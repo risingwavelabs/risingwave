@@ -75,7 +75,7 @@ use risingwave_pb::iceberg_compaction::{
     SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
     subscribe_iceberg_compaction_event_request,
 };
-use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
+use risingwave_pb::meta::alter_connector_props_request::ObjectType;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::event_log_service_client::EventLogServiceClient;
@@ -1311,13 +1311,14 @@ impl MetaClient {
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<u32>,
+        object_type: ObjectType,
     ) -> Result<()> {
         let req = AlterConnectorPropsRequest {
             object_id: sink_id,
             changed_props: changed_props.into_iter().collect(),
             changed_secret_refs: changed_secret_refs.into_iter().collect(),
             connector_conn_ref,
-            object_type: AlterConnectorPropsObject::Sink as i32,
+            object_type: Some(object_type),
         };
         let _resp = self.inner.alter_connector_props(req).await?;
         Ok(())

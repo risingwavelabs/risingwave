@@ -16,6 +16,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+use alter_sink_props::AlterSinkObject;
 use futures::stream::{self, BoxStream};
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
@@ -54,6 +55,7 @@ mod alter_swap_rename;
 mod alter_system;
 mod alter_table_column;
 pub mod alter_table_drop_connector;
+pub mod alter_table_props;
 mod alter_table_with_sr;
 pub mod alter_user;
 pub mod cancel_job;
@@ -779,6 +781,9 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterTableOperation::SetTableProps { changed_props } => {
+                alter_table_props::handle_alter_table_props(handler_args, name, changed_props).await
+            }
             AlterTableOperation::AddConstraint { .. }
             | AlterTableOperation::DropConstraint { .. }
             | AlterTableOperation::RenameColumn { .. }
@@ -909,7 +914,12 @@ pub async fn handle(
 
         Statement::AlterSink { name, operation } => match operation {
             AlterSinkOperation::SetSinkProps { changed_props } => {
-                alter_sink_props::handle_alter_sink_props(handler_args, name, changed_props).await
+                alter_sink_props::handle_alter_sink_props(
+                    handler_args,
+                    AlterSinkObject::Sink(name),
+                    changed_props,
+                )
+                .await
             }
             AlterSinkOperation::RenameSink { sink_name } => {
                 alter_rename::handle_rename_sink(handler_args, name, sink_name).await

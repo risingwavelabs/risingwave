@@ -53,6 +53,7 @@ use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
 };
+use risingwave_pb::meta::alter_connector_props_request::ObjectType;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -1135,6 +1136,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         _changed_props: BTreeMap<String, String>,
         _changed_secret_refs: BTreeMap<String, PbSecretRef>,
         _connector_conn_ref: Option<u32>,
+        _object_type: ObjectType,
     ) -> RpcResult<()> {
         unimplemented!()
     }

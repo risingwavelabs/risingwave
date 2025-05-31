@@ -654,7 +654,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             if F::ALLOW_REWIND {
                                 match log_reader.rewind().await {
                                     Ok(()) => {
-                                        sink_param.properties = config.into_iter().collect();
+                                        sink_param.properties.extend(config.into_iter());
                                         sink = TryFrom::try_from(sink_param.clone()).map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
                                         info!(
                                             executor_id = sink_writer_param.executor_id,
@@ -672,7 +672,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                     }
                                 }
                             } else {
-                                sink_param.properties = config.into_iter().collect();
+                                sink_param.properties.extend(config.into_iter());
                                 sink = TryFrom::try_from(sink_param.clone()).map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
                                 Err(anyhow!("This is not an actual error condition. The system is intentionally triggering recovery procedures to ensure ALTER SINK CONFIG are fully applied.").into())
                             }

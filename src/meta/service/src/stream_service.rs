@@ -25,7 +25,7 @@ use risingwave_meta::model;
 use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::{SourceManagerRunningInfo, ThrottleConfig};
 use risingwave_meta_model::{FragmentId, ObjectId, SinkId, SourceId, StreamingParallelism};
-use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
+use risingwave_pb::meta::alter_connector_props_request::{AlterConnectorPropsObject, ObjectType};
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
 use risingwave_pb::meta::list_table_fragments_response::{
@@ -500,8 +500,16 @@ impl StreamManagerService for StreamServiceImpl {
         request: Request<AlterConnectorPropsRequest>,
     ) -> Result<Response<AlterConnectorPropsResponse>, Status> {
         let request = request.into_inner();
-        if request.object_type != (AlterConnectorPropsObject::Sink as i32) {
-            unimplemented!()
+        match request.object_type {
+            Some(ObjectType::AlterConnectorPropsObject(val))
+                if val == AlterConnectorPropsObject::Sink as i32 => {}
+            Some(ObjectType::AlterIcebergTablePropsObject(..)) => {}
+            _ => {
+                unimplemented!(
+                    "Unsupported object type for AlterConnectorProps: {:?}",
+                    request.object_type
+                );
+            }
         }
 
         let new_config = self
@@ -509,6 +517,7 @@ impl StreamManagerService for StreamServiceImpl {
             .update_sink_props_by_sink_id(
                 request.object_id as i32,
                 request.changed_props.clone().into_iter().collect(),
+                request.object_type.unwrap(),
             )
             .await?;
 

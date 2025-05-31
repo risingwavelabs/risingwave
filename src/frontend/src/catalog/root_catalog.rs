@@ -735,6 +735,21 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("table", table_name.to_owned()))
     }
 
+    pub fn get_table_by_name<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        table_name: &str,
+    ) -> CatalogResult<(&Arc<TableCatalog>, &'a str)> {
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_table_by_name(table_name))
+            })?
+            .ok_or_else(|| CatalogError::NotFound("table", table_name.to_owned()))
+    }
+
     pub fn get_source_by_name<'a>(
         &self,
         db_name: &str,

@@ -334,6 +334,12 @@ message RecoverRequest {}
 message RecoverResponse {}
 
 message AlterConnectorPropsRequest {
+  message AlterIcebergTablePropsObject {
+    int32 table_id = 1;
+    int32 source_id = 2;
+    int32 sink_id = 3;
+  }
+
   enum AlterConnectorPropsObject {
     UNSPECIFIED = 0;
     SOURCE = 1;
@@ -345,7 +351,10 @@ message AlterConnectorPropsRequest {
   map<string, string> changed_props = 2;
   map<string, secret.SecretRef> changed_secret_refs = 3;
   optional uint32 connector_conn_ref = 4;
-  AlterConnectorPropsObject object_type = 5;
+  oneof object_type {
+    AlterConnectorPropsObject alter_connector_props_object = 6;
+    AlterIcebergTablePropsObject alter_iceberg_table_props_object = 7;
+  }
 }
 
 message AlterConnectorPropsResponse {}
