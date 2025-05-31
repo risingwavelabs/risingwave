@@ -110,9 +110,7 @@ pub type F64 = ordered_float::OrderedFloat<f64>;
 ///   but without data fields.
 /// - `FromStr` is only used internally for tests.
 ///   The generated implementation isn't efficient, and doesn't handle whitespaces, etc.
-#[derive(
-    Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumDiscriminants, FromStr,
-)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, Hash, EnumDiscriminants, FromStr)]
 #[strum_discriminants(derive(Hash, Ord, PartialOrd))]
 #[strum_discriminants(name(DataTypeName))]
 #[strum_discriminants(vis(pub))]

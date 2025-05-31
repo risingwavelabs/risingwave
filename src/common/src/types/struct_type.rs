@@ -25,7 +25,7 @@ use crate::catalog::ColumnId;
 use crate::util::iter_util::ZipEqFast;
 
 /// A cheaply cloneable struct type.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct StructType(Arc<StructTypeInner>);
 
 impl Debug for StructType {
@@ -45,7 +45,7 @@ impl Debug for StructType {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct StructTypeInner {
     /// The name and data type of each field.
     ///
