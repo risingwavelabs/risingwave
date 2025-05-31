@@ -674,8 +674,8 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             case "decimal":
             case "numeric":
                 return val == Data.DataType.TypeName.DECIMAL_VALUE
-                        // We allow user to map numeric into rw_int256, rw_uint256, or varchar to avoid precision
-                        // loss in the conversion from pg-numeric to rw-numeric
+                        // We allow user to map decimal/numeric into rw_int256, rw_uint256, or
+                        // varchar to avoid precision loss in the conversion from postgres
                         || val == Data.DataType.TypeName.INT256_VALUE
                         || val == Data.DataType.TypeName.UINT256_VALUE
                         || val == Data.DataType.TypeName.VARCHAR_VALUE;
