@@ -1,0 +1,16 @@
+statement ok
+create table t (f1 struct<foo int>);
+
+statement ok
+create sink sk into t as select row(3)::struct<foo int> as f1;
+
+query
+select (f1).foo from t;
+----
+3
+
+statement ok
+drop sink sk;
+
+statement ok
+drop table t;
