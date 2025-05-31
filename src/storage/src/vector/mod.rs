@@ -55,7 +55,21 @@ impl Vector {
     }
 }
 
+impl<'a> VectorRef<'a> {
+    pub fn from_slice(slice: &'a [VectorItem]) -> Self {
+        VectorInner(slice)
+    }
+}
+
 impl<T: AsRef<[VectorItem]>> VectorInner<T> {
+    pub fn dimension(&self) -> usize {
+        self.0.as_ref().len()
+    }
+
+    pub fn as_slice(&self) -> &[VectorItem] {
+        self.0.as_ref()
+    }
+
     pub fn magnitude(&self) -> VectorItem {
         self.0
             .as_ref()
@@ -89,12 +103,12 @@ pub type VectorDistance = f32;
 
 pub trait OnNearestItem<O> = for<'i> Fn(VectorRef<'i>, VectorDistance, &'i [u8]) -> O;
 
-pub trait MeasureDistance<'a> {
+pub trait MeasureDistance {
     fn measure(&self, other: VectorRef<'_>) -> VectorDistance;
 }
 
 pub trait MeasureDistanceBuilder {
-    type Measure<'a>: MeasureDistance<'a>;
+    type Measure<'a>: MeasureDistance + 'a;
     fn new(target: VectorRef<'_>) -> Self::Measure<'_>;
 
     fn distance(target: VectorRef<'_>, other: VectorRef<'_>) -> VectorDistance
