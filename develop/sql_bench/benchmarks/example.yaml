@@ -16,11 +16,11 @@ prepare_sql: |
 conclude_sql: |
   DELETE FROM example;
 
-# SQL to benchmark (baseline version)
-baseline_sql: |
-  SELECT * FROM example WHERE id > 0 ORDER BY id;
+# SQL to clean up everything after all runs are complete
+cleanup_sql: |
+  DROP TABLE IF EXISTS example;
 
-# SQL to benchmark (optimized version)
+# SQL to benchmark
 benchmark_sql: |
   SELECT * FROM example WHERE id > 0 ORDER BY id DESC;
 
