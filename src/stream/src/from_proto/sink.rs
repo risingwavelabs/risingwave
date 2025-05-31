@@ -163,11 +163,12 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let mut properties_with_secret =
             LocalSecretManager::global().fill_secrets(properties, secret_refs)?;
 
-        if sink_name == "multiverse_people"
+        if params.env.config().developer.switch_jdbc_pg_to_native
             && let Some(connector_type) = properties_with_secret.get(CONNECTOR_TYPE_KEY)
             && connector_type == "jdbc"
             && let Some(url) = properties_with_secret.get("jdbc.url")
             && url.starts_with("jdbc:postgresql:")
+            && sink_name == "multiverse_people"
         {
             tracing::info!("switching to native postgres connector");
             let jdbc_url = parse_jdbc_url(url)
