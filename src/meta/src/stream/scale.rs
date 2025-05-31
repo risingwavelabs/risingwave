@@ -2553,9 +2553,6 @@ impl GlobalStreamManager {
         );
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        // waiting for the first tick
-        ticker.tick().await;
-
         let (local_notification_tx, mut local_notification_rx) =
             tokio::sync::mpsc::unbounded_channel();
 
@@ -2563,6 +2560,9 @@ impl GlobalStreamManager {
             .notification_manager()
             .insert_local_sender(local_notification_tx)
             .await;
+
+        // waiting for the first tick
+        ticker.tick().await;
 
         let worker_nodes = self
             .metadata_manager
@@ -2577,7 +2577,7 @@ impl GlobalStreamManager {
 
         let mut previous_adaptive_parallelism_strategy = AdaptiveParallelismStrategy::default();
 
-        let mut should_trigger = false;
+        let mut should_trigger = true;
 
         loop {
             tokio::select! {
