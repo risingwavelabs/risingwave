@@ -14,8 +14,8 @@
 
 use crate::array::{
     BoolArray, DataChunk, DateArray, DecimalArray, F32Array, F64Array, I16Array, I32Array,
-    I64Array, Int256Array, UInt256Array, IntervalArray, SerialArray, TimeArray, TimestampArray, TimestamptzArray,
-    Utf8Array,
+    I64Array, Int256Array, IntervalArray, SerialArray, TimeArray, TimestampArray, TimestamptzArray,
+    UInt256Array, Utf8Array,
 };
 use crate::test_utils::rand_array::seed_rand_array_ref;
 use crate::types::DataType;

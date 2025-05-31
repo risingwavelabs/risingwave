@@ -110,9 +110,11 @@ where
     T::Error: Debug,
 {
     let l_uint256 = l.into();
-    let r_uint256 = r.try_into()
+    let r_uint256 = r
+        .try_into()
         .map_err(|_| ExprError::CastOutOfRange("uint256"))?;
-    l_uint256.checked_add(r_uint256)
+    l_uint256
+        .checked_add(r_uint256)
         .ok_or(ExprError::NumericOutOfRange)
 }
 
@@ -125,10 +127,12 @@ where
     T::Error: Debug,
     R: Into<UInt256>,
 {
-    let l_uint256 = l.try_into()
+    let l_uint256 = l
+        .try_into()
         .map_err(|_| ExprError::CastOutOfRange("uint256"))?;
     let r_uint256 = r.into();
-    l_uint256.checked_add(r_uint256)
+    l_uint256
+        .checked_add(r_uint256)
         .ok_or(ExprError::NumericOutOfRange)
 }
 
@@ -143,9 +147,11 @@ where
     T::Error: Debug,
 {
     let l_uint256 = l.into();
-    let r_uint256 = r.try_into()
+    let r_uint256 = r
+        .try_into()
         .map_err(|_| ExprError::CastOutOfRange("uint256"))?;
-    l_uint256.checked_sub(&r_uint256)
+    l_uint256
+        .checked_sub(&r_uint256)
         .ok_or(ExprError::NumericOutOfRange)
 }
 
@@ -158,10 +164,12 @@ where
     T::Error: Debug,
     R: Into<UInt256>,
 {
-    let l_uint256 = l.try_into()
+    let l_uint256 = l
+        .try_into()
         .map_err(|_| ExprError::CastOutOfRange("uint256"))?;
     let r_uint256 = r.into();
-    l_uint256.checked_sub(&r_uint256)
+    l_uint256
+        .checked_sub(&r_uint256)
         .ok_or(ExprError::NumericOutOfRange)
 }
 
@@ -176,9 +184,11 @@ where
     T::Error: Debug,
 {
     let l_uint256 = l.into();
-    let r_uint256 = r.try_into()
+    let r_uint256 = r
+        .try_into()
         .map_err(|_| ExprError::CastOutOfRange("uint256"))?;
-    l_uint256.checked_mul(&r_uint256)
+    l_uint256
+        .checked_mul(&r_uint256)
         .ok_or(ExprError::NumericOutOfRange)
 }
 
@@ -191,10 +201,12 @@ where
     T::Error: Debug,
     R: Into<UInt256>,
 {
-    let l_uint256 = l.try_into()
+    let l_uint256 = l
+        .try_into()
         .map_err(|_| ExprError::CastOutOfRange("uint256"))?;
     let r_uint256 = r.into();
-    l_uint256.checked_mul(&r_uint256)
+    l_uint256
+        .checked_mul(&r_uint256)
         .ok_or(ExprError::NumericOutOfRange)
 }
 
@@ -211,9 +223,11 @@ where
         return Err(ExprError::DivisionByZero);
     }
     let l_uint256 = l.into();
-    let r_uint256 = r.try_into()
+    let r_uint256 = r
+        .try_into()
         .map_err(|_| ExprError::CastOutOfRange("uint256"))?;
-    l_uint256.checked_div(&r_uint256)
+    l_uint256
+        .checked_div(&r_uint256)
         .ok_or(ExprError::NumericOutOfRange)
 }
 
@@ -230,9 +244,11 @@ where
     if r_uint256.is_zero() {
         return Err(ExprError::DivisionByZero);
     }
-    let l_uint256 = l.try_into()
+    let l_uint256 = l
+        .try_into()
         .map_err(|_| ExprError::CastOutOfRange("uint256"))?;
-    l_uint256.checked_div(&r_uint256)
+    l_uint256
+        .checked_div(&r_uint256)
         .ok_or(ExprError::NumericOutOfRange)
 }
 
@@ -250,9 +266,11 @@ where
         return Err(ExprError::DivisionByZero);
     }
     let l_uint256 = l.into();
-    let r_uint256 = r.try_into()
+    let r_uint256 = r
+        .try_into()
         .map_err(|_| ExprError::CastOutOfRange("uint256"))?;
-    l_uint256.checked_rem(&r_uint256)
+    l_uint256
+        .checked_rem(&r_uint256)
         .ok_or(ExprError::NumericOutOfRange)
 }
 
@@ -269,9 +287,11 @@ where
     if r_uint256.is_zero() {
         return Err(ExprError::DivisionByZero);
     }
-    let l_uint256 = l.try_into()
+    let l_uint256 = l
+        .try_into()
         .map_err(|_| ExprError::CastOutOfRange("uint256"))?;
-    l_uint256.checked_rem(&r_uint256)
+    l_uint256
+        .checked_rem(&r_uint256)
         .ok_or(ExprError::NumericOutOfRange)
 }
 

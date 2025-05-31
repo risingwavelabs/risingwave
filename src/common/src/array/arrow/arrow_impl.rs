@@ -170,11 +170,14 @@ pub trait ToArrow {
     #[inline]
     fn uint256_to_arrow(&self, array: &UInt256Array) -> Result<arrow_array::ArrayRef, ArrayError> {
         // Convert to FixedSizeBinary(32) with big-endian bytes for correct ordering
-        let mut builder = arrow_array::builder::FixedSizeBinaryBuilder::with_capacity(array.len(), 32);
+        let mut builder =
+            arrow_array::builder::FixedSizeBinaryBuilder::with_capacity(array.len(), 32);
         for value in array.iter() {
             match value {
                 Some(uint256) => {
-                    builder.append_value(uint256.to_be_bytes()).map_err(ArrayError::to_arrow)?;
+                    builder
+                        .append_value(uint256.to_be_bytes())
+                        .map_err(ArrayError::to_arrow)?;
                 }
                 None => builder.append_null(),
             }
@@ -656,7 +659,9 @@ pub trait FromArrow {
             }
             Utf8 => self.from_utf8_array(array.as_any().downcast_ref().unwrap()),
             Binary => self.from_binary_array(array.as_any().downcast_ref().unwrap()),
-            FixedSizeBinary(32) => self.from_fixed_size_binary_array(array.as_any().downcast_ref().unwrap()),
+            FixedSizeBinary(32) => {
+                self.from_fixed_size_binary_array(array.as_any().downcast_ref().unwrap())
+            }
             LargeUtf8 => self.from_large_utf8_array(array.as_any().downcast_ref().unwrap()),
             LargeBinary => self.from_large_binary_array(array.as_any().downcast_ref().unwrap()),
             List(_) => self.from_list_array(array.as_any().downcast_ref().unwrap()),
@@ -880,7 +885,8 @@ pub trait FromArrow {
                 let bytes = array.value(i);
                 if bytes.len() != 32 {
                     return Err(ArrayError::from_arrow(format!(
-                        "expected 32 bytes for UInt256, got {}", bytes.len()
+                        "expected 32 bytes for UInt256, got {}",
+                        bytes.len()
                     )));
                 }
                 let mut bytes_array = [0u8; 32];

@@ -16,8 +16,8 @@ use std::fmt::Debug;
 
 use jsonbb::Builder;
 use risingwave_common::types::{
-    DataType, Date, Decimal, F32, F64, Int256Ref, UInt256Ref, Interval, JsonbRef, JsonbVal, ListRef, MapRef,
-    ScalarRefImpl, Serial, StructRef, Time, Timestamp, Timestamptz, ToText,
+    DataType, Date, Decimal, F32, F64, Int256Ref, Interval, JsonbRef, JsonbVal, ListRef, MapRef,
+    ScalarRefImpl, Serial, StructRef, Time, Timestamp, Timestamptz, ToText, UInt256Ref,
 };
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::Context;
