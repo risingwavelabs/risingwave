@@ -138,7 +138,7 @@ def run_benchmark(bench_name: str, profile: str = "full", pg_url: str | None = N
     """Run a benchmark."""
     benchmark_dir = Path("develop/sql_bench/benchmarks")
     yaml_file = benchmark_dir / f"{bench_name}.yaml"
-    
+
     if not yaml_file.exists():
         print(f"Error: Benchmark configuration '{bench_name}' not found at {yaml_file}")
         sys.exit(1)
