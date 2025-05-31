@@ -36,6 +36,7 @@ mod stream_chunk_iter;
 pub mod stream_record;
 pub mod struct_array;
 mod utf8_array;
+mod uuid_array;
 
 use std::convert::From;
 use std::hash::{Hash, Hasher};
@@ -84,6 +85,7 @@ pub type I16ArrayBuilder = PrimitiveArrayBuilder<i16>;
 pub type F64ArrayBuilder = PrimitiveArrayBuilder<F64>;
 pub type F32ArrayBuilder = PrimitiveArrayBuilder<F32>;
 pub type SerialArrayBuilder = PrimitiveArrayBuilder<Serial>;
+pub use crate::array::uuid_array::{UuidArray, UuidArrayBuilder};
 
 // alias for expr macros
 pub type ArrayImplBuilder = ArrayBuilderImpl;
@@ -393,6 +395,13 @@ impl From<BytesArray> for ArrayImpl {
 impl From<MapArray> for ArrayImpl {
     fn from(arr: MapArray) -> Self {
         Self::Map(arr)
+    }
+}
+
+// Add this implementation for conversion to ArrayImpl
+impl From<UuidArray> for ArrayImpl {
+    fn from(arr: UuidArray) -> Self {
+        Self::Uuid(arr)
     }
 }
 

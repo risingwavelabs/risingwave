@@ -346,6 +346,11 @@ fn datum_to_json_object(
                 }
             }
         }
+
+        // Convert UUID to string representation (RFC-4122 format)
+        (DataType::Uuid, ScalarRefImpl::Uuid(v)) => {
+            json!(v.to_string())
+        }
         // TODO(map): support map
         (data_type, scalar_ref) => {
             return Err(ArrayError::internal(format!(
@@ -403,6 +408,7 @@ pub(crate) fn schema_type_mapping(rw_type: &DataType) -> &'static str {
         DataType::Jsonb => "string",
         DataType::Serial => "string",
         DataType::Int256 => "string",
+        DataType::Uuid => "string",
         DataType::Map(_) => "map",
     }
 }
@@ -434,9 +440,11 @@ fn type_as_json_schema(rw_type: &DataType) -> Map<String, Value> {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use risingwave_common::types::{
         Date, Decimal, Interval, Scalar, ScalarImpl, StructRef, StructType, StructValue, Time,
-        Timestamp,
+        Timestamp, Uuid,
     };
 
     use super::*;
@@ -715,6 +723,21 @@ mod tests {
         )
         .unwrap();
         assert_eq!(json_value, json!([1, 2, 3]));
+
+        // Add this to the test_to_json_basic_type test function
+        let uuid_value = datum_to_json_object(
+            &Field {
+                data_type: DataType::Uuid,
+                ..mock_field.clone()
+            },
+            Some(
+                ScalarImpl::Uuid(Uuid::from_str("01234567-89ab-cdef-fedc-ba9876543210").unwrap())
+                    .as_scalar_ref_impl(),
+            ),
+            &config,
+        )
+        .unwrap();
+        assert_eq!(uuid_value, json!("01234567-89ab-cdef-fedc-ba9876543210"));
     }
 
     #[test]
@@ -788,11 +811,17 @@ mod tests {
                 data_type: DataType::Int256,
                 name: "14".into(),
             },
+            // Add UUID field
+            Field {
+                data_type: DataType::Uuid,
+                name: "15".into(),
+            },
         ];
         let schema =
             json_converter_with_schema(json!({}), "test".to_owned(), fields.iter())["schema"]
                 .to_string();
-        let ans = r#"{"fields":[{"field":"v1","optional":true,"type":"boolean"},{"field":"v2","optional":true,"type":"int16"},{"field":"v3","optional":true,"type":"int32"},{"field":"v4","optional":true,"type":"float"},{"field":"v5","optional":true,"type":"string"},{"field":"v6","optional":true,"type":"int32"},{"field":"v7","optional":true,"type":"string"},{"field":"v8","optional":true,"type":"int64"},{"field":"v9","optional":true,"type":"string"},{"field":"v10","fields":[{"field":"a","optional":true,"type":"int64"},{"field":"b","optional":true,"type":"string"},{"field":"c","fields":[{"field":"aa","optional":true,"type":"int64"},{"field":"bb","optional":true,"type":"double"}],"optional":true,"type":"struct"}],"optional":true,"type":"struct"},{"field":"v11","items":{"items":{"fields":[{"field":"aa","optional":true,"type":"int64"},{"field":"bb","optional":true,"type":"double"}],"optional":true,"type":"struct"},"optional":true,"type":"array"},"optional":true,"type":"array"},{"field":"12","optional":true,"type":"string"},{"field":"13","optional":true,"type":"string"},{"field":"14","optional":true,"type":"string"}],"name":"test","optional":false,"type":"struct"}"#;
+        let ans = r#"{"fields":[{"field":"v1","optional":true,"type":"boolean"},{"field":"v2","optional":true,"type":"int16"},{"field":"v3","optional":true,"type":"int32"},{"field":"v4","optional":true,"type":"float"},{"field":"v5","optional":true,"type":"string"},{"field":"v6","optional":true,"type":"int32"},{"field":"v7","optional":true,"type":"string"},{"field":"v8","optional":true,"type":"int64"},{"field":"v9","optional":true,"type":"string"},{"field":"v10","fields":[{"field":"a","optional":true,"type":"int64"},{"field":"b","optional":true,"type":"string"},{"field":"c","fields":[{"field":"aa","optional":true,"type":"int64"},{"field":"bb","optional":true,"type":"double"}],"optional":true,"type":"struct"}],"optional":true,"type":"struct"},{"field":"v11","items":{"items":{"fields":[{"field":"aa","optional":true,"type":"int64"},{"field":"bb","optional":true,"type":"double"}],"optional":true,"type":"struct"},"optional":true,"type":"array"},"optional":true,"type":"array"},{"field":"12","optional":true,"type":"string"},{"field":"13","optional":true,"type":"string"},{"field":"14","optional":true,"type":"string"},{"field":"15","optional":true,"type":"string"}],"name":"test","optional":false,"type":"struct"}"#;
+
         assert_eq!(schema, ans);
     }
 }

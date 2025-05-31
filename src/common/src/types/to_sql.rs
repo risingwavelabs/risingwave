@@ -44,6 +44,7 @@ impl ToSql for ScalarImpl {
             ScalarImpl::Time(v) => v.to_sql(ty, out),
             ScalarImpl::Bytea(v) => (&**v).to_sql(ty, out),
             ScalarImpl::Jsonb(v) => v.to_sql(ty, out),
+            ScalarImpl::Uuid(v) => v.to_sql(ty, out),
             ScalarImpl::Int256(_) | ScalarImpl::Struct(_) | ScalarImpl::List(_) => {
                 bail_not_implemented!("the postgres encoding for {ty} is unsupported")
             }
@@ -84,6 +85,7 @@ impl ToSql for ScalarRefImpl<'_> {
             ScalarRefImpl::Time(v) => v.to_sql(ty, out),
             ScalarRefImpl::Bytea(v) => (&**v).to_sql(ty, out),
             ScalarRefImpl::Jsonb(v) => v.to_sql(ty, out),
+            ScalarRefImpl::Uuid(v) => v.to_sql(ty, out),
             ScalarRefImpl::Int256(_) | ScalarRefImpl::Struct(_) | ScalarRefImpl::List(_) => {
                 bail_not_implemented!("the postgres encoding for {ty} is unsupported")
             }

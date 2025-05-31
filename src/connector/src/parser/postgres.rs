@@ -71,6 +71,7 @@ fn postgres_cell_to_scalar_impl(
         | DataType::Timestamptz
         | DataType::Jsonb
         | DataType::Interval
+        | DataType::Uuid
         | DataType::Bytea => {
             // ScalarAdapter is also fine. But ScalarImpl is more efficient
             let res = row.try_get::<_, Option<ScalarImpl>>(i);

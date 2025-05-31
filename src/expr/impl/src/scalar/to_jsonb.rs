@@ -17,7 +17,7 @@ use std::fmt::Debug;
 use jsonbb::Builder;
 use risingwave_common::types::{
     DataType, Date, Decimal, F32, F64, Int256Ref, Interval, JsonbRef, JsonbVal, ListRef, MapRef,
-    ScalarRefImpl, Serial, StructRef, Time, Timestamp, Timestamptz, ToText,
+    ScalarRefImpl, Serial, StructRef, Time, Timestamp, Timestamptz, ToText, UuidRef,
 };
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::Context;
@@ -73,6 +73,7 @@ impl ToJsonb for ScalarRefImpl<'_> {
             Struct(v) => v.add_to(ty, builder),
             List(v) => v.add_to(ty, builder),
             Map(v) => v.add_to(ty, builder),
+            Uuid(v) => v.add_to(ty, builder),
         }
     }
 }
@@ -253,6 +254,15 @@ impl ToJsonb for StructRef<'_> {
             value.add_to(field_type, builder)?;
         }
         builder.end_object();
+        Ok(())
+    }
+}
+
+// Add this implementation
+impl<'a> ToJsonb for UuidRef<'a> {
+    fn add_to(self, _: &DataType, builder: &mut Builder) -> Result<()> {
+        // Format UUID as standard string representation
+        builder.add_string(&self.to_string());
         Ok(())
     }
 }

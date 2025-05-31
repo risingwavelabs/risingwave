@@ -772,6 +772,7 @@ impl<'a> TableScanIoEstimator<'a> {
             DataType::Struct { .. } => 20,
             DataType::List { .. } => 20,
             DataType::Map(_) => 20,
+            DataType::Uuid => 16,
         }
     }
 

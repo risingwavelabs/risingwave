@@ -611,6 +611,7 @@ fn bind_params(
                 ScalarRefImpl::Int256(_) => return Err(data_type_not_supported("Int256")),
                 ScalarRefImpl::Serial(_) => return Err(data_type_not_supported("Serial")),
                 ScalarRefImpl::Map(_) => return Err(data_type_not_supported("Map")),
+                ScalarRefImpl::Uuid(_) => return Err(data_type_not_supported("Uuid")),
             },
             None => match schema[col_idx].data_type {
                 DataType::Boolean => {
@@ -659,6 +660,7 @@ fn bind_params(
                 DataType::Serial => return Err(data_type_not_supported("Serial")),
                 DataType::Int256 => return Err(data_type_not_supported("Int256")),
                 DataType::Map(_) => return Err(data_type_not_supported("Map")),
+                DataType::Uuid => return Err(data_type_not_supported("Uuid")),
             },
         };
     }
@@ -693,6 +695,7 @@ fn check_data_type_compatibility(data_type: &DataType) -> Result<()> {
         DataType::Serial => Err(data_type_not_supported("Serial")),
         DataType::Int256 => Err(data_type_not_supported("Int256")),
         DataType::Map(_) => Err(data_type_not_supported("Map")),
+        DataType::Uuid => Err(data_type_not_supported("Uuid")),
     }
 }
 
