@@ -179,6 +179,9 @@ impl ScalarAdapter {
             (ScalarRefImpl::Int256(s), &Type::NUMERIC, _) => {
                 ScalarAdapter::Numeric(string_to_pg_numeric(&s.to_string()))
             }
+            (ScalarRefImpl::UInt256(s), &Type::NUMERIC, _) => {
+                ScalarAdapter::Numeric(string_to_pg_numeric(&s.to_string()))
+            }
             (ScalarRefImpl::Utf8(s), _, Kind::Enum(_)) => {
                 ScalarAdapter::Enum(EnumString(s.to_owned()))
             }
@@ -187,11 +190,12 @@ impl ScalarAdapter {
                 for datum in list.iter() {
                     vec.push(match datum {
                         Some(ScalarRefImpl::Int256(s)) => Some(string_to_pg_numeric(&s.to_string())),
+                        Some(ScalarRefImpl::UInt256(s)) => Some(string_to_pg_numeric(&s.to_string())),
                         Some(ScalarRefImpl::Decimal(s)) => Some(rw_numeric_to_pg_numeric(s)),
                         Some(ScalarRefImpl::Utf8(s)) => Some(string_to_pg_numeric(s)),
                         None => None,
                         _ => {
-                            unreachable!("Only rw-numeric[], rw_int256[] and varchar[] are supported to convert to pg-numeric[]");
+                            unreachable!("Only rw-numeric[], rw_int256[], rw_uint256[] and varchar[] are supported to convert to pg-numeric[]");
                         }
                     })
                 }
@@ -338,6 +342,12 @@ pub fn validate_pg_type_to_rw_type(pg_type: &DataType, rw_type: &DataType) -> bo
                 DataType::List(box (DataType::Decimal | DataType::Int256 | DataType::UInt256))
             )
         }
+        // Allow list of int256/uint256 to be written to PostgreSQL numeric[] columns
+        DataType::List(box (DataType::Int256 | DataType::UInt256)) => {
+            matches!(pg_type, DataType::List(box DataType::Decimal))
+        }
+        // Allow int256/uint256 to be written to PostgreSQL numeric columns
+        DataType::Int256 | DataType::UInt256 => matches!(pg_type, DataType::Decimal),
         _ => false,
     }
 }
