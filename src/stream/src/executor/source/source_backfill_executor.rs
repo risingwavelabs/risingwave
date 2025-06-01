@@ -341,7 +341,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         yield Message::Barrier(barrier);
 
         let source_desc_builder: SourceDescBuilder = self.source_desc_builder.take().unwrap();
-        let source_desc = source_desc_builder
+        let mut source_desc = source_desc_builder
             .build()
             .map_err(StreamExecutorError::connector_error)?;
         let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
@@ -556,6 +556,29 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                                 .get(&self.actor_ctx.id)
                                                 .cloned()
                                                 .map(|target_splits| (target_splits, false));
+                                        }
+                                        Mutation::ConnectorPropsChange(maybe_mutation) => {
+                                            if let Some(props_plaintext) =
+                                                maybe_mutation.get(&self.source_id.table_id())
+                                            {
+                                                source_desc
+                                                    .update_reader(props_plaintext.clone())?;
+
+                                                // rebuild reader
+                                                let (reader, _backfill_info) = self
+                                                    .build_stream_source_reader(
+                                                        &source_desc,
+                                                        backfill_stage
+                                                            .get_latest_unfinished_splits()?,
+                                                    )
+                                                    .await?;
+
+                                                backfill_stream = select_with_strategy(
+                                                    input.by_ref().map(Either::Left),
+                                                    reader.map(Either::Right),
+                                                    select_strategy,
+                                                );
+                                            }
                                         }
                                         Mutation::Throttle(actor_to_apply) => {
                                             if let Some(new_rate_limit) =

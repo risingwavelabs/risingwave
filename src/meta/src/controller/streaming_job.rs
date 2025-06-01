@@ -55,9 +55,9 @@ use risingwave_sqlparser::parser::{Parser, ParserError};
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{BinOper, Expr, Query, SimpleExpr};
 use sea_orm::{
-    ActiveEnum, ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait,
-    IntoActiveModel, IntoSimpleExpr, JoinType, ModelTrait, NotSet, PaginatorTrait, QueryFilter,
-    QuerySelect, RelationTrait, TransactionTrait,
+    ActiveEnum, ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel,
+    IntoSimpleExpr, JoinType, ModelTrait, NotSet, PaginatorTrait, QueryFilter, QuerySelect,
+    RelationTrait, TransactionTrait,
 };
 use thiserror_ext::AsReport;
 
@@ -1758,7 +1758,9 @@ impl CatalogController {
                     .filter(
                         object_dependency::Column::Oid
                             .is_in(to_remove_secret_dep)
-                            .and(object_dependency::Column::UsedBy.eq::<ObjectId>(preferred_id as _)),
+                            .and(
+                                object_dependency::Column::UsedBy.eq::<ObjectId>(preferred_id as _),
+                            ),
                     )
                     .exec(&txn)
                     .await?;
