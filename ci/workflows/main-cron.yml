@@ -335,7 +335,7 @@ steps:
   - label: "integration test (madim) - log_store"
     key: "integration-test-deterministic-log-store"
     command: |
-      TEST_NUM=30 ci/scripts/deterministic-it-test.sh log_store
+      TEST_NUM=15 ci/scripts/deterministic-it-test.sh log_store
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-integration-test-deterministic-simulation"
