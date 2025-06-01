@@ -267,9 +267,19 @@ impl WithOptionsSecResolved {
                 to_remove_secret_dep.push(to_remove_sink.secret_id);
             }
         }
-        for k in update_alter_secret_refs.keys() {
+        for (k, v) in &update_alter_secret_refs {
             if self.inner.contains_key(k) {
                 self.inner.remove(k);
+            }
+
+            if let Some(old_secret_ref) = self.secret_ref.get(k) {
+                // no need to remove, do extend later
+                if old_secret_ref.secret_id != v.secret_id {
+                    to_remove_secret_dep.push(old_secret_ref.secret_id);
+                } else {
+                    // If the secret ref is the same, we don't need to update it.
+                    continue;
+                }
             }
         }
 

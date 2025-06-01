@@ -55,9 +55,9 @@ use risingwave_sqlparser::parser::{Parser, ParserError};
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{BinOper, Expr, Query, SimpleExpr};
 use sea_orm::{
-    ActiveEnum, ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel,
-    IntoSimpleExpr, JoinType, ModelTrait, NotSet, PaginatorTrait, QueryFilter, QuerySelect,
-    RelationTrait, TransactionTrait,
+    ActiveEnum, ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait,
+    IntoActiveModel, IntoSimpleExpr, JoinType, ModelTrait, NotSet, PaginatorTrait, QueryFilter,
+    QuerySelect, RelationTrait, TransactionTrait,
 };
 use thiserror_ext::AsReport;
 
@@ -1670,6 +1670,7 @@ impl CatalogController {
         // todo: validate via source manager
 
         let mut associate_table_id = None;
+        let mut preferred_id: i32 = source_id; // can be source_id or table_id
         let rewrirte_sql = {
             let definition = source.definition.clone();
 
@@ -1730,6 +1731,7 @@ impl CatalogController {
                     *with_options =
                         format_with_option_secret_resolved(&txn, &options_with_secret).await?;
                     associate_table_id = source.optional_associated_table_id;
+                    preferred_id = associate_table_id.unwrap();
                 }
                 _ => unreachable!(),
             }
@@ -1743,7 +1745,7 @@ impl CatalogController {
                 ObjectDependency::insert_many(to_add_secret_dep.into_iter().map(|secret_id| {
                     object_dependency::ActiveModel {
                         oid: Set(secret_id as _),
-                        used_by: Set(source_id as _),
+                        used_by: Set(preferred_id as _),
                         ..Default::default()
                     }
                 }))
@@ -1751,11 +1753,12 @@ impl CatalogController {
                 .await?;
             }
             if !to_remove_secret_dep.is_empty() {
-                ObjectDependency::delete_many()
+                // todo: fix the filter logic
+                let _ = ObjectDependency::delete_many()
                     .filter(
                         object_dependency::Column::Oid
                             .is_in(to_remove_secret_dep)
-                            .and(object_dependency::Column::UsedBy.eq(source_id as ObjectId)),
+                            .and(object_dependency::Column::UsedBy.eq::<ObjectId>(preferred_id as _)),
                     )
                     .exec(&txn)
                     .await?;
