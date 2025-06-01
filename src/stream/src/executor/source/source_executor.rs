@@ -458,10 +458,11 @@ impl<S: StateStore> SourceExecutor<S> {
         yield Message::Barrier(first_barrier);
 
         let mut core = self.stream_source_core.unwrap();
+        let source_id = core.source_id;
 
         // Build source description from the builder.
         let source_desc_builder: SourceDescBuilder = core.source_desc_builder.take().unwrap();
-        let source_desc = source_desc_builder
+        let mut source_desc = source_desc_builder
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
@@ -609,6 +610,20 @@ impl<S: StateStore> SourceExecutor<S> {
                                         )
                                     },
                                 );
+                            }
+
+                            Mutation::ConnectorPropsChange(maybe_mutation) => {
+                                if let Some(new_props) = maybe_mutation.get(&source_id.table_id()) {
+                                    // rebuild the stream reader with new props
+                                    tracing::info!(
+                                        "updating source properties from {:?} to {:?}",
+                                        source_desc.source.config,
+                                        new_props
+                                    );
+                                    source_desc.update_reader(new_props.clone())?;
+                                    // suppose the connector props change will not involve state change
+                                    self.rebuild_stream_reader(&source_desc, &mut stream)?;
+                                }
                             }
 
                             Mutation::Update(UpdateMutation { actor_splits, .. }) => {

@@ -23,6 +23,7 @@ use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_mut};
 use risingwave_common::{bail, current_cluster_version};
+use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
 use risingwave_connector::source::{ConnectorProperties, SourceProperties};
@@ -70,6 +71,7 @@ use crate::controller::utils::{
     get_fragment_mappings, get_internal_tables_by_id, insert_fragment_relations,
     rebuild_fragment_mapping_from_actors,
 };
+use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
 use crate::model::{
     FragmentDownstreamRelation, FragmentReplaceUpstream, StreamActor, StreamContext,
@@ -1630,40 +1632,54 @@ impl CatalogController {
             })?;
         let connector = source.with_properties.0.get_connector().unwrap();
 
-        // todo: make this a config, instead of builtin
-        let check_alter_props_allowed: MetaResult<()> = match_source_name_str!(
-            connector.as_str(),
-            PropType,
-            {
-                for k in alter_props.keys().chain(alter_secret_refs.keys()) {
-                    if !PropType::SOURCE_ALTER_CONFIG_LIST.contains(k) {
-                        return Err(MetaError::invalid_parameter(format!(
-                            "unsupported alter config: {k} for connector {connector}"
-                        )));
-                    }
-                }
-                Ok(())
-            },
-            |other| bail!("connector '{}' is not supported", other)
-        );
-        check_alter_props_allowed?;
+        // // todo: make this a config, instead of builtin
+        // let check_alter_props_allowed: MetaResult<()> = match_source_name_str!(
+        //     connector.as_str(),
+        //     PropType,
+        //     {
+        //         for k in alter_props.keys().chain(alter_secret_refs.keys()) {
+        //             if !PropType::SOURCE_ALTER_CONFIG_LIST.contains(k) {
+        //                 return Err(MetaError::invalid_parameter(format!(
+        //                     "unsupported alter config: {k} for connector {connector}"
+        //                 )));
+        //             }
+        //         }
+        //         Ok(())
+        //     },
+        //     |other| bail!("connector '{}' is not supported", other)
+        // );
+        // check_alter_props_allowed?;
 
         let mut options_with_secret = WithOptionsSecResolved::new(
             source.with_properties.0.clone(),
             source
                 .secret_ref
-                .map(|x| x.to_protobuf())
+                .map(|secret_ref| secret_ref.to_protobuf())
                 .unwrap_or_default(),
         );
-        options_with_secret.handle_update(alter_props, alter_secret_refs)?;
+        let (to_add_secret_dep, to_remove_secret_dep) =
+            options_with_secret.handle_update(alter_props, alter_secret_refs)?;
+
+        tracing::debug!(
+            "update_source_props_by_source_id: source_id={}, options_with_secret={:?}",
+            source_id,
+            options_with_secret
+        );
         // check if the alter-ed props are valid for each Connector
         let _ = ConnectorProperties::extract(options_with_secret.clone(), true)?;
         // todo: validate via source manager
 
+        let mut associate_table_id = None;
         let rewrirte_sql = {
             let definition = source.definition.clone();
+
             let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
-                .map_err(|e| SinkError::Config(anyhow!(e)))?
+                .map_err(|e| {
+                    MetaError::from(MetaErrorInner::Connector(ConnectorError::from(anyhow!(
+                        "Failed to parse source definition SQL: {}",
+                        e
+                    ))))
+                })?
                 .try_into()
                 .unwrap();
 
@@ -1686,7 +1702,7 @@ impl CatalogController {
             ) -> MetaResult<Vec<SqlOption>> {
                 let mut options = Vec::new();
                 for (k, v) in options_with_secret.as_plaintext() {
-                    let sql_option = SqlOption::try_from((k, v))
+                    let sql_option = SqlOption::try_from((k, &format!("'{}'", v)))
                         .map_err(|e| MetaError::invalid_parameter(e.to_string()))?;
                     options.push(sql_option);
                 }
@@ -1705,19 +1721,50 @@ impl CatalogController {
                 Ok(options)
             }
 
-            if let Statement::CreateSource { stmt } = &mut stmt {
-                stmt.with_properties.0 =
-                    format_with_option_secret_resolved(&txn, &options_with_secret).await?;
-            } else {
-                unreachable!()
+            match &mut stmt {
+                Statement::CreateSource { stmt } => {
+                    stmt.with_properties.0 =
+                        format_with_option_secret_resolved(&txn, &options_with_secret).await?;
+                }
+                Statement::CreateTable { with_options, .. } => {
+                    *with_options =
+                        format_with_option_secret_resolved(&txn, &options_with_secret).await?;
+                    associate_table_id = source.optional_associated_table_id;
+                }
+                _ => unreachable!(),
             }
 
             stmt.to_string()
         };
 
+        {
+            // update secret dependencies
+            if !to_add_secret_dep.is_empty() {
+                ObjectDependency::insert_many(to_add_secret_dep.into_iter().map(|secret_id| {
+                    object_dependency::ActiveModel {
+                        oid: Set(secret_id as _),
+                        used_by: Set(source_id as _),
+                        ..Default::default()
+                    }
+                }))
+                .exec(&txn)
+                .await?;
+            }
+            if !to_remove_secret_dep.is_empty() {
+                ObjectDependency::delete_many()
+                    .filter(
+                        object_dependency::Column::Oid
+                            .is_in(to_remove_secret_dep)
+                            .and(object_dependency::Column::UsedBy.eq(source_id as ObjectId)),
+                    )
+                    .exec(&txn)
+                    .await?;
+            }
+        }
+
         let active_source_model = source::ActiveModel {
             source_id: Set(source_id),
-            definition: Set(rewrirte_sql),
+            definition: Set(rewrirte_sql.clone()),
             with_properties: Set(options_with_secret.as_plaintext().clone().into()),
             secret_ref: Set((!options_with_secret.as_secret().is_empty())
                 .then(|| SecretRef::from(options_with_secret.as_secret().clone()))),
@@ -1725,10 +1772,25 @@ impl CatalogController {
         };
         active_source_model.update(&txn).await?;
 
+        if let Some(associate_table_id) = associate_table_id {
+            // update the associated table statement accordly
+            let active_table_model = table::ActiveModel {
+                table_id: Set(associate_table_id),
+                definition: Set(rewrirte_sql),
+                ..Default::default()
+            };
+            active_table_model.update(&txn).await?;
+        }
+
         // update fragments
         update_connector_props_fragaments(
             &txn,
-            source_id,
+            if let Some(associate_table_id) = associate_table_id {
+                // if updating table with connector, the fragment_id is table id
+                associate_table_id
+            } else {
+                source_id
+            },
             FragmentTypeFlag::Source,
             |node, found| {
                 if let PbNodeBody::Source(node) = node
@@ -1742,6 +1804,7 @@ impl CatalogController {
         )
         .await?;
 
+        let mut to_update_objs = Vec::with_capacity(2);
         let (source, obj) = Source::find_by_id(source_id)
             .find_also_related(Object)
             .one(&txn)
@@ -1749,16 +1812,29 @@ impl CatalogController {
             .ok_or_else(|| {
                 MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
             })?;
+        to_update_objs.push(PbObject {
+            object_info: Some(PbObjectInfo::Source(
+                ObjectModel(source, obj.unwrap()).into(),
+            )),
+        });
+
+        if let Some(associate_table_id) = associate_table_id {
+            let (table, obj) = Table::find_by_id(associate_table_id)
+                .find_also_related(Object)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("table", associate_table_id))?;
+            to_update_objs.push(PbObject {
+                object_info: Some(PbObjectInfo::Table(ObjectModel(table, obj.unwrap()).into())),
+            });
+        }
 
         txn.commit().await?;
 
-        let relation_info = PbObjectInfo::Source(ObjectModel(source, obj.unwrap()).into());
         self.notify_frontend(
             NotificationOperation::Update,
             NotificationInfo::ObjectGroup(PbObjectGroup {
-                objects: vec![PbObject {
-                    object_info: Some(relation_info),
-                }],
+                objects: to_update_objs,
             }),
         )
         .await;

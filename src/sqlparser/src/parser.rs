@@ -3329,9 +3329,15 @@ impl Parser<'_> {
         } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
             let target_table = self.parse_object_name()?;
             AlterTableOperation::SwapRenameTable { target_table }
+        } else if self.parse_keyword(Keyword::CONNECTOR) {
+            let with_options = self.parse_with_properties()?;
+            AlterTableOperation::AlterConnectorProps {
+                alter_props: with_options,
+            }
         } else {
-            return self
-                .expected("ADD or RENAME or OWNER TO or SET or DROP or SWAP after ALTER TABLE");
+            return self.expected(
+                "ADD or RENAME or OWNER TO or SET or DROP or SWAP or CONNECTOR after ALTER TABLE",
+            );
         };
         Ok(Statement::AlterTable {
             name: table_name,

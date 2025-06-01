@@ -244,7 +244,13 @@ impl WithOptionsSecResolved {
         &mut self,
         update_alter_props: BTreeMap<String, String>,
         update_alter_secret_refs: BTreeMap<String, PbSecretRef>,
-    ) -> ConnectorResult<()> {
+    ) -> ConnectorResult<(Vec<u32>, Vec<u32>)> {
+        let to_add_secret_dep = update_alter_secret_refs
+            .values()
+            .map(|new_rely_secret| new_rely_secret.secret_id)
+            .collect();
+        let mut to_remove_secret_dep: Vec<u32> = vec![];
+
         // make sure the key in update_alter_props and update_alter_secret_refs not collide
         for key in update_alter_props.keys() {
             if update_alter_secret_refs.contains_key(key) {
@@ -257,7 +263,8 @@ impl WithOptionsSecResolved {
         // remove legacy key if it's set in both plaintext and secret
         for k in update_alter_props.keys() {
             if self.secret_ref.contains_key(k) {
-                self.secret_ref.remove(k);
+                let to_remove_sink = self.secret_ref.remove(k).unwrap();
+                to_remove_secret_dep.push(to_remove_sink.secret_id);
             }
         }
         for k in update_alter_secret_refs.keys() {
@@ -269,7 +276,7 @@ impl WithOptionsSecResolved {
         self.inner.extend(update_alter_props);
         self.secret_ref.extend(update_alter_secret_refs);
 
-        Ok(())
+        Ok((to_add_secret_dep, to_remove_secret_dep))
     }
 
     /// Create a new [`WithOptions`] from a [`BTreeMap`].

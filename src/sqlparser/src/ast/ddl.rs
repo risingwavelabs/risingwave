@@ -122,6 +122,10 @@ pub enum AlterTableOperation {
     },
     /// `DROP CONNECTOR`
     DropConnector,
+    /// `ALTER CONNECTOR WITH (<connector_props>)`
+    AlterConnectorProps {
+        alter_props: Vec<SqlOption>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -380,6 +384,13 @@ impl fmt::Display for AlterTableOperation {
             }
             AlterTableOperation::DropConnector => {
                 write!(f, "DROP CONNECTOR")
+            }
+            AlterTableOperation::AlterConnectorProps { alter_props } => {
+                write!(
+                    f,
+                    "ALTER CONNECTOR WITH ({})",
+                    display_comma_separated(alter_props)
+                )
             }
         }
     }
