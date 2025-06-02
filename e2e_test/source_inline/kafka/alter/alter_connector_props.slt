@@ -1,0 +1,83 @@
+control substitution on
+
+system ok
+rpk topic create kafka_alter_connector_props -p 3
+
+system ok
+cat <<EOF | rpk topic produce 'kafka_alter_connector_props' -f "%k^%v\n"
+{"ID": 6}^{"ID": 6, "firstName": "Leah", "lastName": "Davis", "age": 18, "height": 5.7, "weight": 140}
+{"ID": 7}^{"ID": 7, "firstName": "Connor", "lastName": "Wilson", "age": 19, "height": 5.9, "weight": 160}
+{"ID": 8}^{"ID": 8, "firstName": "Ava", "lastName": "Garcia", "age": 21, "height": 5.2, "weight": 115}
+EOF
+
+statement ok
+create secret s1 with ( backend = 'meta' ) as '1000000000';
+
+statement ok
+create secret s2 with ( backend = 'meta' ) as '2000000000';
+
+statement ok
+CREATE TABLE plain_students (
+    "ID" INT,
+    "firstName" VARCHAR,
+    "lastName" VARCHAR,
+    age INT,
+    height REAL,
+    weight REAL,
+)
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'kafka_alter_connector_props',
+    properties.receive.message.max.bytes = secret s1
+)
+FORMAT PLAIN ENCODE JSON;
+
+sleep 1s
+
+query I
+SELECT count(*) from plain_students;
+----
+3
+
+statement error Invalid Parameter Value: Invalid parameter: connector kafka does not support alter property `topic`, allowed props: `properties.enable.ssl.certificate.verification`, `properties.sync.call.timeout`, `properties.fetch.max.bytes`, `properties.queued.max.messages.kbytes`, `properties.enable.auto.commit`, `properties.message.max.bytes`, `properties.queued.min.messages`, `properties.fetch.wait.max.ms`, `properties.client.id`, `properties.ssl.endpoint.identification.algorithm`, `properties.security.protocol`, `properties.sasl.mechanism`, `properties.fetch.queue.backoff.ms`, `properties.receive.message.max.bytes`, `properties.sasl.password`, `properties.statistics.interval.ms`, `properties.sasl.username`
+ALTER TABLE plain_students CONNECTOR WITH ( topic = secret s2 );
+
+statement ok
+ALTER TABLE plain_students CONNECTOR WITH (properties.receive.message.max.bytes = secret s2);
+
+# the table definition is changed accordingly
+query I
+select count(*)  from rw_tables where definition ILIKE '%secret s2%' and name = 'plain_students';
+----
+1
+
+# the associated source definition is changed accordingly
+query I
+select count(*)  from rw_sources where definition ILIKE '%secret s2%' and name = 'plain_students';
+----
+1
+
+statement ok
+drop secret s1;
+
+system ok
+cat <<EOF | rpk topic produce 'kafka_alter_connector_props' -f "%k^%v\n"
+{"ID": 6}^{"ID": 6, "firstName": "Leah", "lastName": "Davis", "age": 18, "height": 5.7, "weight": 140}
+{"ID": 7}^{"ID": 7, "firstName": "Connor", "lastName": "Wilson", "age": 19, "height": 5.9, "weight": 160}
+{"ID": 8}^{"ID": 8, "firstName": "Ava", "lastName": "Garcia", "age": 21, "height": 5.2, "weight": 115}
+EOF
+
+sleep 1s
+
+query I
+SELECT count(*) from plain_students;
+----
+6
+
+# === clean up ===
+
+statement ok
+drop table plain_students;
+
+system ok
+rpk topic delete kafka_alter_connector_props

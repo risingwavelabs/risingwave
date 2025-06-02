@@ -388,7 +388,7 @@ impl fmt::Display for AlterTableOperation {
             AlterTableOperation::AlterConnectorProps { alter_props } => {
                 write!(
                     f,
-                    "ALTER CONNECTOR WITH ({})",
+                    "CONNECTOR WITH ({})",
                     display_comma_separated(alter_props)
                 )
             }
