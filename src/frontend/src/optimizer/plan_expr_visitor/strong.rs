@@ -162,6 +162,7 @@ impl Strong {
             | ExprType::CharLength
             | ExprType::Repeat
             | ExprType::ConcatOp
+            | ExprType::ByteaConcatOp
             | ExprType::BoolOut
             | ExprType::OctetLength
             | ExprType::BitLength
