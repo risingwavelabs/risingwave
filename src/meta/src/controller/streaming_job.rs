@@ -26,9 +26,11 @@ use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
-use risingwave_connector::source::{ConnectorProperties, SourceProperties};
+use risingwave_connector::source::{
+    ALTER_CONNECTOR_PROPS_ALLOWED, ConnectorProperties,
+};
 use risingwave_connector::{
-    WithOptionsSecResolved, WithPropertiesExt, match_sink_name_str, match_source_name_str,
+    WithOptionsSecResolved, WithPropertiesExt, match_sink_name_str,
 };
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::object::ObjectType;
@@ -1632,23 +1634,33 @@ impl CatalogController {
             })?;
         let connector = source.with_properties.0.get_connector().unwrap();
 
-        // // todo: make this a config, instead of builtin
-        // let check_alter_props_allowed: MetaResult<()> = match_source_name_str!(
-        //     connector.as_str(),
-        //     PropType,
-        //     {
-        //         for k in alter_props.keys().chain(alter_secret_refs.keys()) {
-        //             if !PropType::SOURCE_ALTER_CONFIG_LIST.contains(k) {
-        //                 return Err(MetaError::invalid_parameter(format!(
-        //                     "unsupported alter config: {k} for connector {connector}"
-        //                 )));
-        //             }
-        //         }
-        //         Ok(())
-        //     },
-        //     |other| bail!("connector '{}' is not supported", other)
-        // );
-        // check_alter_props_allowed?;
+        {
+            let allow_props_set =
+                ALTER_CONNECTOR_PROPS_ALLOWED
+                    .get(&connector)
+                    .ok_or_else(|| {
+                        MetaError::invalid_parameter(format!(
+                            "connector {} does not support alter properties",
+                            connector
+                        ))
+                    })?;
+            for k in alter_props.keys().chain(alter_secret_refs.keys()) {
+                if !allow_props_set.contains(k) {
+                    return Err(MetaError::invalid_parameter(format!(
+                        "connector {} does not support alter property `{}`, allowed props: {}",
+                        connector,
+                        k,
+                        {
+                            allow_props_set
+                                .iter()
+                                .map(|s| format!("`{}`", s))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        }
+                    )));
+                }
+            }
+        }
 
         let mut options_with_secret = WithOptionsSecResolved::new(
             source.with_properties.0.clone(),
