@@ -1678,8 +1678,12 @@ impl CatalogController {
         // todo: validate via source manager
 
         let mut associate_table_id = None;
-        let mut preferred_id: i32 = source_id; // can be source_id or table_id
-        let rewrirte_sql = {
+
+        // can be source_id or table_id
+        // if updating an associated source, the preferred_id is the table_id
+        // otherwise, it is the source_id
+        let mut preferred_id: i32 = source_id;
+        let rewrite_sql = {
             let definition = source.definition.clone();
 
             let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
@@ -1777,7 +1781,7 @@ impl CatalogController {
 
         let active_source_model = source::ActiveModel {
             source_id: Set(source_id),
-            definition: Set(rewrirte_sql.clone()),
+            definition: Set(rewrite_sql.clone()),
             with_properties: Set(options_with_secret.as_plaintext().clone().into()),
             secret_ref: Set((!options_with_secret.as_secret().is_empty())
                 .then(|| SecretRef::from(options_with_secret.as_secret().clone()))),
@@ -1789,7 +1793,7 @@ impl CatalogController {
             // update the associated table statement accordly
             let active_table_model = table::ActiveModel {
                 table_id: Set(associate_table_id),
-                definition: Set(rewrirte_sql),
+                definition: Set(rewrite_sql),
                 ..Default::default()
             };
             active_table_model.update(&txn).await?;

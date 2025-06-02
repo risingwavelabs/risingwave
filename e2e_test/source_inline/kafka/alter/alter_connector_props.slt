@@ -17,6 +17,32 @@ statement ok
 create secret s2 with ( backend = 'meta' ) as '2000000000';
 
 statement ok
+create connection conn with (
+    type = 'kafka',
+    properties.bootstrap.server ='${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.security.protocol = 'plaintext'
+);
+
+statement ok
+CREATE TABLE plain_students_1 (
+    "ID" INT,
+    "firstName" VARCHAR,
+    "lastName" VARCHAR,
+    age INT,
+    height REAL,
+    weight REAL,
+)
+WITH (
+    connection = conn,
+    topic = 'kafka_alter_connector_props'
+)
+FORMAT PLAIN ENCODE JSON;
+
+statement error Invalid input syntax: Cannot alter connector properties that are set by CONNECTION. Use `ALTER CONNECTION` to alter them.
+alter table plain_students_1 connector with ( properties.security.protocol = 'sasl_ssl' ) ;
+
+
+statement ok
 CREATE TABLE plain_students (
     "ID" INT,
     "firstName" VARCHAR,
@@ -78,6 +104,12 @@ SELECT count(*) from plain_students;
 
 statement ok
 drop table plain_students;
+
+statement ok
+drop table plain_students_1;
+
+statement ok
+drop connection conn;
 
 system ok
 rpk topic delete kafka_alter_connector_props
