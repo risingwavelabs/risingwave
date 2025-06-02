@@ -1688,10 +1688,9 @@ impl CatalogController {
 
             let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
                 .map_err(|e| {
-                    MetaError::from(MetaErrorInner::Connector(ConnectorError::from(anyhow!(
-                        "Failed to parse source definition SQL: {}",
-                        e
-                    ))))
+                    MetaError::from(MetaErrorInner::Connector(ConnectorError::from(
+                        anyhow!(e).context("Failed to parse source definition SQL"),
+                    )))
                 })?
                 .try_into()
                 .unwrap();
@@ -1716,7 +1715,7 @@ impl CatalogController {
                 let mut options = Vec::new();
                 for (k, v) in options_with_secret.as_plaintext() {
                     let sql_option = SqlOption::try_from((k, &format!("'{}'", v)))
-                        .map_err(|e| MetaError::invalid_parameter(e.to_string()))?;
+                        .map_err(|e| MetaError::invalid_parameter(e.to_report_string()))?;
                     options.push(sql_option);
                 }
                 for (k, v) in options_with_secret.as_secret() {
@@ -1725,7 +1724,7 @@ impl CatalogController {
                     {
                         let sql_option =
                             SqlOption::try_from((k, &format!("SECRET {}", secret_model.name)))
-                                .map_err(|e| MetaError::invalid_parameter(e.to_string()))?;
+                                .map_err(|e| MetaError::invalid_parameter(e.to_report_string()))?;
                         options.push(sql_option);
                     } else {
                         return Err(MetaError::catalog_id_not_found("secret", v.secret_id));
