@@ -26,12 +26,8 @@ use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
-use risingwave_connector::source::{
-    ALTER_CONNECTOR_PROPS_ALLOWED, ConnectorProperties,
-};
-use risingwave_connector::{
-    WithOptionsSecResolved, WithPropertiesExt, match_sink_name_str,
-};
+use risingwave_connector::source::{ALTER_CONNECTOR_PROPS_ALLOWED, ConnectorProperties};
+use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, match_sink_name_str};
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};

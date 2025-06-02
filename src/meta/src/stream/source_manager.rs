@@ -111,6 +111,8 @@ impl SourceManagerCore {
         let mut fragment_replacements = Default::default();
         let mut dropped_source_fragments = Default::default();
         let mut dropped_source_ids = Default::default();
+        let mut reccreate_source_id_map_new_props: Vec<(u32, HashMap<String, String>)> =
+            Default::default();
 
         match source_change {
             SourceChange::CreateJob {
@@ -161,6 +163,13 @@ impl SourceManagerCore {
             } => {
                 split_assignment = split_assignment_;
                 dropped_actors = dropped_actors_;
+            }
+            SourceChange::UpdateSourceProps {
+                source_id_map_new_props,
+            } => {
+                for (source_id, new_props) in source_id_map_new_props {
+                    reccreate_source_id_map_new_props.push((source_id, new_props));
+                }
             }
         }
 
@@ -236,6 +245,18 @@ impl SourceManagerCore {
                     }
                 }
                 *fragment_ids = new_backfill_fragment_ids;
+            }
+        }
+
+        for (source_id, new_props) in reccreate_source_id_map_new_props {
+            tracing::info!("recreate source {source_id} in source manager");
+            if let Some(handle) = self.managed_sources.get_mut(&(source_id as _)) {
+                // the update here should not involve fragments change and split change
+                // Or we need to drop and recreate the source worker instead of updating inplace
+                let props_wrapper =
+                    WithOptionsSecResolved::without_secrets(new_props.into_iter().collect());
+                let props = ConnectorProperties::extract(props_wrapper, false).unwrap(); // already checked when sending barrier
+                handle.update_props(props);
             }
         }
     }
@@ -500,6 +521,11 @@ pub enum SourceChange {
         /// (`source_id`, -> (`source_backfill_fragment_id`, `upstream_source_fragment_id`))
         added_backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
         split_assignment: SplitAssignment,
+    },
+    UpdateSourceProps {
+        // the new properties to be set for each source_id
+        // and the props should not affect split assignment and fragments
+        source_id_map_new_props: HashMap<u32, HashMap<String, String>>,
     },
     /// `CREATE SOURCE` (shared), or `CREATE MV` is _finished_ (backfill is done).
     /// This is applied after `wait_streaming_job_finished`.
