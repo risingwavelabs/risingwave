@@ -125,6 +125,14 @@ struct BackfillStage {
     splits: Vec<SplitImpl>,
 }
 
+enum ApplyMutationAfterBarrier {
+    SourceChangeSplit {
+        target_splits: Vec<SplitImpl>,
+        should_trim_state: bool,
+    },
+    ConnectorPropsChange,
+}
+
 impl BackfillStage {
     fn total_backfilled_rows(&self) -> u64 {
         self.states.values().map(|s| s.num_consumed_rows).sum()
@@ -512,7 +520,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     self_paused = false;
                                 }
 
-                                let mut split_changed = None;
+                                let mut maybe_muatation = None;
                                 if let Some(ref mutation) = barrier.mutation.as_deref() {
                                     match mutation {
                                         Mutation::Pause => {
@@ -544,18 +552,28 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                                 actor_splits = ?actor_splits,
                                                 "source change split received"
                                             );
-                                            split_changed = actor_splits
+                                            maybe_muatation = actor_splits
                                                 .get(&self.actor_ctx.id)
                                                 .cloned()
-                                                .map(|target_splits| (target_splits, true));
+                                                .map(|target_splits| {
+                                                    ApplyMutationAfterBarrier::SourceChangeSplit {
+                                                        target_splits,
+                                                        should_trim_state: true,
+                                                    }
+                                                });
                                         }
                                         Mutation::Update(UpdateMutation {
                                             actor_splits, ..
                                         }) => {
-                                            split_changed = actor_splits
+                                            maybe_muatation = actor_splits
                                                 .get(&self.actor_ctx.id)
                                                 .cloned()
-                                                .map(|target_splits| (target_splits, false));
+                                                .map(|target_splits| {
+                                                    ApplyMutationAfterBarrier::SourceChangeSplit {
+                                                        target_splits,
+                                                        should_trim_state: false,
+                                                    }
+                                                });
                                         }
                                         Mutation::ConnectorPropsChange(maybe_mutation) => {
                                             if let Some(props_plaintext) =
@@ -564,19 +582,8 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                                 source_desc
                                                     .update_reader(props_plaintext.clone())?;
 
-                                                // rebuild reader
-                                                let (reader, _backfill_info) = self
-                                                    .build_stream_source_reader(
-                                                        &source_desc,
-                                                        backfill_stage
-                                                            .get_latest_unfinished_splits()?,
-                                                    )
-                                                    .await?;
-
-                                                backfill_stream = select_with_strategy(
-                                                    input.by_ref().map(Either::Left),
-                                                    reader.map(Either::Right),
-                                                    select_strategy,
+                                                maybe_muatation = Some(
+                                                    ApplyMutationAfterBarrier::ConnectorPropsChange,
                                                 );
                                             }
                                         }
@@ -661,13 +668,11 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     // yield barrier after reporting progress
                                     yield Message::Barrier(barrier);
 
-                                    if let Some((target_splits, should_trim_state)) = split_changed
-                                    {
+                                    if let Some(to_apply_mutation) = maybe_muatation {
                                         self.apply_split_change_after_yield_barrier(
                                             barrier_epoch,
-                                            target_splits,
                                             &mut backfill_stage,
-                                            should_trim_state,
+                                            to_apply_mutation,
                                         )
                                         .await?;
                                     }
@@ -709,14 +714,12 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     // yield barrier after reporting progress
                                     yield Message::Barrier(barrier);
 
-                                    if let Some((target_splits, should_trim_state)) = split_changed
-                                    {
+                                    if let Some(to_apply_mutation) = maybe_muatation {
                                         if self
                                             .apply_split_change_after_yield_barrier(
                                                 barrier_epoch,
-                                                target_splits,
                                                 &mut backfill_stage,
-                                                should_trim_state,
+                                                to_apply_mutation,
                                             )
                                             .await?
                                         {
@@ -915,22 +918,34 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
     async fn apply_split_change_after_yield_barrier(
         &mut self,
         barrier_epoch: EpochPair,
-        target_splits: Vec<SplitImpl>,
         stage: &mut BackfillStage,
-        should_trim_state: bool,
+        to_apply_mutation: ApplyMutationAfterBarrier,
     ) -> StreamExecutorResult<bool> {
-        self.source_split_change_count.inc();
-        {
-            if self
-                .update_state_if_changed(barrier_epoch, target_splits, stage, should_trim_state)
-                .await?
-            {
-                // Note: we don't rebuild backfill_stream here, due to some complex lifetime issues.
-                return Ok(true);
+        match to_apply_mutation {
+            ApplyMutationAfterBarrier::SourceChangeSplit {
+                target_splits,
+                should_trim_state,
+            } => {
+                self.source_split_change_count.inc();
+                {
+                    if self
+                        .update_state_if_changed(
+                            barrier_epoch,
+                            target_splits,
+                            stage,
+                            should_trim_state,
+                        )
+                        .await?
+                    {
+                        // Note: we don't rebuild backfill_stream here, due to some complex lifetime issues.
+                        Ok(true)
+                    } else {
+                        Ok(false)
+                    }
+                }
             }
+            ApplyMutationAfterBarrier::ConnectorPropsChange => Ok(true),
         }
-
-        Ok(false)
     }
 
     /// Returns `true` if split changed. Otherwise `false`.
