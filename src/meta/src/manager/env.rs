@@ -77,6 +77,7 @@ pub struct MetaSrvEnv {
 
     pub hummock_seq: Arc<SequenceGenerator>,
 
+    /// The await-tree registry of the current meta node.
     await_tree_reg: await_tree::Registry,
 
     /// options read by all services

@@ -1615,6 +1615,7 @@ impl MetaClient {
         Ok(resp.iceberg_tables)
     }
 
+    /// Get the await tree of all nodes in the cluster.
     pub async fn get_cluster_stack_trace(
         &self,
         actor_traces_format: ActorTracesFormat,

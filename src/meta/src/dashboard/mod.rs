@@ -367,6 +367,7 @@ pub(super) mod handlers {
     }
 
     impl AwaitTreeDumpParams {
+        /// Parse the `format` parameter to [`ActorTracesFormat`].
         pub fn actor_traces_format(&self) -> Result<ActorTracesFormat> {
             Ok(match self.format.as_str() {
                 "text" => ActorTracesFormat::Text,

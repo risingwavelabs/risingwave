@@ -18,6 +18,10 @@ use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{self, StackTraceRequest, StackTraceResponse};
 use tonic::{Request, Response, Status};
 
+/// The [`MonitorService`] implementation for meta node.
+///
+/// Currently, only [`MonitorService::stack_trace`] is implemented, which returns the await tree of
+/// all nodes in the cluster.
 pub struct MonitorServiceImpl {
     pub metadata_manager: MetadataManager,
     pub await_tree_reg: await_tree::Registry,

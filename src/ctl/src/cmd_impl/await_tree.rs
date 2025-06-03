@@ -29,6 +29,7 @@ pub async fn dump(context: &CtlContext, actor_traces_format: Option<String>) -> 
         _ => return Err(anyhow::anyhow!("Invalid actor traces format")),
     };
 
+    // Query the meta node for the await tree of all nodes in the cluster.
     let meta_client = context.meta_client().await?;
     let all = meta_client
         .get_cluster_stack_trace(actor_traces_format)

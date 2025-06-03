@@ -21,6 +21,8 @@ use risingwave_rpc_client::ComputeClientPool;
 use crate::MetaResult;
 use crate::manager::MetadataManager;
 
+/// Dump the await tree of all nodes in the cluster, including compute nodes, compactor nodes,
+/// and the current meta node.
 pub async fn dump_cluster_await_tree(
     metadata_manager: &MetadataManager,
     meta_node_registry: &await_tree::Registry,
@@ -47,6 +49,7 @@ pub async fn dump_cluster_await_tree(
     Ok(all)
 }
 
+/// Dump the await tree of the current meta node.
 pub async fn dump_meta_node_await_tree(
     meta_node_registry: &await_tree::Registry,
 ) -> MetaResult<StackTraceResponse> {
@@ -62,6 +65,7 @@ pub async fn dump_meta_node_await_tree(
     })
 }
 
+/// Dump the await tree of the given worker nodes (compute nodes or compactor nodes).
 pub async fn dump_worker_node_await_tree(
     worker_nodes: impl IntoIterator<Item = &WorkerNode>,
     actor_traces_format: ActorTracesFormat,
