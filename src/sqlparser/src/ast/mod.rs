@@ -121,6 +121,7 @@ pub struct Ident {
 impl Ident {
     /// Create a new identifier with the given value and no quotes.
     /// the given value must not be a empty string.
+    // FIXME: should avoid using this function unless it's a literal or for testing.
     pub fn new_unchecked<S>(value: S) -> Self
     where
         S: Into<String>,
@@ -198,13 +199,8 @@ impl Ident {
 }
 
 impl From<&str> for Ident {
-    // FIXME: the result is wrong if value contains quote or is case sensitive,
-    //        should use `Ident::from_real_value` instead.
     fn from(value: &str) -> Self {
-        Ident {
-            value: value.to_owned(),
-            quote_style: None,
-        }
+        Self::from_real_value(value)
     }
 }
 
