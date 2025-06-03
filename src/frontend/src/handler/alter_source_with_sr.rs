@@ -19,7 +19,6 @@ use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{ColumnCatalog, max_column_id};
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::{EncodeType, FormatType};
@@ -220,7 +219,6 @@ pub async fn handle_alter_source_with_sr(
     let session = handler_args.session.clone();
     let source = fetch_source_catalog_with_db_schema_id(&session, &name)?;
     let mut source = source.as_ref().clone();
-    let old_columns = source.columns.clone();
 
     if source.associated_table_id.is_some() {
         return Err(ErrorCode::NotSupported(
@@ -282,23 +280,7 @@ pub async fn handle_alter_source_with_sr(
     let catalog_writer = session.catalog_writer()?;
     if source.info.is_shared() {
         let graph = generate_stream_graph_for_source(handler_args, source.clone())?;
-
-        // Calculate the mapping from the original columns to the new columns.
-        let col_index_mapping = ColIndexMapping::new(
-            old_columns
-                .iter()
-                .map(|old_c| {
-                    source
-                        .columns
-                        .iter()
-                        .position(|new_c| new_c.column_id() == old_c.column_id())
-                })
-                .collect(),
-            source.columns.len(),
-        );
-        catalog_writer
-            .replace_source(pb_source, graph, col_index_mapping)
-            .await?
+        catalog_writer.replace_source(pb_source, graph).await?
     } else {
         catalog_writer.alter_source(pb_source).await?;
     }

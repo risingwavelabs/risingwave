@@ -20,7 +20,7 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{FormatEncodeOptions, SqlOption};
+use super::{ConfigParam, FormatEncodeOptions, SqlOption};
 use crate::ast::{
     DataType, Expr, Ident, ObjectName, SecretRefValue, SetVariableValue, Value,
     display_comma_separated, display_separated,
@@ -32,6 +32,7 @@ use crate::tokenizer::Token;
 pub enum AlterDatabaseOperation {
     ChangeOwner { new_owner_name: Ident },
     RenameDatabase { database_name: ObjectName },
+    SetParam(ConfigParam),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -273,6 +274,9 @@ impl fmt::Display for AlterDatabaseOperation {
             }
             AlterDatabaseOperation::RenameDatabase { database_name } => {
                 write!(f, "RENAME TO {}", database_name)
+            }
+            AlterDatabaseOperation::SetParam(ConfigParam { param, value }) => {
+                write!(f, "SET {} TO {}", param, value)
             }
         }
     }

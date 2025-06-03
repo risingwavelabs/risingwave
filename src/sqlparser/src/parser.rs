@@ -33,8 +33,8 @@ use winnow::{ModalResult, Parser as _};
 use crate::ast::*;
 use crate::keywords::{self, Keyword};
 use crate::parser_v2::{
-    ParserExt as _, dollar_quoted_string, keyword, literal_i64, literal_uint, single_quoted_string,
-    token_number,
+    ParserExt as _, dollar_quoted_string, keyword, literal_i64, literal_u32, literal_u64,
+    single_quoted_string, token_number,
 };
 use crate::tokenizer::*;
 use crate::{impl_parse_to, parser_v2};
@@ -877,32 +877,17 @@ impl Parser<'_> {
         };
 
         let over = if self.parse_keyword(Keyword::OVER) {
-            // TODO: support window names (`OVER mywin`) in place of inline specification
-            self.expect_token(&Token::LParen)?;
-            let partition_by = if self.parse_keywords(&[Keyword::PARTITION, Keyword::BY]) {
-                // a list of possibly-qualified column names
-                self.parse_comma_separated(Parser::parse_expr)?
-            } else {
-                vec![]
-            };
-            let order_by_window = if self.parse_keywords(&[Keyword::ORDER, Keyword::BY]) {
-                self.parse_comma_separated(Parser::parse_order_by_expr)?
-            } else {
-                vec![]
-            };
-            let window_frame = if !self.consume_token(&Token::RParen) {
-                let window_frame = self.parse_window_frame()?;
+            if self.peek_token() == Token::LParen {
+                // Inline window specification: OVER (...)
+                self.expect_token(&Token::LParen)?;
+                let window_spec = self.parse_window_spec()?;
                 self.expect_token(&Token::RParen)?;
-                Some(window_frame)
+                Some(Window::Spec(window_spec))
             } else {
-                None
-            };
-
-            Some(WindowSpec {
-                partition_by,
-                order_by: order_by_window,
-                window_frame,
-            })
+                // Named window: OVER window_name
+                let window_name = self.parse_identifier()?;
+                Some(Window::Name(window_name))
+            }
         } else {
             None
         };
@@ -2104,28 +2089,48 @@ impl Parser<'_> {
 
         let mut owner = None;
         let mut resource_group = None;
+        let mut barrier_interval_ms = None;
+        let mut checkpoint_frequency = None;
 
-        while let Some(keyword) =
-            self.parse_one_of_keywords(&[Keyword::OWNER, Keyword::RESOURCE_GROUP])
-        {
-            match keyword {
-                Keyword::OWNER => {
-                    if owner.is_some() {
-                        parser_err!("duplicate OWNER clause in CREATE DATABASE");
+        loop {
+            if let Some(keyword) =
+                self.parse_one_of_keywords(&[Keyword::OWNER, Keyword::RESOURCE_GROUP])
+            {
+                match keyword {
+                    Keyword::OWNER => {
+                        if owner.is_some() {
+                            parser_err!("duplicate OWNER clause in CREATE DATABASE");
+                        }
+
+                        let _ = self.consume_token(&Token::Eq);
+                        owner = Some(self.parse_object_name()?);
                     }
+                    Keyword::RESOURCE_GROUP => {
+                        if resource_group.is_some() {
+                            parser_err!("duplicate RESOURCE_GROUP clause in CREATE DATABASE");
+                        }
 
-                    let _ = self.consume_token(&Token::Eq);
-                    owner = Some(self.parse_object_name()?);
-                }
-                Keyword::RESOURCE_GROUP => {
-                    if resource_group.is_some() {
-                        parser_err!("duplicate RESOURCE_GROUP clause in CREATE DATABASE");
+                        let _ = self.consume_token(&Token::Eq);
+                        resource_group = Some(self.parse_set_variable()?);
                     }
-
-                    let _ = self.consume_token(&Token::Eq);
-                    resource_group = Some(self.parse_set_variable()?);
+                    _ => unreachable!(),
                 }
-                _ => unreachable!(),
+            } else if self.parse_word("BARRIER_INTERVAL_MS") {
+                if barrier_interval_ms.is_some() {
+                    parser_err!("duplicate BARRIER_INTERVAL_MS clause in CREATE DATABASE");
+                }
+
+                let _ = self.consume_token(&Token::Eq);
+                barrier_interval_ms = Some(self.parse_literal_u32()?);
+            } else if self.parse_word("CHECKPOINT_FREQUENCY") {
+                if checkpoint_frequency.is_some() {
+                    parser_err!("duplicate CHECKPOINT_FREQUENCY clause in CREATE DATABASE");
+                }
+
+                let _ = self.consume_token(&Token::Eq);
+                checkpoint_frequency = Some(self.parse_literal_u64()?);
+            } else {
+                break;
             }
         }
 
@@ -2134,6 +2139,8 @@ impl Parser<'_> {
             if_not_exists,
             owner,
             resource_group,
+            barrier_interval_ms,
+            checkpoint_frequency,
         })
     }
 
@@ -3086,6 +3093,17 @@ impl Parser<'_> {
         Ok(SqlOption { name, value })
     }
 
+    // <config_param> { TO | = } { <value> | DEFAULT }
+    // <config_param> is not a keyword, but an identifier
+    pub fn parse_config_param(&mut self) -> ModalResult<ConfigParam> {
+        let param = self.parse_identifier()?;
+        if !self.consume_token(&Token::Eq) && !self.parse_keyword(Keyword::TO) {
+            return self.expected("'=' or 'TO' after config parameter");
+        }
+        let value = self.parse_set_variable()?;
+        Ok(ConfigParam { param, value })
+    }
+
     pub fn parse_since(&mut self) -> ModalResult<Since> {
         if self.parse_keyword(Keyword::SINCE) {
             let checkpoint = *self;
@@ -3192,8 +3210,11 @@ impl Parser<'_> {
             } else {
                 return self.expected("TO after RENAME");
             }
+        } else if self.parse_keyword(Keyword::SET) {
+            // check will be delayed to frontend
+            AlterDatabaseOperation::SetParam(self.parse_config_param()?)
         } else {
-            return self.expected("OWNER TO after ALTER DATABASE");
+            return self.expected("RENAME, OWNER TO, OR SET after ALTER DATABASE");
         };
 
         Ok(Statement::AlterDatabase {
@@ -3796,7 +3817,7 @@ impl Parser<'_> {
     }
 
     pub fn parse_alter_fragment(&mut self) -> ModalResult<Statement> {
-        let fragment_id = self.parse_literal_uint()? as u32;
+        let fragment_id = self.parse_literal_u32()?;
         if !self.parse_keyword(Keyword::SET) {
             return self.expected("SET after ALTER FRAGMENT");
         }
@@ -4008,9 +4029,12 @@ impl Parser<'_> {
         }
     }
 
-    /// Parse an unsigned literal integer/long
-    pub fn parse_literal_uint(&mut self) -> ModalResult<u64> {
-        literal_uint(self)
+    pub fn parse_literal_u32(&mut self) -> ModalResult<u32> {
+        literal_u32(self)
+    }
+
+    pub fn parse_literal_u64(&mut self) -> ModalResult<u64> {
+        literal_u64(self)
     }
 
     pub fn parse_function_definition(&mut self) -> ModalResult<FunctionDefinition> {
@@ -4295,7 +4319,7 @@ impl Parser<'_> {
 
     pub fn parse_optional_precision(&mut self) -> ModalResult<Option<u64>> {
         if self.consume_token(&Token::LParen) {
-            let n = self.parse_literal_uint()?;
+            let n = self.parse_literal_u64()?;
             self.expect_token(&Token::RParen)?;
             Ok(Some(n))
         } else {
@@ -4305,9 +4329,9 @@ impl Parser<'_> {
 
     pub fn parse_optional_precision_scale(&mut self) -> ModalResult<(Option<u64>, Option<u64>)> {
         if self.consume_token(&Token::LParen) {
-            let n = self.parse_literal_uint()?;
+            let n = self.parse_literal_u64()?;
             let scale = if self.consume_token(&Token::Comma) {
-                Some(self.parse_literal_uint()?)
+                Some(self.parse_literal_u64()?)
             } else {
                 None
             };
@@ -4404,7 +4428,7 @@ impl Parser<'_> {
                     }
                 }
                 Keyword::DURATION_SECS => {
-                    analyze_duration = Some(parser.parse_literal_uint()?);
+                    analyze_duration = Some(parser.parse_literal_u64()?);
                 }
                 _ => unreachable!("{}", keyword),
             };
@@ -4446,7 +4470,7 @@ impl Parser<'_> {
                     let sink_name = parser.parse_object_name()?;
                     Ok(Some(AnalyzeTarget::Sink(sink_name)))
                 } else if parser.parse_word("ID") {
-                    let job_id = parser.parse_literal_uint()? as u32;
+                    let job_id = parser.parse_literal_u32()?;
                     Ok(Some(AnalyzeTarget::Id(job_id)))
                 } else {
                     Ok(None)
@@ -4484,7 +4508,7 @@ impl Parser<'_> {
     pub fn parse_describe(&mut self) -> ModalResult<Statement> {
         let kind = match self.parse_one_of_keywords(&[Keyword::FRAGMENT, Keyword::FRAGMENTS]) {
             Some(Keyword::FRAGMENT) => {
-                let fragment_id = self.parse_literal_uint()? as u32;
+                let fragment_id = self.parse_literal_u32()?;
                 return Ok(Statement::DescribeFragment { fragment_id });
             }
             Some(Keyword::FRAGMENTS) => DescribeKind::Fragments,
@@ -4734,6 +4758,12 @@ impl Parser<'_> {
             None
         };
 
+        let window = if self.parse_keyword(Keyword::WINDOW) {
+            self.parse_comma_separated(Parser::parse_named_window)?
+        } else {
+            vec![]
+        };
+
         Ok(Select {
             distinct,
             projection,
@@ -4742,6 +4772,7 @@ impl Parser<'_> {
             selection,
             group_by,
             having,
+            window,
         })
     }
 
@@ -4804,18 +4835,12 @@ impl Parser<'_> {
                 session: false,
             })
         } else {
-            let variable = self.parse_identifier()?;
-
-            if self.consume_token(&Token::Eq) || self.parse_keyword(Keyword::TO) {
-                let value = self.parse_set_variable()?;
-                Ok(Statement::SetVariable {
-                    local: modifier == Some(Keyword::LOCAL),
-                    variable,
-                    value,
-                })
-            } else {
-                self.expected("equals sign or TO")
-            }
+            let config_param = self.parse_config_param()?;
+            Ok(Statement::SetVariable {
+                local: modifier == Some(Keyword::LOCAL),
+                variable: config_param.param,
+                value: config_param.value,
+            })
         }
     }
 
@@ -5002,7 +5027,7 @@ impl Parser<'_> {
 
         let mut job_ids = vec![];
         loop {
-            job_ids.push(self.parse_literal_uint()? as u32);
+            job_ids.push(self.parse_literal_u32()?);
             if !self.consume_token(&Token::Comma) {
                 break;
             }
@@ -5888,6 +5913,40 @@ impl Parser<'_> {
     fn parse_use(&mut self) -> ModalResult<Statement> {
         let db_name = self.parse_object_name()?;
         Ok(Statement::Use { db_name })
+    }
+
+    /// Parse a named window definition for the WINDOW clause
+    pub fn parse_named_window(&mut self) -> ModalResult<NamedWindow> {
+        let name = self.parse_identifier()?;
+        self.expect_keywords(&[Keyword::AS])?;
+        self.expect_token(&Token::LParen)?;
+        let window_spec = self.parse_window_spec()?;
+        self.expect_token(&Token::RParen)?;
+        Ok(NamedWindow { name, window_spec })
+    }
+
+    /// Parse a window specification (contents of OVER clause or WINDOW clause)
+    pub fn parse_window_spec(&mut self) -> ModalResult<WindowSpec> {
+        let partition_by = if self.parse_keywords(&[Keyword::PARTITION, Keyword::BY]) {
+            self.parse_comma_separated(Parser::parse_expr)?
+        } else {
+            vec![]
+        };
+        let order_by = if self.parse_keywords(&[Keyword::ORDER, Keyword::BY]) {
+            self.parse_comma_separated(Parser::parse_order_by_expr)?
+        } else {
+            vec![]
+        };
+        let window_frame = if !self.peek_token().eq(&Token::RParen) {
+            Some(self.parse_window_frame()?)
+        } else {
+            None
+        };
+        Ok(WindowSpec {
+            partition_by,
+            order_by,
+            window_frame,
+        })
     }
 }
 

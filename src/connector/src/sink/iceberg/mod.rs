@@ -250,6 +250,11 @@ impl IcebergConfig {
     pub fn catalog_name(&self) -> String {
         self.common.catalog_name()
     }
+
+    pub fn compaction_interval_sec(&self) -> u64 {
+        // default to 1 hour
+        self.compaction_interval_sec.unwrap_or(3600)
+    }
 }
 
 pub struct IcebergSink {
@@ -500,9 +505,10 @@ impl Sink for IcebergSink {
                 .check_available()
                 .map_err(|e| anyhow::anyhow!(e))?;
         }
-
-        if self.config.enable_compaction && self.config.compaction_interval_sec.is_none() {
-            bail!("`compaction_interval_sec` must be set when `enable_compaction` is true");
+        if self.config.enable_compaction {
+            risingwave_common::license::Feature::IcebergCompaction
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
         }
 
         let _ = self.create_and_validate_table().await?;
@@ -1842,7 +1848,7 @@ impl IcebergSinkCommitter {
             && iceberg_compact_stat_sender
                 .send(IcebergSinkCompactionUpdate {
                     sink_id: SinkId::new(self.sink_id),
-                    compaction_interval: self.config.compaction_interval_sec.unwrap(),
+                    compaction_interval: self.config.compaction_interval_sec(),
                 })
                 .is_err()
         {

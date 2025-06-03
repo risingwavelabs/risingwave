@@ -20,11 +20,11 @@ use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
+use risingwave_common::catalog::AlterDatabaseParam;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node, visit_stream_node_cont_mut,
 };
@@ -123,7 +123,6 @@ impl StreamingJobId {
 pub struct ReplaceStreamJobInfo {
     pub streaming_job: StreamingJob,
     pub fragment_graph: StreamFragmentGraphProto,
-    pub col_index_mapping: Option<ColIndexMapping>,
 }
 
 pub enum DdlCommand {
@@ -165,6 +164,7 @@ pub enum DdlCommand {
     CommentOn(Comment),
     CreateSubscription(Subscription),
     DropSubscription(SubscriptionId, DropMode),
+    AlterDatabaseParam(DatabaseId, AlterDatabaseParam),
 }
 
 impl DdlCommand {
@@ -190,7 +190,8 @@ impl DdlCommand {
             | DdlCommand::CommentOn(_)
             | DdlCommand::CreateSecret(_)
             | DdlCommand::AlterSecret(_)
-            | DdlCommand::AlterSwapRename(_) => true,
+            | DdlCommand::AlterSwapRename(_)
+            | DdlCommand::AlterDatabaseParam(_, _) => true,
             DdlCommand::CreateStreamingJob { .. }
             | DdlCommand::CreateNonSharedSource(_)
             | DdlCommand::ReplaceStreamJob(_)
@@ -351,11 +352,7 @@ impl DdlController {
                 DdlCommand::ReplaceStreamJob(ReplaceStreamJobInfo {
                     streaming_job,
                     fragment_graph,
-                    col_index_mapping,
-                }) => {
-                    ctrl.replace_job(streaming_job, fragment_graph, col_index_mapping)
-                        .await
-                }
+                }) => ctrl.replace_job(streaming_job, fragment_graph).await,
                 DdlCommand::AlterName(relation, name) => ctrl.alter_name(relation, &name).await,
                 DdlCommand::AlterObjectOwner(object, owner_id) => {
                     ctrl.alter_owner(object, owner_id).await
@@ -383,6 +380,9 @@ impl DdlController {
                     ctrl.drop_subscription(subscription_id, drop_mode).await
                 }
                 DdlCommand::AlterSwapRename(objects) => ctrl.alter_swap_rename(objects).await,
+                DdlCommand::AlterDatabaseParam(database_id, param) => {
+                    ctrl.alter_database_param(database_id, param).await
+                }
             }
         }
         .in_current_span();
@@ -537,6 +537,17 @@ impl DdlController {
             None,
         )
         .await
+    }
+
+    async fn alter_database_param(
+        &self,
+        database_id: DatabaseId,
+        param: AlterDatabaseParam,
+    ) -> MetaResult<NotificationVersion> {
+        self.metadata_manager
+            .catalog_controller
+            .alter_database_param(database_id, param)
+            .await
     }
 
     // The 'secret' part of the request we receive from the frontend is in plaintext;
@@ -1301,7 +1312,6 @@ impl DdlController {
                             tmp_id as _,
                             streaming_job,
                             replace_upstream,
-                            None,
                             SinkIntoTableContext {
                                 creating_sink_id: None,
                                 dropping_sink_id: Some(sink_id),
@@ -1387,7 +1397,6 @@ impl DdlController {
         &self,
         mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
-        col_index_mapping: Option<ColIndexMapping>,
     ) -> MetaResult<NotificationVersion> {
         match &mut streaming_job {
             StreamingJob::Table(..) | StreamingJob::Source(..) => {}
@@ -1496,7 +1505,6 @@ impl DdlController {
                         tmp_id,
                         streaming_job,
                         replace_upstream,
-                        col_index_mapping,
                         SinkIntoTableContext {
                             creating_sink_id: None,
                             dropping_sink_id: None,

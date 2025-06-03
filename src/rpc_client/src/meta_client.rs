@@ -29,14 +29,15 @@ use list_rate_limits_response::RateLimitInfo;
 use lru::LruCache;
 use replace_job_plan::ReplaceJob;
 use risingwave_common::RW_VERSION;
-use risingwave_common::catalog::{FunctionId, IndexId, ObjectId, SecretId, TableId};
+use risingwave_common::catalog::{
+    AlterDatabaseParam, FunctionId, IndexId, ObjectId, SecretId, TableId,
+};
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, MetaConfig};
 use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::monitor::EndpointExt;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
@@ -56,7 +57,7 @@ use risingwave_pb::catalog::{
 use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
 use risingwave_pb::cloud_service::*;
 use risingwave_pb::common::worker_node::Property;
-use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
+use risingwave_pb::common::{HostAddress, OptionalUint32, OptionalUint64, WorkerNode, WorkerType};
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::create_materialized_view_request::PbBackfillType;
@@ -558,6 +559,41 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
+    pub async fn alter_database_param(
+        &self,
+        database_id: DatabaseId,
+        param: AlterDatabaseParam,
+    ) -> Result<WaitVersion> {
+        let request = match param {
+            AlterDatabaseParam::BarrierIntervalMs(barrier_interval_ms) => {
+                let barrier_interval_ms = OptionalUint32 {
+                    value: barrier_interval_ms,
+                };
+                AlterDatabaseParamRequest {
+                    database_id,
+                    param: Some(alter_database_param_request::Param::BarrierIntervalMs(
+                        barrier_interval_ms,
+                    )),
+                }
+            }
+            AlterDatabaseParam::CheckpointFrequency(checkpoint_frequency) => {
+                let checkpoint_frequency = OptionalUint64 {
+                    value: checkpoint_frequency,
+                };
+                AlterDatabaseParamRequest {
+                    database_id,
+                    param: Some(alter_database_param_request::Param::CheckpointFrequency(
+                        checkpoint_frequency,
+                    )),
+                }
+            }
+        };
+        let resp = self.inner.alter_database_param(request).await?;
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
+    }
+
     pub async fn alter_set_schema(
         &self,
         object: alter_set_schema_request::Object,
@@ -654,13 +690,11 @@ impl MetaClient {
     pub async fn replace_job(
         &self,
         graph: StreamFragmentGraph,
-        table_col_index_mapping: ColIndexMapping,
         replace_job: ReplaceJob,
     ) -> Result<WaitVersion> {
         let request = ReplaceJobPlanRequest {
             plan: Some(ReplaceJobPlan {
                 fragment_graph: Some(graph),
-                table_col_index_mapping: Some(table_col_index_mapping.to_protobuf()),
                 replace_job: Some(replace_job),
             }),
         };
@@ -2206,6 +2240,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
             ,{ ddl_client, alter_resource_group, AlterResourceGroupRequest, AlterResourceGroupResponse }
+            ,{ ddl_client, alter_database_param, AlterDatabaseParamRequest, AlterDatabaseParamResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
