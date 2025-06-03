@@ -79,20 +79,40 @@ drop database db_with_keyword_default_resource_group;
 statement ok
 create database db_barrier_custom with barrier_interval_ms = 1500 checkpoint_frequency = 2;
 
+query II
+select barrier_interval_ms, checkpoint_frequency from rw_databases where name = 'db_barrier_custom';
+----
+1500 2
+
 statement ok
 alter database db_barrier_custom set barrier_interval_ms = default;
 
 statement ok
 alter database db_barrier_custom set checkpoint_frequency = default;
 
+query II
+select barrier_interval_ms, checkpoint_frequency from rw_databases where name = 'db_barrier_custom';
+----
+NULL NULL
+
 statement ok
 create database db_barrier_default;
+
+query II
+select barrier_interval_ms, checkpoint_frequency from rw_databases where name = 'db_barrier_default';
+----
+NULL NULL
 
 statement ok
 alter database db_barrier_default set barrier_interval_ms = 2000;
 
 statement ok
 alter database db_barrier_default set checkpoint_frequency = 3;
+
+query II
+select barrier_interval_ms, checkpoint_frequency from rw_databases where name = 'db_barrier_default';
+----
+2000 3
 
 statement ok
 drop database db_barrier_default;
