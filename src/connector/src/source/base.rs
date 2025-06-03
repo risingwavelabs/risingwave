@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
+use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -127,6 +128,7 @@ pub struct CreateSplitReaderOpt {
 pub struct CreateSplitReaderResult {
     pub latest_splits: Option<Vec<SplitImpl>>,
     pub backfill_info: HashMap<SplitId, BackfillInfo>,
+    pub release_handle: ReleaseHandle,
 }
 
 pub async fn create_split_readers<P: SourceProperties>(
@@ -141,6 +143,7 @@ pub async fn create_split_readers<P: SourceProperties>(
     let mut res = CreateSplitReaderResult {
         backfill_info: HashMap::new(),
         latest_splits: None,
+        release_handle: Default::default(),
     };
     if opt.support_multiple_splits {
         let mut reader = P::SplitReader::new(
@@ -155,6 +158,7 @@ pub async fn create_split_readers<P: SourceProperties>(
             res.latest_splits = Some(reader.seek_to_latest().await?);
         }
         res.backfill_info = reader.backfill_info();
+        res.release_handle = reader.release_handle();
         Ok((reader.into_stream().boxed(), res))
     } else {
         let mut readers = try_join_all(splits.into_iter().map(|split| {
@@ -488,13 +492,41 @@ impl<T> SourceChunkStream for T where
 
 pub type BoxTryStream<M> = BoxStream<'static, crate::error::ConnectorResult<M>>;
 
-pub trait CleanupHandle: Drop + Send {}
+type CleanupFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 
-impl<T: Drop + Send> CleanupHandle for T {} // blanket impl
+#[derive(Default)]
+/// A generic handle that can perform async cleanup once.
+pub struct ReleaseHandle {
+    task: Option<CleanupFuture>,
+}
 
-pub struct NoopCleanup;
-impl Drop for NoopCleanup {
-    fn drop(&mut self) { /* no-op */
+impl ReleaseHandle {
+    pub fn noop() -> Self {
+        Self { task: None }
+    }
+
+    pub fn new<Fut>(fut: Fut) -> Self
+    where
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        Self {
+            task: Some(Box::pin(fut)),
+        }
+    }
+
+    /// Manually trigger cleanup. Safe to call multiple times.
+    pub async fn release(mut self) {
+        if let Some(fut) = self.task.take() {
+            fut.await;
+        }
+    }
+}
+
+impl Drop for ReleaseHandle {
+    fn drop(&mut self) {
+        if let Some(fut) = self.task.take() {
+            tokio::spawn(fut);
+        }
     }
 }
 
@@ -524,8 +556,9 @@ pub trait SplitReader: Sized + Send {
         Err(anyhow!("seek_to_latest is not supported for this connector").into())
     }
 
-    fn build_drop_handle(&self) -> Box<dyn CleanupHandle> {
-        Box::new(NoopCleanup)
+    /// Optional cleanup.  Default: no-op.
+    fn release_handle(&self) -> ReleaseHandle {
+        ReleaseHandle::noop()
     }
 }
 
