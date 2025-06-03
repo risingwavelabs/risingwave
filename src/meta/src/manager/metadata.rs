@@ -705,6 +705,42 @@ impl MetadataManager {
             .collect())
     }
 
+    /// Updates the properties of a source by its ID.
+    ///
+    /// This method allows modifying source configuration properties and secret references
+    /// for an existing source. It validates the new properties, updates the database records,
+    /// and handles related dependencies like secrets and associated tables.
+    ///
+    /// # Parameters
+    ///
+    /// * `source_id` - The unique identifier of the source to update
+    /// * `alter_props` - Map of property keys to new values to be set or updated
+    /// * `alter_secret_refs` - Map of property keys to secret references for sensitive configuration
+    ///
+    /// # Returns
+    ///
+    /// Returns `WithOptionsSecResolved` containing the final resolved configuration with
+    /// both plaintext properties and secret references properly merged.
+    ///
+    /// # Errors
+    ///
+    /// This method can fail if:
+    /// - The source ID doesn't exist
+    /// - The connector type doesn't support property alteration
+    /// - Invalid property names are provided for the connector type
+    /// - Secret references are invalid or don't exist
+    /// - Database transaction fails
+    ///
+    /// # Implementation Details
+    ///
+    /// The method delegates to the catalog controller which:
+    /// 1. Validates the source exists and connector supports property updates
+    /// 2. Merges new properties with existing ones
+    /// 3. Updates source definition SQL with new properties
+    /// 4. Handles secret dependency management (add/remove)
+    /// 5. Updates associated table if the source has one
+    /// 6. Updates stream fragments to reflect property changes
+    /// 7. Notifies frontends of the changes
     pub async fn update_source_props_by_source_id(
         &self,
         source_id: SourceId,

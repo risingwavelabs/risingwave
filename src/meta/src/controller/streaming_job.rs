@@ -1799,7 +1799,7 @@ impl CatalogController {
         }
 
         // update fragments
-        update_connector_props_fragaments(
+        update_connector_props_fragments(
             &txn,
             if let Some(associate_table_id) = associate_table_id {
                 // if updating table with connector, the fragment_id is table id
@@ -2337,7 +2337,7 @@ pub struct SinkIntoTableContext {
     pub updated_sink_catalogs: Vec<SinkId>,
 }
 
-async fn update_connector_props_fragaments<F>(
+async fn update_connector_props_fragments<F>(
     txn: &DatabaseTransaction,
     job_id: i32,
     expect_flag: FragmentTypeFlag,
