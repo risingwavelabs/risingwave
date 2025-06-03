@@ -12404,7 +12404,6 @@ dependencies = [
  "risingwave_meta",
  "risingwave_meta_model",
  "risingwave_pb",
- "risingwave_rpc_client",
  "sea-orm",
  "serde_json",
  "thiserror-ext",
