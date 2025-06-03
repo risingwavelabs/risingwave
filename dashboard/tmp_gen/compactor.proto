@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package compactor;
+
+import "catalog.proto";
+import "common.proto";
+import "hummock.proto";
+
+option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
+
+message EchoRequest {}
+
+message EchoResponse {}
+
+message DispatchCompactionTaskRequest {
+  // DispatchCompactionTaskRequest is used to pass compaction task level parameters.
+  oneof task {
+    hummock.CompactTask compact_task = 1;
+    hummock.VacuumTask vacuum_task = 2;
+    hummock.FullScanTask full_scan_task = 3;
+    hummock.ValidationTask validation_task = 4;
+    hummock.CancelCompactTask cancel_compact_task = 5;
+  }
+  // Used to build filter_key_extract.
+  repeated catalog.Table tables = 6;
+  // We can generate output object ids for each compactor, which equal to the number of input SSTs.
+  // If all the output object ids are used up, this compaction task fails, and the next allocation will be twice the previous amount of output object ids.
+  repeated uint64 output_object_ids = 7;
+}
+
+message DispatchCompactionTaskResponse {
+  common.Status status = 1;
+}
+
+service CompactorService {
+  rpc Echo(EchoRequest) returns (EchoResponse);
+  rpc DispatchCompactionTask(DispatchCompactionTaskRequest) returns (DispatchCompactionTaskResponse);
+}

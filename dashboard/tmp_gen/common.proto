@@ -1,0 +1,161 @@
+syntax = "proto3";
+
+package common;
+
+option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
+
+message Status {
+  enum Code {
+    UNSPECIFIED = 0;
+    OK = 1;
+    UNKNOWN_WORKER = 2;
+  }
+  Code code = 1;
+  string message = 2;
+}
+
+message HostAddress {
+  string host = 1;
+  int32 port = 2;
+}
+
+// Encode which host machine an actor resides.
+message ActorInfo {
+  uint32 actor_id = 1;
+  HostAddress host = 2;
+}
+
+enum WorkerType {
+  WORKER_TYPE_UNSPECIFIED = 0;
+  WORKER_TYPE_FRONTEND = 1;
+  WORKER_TYPE_COMPUTE_NODE = 2;
+  WORKER_TYPE_RISE_CTL = 3;
+  WORKER_TYPE_COMPACTOR = 4;
+  WORKER_TYPE_META = 5;
+}
+
+// renamed from `ParallelUnit`
+message ActorLocation {
+  // previous `id` field for parallel unit id is deprecated.
+  reserved "id";
+  reserved 1;
+  uint32 worker_node_id = 2;
+}
+
+message WorkerNode {
+  enum State {
+    UNSPECIFIED = 0;
+    STARTING = 1;
+    RUNNING = 2;
+  }
+  // Fields in `Property` that doesn't fit current worker type are just ignored by receiver.
+  message Property {
+    bool is_streaming = 1;
+    bool is_serving = 2;
+    bool is_unschedulable = 3;
+    // This is used for frontend node to register its rpc address
+    string internal_rpc_host_addr = 4;
+
+    reserved 5;
+    reserved "node_label";
+
+    uint32 parallelism = 6;
+
+    // resource group for scheduling
+    optional string resource_group = 7;
+  }
+  message Resource {
+    string rw_version = 1;
+    uint64 total_memory_bytes = 2;
+    uint64 total_cpu_cores = 3;
+  }
+  uint32 id = 1;
+  WorkerType type = 2;
+  HostAddress host = 3;
+  State state = 4;
+
+  reserved 5;
+  reserved "parallel_units";
+
+  Property property = 6;
+
+  // Ranges from 0 to 1023, used to generate the machine ID field in the global unique ID.
+  optional uint32 transactional_id = 7;
+  // Resource spec.
+  // It's populated by meta node with the value reported by worker node, when the worker node is added by meta node.
+  // It's not persistent in meta store.
+  optional Resource resource = 8;
+  // Timestamp the worker node is added by meta node, in seconds.
+  // It's populated by meta node, when the worker node is added by meta node.
+  // It's not persistent in meta store.
+  optional uint64 started_at = 9;
+
+  // Moved to `Property` message.
+  reserved 10;
+  reserved "parallelism";
+}
+
+message Buffer {
+  enum CompressionType {
+    UNSPECIFIED = 0;
+    NONE = 1;
+  }
+  CompressionType compression = 1;
+  bytes body = 2;
+}
+
+// Vnode mapping for stream fragments. Stores mapping from virtual node to (worker id, slot index).
+message WorkerSlotMapping {
+  repeated uint32 original_indices = 1;
+  repeated uint64 data = 2;
+}
+
+message BatchQueryCommittedEpoch {
+  uint64 epoch = 1;
+  uint64 hummock_version_id = 2;
+}
+
+message BatchQueryEpoch {
+  oneof epoch {
+    BatchQueryCommittedEpoch committed = 1;
+    uint64 current = 2;
+    uint64 backup = 3;
+    uint64 time_travel = 4;
+  }
+}
+
+enum Direction {
+  DIRECTION_UNSPECIFIED = 0;
+  DIRECTION_ASCENDING = 1;
+  DIRECTION_DESCENDING = 2;
+}
+
+enum NullsAre {
+  NULLS_ARE_UNSPECIFIED = 0;
+  NULLS_ARE_LARGEST = 1;
+  NULLS_ARE_SMALLEST = 2;
+}
+
+message OrderType {
+  Direction direction = 1;
+  NullsAre nulls_are = 2;
+}
+
+// Column index with an order type (ASC or DESC). Used to represent a sort key (`repeated ColumnOrder`).
+message ColumnOrder {
+  uint32 column_index = 1;
+  OrderType order_type = 2;
+}
+
+message Uint32Vector {
+  repeated uint32 data = 1;
+}
+
+message OptionalUint32 {
+  optional uint32 value = 1;
+}
+
+message OptionalUint64 {
+  optional uint64 value = 1;
+}

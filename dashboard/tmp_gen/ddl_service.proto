@@ -1,0 +1,604 @@
+syntax = "proto3";
+
+package ddl_service;
+
+import "catalog.proto";
+import "common.proto";
+import "meta.proto";
+import "plan_common.proto";
+import "stream_plan.proto";
+
+option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
+
+message WaitVersion {
+  uint64 catalog_version = 1;
+  uint64 hummock_version_id = 2;
+}
+
+message CreateDatabaseRequest {
+  catalog.Database db = 1;
+}
+
+message CreateDatabaseResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message DropDatabaseRequest {
+  uint32 database_id = 1;
+}
+
+message DropDatabaseResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message CreateSchemaRequest {
+  catalog.Schema schema = 1;
+}
+
+message CreateSchemaResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message DropSchemaRequest {
+  uint32 schema_id = 1;
+  bool cascade = 2;
+}
+
+message DropSchemaResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message CreateSourceRequest {
+  catalog.Source source = 1;
+  stream_plan.StreamFragmentGraph fragment_graph = 2;
+  bool if_not_exists = 3;
+}
+
+message CreateSourceResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message DropSourceRequest {
+  uint32 source_id = 1;
+  bool cascade = 2;
+}
+
+message DropSourceResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+// Only for non-shared source
+message AlterSourceRequest {
+  catalog.Source source = 1;
+}
+
+// Only for non-shared source
+message AlterSourceResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message CreateSinkRequest {
+  catalog.Sink sink = 1;
+  stream_plan.StreamFragmentGraph fragment_graph = 2;
+  // It is used to provide a replace plan for the downstream table in `create sink into table` requests.
+  optional ReplaceJobPlan affected_table_change = 3;
+  // The list of object IDs that this sink depends on.
+  repeated uint32 dependencies = 4;
+  bool if_not_exists = 5;
+}
+
+message CreateSinkResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message DropSinkRequest {
+  uint32 sink_id = 1;
+  bool cascade = 2;
+  optional ReplaceJobPlan affected_table_change = 3;
+}
+
+message DropSinkResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message CreateSubscriptionRequest {
+  catalog.Subscription subscription = 1;
+}
+
+message CreateSubscriptionResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message DropSubscriptionRequest {
+  uint32 subscription_id = 1;
+  bool cascade = 2;
+}
+
+message DropSubscriptionResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message CreateMaterializedViewRequest {
+  catalog.Table materialized_view = 1;
+  stream_plan.StreamFragmentGraph fragment_graph = 2;
+
+  // If SERVERLESS, the materialized view should be created using serverless backfill
+  // For that the controller will create a new compute node, which does backfilling and then is deleted.
+  // May alleviate pressure on the cluster during backfill process.
+  enum BackfillType {
+    UNSPECIFIED = 0;
+    REGULAR = 1;
+    SERVERLESS = 2;
+  }
+  BackfillType backfill = 3;
+
+  // The list of object IDs that this materialized view depends on.
+  repeated uint32 dependencies = 4;
+
+  // The specific resource group to use for the materialized view. If not set, the database resource group is used.
+  optional string specific_resource_group = 5;
+
+  bool if_not_exists = 6;
+}
+
+message CreateMaterializedViewResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message DropMaterializedViewRequest {
+  uint32 table_id = 1;
+  bool cascade = 2;
+}
+
+message DropMaterializedViewResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message CreateViewRequest {
+  catalog.View view = 1;
+}
+
+message CreateViewResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message DropViewRequest {
+  uint32 view_id = 1;
+  bool cascade = 2;
+}
+
+message DropViewResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+// An enum to distinguish different types of the `Table` streaming job.
+// - GENERAL: Table streaming jobs w/ or w/o a connector
+// - SHARED_CDC_SOURCE: The table streaming job is created based on a shared CDC source job (risingwavelabs/rfcs#73).
+//
+// And one may add other types to support Table jobs that based on other shared sources (risingwavelabs/rfcs#72).
+//
+// Currently, it's usages include:
+// - When creating the streaming actor graph, different table jobs may need different treatment.
+// - Some adhoc validation when creating the streaming job. e.g., `validate_cdc_table`.
+//
+// It's not included in `catalog.Table`, and thus not persisted. It's only used in the `CreateTableRequest`.
+enum TableJobType {
+  TABLE_JOB_TYPE_UNSPECIFIED = 0;
+  // table streaming jobs excepts the `SHARED_CDC_SOURCE` type
+  TABLE_JOB_TYPE_GENERAL = 1;
+  // table streaming job sharing a CDC source job
+  TABLE_JOB_TYPE_SHARED_CDC_SOURCE = 2;
+}
+
+message CreateTableRequest {
+  // An optional field and will be `Some` for tables with an external connector. If so, the table
+  // will subscribe to the changes of the external connector and materialize the data.
+  catalog.Source source = 1;
+  catalog.Table materialized_view = 2;
+  stream_plan.StreamFragmentGraph fragment_graph = 3;
+  TableJobType job_type = 4;
+  bool if_not_exists = 5;
+}
+
+message CreateTableResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message AlterNameRequest {
+  oneof object {
+    uint32 table_id = 1;
+    uint32 view_id = 2;
+    uint32 index_id = 3;
+    uint32 sink_id = 4;
+    uint32 source_id = 5;
+    uint32 schema_id = 6;
+    uint32 database_id = 7;
+    uint32 subscription_id = 8;
+  }
+  string new_name = 20;
+}
+
+message AlterNameResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message AlterOwnerRequest {
+  oneof object {
+    uint32 table_id = 1;
+    uint32 view_id = 2;
+    uint32 source_id = 3;
+    uint32 sink_id = 4;
+    uint32 schema_id = 5;
+    uint32 database_id = 6;
+    uint32 subscription_id = 7;
+    uint32 connection_id = 8;
+  }
+  uint32 owner_id = 20;
+}
+
+message AlterSetSchemaRequest {
+  oneof object {
+    uint32 table_id = 1;
+    uint32 view_id = 2;
+    uint32 source_id = 3;
+    uint32 sink_id = 4;
+    uint32 function_id = 5;
+    uint32 connection_id = 6;
+    uint32 subscription_id = 7;
+  }
+  uint32 new_schema_id = 20;
+}
+
+message AlterSetSchemaResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message AlterParallelismRequest {
+  // job id
+  uint32 table_id = 1;
+  meta.TableParallelism parallelism = 2;
+  bool deferred = 3;
+}
+
+message AlterParallelismResponse {}
+
+message AlterResourceGroupRequest {
+  uint32 table_id = 1;
+  optional string resource_group = 2;
+  bool deferred = 3;
+}
+
+message AlterResourceGroupResponse {}
+
+message AlterOwnerResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message AlterSwapRenameRequest {
+  message ObjectNameSwapPair {
+    uint32 src_object_id = 1;
+    uint32 dst_object_id = 2;
+  }
+  oneof object {
+    ObjectNameSwapPair schema = 1;
+    ObjectNameSwapPair table = 2;
+    ObjectNameSwapPair view = 3;
+    ObjectNameSwapPair source = 4;
+    ObjectNameSwapPair sink = 5;
+    ObjectNameSwapPair subscription = 6;
+  }
+}
+
+message AlterSwapRenameResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message CreateFunctionRequest {
+  catalog.Function function = 1;
+}
+
+message CreateFunctionResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message DropFunctionRequest {
+  uint32 function_id = 1;
+}
+
+message DropFunctionResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message DropTableRequest {
+  oneof source_id {
+    uint32 id = 1;
+  }
+  uint32 table_id = 2;
+  bool cascade = 3;
+}
+
+message DropTableResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+// Used by risectl (and in the future, dashboard)
+message RisectlListStateTablesRequest {}
+
+// Used by risectl (and in the future, dashboard)
+message RisectlListStateTablesResponse {
+  repeated catalog.Table tables = 1;
+}
+
+message CreateIndexRequest {
+  catalog.Index index = 1;
+  catalog.Table index_table = 2;
+  stream_plan.StreamFragmentGraph fragment_graph = 3;
+  bool if_not_exists = 4;
+}
+
+message CreateIndexResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message DropIndexRequest {
+  uint32 index_id = 1;
+  bool cascade = 2;
+}
+
+message DropIndexResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message ReplaceJobPlan {
+  // The new materialization plan, where all schema are updated.
+  stream_plan.StreamFragmentGraph fragment_graph = 1;
+
+  message ReplaceTable {
+    // The new table catalog, with the correct (old) table ID and a new version.
+    // If the new version does not match the subsequent version in the meta service's
+    // catalog, this request will be rejected.
+    catalog.Table table = 1;
+    // Source catalog of table's associated source
+    catalog.Source source = 2;
+    TableJobType job_type = 3;
+  }
+
+  message ReplaceSource {
+    catalog.Source source = 1;
+  }
+
+  oneof replace_job {
+    ReplaceTable replace_table = 3;
+    ReplaceSource replace_source = 4;
+  }
+}
+
+message ReplaceJobPlanRequest {
+  ReplaceJobPlan plan = 1;
+}
+
+message ReplaceJobPlanResponse {
+  common.Status status = 1;
+  // The new global catalog version.
+  WaitVersion version = 2;
+}
+
+message GetTableRequest {
+  string database_name = 1;
+  string table_name = 2;
+}
+
+message GetTableResponse {
+  catalog.Table table = 1;
+}
+
+message GetDdlProgressRequest {}
+
+message DdlProgress {
+  uint64 id = 1;
+  string statement = 2;
+  string progress = 3;
+}
+
+message GetDdlProgressResponse {
+  repeated DdlProgress ddl_progress = 1;
+}
+
+message CreateSecretRequest {
+  string name = 1;
+  bytes value = 2;
+  uint32 database_id = 3;
+  uint32 schema_id = 4;
+  uint32 owner_id = 5;
+}
+
+message CreateSecretResponse {
+  WaitVersion version = 1;
+}
+
+message DropSecretRequest {
+  uint32 secret_id = 1;
+}
+
+message DropSecretResponse {
+  WaitVersion version = 1;
+}
+
+message AlterSecretRequest {
+  uint32 secret_id = 1;
+  string name = 2;
+  bytes value = 3;
+  uint32 database_id = 4;
+  uint32 schema_id = 5;
+  uint32 owner_id = 6;
+}
+
+message AlterSecretResponse {
+  WaitVersion version = 1;
+}
+
+message CreateConnectionRequest {
+  message PrivateLink {
+    catalog.Connection.PrivateLinkService.PrivateLinkProvider provider = 1;
+    string service_name = 2;
+    optional string tags = 3;
+  }
+  string name = 1;
+  uint32 database_id = 2;
+  uint32 schema_id = 3;
+  oneof payload {
+    PrivateLink private_link = 4 [deprecated = true];
+    catalog.ConnectionParams connection_params = 6;
+  }
+  uint32 owner_id = 5;
+}
+
+message CreateConnectionResponse {
+  // global catalog version
+  WaitVersion version = 1;
+}
+
+message ListConnectionsRequest {}
+
+message ListConnectionsResponse {
+  repeated catalog.Connection connections = 1;
+}
+
+message DropConnectionRequest {
+  uint32 connection_id = 1;
+}
+
+message DropConnectionResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message GetTablesRequest {
+  repeated uint32 table_ids = 1;
+  bool include_dropped_tables = 2;
+}
+
+message GetTablesResponse {
+  map<uint32, catalog.Table> tables = 1;
+}
+
+message WaitRequest {}
+
+message WaitResponse {}
+
+message CommentOnRequest {
+  catalog.Comment comment = 1;
+}
+
+message CommentOnResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message TableSchemaChange {
+  enum TableChangeType {
+    UNSPECIFIED = 0;
+    ALTER = 1;
+    CREATE = 2;
+    DROP = 3;
+  }
+
+  TableChangeType change_type = 1;
+  string cdc_table_id = 2;
+  repeated plan_common.ColumnCatalog columns = 3;
+  string upstream_ddl = 4;
+}
+
+message SchemaChangeEnvelope {
+  repeated TableSchemaChange table_changes = 1;
+}
+
+message AutoSchemaChangeRequest {
+  SchemaChangeEnvelope schema_change = 1;
+}
+
+message AutoSchemaChangeResponse {}
+
+message AlterDatabaseParamRequest {
+  uint32 database_id = 1;
+  oneof param {
+    common.OptionalUint32 barrier_interval_ms = 2;
+    common.OptionalUint64 checkpoint_frequency = 3;
+  }
+}
+
+message AlterDatabaseParamResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+service DdlService {
+  rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
+  rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
+  rpc CreateSchema(CreateSchemaRequest) returns (CreateSchemaResponse);
+  rpc DropSchema(DropSchemaRequest) returns (DropSchemaResponse);
+  rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
+  rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
+  rpc CreateSink(CreateSinkRequest) returns (CreateSinkResponse);
+  rpc CreateSubscription(CreateSubscriptionRequest) returns (CreateSubscriptionResponse);
+  rpc DropSink(DropSinkRequest) returns (DropSinkResponse);
+  rpc DropSubscription(DropSubscriptionRequest) returns (DropSubscriptionResponse);
+  rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
+  rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
+  rpc CreateTable(CreateTableRequest) returns (CreateTableResponse);
+  rpc CreateSecret(CreateSecretRequest) returns (CreateSecretResponse);
+  rpc DropSecret(DropSecretRequest) returns (DropSecretResponse);
+  rpc AlterSecret(AlterSecretRequest) returns (AlterSecretResponse);
+  rpc AlterName(AlterNameRequest) returns (AlterNameResponse);
+  rpc AlterSource(AlterSourceRequest) returns (AlterSourceResponse);
+  rpc AlterOwner(AlterOwnerRequest) returns (AlterOwnerResponse);
+  rpc AlterSetSchema(AlterSetSchemaRequest) returns (AlterSetSchemaResponse);
+  rpc AlterParallelism(AlterParallelismRequest) returns (AlterParallelismResponse);
+  rpc AlterResourceGroup(AlterResourceGroupRequest) returns (AlterResourceGroupResponse);
+  rpc DropTable(DropTableRequest) returns (DropTableResponse);
+  rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
+  rpc CreateView(CreateViewRequest) returns (CreateViewResponse);
+  rpc DropView(DropViewRequest) returns (DropViewResponse);
+  rpc CreateIndex(CreateIndexRequest) returns (CreateIndexResponse);
+  rpc DropIndex(DropIndexRequest) returns (DropIndexResponse);
+  rpc CreateFunction(CreateFunctionRequest) returns (CreateFunctionResponse);
+  rpc DropFunction(DropFunctionRequest) returns (DropFunctionResponse);
+  rpc ReplaceJobPlan(ReplaceJobPlanRequest) returns (ReplaceJobPlanResponse);
+  rpc GetTable(GetTableRequest) returns (GetTableResponse);
+  rpc GetDdlProgress(GetDdlProgressRequest) returns (GetDdlProgressResponse);
+  rpc CreateConnection(CreateConnectionRequest) returns (CreateConnectionResponse);
+  rpc ListConnections(ListConnectionsRequest) returns (ListConnectionsResponse);
+  rpc DropConnection(DropConnectionRequest) returns (DropConnectionResponse);
+  rpc GetTables(GetTablesRequest) returns (GetTablesResponse);
+  rpc Wait(WaitRequest) returns (WaitResponse);
+  rpc CommentOn(CommentOnRequest) returns (CommentOnResponse);
+  rpc AutoSchemaChange(AutoSchemaChangeRequest) returns (AutoSchemaChangeResponse);
+  rpc AlterSwapRename(AlterSwapRenameRequest) returns (AlterSwapRenameResponse);
+  rpc AlterDatabaseParam(AlterDatabaseParamRequest) returns (AlterDatabaseParamResponse);
+}

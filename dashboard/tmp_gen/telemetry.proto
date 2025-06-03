@@ -1,0 +1,175 @@
+syntax = "proto3";
+
+package telemetry;
+
+option go_package = "risingwavelabs.com/risingwave/proto/telemetry";
+
+enum MetaBackend {
+  META_BACKEND_UNSPECIFIED = 0;
+  META_BACKEND_MEMORY = 1;
+  META_BACKEND_ETCD = 2;
+  META_BACKEND_RDB = 3;
+}
+
+enum TelemetryNodeType {
+  TELEMETRY_NODE_TYPE_UNSPECIFIED = 0;
+  TELEMETRY_NODE_TYPE_META = 1;
+  TELEMETRY_NODE_TYPE_COMPUTE = 2;
+  TELEMETRY_NODE_TYPE_FRONTEND = 3;
+  TELEMETRY_NODE_TYPE_COMPACTOR = 4;
+}
+
+enum TelemetryClusterType {
+  TELEMETRY_CLUSTER_TYPE_UNSPECIFIED = 0;
+  TELEMETRY_CLUSTER_TYPE_SINGLE_NODE = 1;
+  TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE = 2;
+  TELEMETRY_CLUSTER_TYPE_KUBERNETES = 3;
+  TELEMETRY_CLUSTER_TYPE_CLOUD_HOSTED = 4;
+}
+
+message SystemMemory {
+  uint64 used = 1;
+  uint64 total = 2;
+}
+
+message SystemOs {
+  string name = 1;
+  string version = 2;
+  string kernel_version = 3;
+}
+
+message SystemCpu {
+  float available = 1;
+}
+
+message SystemData {
+  SystemMemory memory = 1;
+  SystemOs os = 2;
+  SystemCpu cpu = 3;
+}
+
+// NodeCount represents how many nodes in this cluster
+message NodeCount {
+  uint32 meta = 1;
+  uint32 compute = 2;
+  uint32 frontend = 3;
+  uint32 compactor = 4;
+}
+
+// RwVersion represents the version of RisingWave
+message RwVersion {
+  // Version is the Cargo package version of RisingWave
+  string rw_version = 1;
+  // GitSHA is the Git commit SHA of RisingWave
+  string git_sha = 2;
+}
+
+message ReportBase {
+  // tracking_id is persistent in meta data
+  string tracking_id = 1;
+  // session_id is reset every time node restarts
+  string session_id = 2;
+  // system_data is hardware and os info
+  SystemData system_data = 3;
+  // up_time is how long the node has been running
+  uint64 up_time = 4;
+  // report_time is when the report is created
+  uint64 report_time = 5;
+  // node_type is the node that creates the report
+  TelemetryNodeType node_type = 6;
+  // mark the report is a test message
+  // if so, the backend do validations but not store it
+  bool is_test = 7;
+}
+
+message MetaReport {
+  ReportBase base = 1;
+  // meta_backend is the backend of meta data
+  MetaBackend meta_backend = 2;
+  // node_count is the count of each node type
+  NodeCount node_count = 3;
+  // rw_version is the version of RisingWave
+  RwVersion rw_version = 4;
+  // This field represents the "number of running streaming jobs"
+  // and is used to indicate whether the cluster is active.
+  uint32 stream_job_count = 5;
+  // stream_jobs is the list of running streaming jobs
+  // and is used to collect the table_id, connector_name and table_optimizations
+  repeated StreamJobDesc stream_jobs = 6;
+
+  // How the cluster is deployed
+  TelemetryClusterType cluster_type = 7;
+
+  // The object store media type obtained from ObjectStore::store_media_type
+  string object_store_media_type = 8;
+
+  // The connector usage of the cluster
+  string connector_usage_json_str = 9;
+}
+
+enum PlanOptimization {
+  TABLE_OPTIMIZATION_UNSPECIFIED = 0;
+}
+
+message StreamJobDesc {
+  int32 table_id = 1;
+  optional string connector_name = 2;
+  repeated PlanOptimization plan_optimizations = 3;
+}
+
+message ComputeReport {
+  ReportBase base = 1;
+}
+
+message FrontendReport {
+  ReportBase base = 1;
+}
+
+message CompactorReport {
+  ReportBase base = 1;
+}
+
+enum TelemetryEventStage {
+  TELEMETRY_EVENT_STAGE_UNSPECIFIED = 0;
+  TELEMETRY_EVENT_STAGE_CREATE_STREAM_JOB = 1;
+  TELEMETRY_EVENT_STAGE_UPDATE_STREAM_JOB = 2;
+  TELEMETRY_EVENT_STAGE_DROP_STREAM_JOB = 3;
+  TELEMETRY_EVENT_STAGE_QUERY = 4;
+  TELEMETRY_EVENT_STAGE_RECOVERY = 5;
+}
+
+enum TelemetryDatabaseObject {
+  TELEMETRY_DATABASE_OBJECT_UNSPECIFIED = 0;
+  TELEMETRY_DATABASE_OBJECT_SOURCE = 1;
+  TELEMETRY_DATABASE_OBJECT_MV = 2;
+  TELEMETRY_DATABASE_OBJECT_TABLE = 3;
+  TELEMETRY_DATABASE_OBJECT_SINK = 4;
+  TELEMETRY_DATABASE_OBJECT_INDEX = 5;
+}
+
+message EventMessage {
+  // tracking_id is persistent in meta data
+  string tracking_id = 1;
+  // event_time is when the event is created
+  uint64 event_time_sec = 3;
+  // event_stage describes in which process the event happens
+  TelemetryEventStage event_stage = 4;
+  // feature_name is the name of the feature triggered the event
+  string event_name = 5;
+  // connector_name is the name of the connector involves
+  optional string connector_name = 6;
+  // connector_direction is the direction of data flow, can be source or sink
+  optional TelemetryDatabaseObject object = 10;
+  // catalog_id is the id of the catalog involves (table_id/source_id/...)
+  int64 catalog_id = 7;
+  // attributes is the additional information of the event: json format ser to string
+  optional string attributes = 8;
+  // node is the node that creates the event
+  string node = 9;
+  // mark the event is a test message
+  bool is_test = 11;
+}
+
+message BatchEventMessage {
+  repeated EventMessage events = 1;
+}

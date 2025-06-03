@@ -1,0 +1,560 @@
+syntax = "proto3";
+
+package catalog;
+
+import "common.proto";
+import "data.proto";
+import "expr.proto";
+import "plan_common.proto";
+import "secret.proto";
+
+option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
+
+// A mapping of column indices.
+message ColIndexMapping {
+  // The size of the target space.
+  uint64 target_size = 1;
+  // Each subscript is mapped to the corresponding element.
+  // For those not mapped, the value will be negative.
+  repeated int64 map = 2;
+}
+
+message WatermarkDesc {
+  // The column idx the watermark is on
+  uint32 watermark_idx = 1;
+  // The expression to calculate the watermark value.
+  expr.ExprNode expr = 2;
+}
+
+enum SchemaRegistryNameStrategy {
+  SCHEMA_REGISTRY_NAME_STRATEGY_UNSPECIFIED = 0;
+  SCHEMA_REGISTRY_NAME_STRATEGY_RECORD_NAME_STRATEGY = 1;
+  SCHEMA_REGISTRY_NAME_STRATEGY_TOPIC_RECORD_NAME_STRATEGY = 2;
+}
+
+enum StreamJobStatus {
+  // Prefixed by `STREAM_JOB_STATUS` due to protobuf namespacing rules.
+  STREAM_JOB_STATUS_UNSPECIFIED = 0;
+  STREAM_JOB_STATUS_CREATING = 1;
+  STREAM_JOB_STATUS_CREATED = 2;
+}
+
+// How the stream job was created will determine
+// whether they are persisted.
+enum CreateType {
+  CREATE_TYPE_UNSPECIFIED = 0;
+  CREATE_TYPE_BACKGROUND = 1;
+  CREATE_TYPE_FOREGROUND = 2;
+}
+
+message StreamSourceInfo {
+  // deprecated
+  plan_common.RowFormatType row_format = 1;
+  string row_schema_location = 2;
+  // This means *use **confluent** schema registry* and is `false` for **aws glue** schema registry.
+  // Eventually we will deprecate it and rely on `enum SchemaLocation` derived from `format_encode_options` below.
+  // * schema.location     false
+  // * schema.registry     true
+  // * aws.glue.schema_arn false
+  bool use_schema_registry = 3;
+  string proto_message_name = 4;
+  int32 csv_delimiter = 5;
+  bool csv_has_header = 6;
+  reserved 7;
+  reserved "upsert_avro_primary_key"; // deprecated
+  plan_common.FormatType format = 8;
+  plan_common.EncodeType row_encode = 9;
+  SchemaRegistryNameStrategy name_strategy = 10;
+  optional string key_message_name = 11;
+  plan_common.ExternalTableDesc external_table = 12;
+  // **This field should now be called `is_shared`.** Not renamed for backwards
+  // compatibility.
+  //
+  // Whether the stream source is a shared source (it has a streaming job).
+  // This is related with [RFC: Reusable Source
+  // Executor](https://github.com/risingwavelabs/rfcs/pull/72).
+  //
+  // Currently, the following sources can be shared:
+  //
+  // - Direct CDC sources (mysql & postgresql & sqlserver)
+  // - MQ sources (Kafka)
+  bool cdc_source_job = 13;
+  // Only used when `cdc_source_job` is `true`.
+  // If `false`, `requires_singleton` will be set in the stream plan.
+  //
+  // - Direct CDC sources: `false`
+  // - MQ sources (Kafka): `true`
+  bool is_distributed = 15;
+  // Options specified by user in the FORMAT ENCODE clause.
+  map<string, string> format_encode_options = 14;
+
+  // Handle the source relies on any sceret. The key is the propertity name and the value is the secret id and type.
+  // For format and encode options.
+  map<string, secret.SecretRef> format_encode_secret_refs = 16;
+
+  // ref connection for schema registry
+  optional uint32 connection_id = 17;
+}
+
+message WebhookSourceInfo {
+  secret.SecretRef secret_ref = 1;
+  expr.ExprNode signature_expr = 2;
+  // Return until the data is persisted in the storage layer or not. Default is true.
+  bool wait_for_persistence = 3;
+}
+
+message Source {
+  // For shared source, this is the same as the job id.
+  // For non-shared source and table with connector, this is a different oid.
+  uint32 id = 1;
+  uint32 schema_id = 2;
+  uint32 database_id = 3;
+  string name = 4;
+  // The column index of row ID. If the primary key is specified by the user,
+  // this will be `None`.
+  optional uint32 row_id_index = 5;
+  // Columns of the source.
+  repeated plan_common.ColumnCatalog columns = 6;
+  // Column id of the primary key specified by the user. If the user does not
+  // specify a primary key, the vector will be empty.
+  repeated int32 pk_column_ids = 7;
+  // Properties specified by the user in WITH clause.
+  map<string, string> with_properties = 8;
+
+  uint32 owner = 9;
+
+  StreamSourceInfo info = 10;
+  // Define watermarks on the source. The `repeated` is just for forward
+  // compatibility, currently, only one watermark on the source
+  repeated WatermarkDesc watermark_descs = 11;
+  // Indicate whether this source is created by table.
+  oneof optional_associated_table_id {
+    uint32 associated_table_id = 12;
+  }
+  string definition = 13;
+
+  // ref connection for connector
+  optional uint32 connection_id = 14;
+
+  optional uint64 initialized_at_epoch = 15;
+  optional uint64 created_at_epoch = 16;
+
+  // Cluster version (tracked by git commit) when initialized/created
+  optional string initialized_at_cluster_version = 17;
+  optional string created_at_cluster_version = 18;
+  // Handle the source relies on any sceret. The key is the propertity name and the value is the secret id.
+  // Used for secret connect options.
+  map<string, secret.SecretRef> secret_refs = 19;
+
+  // Per-source catalog version, used by schema change.
+  uint64 version = 100;
+
+  optional uint32 rate_limit = 101;
+}
+
+enum SinkType {
+  SINK_TYPE_UNSPECIFIED = 0;
+  SINK_TYPE_APPEND_ONLY = 1;
+  SINK_TYPE_FORCE_APPEND_ONLY = 2;
+  SINK_TYPE_UPSERT = 3;
+}
+
+// Similar to `StreamSourceInfo`, and may replace `SinkType` later.
+message SinkFormatDesc {
+  plan_common.FormatType format = 1;
+  plan_common.EncodeType encode = 2;
+  map<string, string> options = 3;
+  optional plan_common.EncodeType key_encode = 4;
+  // Secret used for format encode options.
+  map<string, secret.SecretRef> secret_refs = 5;
+
+  // ref connection for schema registry
+  optional uint32 connection_id = 6;
+}
+
+// the catalog of the sink. There are two kind of schema here. The full schema is all columns
+// stored in the `column` which is the sink executor/fragment's output schema. The visible
+// schema contains the columns whose `is_hidden` is false, which is the columns sink out to the
+// external system. The distribution key and all other keys are indexed in the full schema.
+message Sink {
+  uint32 id = 1;
+  uint32 schema_id = 2;
+  uint32 database_id = 3;
+  string name = 4;
+  repeated plan_common.ColumnCatalog columns = 5;
+  // Primary key derived from the SQL by the frontend.
+  repeated common.ColumnOrder plan_pk = 6;
+  repeated uint32 dependent_relations = 7 [deprecated = true];
+  repeated int32 distribution_key = 8;
+  // User-defined primary key indices for the upsert sink.
+  repeated int32 downstream_pk = 9;
+  SinkType sink_type = 10; // to be deprecated
+  uint32 owner = 11;
+  map<string, string> properties = 12;
+  string definition = 13;
+
+  // ref connection for connector
+  optional uint32 connection_id = 14;
+  optional uint64 initialized_at_epoch = 15;
+  optional uint64 created_at_epoch = 16;
+  string db_name = 17;
+  string sink_from_name = 18;
+  StreamJobStatus stream_job_status = 19;
+  SinkFormatDesc format_desc = 20;
+
+  // Target table id (only applicable for table sink)
+  optional uint32 target_table = 21;
+
+  // Cluster version (tracked by git commit) when initialized/created
+  optional string initialized_at_cluster_version = 22;
+  optional string created_at_cluster_version = 23;
+
+  // Whether it should use background ddl or block until backfill finishes.
+  CreateType create_type = 24;
+
+  // Handle the sink relies on any sceret. The key is the propertity name and the value is the secret id and type.
+  // Used for connect options.
+  map<string, secret.SecretRef> secret_refs = 25;
+
+  // only for the sink whose target is a table. Columns of the target table when the sink is created. At this point all the default columns of the target table are all handled by the project operator in the sink plan.
+  repeated plan_common.ColumnCatalog original_target_columns = 26;
+}
+
+message Subscription {
+  enum SubscriptionState {
+    UNSPECIFIED = 0;
+    INIT = 1;
+    CREATED = 2;
+  }
+  uint32 id = 1;
+  string name = 2;
+  string definition = 3;
+  uint64 retention_seconds = 6;
+  uint32 database_id = 8;
+  uint32 schema_id = 9;
+  uint32 dependent_table_id = 10;
+  optional uint64 initialized_at_epoch = 11;
+  optional uint64 created_at_epoch = 12;
+  uint32 owner = 13;
+  optional string initialized_at_cluster_version = 15;
+  optional string created_at_cluster_version = 16;
+
+  SubscriptionState subscription_state = 19;
+}
+
+message ConnectionParams {
+  enum ConnectionType {
+    CONNECTION_TYPE_UNSPECIFIED = 0;
+    CONNECTION_TYPE_KAFKA = 1;
+    CONNECTION_TYPE_ICEBERG = 2;
+    CONNECTION_TYPE_SCHEMA_REGISTRY = 3;
+    CONNECTION_TYPE_ELASTICSEARCH = 4;
+  }
+
+  ConnectionType connection_type = 1;
+  map<string, string> properties = 2;
+  map<string, secret.SecretRef> secret_refs = 3;
+}
+
+message Connection {
+  message PrivateLinkService {
+    enum PrivateLinkProvider {
+      UNSPECIFIED = 0;
+      MOCK = 1;
+      AWS = 2;
+    }
+    PrivateLinkProvider provider = 1;
+    string service_name = 2;
+    string endpoint_id = 3;
+    map<string, string> dns_entries = 4;
+    string endpoint_dns_name = 5;
+  }
+
+  uint32 id = 1;
+  uint32 schema_id = 2;
+  uint32 database_id = 3;
+  string name = 4;
+  oneof info {
+    PrivateLinkService private_link_service = 5 [deprecated = true];
+    ConnectionParams connection_params = 7;
+  }
+  uint32 owner = 6;
+}
+
+message Index {
+  uint32 id = 1;
+  uint32 schema_id = 2;
+  uint32 database_id = 3;
+  string name = 4;
+  uint32 owner = 5;
+  uint32 index_table_id = 6;
+  uint32 primary_table_id = 7;
+  // Only `InputRef` type index is supported Now.
+  // The index of `InputRef` is the column index of the primary table.
+  repeated expr.ExprNode index_item = 8;
+  repeated IndexColumnProperties index_column_properties = 16;
+  reserved 9; // Deprecated repeated int32 original_columns = 9;
+
+  optional uint64 initialized_at_epoch = 10;
+  optional uint64 created_at_epoch = 11;
+  StreamJobStatus stream_job_status = 12;
+
+  // Use to record the prefix len of the index_item to reconstruct index columns
+  // provided by users.
+  uint32 index_columns_len = 13;
+  // Cluster version (tracked by git commit) when initialized/created
+  optional string initialized_at_cluster_version = 14;
+  optional string created_at_cluster_version = 15;
+}
+
+// https://www.postgresql.org/docs/current/functions-info.html#FUNCTIONS-INFO-INDEX-COLUMN-PROPS
+message IndexColumnProperties {
+  // Whether the column sort in ascending(false) or descending(true) order on a forward scan.
+  bool is_desc = 1;
+  // Does the column sort with nulls first on a forward scan?
+  bool nulls_first = 2;
+}
+
+message Function {
+  uint32 id = 1;
+  uint32 schema_id = 2;
+  uint32 database_id = 3;
+  string name = 4;
+  uint32 owner = 9;
+  repeated string arg_names = 15;
+  repeated data.DataType arg_types = 5;
+  data.DataType return_type = 6;
+  string language = 7;
+  optional string link = 8;
+  // The function name in the runtime / on the remote side that is bound to the UDF created in RisingWave.
+  optional string name_in_runtime = 10;
+  // The source code of the function.
+  optional string body = 14;
+  // The zstd-compressed binary of the function.
+  optional bytes compressed_binary = 17;
+  bool always_retry_on_network_error = 16;
+  // The runtime selected when multiple runtimes are available for the language. Now is not used.
+  optional string runtime = 18;
+  reserved 19;
+  reserved "function_type";
+  // additional options for javascript functions
+  optional bool is_async = 20;
+  optional bool is_batched = 21;
+
+  oneof kind {
+    ScalarFunction scalar = 11;
+    TableFunction table = 12;
+    AggregateFunction aggregate = 13;
+  }
+  message ScalarFunction {}
+  message TableFunction {}
+  message AggregateFunction {}
+}
+
+// Includes full information about a table.
+//
+// Here `Table` is an internal concept, corresponding to _a table in storage_, all of which can be `SELECT`ed.
+// It is not the same as a user-side table created by `CREATE TABLE`.
+//
+// See `TableCatalog` struct in frontend crate for more information.
+message Table {
+  enum TableType {
+    UNSPECIFIED = 0;
+    TABLE = 1;
+    MATERIALIZED_VIEW = 2;
+    INDEX = 3;
+    INTERNAL = 4;
+  }
+
+  message TableVersion {
+    // The version number, which will be 0 by default and be increased by 1 for
+    // each schema change in the frontend.
+    uint64 version = 1;
+    // The ID of the next column to be added, which is used to make all columns
+    // in the table have unique IDs, even if some columns have been dropped.
+    int32 next_column_id = 2;
+  }
+
+  enum Engine {
+    ENGINE_UNSPECIFIED = 0;
+    HUMMOCK = 1;
+    ICEBERG = 2;
+  }
+
+  uint32 id = 1;
+  uint32 schema_id = 2;
+  uint32 database_id = 3;
+  string name = 4;
+  repeated plan_common.ColumnCatalog columns = 5;
+  repeated common.ColumnOrder pk = 6;
+  // For cdc table created from a cdc source, here records the source id.
+  repeated uint32 dependent_relations = 8; // TODO(rc): deprecate this by passing dependencies via `Request` message
+  oneof optional_associated_source_id {
+    uint32 associated_source_id = 9;
+  }
+  TableType table_type = 10;
+  repeated int32 distribution_key = 12;
+  // pk_indices of the corresponding materialize operator's output.
+  repeated int32 stream_key = 13;
+  bool append_only = 14;
+  uint32 owner = 15;
+  reserved 16;
+  reserved "properties"; // deprecated
+  uint32 fragment_id = 17;
+  // an optional column index which is the vnode of each row computed by the
+  // table's consistent hash distribution
+  optional uint32 vnode_col_index = 18;
+  // An optional column index of row id. If the primary key is specified by
+  // users, this will be `None`.
+  optional uint32 row_id_index = 19;
+  // The column indices which are stored in the state store's value with
+  // row-encoding. Currently is not supported yet and expected to be
+  // `[0..columns.len()]`.
+  repeated int32 value_indices = 20;
+  string definition = 21;
+  // Used to control whether handling pk conflict for incoming data.
+  HandleConflictBehavior handle_pk_conflict_behavior = 22;
+  // Anticipated read prefix pattern (number of fields) for the table, which can
+  // be utilized for implementing the table's bloom filter or other storage
+  // optimization techniques.
+  uint32 read_prefix_len_hint = 23;
+  repeated int32 watermark_indices = 24;
+  repeated int32 dist_key_in_pk = 25;
+  // A dml fragment id corresponds to the table, used to decide where the dml
+  // statement is executed.
+  optional uint32 dml_fragment_id = 26;
+  // The range of row count of the table.
+  // This field is not always present due to backward compatibility. Use
+  // `Cardinality::unknown` in this case.
+  plan_common.Cardinality cardinality = 27;
+
+  optional uint64 initialized_at_epoch = 28;
+  optional uint64 created_at_epoch = 29;
+
+  // This field is introduced in v1.2.0. It is used to indicate whether the
+  // table should use watermark_cache to avoid state cleaning as a performance
+  // optimization. In older versions we can just initialize without it.
+  bool cleaned_by_watermark = 30;
+
+  // Used to filter created / creating tables in meta.
+  StreamJobStatus stream_job_status = 31;
+
+  CreateType create_type = 32;
+
+  // This field is used to store the description set by the `comment on` clause.
+  optional string description = 33;
+
+  // This field is used to mark the the sink into this table.
+  repeated uint32 incoming_sinks = 34;
+
+  // Cluster version (tracked by git commit) when initialized/created
+  optional string initialized_at_cluster_version = 35;
+  optional string created_at_cluster_version = 36;
+
+  // TTL of the record in the table, to ensure the consistency with other tables
+  // in the streaming plan, it only applies to append-only tables.
+  optional uint32 retention_seconds = 37;
+
+  // This field specifies the index of the column set in the "with version
+  // column" within all the columns. It is used for filtering during "on
+  // conflict" operations.
+  optional uint32 version_column_index = 38;
+
+  // The unique identifier of the upstream table if it is a CDC table.
+  // It will be used in auto schema change to get the Table which mapped to the
+  // upstream table.
+  optional string cdc_table_id = 39;
+
+  // Total vnode count of the table.
+  //
+  // Use `VnodeCountCompat::vnode_count` to access it.
+  //
+  // - Can be unset if the table is created in older versions where variable vnode count is not
+  //   supported, in which case a default value of 256 (or 1 for singleton) should be used.
+  // - Can be placeholder value `Some(0)` if the catalog is generated by the frontend and the
+  //   corresponding job is still in `Creating` status, in which case calling `vnode_count`
+  //   will panic.
+  //
+  // Please note that this field is not intended to describe the expected vnode count
+  // for a streaming job. Instead, refer to `stream_plan.StreamFragmentGraph.max_parallelism`.
+  optional uint32 maybe_vnode_count = 40;
+
+  // The information used by webhook source to validate the incoming data.
+  optional WebhookSourceInfo webhook_info = 41;
+
+  // This field stores the job ID for internal tables.
+  optional uint32 job_id = 42;
+
+  // Table Engine, currently only support hummock and iceberg
+  optional Engine engine = 43;
+
+  // Indicate the index of the watermark column in the primary key that should be cleaned.
+  // NOTICE: when it is "None", the watermark column should be the first column in the pk
+  optional int32 clean_watermark_index_in_pk = 44;
+
+  // Per-table catalog version, used by schema change. `None` for internal
+  // tables and tests. Not to be confused with the global catalog version for
+  // notification service.
+  TableVersion version = 100;
+}
+
+enum HandleConflictBehavior {
+  HANDLE_CONFLICT_BEHAVIOR_UNSPECIFIED = 0;
+  HANDLE_CONFLICT_BEHAVIOR_OVERWRITE = 1;
+  HANDLE_CONFLICT_BEHAVIOR_IGNORE = 2;
+  HANDLE_CONFLICT_BEHAVIOR_NO_CHECK = 3;
+  HANDLE_CONFLICT_BEHAVIOR_DO_UPDATE_IF_NOT_NULL = 4;
+}
+
+message View {
+  uint32 id = 1;
+  uint32 schema_id = 2;
+  uint32 database_id = 3;
+  string name = 4;
+  uint32 owner = 5;
+  map<string, string> properties = 6;
+  string sql = 7;
+  repeated uint32 dependent_relations = 8;
+  // User-specified column names.
+  repeated plan_common.Field columns = 9;
+}
+
+message Schema {
+  uint32 id = 1;
+  uint32 database_id = 2;
+  string name = 3;
+  uint32 owner = 4;
+}
+
+message Database {
+  uint32 id = 1;
+  string name = 2;
+  uint32 owner = 3;
+  string resource_group = 4;
+  optional uint32 barrier_interval_ms = 5;
+  optional uint64 checkpoint_frequency = 6;
+}
+
+message Comment {
+  uint32 table_id = 1;
+  uint32 schema_id = 2;
+  uint32 database_id = 3;
+  optional uint32 column_index = 4;
+  optional string description = 5;
+}
+
+message Secret {
+  uint32 id = 1;
+  string name = 2;
+  uint32 database_id = 3;
+  // The secret here is encrypted to bytes.
+  bytes value = 4;
+  uint32 owner = 5;
+  uint32 schema_id = 6;
+}
+
+message OptionsWithSecret {
+  map<string, string> options = 1;
+  map<string, secret.SecretRef> secret_refs = 2;
+}

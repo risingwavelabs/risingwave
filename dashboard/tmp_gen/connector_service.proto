@@ -1,0 +1,264 @@
+syntax = "proto3";
+
+package connector_service;
+
+import "catalog.proto";
+import "common.proto";
+import "plan_common.proto";
+
+option java_outer_classname = "ConnectorServiceProto";
+option java_package = "com.risingwave.proto";
+
+message TableSchema {
+  repeated plan_common.ColumnDesc columns = 1;
+  repeated uint32 pk_indices = 2;
+}
+
+message ValidationError {
+  string error_message = 1;
+}
+
+message SinkParam {
+  uint32 sink_id = 1;
+  map<string, string> properties = 2;
+  TableSchema table_schema = 3;
+  catalog.SinkType sink_type = 4; // to be deprecated
+  string db_name = 5;
+  string sink_from_name = 6;
+  catalog.SinkFormatDesc format_desc = 7;
+  string sink_name = 8;
+}
+
+message SinkWriterStreamRequest {
+  message StartSink {
+    SinkParam sink_param = 1;
+    // Deprecated: SinkPayloadFormat format = 2;
+    reserved "format";
+    reserved 2;
+    TableSchema payload_schema = 3;
+  }
+
+  message WriteBatch {
+    message StreamChunkPayload {
+      bytes binary_data = 1;
+    }
+
+    oneof payload {
+      StreamChunkPayload stream_chunk_payload = 2;
+      // This is a reference pointer to a StreamChunk. The StreamChunk is owned
+      // by the JniSinkWriterStreamRequest, which should handle the release of StreamChunk.
+      // Index set to 5 because 3 and 4 have been occupied by `batch_id` and `epoch`
+      int64 stream_chunk_ref_pointer = 5;
+    }
+
+    // Deprecated in oneof payload: JsonPayload json_payload = 1;
+    reserved "json_payload";
+    reserved 1;
+
+    uint64 batch_id = 3;
+    uint64 epoch = 4;
+  }
+
+  message Barrier {
+    uint64 epoch = 1;
+    bool is_checkpoint = 2;
+  }
+
+  // reserve for previous BeginEpoch to avoid protobuf breaking change
+  // though there is no harm.
+  reserved 2;
+  reserved "begin_epoch";
+
+  oneof request {
+    StartSink start = 1;
+    WriteBatch write_batch = 3;
+    Barrier barrier = 4;
+  }
+}
+
+message SinkWriterStreamResponse {
+  message StartResponse {}
+
+  message CommitResponse {
+    uint64 epoch = 1;
+    SinkMetadata metadata = 2;
+  }
+
+  message BatchWrittenResponse {
+    uint64 epoch = 1;
+    uint64 batch_id = 2;
+  }
+
+  oneof response {
+    StartResponse start = 1;
+    CommitResponse commit = 2;
+    BatchWrittenResponse batch = 3;
+  }
+}
+
+message ValidateSinkRequest {
+  SinkParam sink_param = 1;
+}
+
+message ValidateSinkResponse {
+  // On validation failure, we return the error.
+  ValidationError error = 1;
+}
+
+message SinkMetadata {
+  message SerializedMetadata {
+    bytes metadata = 1;
+  }
+
+  oneof metadata {
+    SerializedMetadata serialized = 1;
+  }
+}
+
+message SinkCoordinatorStreamRequest {
+  message StartCoordinator {
+    SinkParam param = 1;
+  }
+
+  message CommitMetadata {
+    uint64 epoch = 1;
+    repeated SinkMetadata metadata = 2;
+  }
+
+  oneof request {
+    StartCoordinator start = 1;
+    CommitMetadata commit = 2;
+  }
+}
+
+message SinkCoordinatorStreamResponse {
+  message StartResponse {}
+
+  message CommitResponse {
+    uint64 epoch = 1;
+  }
+
+  oneof response {
+    StartResponse start = 1;
+    CommitResponse commit = 2;
+  }
+}
+
+/* Source Service */
+
+message CdcMessage {
+  enum CdcMessageType {
+    UNSPECIFIED = 0;
+    HEARTBEAT = 1;
+    DATA = 2;
+    TRANSACTION_META = 3;
+    SCHEMA_CHANGE = 4;
+  }
+
+  // The value of the Debezium message
+  string payload = 1;
+  string partition = 2;
+  string offset = 3;
+  string full_table_name = 4;
+  int64 source_ts_ms = 5;
+  CdcMessageType msg_type = 6;
+
+  // The key of the Debezium message, which only used by `mongodb-cdc` connector.
+  string key = 7;
+}
+
+enum SourceType {
+  UNSPECIFIED = 0;
+  MYSQL = 1;
+  POSTGRES = 2;
+  CITUS = 3;
+  MONGODB = 4;
+  SQL_SERVER = 5;
+}
+
+message GetEventStreamRequest {
+  uint64 source_id = 1;
+  SourceType source_type = 2;
+  string start_offset = 3;
+  map<string, string> properties = 4;
+  bool snapshot_done = 5;
+  bool is_source_job = 6;
+}
+
+message GetEventStreamResponse {
+  message ControlInfo {
+    bool handshake_ok = 1;
+  }
+  uint64 source_id = 1;
+  repeated CdcMessage events = 2;
+  ControlInfo control = 3;
+}
+
+message ValidateSourceRequest {
+  uint64 source_id = 1;
+  SourceType source_type = 2;
+  map<string, string> properties = 3;
+  TableSchema table_schema = 4;
+  bool is_source_job = 5;
+  bool is_backfill_table = 6;
+}
+
+message ValidateSourceResponse {
+  // On validation failure, we return the error.
+  ValidationError error = 1;
+}
+
+service ConnectorService {
+  rpc SinkWriterStream(stream SinkWriterStreamRequest) returns (stream SinkWriterStreamResponse);
+  rpc SinkCoordinatorStream(stream SinkCoordinatorStreamRequest) returns (stream SinkCoordinatorStreamResponse);
+  rpc ValidateSink(ValidateSinkRequest) returns (ValidateSinkResponse);
+  rpc GetEventStream(GetEventStreamRequest) returns (stream GetEventStreamResponse);
+  rpc ValidateSource(ValidateSourceRequest) returns (ValidateSourceResponse);
+}
+
+message CoordinateRequest {
+  // The first request that starts a coordination between sink writer and coordinator.
+  // The service will respond after sink writers of all vnodes have sent the request.
+  message StartCoordinationRequest {
+    common.Buffer vnode_bitmap = 1;
+    SinkParam param = 2;
+  }
+
+  message CommitRequest {
+    uint64 epoch = 1;
+    SinkMetadata metadata = 2;
+  }
+
+  message UpdateVnodeBitmapRequest {
+    common.Buffer vnode_bitmap = 1;
+  }
+
+  oneof msg {
+    StartCoordinationRequest start_request = 1;
+    CommitRequest commit_request = 2;
+    UpdateVnodeBitmapRequest update_vnode_request = 3;
+    bool stop = 4;
+    uint64 align_initial_epoch_request = 5;
+  }
+}
+
+message CoordinateResponse {
+  message StartCoordinationResponse {
+    optional uint64 log_store_rewind_start_epoch = 1;
+  }
+
+  message CommitResponse {
+    uint64 epoch = 1;
+  }
+
+  oneof msg {
+    StartCoordinationResponse start_response = 1;
+    CommitResponse commit_response = 2;
+    bool stopped = 3;
+    uint64 align_initial_epoch_response = 4;
+  }
+}
+
+service SinkCoordinationService {
+  rpc Coordinate(stream CoordinateRequest) returns (stream CoordinateResponse);
+}

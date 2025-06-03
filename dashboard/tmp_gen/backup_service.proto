@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package backup_service;
+
+import "hummock.proto";
+
+option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
+
+message MetaBackupManifestId {
+  uint64 id = 1;
+}
+
+enum BackupJobStatus {
+  UNSPECIFIED = 0;
+  RUNNING = 1;
+  SUCCEEDED = 2;
+  NOT_FOUND = 3;
+  FAILED = 4;
+}
+message BackupMetaRequest {
+  optional string remarks = 1;
+}
+message BackupMetaResponse {
+  uint64 job_id = 1;
+}
+message GetBackupJobStatusRequest {
+  uint64 job_id = 1;
+}
+message GetBackupJobStatusResponse {
+  uint64 job_id = 1;
+  BackupJobStatus job_status = 2;
+  string message = 3;
+}
+message DeleteMetaSnapshotRequest {
+  repeated uint64 snapshot_ids = 1;
+}
+message DeleteMetaSnapshotResponse {}
+message GetMetaSnapshotManifestRequest {}
+message GetMetaSnapshotManifestResponse {
+  MetaSnapshotManifest manifest = 1;
+}
+message MetaSnapshotManifest {
+  uint64 manifest_id = 1;
+  repeated MetaSnapshotMetadata snapshot_metadata = 2;
+}
+message MetaSnapshotMetadata {
+  uint64 id = 1;
+  uint64 hummock_version_id = 2;
+  reserved 3;
+  reserved 'max_committed_epoch';
+  reserved 4;
+  reserved 'safe_epoch';
+  optional uint32 format_version = 5;
+  optional string remarks = 6;
+  optional string rw_version = 7;
+  map<uint32, hummock.StateTableInfo> state_table_info = 8;
+}
+
+service BackupService {
+  rpc BackupMeta(BackupMetaRequest) returns (BackupMetaResponse);
+  rpc GetBackupJobStatus(GetBackupJobStatusRequest) returns (GetBackupJobStatusResponse);
+  rpc DeleteMetaSnapshot(DeleteMetaSnapshotRequest) returns (DeleteMetaSnapshotResponse);
+  rpc GetMetaSnapshotManifest(GetMetaSnapshotManifestRequest) returns (GetMetaSnapshotManifestResponse);
+}

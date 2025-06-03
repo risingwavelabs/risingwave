@@ -1,0 +1,489 @@
+syntax = "proto3";
+
+package batch_plan;
+
+import "catalog.proto";
+import "common.proto";
+import "data.proto";
+import "expr.proto";
+import "plan_common.proto";
+import "secret.proto";
+
+option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
+
+message RowSeqScanNode {
+  plan_common.StorageTableDesc table_desc = 1;
+  repeated int32 column_ids = 2;
+  // All the ranges need to be read. i.e., they are OR'ed.
+  //
+  // Empty `scan_ranges` means full table scan.
+  repeated ScanRange scan_ranges = 3;
+  // The partition to read for scan tasks.
+  //
+  // Will be filled by the scheduler.
+  common.Buffer vnode_bitmap = 4;
+  // Whether the order on output columns should be preserved.
+  bool ordered = 5;
+
+  // The pushed down `batch_limit`. Max rows needed to return.
+  optional uint64 limit = 6;
+  optional plan_common.AsOf as_of = 7;
+}
+
+message SysRowSeqScanNode {
+  uint32 table_id = 1;
+  repeated plan_common.ColumnDesc column_descs = 2;
+}
+
+// The range to scan, which specifies a consecutive range of the PK
+// and can represent: (Suppose there are N columns in the PK)
+// - full table scan: Should not occur. Use an empty `Vec<ScanRange>` instead.
+// - index range scan: `eq_conds` includes i (between 0 and N-1, inclusive) values,
+//     and `lower_bound` & `upper_bound` is the range for the (i+1)th column
+// - index point get: `eq_conds` includes N values, and `lower_bound` & `upper_bound` are `None`
+message ScanRange {
+  // The i-th element represents the value of the i-th PK column.
+  repeated bytes eq_conds = 1;
+
+  // `None` represent unbounded.
+  message Bound {
+    repeated bytes value = 1;
+    bool inclusive = 2;
+  }
+  //  The lower bound of the next PK column subsequent to those in `eq_conds`.
+  Bound lower_bound = 2;
+  //  The upper bound of the next PK column subsequent to those in `eq_conds`.
+  Bound upper_bound = 3;
+}
+
+message SourceNode {
+  uint32 source_id = 1;
+  repeated plan_common.ColumnCatalog columns = 2;
+  map<string, string> with_properties = 3;
+  repeated bytes split = 4;
+  catalog.StreamSourceInfo info = 5;
+  map<string, secret.SecretRef> secret_refs = 6;
+}
+
+message IcebergScanNode {
+  enum IcebergScanType {
+    ICEBERG_SCAN_TYPE_UNSPECIFIED = 0;
+    ICEBERG_SCAN_TYPE_DATA_SCAN = 1;
+    ICEBERG_SCAN_TYPE_EQUALITY_DELETE_SCAN = 2;
+    ICEBERG_SCAN_TYPE_POSITION_DELETE_SCAN = 3;
+    ICEBERG_SCAN_TYPE_COUNT_STAR = 4;
+  }
+  repeated plan_common.ColumnCatalog columns = 1;
+  map<string, string> with_properties = 2;
+  repeated bytes split = 3;
+  map<string, secret.SecretRef> secret_refs = 4;
+  IcebergScanType iceberg_scan_type = 5;
+}
+
+message FileScanNode {
+  enum FileFormat {
+    FILE_FORMAT_UNSPECIFIED = 0;
+    PARQUET = 1;
+  }
+
+  enum StorageType {
+    STORAGE_TYPE_UNSPECIFIED = 0;
+    S3 = 1;
+    GCS = 2;
+    AZBLOB = 3;
+  }
+
+  repeated plan_common.ColumnDesc columns = 1;
+  FileFormat file_format = 2;
+  StorageType storage_type = 3;
+  string s3_region = 4;
+  string s3_access_key = 5;
+  string s3_secret_key = 6;
+  repeated string file_location = 7;
+  string s3_endpoint = 8;
+}
+
+message GcsFileScanNode {
+  enum FileFormat {
+    FILE_FORMAT_UNSPECIFIED = 0;
+    PARQUET = 1;
+  }
+
+  repeated plan_common.ColumnDesc columns = 1;
+  FileFormat file_format = 2;
+  string credential = 3;
+  repeated string file_location = 4;
+}
+
+message AzblobFileScanNode {
+  enum FileFormat {
+    FILE_FORMAT_UNSPECIFIED = 0;
+    PARQUET = 1;
+  }
+
+  repeated plan_common.ColumnDesc columns = 1;
+  FileFormat file_format = 2;
+  string account_name = 3;
+  string account_key = 4;
+  string endpoint = 5;
+
+  repeated string file_location = 6;
+}
+
+// NOTE(kwannoel): This will only be used in batch mode. We can change the definition as needed.
+message PostgresQueryNode {
+  repeated plan_common.ColumnDesc columns = 1;
+  string hostname = 2;
+  string port = 3;
+  string username = 4;
+  string password = 5;
+  string database = 6;
+  string query = 7;
+}
+
+// NOTE(kwannoel): This will only be used in batch mode. We can change the definition as needed.
+message MySqlQueryNode {
+  repeated plan_common.ColumnDesc columns = 1;
+  string hostname = 2;
+  string port = 3;
+  string username = 4;
+  string password = 5;
+  string database = 6;
+  string query = 7;
+}
+
+message ProjectNode {
+  repeated expr.ExprNode select_list = 1;
+}
+
+message FilterNode {
+  expr.ExprNode search_condition = 1;
+}
+
+message LogRowSeqScanNode {
+  plan_common.StorageTableDesc table_desc = 1;
+  // This records the mandatory column_ids of the original table, excluding op
+  repeated int32 column_ids = 2;
+  // The partition to read for scan tasks.
+  //
+  // Will be filled by the scheduler.
+  common.Buffer vnode_bitmap = 3;
+  common.BatchQueryEpoch old_epoch = 4;
+  common.BatchQueryEpoch new_epoch = 5;
+  bool ordered = 6;
+  ScanRange scan_range = 7;
+}
+
+message InsertNode {
+  // Id of the table to perform inserting.
+  uint32 table_id = 1;
+  // Version of the table.
+  uint64 table_version_id = 5;
+  repeated uint32 column_indices = 2;
+
+  // deprecated, breaking change
+  // DefaultColumns default_columns = 6 [deprecated = true];
+  // reserved 6;
+
+  plan_common.DefaultColumns default_columns = 6;
+  // An optional field and will be `None` for tables without user-defined pk.
+  // The `BatchInsertExecutor` should add a column with NULL value which will
+  // be filled in streaming.
+  optional uint32 row_id_index = 3;
+  bool returning = 4;
+
+  // Session id is used to ensure that dml data from the same session should be sent to a fixed worker node and channel.
+  uint32 session_id = 7;
+}
+
+message DeleteNode {
+  // Id of the table to perform deleting.
+  uint32 table_id = 1;
+  // Version of the table.
+  uint64 table_version_id = 3;
+  bool returning = 2;
+
+  // Session id is used to ensure that dml data from the same session should be sent to a fixed worker node and channel.
+  uint32 session_id = 4;
+}
+
+message UpdateNode {
+  // Id of the table to perform updating.
+  uint32 table_id = 1;
+  // Version of the table.
+  uint64 table_version_id = 2;
+  // Expressions to generate `U-` records.
+  repeated expr.ExprNode old_exprs = 3;
+  // Expressions to generate `U+` records.
+  repeated expr.ExprNode new_exprs = 4;
+  bool returning = 5;
+
+  // Session id is used to ensure that dml data from the same session should be sent to a fixed worker node and channel.
+  uint32 session_id = 6;
+}
+
+message ValuesNode {
+  message ExprTuple {
+    repeated expr.ExprNode cells = 1;
+  }
+  repeated ExprTuple tuples = 1;
+  repeated plan_common.Field fields = 2;
+}
+
+message SortNode {
+  repeated common.ColumnOrder column_orders = 1;
+}
+
+message TopNNode {
+  repeated common.ColumnOrder column_orders = 1;
+  uint64 limit = 2;
+  uint64 offset = 3;
+  bool with_ties = 4;
+}
+
+message GroupTopNNode {
+  repeated common.ColumnOrder column_orders = 1;
+  uint64 limit = 2;
+  uint64 offset = 3;
+  repeated uint32 group_key = 4;
+  bool with_ties = 5;
+}
+
+message LimitNode {
+  uint64 limit = 1;
+  uint64 offset = 2;
+}
+
+message NestedLoopJoinNode {
+  plan_common.JoinType join_type = 1;
+  expr.ExprNode join_cond = 2;
+  repeated uint32 output_indices = 3;
+}
+
+message HashAggNode {
+  repeated uint32 group_key = 1;
+  repeated expr.AggCall agg_calls = 2;
+}
+
+message ExpandNode {
+  message Subset {
+    repeated uint32 column_indices = 1;
+  }
+  repeated Subset column_subsets = 1;
+}
+
+message ProjectSetNode {
+  repeated expr.ProjectSetSelectItem select_list = 1;
+}
+
+message SortAggNode {
+  repeated expr.ExprNode group_key = 1;
+  repeated expr.AggCall agg_calls = 2;
+}
+
+message HashJoinNode {
+  plan_common.JoinType join_type = 1;
+  repeated int32 left_key = 2;
+  repeated int32 right_key = 3;
+  expr.ExprNode condition = 4;
+  repeated uint32 output_indices = 5;
+  // Null safe means it treats `null = null` as true.
+  // Each key pair can be null safe independently. (left_key, right_key, null_safe)
+  repeated bool null_safe = 6;
+  optional plan_common.AsOfJoinDesc asof_desc = 7;
+}
+
+message SortMergeJoinNode {
+  plan_common.JoinType join_type = 1;
+  repeated int32 left_key = 2;
+  repeated int32 right_key = 3;
+  common.Direction direction = 4;
+  repeated uint32 output_indices = 5;
+}
+
+message HopWindowNode {
+  uint32 time_col = 1;
+  data.Interval window_slide = 2;
+  data.Interval window_size = 3;
+  repeated uint32 output_indices = 4;
+  repeated expr.ExprNode window_start_exprs = 5;
+  repeated expr.ExprNode window_end_exprs = 6;
+}
+
+message TableFunctionNode {
+  expr.TableFunction table_function = 1;
+}
+
+// Task is a running instance of Stage.
+message TaskId {
+  string query_id = 1;
+  uint32 stage_id = 2;
+  uint64 task_id = 3;
+}
+
+// Every task will create N buffers (channels) for parent operators to fetch results from,
+// where N is the parallelism of parent stage.
+message TaskOutputId {
+  TaskId task_id = 1;
+  // The id of output channel to fetch from
+  uint64 output_id = 2;
+}
+
+message LocalExecutePlan {
+  batch_plan.PlanFragment plan = 1;
+  common.BatchQueryEpoch epoch = 2;
+  map<string, string> tracing_context = 3;
+}
+
+// ExchangeSource describes where to read results from children operators
+message ExchangeSource {
+  TaskOutputId task_output_id = 1;
+  common.HostAddress host = 2;
+  oneof local_execute_plan {
+    LocalExecutePlan plan = 3;
+  }
+}
+
+message ExchangeNode {
+  repeated ExchangeSource sources = 1;
+  // sequential means each tasks of the exchange node will be executed sequentially.
+  bool sequential = 2;
+  repeated plan_common.Field input_schema = 3;
+}
+
+message MergeSortExchangeNode {
+  ExchangeNode exchange = 1;
+  repeated common.ColumnOrder column_orders = 2;
+}
+
+message LocalLookupJoinNode {
+  plan_common.JoinType join_type = 1;
+  expr.ExprNode condition = 2;
+  repeated uint32 outer_side_key = 3;
+  repeated uint32 inner_side_key = 4;
+  uint32 lookup_prefix_len = 5;
+  plan_common.StorageTableDesc inner_side_table_desc = 6;
+  repeated uint64 inner_side_vnode_mapping = 7;
+  repeated int32 inner_side_column_ids = 8;
+  repeated uint32 output_indices = 9;
+  repeated common.WorkerNode worker_nodes = 10;
+  // Null safe means it treats `null = null` as true.
+  // Each key pair can be null safe independently. (left_key, right_key, null_safe)
+  repeated bool null_safe = 11;
+  optional plan_common.AsOf as_of = 12;
+  optional plan_common.AsOfJoinDesc asof_desc = 13;
+}
+
+// RFC: A new schedule way for distributed lookup join
+// https://github.com/risingwavelabs/rfcs/pull/6
+message DistributedLookupJoinNode {
+  plan_common.JoinType join_type = 1;
+  expr.ExprNode condition = 2;
+  repeated uint32 outer_side_key = 3;
+  repeated uint32 inner_side_key = 4;
+  uint32 lookup_prefix_len = 5;
+  plan_common.StorageTableDesc inner_side_table_desc = 6;
+  repeated int32 inner_side_column_ids = 7;
+  repeated uint32 output_indices = 8;
+  // Null safe means it treats `null = null` as true.
+  // Each key pair can be null safe independently. (left_key, right_key, null_safe)
+  repeated bool null_safe = 9;
+  optional plan_common.AsOf as_of = 10;
+  optional plan_common.AsOfJoinDesc asof_desc = 11;
+}
+
+message UnionNode {}
+
+message SortOverWindowNode {
+  repeated expr.WindowFunction calls = 1;
+  repeated uint32 partition_by = 2;
+  repeated common.ColumnOrder order_by = 3;
+}
+
+message MaxOneRowNode {}
+
+message PlanNode {
+  repeated PlanNode children = 1;
+  reserved 22;
+  reserved "sort_merge_join";
+  oneof node_body {
+    InsertNode insert = 2;
+    DeleteNode delete = 3;
+    UpdateNode update = 4;
+    ProjectNode project = 5;
+    HashAggNode hash_agg = 7;
+    FilterNode filter = 8;
+    ExchangeNode exchange = 9;
+    SortNode sort = 10;
+    NestedLoopJoinNode nested_loop_join = 11;
+    TopNNode top_n = 14;
+    SortAggNode sort_agg = 15;
+    RowSeqScanNode row_seq_scan = 16;
+    LimitNode limit = 17;
+    ValuesNode values = 18;
+    HashJoinNode hash_join = 19;
+    MergeSortExchangeNode merge_sort_exchange = 21;
+    HopWindowNode hop_window = 25;
+    TableFunctionNode table_function = 26;
+    SysRowSeqScanNode sys_row_seq_scan = 27;
+    ExpandNode expand = 28;
+    LocalLookupJoinNode local_lookup_join = 29;
+    ProjectSetNode project_set = 30;
+    UnionNode union = 31;
+    GroupTopNNode group_top_n = 32;
+    DistributedLookupJoinNode distributed_lookup_join = 33;
+    SourceNode source = 34;
+    SortOverWindowNode sort_over_window = 35;
+    MaxOneRowNode max_one_row = 36;
+    LogRowSeqScanNode log_row_seq_scan = 37;
+    FileScanNode file_scan = 38;
+    IcebergScanNode iceberg_scan = 39;
+    PostgresQueryNode postgres_query = 40;
+    MySqlQueryNode mysql_query = 41;
+    GcsFileScanNode gcs_file_scan = 42;
+    AzblobFileScanNode azblob_file_scan = 43;
+    // The following nodes are used for testing.
+    bool block_executor = 100;
+    bool busy_loop_executor = 101;
+  }
+  string identity = 24;
+}
+
+// ExchangeInfo determines how to distribute results to tasks of next stage.
+//
+// Note that the fragment itself does not know the where are the receivers. Instead, it prepares results in
+// N buffers and wait for parent operators (`Exchange` nodes) to pull data from a specified buffer
+message ExchangeInfo {
+  enum DistributionMode {
+    // No partitioning at all, used for root segment which aggregates query results
+    UNSPECIFIED = 0;
+    SINGLE = 1;
+    BROADCAST = 2;
+    HASH = 3;
+    CONSISTENT_HASH = 4;
+  }
+  message BroadcastInfo {
+    uint32 count = 1;
+  }
+  message HashInfo {
+    uint32 output_count = 1;
+    repeated uint32 key = 3;
+  }
+  message ConsistentHashInfo {
+    // `vmap` maps virtual node to down stream task id
+    repeated uint32 vmap = 1;
+    repeated uint32 key = 2;
+  }
+  DistributionMode mode = 1;
+  oneof distribution {
+    BroadcastInfo broadcast_info = 2;
+    HashInfo hash_info = 3;
+    ConsistentHashInfo consistent_hash_info = 4;
+  }
+}
+
+message PlanFragment {
+  PlanNode root = 1;
+  ExchangeInfo exchange_info = 2;
+}

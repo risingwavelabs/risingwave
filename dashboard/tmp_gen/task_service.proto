@@ -1,0 +1,152 @@
+syntax = "proto3";
+
+package task_service;
+
+import "batch_plan.proto";
+import "common.proto";
+import "data.proto";
+import "plan_common.proto";
+import "stream_plan.proto";
+
+option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
+
+// Task is a running instance of Stage.
+message TaskId {
+  string query_id = 1;
+  uint32 stage_id = 2;
+  uint32 task_id = 3;
+}
+
+message TaskInfoResponse {
+  enum TaskStatus {
+    // Note: Requirement of proto3: first enum must be 0.
+    UNSPECIFIED = 0;
+    PENDING = 2;
+    RUNNING = 3;
+    FINISHED = 6;
+    FAILED = 7;
+    ABORTED = 8;
+    CANCELLED = 9;
+    PING = 10;
+  }
+  batch_plan.TaskId task_id = 1;
+  TaskStatus task_status = 2;
+  // Optional error message for failed task.
+  string error_message = 3;
+}
+
+message CreateTaskRequest {
+  batch_plan.TaskId task_id = 1;
+  batch_plan.PlanFragment plan = 2;
+  common.BatchQueryEpoch epoch = 3;
+  map<string, string> tracing_context = 4;
+  plan_common.ExprContext expr_context = 5;
+}
+
+message CancelTaskRequest {
+  batch_plan.TaskId task_id = 1;
+}
+
+message CancelTaskResponse {
+  common.Status status = 1;
+}
+
+message GetTaskInfoRequest {
+  batch_plan.TaskId task_id = 1;
+}
+
+message GetDataResponse {
+  data.DataChunk record_batch = 2;
+}
+
+message FastInsertRequest {
+  // Id of the table to perform inserting.
+  uint32 table_id = 1;
+  // Version of the table.
+  uint64 table_version_id = 2;
+  repeated uint32 column_indices = 3;
+  data.DataChunk data_chunk = 4;
+
+  // An optional field and will be `None` for tables without user-defined pk.
+  // The `BatchInsertExecutor` should add a column with NULL value which will
+  // be filled in streaming.
+  optional uint32 row_id_index = 5;
+
+  // Use this number to assign the insert req to different worker nodes and dml channels.
+  uint32 request_id = 6;
+  bool wait_for_persistence = 7;
+  // TODO(kexiang): add support for default columns. plan_common.ExprContext expr_context is needed for it.
+}
+
+message FastInsertResponse {
+  enum Status {
+    UNSPECIFIED = 0;
+    SUCCEEDED = 1;
+    DML_FAILED = 2;
+  }
+  Status status = 1;
+  string error_message = 2;
+}
+
+message ExecuteRequest {
+  batch_plan.TaskId task_id = 1;
+  batch_plan.PlanFragment plan = 2;
+  common.BatchQueryEpoch epoch = 3;
+  map<string, string> tracing_context = 4;
+  plan_common.ExprContext expr_context = 5;
+}
+
+service TaskService {
+  rpc CreateTask(CreateTaskRequest) returns (stream TaskInfoResponse);
+  // Cancel an already-died (self execution-failure, previous aborted, completed) task will still succeed.
+  rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
+  rpc Execute(ExecuteRequest) returns (stream GetDataResponse);
+  // A lightweight version insert, only for non-pgwire insert, such as inserts from webhooks and websockets.
+  rpc FastInsert(FastInsertRequest) returns (FastInsertResponse);
+}
+
+message GetDataRequest {
+  batch_plan.TaskOutputId task_output_id = 1;
+}
+
+// The structure for permit-based back-pressure.
+message Permits {
+  oneof value {
+    // The permits required for a chunk, i.e. the cardinality of the chunk.
+    uint32 record = 1;
+    // The permits required for a barrier, typically 1.
+    uint32 barrier = 2;
+  }
+}
+
+message GetStreamRequest {
+  message Get {
+    uint32 up_actor_id = 1;
+    uint32 down_actor_id = 2;
+    uint32 up_fragment_id = 3;
+    uint32 down_fragment_id = 4;
+    uint32 database_id = 5;
+    string term_id = 6;
+  }
+
+  oneof value {
+    // The first message, which tells the upstream which channel this exchange stream is for.
+    Get get = 1;
+    // The following messages, which adds the permits back to the upstream to achieve back-pressure.
+    Permits add_permits = 2;
+  }
+}
+
+message GetStreamResponse {
+  stream_plan.StreamMessageBatch message = 1;
+  // The number of permits acquired for this message, which should be sent back to the upstream with `add_permits`.
+  // In theory, this can also be derived from the message itself by the receiver. Here we send it explicitly to
+  // avoid any sense of inconsistency for the derivation logic, so the receiver can simply send it back verbatim.
+  Permits permits = 2;
+}
+
+service ExchangeService {
+  rpc GetData(GetDataRequest) returns (stream GetDataResponse);
+  rpc GetStream(stream GetStreamRequest) returns (stream GetStreamResponse);
+}

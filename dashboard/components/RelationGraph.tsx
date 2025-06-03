@@ -15,23 +15,40 @@
  *
  */
 
-import { theme } from "@chakra-ui/react"
-import * as d3 from "d3"
+import {
+  Box,
+  Button,
+  Flex,
+  HStack,
+  Text,
+  Tooltip,
+  VStack,
+} from "@chakra-ui/react"
+import {
+  Background,
+  Controls,
+  Edge,
+  Node,
+  ReactFlow,
+  ReactFlowProvider,
+  addEdge,
+  getConnectedEdges,
+  getIncomers,
+  getOutgoers,
+  useEdgesState,
+  useNodesState,
+  useReactFlow,
+} from "@xyflow/react"
+import "@xyflow/react/dist/style.css"
 import * as dagre from "dagre"
-import { useCallback, useEffect, useRef } from "react"
+import React, { memo, useCallback, useEffect, useMemo, useState } from "react"
 import {
   Relation,
   relationIsStreamingJob,
   relationType,
   relationTypeTitleCase,
 } from "../lib/api/streaming"
-import {
-  Edge,
-  Enter,
-  Position,
-  RelationPoint,
-  RelationPointPosition,
-} from "../lib/layout"
+import { RelationPoint } from "../lib/layout"
 import { ChannelStatsDerived } from "../pages/fragment_graph"
 import { RelationStats } from "../proto/gen/monitor_service"
 import { CatalogModal, useCatalogModal } from "./CatalogModal"
@@ -42,401 +59,396 @@ import {
   latencyToColor,
 } from "./utils/backPressure"
 
-// Size of each relation box in pixels
-export const boxWidth = 150
-export const boxHeight = 45
+// Size of each relation node in pixels
+const NODE_WIDTH = 180
+const NODE_HEIGHT = 50
 
-// Radius of the icon circle in pixels
-const iconRadius = 12
-
-// Horizontal spacing between layers in the graph in pixels
-const layerMargin = 80
-
-// Vertical spacing between rows in the graph in pixels
-const rowMargin = 30
-
-// Margin around the entire graph layout in pixels
-const layoutMargin = 30
-
-function boundBox(relationPosition: RelationPointPosition[]): {
-  width: number
-  height: number
-} {
-  let width = 0
-  let height = 0
-  for (const { x, y } of relationPosition) {
-    width = Math.max(width, x + boxWidth)
-    height = Math.max(height, y + boxHeight)
-  }
-  return { width, height }
+// Layout configuration
+const LAYOUT_CONFIG = {
+  rankdir: "LR",
+  nodesep: 50,
+  ranksep: 100,
+  marginx: 20,
+  marginy: 20,
 }
 
-export default function RelationGraph({
-  nodes,
-  selectedId,
-  setSelectedId,
-  channelStats,
-  relationStats,
-}: {
-  nodes: RelationPoint[] // rename to RelationNode
+type ViewMode = "all" | "focus"
+
+interface RelationNode extends Node {
+  data: {
+    relation: Relation
+    relationStats?: RelationStats
+    channelStats?: Map<string, ChannelStatsDerived>
+  }
+}
+
+interface RelationEdge extends Edge {
+  data?: {
+    channelStats?: ChannelStatsDerived
+  }
+}
+
+// Custom node component for relations
+const RelationNodeComponent = memo(({ data, selected }: { data: any; selected: boolean }) => {
+  const { relation, relationStats } = data
+  const now_ms = Date.now()
+
+  const relationTypeAbbr = (relation: Relation) => {
+    const type = relationType(relation)
+    if (type === "SINK") {
+      return "K"
+    } else {
+      return type.charAt(0)
+    }
+  }
+
+  const getNodeColor = () => {
+    const weight = relationIsStreamingJob(relation) ? "500" : "400"
+    const baseColor = selected ? "#3182ce" : "#718096"
+    
+    if (relationStats) {
+      const currentMs = epochToUnixMillis(relationStats.currentEpoch)
+      return latencyToColor(now_ms - currentMs, baseColor)
+    }
+    return baseColor
+  }
+
+  const getTooltipContent = () => {
+    const latencySeconds = relationStats
+      ? ((Date.now() - epochToUnixMillis(relationStats.currentEpoch)) / 1000).toFixed(2)
+      : "N/A"
+    const epoch = relationStats?.currentEpoch ?? "N/A"
+
+    return `${relationTypeTitleCase(relation)} ${relation.id}: ${relation.name}\nEpoch: ${epoch}\nLatency: ${latencySeconds} seconds`
+  }
+
+  return (
+    <Tooltip label={getTooltipContent()} hasArrow placement="top">
+      <Box
+        bg="white"
+        border="2px solid"
+        borderColor={selected ? "blue.500" : "gray.200"}
+        borderRadius="md"
+        p={2}
+        minW={NODE_WIDTH}
+        h={NODE_HEIGHT}
+        display="flex"
+        alignItems="center"
+        cursor="pointer"
+        _hover={{ borderColor: "blue.300" }}
+        boxShadow={selected ? "lg" : "sm"}
+      >
+        <Flex
+          w={8}
+          h={8}
+          borderRadius="full"
+          bg={getNodeColor()}
+          color="white"
+          alignItems="center"
+          justifyContent="center"
+          fontSize="sm"
+          fontWeight="bold"
+          mr={3}
+        >
+          {relationTypeAbbr(relation)}
+        </Flex>
+        <Text
+          fontSize="sm"
+          fontWeight="medium"
+          noOfLines={2}
+          flex={1}
+          title={relation.name}
+        >
+          {relation.name}
+        </Text>
+      </Box>
+    </Tooltip>
+  )
+})
+
+RelationNodeComponent.displayName = "RelationNodeComponent"
+
+// Node types for ReactFlow
+const nodeTypes = {
+  relationNode: RelationNodeComponent,
+}
+
+// Layout function using Dagre
+const getLayoutedElements = (nodes: Node[], edges: Edge[]) => {
+  const g = new dagre.graphlib.Graph()
+  g.setGraph(LAYOUT_CONFIG)
+  g.setDefaultEdgeLabel(() => ({}))
+
+  nodes.forEach((node) => {
+    g.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT })
+  })
+
+  edges.forEach((edge) => {
+    g.setEdge(edge.source, edge.target)
+  })
+
+  dagre.layout(g)
+
+  const layoutedNodes = nodes.map((node) => {
+    const nodeWithPosition = g.node(node.id)
+    return {
+      ...node,
+      position: {
+        x: nodeWithPosition.x - NODE_WIDTH / 2,
+        y: nodeWithPosition.y - NODE_HEIGHT / 2,
+      },
+    }
+  })
+
+  return { nodes: layoutedNodes, edges }
+}
+
+interface RelationGraphProps {
+  nodes: RelationPoint[]
   selectedId: string | undefined
   setSelectedId: (id: string) => void
   channelStats?: Map<string, ChannelStatsDerived>
   relationStats: { [relationId: number]: RelationStats } | undefined
-}) {
-  const [modalData, setModalId] = useCatalogModal(nodes.map((n) => n.relation))
+}
 
-  const svgRef = useRef<SVGSVGElement>(null)
+const RelationGraphInner = ({
+  nodes: relationPoints,
+  selectedId,
+  setSelectedId,
+  channelStats,
+  relationStats,
+}: RelationGraphProps) => {
+  const [modalData, setModalId] = useCatalogModal(
+    relationPoints.map((n: RelationPoint) => n.relation)
+  )
+  const [viewMode, setViewMode] = useState<ViewMode>("all")
+  const [focusNodeId, setFocusNodeId] = useState<string | undefined>()
+  const { fitView } = useReactFlow()
 
-  const layoutMapCallback = useCallback(() => {
-    // Create a new directed graph
-    const g = new dagre.graphlib.Graph()
+  // Convert RelationPoint[] to ReactFlow nodes and edges
+  const { initialNodes, initialEdges } = useMemo(() => {
+    const nodes: RelationNode[] = relationPoints.map((point) => ({
+      id: point.id,
+      type: "relationNode",
+      position: { x: 0, y: 0 }, // Will be set by layout
+      data: {
+        relation: point.relation,
+        relationStats: relationStats?.[parseInt(point.id)],
+        channelStats,
+      },
+    }))
 
-    // Set graph direction and spacing
-    g.setGraph({
-      rankdir: "LR",
-      nodesep: rowMargin,
-      ranksep: layerMargin,
-      marginx: layoutMargin,
-      marginy: layoutMargin,
-    })
-
-    // Default to assigning empty object as edge label
-    g.setDefaultEdgeLabel(() => ({}))
-
-    // Add nodes
-    nodes.forEach((node) => {
-      g.setNode(node.id, node)
-    })
-
-    // Add edges
-    nodes.forEach((node) => {
-      node.parentIds?.forEach((parentId) => {
-        g.setEdge(parentId, node.id) // Here the "parent" means the upstream relation
+    const edges: Edge[] = []
+    relationPoints.forEach((point) => {
+      point.parentIds?.forEach((parentId) => {
+        const channelStat = channelStats?.get(`${parentId}_${point.id}`)
+        edges.push({
+          id: `${parentId}-${point.id}`,
+          source: parentId,
+          target: point.id,
+          style: {
+            stroke: channelStat
+              ? backPressureColor(channelStat.backPressure)
+              : "#94a3b8",
+            strokeWidth: channelStat
+              ? backPressureWidth(channelStat.backPressure, 15)
+              : 2,
+          },
+        })
       })
     })
 
-    // Perform layout
-    dagre.layout(g)
+    return { initialNodes: nodes, initialEdges: edges }
+  }, [relationPoints, relationStats, channelStats])
 
-    // Convert to expected format
-    const layoutMap = g.nodes().map((id) => {
-      const node = g.node(id)
-      return {
-        ...node,
-        x: node.x - boxWidth / 2, // Adjust for center-based coordinates
-        y: node.y - boxHeight / 2,
-      } as RelationPointPosition
-    })
+  const [reactFlowNodes, setNodes, onNodesChange] = useNodesState(initialNodes)
+  const [reactFlowEdges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
 
-    const links = g.edges().map((e) => {
-      const edge = g.edge(e)
-      return {
-        source: e.v,
-        target: e.w,
-        points: edge.points || [],
-      }
-    })
-
-    // Calculate bounds
-    const { width, height } = boundBox(layoutMap)
-
-    return {
-      layoutMap,
-      links,
-      width,
-      height,
+  // Filter nodes and edges based on view mode
+  const filteredData = useMemo(() => {
+    if (viewMode === "all" || !focusNodeId) {
+      return { nodes: initialNodes, edges: initialEdges }
     }
-  }, [nodes])
 
-  const { layoutMap, links, width, height } = layoutMapCallback()
+    // Sub-DAG mode: show only upstream/downstream of focused node
+    const allNodes = initialNodes
+    const allEdges = initialEdges
+    
+    const focusNode = allNodes.find((node: Node) => node.id === focusNodeId)
+    if (!focusNode) return { nodes: allNodes, edges: allEdges }
 
+    // Get all connected nodes (upstream and downstream)
+    const incomers = getIncomers(focusNode, allNodes, allEdges)
+    const outgoers = getOutgoers(focusNode, allNodes, allEdges)
+    const connectedEdges = getConnectedEdges([focusNode], allEdges)
+
+    // Include the focus node plus all its connections
+    const relevantNodeIds = new Set([
+      focusNode.id,
+      ...incomers.map((n: Node) => n.id),
+      ...outgoers.map((n: Node) => n.id),
+    ])
+
+    const filteredNodes = allNodes.filter((node: Node) =>
+      relevantNodeIds.has(node.id)
+    )
+    
+    // Get edges that connect the relevant nodes
+    const filteredEdges = allEdges.filter(
+      (edge) =>
+        relevantNodeIds.has(edge.source) && relevantNodeIds.has(edge.target)
+    )
+
+    return { nodes: filteredNodes, edges: filteredEdges }
+  }, [viewMode, focusNodeId, initialNodes, initialEdges])
+
+  // Apply layout when data changes
   useEffect(() => {
-    const now_ms = Date.now()
-    const svgNode = svgRef.current
-    const svgSelection = d3.select(svgNode)
+    const layouted = getLayoutedElements(filteredData.nodes, filteredData.edges)
+    setNodes(layouted.nodes)
+    setEdges(layouted.edges)
+    
+    // Fit view after layout
+    setTimeout(() => fitView({ duration: 300 }), 10)
+  }, [filteredData, setNodes, setEdges, fitView])
 
-    const curveStyle = d3.curveBasis
+  const onNodeClick = useCallback(
+    (event: React.MouseEvent, node: Node) => {
+      setSelectedId(node.id)
+      setModalId(parseInt(node.id))
+    },
+    [setSelectedId, setModalId]
+  )
 
-    const line = d3
-      .line<Position>()
-      .curve(curveStyle)
-      .x(({ x }) => x)
-      .y(({ y }) => y)
-
-    const edgeSelection = svgSelection
-      .select(".edges")
-      .selectAll<SVGPathElement, null>(".edge")
-      .data(links)
-    type EdgeSelection = typeof edgeSelection
-
-    const isSelected = (id: string) => id === selectedId
-
-    const applyEdge = (sel: EdgeSelection) => {
-      const color = (d: Edge) => {
-        if (channelStats) {
-          let value = channelStats.get(`${d.source}_${d.target}`)
-          if (value) {
-            return backPressureColor(value.backPressure)
-          }
-        }
-
-        return theme.colors.gray["300"]
+  const onNodeDoubleClick = useCallback(
+    (event: React.MouseEvent, node: Node) => {
+      // Double-click to focus on a node (show sub-DAG)
+      if (viewMode === "all") {
+        setViewMode("focus")
+        setFocusNodeId(node.id)
+      } else if (focusNodeId === node.id) {
+        // Double-click on focused node to go back to all view
+        setViewMode("all")
+        setFocusNodeId(undefined)
+      } else {
+        // Focus on different node
+        setFocusNodeId(node.id)
       }
+    },
+    [viewMode, focusNodeId]
+  )
 
-      const width = (d: Edge) => {
-        if (channelStats) {
-          let value = channelStats.get(`${d.source}_${d.target}`)
-          if (value) {
-            return backPressureWidth(value.backPressure, 15)
-          }
-        }
-        return 2
-      }
+  const handleShowAll = useCallback(() => {
+    setViewMode("all")
+    setFocusNodeId(undefined)
+  }, [])
 
-      sel
-        .attr("d", ({ points }) => line(points))
-        .attr("fill", "none")
-        .attr("stroke-width", width)
-        .attr("stroke", color)
-        .attr("opacity", (d) =>
-          isSelected(d.source) || isSelected(d.target) ? 1 : 0.5
-        )
-
-      sel
-        .on("mouseover", (event, d) => {
-          // Remove existing tooltip if any
-          d3.selectAll(".tooltip").remove()
-
-          // Create new tooltip
-          const stats = channelStats?.get(`${d.source}_${d.target}`)
-          const tooltipText = `<b>Relation ${d.source} → ${
-            d.target
-          }</b><br>Backpressure: ${
-            stats != null ? `${(stats.backPressure * 100).toFixed(2)}%` : "N/A"
-          }<br>Recv Throughput: ${
-            stats != null ? `${stats.recvThroughput.toFixed(2)} rows/s` : "N/A"
-          }<br>Send Throughput: ${
-            stats != null ? `${stats.sendThroughput.toFixed(2)} rows/s` : "N/A"
-          }`
-          d3.select("body")
-            .append("div")
-            .attr("class", "tooltip")
-            .style("position", "absolute")
-            .style("background", "white")
-            .style("padding", "10px")
-            .style("border", "1px solid #ddd")
-            .style("border-radius", "4px")
-            .style("pointer-events", "none")
-            .style("left", event.pageX + 10 + "px")
-            .style("top", event.pageY + 10 + "px")
-            .style("font-size", "12px")
-            .html(tooltipText)
-        })
-        .on("mousemove", (event) => {
-          d3.select(".tooltip")
-            .style("left", event.pageX + 10 + "px")
-            .style("top", event.pageY + 10 + "px")
-        })
-        .on("mouseout", () => {
-          d3.selectAll(".tooltip").remove()
-        })
-
-      return sel
+  const handleFocusMode = useCallback(() => {
+    if (selectedId) {
+      setViewMode("focus")
+      setFocusNodeId(selectedId)
     }
+  }, [selectedId])
 
-    const createEdge = (sel: Enter<EdgeSelection>) =>
-      sel.append("path").attr("class", "edge").call(applyEdge)
-    edgeSelection.exit().remove()
-    edgeSelection.enter().call(createEdge)
-    edgeSelection.call(applyEdge)
+  // Update node selection visual
+  useEffect(() => {
+    setNodes((nodes: Node[]) =>
+      nodes.map((node: Node) => ({
+        ...node,
+        selected: node.id === selectedId,
+      }))
+    )
+  }, [selectedId, setNodes])
 
-    const applyNode = (g: NodeSelection) => {
-      g.attr("transform", ({ x, y }) => `translate(${x},${y})`)
-
-      // Rectangle box of relation
-      let rect = g.select<SVGRectElement>("rect")
-      if (rect.empty()) {
-        rect = g.append("rect")
-      }
-      rect
-        .attr("width", boxWidth)
-        .attr("height", boxHeight)
-        .attr("rx", 6) // rounded corners
-        .attr("ry", 6)
-        .attr("fill", "white")
-        .attr("stroke", ({ id }) =>
-          isSelected(id) ? theme.colors.blue["500"] : theme.colors.gray["200"]
-        )
-        .attr("stroke-width", 2)
-
-      // Icon circle of relation type
-      let circle = g.select<SVGCircleElement>("circle")
-      if (circle.empty()) {
-        circle = g.append("circle")
-      }
-      circle
-        .attr("cx", iconRadius + 10) // position circle in left part of box
-        .attr("cy", boxHeight / 2)
-        .attr("r", iconRadius)
-        .attr("fill", ({ id, relation }) => {
-          const weight = relationIsStreamingJob(relation) ? "500" : "400"
-          const baseColor = isSelected(id)
-            ? theme.colors.blue[weight]
-            : theme.colors.gray[weight]
-          if (relationStats) {
-            const relationId = parseInt(id)
-            if (!isNaN(relationId) && relationStats[relationId]) {
-              const currentMs = epochToUnixMillis(
-                relationStats[relationId].currentEpoch
-              )
-              return latencyToColor(now_ms - currentMs, baseColor)
-            }
-          }
-          return baseColor
-        })
-
-      // Type letter in circle
-      let typeText = g.select<SVGTextElement>(".type")
-      if (typeText.empty()) {
-        typeText = g.append("text").attr("class", "type")
-      }
-
-      function relationTypeAbbr(relation: Relation) {
-        const type = relationType(relation)
-        if (type === "SINK") {
-          return "K"
-        } else {
-          return type.charAt(0)
-        }
-      }
-
-      // Add a clipPath to contain the text within the box
-      let clipPath = g.select<SVGClipPathElement>(".clip-path")
-      if (clipPath.empty()) {
-        clipPath = g
-          .append("clipPath")
-          .attr("class", "clip-path")
-          .attr("id", (d) => `clip-${d.id}`)
-        clipPath.append("rect")
-      }
-      clipPath
-        .select("rect")
-        .attr("width", boxWidth - (iconRadius * 2 + 20)) // Leave space for icon
-        .attr("height", boxHeight)
-        .attr("x", iconRadius * 2 + 15)
-        .attr("y", 0)
-
-      typeText
-        .attr("fill", "white")
-        .text(({ relation }) => `${relationTypeAbbr(relation)}`)
-        .attr("font-family", "inherit")
-        .attr("text-anchor", "middle")
-        .attr("x", iconRadius + 10)
-        .attr("y", boxHeight / 2)
-        .attr("dy", "0.35em") // vertical alignment
-        .attr("font-size", 16)
-        .attr("font-weight", "bold")
-
-      // Relation name
-      let text = g.select<SVGTextElement>(".text")
-      if (text.empty()) {
-        text = g.append("text").attr("class", "text")
-      }
-
-      text
-        .attr("fill", "black")
-        .text(({ name }) => name)
-        .attr("font-family", "inherit")
-        .attr("x", iconRadius * 2 + 15) // position text right of circle
-        .attr("y", boxHeight / 2)
-        .attr("dy", "0.35em")
-        .attr("font-size", 14)
-        .attr("clip-path", (d) => `url(#clip-${d.id})`) // Apply clipPath
-
-      // Tooltip for relation
-      const getTooltipContent = (relation: Relation, id: string) => {
-        const relationId = parseInt(id)
-        const stats = relationStats?.[relationId]
-        const latencySeconds = stats
-          ? (
-              (Date.now() - epochToUnixMillis(stats.currentEpoch)) /
-              1000
-            ).toFixed(2)
-          : "N/A"
-        const epoch = stats?.currentEpoch ?? "N/A"
-
-        return `<b>${relationTypeTitleCase(relation)} ${id}: ${
-          relation.name
-        }</b><br>Epoch: ${epoch}<br>Latency: ${latencySeconds} seconds`
-      }
-
-      g.on("mouseover", (event, { relation, id }) => {
-        // Remove existing tooltip if any
-        d3.selectAll(".tooltip").remove()
-
-        // Create new tooltip
-        d3.select("body")
-          .append("div")
-          .attr("class", "tooltip")
-          .style("position", "absolute")
-          .style("background", "white")
-          .style("padding", "10px")
-          .style("border", "1px solid #ddd")
-          .style("border-radius", "4px")
-          .style("pointer-events", "none")
-          .style("left", event.pageX + 10 + "px")
-          .style("top", event.pageY + 10 + "px")
-          .style("font-size", "12px")
-          .html(getTooltipContent(relation, id))
-      })
-        .on("mousemove", (event) => {
-          d3.select(".tooltip")
-            .style("left", event.pageX + 10 + "px")
-            .style("top", event.pageY + 10 + "px")
-        })
-        .on("mouseout", () => {
-          d3.selectAll(".tooltip").remove()
-        })
-
-      // Relation modal
-      g.style("cursor", "pointer").on("click", (_, { relation, id }) => {
-        setSelectedId(id)
-        setModalId(relation.id)
-      })
-
-      return g
+  const edgeStyle = useCallback((edge: Edge) => {
+    const isConnectedToSelected =
+      edge.source === selectedId || edge.target === selectedId
+    return {
+      ...edge.style,
+      opacity: selectedId && !isConnectedToSelected ? 0.3 : 1,
     }
+  }, [selectedId])
 
-    const createNode = (sel: Enter<NodeSelection>) =>
-      sel.append("g").attr("class", "node").call(applyNode)
+  // Apply edge styling based on selection
+  useEffect(() => {
+    setEdges((edges: Edge[]) =>
+      edges.map((edge: Edge) => ({
+        ...edge,
+        style: edgeStyle(edge),
+      }))
+    )
+  }, [selectedId, setEdges, edgeStyle])
 
-    const g = svgSelection.select(".boxes")
-    const nodeSelection = g
-      .selectAll<SVGGElement, null>(".node")
-      .data(layoutMap)
-    type NodeSelection = typeof nodeSelection
-
-    nodeSelection.enter().call(createNode)
-    nodeSelection.call(applyNode)
-    nodeSelection.exit().remove()
-  }, [
-    layoutMap,
-    links,
-    selectedId,
-    setModalId,
-    setSelectedId,
-    channelStats,
-    relationStats,
-  ])
+  const focusedNodeName = useMemo(() => {
+    if (!focusNodeId) return ""
+    const node = relationPoints.find((n: RelationPoint) => n.id === focusNodeId)
+    return node?.relation.name || ""
+  }, [focusNodeId, relationPoints])
 
   return (
-    <>
-      <svg ref={svgRef} width={`${width}px`} height={`${height}px`}>
-        <g className="edges" />
-        <g className="boxes" />
-      </svg>
+    <Box h="full" position="relative">
+      {/* Controls */}
+      <Box position="absolute" top={4} left={4} zIndex={10}>
+        <VStack align="start" spacing={2}>
+          <HStack spacing={2}>
+            <Button
+              size="sm"
+              colorScheme={viewMode === "all" ? "blue" : "gray"}
+              onClick={handleShowAll}
+            >
+              Show All ({relationPoints.length})
+            </Button>
+            <Button
+              size="sm"
+              colorScheme={viewMode === "focus" ? "blue" : "gray"}
+              onClick={handleFocusMode}
+              isDisabled={!selectedId}
+            >
+              Focus Mode
+            </Button>
+          </HStack>
+          
+          {viewMode === "focus" && focusedNodeName && (
+            <Text fontSize="sm" color="gray.600" bg="white" px={2} py={1} borderRadius="md">
+              Focusing on: <Text as="span" fontWeight="semibold">{focusedNodeName}</Text>
+            </Text>
+          )}
+          
+          <Text fontSize="xs" color="gray.500" bg="white" px={2} py={1} borderRadius="md">
+            Double-click node to focus • Drag nodes to rearrange
+          </Text>
+        </VStack>
+      </Box>
+
+      <ReactFlow
+        nodes={reactFlowNodes}
+        edges={reactFlowEdges}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onNodeClick={onNodeClick}
+        onNodeDoubleClick={onNodeDoubleClick}
+        nodeTypes={nodeTypes}
+        fitView
+        attributionPosition="bottom-left"
+        proOptions={{ hideAttribution: true }}
+      >
+        <Background />
+        <Controls />
+      </ReactFlow>
+
       <CatalogModal modalData={modalData} onClose={() => setModalId(null)} />
-    </>
+    </Box>
   )
 }
+
+export default function RelationGraph(props: RelationGraphProps) {
+  return (
+    <ReactFlowProvider>
+      <RelationGraphInner {...props} />
+    </ReactFlowProvider>
+  )
+}
+
+// Keep the same exports for backward compatibility
+export const boxWidth = NODE_WIDTH
+export const boxHeight = NODE_HEIGHT

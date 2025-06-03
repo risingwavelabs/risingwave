@@ -1,0 +1,153 @@
+syntax = "proto3";
+
+package stream_service;
+
+import "common.proto";
+import "hummock.proto";
+import "plan_common.proto";
+import "stream_plan.proto";
+
+option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
+
+message InjectBarrierRequest {
+  string request_id = 1;
+  stream_plan.Barrier barrier = 2;
+  uint32 database_id = 3;
+  repeated uint32 actor_ids_to_collect = 4;
+  repeated uint32 table_ids_to_sync = 5;
+  uint32 partial_graph_id = 6;
+
+  message FragmentBuildActorInfo {
+    uint32 fragment_id = 1;
+    stream_plan.StreamNode node = 2;
+    repeated BuildActorInfo actors = 3;
+  }
+
+  message BuildActorInfo {
+    message UpstreamActors {
+      repeated common.ActorInfo actors = 1;
+    }
+    uint32 actor_id = 1;
+    map<uint32, UpstreamActors> fragment_upstreams = 2;
+    repeated stream_plan.Dispatcher dispatchers = 3;
+    common.Buffer vnode_bitmap = 4;
+    string mview_definition = 5;
+    plan_common.ExprContext expr_context = 6;
+  }
+
+  repeated FragmentBuildActorInfo actors_to_build = 9;
+  repeated stream_plan.SubscriptionUpstreamInfo subscriptions_to_add = 10;
+  repeated stream_plan.SubscriptionUpstreamInfo subscriptions_to_remove = 11;
+}
+
+message BarrierCompleteResponse {
+  message CreateMviewProgress {
+    // Note: ideally we should use `executor_id`, but `actor_id` is ok-ish.
+    // See <https://github.com/risingwavelabs/risingwave/issues/6236>.
+    uint32 backfill_actor_id = 1;
+    bool done = 2;
+    // MV backfill snapshot read epoch (0 for Done / Source backfill)
+    uint64 consumed_epoch = 3;
+    // MV backfill snapshot read rows / Source backfilled rows
+    uint64 consumed_rows = 4;
+    uint64 pending_epoch_lag = 5;
+  }
+  string request_id = 1;
+  common.Status status = 2;
+  repeated CreateMviewProgress create_mview_progress = 3;
+  message LocalSstableInfo {
+    reserved 1;
+    reserved "compaction_group_id";
+    hummock.SstableInfo sst = 2;
+    map<uint32, hummock.TableStats> table_stats_map = 3;
+    uint64 created_at = 4;
+  }
+  repeated LocalSstableInfo synced_sstables = 4;
+  uint32 worker_id = 5;
+  map<uint32, hummock.TableWatermarks> table_watermarks = 6;
+  repeated hummock.SstableInfo old_value_sstables = 7;
+  uint32 partial_graph_id = 8;
+  // prev_epoch of barrier
+  uint64 epoch = 9;
+  uint32 database_id = 10;
+}
+
+message StreamingControlStreamRequest {
+  message InitialPartialGraph {
+    uint32 partial_graph_id = 1;
+    repeated stream_plan.SubscriptionUpstreamInfo subscriptions = 2;
+  }
+
+  message DatabaseInitialPartialGraph {
+    uint32 database_id = 1;
+    repeated InitialPartialGraph graphs = 2;
+  }
+
+  message InitRequest {
+    repeated DatabaseInitialPartialGraph databases = 1;
+    string term_id = 2;
+  }
+
+  message CreatePartialGraphRequest {
+    uint32 partial_graph_id = 1;
+    uint32 database_id = 2;
+  }
+
+  message RemovePartialGraphRequest {
+    repeated uint32 partial_graph_ids = 1;
+    uint32 database_id = 2;
+  }
+
+  message ResetDatabaseRequest {
+    uint32 database_id = 1;
+    uint32 reset_request_id = 2;
+  }
+
+  oneof request {
+    InitRequest init = 1;
+    InjectBarrierRequest inject_barrier = 2;
+    RemovePartialGraphRequest remove_partial_graph = 3;
+    CreatePartialGraphRequest create_partial_graph = 4;
+    ResetDatabaseRequest reset_database = 5;
+  }
+}
+
+message ScoredError {
+  string err_msg = 1;
+  int32 score = 2;
+}
+
+message StreamingControlStreamResponse {
+  message InitResponse {}
+  message ShutdownResponse {}
+  message ReportDatabaseFailureResponse {
+    uint32 database_id = 1;
+  }
+
+  message ResetDatabaseResponse {
+    uint32 database_id = 1;
+    optional ScoredError root_err = 2;
+    uint32 reset_request_id = 3;
+  }
+
+  oneof response {
+    InitResponse init = 1;
+    BarrierCompleteResponse complete_barrier = 2;
+    ShutdownResponse shutdown = 3;
+    ReportDatabaseFailureResponse report_database_failure = 4;
+    ResetDatabaseResponse reset_database = 5;
+  }
+}
+
+message GetMinUncommittedObjectIdRequest {}
+message GetMinUncommittedObjectIdResponse {
+  uint64 min_uncommitted_object_id = 1;
+}
+
+service StreamService {
+  rpc StreamingControlStream(stream StreamingControlStreamRequest) returns (stream StreamingControlStreamResponse);
+  rpc GetMinUncommittedObjectId(GetMinUncommittedObjectIdRequest) returns (GetMinUncommittedObjectIdResponse);
+}
+
+// TODO: Lifecycle management for actors.

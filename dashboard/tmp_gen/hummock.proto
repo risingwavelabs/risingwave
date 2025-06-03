@@ -1,0 +1,1005 @@
+syntax = "proto3";
+
+package hummock;
+
+import "catalog.proto";
+import "common.proto";
+import "iceberg_compaction.proto";
+
+option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
+
+enum BloomFilterType {
+  BLOOM_FILTER_UNSPECIFIED = 0;
+  SSTABLE = 1;
+  BLOCKED = 2;
+}
+
+message SstableInfo {
+  uint64 object_id = 1;
+  uint64 sst_id = 2;
+  KeyRange key_range = 3;
+  // represents the physical object size, which is usually used in the builder.
+  uint64 file_size = 4;
+  repeated uint32 table_ids = 5;
+  uint64 meta_offset = 6;
+  uint64 stale_key_count = 7;
+  uint64 total_key_count = 8;
+  uint64 min_epoch = 9;
+  uint64 max_epoch = 10;
+  uint64 uncompressed_file_size = 11;
+  uint64 range_tombstone_count = 12;
+  BloomFilterType bloom_filter_kind = 13;
+
+  // In order to calculate more finely in the compaction strategy, we need to re-calculate the sst_size after split sst
+  // `sst_size` represents the size of the sst instead of the object size(usually used in the meta).
+  uint64 sst_size = 14;
+}
+
+enum LevelType {
+  LEVEL_TYPE_UNSPECIFIED = 0;
+  LEVEL_TYPE_NONOVERLAPPING = 1;
+  LEVEL_TYPE_OVERLAPPING = 2;
+}
+
+message OverlappingLevel {
+  repeated Level sub_levels = 1;
+  uint64 total_file_size = 2;
+  uint64 uncompressed_file_size = 3;
+}
+
+message Level {
+  uint32 level_idx = 1;
+  LevelType level_type = 2;
+  repeated SstableInfo table_infos = 3;
+  uint64 total_file_size = 4;
+  uint64 sub_level_id = 5;
+  uint64 uncompressed_file_size = 6;
+  uint32 vnode_partition_count = 7;
+}
+
+message InputLevel {
+  uint32 level_idx = 1;
+  LevelType level_type = 2;
+  repeated SstableInfo table_infos = 3;
+}
+
+message NewL0SubLevel {
+  repeated SstableInfo inserted_table_infos = 1;
+}
+
+message IntraLevelDelta {
+  uint32 level_idx = 1;
+  uint64 l0_sub_level_id = 2;
+  repeated uint64 removed_table_ids = 3;
+  repeated SstableInfo inserted_table_infos = 4;
+  uint32 vnode_partition_count = 5;
+  uint64 compaction_group_version_id = 6;
+}
+
+enum CompatibilityVersion {
+  VERSION_UNSPECIFIED = 0;
+  NO_TRIVIAL_SPLIT = 1;
+  NO_MEMBER_TABLE_IDS = 2;
+  SPLIT_GROUP_BY_TABLE_ID = 3;
+}
+
+message GroupConstruct {
+  CompactionConfig group_config = 1;
+  // If parent_group_id is not 0, it means parent_group_id splits into parent_group_id and this group, so this group is not empty initially.
+  uint64 parent_group_id = 2;
+  repeated uint32 table_ids = 3 [deprecated = true];
+  uint64 group_id = 4;
+  uint64 new_sst_start_id = 5;
+  CompatibilityVersion version = 6;
+
+  // The split_key is the key that the group is split by.
+  // When GroupConstruct with commit_epoch, split_key will be empty
+  // When split_key is not None, GroupConstruct tells to use split_key to check each level and split the sstable_info in the level into two groups (bounded by split_key).
+  // For the left sstable_info, split_key (right_exclusive=true) will be used as key_range_right.
+  // In the current implementation split_key always contains a table_id, vnode = 0, epoch = MAX
+  optional bytes split_key = 7;
+}
+
+message GroupDestroy {}
+
+message GroupMerge {
+  uint64 left_group_id = 1;
+  uint64 right_group_id = 2;
+}
+
+message GroupDelta {
+  reserved 4;
+  reserved "group_meta_change";
+  reserved 5;
+  reserved "group_table_change";
+  oneof delta_type {
+    IntraLevelDelta intra_level = 1;
+    GroupConstruct group_construct = 2;
+    GroupDestroy group_destroy = 3;
+    GroupMerge group_merge = 6;
+    NewL0SubLevel new_l0_sub_level = 7;
+  }
+}
+
+message VnodeWatermark {
+  // The watermark shared by multiple vnodes
+  bytes watermark = 1;
+  // The set of vnodes that share the same watermark
+  common.Buffer vnode_bitmap = 2;
+}
+
+// Table watermark is a lighter weight range delete introduced in
+// https://github.com/risingwavelabs/risingwave/issues/13148
+// It means the lowest (or highest when `is_ascending` is false) visible
+// keys in the table within a vnode. Keys lower (or higher) than the
+// table watermark is invisible and will be cleaned in later compaction.
+message TableWatermarks {
+  message EpochNewWatermarks {
+    repeated VnodeWatermark watermarks = 1;
+    uint64 epoch = 2;
+  }
+
+  // Table watermarks of a state table from all vnodes written in multiple epochs.
+  // Epochs should be sorted in ascending order, which means earlier epoch at the front
+  repeated EpochNewWatermarks epoch_watermarks = 1;
+
+  // The direction of the table watermark.
+  bool is_ascending = 2;
+
+  // The table watermark is non-pk prefix table watermark.
+  bool is_non_pk_prefix = 3;
+}
+
+message EpochNewChangeLog {
+  repeated SstableInfo old_value = 1;
+  repeated SstableInfo new_value = 2;
+  // Epochs should be sorted in ascending order, which means earlier epoch at the front
+  repeated uint64 epochs = 3;
+}
+
+message TableChangeLog {
+  // Epochs should be sorted in ascending order, which means earlier epoch at the front.
+  repeated EpochNewChangeLog change_logs = 1;
+}
+
+message StateTableInfo {
+  uint64 committed_epoch = 1;
+  reserved 2;
+  reserved 'safe_epoch';
+  uint64 compaction_group_id = 3;
+}
+
+message StateTableInfoDelta {
+  uint64 committed_epoch = 1;
+  reserved 2;
+  reserved 'safe_epoch';
+  uint64 compaction_group_id = 3;
+}
+
+enum DistanceType {
+  DISTANCE_TYPE_UNSPECIFIED = 0;
+  DISTANCE_TYPE_L1 = 1;
+  DISTANCE_TYPE_L2 = 2;
+  DISTANCE_TYPE_COSINE = 3;
+  DISTANCE_TYPE_INNER_PRODUCT = 4;
+}
+
+enum VectorIndexObjectType {
+  VECTOR_INDEX_OBJECT_UNSPECIFIED = 0;
+  VECTOR_INDEX_OBJECT_VECTOR = 1;
+}
+message VectorIndexObject {
+  uint64 id = 1;
+  VectorIndexObjectType object_type = 2;
+}
+
+message VectorFileInfo {
+  uint64 object_id = 1;
+  uint64 file_size = 2;
+}
+
+message FlatIndexConfig {}
+
+message FlatIndex {
+  FlatIndexConfig config = 1;
+  repeated VectorFileInfo vector_files = 2;
+}
+
+message FlatIndexAdd {
+  repeated VectorFileInfo added_vector_files = 1;
+}
+
+message VectorIndex {
+  uint32 dimension = 1;
+  DistanceType distance_type = 2;
+  oneof variant {
+    // reserve 64 general configs
+    FlatIndex flat = 65;
+  }
+}
+
+message VectorIndexDelta {
+  message VectorIndexInit {
+    uint32 dimension = 1;
+    DistanceType distance_type = 2;
+    oneof config {
+      // reserve 64 general configs
+      FlatIndexConfig flat = 65;
+    }
+  }
+
+  message VectorIndexAdd {
+    oneof add {
+      // reserve 64 general configs
+      FlatIndexAdd flat = 65;
+    }
+  }
+
+  message VectorIndexAdds {
+    repeated VectorIndexAdd adds = 1;
+  }
+
+  oneof delta {
+    VectorIndexInit init = 1;
+    VectorIndexAdds adds = 2;
+  }
+}
+
+message HummockVersion {
+  message Levels {
+    repeated Level levels = 1;
+    OverlappingLevel l0 = 2;
+    uint64 group_id = 3;
+    uint64 parent_group_id = 4;
+    repeated uint32 member_table_ids = 5 [deprecated = true];
+    uint64 compaction_group_version_id = 6;
+  }
+  uint64 id = 1;
+  // Levels of each compaction group
+  map<uint64, Levels> levels = 2;
+  uint64 max_committed_epoch = 3 [deprecated = true];
+  reserved 4;
+  reserved 'safe_epoch';
+  map<uint32, TableWatermarks> table_watermarks = 5;
+  map<uint32, TableChangeLog> table_change_logs = 6;
+  map<uint32, StateTableInfo> state_table_info = 7;
+  map<uint32, VectorIndex> vector_indexes = 8;
+}
+
+message HummockVersionDelta {
+  message GroupDeltas {
+    repeated GroupDelta group_deltas = 1;
+  }
+  uint64 id = 1;
+  uint64 prev_id = 2;
+  // Levels of each compaction group
+  map<uint64, GroupDeltas> group_deltas = 3;
+  uint64 max_committed_epoch = 4 [deprecated = true];
+  reserved 5;
+  reserved 'safe_epoch';
+  bool trivial_move = 6;
+  reserved 7;
+  reserved "gc_object_ids";
+  map<uint32, TableWatermarks> new_table_watermarks = 8;
+  repeated uint32 removed_table_ids = 9;
+  message ChangeLogDelta {
+    EpochNewChangeLog new_log = 1;
+    // only logs in epoch later than truncate_epoch will be preserved
+    uint64 truncate_epoch = 2;
+  }
+  map<uint32, ChangeLogDelta> change_log_delta = 10;
+  map<uint32, StateTableInfoDelta> state_table_info_delta = 11;
+  map<uint32, VectorIndexDelta> vector_index_delta = 12;
+}
+
+message HummockVersionDeltas {
+  repeated HummockVersionDelta version_deltas = 1;
+}
+
+message HummockVersionCheckpoint {
+  message StaleObjects {
+    repeated uint64 id = 1;
+    uint64 total_file_size = 2;
+    repeated VectorIndexObject vector_files = 3;
+  }
+  HummockVersion version = 1;
+  map<uint64, StaleObjects> stale_objects = 2;
+}
+
+message HummockVersionArchive {
+  HummockVersion version = 1;
+  // some version_deltas since version
+  repeated HummockVersionDelta version_deltas = 2;
+}
+
+message VersionUpdatePayload {
+  oneof payload {
+    HummockVersionDeltas version_deltas = 1;
+    HummockVersion pinned_version = 2;
+  }
+}
+
+message UnpinVersionBeforeRequest {
+  uint32 context_id = 1;
+  uint64 unpin_version_before = 2;
+}
+
+message UnpinVersionBeforeResponse {
+  common.Status status = 1;
+}
+
+message GetCurrentVersionRequest {}
+
+message GetCurrentVersionResponse {
+  common.Status status = 1;
+  HummockVersion current_version = 2;
+}
+
+message UnpinVersionRequest {
+  uint32 context_id = 1;
+}
+
+message UnpinVersionResponse {
+  common.Status status = 1;
+}
+
+message GetAssignedCompactTaskNumRequest {}
+
+message GetAssignedCompactTaskNumResponse {
+  uint32 num_tasks = 1;
+}
+
+// When right_exclusive=false, it represents [left, right], of which both boundary are open. When right_exclusive=true,
+// it represents [left, right), of which right is exclusive.
+message KeyRange {
+  bytes left = 1;
+  bytes right = 2;
+  bool right_exclusive = 3;
+}
+
+message TableOption {
+  reserved 1;
+  optional uint32 retention_seconds = 2;
+}
+
+message TableSchema {
+  repeated int32 column_ids = 1;
+}
+
+message CompactTask {
+  enum TaskStatus {
+    UNSPECIFIED = 0;
+    PENDING = 1;
+    SUCCESS = 2;
+    HEARTBEAT_CANCELED = 3;
+    NO_AVAIL_MEMORY_RESOURCE_CANCELED = 4;
+    ASSIGN_FAIL_CANCELED = 5;
+    SEND_FAIL_CANCELED = 6;
+    MANUAL_CANCELED = 7;
+    INVALID_GROUP_CANCELED = 8;
+    INPUT_OUTDATED_CANCELED = 9;
+    EXECUTE_FAILED = 10;
+    JOIN_HANDLE_FAILED = 11;
+    TRACK_SST_OBJECT_ID_FAILED = 12;
+    NO_AVAIL_CPU_RESOURCE_CANCELED = 13;
+    HEARTBEAT_PROGRESS_CANCELED = 14;
+    RETENTION_TIME_REJECTED = 17;
+
+    // for serverless compaction
+    SERVERLESS_SEND_FAIL_CANCELED = 15;
+    SERVERLESS_TABLE_NOT_FOUND_CANCELED = 16;
+  }
+  // SSTs to be compacted, which will be removed from LSM after compaction
+  repeated InputLevel input_ssts = 1;
+  // In ideal case, the compaction will generate splits.len() tables which have key range
+  // corresponding to that in [splits], respectively
+  repeated KeyRange splits = 2;
+  reserved 3;
+  reserved 'watermark';
+  // compaction output, which will be added to [target_level] of LSM after compaction
+  repeated SstableInfo sorted_output_ssts = 4;
+  // task id assigned by hummock storage service
+  uint64 task_id = 5;
+  // compaction output will be added to [target_level] of LSM after compaction
+  uint32 target_level = 6;
+  bool gc_delete_keys = 7;
+  // Lbase in LSM
+  uint32 base_level = 8;
+  TaskStatus task_status = 9;
+  // compaction group the task belongs to
+  uint64 compaction_group_id = 12;
+  // existing_table_ids for compaction drop key
+  repeated uint32 existing_table_ids = 13;
+  uint32 compression_algorithm = 14;
+  uint64 target_file_size = 15;
+  uint32 compaction_filter_mask = 16;
+  map<uint32, TableOption> table_options = 17;
+  uint64 current_epoch_time = 18;
+  uint64 target_sub_level_id = 19;
+
+  enum TaskType {
+    TYPE_UNSPECIFIED = 0;
+    DYNAMIC = 1;
+    SPACE_RECLAIM = 2;
+    MANUAL = 3;
+    SHARED_BUFFER = 4;
+    TTL = 5;
+    TOMBSTONE = 6;
+    EMERGENCY = 7;
+    VNODE_WATERMARK = 8;
+  }
+
+  // Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum
+  TaskType task_type = 20;
+
+  // Deprecated. use table_vnode_partition instead;
+  bool split_by_state_table = 21 [deprecated = true];
+  // Compaction needs to cut the state table every time 1/weight of vnodes in the table have been processed.
+  // Deprecated. use table_vnode_partition instead;
+  uint32 split_weight_by_vnode = 22;
+  map<uint32, uint32> table_vnode_partition = 23;
+  // The table watermark of any table id. In compaction we only use the table watermarks on safe epoch,
+  // so we only need to include the table watermarks on safe epoch to reduce the size of metadata.
+  map<uint32, TableWatermarks> table_watermarks = 24;
+  // The table schemas that are at least as new as the one used to create `input_ssts`.
+  map<uint32, TableSchema> table_schemas = 25;
+  // Max sub compaction task numbers
+  uint32 max_sub_compaction = 26;
+  // The compaction group id when the compaction task is created.
+  uint64 compaction_group_version_id = 27;
+}
+
+message LevelHandler {
+  message RunningCompactTask {
+    uint64 task_id = 1;
+    repeated uint64 ssts = 2;
+    uint64 total_file_size = 3;
+    uint32 target_level = 4;
+  }
+  uint32 level = 1;
+  repeated RunningCompactTask tasks = 3;
+}
+
+message CompactStatus {
+  uint64 compaction_group_id = 1;
+  repeated LevelHandler level_handlers = 2;
+}
+
+// Config info of compaction group.
+message CompactionGroup {
+  uint64 id = 1;
+  CompactionConfig compaction_config = 4;
+}
+
+// Complete info of compaction group.
+// The info is the aggregate of HummockVersion and CompactionGroupConfig
+message CompactionGroupInfo {
+  uint64 id = 1;
+  uint64 parent_id = 2;
+  repeated uint32 member_table_ids = 3;
+  CompactionConfig compaction_config = 4;
+}
+
+message CompactTaskAssignment {
+  CompactTask compact_task = 1;
+  uint32 context_id = 2;
+}
+
+message HummockPinnedVersion {
+  uint32 context_id = 1;
+  uint64 min_pinned_id = 2;
+}
+
+message HummockPinnedSnapshot {
+  uint32 context_id = 1;
+  uint64 minimal_pinned_snapshot = 2;
+}
+
+message GetNewObjectIdsRequest {
+  uint32 number = 1;
+}
+
+message GetNewObjectIdsResponse {
+  common.Status status = 1;
+  // inclusive
+  uint64 start_id = 2;
+  // exclusive
+  uint64 end_id = 3;
+}
+
+// This is a heartbeat message. Task will be considered dead if
+// CompactTaskProgress is not received for a timeout
+// or num_ssts_sealed/num_ssts_uploaded do not increase for a timeout.
+message CompactTaskProgress {
+  uint64 task_id = 1;
+  uint32 num_ssts_sealed = 2;
+  uint32 num_ssts_uploaded = 3;
+  uint64 num_progress_key = 4;
+  uint64 num_pending_read_io = 5;
+  uint64 num_pending_write_io = 6;
+  optional uint64 compaction_group_id = 7;
+}
+
+message SubscribeCompactionEventRequest {
+  // Register provides the context_id of the corresponding Compactor.
+  message Register {
+    uint32 context_id = 1;
+  }
+
+  // PullTask provides the number of tasks needed for the Compactor.
+  message PullTask {
+    uint32 pull_task_count = 4;
+  }
+
+  // ReportTask provides the compact task to report to the meta.
+  message ReportTask {
+    reserved 2;
+    reserved "compact_task";
+    map<uint32, TableStats> table_stats_change = 3;
+
+    uint64 task_id = 4;
+    CompactTask.TaskStatus task_status = 5;
+    repeated SstableInfo sorted_output_ssts = 6;
+    map<uint64, uint64> object_timestamps = 7;
+  }
+
+  // HeartBeat provides the progress status of all tasks on the Compactor.
+  message HeartBeat {
+    repeated CompactTaskProgress progress = 2;
+  }
+
+  oneof event {
+    // Compactor will register its own context_id with Meta via Register and establish a bi-directional streaming rpc.
+    Register register = 1;
+
+    // Compactor will recalculate the number of tasks needed locally after receiving the PullTaskAck and get the next batch of tasks from Meta via PullTask.
+    PullTask pull_task = 2;
+
+    // When the execution of each task completes/fails, Compactor returns the task to the meta via ReportTask.
+    ReportTask report_task = 3;
+
+    // Periodically, HeartBeat carries the progress of all tasks on the Compactor, and the meta will cancel the task when it expires.
+    HeartBeat heart_beat = 4;
+  }
+
+  uint64 create_at = 7;
+}
+
+message SubscribeCompactionEventResponse {
+  // PullTaskAck is a response, the meta will return a PullTaskAck after distributing the task requested by the PullTask.
+  // The Compactor receives the PullTaskAck and remakes its state and tries to initiate the next PullTask.
+  message PullTaskAck {}
+
+  oneof event {
+    CompactTask compact_task = 1;
+    VacuumTask vacuum_task = 2 [deprecated = true];
+    FullScanTask full_scan_task = 3 [deprecated = true];
+    ValidationTask validation_task = 4 [deprecated = true];
+    CancelCompactTask cancel_compact_task = 5;
+
+    PullTaskAck pull_task_ack = 6;
+  }
+
+  uint64 create_at = 7;
+}
+
+message ReportCompactionTaskRequest {
+  // ReportTask provides the compact task to report to the meta.
+  message ReportTask {
+    CompactTask compact_task = 2;
+    map<uint32, TableStats> table_stats_change = 3;
+    map<uint64, uint64> object_timestamps = 4;
+  }
+  // HeartBeat provides the progress status of all tasks on the Compactor.
+  message HeartBeat {
+    repeated CompactTaskProgress progress = 2;
+  }
+  oneof event {
+    ReportTask report_task = 1;
+    HeartBeat heart_beat = 2;
+  }
+}
+
+message ReportCompactionTaskResponse {
+  common.Status status = 1;
+}
+
+message ValidationTask {
+  repeated SstableInfo sst_infos = 1;
+  map<uint64, uint32> sst_id_to_worker_id = 2;
+}
+
+// Delete SSTs in object store
+message VacuumTask {
+  repeated uint64 sstable_object_ids = 1;
+}
+
+// Scan object store to get candidate orphan SSTs.
+message FullScanTask {
+  uint64 sst_retention_watermark = 1;
+  optional string prefix = 2;
+  optional string start_after = 3;
+  optional uint64 limit = 4;
+}
+
+// Cancel compact task
+message CancelCompactTask {
+  uint32 context_id = 1;
+  uint64 task_id = 2;
+}
+
+message TriggerManualCompactionRequest {
+  uint64 compaction_group_id = 1;
+  KeyRange key_range = 2;
+  uint32 table_id = 3;
+  uint32 level = 4;
+  repeated uint64 sst_ids = 5;
+}
+
+message TriggerManualCompactionResponse {
+  common.Status status = 1;
+}
+
+message TriggerFullGCRequest {
+  uint64 sst_retention_time_sec = 1;
+  optional string prefix = 2;
+}
+
+message TriggerFullGCResponse {
+  common.Status status = 1;
+}
+
+message ListVersionDeltasRequest {
+  uint64 start_id = 1;
+  uint32 num_limit = 2;
+  uint64 committed_epoch_limit = 3;
+}
+
+message ListVersionDeltasResponse {
+  HummockVersionDeltas version_deltas = 1;
+}
+
+message PinnedVersionsSummary {
+  repeated HummockPinnedVersion pinned_versions = 1;
+  map<uint32, common.WorkerNode> workers = 2;
+}
+
+message RiseCtlGetPinnedVersionsSummaryRequest {}
+
+message RiseCtlGetPinnedVersionsSummaryResponse {
+  PinnedVersionsSummary summary = 1;
+}
+
+message InitMetadataForReplayRequest {
+  repeated catalog.Table tables = 1;
+  repeated CompactionGroupInfo compaction_groups = 2;
+}
+
+message InitMetadataForReplayResponse {}
+
+message ReplayVersionDeltaRequest {
+  HummockVersionDelta version_delta = 1;
+}
+
+message ReplayVersionDeltaResponse {
+  HummockVersion version = 1;
+  repeated uint64 modified_compaction_groups = 2;
+}
+
+message TriggerCompactionDeterministicRequest {
+  uint64 version_id = 1;
+  repeated uint64 compaction_groups = 2;
+}
+
+message TriggerCompactionDeterministicResponse {}
+
+message DisableCommitEpochRequest {}
+
+message DisableCommitEpochResponse {
+  HummockVersion current_version = 1;
+}
+
+message RiseCtlListCompactionGroupRequest {}
+
+message RiseCtlListCompactionGroupResponse {
+  common.Status status = 1;
+  repeated CompactionGroupInfo compaction_groups = 2;
+}
+
+message RiseCtlUpdateCompactionConfigRequest {
+  message CompressionAlgorithm {
+    uint32 level = 1;
+    string compression_algorithm = 2;
+  }
+
+  message MutableConfig {
+    oneof mutable_config {
+      uint64 max_bytes_for_level_base = 1;
+      uint64 max_bytes_for_level_multiplier = 2;
+      uint64 max_compaction_bytes = 3;
+      uint64 sub_level_max_compaction_bytes = 4;
+      uint64 level0_tier_compact_file_number = 6;
+      uint64 target_file_size_base = 7;
+      uint32 compaction_filter_mask = 8;
+      uint32 max_sub_compaction = 9;
+      uint64 level0_stop_write_threshold_sub_level_number = 10;
+      uint32 level0_sub_level_compact_level_count = 11;
+      uint32 level0_overlapping_sub_level_compact_level_count = 12;
+      uint64 max_space_reclaim_bytes = 13;
+      uint64 level0_max_compact_file_number = 14;
+      bool enable_emergency_picker = 15;
+      uint32 tombstone_reclaim_ratio = 16;
+      CompressionAlgorithm compression_algorithm = 17;
+      uint32 max_l0_compact_level_count = 18;
+      uint64 sst_allowed_trivial_move_min_size = 19;
+      uint32 split_weight_by_vnode = 20;
+      bool disable_auto_group_scheduling = 21;
+      uint64 max_overlapping_level_size = 22;
+      // The emergency compaction limitations for the level0 sstables file count
+      uint32 emergency_level0_sst_file_count = 25;
+      // The emergency compaction limitations for the level0 sub level partition
+      uint32 emergency_level0_sub_level_partition = 26;
+      // The limitation of the max sst size of the level0 to trigger the write stop
+      uint32 level0_stop_write_threshold_max_sst_count = 27;
+      // The limitation of the max sst size of the level0 to trigger the write stop
+      uint64 level0_stop_write_threshold_max_size = 28;
+      // The limitation of the max sst count of the trivial move task
+      uint32 sst_allowed_trivial_move_max_count = 29;
+      // Enable the optimization of the interval selection for the level0 compaction
+      bool enable_optimize_l0_interval_selection = 30;
+    }
+  }
+  repeated uint64 compaction_group_ids = 1;
+  repeated MutableConfig configs = 2;
+}
+
+message RiseCtlUpdateCompactionConfigResponse {
+  common.Status status = 1;
+}
+
+message PinVersionRequest {
+  uint32 context_id = 1;
+}
+
+message PinVersionResponse {
+  HummockVersion pinned_version = 1;
+}
+
+message SplitCompactionGroupRequest {
+  uint64 group_id = 1;
+  repeated uint32 table_ids = 2;
+  uint32 partition_vnode_count = 3;
+}
+
+message SplitCompactionGroupResponse {
+  uint64 new_group_id = 1;
+}
+
+message RiseCtlPauseVersionCheckpointRequest {}
+
+message RiseCtlPauseVersionCheckpointResponse {}
+
+message RiseCtlResumeVersionCheckpointRequest {}
+
+message RiseCtlResumeVersionCheckpointResponse {}
+
+message RiseCtlGetCheckpointVersionRequest {}
+
+message RiseCtlGetCheckpointVersionResponse {
+  HummockVersion checkpoint_version = 1;
+}
+
+message RiseCtlListCompactionStatusRequest {}
+
+message RiseCtlListCompactionStatusResponse {
+  repeated CompactStatus compaction_statuses = 1;
+  repeated CompactTaskAssignment task_assignment = 2;
+  repeated CompactTaskProgress task_progress = 3;
+}
+
+message ListBranchedObjectRequest {}
+
+message ListBranchedObjectResponse {
+  repeated BranchedObject branched_objects = 1;
+}
+
+message ListActiveWriteLimitRequest {}
+
+message ListActiveWriteLimitResponse {
+  // < compaction group id, write limit info >
+  map<uint64, WriteLimits.WriteLimit> write_limits = 1;
+}
+
+message ListHummockMetaConfigRequest {}
+
+message ListHummockMetaConfigResponse {
+  map<string, string> configs = 1;
+}
+
+message RiseCtlRebuildTableStatsRequest {}
+
+message RiseCtlRebuildTableStatsResponse {}
+
+message GetCompactionScoreRequest {
+  uint64 compaction_group_id = 1;
+}
+
+message GetCompactionScoreResponse {
+  message PickerInfo {
+    uint64 score = 1;
+    uint64 select_level = 2;
+    uint64 target_level = 3;
+    string picker_type = 4;
+  }
+  uint64 compaction_group_id = 1;
+  repeated PickerInfo scores = 2;
+}
+
+message ListCompactTaskAssignmentRequest {}
+
+message ListCompactTaskAssignmentResponse {
+  repeated CompactTaskAssignment task_assignment = 1;
+}
+
+message ListCompactTaskProgressRequest {}
+
+message ListCompactTaskProgressResponse {
+  repeated CompactTaskProgress task_progress = 1;
+}
+
+message CancelCompactTaskRequest {
+  uint64 task_id = 1;
+  CompactTask.TaskStatus task_status = 2;
+}
+
+message CancelCompactTaskResponse {
+  bool ret = 1;
+}
+
+message GetVersionByEpochRequest {
+  uint64 epoch = 1;
+  uint32 table_id = 2;
+}
+
+message GetVersionByEpochResponse {
+  HummockVersion version = 1;
+}
+
+message MergeCompactionGroupRequest {
+  uint64 left_group_id = 1;
+  uint64 right_group_id = 2;
+}
+
+message MergeCompactionGroupResponse {}
+
+service HummockManagerService {
+  rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
+  rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
+  rpc ListVersionDeltas(ListVersionDeltasRequest) returns (ListVersionDeltasResponse);
+  rpc ReplayVersionDelta(ReplayVersionDeltaRequest) returns (ReplayVersionDeltaResponse);
+  rpc GetAssignedCompactTaskNum(GetAssignedCompactTaskNumRequest) returns (GetAssignedCompactTaskNumResponse);
+  rpc TriggerCompactionDeterministic(TriggerCompactionDeterministicRequest) returns (TriggerCompactionDeterministicResponse);
+  rpc DisableCommitEpoch(DisableCommitEpochRequest) returns (DisableCommitEpochResponse);
+  rpc GetNewObjectIds(GetNewObjectIdsRequest) returns (GetNewObjectIdsResponse);
+  rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
+  rpc TriggerFullGC(TriggerFullGCRequest) returns (TriggerFullGCResponse);
+  rpc RiseCtlGetPinnedVersionsSummary(RiseCtlGetPinnedVersionsSummaryRequest) returns (RiseCtlGetPinnedVersionsSummaryResponse);
+  rpc RiseCtlListCompactionGroup(RiseCtlListCompactionGroupRequest) returns (RiseCtlListCompactionGroupResponse);
+  rpc RiseCtlUpdateCompactionConfig(RiseCtlUpdateCompactionConfigRequest) returns (RiseCtlUpdateCompactionConfigResponse);
+  rpc RiseCtlPauseVersionCheckpoint(RiseCtlPauseVersionCheckpointRequest) returns (RiseCtlPauseVersionCheckpointResponse);
+  rpc RiseCtlResumeVersionCheckpoint(RiseCtlResumeVersionCheckpointRequest) returns (RiseCtlResumeVersionCheckpointResponse);
+  rpc RiseCtlGetCheckpointVersion(RiseCtlGetCheckpointVersionRequest) returns (RiseCtlGetCheckpointVersionResponse);
+  rpc RiseCtlRebuildTableStats(RiseCtlRebuildTableStatsRequest) returns (RiseCtlRebuildTableStatsResponse);
+  rpc InitMetadataForReplay(InitMetadataForReplayRequest) returns (InitMetadataForReplayResponse);
+  rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
+  rpc SplitCompactionGroup(SplitCompactionGroupRequest) returns (SplitCompactionGroupResponse);
+  rpc RiseCtlListCompactionStatus(RiseCtlListCompactionStatusRequest) returns (RiseCtlListCompactionStatusResponse);
+  rpc SubscribeCompactionEvent(stream SubscribeCompactionEventRequest) returns (stream SubscribeCompactionEventResponse);
+  rpc ReportCompactionTask(ReportCompactionTaskRequest) returns (ReportCompactionTaskResponse);
+  rpc ListBranchedObject(ListBranchedObjectRequest) returns (ListBranchedObjectResponse);
+  rpc ListActiveWriteLimit(ListActiveWriteLimitRequest) returns (ListActiveWriteLimitResponse);
+  rpc ListHummockMetaConfig(ListHummockMetaConfigRequest) returns (ListHummockMetaConfigResponse);
+  rpc GetCompactionScore(GetCompactionScoreRequest) returns (GetCompactionScoreResponse);
+  rpc ListCompactTaskAssignment(ListCompactTaskAssignmentRequest) returns (ListCompactTaskAssignmentResponse);
+  rpc ListCompactTaskProgress(ListCompactTaskProgressRequest) returns (ListCompactTaskProgressResponse);
+  rpc CancelCompactTask(CancelCompactTaskRequest) returns (CancelCompactTaskResponse);
+  rpc GetVersionByEpoch(GetVersionByEpochRequest) returns (GetVersionByEpochResponse);
+  rpc MergeCompactionGroup(MergeCompactionGroupRequest) returns (MergeCompactionGroupResponse);
+
+  // iceberg
+  rpc SubscribeIcebergCompactionEvent(stream iceberg_compaction.SubscribeIcebergCompactionEventRequest) returns (stream iceberg_compaction.SubscribeIcebergCompactionEventResponse);
+}
+
+message CompactionConfig {
+  enum CompactionMode {
+    UNSPECIFIED = 0;
+    RANGE = 1;
+  }
+  uint64 max_bytes_for_level_base = 1;
+  uint64 max_level = 2;
+  uint64 max_bytes_for_level_multiplier = 3;
+  uint64 max_compaction_bytes = 4;
+  uint64 sub_level_max_compaction_bytes = 5;
+  uint64 level0_tier_compact_file_number = 7;
+  CompactionMode compaction_mode = 8;
+  repeated string compression_algorithm = 9;
+  uint64 target_file_size_base = 10;
+  uint32 compaction_filter_mask = 11;
+  uint32 max_sub_compaction = 12;
+  uint64 max_space_reclaim_bytes = 13;
+  bool split_by_state_table = 14;
+  // Compaction needs to cut the state table every time 1/weight of vnodes in the table have been processed.
+  uint32 split_weight_by_vnode = 6;
+  // soft limit for max number of sub level number
+  uint64 level0_stop_write_threshold_sub_level_number = 15;
+  uint64 level0_max_compact_file_number = 16;
+  uint32 level0_sub_level_compact_level_count = 17;
+
+  // for tier compaction pick overlapping level
+  uint32 level0_overlapping_sub_level_compact_level_count = 18;
+  uint32 tombstone_reclaim_ratio = 19;
+  bool enable_emergency_picker = 20;
+
+  // The limitation of the level count of l0 compaction
+  optional uint32 max_l0_compact_level_count = 21;
+
+  // The limitation of base level trivial move sst size
+  optional uint64 sst_allowed_trivial_move_min_size = 22;
+
+  // The limitation of auto group scheduling
+  optional bool disable_auto_group_scheduling = 23;
+
+  // The limitation of the max size of the overlapping-level for the compaction
+  // hummock will reorg the commit-sstables to the multi overlapping-level if the size of the commit-sstables is larger than `max_overlapping_level_size`
+  optional uint64 max_overlapping_level_size = 24;
+
+  // The emergency compaction limitations for the level0 sstables file count
+  optional uint32 emergency_level0_sst_file_count = 25;
+
+  // The emergency compaction limitations for the level0 sub level partition
+  optional uint32 emergency_level0_sub_level_partition = 26;
+
+  // The limitation of the max sst count of the level0 to trigger the write stop
+  optional uint32 level0_stop_write_threshold_max_sst_count = 27;
+
+  // The limitation of the max sst size of the level0 to trigger the write stop
+  optional uint64 level0_stop_write_threshold_max_size = 28;
+
+  // The limitation of the max sst count of the trivial move task
+  optional uint32 sst_allowed_trivial_move_max_count = 29;
+
+  // Enable the optimization of the interval selection for the level0 compaction
+  optional bool enable_optimize_l0_interval_selection = 30;
+}
+
+message TableStats {
+  int64 total_key_size = 1;
+  int64 total_value_size = 2;
+  int64 total_key_count = 3;
+
+  // `total_compressed_size`` represents the size that the table takes up in the output sst
+  //  and this field is only filled and used by CN flushes, not compactor compaction
+  uint64 total_compressed_size = 4;
+}
+
+message HummockVersionStats {
+  uint64 hummock_version_id = 1;
+  map<uint32, TableStats> table_stats = 2;
+}
+
+message WriteLimits {
+  message WriteLimit {
+    repeated uint32 table_ids = 1;
+    string reason = 2;
+  }
+  // < compaction group id, write limit info >
+  map<uint64, WriteLimit> write_limits = 1;
+}
+
+message BranchedObject {
+  uint64 object_id = 1;
+  repeated uint64 sst_id = 2;
+  // Compaction group id the SST belongs to.
+  uint64 compaction_group_id = 3;
+}

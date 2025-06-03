@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package source;
+
+option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
+
+message ConnectorSplit {
+  string split_type = 1;
+  bytes encoded_split = 2;
+}
+
+message ConnectorSplits {
+  repeated ConnectorSplit splits = 1;
+}
+
+message SourceActorInfo {
+  uint32 actor_id = 1;
+  ConnectorSplits splits = 2;
+}

@@ -1,0 +1,157 @@
+syntax = "proto3";
+
+package data;
+
+import "common.proto";
+
+option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
+
+message Interval {
+  int32 months = 1;
+  int32 days = 2;
+  int64 usecs = 3;
+}
+
+message DataType {
+  enum IntervalType {
+    UNSPECIFIED = 0;
+    YEAR = 1;
+    MONTH = 2;
+    DAY = 3;
+    HOUR = 4;
+    MINUTE = 5;
+    SECOND = 6;
+    YEAR_TO_MONTH = 7;
+    DAY_TO_HOUR = 8;
+    DAY_TO_MINUTE = 9;
+    DAY_TO_SECOND = 10;
+    HOUR_TO_MINUTE = 11;
+    HOUR_TO_SECOND = 12;
+    MINUTE_TO_SECOND = 13;
+  }
+  enum TypeName {
+    TYPE_UNSPECIFIED = 0;
+    INT16 = 1;
+    INT32 = 2;
+    INT64 = 3;
+    FLOAT = 4;
+    DOUBLE = 5;
+    BOOLEAN = 6;
+    VARCHAR = 7;
+    DECIMAL = 8;
+    TIME = 9;
+    TIMESTAMP = 10;
+    INTERVAL = 11;
+    DATE = 12;
+    // Timestamp type with timezone
+    TIMESTAMPTZ = 13;
+    STRUCT = 15;
+    LIST = 16;
+    BYTEA = 17;
+    JSONB = 18;
+    SERIAL = 19;
+    INT256 = 20;
+    MAP = 21;
+  }
+  TypeName type_name = 1;
+  // Data length for char.
+  // Max data length for varchar.
+  // Precision for time, decimal.
+  uint32 precision = 2;
+  // Scale for decimal.
+  uint32 scale = 3;
+  bool is_nullable = 4;
+  IntervalType interval_type = 5;
+  // For struct type, it represents all the fields in the struct.
+  // For list type it only contains 1 element which is the inner item type of the List.
+  // For example, `ARRAY<INTEGER>` will be represented as `vec![DataType::Int32]`.
+  repeated DataType field_type = 6;
+  // Name of the fields if it is a struct type. For other types it will be empty.
+  repeated string field_names = 7;
+  // Id of the fields if it is a struct type. Used in serialization for nested-schema evolution purposes.
+  //
+  // Empty if either:
+  // - it is not a struct type
+  // - it is not within a table schema (`ColumnDesc`)
+  // - it was persisted in an old version.
+  repeated int32 field_ids = 8;
+}
+
+message StructRwArrayData {
+  repeated RwArray children_array = 1;
+  repeated DataType children_type = 2;
+}
+
+message ListRwArrayData {
+  repeated uint32 offsets = 1;
+  RwArray value = 2;
+  DataType value_type = 3;
+}
+
+enum RwArrayType {
+  UNSPECIFIED = 0;
+  INT16 = 1;
+  INT32 = 2;
+  INT64 = 3;
+  FLOAT32 = 4;
+  FLOAT64 = 5;
+  UTF8 = 6;
+  BOOL = 7;
+  DECIMAL = 8;
+  DATE = 9;
+  TIME = 10;
+  TIMESTAMP = 11;
+  TIMESTAMPTZ = 19;
+  INTERVAL = 12;
+  STRUCT = 13;
+  LIST = 14;
+  BYTEA = 15;
+  JSONB = 16;
+  SERIAL = 17;
+  INT256 = 18;
+  MAP = 20;
+}
+
+message RwArray {
+  RwArrayType array_type = 1;
+  common.Buffer null_bitmap = 2;
+  repeated common.Buffer values = 3;
+  StructRwArrayData struct_array_data = 4;
+  ListRwArrayData list_array_data = 5;
+}
+
+message Datum {
+  // bool array/bitmap: one byte, 0 for false (null), non-zero for true (non-null)
+  // integer, float,  double: big-endianness
+  // interval: encoded to (months, days, milliseconds), big-endianness
+  // varchar: encoded accorded to encoding, currently only utf8 is supported.
+  bytes body = 1;
+}
+
+message DataChunk {
+  uint32 cardinality = 1;
+  repeated RwArray columns = 2;
+}
+
+enum Op {
+  OP_UNSPECIFIED = 0;
+  INSERT = 1;
+  DELETE = 2;
+  UPDATE_INSERT = 3;
+  UPDATE_DELETE = 4;
+}
+
+message StreamChunk {
+  // for RwArray::from_protobuf(), may not need later
+  uint32 cardinality = 1;
+  repeated Op ops = 2;
+  repeated RwArray columns = 3;
+}
+
+message Epoch {
+  uint64 curr = 1;
+  uint64 prev = 2;
+}
+
+message Terminate {}

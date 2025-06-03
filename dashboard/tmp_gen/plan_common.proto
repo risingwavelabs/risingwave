@@ -1,0 +1,301 @@
+syntax = "proto3";
+
+package plan_common;
+
+import "common.proto";
+import "data.proto";
+import "expr.proto";
+import "secret.proto";
+
+option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
+
+// Field is a column in the streaming or batch plan.
+message Field {
+  data.DataType data_type = 1;
+  string name = 2;
+}
+
+enum ColumnDescVersion {
+  COLUMN_DESC_VERSION_UNSPECIFIED = 0;
+  // Introduced in https://github.com/risingwavelabs/risingwave/pull/13707#discussion_r1429947537,
+  // in case DEFAULT_KEY_COLUMN_NAME changes
+  COLUMN_DESC_VERSION_PR_13707 = 1;
+}
+
+message ColumnDesc {
+  data.DataType column_type = 1;
+  int32 column_id = 2;
+  // we store the column name in column desc now just for debug, but in future
+  // we should store it in ColumnCatalog but not here
+  string name = 3;
+
+  // Deprecated fields for struct type.
+  // TODO(struct): support struct type name and store it in `DataType`.
+  reserved 4;
+  reserved "field_descs";
+  reserved 5;
+  reserved "type_name";
+
+  // deprecated, breaking change
+  // GeneratedColumnDesc generated_column = 6 [deprecated = true];
+  // reserved 6;
+
+  // Optional description for the generated column or default value.
+  oneof generated_or_default_column {
+    GeneratedColumnDesc generated_column = 6;
+    DefaultColumnDesc default_column = 7;
+  }
+
+  // This field is used to store the description set by the `comment on` clause.
+  optional string description = 8;
+
+  // This field is used to represent the connector-spec additional column type.
+  // UNSPECIFIED or unset for normal column.
+
+  // deprecated, use AdditionalColumn instead, keep for compatibility with v1.6.x
+  AdditionalColumnType additional_column_type = 9;
+
+  ColumnDescVersion version = 10;
+
+  AdditionalColumn additional_column = 11;
+
+  bool nullable = 12;
+}
+
+message ColumnCatalog {
+  ColumnDesc column_desc = 1;
+  bool is_hidden = 2;
+}
+
+message GeneratedColumnDesc {
+  expr.ExprNode expr = 1;
+}
+
+message DefaultColumnDesc {
+  // Expression of the `DEFAULT`. Used when inserting new records.
+  expr.ExprNode expr = 1;
+  // Evaluated value of the expression at the time of the table creation or the
+  // column addition. Used when filling the default value for the records where
+  // the column is missing.
+  data.Datum snapshot_value = 2;
+}
+
+message StorageTableDesc {
+  uint32 table_id = 1;
+  repeated ColumnDesc columns = 2;
+  // TODO: may refactor primary key representations
+  repeated common.ColumnOrder pk = 3;
+  repeated uint32 dist_key_in_pk_indices = 4;
+  reserved 5;
+  repeated uint32 value_indices = 6;
+  uint32 read_prefix_len_hint = 7;
+  // Whether the table is versioned. If `true`, column-aware row encoding will
+  // be used to be compatible with schema changes.
+  bool versioned = 8;
+  repeated uint32 stream_key = 9;
+  optional uint32 vnode_col_idx_in_pk = 10;
+  optional uint32 retention_seconds = 11;
+
+  // Total vnode count of the table.
+  //
+  // Can be unset if the table is created in older versions where variable vnode count is not
+  // supported, in which case a default value of 256 (or 1 for singleton) should be used.
+  // Use `VnodeCountCompat::vnode_count` to access it.
+  optional uint32 maybe_vnode_count = 12;
+}
+
+message AsOf {
+  message ProcessTime {}
+  message Timestamp {
+    int64 timestamp = 1;
+  }
+  message Version {
+    int64 version = 1;
+  }
+  oneof as_of_type {
+    ProcessTime process_time = 1;
+    Timestamp timestamp = 2;
+    Version version = 3;
+  }
+}
+
+// Represents a table in external database for CDC scenario
+message ExternalTableDesc {
+  uint32 table_id = 1;
+  repeated ColumnDesc columns = 2;
+  // TODO: may refactor primary key representations
+  repeated common.ColumnOrder pk = 3;
+  string table_name = 4;
+  repeated uint32 stream_key = 5;
+  map<string, string> connect_properties = 6;
+  // upstream cdc source job id
+  uint32 source_id = 7;
+  map<string, secret.SecretRef> secret_refs = 8;
+}
+
+enum JoinType {
+  // Note that it comes from Calcite's JoinRelType.
+  // DO NOT HAVE direction for SEMI and ANTI now.
+  JOIN_TYPE_UNSPECIFIED = 0;
+  JOIN_TYPE_INNER = 1;
+  JOIN_TYPE_LEFT_OUTER = 2;
+  JOIN_TYPE_RIGHT_OUTER = 3;
+  JOIN_TYPE_FULL_OUTER = 4;
+  JOIN_TYPE_LEFT_SEMI = 5;
+  JOIN_TYPE_LEFT_ANTI = 6;
+  JOIN_TYPE_RIGHT_SEMI = 7;
+  JOIN_TYPE_RIGHT_ANTI = 8;
+  JOIN_TYPE_ASOF_INNER = 9;
+  JOIN_TYPE_ASOF_LEFT_OUTER = 10;
+}
+
+enum AsOfJoinType {
+  AS_OF_JOIN_TYPE_UNSPECIFIED = 0;
+  AS_OF_JOIN_TYPE_INNER = 1;
+  AS_OF_JOIN_TYPE_LEFT_OUTER = 2;
+}
+
+enum AsOfJoinInequalityType {
+  AS_OF_INEQUALITY_TYPE_UNSPECIFIED = 0;
+  AS_OF_INEQUALITY_TYPE_GT = 1;
+  AS_OF_INEQUALITY_TYPE_GE = 2;
+  AS_OF_INEQUALITY_TYPE_LT = 3;
+  AS_OF_INEQUALITY_TYPE_LE = 4;
+}
+
+message AsOfJoinDesc {
+  // The index of the right side's as of column.
+  uint32 right_idx = 1;
+  // The index of the left side's as of column.
+  uint32 left_idx = 2;
+  // The type of the inequality.
+  AsOfJoinInequalityType inequality_type = 3;
+}
+
+// https://github.com/tokio-rs/prost/issues/80
+enum FormatType {
+  FORMAT_TYPE_UNSPECIFIED = 0;
+  FORMAT_TYPE_NATIVE = 1;
+  FORMAT_TYPE_DEBEZIUM = 2;
+  FORMAT_TYPE_DEBEZIUM_MONGO = 3;
+  FORMAT_TYPE_MAXWELL = 4;
+  FORMAT_TYPE_CANAL = 5;
+  FORMAT_TYPE_UPSERT = 6;
+  FORMAT_TYPE_PLAIN = 7;
+  FORMAT_TYPE_NONE = 8;
+}
+
+enum EncodeType {
+  ENCODE_TYPE_UNSPECIFIED = 0;
+  ENCODE_TYPE_NATIVE = 1;
+  ENCODE_TYPE_AVRO = 2;
+  ENCODE_TYPE_CSV = 3;
+  ENCODE_TYPE_PROTOBUF = 4;
+  ENCODE_TYPE_JSON = 5;
+  ENCODE_TYPE_BYTES = 6;
+  ENCODE_TYPE_TEMPLATE = 7;
+  ENCODE_TYPE_NONE = 8;
+  ENCODE_TYPE_TEXT = 9;
+  ENCODE_TYPE_PARQUET = 10;
+}
+
+enum RowFormatType {
+  ROW_UNSPECIFIED = 0;
+  JSON = 1;
+  PROTOBUF = 2;
+  DEBEZIUM_JSON = 3;
+  AVRO = 4;
+  MAXWELL = 5;
+  CANAL_JSON = 6;
+  CSV = 7;
+  NATIVE = 8;
+  DEBEZIUM_AVRO = 9;
+  UPSERT_JSON = 10;
+  UPSERT_AVRO = 11;
+  DEBEZIUM_MONGO_JSON = 12;
+  BYTES = 13;
+}
+
+message IndexAndExpr {
+  uint32 index = 1;
+  expr.ExprNode expr = 2;
+}
+
+message DefaultColumns {
+  repeated IndexAndExpr default_columns = 1;
+}
+
+// The cardinality of the output rows of a plan node. Bounds are inclusive.
+message Cardinality {
+  uint64 lo = 1;
+  // Unbounded if not set.
+  optional uint64 hi = 2;
+}
+
+// Provide statement-local context, e.g. session info like time zone, for execution.
+message ExprContext {
+  string time_zone = 1;
+  bool strict_mode = 2;
+}
+
+message AdditionalColumnKey {}
+
+message AdditionalColumnTimestamp {}
+
+message AdditionalColumnPartition {}
+
+message AdditionalColumnOffset {}
+
+message AdditionalColumnFilename {}
+
+message AdditionalColumnHeader {
+  string inner_field = 1;
+  data.DataType data_type = 2;
+}
+
+// metadata column for cdc table
+message AdditionalDatabaseName {}
+
+message AdditionalSchemaName {}
+
+message AdditionalTableName {}
+
+message AdditionalCollectionName {}
+
+message AdditionalColumnPayload {}
+
+// this type means we read all headers as a whole
+message AdditionalColumnHeaders {}
+
+message AdditionalSubject {}
+
+message AdditionalColumn {
+  oneof column_type {
+    AdditionalColumnKey key = 1;
+    AdditionalColumnTimestamp timestamp = 2;
+    AdditionalColumnPartition partition = 3;
+    AdditionalColumnOffset offset = 4;
+    AdditionalColumnHeader header_inner = 5;
+    AdditionalColumnFilename filename = 6;
+    AdditionalColumnHeaders headers = 7;
+    AdditionalDatabaseName database_name = 8;
+    AdditionalSchemaName schema_name = 9;
+    AdditionalTableName table_name = 10;
+    AdditionalCollectionName collection_name = 11;
+    AdditionalColumnPayload payload = 12;
+    AdditionalSubject subject = 13;
+  }
+}
+
+enum AdditionalColumnType {
+  ADDITIONAL_COLUMN_TYPE_UNSPECIFIED = 0;
+  ADDITIONAL_COLUMN_TYPE_KEY = 1;
+  ADDITIONAL_COLUMN_TYPE_TIMESTAMP = 2;
+  ADDITIONAL_COLUMN_TYPE_PARTITION = 3;
+  ADDITIONAL_COLUMN_TYPE_OFFSET = 4;
+  ADDITIONAL_COLUMN_TYPE_HEADER = 5;
+  ADDITIONAL_COLUMN_TYPE_FILENAME = 6;
+  ADDITIONAL_COLUMN_TYPE_NORMAL = 7;
+  ADDITIONAL_COLUMN_TYPE_PAYLOAD = 8;
+}

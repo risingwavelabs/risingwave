@@ -1,0 +1,660 @@
+syntax = "proto3";
+
+package expr;
+
+import "common.proto";
+import "data.proto";
+
+option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
+
+message ExprNode {
+  message NowRexNode {}
+  // TODO: move this into `FunctionCall`.
+  enum Type {
+    // `InputRef`, `Constant`, and `UserDefinedFunction` are indicated by the viriant of `rex_node`.
+    // Their types are therefore deprecated and should be `UNSPECIFIED` instead.
+    reserved 1, 2, 3000;
+    reserved "INPUT_REF", "CONSTANT_VALUE", "UDF";
+
+    // Used for `InputRef`, `Constant`, and `UserDefinedFunction`.
+    UNSPECIFIED = 0;
+
+    // arithmetics operators
+    ADD = 3;
+    SUBTRACT = 4;
+    MULTIPLY = 5;
+    DIVIDE = 6;
+    MODULUS = 7;
+    // comparison operators
+    EQUAL = 8;
+    NOT_EQUAL = 9;
+    LESS_THAN = 10;
+    LESS_THAN_OR_EQUAL = 11;
+    GREATER_THAN = 12;
+    GREATER_THAN_OR_EQUAL = 13;
+    GREATEST = 14;
+    LEAST = 15;
+    // logical operators
+    AND = 21;
+    OR = 22;
+    NOT = 23;
+    IN = 24;
+    SOME = 25;
+    ALL = 26;
+    // bitwise operators
+    BITWISE_AND = 31;
+    BITWISE_OR = 32;
+    BITWISE_XOR = 33;
+    BITWISE_NOT = 34;
+    BITWISE_SHIFT_LEFT = 35;
+    BITWISE_SHIFT_RIGHT = 36;
+    // date/time functions
+    EXTRACT = 101;
+    DATE_PART = 102;
+    TUMBLE_START = 103;
+    MAKE_DATE = 113;
+    MAKE_TIME = 114;
+    MAKE_TIMESTAMP = 115;
+    DATE_BIN = 116;
+    // From f64 to timestamp.
+    // e.g. `select to_timestamp(1672044740.0)`
+    SEC_TO_TIMESTAMPTZ = 104;
+    AT_TIME_ZONE = 105;
+    DATE_TRUNC = 106;
+    // Parse text to timestamp by format string.
+    // e.g. `select to_timestamp('2022 08 21', 'YYYY MM DD')`
+    CHAR_TO_TIMESTAMPTZ = 107;
+    CHAR_TO_DATE = 111;
+    // Performs a cast with additional timezone information.
+    CAST_WITH_TIME_ZONE = 108;
+    ADD_WITH_TIME_ZONE = 109;
+    SUBTRACT_WITH_TIME_ZONE = 110;
+    MAKE_TIMESTAMPTZ = 112;
+    // other functions
+    CAST = 201;
+    SUBSTR = 202;
+    LENGTH = 203;
+    LIKE = 204;
+    I_LIKE = 279;
+    SIMILAR_TO_ESCAPE = 284;
+    UPPER = 205;
+    LOWER = 206;
+    TRIM = 207;
+    REPLACE = 208;
+    POSITION = 209;
+    LTRIM = 210;
+    RTRIM = 211;
+    CASE = 212;
+    // Optimize case-when expression to constant lookup
+    // when arms are in a large scale with simple form
+    CONSTANT_LOOKUP = 624;
+    // ROUND(numeric, integer) -> numeric
+    ROUND_DIGIT = 213;
+    // ROUND(numeric) -> numeric
+    // ROUND(double precision) -> double precision
+    ROUND = 214;
+    ASCII = 215;
+    TRANSLATE = 216;
+    COALESCE = 217;
+    CONCAT_WS = 218;
+    CONCAT_WS_VARIADIC = 285;
+    ABS = 219;
+    SPLIT_PART = 220;
+    CEIL = 221;
+    FLOOR = 222;
+    TO_CHAR = 223;
+    MD5 = 224;
+    CHAR_LENGTH = 225;
+    REPEAT = 226;
+    CONCAT_OP = 227;
+    CONCAT = 286;
+    CONCAT_VARIADIC = 287;
+    // BOOL_OUT is different from CAST-bool-to-varchar in PostgreSQL.
+    BOOL_OUT = 228;
+    OCTET_LENGTH = 229;
+    BIT_LENGTH = 230;
+    OVERLAY = 231;
+    REGEXP_MATCH = 232;
+    REGEXP_REPLACE = 280;
+    REGEXP_COUNT = 281;
+    REGEXP_SPLIT_TO_ARRAY = 282;
+    REGEXP_EQ = 283;
+    POW = 233;
+    EXP = 234;
+    CHR = 235;
+    STARTS_WITH = 236;
+    INITCAP = 237;
+    LPAD = 238;
+    RPAD = 239;
+    REVERSE = 240;
+    STRPOS = 241 [deprecated = true]; // duplicated with POSITION
+    TO_ASCII = 242;
+    TO_HEX = 243;
+    QUOTE_IDENT = 244;
+    SIN = 245;
+    COS = 246;
+    TAN = 247;
+    COT = 248;
+    ASIN = 249;
+    ACOS = 250;
+    ATAN = 251;
+    ATAN2 = 252;
+    SIND = 253;
+    COSD = 254;
+    COTD = 255;
+    TAND = 256;
+    ASIND = 257;
+    SQRT = 258;
+    DEGREES = 259;
+    RADIANS = 260;
+    COSH = 261;
+    TANH = 262;
+    COTH = 263;
+    ASINH = 264;
+    ACOSH = 265;
+    ATANH = 266;
+    SINH = 267;
+    ACOSD = 268;
+    ATAND = 269;
+    ATAN2D = 270;
+    TRUNC = 271;
+    LN = 272;
+    LOG10 = 273;
+    CBRT = 274;
+    SIGN = 275;
+    SCALE = 276;
+    MIN_SCALE = 277;
+    TRIM_SCALE = 278;
+
+    // Boolean comparison
+    IS_TRUE = 301;
+    IS_NOT_TRUE = 302;
+    IS_FALSE = 303;
+    IS_NOT_FALSE = 304;
+    IS_NULL = 305;
+    IS_NOT_NULL = 306;
+    IS_DISTINCT_FROM = 307;
+    IS_NOT_DISTINCT_FROM = 308;
+
+    // string/bytea expressions
+    ENCODE = 310;
+    DECODE = 311;
+    SHA1 = 312;
+    SHA224 = 313;
+    SHA256 = 314;
+    SHA384 = 315;
+    SHA512 = 316;
+    LEFT = 317;
+    RIGHT = 318;
+    FORMAT = 319;
+    FORMAT_VARIADIC = 326;
+    PGWIRE_SEND = 320;
+    PGWIRE_RECV = 321;
+    CONVERT_FROM = 322;
+    CONVERT_TO = 323;
+    DECRYPT = 324;
+    ENCRYPT = 325;
+    INET_ATON = 328;
+    INET_NTOA = 329;
+    QUOTE_LITERAL = 330;
+    QUOTE_NULLABLE = 331;
+    HMAC = 332;
+    SECURE_COMPARE = 333;
+
+    // Constraints Check
+    CHECK_NOT_NULL = 350;
+
+    // Unary operators
+    NEG = 401;
+    // Nested selection operators
+    FIELD = 501;
+    // Array expression.
+    ARRAY = 521;
+    ARRAY_ACCESS = 522;
+    ROW = 523;
+    ARRAY_TO_STRING = 524;
+    ARRAY_RANGE_ACCESS = 525;
+    // Array functions
+    ARRAY_CAT = 531;
+    ARRAY_APPEND = 532;
+    ARRAY_PREPEND = 533;
+    FORMAT_TYPE = 534;
+    ARRAY_DISTINCT = 535;
+    ARRAY_LENGTH = 536;
+    CARDINALITY = 537;
+    ARRAY_REMOVE = 538;
+    ARRAY_POSITIONS = 539;
+    TRIM_ARRAY = 540;
+    STRING_TO_ARRAY = 541;
+    ARRAY_POSITION = 542;
+    ARRAY_REPLACE = 543;
+    ARRAY_DIMS = 544;
+    ARRAY_TRANSFORM = 545;
+    ARRAY_MIN = 546;
+    ARRAY_MAX = 547;
+    ARRAY_SUM = 548;
+    ARRAY_SORT = 549;
+    ARRAY_CONTAINS = 550;
+    ARRAY_CONTAINED = 551;
+    ARRAY_FLATTEN = 552;
+
+    // Int256 functions
+    HEX_TO_INT256 = 560;
+
+    // Jsonb functions
+
+    // jsonb -> int, jsonb -> text that returns jsonb
+    JSONB_ACCESS = 600;
+    // jsonb ->> int, jsonb ->> text that returns text
+    JSONB_ACCESS_STR = 601;
+    // jsonb #> text[] -> jsonb
+    JSONB_EXTRACT_PATH = 627;
+    JSONB_EXTRACT_PATH_VARIADIC = 613;
+    // jsonb #>> text[] -> text
+    JSONB_EXTRACT_PATH_TEXT = 628;
+    JSONB_EXTRACT_PATH_TEXT_VARIADIC = 614;
+    JSONB_TYPEOF = 602;
+    JSONB_ARRAY_LENGTH = 603;
+    IS_JSON = 604;
+    JSONB_CONCAT = 605;
+    JSONB_OBJECT = 606;
+    JSONB_PRETTY = 607;
+    // jsonb @> jsonb
+    JSONB_CONTAINS = 608;
+    // jsonb <@ jsonb
+    JSONB_CONTAINED = 609;
+    // jsonb ? text
+    JSONB_EXISTS = 610;
+    // jsonb ?| text[]
+    JSONB_EXISTS_ANY = 611;
+    // jsonb ?& text[]
+    JSONB_EXISTS_ALL = 612;
+    // see SUBTRACT for:
+    // jsonb - text -> jsonb
+    // jsonb - text[] -> jsonb
+    // jsonb - integer -> jsonb
+    //
+    // jsonb #- text[] -> jsonb
+    JSONB_DELETE_PATH = 615;
+    JSONB_STRIP_NULLS = 616;
+    TO_JSONB = 617;
+    JSONB_BUILD_ARRAY = 618;
+    JSONB_BUILD_ARRAY_VARIADIC = 625;
+    JSONB_BUILD_OBJECT = 619;
+    JSONB_BUILD_OBJECT_VARIADIC = 626;
+    JSONB_PATH_EXISTS = 620;
+    JSONB_PATH_MATCH = 621;
+    JSONB_PATH_QUERY_ARRAY = 622;
+    JSONB_PATH_QUERY_FIRST = 623;
+    JSONB_POPULATE_RECORD = 629;
+    JSONB_TO_RECORD = 630;
+    JSONB_SET = 631;
+    JSONB_POPULATE_MAP = 632;
+
+    // Map functions
+    MAP_FROM_ENTRIES = 700;
+    MAP_ACCESS = 701;
+    MAP_KEYS = 702;
+    MAP_VALUES = 703;
+    MAP_ENTRIES = 704;
+    MAP_FROM_KEY_VALUES = 705;
+    MAP_LENGTH = 706;
+    MAP_CONTAINS = 707;
+    MAP_CAT = 708;
+    MAP_INSERT = 709;
+    MAP_DELETE = 710;
+
+    // Internal function for schema change
+    COMPOSITE_CAST = 800;
+
+    // Non-pure functions below (> 1000)
+    // ------------------------
+    // Internal functions
+    VNODE = 1101;
+    TEST_PAID_TIER = 1102;
+    VNODE_USER = 1103;
+    LICENSE = 1104;
+    // Non-deterministic functions
+    PROCTIME = 2023;
+    PG_SLEEP = 2024;
+    PG_SLEEP_FOR = 2025;
+    PG_SLEEP_UNTIL = 2026;
+
+    // System administration functions
+    CAST_REGCLASS = 2100;
+    // System information functions
+    PG_GET_INDEXDEF = 2400;
+    COL_DESCRIPTION = 2401;
+    PG_GET_VIEWDEF = 2402;
+    PG_GET_USERBYID = 2403;
+    PG_INDEXES_SIZE = 2404;
+    PG_RELATION_SIZE = 2405;
+    PG_GET_SERIAL_SEQUENCE = 2406;
+    PG_INDEX_COLUMN_HAS_PROPERTY = 2410;
+    HAS_TABLE_PRIVILEGE = 2407;
+    HAS_ANY_COLUMN_PRIVILEGE = 2408;
+    HAS_SCHEMA_PRIVILEGE = 2409;
+    PG_IS_IN_RECOVERY = 2411;
+    RW_RECOVERY_STATUS = 2412;
+    RW_EPOCH_TO_TS = 2413;
+    PG_TABLE_IS_VISIBLE = 2414;
+    HAS_FUNCTION_PRIVILEGE = 2415;
+
+    // EXTERNAL
+    ICEBERG_TRANSFORM = 2201;
+  }
+  // Only use this field for function call. For other types of expression, it should be UNSPECIFIED.
+  Type function_type = 1;
+  data.DataType return_type = 3;
+  oneof rex_node {
+    uint32 input_ref = 4;
+    data.Datum constant = 5;
+    FunctionCall func_call = 6;
+    UserDefinedFunction udf = 7;
+    NowRexNode now = 8;
+  }
+}
+
+message TableFunction {
+  enum Type {
+    UNSPECIFIED = 0;
+    GENERATE_SERIES = 1;
+    UNNEST = 2;
+    REGEXP_MATCHES = 3;
+    RANGE = 4;
+    GENERATE_SUBSCRIPTS = 5;
+    // buf:lint:ignore ENUM_VALUE_UPPER_SNAKE_CASE
+    _PG_EXPANDARRAY = 6;
+    PG_GET_KEYWORDS = 18;
+    // Jsonb functions
+    JSONB_ARRAY_ELEMENTS = 10;
+    JSONB_ARRAY_ELEMENTS_TEXT = 11;
+    JSONB_EACH = 12;
+    JSONB_EACH_TEXT = 13;
+    JSONB_OBJECT_KEYS = 14;
+    JSONB_PATH_QUERY = 15;
+    JSONB_POPULATE_RECORDSET = 16;
+    JSONB_TO_RECORDSET = 17;
+    // file scan
+    FILE_SCAN = 19;
+    // postgres query
+    POSTGRES_QUERY = 20;
+    // mysql query
+    MYSQL_QUERY = 21;
+    // User defined table function
+    USER_DEFINED = 100;
+  }
+  Type function_type = 1;
+  repeated expr.ExprNode args = 2;
+  data.DataType return_type = 3;
+  // optional. only used when the type is USER_DEFINED.
+  UserDefinedFunctionMetadata udf = 4;
+}
+
+// Reference to an upstream column, containing its index and data type.
+message InputRef {
+  uint32 index = 1;
+  data.DataType type = 2;
+}
+
+message Constant {
+  data.Datum datum = 1;
+  data.DataType type = 2;
+}
+
+// The items which can occur in the select list of `ProjectSet` operator.
+//
+// When there are table functions in the SQL query `SELECT ...`, it will be planned as `ProjectSet`.
+// Otherwise it will be planned as `Project`.
+//
+// # Examples
+//
+// ```sql
+// # Project
+// select 1;
+//
+// # ProjectSet
+// select unnest(array[1,2,3]);
+//
+// # ProjectSet (table function & usual expression)
+// select unnest(array[1,2,3]), 1;
+//
+// # ProjectSet (multiple table functions)
+// select unnest(array[1,2,3]), unnest(array[4,5]);
+//
+// # ProjectSet over ProjectSet (table function as parameters of table function)
+// select unnest(regexp_matches(v1, 'a(\d)c(\d)', 'g')) from t;
+//
+// # Project over ProjectSet (table function as parameters of usual function)
+// select unnest(regexp_matches(v1, 'a(\d)c(\d)', 'g')) from t;
+// ```
+message ProjectSetSelectItem {
+  oneof select_item {
+    expr.ExprNode expr = 1;
+    expr.TableFunction table_function = 2;
+  }
+}
+
+message FunctionCall {
+  repeated ExprNode children = 1;
+}
+
+// Aggregate Function Calls for Aggregation
+message AggCall {
+  enum Kind {
+    UNSPECIFIED = 0;
+    SUM = 1;
+    MIN = 2;
+    MAX = 3;
+    COUNT = 4;
+    AVG = 5;
+    STRING_AGG = 6;
+    APPROX_COUNT_DISTINCT = 7;
+    ARRAY_AGG = 8;
+    FIRST_VALUE = 9;
+    SUM0 = 10;
+    VAR_POP = 11;
+    VAR_SAMP = 12;
+    STDDEV_POP = 13;
+    STDDEV_SAMP = 14;
+    BIT_AND = 15;
+    BIT_OR = 16;
+    BIT_XOR = 17;
+    BOOL_AND = 18;
+    BOOL_OR = 19;
+    JSONB_AGG = 20;
+    JSONB_OBJECT_AGG = 21;
+    PERCENTILE_CONT = 22;
+    PERCENTILE_DISC = 23;
+    MODE = 24;
+    LAST_VALUE = 25;
+    GROUPING = 26;
+    INTERNAL_LAST_SEEN_VALUE = 27;
+    APPROX_PERCENTILE = 28;
+
+    // user defined aggregate function
+    USER_DEFINED = 100;
+    // wraps a scalar function that takes a list as input as an aggregate function.
+    WRAP_SCALAR = 101;
+  }
+  Kind kind = 1;
+  repeated InputRef args = 2;
+  data.DataType return_type = 3;
+  bool distinct = 4;
+  repeated common.ColumnOrder order_by = 5;
+  ExprNode filter = 6;
+  repeated Constant direct_args = 7;
+  // optional. only used when the kind is USER_DEFINED.
+  UserDefinedFunctionMetadata udf = 8;
+  // optional. only used when the kind is WRAP_SCALAR.
+  ExprNode scalar = 9;
+}
+
+// The aggregation type.
+//
+// Ideally this should be used to encode the Rust `AggCall::agg_type` field, but historically we
+// flattened it into multiple fields in proto `AggCall` - `kind` + `udf` + `scalar`. So this
+// `AggType` proto type is only used by `WindowFunction` currently.
+message AggType {
+  AggCall.Kind kind = 1;
+
+  // UDF metadata. Only present when the kind is `USER_DEFINED`.
+  optional UserDefinedFunctionMetadata udf_meta = 8;
+  // Wrapped scalar expression. Only present when the kind is `WRAP_SCALAR`.
+  optional ExprNode scalar_expr = 9;
+}
+
+message WindowFrame {
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+
+    TYPE_ROWS_LEGACY = 2 [deprecated = true]; // Deprecated since we introduced `RANGE` frame.
+
+    TYPE_ROWS = 5;
+    TYPE_RANGE = 10;
+    TYPE_SESSION = 15;
+  }
+  enum BoundType {
+    BOUND_TYPE_UNSPECIFIED = 0;
+    BOUND_TYPE_UNBOUNDED_PRECEDING = 1;
+    BOUND_TYPE_PRECEDING = 2;
+    BOUND_TYPE_CURRENT_ROW = 3;
+    BOUND_TYPE_FOLLOWING = 4;
+    BOUND_TYPE_UNBOUNDED_FOLLOWING = 5;
+  }
+  // Deprecated since we introduced `RANGE` frame.
+  message Bound {
+    option deprecated = true;
+    BoundType type = 1;
+    oneof offset {
+      uint64 integer = 2;
+      data.Datum datum = 3;
+    }
+  }
+  enum Exclusion {
+    EXCLUSION_UNSPECIFIED = 0;
+    EXCLUSION_CURRENT_ROW = 1;
+    // EXCLUSION_GROUP = 2;
+    // EXCLUSION_TIES = 3;
+    EXCLUSION_NO_OTHERS = 4;
+  }
+  message RowsFrameBounds {
+    RowsFrameBound start = 1;
+    RowsFrameBound end = 2;
+  }
+  message RowsFrameBound {
+    BoundType type = 1;
+    optional uint64 offset = 3;
+  }
+  message RangeFrameBounds {
+    RangeFrameBound start = 1;
+    RangeFrameBound end = 2;
+
+    data.DataType order_data_type = 10;
+    common.OrderType order_type = 15;
+    data.DataType offset_data_type = 20;
+  }
+  message RangeFrameBound {
+    BoundType type = 1;
+    optional data.Datum offset = 3;
+  }
+  message SessionFrameBounds {
+    data.Datum gap = 1;
+
+    data.DataType order_data_type = 10;
+    common.OrderType order_type = 15;
+    data.DataType gap_data_type = 20;
+  }
+
+  Type type = 1;
+
+  Bound start = 2 [deprecated = true]; // Deprecated since we introduced `RANGE` frame.
+  Bound end = 3 [deprecated = true]; // Deprecated since we introduced `RANGE` frame.
+
+  Exclusion exclusion = 4;
+
+  oneof bounds {
+    RowsFrameBounds rows = 10;
+    RangeFrameBounds range = 15;
+    SessionFrameBounds session = 20;
+  }
+}
+
+message WindowFunction {
+  enum GeneralType {
+    UNSPECIFIED = 0;
+    ROW_NUMBER = 1;
+    RANK = 2;
+    DENSE_RANK = 3;
+    // PERCENT_RANK = 4;
+    // CUME_DIST = 5;
+    // NTILE = 6;
+    LAG = 7;
+    LEAD = 8;
+  }
+
+  oneof type {
+    GeneralType general = 1;
+    AggCall.Kind aggregate = 2 [deprecated = true]; // Deprecated since we have a new `aggregate2` variant.
+    AggType aggregate2 = 103;
+  }
+  repeated InputRef args = 3;
+  data.DataType return_type = 4;
+  WindowFrame frame = 5;
+  bool ignore_nulls = 6;
+}
+
+// Note: due to historic reasons, UserDefinedFunction is a oneof variant parallel to FunctionCall,
+// while UserDefinedFunctionMetadata is embedded as a field in TableFunction and AggCall.
+
+enum UdfExprVersion {
+  // Versions before introducing this enum.
+  UDF_EXPR_VERSION_UNSPECIFIED = 0;
+  // Begin from this version, we re-interpret `identifier` as `name_in_runtime`.
+  UDF_EXPR_VERSION_NAME_IN_RUNTIME = 1;
+}
+
+message UserDefinedFunction {
+  repeated ExprNode children = 1;
+  string name = 2;
+  repeated string arg_names = 8;
+  repeated data.DataType arg_types = 3;
+  string language = 4;
+  // The link to the external function service.
+  optional string link = 5;
+  // This is re-interpreted as `name_in_runtime`.
+  optional string identifier = 6;
+  // - If `language` is `javascript` or `python`, the source code of the function.
+  optional string body = 7;
+  // - If `language` is `rust` or `wasm`, the zstd-compressed wasm binary.
+  optional bytes compressed_binary = 10;
+  bool always_retry_on_network_error = 9;
+  // The runtime selected when multiple runtimes are available for the language. Now is not used.
+  optional string runtime = 11;
+  reserved 12;
+  reserved "function_type";
+  // additional options for javascript functions
+  optional bool is_async = 13;
+  optional bool is_batched = 14;
+
+  UdfExprVersion version = 1000;
+}
+
+// Additional information for user defined table/aggregate functions.
+message UserDefinedFunctionMetadata {
+  repeated string arg_names = 8;
+  repeated data.DataType arg_types = 3;
+  data.DataType return_type = 13;
+  string language = 4;
+  optional string link = 5;
+  // This is re-interpreted as `name_in_runtime`.
+  optional string identifier = 6;
+  optional string body = 7;
+  optional bytes compressed_binary = 10;
+  optional string runtime = 11;
+  reserved 12;
+  reserved "function_type";
+
+  UdfExprVersion version = 1000;
+}

@@ -1,11 +1,118 @@
-# Dashboard
+# RisingWave Dashboard
 
-The framework: [Next.js](https://nextjs.org).
+A web dashboard for monitoring and managing RisingWave streaming database.
 
-Next.js supports SPA, SSG and SSR. With this feature, the dashboard ui can be deployed in
+## Features
 
-1. Standalone machine serving only dashboard UI with a backend. (e.g. Dashboard for cloud product)
-2. Meta service node. (e.g. Static HTML files integrated in meta service without any other dependencies like node.js)
+### Relation Graph Improvements (Issue #20543)
+
+The relation graph has been significantly improved to handle large and complex DAGs with better usability:
+
+#### Key Improvements
+
+1. **Modern ReactFlow Integration**
+   - Upgraded from `react-flow-renderer` v10 to `@xyflow/react` v12
+   - Better performance and rendering for large graphs
+   - Built-in drag & drop support for nodes
+   - Smooth animations and transitions
+
+2. **Adaptive Layout with Dagre**
+   - Automatic layout calculation using Dagre algorithm
+   - Configurable spacing and direction
+   - Optimized for readability with proper node spacing
+
+3. **Sub-DAG Focus Mode**
+   - Click "Focus Mode" button to show only upstream/downstream relations
+   - Double-click any node to focus on its connections
+   - Easy navigation between full view and focused view
+   - Shows node count and current focus context
+
+4. **Enhanced User Experience**
+   - Drag nodes to rearrange manually
+   - Zoom and pan controls
+   - Background grid for better visual reference
+   - Tooltips with detailed relation information
+   - Visual feedback for selected nodes and connected edges
+
+5. **Improved Visual Design**
+   - Modern card-based node design
+   - Color-coded relation types (Sources, Sinks, MVs, Tables)
+   - Better contrast and readability
+   - Responsive layout
+
+#### Usage
+
+- **View All Relations**: Click "Show All" to see the complete DAG
+- **Focus on Specific Node**: 
+  - Select a node and click "Focus Mode", or
+  - Double-click any node to immediately focus on it
+- **Navigate**: Double-click the focused node again to return to full view
+- **Interact**: Drag nodes to reposition, use mouse wheel to zoom
+- **Get Details**: Hover over nodes for detailed information
+
+#### Technical Details
+
+- Uses Dagre layout algorithm for automatic positioning
+- ReactFlow provides built-in interaction capabilities
+- Maintains backward compatibility with existing API
+- Responsive design works on different screen sizes
+
+### Development
+
+#### Prerequisites
+
+- Node.js 18+
+- npm or yarn
+
+#### Getting Started
+
+```bash
+cd dashboard
+npm install
+npm run dev
+```
+
+#### Building
+
+```bash
+npm run build
+npm start
+```
+
+#### Scripts
+
+- `npm run dev` - Start development server
+- `npm run build` - Build for production
+- `npm run start` - Start production server
+- `npm run lint` - Run linting
+- `npm run format` - Format code
+
+### Technologies
+
+- **Frontend**: Next.js, React, TypeScript
+- **UI**: Chakra UI
+- **Graph Visualization**: ReactFlow (@xyflow/react)
+- **Layout**: Dagre
+- **Data Visualization**: Recharts, D3
+
+### API Integration
+
+The dashboard connects to RisingWave's REST API endpoints:
+
+- `/api/monitor/streaming_stats` - Real-time streaming statistics
+- `/api/catalog/relations` - Relation metadata
+- `/api/catalog/dependencies` - Relation dependencies
+
+### Contributing
+
+When working on the relation graph:
+
+1. The main component is in `components/RelationGraph.tsx`
+2. Layout logic uses Dagre in `getLayoutedElements()`
+3. Sub-DAG filtering is in the `filteredData` memo
+4. Node styling is in `RelationNodeComponent`
+
+For other dashboard features, check the `pages/` directory for route implementations.
 
 ## Files
 

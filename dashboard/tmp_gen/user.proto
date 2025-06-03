@@ -1,0 +1,145 @@
+syntax = "proto3";
+
+package user;
+
+import "common.proto";
+
+option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
+
+// AuthInfo is the information required to login to a server.
+message AuthInfo {
+  enum EncryptionType {
+    UNSPECIFIED = 0;
+    PLAINTEXT = 1;
+    SHA256 = 2;
+    MD5 = 3;
+    OAUTH = 4;
+  }
+  EncryptionType encryption_type = 1;
+  bytes encrypted_value = 2;
+  map<string, string> metadata = 3;
+}
+
+// User defines a user in the system.
+message UserInfo {
+  uint32 id = 1;
+  string name = 2;
+  bool is_super = 3;
+  bool can_create_db = 4;
+  bool can_create_user = 5;
+  bool can_login = 6;
+  AuthInfo auth_info = 7;
+
+  /// Granted privileges will be only updated through the command of GRANT/REVOKE.
+  repeated GrantPrivilege grant_privileges = 8;
+}
+
+// GrantPrivilege defines a privilege granted to a user.
+message GrantPrivilege {
+  enum Action {
+    UNSPECIFIED = 0;
+    SELECT = 1;
+    INSERT = 2;
+    UPDATE = 3;
+    DELETE = 4;
+    CREATE = 5;
+    CONNECT = 6;
+    USAGE = 7;
+    EXECUTE = 8;
+  }
+
+  message ActionWithGrantOption {
+    Action action = 1;
+    bool with_grant_option = 2;
+    uint32 granted_by = 3;
+  }
+
+  oneof object {
+    uint32 database_id = 1;
+    uint32 schema_id = 2;
+    uint32 table_id = 3;
+    uint32 source_id = 4;
+    uint32 sink_id = 5;
+    uint32 view_id = 6;
+    uint32 function_id = 7;
+    uint32 subscription_id = 8;
+    uint32 connection_id = 9;
+    uint32 secret_id = 10;
+  }
+  repeated ActionWithGrantOption action_with_opts = 20;
+}
+
+message CreateUserRequest {
+  UserInfo user = 1;
+}
+
+message CreateUserResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+message DropUserRequest {
+  uint32 user_id = 1;
+}
+
+message DropUserResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+message UpdateUserRequest {
+  enum UpdateField {
+    UNSPECIFIED = 0;
+    SUPER = 1;
+    LOGIN = 2;
+    CREATE_DB = 3;
+    AUTH_INFO = 4;
+    RENAME = 5;
+    CREATE_USER = 6;
+  }
+  UserInfo user = 1;
+  repeated UpdateField update_fields = 2;
+}
+
+message UpdateUserResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+message GrantPrivilegeRequest {
+  repeated uint32 user_ids = 1;
+  repeated GrantPrivilege privileges = 2;
+  bool with_grant_option = 3;
+  uint32 granted_by = 4;
+}
+
+message GrantPrivilegeResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+message RevokePrivilegeRequest {
+  repeated uint32 user_ids = 1;
+  repeated GrantPrivilege privileges = 2;
+  uint32 granted_by = 3;
+  uint32 revoke_by = 4;
+  bool revoke_grant_option = 5;
+  bool cascade = 6;
+}
+
+message RevokePrivilegeResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+service UserService {
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+  rpc DropUser(DropUserRequest) returns (DropUserResponse);
+  rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
+
+  // GrantPrivilege grants a privilege to a user.
+  rpc GrantPrivilege(GrantPrivilegeRequest) returns (GrantPrivilegeResponse);
+  // RevokePrivilege revokes a privilege from a user.
+  rpc RevokePrivilege(RevokePrivilegeRequest) returns (RevokePrivilegeResponse);
+}
