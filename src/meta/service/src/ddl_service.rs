@@ -21,7 +21,6 @@ use rand::seq::IndexedRandom;
 use replace_job_plan::{ReplaceSource, ReplaceTable};
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::types::DataType;
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager};
 use risingwave_meta::model::TableParallelism;
@@ -90,14 +89,9 @@ impl DdlServiceImpl {
     fn extract_replace_table_info(
         ReplaceJobPlan {
             fragment_graph,
-            table_col_index_mapping,
             replace_job,
         }: ReplaceJobPlan,
     ) -> ReplaceStreamJobInfo {
-        let col_index_mapping = table_col_index_mapping
-            .as_ref()
-            .map(ColIndexMapping::from_protobuf);
-
         let replace_streaming_job: StreamingJob = match replace_job.unwrap() {
             replace_job_plan::ReplaceJob::ReplaceTable(ReplaceTable {
                 table,
@@ -116,7 +110,6 @@ impl DdlServiceImpl {
         ReplaceStreamJobInfo {
             streaming_job: replace_streaming_job,
             fragment_graph: fragment_graph.unwrap(),
-            col_index_mapping,
         }
     }
 }

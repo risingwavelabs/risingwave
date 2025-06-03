@@ -20,7 +20,6 @@ use indexmap::IndexMap;
 use itertools::Itertools;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_mut};
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::sink::file_sink::fs::FsSink;
@@ -951,7 +950,6 @@ impl CatalogController {
                 let (relations, fragment_mapping, _) = Self::finish_replace_streaming_job_inner(
                     tmp_id as ObjectId,
                     replace_upstream,
-                    None,
                     SinkIntoTableContext {
                         creating_sink_id: Some(incoming_sink_id as _),
                         dropping_sink_id: None,
@@ -1009,7 +1007,6 @@ impl CatalogController {
         tmp_id: ObjectId,
         streaming_job: StreamingJob,
         replace_upstream: FragmentReplaceUpstream,
-        col_index_mapping: Option<ColIndexMapping>,
         sink_into_table_context: SinkIntoTableContext,
         drop_table_connector_ctx: Option<&DropTableConnectorContext>,
     ) -> MetaResult<NotificationVersion> {
@@ -1020,7 +1017,6 @@ impl CatalogController {
             Self::finish_replace_streaming_job_inner(
                 tmp_id,
                 replace_upstream,
-                col_index_mapping,
                 sink_into_table_context,
                 &txn,
                 streaming_job,
@@ -1060,7 +1056,6 @@ impl CatalogController {
     pub async fn finish_replace_streaming_job_inner(
         tmp_id: ObjectId,
         replace_upstream: FragmentReplaceUpstream,
-        _col_index_mapping: Option<ColIndexMapping>, // TODO: remove this as it's not used
         SinkIntoTableContext {
             creating_sink_id,
             dropping_sink_id,
