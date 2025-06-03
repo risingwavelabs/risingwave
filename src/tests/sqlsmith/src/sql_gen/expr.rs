@@ -14,12 +14,13 @@
 
 use itertools::Itertools;
 use rand::Rng;
-use rand::seq::IndexedRandom;
+use rand::seq::{IndexedRandom, IteratorRandom};
 use risingwave_common::types::{DataType, DataTypeName, StructType};
 use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_frontend::expr::cast_sigs;
 use risingwave_sqlparser::ast::{Expr, Ident, OrderByExpr, Value};
 
+use crate::config::Feature;
 use crate::sql_gen::types::data_type_to_ast_data_type;
 use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
 
@@ -199,12 +200,27 @@ impl<R: Rng> SqlGenerator<'_, R> {
             .iter()
             .filter(|col| col.data_type == *typ)
             .collect::<Vec<_>>();
-        if matched_cols.is_empty() {
-            self.gen_simple_scalar(typ)
-        } else {
+        if !matched_cols.is_empty() {
             let col_def = matched_cols.choose(&mut self.rng).unwrap();
-            Expr::Identifier(Ident::new_unchecked(&col_def.name))
+            return Expr::Identifier(Ident::new_unchecked(&col_def.name));
         }
+
+        if self.should_generate(Feature::StructFields) {
+            for col in &columns {
+                if let DataType::Struct(struct_ty) = &col.data_type {
+                    for (field_name, field_type) in struct_ty.iter() {
+                        if field_type == typ {
+                            return Expr::CompoundIdentifier(vec![
+                                Ident::new_unchecked(&col.name),
+                                Ident::new_unchecked(field_name),
+                            ]);
+                        }
+                    }
+                }
+            }
+        }
+
+        self.gen_simple_scalar(typ)
     }
 
     /// Generates `n` expressions of type `ret`.
@@ -237,9 +253,21 @@ impl<R: Rng> SqlGenerator<'_, R> {
         }
         let mut order_by = vec![];
         while self.flip_coin() {
-            let column = self.bound_columns.choose(&mut self.rng).unwrap();
+            let column = self.bound_columns.choose(&mut self.rng).unwrap().clone();
+            let mut expr = Expr::Identifier(Ident::new_unchecked(&column.name));
+            if self.should_generate(Feature::StructFields) {
+                if let DataType::Struct(struct_ty) = &column.data_type {
+                    if let Some((field_name, _field_type)) = struct_ty.iter().choose(&mut self.rng)
+                    {
+                        expr = Expr::CompoundIdentifier(vec![
+                            Ident::new_unchecked(&column.name),
+                            Ident::new_unchecked(field_name),
+                        ]);
+                    }
+                }
+            }
             order_by.push(OrderByExpr {
-                expr: Expr::Identifier(Ident::new_unchecked(&column.name)),
+                expr,
                 asc: if self.rng.random_bool(0.3) {
                     None
                 } else {

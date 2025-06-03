@@ -24,6 +24,7 @@ pub enum Feature {
     Where,
     Agg,
     Join,
+    StructFields,
 }
 
 impl fmt::Display for Feature {
@@ -32,6 +33,7 @@ impl fmt::Display for Feature {
             Feature::Where => "where",
             Feature::Agg => "agg",
             Feature::Join => "join",
+            Feature::StructFields => "struct fields",
         };
         write!(f, "{}", s)
     }
