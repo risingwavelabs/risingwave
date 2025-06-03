@@ -43,14 +43,14 @@ pub async fn dump_cluster_await_tree(
         dump_worker_node_await_tree(&compactor_nodes, actor_traces_format).await?;
     all.merge_other(compactor_traces);
 
-    let meta_traces = dump_meta_node_await_tree(meta_node_registry).await?;
+    let meta_traces = dump_meta_node_await_tree(meta_node_registry)?;
     all.merge_other(meta_traces);
 
     Ok(all)
 }
 
 /// Dump the await tree of the current meta node.
-pub async fn dump_meta_node_await_tree(
+pub fn dump_meta_node_await_tree(
     meta_node_registry: &await_tree::Registry,
 ) -> MetaResult<StackTraceResponse> {
     let meta_traces = meta_node_registry

@@ -13,11 +13,10 @@
 // limitations under the License.
 
 use risingwave_common::util::StackTraceResponseExt;
-use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::monitor_service::StackTraceRequest;
 use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
-use risingwave_pb::monitor_service::{StackTraceRequest, StackTraceResponse};
-use risingwave_rpc_client::{CompactorClient, ComputeClientPool};
+use risingwave_rpc_client::ComputeClientPool;
 use rw_diagnose_tools::await_tree::AnalyzeSummary;
 
 use crate::CtlContext;
