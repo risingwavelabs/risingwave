@@ -96,36 +96,20 @@ impl From<ColumnDef> for Column {
 
 #[derive(Copy, Clone)]
 pub(crate) struct SqlGeneratorContext {
-    can_agg: bool, // This is used to disable agg expr totally,
-    // Used in top level, where we want to test queries
-    // without aggregates.
     inside_agg: bool,
 }
 
 impl SqlGeneratorContext {
-    pub fn new() -> Self {
-        SqlGeneratorContext {
-            can_agg: true,
-            inside_agg: false,
-        }
+    pub fn new(inside_agg: bool) -> Self {
+        SqlGeneratorContext { inside_agg }
     }
 
-    pub fn new_with_can_agg(can_agg: bool) -> Self {
-        Self {
-            can_agg,
-            inside_agg: false,
-        }
+    pub fn set_inside_agg(&mut self, inside_agg: bool) {
+        self.inside_agg = inside_agg;
     }
 
-    pub fn set_inside_agg(self) -> Self {
-        Self {
-            inside_agg: true,
-            ..self
-        }
-    }
-
-    pub fn can_gen_agg(self) -> bool {
-        self.can_agg && !self.inside_agg
+    pub fn can_gen_agg(self, can_agg: bool) -> bool {
+        can_agg && !self.inside_agg
     }
 
     pub fn is_inside_agg(self) -> bool {
@@ -240,9 +224,5 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Decide whether to generate on config.
     pub(crate) fn should_generate(&mut self, feature: Feature) -> bool {
         self.config.should_generate(feature, self.rng)
-    }
-
-    pub(crate) fn enable_generate(&mut self, feature: Feature) -> bool {
-        self.config.enable_generate(feature)
     }
 }

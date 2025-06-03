@@ -86,13 +86,6 @@ impl Configuration {
         }
     }
 
-    pub fn enable_generate(&self, feature: Feature) -> bool {
-        self.config
-            .get(&feature)
-            .map(|status| status.enabled)
-            .unwrap_or(true)
-    }
-
     pub fn set_weight(&mut self, feature: Feature, weight: u8) {
         self.config
             .entry(feature)
