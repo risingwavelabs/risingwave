@@ -19,7 +19,7 @@ axum = { workspace = true }
 base64 = "0.22"
 bk-tree = "0.5.0"
 bytes = "1"
-chrono = { version = "0.4", default-features = false }
+chrono = { workspace = true }
 clap = { workspace = true }
 downcast-rs = "2.0"
 dyn-clone = "1.0.14"
@@ -46,13 +46,13 @@ num-integer = "0.1"
 parking_lot = { workspace = true }
 parse-display = "0.10"
 paste = "1"
-petgraph = "0.6"
+petgraph = "0.8"
 pgwire = { path = "../utils/pgwire" }
 pin-project-lite = { workspace = true }
 postgres-types = { version = "0.2.6" }
 pretty-xmlish = "0.1.13"
 pretty_assertions = "1"
-prometheus = { version = "0.13", features = ["process"] }
+prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true }
 quick-xml = { version = "0.37", features = ["serialize"] }
 rand = { version = "0.9", features = ["small_rng"] }
@@ -75,10 +75,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
 sha2 = "0.10.7"
-smallvec = { version = "1.14.0", features = ["serde"] }
+smallvec = { workspace = true, features = ["serde"] }
 speedate = "0.15.0"
 tempfile = "3"
-thiserror = "1"
+thiserror = "2"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

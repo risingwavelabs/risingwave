@@ -37,6 +37,10 @@ mod m20250121_085800_change_wasm_udf_identifier;
 mod m20250210_170743_function_options;
 mod m20250319_062702_mysql_utf8mb4;
 mod m20250325_061743_exactly_once_iceberg_sink_metadata;
+mod m20250509_102041_remove_dispatcher;
+mod m20250514_114514_dispatcher_type_mapping;
+mod m20250522_074525_iceberg_tables;
+mod m20250522_074947_iceberg_namespace_properties;
 mod utils;
 
 pub struct Migrator;
@@ -112,6 +116,10 @@ impl MigratorTrait for Migrator {
             Box::new(m20250210_170743_function_options::Migration),
             Box::new(m20250319_062702_mysql_utf8mb4::Migration),
             Box::new(m20250325_061743_exactly_once_iceberg_sink_metadata::Migration),
+            Box::new(m20250509_102041_remove_dispatcher::Migration),
+            Box::new(m20250514_114514_dispatcher_type_mapping::Migration),
+            Box::new(m20250522_074525_iceberg_tables::Migration),
+            Box::new(m20250522_074947_iceberg_namespace_properties::Migration),
         ]
     }
 }

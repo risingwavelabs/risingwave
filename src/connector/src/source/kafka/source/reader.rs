@@ -21,13 +21,13 @@ use anyhow::Context;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::error::KafkaError;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 
+use crate::connector_common::read_kafka_log_level;
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
@@ -94,8 +94,11 @@ impl SplitReader for KafkaSplitReader {
         .await?;
 
         let client_ctx = RwConsumerContext::new(ctx_common);
+
+        if let Some(log_level) = read_kafka_log_level() {
+            config.set_log_level(log_level);
+        }
         let consumer: StreamConsumer<RwConsumerContext> = config
-            .set_log_level(RDKafkaLogLevel::Info)
             .create_with_context(client_ctx)
             .await
             .context("failed to create kafka consumer")?;
@@ -247,8 +250,7 @@ impl KafkaSplitReader {
             )
         });
 
-        let mut latest_message_id_metrics: HashMap<String, LabelGuardedIntGauge<3>> =
-            HashMap::new();
+        let mut latest_message_id_metrics: HashMap<String, LabelGuardedIntGauge> = HashMap::new();
 
         #[for_await]
         'for_outer_loop: for msgs in self.consumer.stream().ready_chunks(max_chunk_size) {

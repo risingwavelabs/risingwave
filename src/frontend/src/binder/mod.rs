@@ -387,13 +387,6 @@ impl Binder {
         Self::new_inner(session, BindFor::System, vec![])
     }
 
-    pub fn new_for_stream_with_param_types(
-        session: &SessionImpl,
-        param_types: Vec<Option<DataType>>,
-    ) -> Binder {
-        Self::new_inner(session, BindFor::Stream, param_types)
-    }
-
     fn is_for_stream(&self) -> bool {
         matches!(self.bind_for, BindFor::Stream)
     }
@@ -621,6 +614,7 @@ mod tests {
                                                                 [],
                                                             ),
                                                             having: None,
+                                                            window: {},
                                                             schema: Schema {
                                                                 fields: [
                                                                     a:Int32,
@@ -694,6 +688,7 @@ mod tests {
                                                                                     [],
                                                                                 ),
                                                                                 having: None,
+                                                                                window: {},
                                                                                 schema: Schema {
                                                                                     fields: [
                                                                                         a:Int32,
@@ -736,6 +731,7 @@ mod tests {
                                                                 [],
                                                             ),
                                                             having: None,
+                                                            window: {},
                                                             schema: Schema {
                                                                 fields: [
                                                                     ?column?:Int32,
@@ -759,6 +755,7 @@ mod tests {
                                 [],
                             ),
                             having: None,
+                            window: {},
                             schema: Schema {
                                 fields: [
                                     a:Int32,
@@ -887,6 +884,7 @@ mod tests {
                             selection: None,
                             group_by: [],
                             having: None,
+                            window: [],
                         },
                     ),
                     order_by: [],
@@ -1025,6 +1023,7 @@ mod tests {
                                 [],
                             ),
                             having: None,
+                            window: {},
                             schema: Schema {
                                 fields: [
                                     approx_percentile:Float64,

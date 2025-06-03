@@ -485,6 +485,8 @@ impl Cluster {
                 conf.config_path.as_str(),
                 "--listen-addr",
                 "0.0.0.0:4566",
+                "--health-check-listener-addr",
+                "0.0.0.0:6786",
                 "--advertise-addr",
                 &format!("192.168.2.{i}:4566"),
                 "--temp-secret-file-dir",
@@ -902,6 +904,45 @@ impl Cluster {
             }
         }
     }
+
+    pub async fn wait_for_recovery(&mut self) -> Result<()> {
+        let timeout = Duration::from_secs(200);
+        let mut session = self.start_session();
+        tokio::time::timeout(timeout, async {
+            loop {
+                if let Ok(result) = session.run("select rw_recovery_status()").await
+                    && result == "RUNNING"
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_nanos(10)).await;
+            }
+        })
+        .await?;
+        Ok(())
+    }
+
+    /// This function only works if all actors in your cluster are following adaptive scaling.
+    pub async fn wait_for_scale(&mut self, parallelism: usize) -> Result<()> {
+        let timeout = Duration::from_secs(200);
+        let mut session = self.start_session();
+        tokio::time::timeout(timeout, async {
+            loop {
+                let parallelism_sql = format!(
+                    "select count(parallelism) filter (where parallelism != {parallelism})\
+                from (select count(*) parallelism from rw_actors group by fragment_id);"
+                );
+                if let Ok(result) = session.run(&parallelism_sql).await
+                    && result == "0"
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_nanos(10)).await;
+            }
+        })
+        .await?;
+        Ok(())
+    }
 }
 
 type SessionRequest = (
@@ -916,6 +957,16 @@ pub struct Session {
 }
 
 impl Session {
+    /// Run the given SQLs on the session.
+    pub async fn run_all(&mut self, sqls: Vec<impl Into<String>>) -> Result<Vec<String>> {
+        let mut results = Vec::with_capacity(sqls.len());
+        for sql in sqls {
+            let result = self.run(sql).await?;
+            results.push(result);
+        }
+        Ok(results)
+    }
+
     /// Run the given SQL query on the session.
     pub async fn run(&mut self, sql: impl Into<String>) -> Result<String> {
         let (tx, rx) = oneshot::channel();

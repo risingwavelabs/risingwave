@@ -19,7 +19,7 @@ pub(crate) mod tests {
     use std::sync::Arc;
 
     use bytes::{BufMut, Bytes, BytesMut};
-    use foyer::CacheHint;
+    use foyer::Hint;
     use itertools::Itertools;
     use rand::{Rng, RngCore, SeedableRng};
     use risingwave_common::bitmap::BitmapBuilder;
@@ -70,13 +70,13 @@ pub(crate) mod tests {
         PkPrefixSkipWatermarkIterator, PkPrefixSkipWatermarkState, UserIterator,
     };
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
-    use risingwave_storage::hummock::test_utils::*;
+    use risingwave_storage::hummock::test_utils::{ReadOptions, *};
     use risingwave_storage::hummock::value::HummockValue;
     use risingwave_storage::hummock::{
         BlockedXor16FilterBuilder, CachePolicy, CompressionAlgorithm, FilterBuilder,
         HummockStorage as GlobalHummockStorage, HummockStorage, LocalHummockStorage, MemoryLimiter,
-        SharedComapctorObjectIdManager, Sstable, SstableBuilder, SstableBuilderOptions,
-        SstableIteratorReadOptions, SstableObjectIdManager, SstableWriterOptions,
+        ObjectIdManager, SharedComapctorObjectIdManager, Sstable, SstableBuilder,
+        SstableBuilderOptions, SstableIteratorReadOptions, SstableWriterOptions,
     };
     use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
     use risingwave_storage::opts::StorageOpts;
@@ -175,16 +175,10 @@ pub(crate) mod tests {
             let mut new_val = val.clone();
             new_val.extend_from_slice(&val_str.to_be_bytes());
             local
-                .ingest_batch(
-                    vec![(
-                        TableKey(key.clone()),
-                        StorageValue::new_put(Bytes::from(new_val)),
-                    )],
-                    WriteOptions {
-                        epoch,
-                        table_id: Default::default(),
-                    },
-                )
+                .ingest_batch(vec![(
+                    TableKey(key.clone()),
+                    StorageValue::new_put(Bytes::from(new_val)),
+                )])
                 .await
                 .unwrap();
             if i + 1 < epochs.len() {
@@ -244,7 +238,7 @@ pub(crate) mod tests {
         .await;
 
         let compact_ctx = get_compactor_context(&storage);
-        let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
+        let object_id_manager = Arc::new(ObjectIdManager::new(
             hummock_meta_client.clone(),
             storage
                 .storage_opts()
@@ -289,7 +283,7 @@ pub(crate) mod tests {
                 compact_ctx.clone(),
                 compact_task.clone(),
                 rx,
-                Box::new(sstable_object_id_manager.clone()),
+                object_id_manager.clone(),
                 compaction_catalog_agent_ref.clone(),
             )
             .await;
@@ -336,7 +330,7 @@ pub(crate) mod tests {
                 TableKey(key.clone()),
                 get_epoch,
                 ReadOptions {
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
                 },
             )
@@ -508,7 +502,7 @@ pub(crate) mod tests {
             global_storage.storage_opts().clone(),
             global_storage.sstable_store(),
         );
-        let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
+        let object_id_manager = Arc::new(ObjectIdManager::new(
             hummock_meta_client.clone(),
             global_storage
                 .storage_opts()
@@ -605,7 +599,7 @@ pub(crate) mod tests {
             compact_ctx,
             compact_task.clone(),
             rx,
-            Box::new(sstable_object_id_manager.clone()),
+            object_id_manager.clone(),
             compaction_catalog_agent_ref.clone(),
         )
         .await;
@@ -662,7 +656,7 @@ pub(crate) mod tests {
                 ReadOptions {
                     table_id: TableId::from(existing_table_id),
                     prefetch_options: PrefetchOptions::default(),
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
                 },
             )
@@ -701,7 +695,7 @@ pub(crate) mod tests {
         .await;
 
         let compact_ctx = get_compactor_context(&storage);
-        let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
+        let object_id_manager = Arc::new(ObjectIdManager::new(
             hummock_meta_client.clone(),
             storage
                 .storage_opts()
@@ -805,7 +799,7 @@ pub(crate) mod tests {
             compact_ctx,
             compact_task.clone(),
             rx,
-            Box::new(sstable_object_id_manager.clone()),
+            object_id_manager.clone(),
             compaction_catalog_agent_ref.clone(),
         )
         .await;
@@ -865,7 +859,7 @@ pub(crate) mod tests {
                 ReadOptions {
                     table_id: TableId::from(existing_table_id),
                     prefetch_options: PrefetchOptions::default(),
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
                 },
             )
@@ -925,7 +919,7 @@ pub(crate) mod tests {
         ));
 
         let compact_ctx = get_compactor_context(&storage);
-        let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
+        let object_id_manager = Arc::new(ObjectIdManager::new(
             hummock_meta_client.clone(),
             storage
                 .storage_opts()
@@ -1009,7 +1003,7 @@ pub(crate) mod tests {
             compact_ctx,
             compact_task.clone(),
             rx,
-            Box::new(sstable_object_id_manager.clone()),
+            object_id_manager.clone(),
             compaction_catalog_agent_ref.clone(),
         )
         .await;
@@ -1078,7 +1072,7 @@ pub(crate) mod tests {
                     prefix_hint: Some(Bytes::from(bloom_filter_key)),
                     table_id: TableId::from(existing_table_id),
                     prefetch_options: PrefetchOptions::default(),
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
                 },
             )
@@ -1119,7 +1113,7 @@ pub(crate) mod tests {
         )
         .await;
         let compact_ctx = get_compactor_context(&storage);
-        let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
+        let object_id_manager = Arc::new(ObjectIdManager::new(
             hummock_meta_client.clone(),
             storage
                 .storage_opts()
@@ -1194,7 +1188,7 @@ pub(crate) mod tests {
             compact_ctx,
             compact_task.clone(),
             rx,
-            Box::new(sstable_object_id_manager.clone()),
+            object_id_manager.clone(),
             compaction_catalog_agent_ref.clone(),
         )
         .await;
@@ -1302,18 +1296,18 @@ pub(crate) mod tests {
             0,
             compact_ctx.clone(),
             task.clone(),
-            Box::new(SharedComapctorObjectIdManager::for_test(
-                VecDeque::from_iter([5, 6, 7, 8, 9, 10, 11, 12, 13]),
-            )),
+            SharedComapctorObjectIdManager::for_test(VecDeque::from_iter([
+                5, 6, 7, 8, 9, 10, 11, 12, 13,
+            ])),
         );
 
         let fast_compact_runner = FastCompactorRunner::new(
             compact_ctx.clone(),
             task.clone(),
             compaction_catalog_agent_ref.clone(),
-            Box::new(SharedComapctorObjectIdManager::for_test(
-                VecDeque::from_iter([22, 23, 24, 25, 26, 27, 28, 29]),
-            )),
+            SharedComapctorObjectIdManager::for_test(VecDeque::from_iter([
+                22, 23, 24, 25, 26, 27, 28, 29,
+            ])),
             Arc::new(TaskProgress::default()),
         );
         let (_, ret1, _) = slow_compact_runner
@@ -1350,7 +1344,7 @@ pub(crate) mod tests {
             &[existing_table_id],
         )
         .await;
-        hummock_manager_ref.get_new_sst_ids(10).await.unwrap();
+        hummock_manager_ref.get_new_object_ids(10).await.unwrap();
         let compact_ctx = get_compactor_context(&storage);
         let compaction_catalog_agent_ref =
             CompactionCatalogAgent::for_test(vec![existing_table_id]);
@@ -1533,7 +1527,7 @@ pub(crate) mod tests {
             &[existing_table_id],
         )
         .await;
-        hummock_manager_ref.get_new_sst_ids(10).await.unwrap();
+        hummock_manager_ref.get_new_object_ids(10).await.unwrap();
         let compact_ctx = get_compactor_context(&storage);
         let compaction_catalog_agent_ref =
             CompactionCatalogAgent::for_test(vec![existing_table_id]);
@@ -1661,7 +1655,7 @@ pub(crate) mod tests {
             &[existing_table_id],
         )
         .await;
-        hummock_manager_ref.get_new_sst_ids(10).await.unwrap();
+        hummock_manager_ref.get_new_object_ids(10).await.unwrap();
         let compact_ctx = get_compactor_context(&storage);
         let compaction_catalog_agent_ref =
             CompactionCatalogAgent::for_test(vec![existing_table_id]);
@@ -1903,7 +1897,7 @@ pub(crate) mod tests {
             CompactionCatalogAgent::for_test(vec![table_id_1.table_id(), table_id_2.table_id()]);
 
         let compact_ctx = get_compactor_context(&storage);
-        let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
+        let object_id_manager = Arc::new(ObjectIdManager::new(
             hummock_meta_client.clone(),
             storage
                 .storage_opts()
@@ -2020,7 +2014,7 @@ pub(crate) mod tests {
             hummock_manager_ref: HummockManagerRef,
             compact_ctx: CompactorContext,
             compaction_catalog_agent_ref: CompactionCatalogAgentRef,
-            sstable_object_id_manager: Arc<SstableObjectIdManager>,
+            object_id_manager: Arc<ObjectIdManager>,
         ) {
             // compact left group
             let manual_compcation_option = ManualCompactionOption {
@@ -2050,7 +2044,7 @@ pub(crate) mod tests {
                 compact_ctx,
                 compact_task.clone(),
                 rx,
-                Box::new(sstable_object_id_manager.clone()),
+                object_id_manager.clone(),
                 compaction_catalog_agent_ref.clone(),
             )
             .await;
@@ -2098,7 +2092,7 @@ pub(crate) mod tests {
             hummock_manager_ref.clone(),
             compact_ctx.clone(),
             compaction_catalog_agent_ref.clone(),
-            sstable_object_id_manager.clone(),
+            object_id_manager.clone(),
         )
         .await;
 
@@ -2108,7 +2102,7 @@ pub(crate) mod tests {
             hummock_manager_ref.clone(),
             compact_ctx.clone(),
             compaction_catalog_agent_ref.clone(),
-            sstable_object_id_manager.clone(),
+            object_id_manager.clone(),
         )
         .await;
 
@@ -2136,7 +2130,7 @@ pub(crate) mod tests {
             hummock_manager_ref.clone(),
             compact_ctx.clone(),
             compaction_catalog_agent_ref.clone(),
-            sstable_object_id_manager.clone(),
+            object_id_manager.clone(),
         )
         .await;
 
@@ -2146,7 +2140,7 @@ pub(crate) mod tests {
             hummock_manager_ref.clone(),
             compact_ctx.clone(),
             compaction_catalog_agent_ref.clone(),
-            sstable_object_id_manager.clone(),
+            object_id_manager.clone(),
         )
         .await;
 
@@ -2180,7 +2174,7 @@ pub(crate) mod tests {
             hummock_manager_ref.clone(),
             compact_ctx.clone(),
             compaction_catalog_agent_ref.clone(),
-            sstable_object_id_manager.clone(),
+            object_id_manager.clone(),
         )
         .await;
 
@@ -2241,7 +2235,7 @@ pub(crate) mod tests {
             hummock_manager_ref.clone(),
             compact_ctx.clone(),
             compaction_catalog_agent_ref.clone(),
-            sstable_object_id_manager.clone(),
+            object_id_manager.clone(),
         )
         .await;
 
@@ -2251,7 +2245,7 @@ pub(crate) mod tests {
             hummock_manager_ref.clone(),
             compact_ctx.clone(),
             compaction_catalog_agent_ref.clone(),
-            sstable_object_id_manager.clone(),
+            object_id_manager.clone(),
         )
         .await;
 
@@ -2261,7 +2255,7 @@ pub(crate) mod tests {
             hummock_manager_ref: HummockManagerRef,
             compact_ctx: CompactorContext,
             compaction_catalog_agent_ref: CompactionCatalogAgentRef,
-            sstable_object_id_manager: Arc<SstableObjectIdManager>,
+            object_id_manager: Arc<ObjectIdManager>,
         ) {
             loop {
                 let manual_compcation_option = ManualCompactionOption {
@@ -2289,7 +2283,7 @@ pub(crate) mod tests {
                     compact_ctx.clone(),
                     compact_task.clone(),
                     rx,
-                    Box::new(sstable_object_id_manager.clone()),
+                    object_id_manager.clone(),
                     compaction_catalog_agent_ref.clone(),
                 )
                 .await;
@@ -2339,7 +2333,7 @@ pub(crate) mod tests {
             hummock_manager_ref.clone(),
             compact_ctx.clone(),
             compaction_catalog_agent_ref.clone(),
-            sstable_object_id_manager.clone(),
+            object_id_manager.clone(),
         )
         .await;
 
@@ -2349,7 +2343,7 @@ pub(crate) mod tests {
             hummock_manager_ref.clone(),
             compact_ctx.clone(),
             compaction_catalog_agent_ref.clone(),
-            sstable_object_id_manager.clone(),
+            object_id_manager.clone(),
         )
         .await;
 

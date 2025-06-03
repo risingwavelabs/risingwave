@@ -4,6 +4,9 @@ anchors:
         # Agent terminated because the AWS EC2 spot instance killed by AWS.
         - signal_reason: agent_stop
           limit: 3
+        - exit_status: -1
+          signal_reason: none
+          limit: 3
   - plugins:
     - cargo-cache: &cargo-cache
         nienbo/cache#v2.4.20:
@@ -55,6 +58,10 @@ steps:
       - monorepo-diff#v1.2.0:
           diff: "git diff --name-only origin/main"
           watch:
+            - path: "ci/.env"
+              config:
+                command: "ci/build-ci-image.sh"
+                label: "ci build images"
             - path: "ci/build-ci-image.sh"
               config:
                 command: "ci/build-ci-image.sh"
@@ -106,11 +113,10 @@ steps:
     command: "ci/scripts/e2e-test-serial.sh -p ci-dev -m ci-3streaming-2serving-3fe"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-test"
+      || build.pull_request.labels includes "ci/run-e2e-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-tests?(,|$$)/
     depends_on:
       - "build"
-      - "build-other"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
@@ -153,7 +159,7 @@ steps:
     command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-parallel-tests"
+      || build.pull_request.labels includes "ci/run-e2e-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-tests?(,|$$)/
     depends_on:
       - "build"
@@ -175,16 +181,6 @@ steps:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 14
-    retry: *auto-retry
-
-  - label: "end-to-end test (parallel, in-memory)"
-    if: build.pull_request.labels includes "ci/run-e2e-parallel-in-memory-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-in-memory-tests?(,|$$)/
-    command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-dev"
-    depends_on: "build"
-    plugins:
-      - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 40
     retry: *auto-retry
 
   - label: "end-to-end source test"
@@ -328,7 +324,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end deltalake sink test"
-    if: build.pull_request.labels includes "ci/run- e2e-deltalake-sink-rust-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-deltalake-sink-rust-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-deltalake-sink-rust-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-deltalake-sink-rust-tests?(,|$$)/
     command: "ci/scripts/e2e-deltalake-sink-rust-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -342,7 +338,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end redis sink test"
-    if: build.pull_request.labels includes "ci/run-e2e-redis-sink-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-redis-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-redis-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-redis-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-redis-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -356,7 +352,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end doris sink test"
-    if: build.pull_request.labels includes "ci/run-e2e-doris-sink-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-doris-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-doris-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-doris-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-doris-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -370,7 +366,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end starrocks sink test"
-    if: build.pull_request.labels includes "ci/run-e2e-starrocks-sink-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-starrocks-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-starrocks-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-starrocks-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-starrocks-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -384,7 +380,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end cassandra sink test"
-    if: build.pull_request.labels includes "ci/run-e2e-cassandra-sink-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-cassandra-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-cassandra-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-cassandra-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-cassandra-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -398,7 +394,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end mongodb sink test"
-    if: build.pull_request.labels includes "ci/run-e2e-mongodb-sink-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-mongodb-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-mongodb-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-mongodb-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-mongodb-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -505,8 +501,9 @@ steps:
     depends_on: "build-simulation"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 22
+      # Only upload zipped files, otherwise the logs is too much.
+      - ./ci/plugins/upload-failure-logs-zipped
+    timeout_in_minutes: 40
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"
@@ -559,9 +556,7 @@ steps:
     key: "flamegraph-env-build"
     command: "ci/scripts/flamegraph-env-build.sh"
     if: |
-      build.pull_request.labels includes "cpu_flamegraph"
-      || build.pull_request.labels includes "ci/run-cpu-flamegraph"
-      || build.pull_request.labels includes "heap_flamegraph"
+      build.pull_request.labels includes "ci/run-cpu-flamegraph"
       || build.pull_request.labels includes "ci/run-heap-flamegraph"
       || build.env("CI_STEPS") =~ /(^|,)(cpu-flamegraph|heap-flamegraph)(,|$$)/
     plugins:
@@ -574,11 +569,11 @@ steps:
           - GITHUB_TOKEN
     timeout_in_minutes: 20
 
-  # Generates cpu flamegraph if label `cpu_flamegraph` is added to PR.
+  # Generates cpu flamegraph if label `ci/run-cpu-flamegraph` is added to PR.
   - label: "Generate CPU flamegraph"
     command: "PULL_REQUEST=$BUILDKITE_PULL_REQUEST ci/scripts/gen-flamegraph.sh cpu"
     depends_on: "flamegraph-env-build"
-    if: build.pull_request.labels includes "cpu_flamegraph" || build.pull_request.labels includes "ci/run-cpu-flamegraph" || build.env("CI_STEPS") =~ /(^|,)cpu-flamegraph(,|$$)/
+    if: build.pull_request.labels includes "ci/run-cpu-flamegraph" || build.env("CI_STEPS") =~ /(^|,)cpu-flamegraph(,|$$)/
     plugins:
       - seek-oss/aws-sm#v2.3.2:
           env:
@@ -594,12 +589,12 @@ steps:
     # - Building RW artifacts: ~8min
     timeout_in_minutes: 540
 
-  # Generates heap flamegraph if label `heap_flamegraph` is added to PR.
+  # Generates heap flamegraph if label `ci/run-heap-flamegraph` is added to PR.
   - label: "Generate Heap flamegraph"
     command: "PULL_REQUEST=$BUILDKITE_PULL_REQUEST ci/scripts/gen-flamegraph.sh heap"
     depends_on: "flamegraph-env-build"
 
-    if: build.pull_request.labels includes "heap_flamegraph" || build.pull_request.labels includes "ci/run-heap-flamegraph" || build.env("CI_STEPS") =~ /(^|,)heap-flamegraph(,|$$)/
+    if: build.pull_request.labels includes "ci/run-heap-flamegraph" || build.env("CI_STEPS") =~ /(^|,)heap-flamegraph(,|$$)/
 
     plugins:
       - seek-oss/aws-sm#v2.3.2:
@@ -678,8 +673,6 @@ steps:
     if: build.pull_request.labels includes "ci/run-e2e-standalone-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-standalone-tests?(,|$$)/
     depends_on:
       - "build"
-      - "build-other"
-      - "docslt"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
@@ -691,8 +684,6 @@ steps:
     if: build.pull_request.labels includes "ci/run-e2e-single-node-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-single-node-tests?(,|$$)/
     depends_on:
       - "build"
-      - "build-other"
-      - "docslt"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
@@ -705,8 +696,6 @@ steps:
     if: build.pull_request.labels includes "ci/run-e2e-test-other-backends" || build.env("CI_STEPS") =~ /(^|,)e2e-test-other-backends?(,|$$)/
     depends_on:
       - "build"
-      - "build-other"
-      - "docslt"
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose

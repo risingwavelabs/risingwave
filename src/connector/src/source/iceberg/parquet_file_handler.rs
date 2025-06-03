@@ -18,14 +18,13 @@ use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{Context, bail};
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::{FutureExt, Stream, TryFutureExt};
 use iceberg::io::{
     FileIOBuilder, FileMetadata, FileRead, S3_ACCESS_KEY_ID, S3_REGION, S3_SECRET_ACCESS_KEY,
 };
-use iceberg::{Error, ErrorKind};
 use itertools::Itertools;
 use opendal::Operator;
 use opendal::layers::{LoggingLayer, RetryLayer};
@@ -33,9 +32,11 @@ use opendal::services::{Azblob, Gcs, S3};
 use parquet::arrow::async_reader::AsyncFileReader;
 use parquet::arrow::{ParquetRecordBatchStreamBuilder, ProjectionMask, parquet_to_arrow_schema};
 use parquet::file::metadata::{FileMetaData, ParquetMetaData, ParquetMetaDataReader};
+use prometheus::core::GenericCounter;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::array::arrow::{IcebergArrowConvert, is_parquet_schema_match_source_schema};
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::metrics::LabelGuardedMetric;
 use risingwave_common::util::tokio_util::compat::FuturesAsyncReadCompatExt;
 use url::Url;
 
@@ -87,19 +88,16 @@ pub async fn create_parquet_stream_builder(
     props.insert(S3_SECRET_ACCESS_KEY, s3_secret_key.clone());
 
     let file_io_builder = FileIOBuilder::new("s3");
-    let file_io = file_io_builder
-        .with_props(props.into_iter())
-        .build()
-        .map_err(|e| anyhow!(e))?;
-    let parquet_file = file_io.new_input(&location).map_err(|e| anyhow!(e))?;
+    let file_io = file_io_builder.with_props(props.into_iter()).build()?;
+    let parquet_file = file_io.new_input(&location)?;
 
-    let parquet_metadata = parquet_file.metadata().await.map_err(|e| anyhow!(e))?;
-    let parquet_reader = parquet_file.reader().await.map_err(|e| anyhow!(e))?;
+    let parquet_metadata = parquet_file.metadata().await?;
+    let parquet_reader = parquet_file.reader().await?;
     let parquet_file_reader = ParquetFileReader::new(parquet_metadata, parquet_reader);
 
     ParquetRecordBatchStreamBuilder::new(parquet_file_reader)
         .await
-        .map_err(|e| anyhow!(e))
+        .map_err(Into::into)
 }
 
 pub fn new_s3_operator(
@@ -171,12 +169,7 @@ pub fn extract_bucket_and_file_name(
     let url = Url::parse(location)?;
     let bucket = url
         .host_str()
-        .ok_or_else(|| {
-            Error::new(
-                ErrorKind::DataInvalid,
-                format!("Invalid url: {}, missing bucket", location),
-            )
-        })?
+        .with_context(|| format!("Invalid url: {}, missing bucket", location))?
         .to_owned();
     let prefix = match file_scan_backend {
         FileScanBackend::S3 => format!("s3://{}/", bucket),
@@ -199,19 +192,13 @@ pub async fn list_data_directory(
         FileScanBackend::Azblob => format!("azblob://{}/", bucket),
     };
     if dir.starts_with(&prefix) {
-        op.list(&file_name)
-            .await
-            .map_err(|e| anyhow!(e))
-            .map(|list| {
-                list.into_iter()
-                    .map(|entry| prefix.clone() + entry.path())
-                    .collect()
-            })
+        op.list(&file_name).await.map_err(Into::into).map(|list| {
+            list.into_iter()
+                .map(|entry| prefix.clone() + entry.path())
+                .collect()
+        })
     } else {
-        Err(Error::new(
-            ErrorKind::DataInvalid,
-            format!("Invalid url: {}, should start with {}", dir, prefix),
-        ))?
+        bail!("Invalid url: {}, should start with {}", dir, prefix)
     }
 }
 
@@ -284,16 +271,10 @@ pub async fn read_parquet_file(
     batch_size: usize,
     offset: usize,
     file_source_input_row_count_metrics: Option<
-        risingwave_common::metrics::LabelGuardedMetric<
-            prometheus::core::GenericCounter<prometheus::core::AtomicU64>,
-            4,
-        >,
+        LabelGuardedMetric<GenericCounter<prometheus::core::AtomicU64>>,
     >,
     parquet_source_skip_row_count_metrics: Option<
-        risingwave_common::metrics::LabelGuardedMetric<
-            prometheus::core::GenericCounter<prometheus::core::AtomicU64>,
-            4,
-        >,
+        LabelGuardedMetric<GenericCounter<prometheus::core::AtomicU64>>,
     >,
 ) -> ConnectorResult<
     Pin<Box<dyn Stream<Item = Result<StreamChunk, crate::error::ConnectorError>> + Send>>,
@@ -321,8 +302,7 @@ pub async fn read_parquet_file(
     let converted_arrow_schema = parquet_to_arrow_schema(
         file_metadata.schema_descr(),
         file_metadata.key_value_metadata(),
-    )
-    .map_err(anyhow::Error::from)?;
+    )?;
     let columns = match parser_columns {
         Some(columns) => columns,
         None => converted_arrow_schema
@@ -362,14 +342,13 @@ pub async fn get_parquet_fields(
         .into_futures_async_read(..)
         .await?
         .compat();
-    let parquet_metadata = reader.get_metadata().await.map_err(anyhow::Error::from)?;
+    let parquet_metadata = reader.get_metadata().await?;
 
     let file_metadata = parquet_metadata.file_metadata();
     let converted_arrow_schema = parquet_to_arrow_schema(
         file_metadata.schema_descr(),
         file_metadata.key_value_metadata(),
-    )
-    .map_err(anyhow::Error::from)?;
+    )?;
     let fields: risingwave_common::array::arrow::arrow_schema_iceberg::Fields =
         converted_arrow_schema.fields;
     Ok(fields)

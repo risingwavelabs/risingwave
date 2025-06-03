@@ -27,9 +27,9 @@ use risingwave_hummock_sdk::key::{
     TableKey, TableKeyRange, is_empty_key_range, vnode, vnode_range,
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
+use risingwave_hummock_sdk::table_watermark::{PkPrefixTableWatermarksIndex, WatermarkSerdeType};
 use risingwave_hummock_sdk::version::{HummockVersion, LocalHummockVersion};
-use risingwave_hummock_sdk::{HummockReadEpoch, HummockSstableObjectId, SyncResult};
+use risingwave_hummock_sdk::{HummockRawObjectId, HummockReadEpoch, SyncResult};
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
@@ -58,11 +58,12 @@ use crate::hummock::utils::{wait_for_epoch, wait_for_update};
 use crate::hummock::write_limiter::{WriteLimiter, WriteLimiterRef};
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockStorageIterator, HummockStorageRevIterator,
-    MemoryLimiter, SstableObjectIdManager, SstableObjectIdManagerRef, SstableStoreRef,
+    MemoryLimiter, ObjectIdManager, ObjectIdManagerRef, SstableStoreRef,
 };
 use crate::mem_table::ImmutableMemtable;
 use crate::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use crate::opts::StorageOpts;
+use crate::panic_store::PanicStateStore;
 use crate::store::*;
 
 struct HummockStorageShutdownGuard {
@@ -93,7 +94,7 @@ pub struct HummockStorage {
 
     compaction_catalog_manager_ref: CompactionCatalogManagerRef,
 
-    sstable_object_id_manager: SstableObjectIdManagerRef,
+    object_id_manager: ObjectIdManagerRef,
 
     buffer_tracker: BufferTracker,
 
@@ -126,8 +127,10 @@ pub fn get_committed_read_version_tuple(
     mut key_range: TableKeyRange,
     epoch: HummockEpoch,
 ) -> (TableKeyRange, ReadVersionTuple) {
-    if let Some(table_watermarks) = version.table_watermarks.get(&table_id) {
-        TableWatermarksIndex::new_committed(
+    if let Some(table_watermarks) = version.table_watermarks.get(&table_id)
+        && let WatermarkSerdeType::PkPrefix = table_watermarks.watermark_type
+    {
+        PkPrefixTableWatermarksIndex::new_committed(
             table_watermarks.clone(),
             version
                 .state_table_info
@@ -154,7 +157,7 @@ impl HummockStorage {
         compactor_metrics: Arc<CompactorMetrics>,
         await_tree_config: Option<await_tree::Config>,
     ) -> HummockResult<Self> {
-        let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
+        let object_id_manager = Arc::new(ObjectIdManager::new(
             hummock_meta_client.clone(),
             options.sstable_id_remote_fetch_number,
         ));
@@ -209,7 +212,7 @@ impl HummockStorage {
             pinned_version,
             compactor_context.clone(),
             compaction_catalog_manager_ref.clone(),
-            sstable_object_id_manager.clone(),
+            object_id_manager.clone(),
             state_store_metrics.clone(),
         );
 
@@ -218,7 +221,7 @@ impl HummockStorage {
         let instance = Self {
             context: compactor_context,
             compaction_catalog_manager_ref: compaction_catalog_manager_ref.clone(),
-            sstable_object_id_manager,
+            object_id_manager,
             buffer_tracker: hummock_event_handler.buffer_tracker().clone(),
             version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
             hummock_event_sender: event_tx.clone(),
@@ -256,23 +259,30 @@ impl HummockStorageReadSnapshot {
     /// If `Ok(Some())` is returned, the key is found. If `Ok(None)` is returned,
     /// the key is not found. If `Err()` is returned, the searching for the key
     /// failed due to other non-EOF errors.
-    async fn get_inner(
+    async fn get_inner<O>(
         &self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-    ) -> StorageResult<Option<StateStoreKeyedRow>> {
+        on_key_value_fn: impl KeyValueFn<O>,
+    ) -> StorageResult<Option<O>> {
         let key_range = (Bound::Included(key.clone()), Bound::Included(key.clone()));
 
-        let (key_range, read_version_tuple) = self
-            .build_read_version_tuple(self.raw_epoch, key_range, &read_options)
-            .await?;
+        let (key_range, read_version_tuple) =
+            self.build_read_version_tuple(self.epoch, key_range).await?;
 
         if is_empty_key_range(&key_range) {
             return Ok(None);
         }
 
         self.hummock_version_reader
-            .get(key, self.raw_epoch, read_options, read_version_tuple)
+            .get(
+                key,
+                self.epoch.get_epoch(),
+                self.table_id,
+                read_options,
+                read_version_tuple,
+                on_key_value_fn,
+            )
             .await
     }
 
@@ -281,12 +291,17 @@ impl HummockStorageReadSnapshot {
         key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStorageIterator> {
-        let (key_range, read_version_tuple) = self
-            .build_read_version_tuple(self.raw_epoch, key_range, &read_options)
-            .await?;
+        let (key_range, read_version_tuple) =
+            self.build_read_version_tuple(self.epoch, key_range).await?;
 
         self.hummock_version_reader
-            .iter(key_range, self.raw_epoch, read_options, read_version_tuple)
+            .iter(
+                key_range,
+                self.epoch.get_epoch(),
+                self.table_id,
+                read_options,
+                read_version_tuple,
+            )
             .await
     }
 
@@ -295,14 +310,14 @@ impl HummockStorageReadSnapshot {
         key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStorageRevIterator> {
-        let (key_range, read_version_tuple) = self
-            .build_read_version_tuple(self.raw_epoch, key_range, &read_options)
-            .await?;
+        let (key_range, read_version_tuple) =
+            self.build_read_version_tuple(self.epoch, key_range).await?;
 
         self.hummock_version_reader
             .rev_iter(
                 key_range,
-                self.raw_epoch,
+                self.epoch.get_epoch(),
+                self.table_id,
                 read_options,
                 read_version_tuple,
                 None,
@@ -335,18 +350,23 @@ impl HummockStorageReadSnapshot {
 
     async fn build_read_version_tuple(
         &self,
-        epoch: u64,
+        epoch: HummockReadEpoch,
         key_range: TableKeyRange,
-        read_options: &ReadOptions,
     ) -> StorageResult<(TableKeyRange, ReadVersionTuple)> {
-        if read_options.read_version_from_backup {
-            self.build_read_version_tuple_from_backup(epoch, self.table_id, key_range)
-                .await
-        } else if read_options.read_committed {
-            self.build_read_version_tuple_from_committed(epoch, self.table_id, key_range)
-                .await
-        } else {
-            self.build_read_version_tuple_from_all(epoch, self.table_id, key_range)
+        match epoch {
+            HummockReadEpoch::Backup(epoch) => {
+                self.build_read_version_tuple_from_backup(epoch, self.table_id, key_range)
+                    .await
+            }
+            HummockReadEpoch::Committed(epoch)
+            | HummockReadEpoch::BatchQueryCommitted(epoch, _)
+            | HummockReadEpoch::TimeTravel(epoch) => {
+                self.build_read_version_tuple_from_committed(epoch, self.table_id, key_range)
+                    .await
+            }
+            HummockReadEpoch::NoWait(epoch) => {
+                self.build_read_version_tuple_from_all(epoch, self.table_id, key_range)
+            }
         }
     }
 
@@ -549,8 +569,8 @@ impl HummockStorage {
         self.context.sstable_store.clone()
     }
 
-    pub fn sstable_object_id_manager(&self) -> &SstableObjectIdManagerRef {
-        &self.sstable_object_id_manager
+    pub fn object_id_manager(&self) -> &ObjectIdManagerRef {
+        &self.object_id_manager
     }
 
     pub fn compaction_catalog_manager_ref(&self) -> CompactionCatalogManagerRef {
@@ -573,10 +593,10 @@ impl HummockStorage {
         self.compact_await_tree_reg.as_ref()
     }
 
-    pub async fn min_uncommitted_sst_id(&self) -> Option<HummockSstableObjectId> {
+    pub async fn min_uncommitted_object_id(&self) -> Option<HummockRawObjectId> {
         let (tx, rx) = oneshot::channel();
         self.hummock_event_sender
-            .send(HummockEvent::GetMinUncommittedSstId { result_tx: tx })
+            .send(HummockEvent::GetMinUncommittedObjectId { result_tx: tx })
             .expect("should send success");
         rx.await.expect("should await success")
     }
@@ -599,7 +619,7 @@ impl HummockStorage {
 
 #[derive(Clone)]
 pub struct HummockStorageReadSnapshot {
-    raw_epoch: u64,
+    epoch: HummockReadEpoch,
     table_id: TableId,
     recent_versions: Arc<ArcSwap<RecentVersions>>,
     hummock_version_reader: HummockVersionReader,
@@ -609,17 +629,20 @@ pub struct HummockStorageReadSnapshot {
     simple_time_travel_version_cache: Arc<SimpleTimeTravelVersionCache>,
 }
 
-impl StateStoreRead for HummockStorageReadSnapshot {
-    type Iter = HummockStorageIterator;
-    type RevIter = HummockStorageRevIterator;
-
-    fn get_keyed_row(
+impl StateStoreGet for HummockStorageReadSnapshot {
+    fn on_key_value<O: Send + 'static>(
         &self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + Send + '_ {
-        self.get_inner(key, read_options)
+        on_key_value_fn: impl KeyValueFn<O>,
+    ) -> impl StorageFuture<'_, Option<O>> {
+        self.get_inner(key, read_options, on_key_value_fn)
     }
+}
+
+impl StateStoreRead for HummockStorageReadSnapshot {
+    type Iter = HummockStorageIterator;
+    type RevIter = HummockStorageRevIterator;
 
     fn iter(
         &self,
@@ -651,6 +674,17 @@ impl StateStoreRead for HummockStorageReadSnapshot {
             self.table_id
         );
         self.rev_iter_inner(key_range, read_options)
+    }
+}
+
+impl StateStoreReadVector for HummockStorageReadSnapshot {
+    async fn nearest<O: Send + 'static>(
+        &self,
+        _vec: Vector,
+        _options: VectorNearestOptions,
+        _on_nearest_item_fn: impl OnNearestItemFn<O>,
+    ) -> StorageResult<Vec<O>> {
+        unimplemented!()
     }
 }
 
@@ -778,6 +812,7 @@ impl HummockStorage {
 impl StateStore for HummockStorage {
     type Local = LocalHummockStorage;
     type ReadSnapshot = HummockStorageReadSnapshot;
+    type VectorWriter = PanicStateStore;
 
     /// Waits until the local hummock version contains the epoch. If `wait_epoch` is `Current`,
     /// we will only check whether it is le `sealed_epoch` and won't wait.
@@ -800,7 +835,7 @@ impl StateStore for HummockStorage {
     ) -> StorageResult<Self::ReadSnapshot> {
         self.try_wait_epoch_impl(epoch, options.table_id).await?;
         Ok(HummockStorageReadSnapshot {
-            raw_epoch: epoch.get_epoch(),
+            epoch,
             table_id: options.table_id,
             recent_versions: self.recent_versions.clone(),
             hummock_version_reader: self.hummock_version_reader.clone(),
@@ -809,6 +844,10 @@ impl StateStore for HummockStorage {
             hummock_meta_client: self.hummock_meta_client.clone(),
             simple_time_travel_version_cache: self.simple_time_travel_version_cache.clone(),
         })
+    }
+
+    async fn new_vector_writer(&self, _options: NewVectorWriterOptions) -> Self::VectorWriter {
+        unimplemented!()
     }
 }
 

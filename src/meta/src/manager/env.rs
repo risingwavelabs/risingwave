@@ -121,6 +121,9 @@ pub struct MetaOpts {
     pub hummock_time_travel_epoch_version_insert_batch_size: usize,
     pub hummock_gc_history_insert_batch_size: usize,
     pub hummock_time_travel_filter_out_objects_batch_size: usize,
+    pub hummock_time_travel_filter_out_objects_v1: bool,
+    pub hummock_time_travel_filter_out_objects_list_version_batch_size: usize,
+    pub hummock_time_travel_filter_out_objects_list_delta_batch_size: usize,
     /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
     /// attempt is rejected. Greater value reduces object store IO, meanwhile it results in
     /// more loss of in memory `HummockVersionCheckpoint::stale_objects` state when meta node is
@@ -248,6 +251,8 @@ pub struct MetaOpts {
 
     pub periodic_scheduling_compaction_group_merge_interval_sec: u64,
 
+    pub compaction_group_merge_dimension_threshold: f64,
+
     // The private key for the secret store, used when the secret is stored in the meta.
     pub secret_store_private_key: Option<Vec<u8>>,
     /// The path of the temp secret file directory.
@@ -288,6 +293,9 @@ impl MetaOpts {
             hummock_time_travel_epoch_version_insert_batch_size: 1000,
             hummock_gc_history_insert_batch_size: 1000,
             hummock_time_travel_filter_out_objects_batch_size: 1000,
+            hummock_time_travel_filter_out_objects_v1: false,
+            hummock_time_travel_filter_out_objects_list_version_batch_size: 10,
+            hummock_time_travel_filter_out_objects_list_delta_batch_size: 1000,
             min_delta_log_num_for_hummock_version_checkpoint: 1,
             min_sst_retention_time_sec: 3600 * 24 * 7,
             full_gc_interval_sec: 3600 * 24 * 7,
@@ -340,6 +348,7 @@ impl MetaOpts {
             table_stat_throuput_window_seconds_for_split: 60,
             table_stat_throuput_window_seconds_for_merge: 240,
             periodic_scheduling_compaction_group_merge_interval_sec: 60 * 10,
+            compaction_group_merge_dimension_threshold: 1.2,
             license_key_path: None,
             compute_client_config: RpcClientConfig::default(),
             stream_client_config: RpcClientConfig::default(),

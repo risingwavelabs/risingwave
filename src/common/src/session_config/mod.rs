@@ -14,6 +14,7 @@
 
 mod non_zero64;
 mod over_window;
+pub mod parallelism;
 mod query_mode;
 mod search_path;
 pub mod sink_decouple;
@@ -31,6 +32,7 @@ use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
 use crate::hash::VirtualNode;
+use crate::session_config::parallelism::ConfigParallelism;
 use crate::session_config::sink_decouple::SinkDecouple;
 use crate::session_config::transaction_isolation_level::IsolationLevel;
 pub use crate::session_config::visibility_mode::VisibilityMode;
@@ -157,8 +159,33 @@ pub struct SessionConfig {
     /// If a non-zero value is set, streaming queries will be scheduled to use a fixed number of parallelism.
     /// Note that the value will be bounded at `STREAMING_MAX_PARALLELISM`.
     #[serde_as(as = "DisplayFromStr")]
-    #[parameter(default = ConfigNonZeroU64::default())]
-    streaming_parallelism: ConfigNonZeroU64,
+    #[parameter(default = ConfigParallelism::default())]
+    streaming_parallelism: ConfigParallelism,
+
+    /// Specific parallelism for table. By default, it will fall back to `STREAMING_PARALLELISM`.
+    #[serde_as(as = "DisplayFromStr")]
+    #[parameter(default = ConfigParallelism::default())]
+    streaming_parallelism_for_table: ConfigParallelism,
+
+    /// Specific parallelism for sink. By default, it will fall back to `STREAMING_PARALLELISM`.
+    #[serde_as(as = "DisplayFromStr")]
+    #[parameter(default = ConfigParallelism::default())]
+    streaming_parallelism_for_sink: ConfigParallelism,
+
+    /// Specific parallelism for index. By default, it will fall back to `STREAMING_PARALLELISM`.
+    #[serde_as(as = "DisplayFromStr")]
+    #[parameter(default = ConfigParallelism::default())]
+    streaming_parallelism_for_index: ConfigParallelism,
+
+    /// Specific parallelism for source. By default, it will fall back to `STREAMING_PARALLELISM`.
+    #[serde_as(as = "DisplayFromStr")]
+    #[parameter(default = ConfigParallelism::default())]
+    streaming_parallelism_for_source: ConfigParallelism,
+
+    /// Specific parallelism for materialized view. By default, it will fall back to `STREAMING_PARALLELISM`.
+    #[serde_as(as = "DisplayFromStr")]
+    #[parameter(default = ConfigParallelism::default())]
+    streaming_parallelism_for_materialized_view: ConfigParallelism,
 
     /// Enable delta join for streaming queries. Defaults to false.
     #[parameter(default = false, alias = "rw_streaming_enable_delta_join")]
@@ -167,6 +194,11 @@ pub struct SessionConfig {
     /// Enable bushy join for streaming queries. Defaults to true.
     #[parameter(default = true, alias = "rw_streaming_enable_bushy_join")]
     streaming_enable_bushy_join: bool,
+
+    /// Force filtering to be done inside the join whenever there's a choice between optimizations.
+    /// Defaults to false.
+    #[parameter(default = false, alias = "rw_streaming_force_filter_inside_join")]
+    streaming_force_filter_inside_join: bool,
 
     /// Enable arrangement backfill for streaming queries. Defaults to true.
     /// When set to true, the parallelism of the upstream fragment will be
@@ -182,6 +214,10 @@ pub struct SessionConfig {
     /// Allow `jsonb` in stream key
     #[parameter(default = false, alias = "rw_streaming_allow_jsonb_in_stream_key")]
     streaming_allow_jsonb_in_stream_key: bool,
+
+    /// Enable materialized expressions for impure functions (typically UDF).
+    #[parameter(default = true)]
+    streaming_enable_materialized_expressions: bool,
 
     /// Enable join ordering for streaming and batch queries. Defaults to true.
     #[parameter(default = true, alias = "rw_enable_join_ordering")]
@@ -350,12 +386,18 @@ pub struct SessionConfig {
     /// The timeout for reading from the buffer of the sync log store on barrier.
     /// Every epoch we will attempt to read the full buffer of the sync log store.
     /// If we hit the timeout, we will stop reading and continue.
-    #[parameter(default = 256_usize)]
+    #[parameter(default = 64_usize)]
     streaming_sync_log_store_pause_duration_ms: usize,
 
     /// The max buffer size for sync logstore, before we start flushing.
     #[parameter(default = 2048_usize)]
     streaming_sync_log_store_buffer_size: usize,
+
+    /// Whether to disable purifying the definition of the table or source upon retrieval.
+    /// Only set this if encountering issues with functionalities like `SHOW` or `ALTER TABLE/SOURCE`.
+    /// This config may be removed in the future.
+    #[parameter(default = false, flags = "NO_ALTER_SYS")]
+    disable_purify_definition: bool,
 }
 
 fn check_iceberg_engine_connection(val: &str) -> Result<(), String> {

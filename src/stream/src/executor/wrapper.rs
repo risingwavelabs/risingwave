@@ -23,8 +23,6 @@ mod update_check;
 
 /// [`WrapperExecutor`] will do some sanity checks and logging for the wrapped executor.
 pub struct WrapperExecutor {
-    operator_id: u64,
-
     input: Executor,
 
     actor_ctx: ActorContextRef,
@@ -36,14 +34,12 @@ pub struct WrapperExecutor {
 
 impl WrapperExecutor {
     pub fn new(
-        operator_id: u64,
         input: Executor,
         actor_ctx: ActorContextRef,
         enable_executor_row_count: bool,
         enable_explain_analyze_stats: bool,
     ) -> Self {
         Self {
-            operator_id,
             input,
             actor_ctx,
             enable_executor_row_count,
@@ -64,7 +60,6 @@ impl WrapperExecutor {
     }
 
     fn wrap(
-        operator_id: u64,
         enable_executor_row_count: bool,
         enable_explain_analyze_stats: bool,
         info: Arc<ExecutorInfo>,
@@ -94,8 +89,8 @@ impl WrapperExecutor {
 
         // operator-level metrics
         let stream = stream_node_metrics::stream_node_metrics(
+            info.clone(),
             enable_explain_analyze_stats,
-            operator_id,
             stream,
             actor_ctx.clone(),
         );
@@ -112,7 +107,6 @@ impl Execute for WrapperExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         let info = Arc::new(self.input.info().clone());
         Self::wrap(
-            self.operator_id,
             self.enable_executor_row_count,
             self.enable_explain_analyze_stats,
             info,
@@ -125,7 +119,6 @@ impl Execute for WrapperExecutor {
     fn execute_with_epoch(self: Box<Self>, epoch: u64) -> BoxedMessageStream {
         let info = Arc::new(self.input.info().clone());
         Self::wrap(
-            self.operator_id,
             self.enable_executor_row_count,
             self.enable_explain_analyze_stats,
             info,

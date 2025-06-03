@@ -23,10 +23,9 @@ use risingwave_common::hash::{
 };
 use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node};
 use risingwave_connector::source::SplitImpl;
-use risingwave_meta_model::actor_dispatcher::DispatcherType;
-use risingwave_meta_model::{SourceId, StreamingParallelism, WorkerId};
+use risingwave_meta_model::{DispatcherType, SourceId, StreamingParallelism, WorkerId};
 use risingwave_pb::catalog::Table;
-use risingwave_pb::common::PbActorLocation;
+use risingwave_pb::common::{ActorInfo, PbActorLocation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
@@ -40,8 +39,8 @@ use risingwave_pb::meta::{PbTableFragments, PbTableParallelism};
 use risingwave_pb::plan_common::PbExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, Dispatcher, FragmentTypeFlag, PbDispatcher, PbStreamActor, PbStreamContext,
-    StreamNode,
+    DispatchStrategy, Dispatcher, FragmentTypeFlag, PbDispatchOutputMapping, PbDispatcher,
+    PbStreamActor, PbStreamContext, StreamNode,
 };
 
 use super::{ActorId, FragmentId};
@@ -115,8 +114,7 @@ impl From<TableParallelism> for StreamingParallelism {
     }
 }
 
-pub type ActorUpstreams = BTreeMap<FragmentId, HashSet<ActorId>>;
-pub type FragmentActorUpstreams = HashMap<ActorId, ActorUpstreams>;
+pub type ActorUpstreams = BTreeMap<FragmentId, HashMap<ActorId, ActorInfo>>;
 pub type StreamActorWithDispatchers = (StreamActor, Vec<PbDispatcher>);
 pub type StreamActorWithUpDownstreams = (StreamActor, ActorUpstreams, Vec<PbDispatcher>);
 pub type FragmentActorDispatchers = HashMap<FragmentId, HashMap<ActorId, Vec<PbDispatcher>>>;
@@ -133,7 +131,7 @@ pub struct DownstreamFragmentRelation {
     pub downstream_fragment_id: FragmentId,
     pub dispatcher_type: DispatcherType,
     pub dist_key_indices: Vec<u32>,
-    pub output_indices: Vec<u32>,
+    pub output_mapping: PbDispatchOutputMapping,
 }
 
 impl From<(FragmentId, DispatchStrategy)> for DownstreamFragmentRelation {
@@ -142,7 +140,7 @@ impl From<(FragmentId, DispatchStrategy)> for DownstreamFragmentRelation {
             downstream_fragment_id: fragment_id,
             dispatcher_type: dispatch.get_type().unwrap().into(),
             dist_key_indices: dispatch.dist_key_indices,
-            output_indices: dispatch.output_indices,
+            output_mapping: dispatch.output_mapping.unwrap(),
         }
     }
 }
@@ -404,6 +402,13 @@ impl StreamJobFragments {
 
     pub fn fragments(&self) -> impl Iterator<Item = &Fragment> {
         self.fragments.values()
+    }
+
+    pub fn fragment_actors(&self, fragment_id: FragmentId) -> &[StreamActor] {
+        self.fragments
+            .get(&fragment_id)
+            .map(|f| f.actors.as_slice())
+            .unwrap_or_default()
     }
 
     /// Returns the table id.

@@ -21,6 +21,7 @@ use futures::future::{BoxFuture, Either, select};
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use risingwave_common::bitmap::Bitmap;
+use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::{SinkCommittedEpochSubscriber, SinkError, SinkParam};
 use risingwave_pb::connector_service::coordinate_request::Msg;
@@ -103,6 +104,7 @@ impl SinkCoordinatorManager {
         db: DatabaseConnection,
         hummock_manager: HummockManagerRef,
         metadata_manager: MetadataManager,
+        iceberg_compact_stat_sender: UnboundedSender<IcebergSinkCompactionUpdate>,
     ) -> (Self, (JoinHandle<()>, Sender<()>)) {
         let subscriber =
             new_committed_epoch_subscriber(hummock_manager.clone(), metadata_manager.clone());
@@ -112,6 +114,7 @@ impl SinkCoordinatorManager {
                 manager_request_stream,
                 db.clone(),
                 subscriber.clone(),
+                iceberg_compact_stat_sender.clone(),
             ))
         })
     }
@@ -384,8 +387,8 @@ mod tests {
 
     use anyhow::anyhow;
     use async_trait::async_trait;
-    use futures::future::join;
-    use futures::{FutureExt, StreamExt};
+    use futures::future::{join, try_join};
+    use futures::{FutureExt, StreamExt, TryFutureExt};
     use itertools::Itertools;
     use rand::seq::SliceRandom;
     use risingwave_common::bitmap::BitmapBuilder;
@@ -447,6 +450,7 @@ mod tests {
             sink_from_name: "test".into(),
         };
 
+        let epoch0 = 232;
         let epoch1 = 233;
         let epoch2 = 234;
 
@@ -549,6 +553,15 @@ mod tests {
 
         let (mut client1, mut client2) =
             join(build_client(vnode1), pin!(build_client(vnode2))).await;
+
+        let (aligned_epoch1, aligned_epoch2) = try_join(
+            client1.align_initial_epoch(epoch0),
+            client2.align_initial_epoch(epoch1),
+        )
+        .await
+        .unwrap();
+        assert_eq!(aligned_epoch1, epoch1);
+        assert_eq!(aligned_epoch2, epoch1);
 
         {
             // commit epoch1
@@ -725,6 +738,9 @@ mod tests {
         };
 
         let mut client = build_client(vnode).await;
+
+        let aligned_epoch = client.align_initial_epoch(epoch1).await.unwrap();
+        assert_eq!(aligned_epoch, epoch1);
 
         client
             .commit(
@@ -1061,12 +1077,21 @@ mod tests {
                 ))
             })
             .await
-            .unwrap()
-            .0
         };
 
-        let (mut client1, mut client2) =
-            join(build_client(vnode1), pin!(build_client(vnode2))).await;
+        let ((mut client1, _), (mut client2, _)) =
+            try_join(build_client(vnode1), pin!(build_client(vnode2)))
+                .await
+                .unwrap();
+
+        let (aligned_epoch1, aligned_epoch2) = try_join(
+            client1.align_initial_epoch(epoch1),
+            client2.align_initial_epoch(epoch1),
+        )
+        .await
+        .unwrap();
+        assert_eq!(aligned_epoch1, epoch1);
+        assert_eq!(aligned_epoch2, epoch1);
 
         {
             // commit epoch1
@@ -1113,26 +1138,14 @@ mod tests {
             )
         };
 
-        let mut client3 = build_client(vnode3).await;
+        let mut build_client3_future = pin!(build_client(vnode3));
+        assert!(
+            poll_fn(|cx| Poll::Ready(build_client3_future.as_mut().poll(cx)))
+                .await
+                .is_pending()
+        );
+        let mut client3;
         {
-            let mut commit_future3 = pin!(
-                client3
-                    .commit(
-                        epoch3,
-                        SinkMetadata {
-                            metadata: Some(Metadata::Serialized(SerializedMetadata {
-                                metadata: metadata_scale_out[2].clone(),
-                            })),
-                        },
-                    )
-                    .map(|result| result.unwrap())
-            );
-            assert!(
-                poll_fn(|cx| Poll::Ready(commit_future3.as_mut().poll(cx)))
-                    .await
-                    .is_pending()
-            );
-
             {
                 // commit epoch2
                 let mut commit_future = pin!(
@@ -1145,43 +1158,68 @@ mod tests {
                                 })),
                             },
                         )
-                        .map(|result| result.unwrap())
+                        .map_err(Into::into)
                 );
                 assert!(
                     poll_fn(|cx| Poll::Ready(commit_future.as_mut().poll(cx)))
                         .await
                         .is_pending()
                 );
-                join(
+                try_join(
                     commit_future,
-                    client2
-                        .commit(
-                            epoch2,
-                            SinkMetadata {
-                                metadata: Some(Metadata::Serialized(SerializedMetadata {
-                                    metadata: metadata[1][1].clone(),
-                                })),
-                            },
-                        )
-                        .map(|result| result.unwrap()),
-                )
-                .await;
-            }
-
-            client1.update_vnode_bitmap(&vnode1).await.unwrap();
-            client2.update_vnode_bitmap(&vnode2).await.unwrap();
-            let mut commit_future1 = pin!(
-                client1
-                    .commit(
-                        epoch3,
+                    client2.commit(
+                        epoch2,
                         SinkMetadata {
                             metadata: Some(Metadata::Serialized(SerializedMetadata {
-                                metadata: metadata_scale_out[0].clone(),
+                                metadata: metadata[1][1].clone(),
                             })),
                         },
+                    ),
+                )
+                .await
+                .unwrap();
+            }
+
+            client3 = {
+                let (
+                    (client3, init_epoch),
+                    (update_vnode_bitmap_epoch1, update_vnode_bitmap_epoch2),
+                ) = try_join(
+                    build_client3_future,
+                    try_join(
+                        client1.update_vnode_bitmap(&vnode1),
+                        client2.update_vnode_bitmap(&vnode2),
                     )
-                    .map(|result| result.unwrap())
+                    .map_err(Into::into),
+                )
+                .await
+                .unwrap();
+                assert_eq!(init_epoch, Some(epoch2));
+                assert_eq!(update_vnode_bitmap_epoch1, epoch2);
+                assert_eq!(update_vnode_bitmap_epoch2, epoch2);
+                client3
+            };
+            let mut commit_future3 = pin!(client3.commit(
+                epoch3,
+                SinkMetadata {
+                    metadata: Some(Metadata::Serialized(SerializedMetadata {
+                        metadata: metadata_scale_out[2].clone(),
+                    })),
+                },
+            ));
+            assert!(
+                poll_fn(|cx| Poll::Ready(commit_future3.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
             );
+            let mut commit_future1 = pin!(client1.commit(
+                epoch3,
+                SinkMetadata {
+                    metadata: Some(Metadata::Serialized(SerializedMetadata {
+                        metadata: metadata_scale_out[0].clone(),
+                    })),
+                },
+            ));
             assert!(
                 poll_fn(|cx| Poll::Ready(commit_future1.as_mut().poll(cx)))
                     .await
@@ -1192,17 +1230,19 @@ mod tests {
                     .await
                     .is_pending()
             );
-            client2
-                .commit(
+            try_join(
+                client2.commit(
                     epoch3,
                     SinkMetadata {
                         metadata: Some(Metadata::Serialized(SerializedMetadata {
                             metadata: metadata_scale_out[1].clone(),
                         })),
                     },
-                )
-                .map(|result| result.unwrap())
-                .await;
+                ),
+                try_join(commit_future1, commit_future3),
+            )
+            .await
+            .unwrap();
         }
 
         let (vnode2, vnode3) = {
@@ -1210,9 +1250,19 @@ mod tests {
             (build_bitmap(first), build_bitmap(second))
         };
 
-        // client1.stop().await.unwrap();
-        client2.update_vnode_bitmap(&vnode2).await.unwrap();
-        client3.update_vnode_bitmap(&vnode3).await.unwrap();
+        {
+            let (_, (update_vnode_bitmap_epoch2, update_vnode_bitmap_epoch3)) = try_join(
+                client1.stop(),
+                try_join(
+                    client2.update_vnode_bitmap(&vnode2),
+                    client3.update_vnode_bitmap(&vnode3),
+                ),
+            )
+            .await
+            .unwrap();
+            assert_eq!(update_vnode_bitmap_epoch2, epoch3);
+            assert_eq!(update_vnode_bitmap_epoch3, epoch3);
+        }
 
         {
             let mut commit_future = pin!(

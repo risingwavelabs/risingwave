@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
+use risingwave_common::bail;
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::{
@@ -25,7 +26,6 @@ use risingwave_meta_model::{
 use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
 use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
-use risingwave_pb::catalog::subscription::PbSubscriptionState;
 use risingwave_pb::catalog::table::{PbEngine, PbOptionalAssociatedSourceId, PbTableType};
 use risingwave_pb::catalog::{
     PbConnection, PbCreateType, PbDatabase, PbFunction, PbHandleConflictBehavior, PbIndex,
@@ -66,7 +66,7 @@ pub struct SqlMetaStore {
 
 impl SqlMetaStore {
     /// Connect to the SQL meta store based on the given configuration.
-    pub async fn connect(backend: MetaStoreBackend) -> Result<Self, sea_orm::DbErr> {
+    pub async fn connect(backend: MetaStoreBackend) -> MetaResult<Self> {
         const MAX_DURATION: Duration = Duration::new(u64::MAX / 4, 0);
 
         #[easy_ext::ext]
@@ -117,6 +117,11 @@ impl SqlMetaStore {
                     .acquire_timeout(Duration::from_secs(config.acquire_timeout_sec));
 
                 if DbBackend::Sqlite.is_prefix_of(&endpoint) {
+                    if endpoint.contains(":memory:") || endpoint.contains("mode=memory") {
+                        bail!(
+                            "use the `mem` backend instead of specifying a URL of in-memory SQLite"
+                        );
+                    }
                     options.sqlite_common();
                 }
 
@@ -369,7 +374,7 @@ impl From<ObjectModel<subscription::Model>> for PbSubscription {
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             dependent_table_id: value.0.dependent_table_id as _,
-            subscription_state: PbSubscriptionState::Init as _,
+            subscription_state: value.0.subscription_state as _,
         }
     }
 }

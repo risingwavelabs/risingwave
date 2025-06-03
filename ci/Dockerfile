@@ -1,8 +1,7 @@
-#############################################################################################
-#                                     !!! IMPORTANT !!!                                     #
-# If you want to bump CI Docker image, please update BUILD_ENV_VERSION in build-ci-image.sh #
-# and corresponding rw-build-env version in docker-compose.yml.                             #
-#############################################################################################
+################################################################################
+#                               !!! IMPORTANT !!!                              #
+# If you want to bump CI Docker image, please update BUILD_ENV_VERSION in .env #
+################################################################################
 
 FROM ubuntu:24.04 AS risingwave-build-env
 
@@ -11,11 +10,12 @@ ENV LANG en_US.utf8
 # Use AWS ubuntu mirror
 RUN sed -i 's|http://archive.ubuntu.com/ubuntu|http://us-east-2.ec2.archive.ubuntu.com/ubuntu/|g' /etc/apt/sources.list
 RUN apt-get update -yy && \
-    DEBIAN_FRONTEND=noninteractive apt-get -y install sudo make build-essential cmake protobuf-compiler curl parallel python3 python3-pip python3-venv software-properties-common psmisc \
-    openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config bash openjdk-17-jdk wget unzip git tmux lld postgresql-client kcat netcat-openbsd mysql-client \
+    DEBIAN_FRONTEND=noninteractive apt-get -y install sudo make build-essential cmake protobuf-compiler curl parallel python3 python3-pip python3-venv software-properties-common psmisc jq \
+    openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config bash openjdk-17-jdk wget unzip git tmux lld postgresql-client kcat netcat-openbsd mysql-client sqlite3 \
     maven zstd libzstd-dev locales \
     python3.12 python3.12-dev \
     golang perl \
+    dumb-init \
     && rm -rf /var/lib/{apt,dpkg,cache,log}/
 ENV PYO3_PYTHON=python3.12
 
@@ -50,7 +50,7 @@ RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.29.0/buf-$(u
     tar -xvzf - -C /usr/local --strip-components 1
 
 # install python dependencies
-RUN pip3 install --break-system-packages pyarrow pytest
+RUN pip3 install --break-system-packages pytest
 
 # Install poetry
 RUN curl -sSL https://install.python-poetry.org | python3 -
@@ -72,7 +72,7 @@ ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 RUN cargo binstall -y --locked cargo-llvm-cov cargo-nextest cargo-sort cargo-cache cargo-machete \
     cargo-make@0.37.24 \
-    sqllogictest-bin@0.28.0 \
+    sqllogictest-bin@0.28.2 \
     sccache@0.7.4 \
     && cargo cache -a \
     && rm -rf "/root/.cargo/registry/index" \
@@ -89,3 +89,9 @@ cd "/risingwave"
 ./risedev "\$@"
 EOF
 RUN chmod +x /root/.cargo/bin/risedev
+
+# Use `dumb-init` as the init system to properly handle signals:
+# - rewrite SIGTERM (sent by Buildkite agent or `docker stop`) to SIGINT
+# - forward signals to all child processes in the same process group
+# To debug, set env var `DUMB_INIT_DEBUG=1` for verbose logging.
+ENTRYPOINT [ "/usr/bin/dumb-init", "--rewrite", "15:2", "--" ]

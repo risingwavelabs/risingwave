@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Context as _;
-use itertools::Itertools as _;
 use risingwave_common::catalog::{ColumnCatalog, SourceVersionId};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
@@ -67,11 +65,7 @@ impl SourceCatalog {
     ///
     /// Returns error if it's invalid.
     pub fn create_sql_ast(&self) -> Result<ast::Statement> {
-        Ok(Parser::parse_sql(&self.definition)
-            .context("unable to parse definition sql")?
-            .into_iter()
-            .exactly_one()
-            .context("expecting exactly one statement in definition")?)
+        Ok(Parser::parse_exactly_one(&self.definition)?)
     }
 
     pub fn to_prost(&self) -> PbSource {
@@ -113,13 +107,17 @@ impl SourceCatalog {
             .get_connector()
             .expect("connector name is missing")
     }
+
+    pub fn is_iceberg_connector(&self) -> bool {
+        self.with_properties.is_iceberg_connector()
+    }
 }
 
 impl SourceCatalog {
     /// Returns the SQL definition when the source was created, purified with best effort.
     pub fn create_sql_purified(&self) -> String {
         self.create_sql_ast_purified()
-            .map(|stmt| stmt.to_string())
+            .and_then(|stmt| stmt.try_to_string().map_err(Into::into))
             .unwrap_or_else(|_| self.create_sql())
     }
 
@@ -127,6 +125,12 @@ impl SourceCatalog {
     ///
     /// Returns error if it's invalid.
     pub fn create_sql_ast_purified(&self) -> Result<ast::Statement> {
+        if self.with_properties.is_cdc_connector() {
+            // For CDC sources, we should not purify the SQL definition to add column definitions
+            // or constraints.
+            return self.create_sql_ast();
+        }
+
         match try_purify_table_source_create_sql_ast(
             self.create_sql_ast()?,
             &self.columns,

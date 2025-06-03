@@ -19,6 +19,7 @@ use risingwave_sqlparser::ast::{
     Ident, ObjectName, TableAlias, TableFactor, TableWithJoins, Value,
 };
 
+use crate::config::Feature;
 use crate::sql_gen::types::BINARY_INEQUALITY_OP_TABLE;
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext};
 use crate::{BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Table};
@@ -36,12 +37,14 @@ fn create_equi_expr(left: String, right: String) -> Expr {
 impl<R: Rng> SqlGenerator<'_, R> {
     /// A relation specified in the FROM clause.
     pub(crate) fn gen_from_relation(&mut self) -> (TableWithJoins, Vec<Table>) {
-        match self.rng.random_range(1..=4) {
-            1..=1 => self.gen_no_join(),
-            2..=3 => self
+        if !self.should_generate(Feature::Join) {
+            return self.gen_no_join();
+        }
+        match self.rng.random_range(1..=3) {
+            1..=2 => self
                 .gen_simple_join_clause()
                 .unwrap_or_else(|| self.gen_no_join()),
-            4..=4 => self.gen_more_joins(),
+            3..=3 => self.gen_more_joins(),
             // TODO(kwannoel): cycles, bushy joins.
             _ => unreachable!(),
         }
@@ -84,16 +87,17 @@ impl<R: Rng> SqlGenerator<'_, R> {
     /// Generated column names should be qualified by table name.
     fn gen_table_factor_inner(&mut self) -> (TableFactor, Table) {
         // TODO: TableFactor::Derived, TableFactor::TableFunction, TableFactor::NestedJoin
-        match self.rng.random_range(0..=2) {
+        match self.rng.random_range(0..=3) {
             0 => self.gen_time_window_func(),
-            1 => {
+            1 => self.gen_table_func(),
+            2 => {
                 if self.can_recurse() {
                     self.gen_table_subquery()
                 } else {
                     self.gen_simple_table_factor()
                 }
             }
-            2 => self.gen_simple_table_factor(),
+            3 => self.gen_simple_table_factor(),
             _ => unreachable!(),
         }
     }

@@ -1,0 +1,11 @@
+statement ok
+create function extract_tcp_info(bytea) returns struct<src_addr varchar, dst_addr varchar, src_port smallint, dst_port smallint>
+language wasm using link 'fs://e2e_test/udf/embedded_wasm/target/wasm32-wasip1/release/udf.wasm';
+
+query T
+select extract_tcp_info(E'\\x45000034a8a8400040065b8ac0a8000ec0a80001035d20b6d971b900000000080020200493310000020405b4' :: bytea);
+----
+(192.168.0.14,192.168.0.1,861,8374)
+
+statement ok
+drop function extract_tcp_info;

@@ -18,6 +18,7 @@ use std::iter::repeat_with;
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
+use anyhow::anyhow;
 use futures::{FutureExt, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::array::Op;
@@ -25,22 +26,26 @@ use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_pb::stream_plan::PbDispatcher;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
+use risingwave_pb::stream_plan::{self, PbDispatcher};
 use smallvec::{SmallVec, smallvec};
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
 use tokio_stream::StreamExt;
 use tokio_stream::adapters::Peekable;
 use tracing::{Instrument, event};
 
-use super::exchange::output::{BoxedOutput, new_output};
+use super::exchange::output::Output;
 use super::{
     AddMutation, DispatcherBarriers, DispatcherMessageBatch, MessageBatch, TroublemakerExecutor,
     UpdateMutation,
 };
 use crate::executor::StreamConsumer;
 use crate::executor::prelude::*;
-use crate::task::{DispatcherId, SharedContext};
+use crate::task::{DispatcherId, LocalBarrierManager, NewOutputRequest};
+
+mod output_mapping;
+pub use output_mapping::DispatchOutputMapping;
 
 /// [`DispatchExecutor`] consumes messages and send them into downstream actors. Usually,
 /// data chunks will be dispatched with some specified policy, while control message
@@ -52,7 +57,7 @@ pub struct DispatchExecutor {
 
 struct DispatcherWithMetrics {
     dispatcher: DispatcherImpl,
-    actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounter<3>,
+    actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounter,
 }
 
 impl DispatcherWithMetrics {
@@ -86,7 +91,7 @@ struct DispatchExecutorMetrics {
     actor_id_str: String,
     fragment_id_str: String,
     metrics: Arc<StreamingMetrics>,
-    actor_out_record_cnt: LabelGuardedIntCounter<2>,
+    actor_out_record_cnt: LabelGuardedIntCounter,
 }
 
 impl DispatchExecutorMetrics {
@@ -96,8 +101,8 @@ impl DispatchExecutorMetrics {
                 .metrics
                 .actor_output_buffer_blocking_duration_ns
                 .with_guarded_label_values(&[
-                    &self.actor_id_str,
-                    &self.fragment_id_str,
+                    self.actor_id_str.as_str(),
+                    self.fragment_id_str.as_str(),
                     dispatcher.dispatcher_id_str(),
                 ]),
             dispatcher,
@@ -108,13 +113,60 @@ impl DispatchExecutorMetrics {
 struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherWithMetrics>,
     actor_id: u32,
-    context: Arc<SharedContext>,
+    local_barrier_manager: LocalBarrierManager,
     metrics: DispatchExecutorMetrics,
+    new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
+    pending_new_output_requests: HashMap<ActorId, NewOutputRequest>,
 }
 
 impl DispatchExecutorInner {
+    async fn collect_outputs(
+        &mut self,
+        downstream_actors: &[ActorId],
+    ) -> StreamResult<Vec<Output>> {
+        fn resolve_output(downstream_actor: ActorId, request: NewOutputRequest) -> Output {
+            let tx = match request {
+                NewOutputRequest::Local(tx) | NewOutputRequest::Remote(tx) => tx,
+            };
+            Output::new(downstream_actor, tx)
+        }
+        let mut outputs = Vec::with_capacity(downstream_actors.len());
+        for downstream_actor in downstream_actors {
+            let output =
+                if let Some(request) = self.pending_new_output_requests.remove(downstream_actor) {
+                    resolve_output(*downstream_actor, request)
+                } else {
+                    loop {
+                        let (requested_actor, request) = self
+                            .new_output_request_rx
+                            .recv()
+                            .await
+                            .ok_or_else(|| anyhow!("end of new output request"))?;
+                        if requested_actor == *downstream_actor {
+                            break resolve_output(requested_actor, request);
+                        } else {
+                            assert!(
+                                self.pending_new_output_requests
+                                    .insert(requested_actor, request)
+                                    .is_none(),
+                                "duplicated inflight new output requests from actor {}",
+                                requested_actor
+                            );
+                        }
+                    }
+                };
+            outputs.push(output);
+        }
+        Ok(outputs)
+    }
+
     async fn dispatch(&mut self, msg: MessageBatch) -> StreamResult<()> {
-        let limit = (self.context.config.developer).exchange_concurrent_dispatchers;
+        let limit = self
+            .local_barrier_manager
+            .env
+            .config()
+            .developer
+            .exchange_concurrent_dispatchers;
         // Only barrier can be batched for now.
         match msg {
             MessageBatch::BarrierBatch(barrier_batch) => {
@@ -123,7 +175,7 @@ impl DispatchExecutorInner {
                 }
                 // Only the first barrier in a batch can be mutation.
                 let mutation = barrier_batch[0].mutation.clone();
-                self.pre_mutate_dispatchers(&mutation)?;
+                self.pre_mutate_dispatchers(&mutation).await?;
                 futures::stream::iter(self.dispatchers.iter_mut())
                     .map(Ok)
                     .try_for_each_concurrent(limit, |dispatcher| async {
@@ -174,19 +226,18 @@ impl DispatchExecutorInner {
     }
 
     /// Add new dispatchers to the executor. Will check whether their ids are unique.
-    fn add_dispatchers<'a>(
+    async fn add_dispatchers<'a>(
         &mut self,
         new_dispatchers: impl IntoIterator<Item = &'a PbDispatcher>,
     ) -> StreamResult<()> {
-        let new_dispatchers: Vec<_> = new_dispatchers
-            .into_iter()
-            .map(|d| {
-                DispatcherImpl::new(&self.context, self.actor_id, d)
-                    .map(|dispatcher| self.metrics.monitor_dispatcher(dispatcher))
-            })
-            .try_collect()?;
-
-        self.dispatchers.extend(new_dispatchers);
+        for dispatcher in new_dispatchers {
+            let outputs = self
+                .collect_outputs(&dispatcher.downstream_actor_id)
+                .await?;
+            let dispatcher = DispatcherImpl::new(outputs, dispatcher)?;
+            let dispatcher = self.metrics.monitor_dispatcher(dispatcher);
+            self.dispatchers.push(dispatcher);
+        }
 
         assert!(
             self.dispatchers
@@ -209,12 +260,10 @@ impl DispatchExecutorInner {
 
     /// Update the dispatcher BEFORE we actually dispatch this barrier. We'll only add the new
     /// outputs.
-    fn pre_update_dispatcher(&mut self, update: &PbDispatcherUpdate) -> StreamResult<()> {
-        let outputs: Vec<_> = update
-            .added_downstream_actor_id
-            .iter()
-            .map(|&id| new_output(&self.context, self.actor_id, id))
-            .try_collect()?;
+    async fn pre_update_dispatcher(&mut self, update: &PbDispatcherUpdate) -> StreamResult<()> {
+        let outputs = self
+            .collect_outputs(&update.added_downstream_actor_id)
+            .await?;
 
         let dispatcher = self.find_dispatcher(update.dispatcher_id);
         dispatcher.add_outputs(outputs);
@@ -245,7 +294,10 @@ impl DispatchExecutorInner {
     }
 
     /// For `Add` and `Update`, update the dispatchers before we dispatch the barrier.
-    fn pre_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> StreamResult<()> {
+    async fn pre_mutate_dispatchers(
+        &mut self,
+        mutation: &Option<Arc<Mutation>>,
+    ) -> StreamResult<()> {
         let Some(mutation) = mutation.as_deref() else {
             return Ok(());
         };
@@ -253,7 +305,7 @@ impl DispatchExecutorInner {
         match mutation {
             Mutation::Add(AddMutation { adds, .. }) => {
                 if let Some(new_dispatchers) = adds.get(&self.actor_id) {
-                    self.add_dispatchers(new_dispatchers)?;
+                    self.add_dispatchers(new_dispatchers).await?;
                 }
             }
             Mutation::Update(UpdateMutation {
@@ -262,12 +314,12 @@ impl DispatchExecutorInner {
                 ..
             }) => {
                 if let Some(new_dispatchers) = actor_dispatchers.get(&self.actor_id) {
-                    self.add_dispatchers(new_dispatchers)?;
+                    self.add_dispatchers(new_dispatchers).await?;
                 }
 
                 if let Some(updates) = dispatchers.get(&self.actor_id) {
                     for update in updates {
-                        self.pre_update_dispatcher(update)?;
+                        self.pre_update_dispatcher(update).await?;
                     }
                 }
             }
@@ -280,16 +332,16 @@ impl DispatchExecutorInner {
                 },
             ) => {
                 if let Some(new_dispatchers) = adds.get(&self.actor_id) {
-                    self.add_dispatchers(new_dispatchers)?;
+                    self.add_dispatchers(new_dispatchers).await?;
                 }
 
                 if let Some(new_dispatchers) = actor_dispatchers.get(&self.actor_id) {
-                    self.add_dispatchers(new_dispatchers)?;
+                    self.add_dispatchers(new_dispatchers).await?;
                 }
 
                 if let Some(updates) = dispatchers.get(&self.actor_id) {
                     for update in updates {
-                        self.pre_update_dispatcher(update)?;
+                        self.pre_update_dispatcher(update).await?;
                     }
                 }
             }
@@ -351,15 +403,74 @@ impl DispatchExecutorInner {
 }
 
 impl DispatchExecutor {
-    pub fn new(
-        mut input: Executor,
+    pub(crate) async fn new(
+        input: Executor,
+        new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
+        dispatchers: Vec<stream_plan::Dispatcher>,
+        actor_id: u32,
+        fragment_id: u32,
+        local_barrier_manager: LocalBarrierManager,
+        metrics: Arc<StreamingMetrics>,
+    ) -> StreamResult<Self> {
+        let mut executor = Self::new_inner(
+            input,
+            new_output_request_rx,
+            vec![],
+            actor_id,
+            fragment_id,
+            local_barrier_manager,
+            metrics,
+        );
+        let inner = &mut executor.inner;
+        for dispatcher in dispatchers {
+            let outputs = inner
+                .collect_outputs(&dispatcher.downstream_actor_id)
+                .await?;
+            let dispatcher = DispatcherImpl::new(outputs, &dispatcher)?;
+            let dispatcher = inner.metrics.monitor_dispatcher(dispatcher);
+            inner.dispatchers.push(dispatcher);
+        }
+        Ok(executor)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        input: Executor,
         dispatchers: Vec<DispatcherImpl>,
         actor_id: u32,
         fragment_id: u32,
-        context: Arc<SharedContext>,
+        local_barrier_manager: LocalBarrierManager,
         metrics: Arc<StreamingMetrics>,
-        chunk_size: usize,
+    ) -> (
+        Self,
+        tokio::sync::mpsc::UnboundedSender<(ActorId, NewOutputRequest)>,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+
+        (
+            Self::new_inner(
+                input,
+                rx,
+                dispatchers,
+                actor_id,
+                fragment_id,
+                local_barrier_manager,
+                metrics,
+            ),
+            tx,
+        )
+    }
+
+    fn new_inner(
+        mut input: Executor,
+        new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
+        dispatchers: Vec<DispatcherImpl>,
+        actor_id: u32,
+        fragment_id: u32,
+        local_barrier_manager: LocalBarrierManager,
+        metrics: Arc<StreamingMetrics>,
     ) -> Self {
+        let chunk_size = local_barrier_manager.env.config().developer.chunk_size;
         if crate::consistency::insane() {
             // make some trouble before dispatching to avoid generating invalid dist key.
             let mut info = input.info().clone();
@@ -388,8 +499,10 @@ impl DispatchExecutor {
             inner: DispatchExecutorInner {
                 dispatchers,
                 actor_id,
-                context,
+                local_barrier_manager,
                 metrics,
+                new_output_request_rx,
+                pending_new_output_requests: Default::default(),
             },
         }
     }
@@ -399,8 +512,13 @@ impl StreamConsumer for DispatchExecutor {
     type BarrierStream = impl Stream<Item = StreamResult<Barrier>> + Send;
 
     fn execute(mut self: Box<Self>) -> Self::BarrierStream {
-        let max_barrier_count_per_batch =
-            self.inner.context.config.developer.max_barrier_batch_size;
+        let max_barrier_count_per_batch = self
+            .inner
+            .local_barrier_manager
+            .env
+            .config()
+            .developer
+            .max_barrier_batch_size;
         #[try_stream]
         async move {
             let mut input = self.input.execute().peekable();
@@ -514,22 +632,9 @@ pub enum DispatcherImpl {
 }
 
 impl DispatcherImpl {
-    pub fn new(
-        context: &SharedContext,
-        actor_id: ActorId,
-        dispatcher: &PbDispatcher,
-    ) -> StreamResult<Self> {
-        let outputs = dispatcher
-            .downstream_actor_id
-            .iter()
-            .map(|&down_id| new_output(context, actor_id, down_id))
-            .collect::<StreamResult<Vec<_>>>()?;
-
-        let output_indices = dispatcher
-            .output_indices
-            .iter()
-            .map(|&i| i as usize)
-            .collect_vec();
+    pub fn new(outputs: Vec<Output>, dispatcher: &PbDispatcher) -> StreamResult<Self> {
+        let output_mapping =
+            DispatchOutputMapping::from_protobuf(dispatcher.output_mapping.clone().unwrap());
 
         use risingwave_pb::stream_plan::DispatcherType::*;
         let dispatcher_impl = match dispatcher.get_type()? {
@@ -547,21 +652,21 @@ impl DispatcherImpl {
                 DispatcherImpl::Hash(HashDataDispatcher::new(
                     outputs,
                     dist_key_indices,
-                    output_indices,
+                    output_mapping,
                     hash_mapping,
                     dispatcher.dispatcher_id,
                 ))
             }
             Broadcast => DispatcherImpl::Broadcast(BroadcastDispatcher::new(
                 outputs,
-                output_indices,
+                output_mapping,
                 dispatcher.dispatcher_id,
             )),
             Simple | NoShuffle => {
                 let [output]: [_; 1] = outputs.try_into().unwrap();
                 DispatcherImpl::Simple(SimpleDispatcher::new(
                     output,
-                    output_indices,
+                    output_mapping,
                     dispatcher.dispatcher_id,
                 ))
             }
@@ -593,7 +698,7 @@ macro_rules! impl_dispatcher {
                 }
             }
 
-            pub fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
+            pub fn add_outputs(&mut self, outputs: impl IntoIterator<Item = Output>) {
                 match self {
                     $(Self::$variant_name(inner) => inner.add_outputs(outputs), )*
                 }
@@ -650,7 +755,7 @@ pub trait Dispatcher: Debug + 'static {
     fn dispatch_watermark(&mut self, watermark: Watermark) -> impl DispatchFuture<'_>;
 
     /// Add new outputs to the dispatcher.
-    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>);
+    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = Output>);
     /// Remove outputs to `actor_ids` from the dispatcher.
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>);
 
@@ -674,7 +779,7 @@ pub trait Dispatcher: Debug + 'static {
 /// Note that this does not follow `concurrent_dispatchers` in the config and the concurrency is
 /// always unlimited.
 async fn broadcast_concurrent(
-    outputs: impl IntoIterator<Item = &'_ mut BoxedOutput>,
+    outputs: impl IntoIterator<Item = &'_ mut Output>,
     message: DispatcherMessageBatch,
 ) -> StreamResult<()> {
     futures::future::try_join_all(
@@ -688,8 +793,8 @@ async fn broadcast_concurrent(
 
 #[derive(Debug)]
 pub struct RoundRobinDataDispatcher {
-    outputs: Vec<BoxedOutput>,
-    output_indices: Vec<usize>,
+    outputs: Vec<Output>,
+    output_mapping: DispatchOutputMapping,
     cur: usize,
     dispatcher_id: DispatcherId,
     dispatcher_id_str: String,
@@ -697,13 +802,13 @@ pub struct RoundRobinDataDispatcher {
 
 impl RoundRobinDataDispatcher {
     pub fn new(
-        outputs: Vec<BoxedOutput>,
-        output_indices: Vec<usize>,
+        outputs: Vec<Output>,
+        output_mapping: DispatchOutputMapping,
         dispatcher_id: DispatcherId,
     ) -> Self {
         Self {
             outputs,
-            output_indices,
+            output_mapping,
             cur: 0,
             dispatcher_id,
             dispatcher_id_str: dispatcher_id.to_string(),
@@ -713,13 +818,7 @@ impl RoundRobinDataDispatcher {
 
 impl Dispatcher for RoundRobinDataDispatcher {
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> StreamResult<()> {
-        let chunk = if self.output_indices.len() < chunk.columns().len() {
-            chunk
-                .project(&self.output_indices)
-                .eliminate_adjacent_noop_update()
-        } else {
-            chunk.project(&self.output_indices)
-        };
+        let chunk = self.output_mapping.apply(chunk);
 
         self.outputs[self.cur]
             .send(DispatcherMessageBatch::Chunk(chunk))
@@ -739,7 +838,7 @@ impl Dispatcher for RoundRobinDataDispatcher {
     }
 
     async fn dispatch_watermark(&mut self, watermark: Watermark) -> StreamResult<()> {
-        if let Some(watermark) = watermark.transform_with_indices(&self.output_indices) {
+        if let Some(watermark) = self.output_mapping.apply_watermark(watermark) {
             // always broadcast watermark
             broadcast_concurrent(
                 &mut self.outputs,
@@ -750,7 +849,7 @@ impl Dispatcher for RoundRobinDataDispatcher {
         Ok(())
     }
 
-    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
+    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = Output>) {
         self.outputs.extend(outputs);
     }
 
@@ -775,9 +874,9 @@ impl Dispatcher for RoundRobinDataDispatcher {
 }
 
 pub struct HashDataDispatcher {
-    outputs: Vec<BoxedOutput>,
+    outputs: Vec<Output>,
     keys: Vec<usize>,
-    output_indices: Vec<usize>,
+    output_mapping: DispatchOutputMapping,
     /// Mapping from virtual node to actor id, used for hash data dispatcher to dispatch tasks to
     /// different downstream actors.
     hash_mapping: ExpandedActorMapping,
@@ -797,16 +896,16 @@ impl Debug for HashDataDispatcher {
 
 impl HashDataDispatcher {
     pub fn new(
-        outputs: Vec<BoxedOutput>,
+        outputs: Vec<Output>,
         keys: Vec<usize>,
-        output_indices: Vec<usize>,
+        output_mapping: DispatchOutputMapping,
         hash_mapping: ExpandedActorMapping,
         dispatcher_id: DispatcherId,
     ) -> Self {
         Self {
             outputs,
             keys,
-            output_indices,
+            output_mapping,
             hash_mapping,
             dispatcher_id,
             dispatcher_id_str: dispatcher_id.to_string(),
@@ -815,7 +914,7 @@ impl HashDataDispatcher {
 }
 
 impl Dispatcher for HashDataDispatcher {
-    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
+    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = Output>) {
         self.outputs.extend(outputs);
     }
 
@@ -829,7 +928,7 @@ impl Dispatcher for HashDataDispatcher {
     }
 
     async fn dispatch_watermark(&mut self, watermark: Watermark) -> StreamResult<()> {
-        if let Some(watermark) = watermark.transform_with_indices(&self.output_indices) {
+        if let Some(watermark) = self.output_mapping.apply_watermark(watermark) {
             // always broadcast watermark
             broadcast_concurrent(
                 &mut self.outputs,
@@ -859,13 +958,7 @@ impl Dispatcher for HashDataDispatcher {
         let mut new_ops: Vec<Op> = Vec::with_capacity(chunk.capacity());
 
         // Apply output indices after calculating the vnode.
-        let chunk = if self.output_indices.len() < chunk.columns().len() {
-            chunk
-                .project(&self.output_indices)
-                .eliminate_adjacent_noop_update()
-        } else {
-            chunk.project(&self.output_indices)
-        };
+        let chunk = self.output_mapping.apply(chunk);
 
         for ((vnode, &op), visible) in vnodes
             .iter()
@@ -967,29 +1060,29 @@ impl Dispatcher for HashDataDispatcher {
 /// `BroadcastDispatcher` dispatches message to all outputs.
 #[derive(Debug)]
 pub struct BroadcastDispatcher {
-    outputs: HashMap<ActorId, BoxedOutput>,
-    output_indices: Vec<usize>,
+    outputs: HashMap<ActorId, Output>,
+    output_mapping: DispatchOutputMapping,
     dispatcher_id: DispatcherId,
     dispatcher_id_str: String,
 }
 
 impl BroadcastDispatcher {
     pub fn new(
-        outputs: impl IntoIterator<Item = BoxedOutput>,
-        output_indices: Vec<usize>,
+        outputs: impl IntoIterator<Item = Output>,
+        output_mapping: DispatchOutputMapping,
         dispatcher_id: DispatcherId,
     ) -> Self {
         Self {
             outputs: Self::into_pairs(outputs).collect(),
-            output_indices,
+            output_mapping,
             dispatcher_id,
             dispatcher_id_str: dispatcher_id.to_string(),
         }
     }
 
     fn into_pairs(
-        outputs: impl IntoIterator<Item = BoxedOutput>,
-    ) -> impl Iterator<Item = (ActorId, BoxedOutput)> {
+        outputs: impl IntoIterator<Item = Output>,
+    ) -> impl Iterator<Item = (ActorId, Output)> {
         outputs
             .into_iter()
             .map(|output| (output.actor_id(), output))
@@ -998,13 +1091,7 @@ impl BroadcastDispatcher {
 
 impl Dispatcher for BroadcastDispatcher {
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> StreamResult<()> {
-        let chunk = if self.output_indices.len() < chunk.columns().len() {
-            chunk
-                .project(&self.output_indices)
-                .eliminate_adjacent_noop_update()
-        } else {
-            chunk.project(&self.output_indices)
-        };
+        let chunk = self.output_mapping.apply(chunk);
         broadcast_concurrent(
             self.outputs.values_mut(),
             DispatcherMessageBatch::Chunk(chunk),
@@ -1022,7 +1109,7 @@ impl Dispatcher for BroadcastDispatcher {
     }
 
     async fn dispatch_watermark(&mut self, watermark: Watermark) -> StreamResult<()> {
-        if let Some(watermark) = watermark.transform_with_indices(&self.output_indices) {
+        if let Some(watermark) = self.output_mapping.apply_watermark(watermark) {
             // always broadcast watermark
             broadcast_concurrent(
                 self.outputs.values_mut(),
@@ -1033,7 +1120,7 @@ impl Dispatcher for BroadcastDispatcher {
         Ok(())
     }
 
-    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
+    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = Output>) {
         self.outputs.extend(Self::into_pairs(outputs));
     }
 
@@ -1072,21 +1159,21 @@ pub struct SimpleDispatcher {
     ///
     /// Therefore, when dispatching data, we assert that there's exactly one output by
     /// `Self::output`.
-    output: SmallVec<[BoxedOutput; 2]>,
-    output_indices: Vec<usize>,
+    output: SmallVec<[Output; 2]>,
+    output_mapping: DispatchOutputMapping,
     dispatcher_id: DispatcherId,
     dispatcher_id_str: String,
 }
 
 impl SimpleDispatcher {
     pub fn new(
-        output: BoxedOutput,
-        output_indices: Vec<usize>,
+        output: Output,
+        output_mapping: DispatchOutputMapping,
         dispatcher_id: DispatcherId,
     ) -> Self {
         Self {
             output: smallvec![output],
-            output_indices,
+            output_mapping,
             dispatcher_id,
             dispatcher_id_str: dispatcher_id.to_string(),
         }
@@ -1094,7 +1181,7 @@ impl SimpleDispatcher {
 }
 
 impl Dispatcher for SimpleDispatcher {
-    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
+    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = Output>) {
         self.output.extend(outputs);
         assert!(self.output.len() <= 2);
     }
@@ -1116,13 +1203,7 @@ impl Dispatcher for SimpleDispatcher {
             .exactly_one()
             .expect("expect exactly one output");
 
-        let chunk = if self.output_indices.len() < chunk.columns().len() {
-            chunk
-                .project(&self.output_indices)
-                .eliminate_adjacent_noop_update()
-        } else {
-            chunk.project(&self.output_indices)
-        };
+        let chunk = self.output_mapping.apply(chunk);
         output.send(DispatcherMessageBatch::Chunk(chunk)).await
     }
 
@@ -1133,7 +1214,7 @@ impl Dispatcher for SimpleDispatcher {
             .exactly_one()
             .expect("expect exactly one output");
 
-        if let Some(watermark) = watermark.transform_with_indices(&self.output_indices) {
+        if let Some(watermark) = self.output_mapping.apply_watermark(watermark) {
             output
                 .send(DispatcherMessageBatch::Watermark(watermark))
                 .await?;
@@ -1162,16 +1243,14 @@ impl Dispatcher for SimpleDispatcher {
 #[cfg(test)]
 mod tests {
     use std::hash::{BuildHasher, Hasher};
-    use std::sync::Mutex;
 
-    use async_trait::async_trait;
     use futures::pin_mut;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder};
-    use risingwave_common::config;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::hash_util::Crc32FastBuilder;
-    use risingwave_pb::stream_plan::DispatcherType;
+    use risingwave_pb::stream_plan::{DispatcherType, PbDispatchOutputMapping};
+    use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
     use crate::executor::exchange::output::Output;
@@ -1179,31 +1258,6 @@ mod tests {
     use crate::executor::receiver::ReceiverExecutor;
     use crate::executor::{BarrierInner as Barrier, MessageInner as Message};
     use crate::task::barrier_test_utils::LocalBarrierTestEnv;
-    use crate::task::test_utils::helper_make_local_actor;
-
-    #[derive(Debug)]
-    pub struct MockOutput {
-        actor_id: ActorId,
-        data: Arc<Mutex<Vec<DispatcherMessageBatch>>>,
-    }
-
-    impl MockOutput {
-        pub fn new(actor_id: ActorId, data: Arc<Mutex<Vec<DispatcherMessageBatch>>>) -> Self {
-            Self { actor_id, data }
-        }
-    }
-
-    #[async_trait]
-    impl Output for MockOutput {
-        async fn send(&mut self, message: DispatcherMessageBatch) -> StreamResult<()> {
-            self.data.lock().unwrap().push(message);
-            Ok(())
-        }
-
-        fn actor_id(&self) -> ActorId {
-            self.actor_id
-        }
-    }
 
     // TODO: this test contains update being shuffled to different partitions, which is not
     // supported for now.
@@ -1218,15 +1272,12 @@ mod tests {
 
         let num_outputs = 2; // actor id ranges from 1 to 2
         let key_indices = &[0, 2];
-        let output_data_vecs = (0..num_outputs)
-            .map(|_| Arc::new(Mutex::new(Vec::new())))
-            .collect::<Vec<_>>();
-        let outputs = output_data_vecs
-            .iter()
+        let (output_tx_vecs, mut output_rx_vecs): (Vec<_>, Vec<_>) =
+            (0..num_outputs).map(|_| channel_for_test()).collect();
+        let outputs = output_tx_vecs
+            .into_iter()
             .enumerate()
-            .map(|(actor_id, data)| {
-                Box::new(MockOutput::new(1 + actor_id as u32, data.clone())) as BoxedOutput
-            })
+            .map(|(actor_id, tx)| Output::new(1 + actor_id as u32, tx))
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
             .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT_FOR_TEST / num_outputs])
@@ -1235,7 +1286,7 @@ mod tests {
         let mut hash_dispatcher = HashDataDispatcher::new(
             outputs,
             key_indices.to_vec(),
-            vec![0, 1, 2],
+            DispatchOutputMapping::Simple(vec![0, 1, 2]),
             hash_mapping,
             0,
         );
@@ -1254,7 +1305,7 @@ mod tests {
         hash_dispatcher.dispatch_data(chunk).await.unwrap();
 
         assert_eq!(
-            *output_data_vecs[0].lock().unwrap()[0].as_chunk().unwrap(),
+            *output_rx_vecs[0].recv().await.unwrap().as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I I
                 +  4 6 8
@@ -1268,7 +1319,7 @@ mod tests {
             )
         );
         assert_eq!(
-            *output_data_vecs[1].lock().unwrap()[0].as_chunk().unwrap(),
+            *output_rx_vecs[1].recv().await.unwrap().as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I I
                 +  4 6 8 D
@@ -1290,45 +1341,30 @@ mod tests {
         let actor_id = 233;
         let fragment_id = 666;
         let barrier_test_env = LocalBarrierTestEnv::for_test().await;
-        let ctx = Arc::new(SharedContext::for_test());
         let metrics = Arc::new(StreamingMetrics::unused());
 
         let (untouched, old, new) = (234, 235, 238); // broadcast downstream actors
         let (old_simple, new_simple) = (114, 514); // simple downstream actors
 
-        // 1. Register info in context.
-        ctx.add_actors(
-            [actor_id, untouched, old, new, old_simple, new_simple]
-                .into_iter()
-                .map(helper_make_local_actor),
-        );
         // actor_id -> untouched, old, new, old_simple, new_simple
 
         let broadcast_dispatcher_id = 666;
-        let broadcast_dispatcher = DispatcherImpl::new(
-            &ctx,
-            actor_id,
-            &PbDispatcher {
-                r#type: DispatcherType::Broadcast as _,
-                dispatcher_id: broadcast_dispatcher_id,
-                downstream_actor_id: vec![untouched, old],
-                ..Default::default()
-            },
-        )
-        .unwrap();
+        let broadcast_dispatcher = PbDispatcher {
+            r#type: DispatcherType::Broadcast as _,
+            dispatcher_id: broadcast_dispatcher_id,
+            downstream_actor_id: vec![untouched, old],
+            output_mapping: PbDispatchOutputMapping::identical(0).into(), /* dummy length as it's not used */
+            ..Default::default()
+        };
 
         let simple_dispatcher_id = 888;
-        let simple_dispatcher = DispatcherImpl::new(
-            &ctx,
-            actor_id,
-            &PbDispatcher {
-                r#type: DispatcherType::Simple as _,
-                dispatcher_id: simple_dispatcher_id,
-                downstream_actor_id: vec![old_simple],
-                ..Default::default()
-            },
-        )
-        .unwrap();
+        let simple_dispatcher = PbDispatcher {
+            r#type: DispatcherType::Simple as _,
+            dispatcher_id: simple_dispatcher_id,
+            downstream_actor_id: vec![old_simple],
+            output_mapping: PbDispatchOutputMapping::identical(0).into(), /* dummy length as it's not used */
+            ..Default::default()
+        };
 
         let dispatcher_updates = maplit::hashmap! {
             actor_id => vec![PbDispatcherUpdate {
@@ -1357,28 +1393,41 @@ mod tests {
             ReceiverExecutor::for_test(
                 actor_id,
                 rx,
-                barrier_test_env.shared_context.clone(),
                 barrier_test_env.local_barrier_manager.clone(),
             )
             .boxed(),
         );
-        let executor = Box::new(DispatchExecutor::new(
-            input,
-            vec![broadcast_dispatcher, simple_dispatcher],
-            actor_id,
-            fragment_id,
-            ctx.clone(),
-            metrics,
-            config::default::developer::stream_chunk_size(),
-        ))
-        .execute();
-        pin_mut!(executor);
 
-        // 2. Take downstream receivers.
+        let (new_output_request_tx, new_output_request_rx) = unbounded_channel();
         let mut rxs = [untouched, old, new, old_simple, new_simple]
             .into_iter()
-            .map(|id| (id, ctx.take_receiver((actor_id, id)).unwrap()))
+            .map(|id| {
+                (id, {
+                    let (tx, rx) = channel_for_test();
+                    new_output_request_tx
+                        .send((id, NewOutputRequest::Local(tx)))
+                        .unwrap();
+                    rx
+                })
+            })
             .collect::<HashMap<_, _>>();
+        let executor = Box::new(
+            DispatchExecutor::new(
+                input,
+                new_output_request_rx,
+                vec![broadcast_dispatcher, simple_dispatcher],
+                actor_id,
+                fragment_id,
+                barrier_test_env.local_barrier_manager.clone(),
+                metrics,
+            )
+            .await
+            .unwrap(),
+        )
+        .execute();
+
+        pin_mut!(executor);
+
         macro_rules! try_recv {
             ($down_id:expr) => {
                 rxs.get_mut(&$down_id).unwrap().try_recv()
@@ -1482,15 +1531,12 @@ mod tests {
         let cardinality = 10;
         let dimension = 4;
         let key_indices = &[0, 2];
-        let output_data_vecs = (0..num_outputs)
-            .map(|_| Arc::new(Mutex::new(Vec::new())))
-            .collect::<Vec<_>>();
-        let outputs = output_data_vecs
-            .iter()
+        let (output_tx_vecs, output_rx_vecs): (Vec<_>, Vec<_>) =
+            (0..num_outputs).map(|_| channel_for_test()).collect();
+        let outputs = output_tx_vecs
+            .into_iter()
             .enumerate()
-            .map(|(actor_id, data)| {
-                Box::new(MockOutput::new(1 + actor_id as u32, data.clone())) as BoxedOutput
-            })
+            .map(|(actor_id, tx)| Output::new(1 + actor_id as u32, tx))
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
             .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT_FOR_TEST / num_outputs])
@@ -1499,7 +1545,7 @@ mod tests {
         let mut hash_dispatcher = HashDataDispatcher::new(
             outputs,
             key_indices.to_vec(),
-            (0..dimension).collect(),
+            DispatchOutputMapping::Simple((0..dimension).collect()),
             hash_mapping.clone(),
             0,
         );
@@ -1551,14 +1597,17 @@ mod tests {
         let chunk = StreamChunk::new(ops, columns);
         hash_dispatcher.dispatch_data(chunk).await.unwrap();
 
-        for (output_idx, output) in output_data_vecs.into_iter().enumerate() {
-            let guard = output.lock().unwrap();
+        for (output_idx, mut rx) in output_rx_vecs.into_iter().enumerate() {
+            let mut output = vec![];
+            while let Some(Some(msg)) = rx.recv().now_or_never() {
+                output.push(msg);
+            }
             // It is possible that there is no chunks, as a key doesn't belong to any hash bucket.
-            assert!(guard.len() <= 1);
-            if guard.is_empty() {
+            assert!(output.len() <= 1);
+            if output.is_empty() {
                 assert!(output_cols[output_idx].iter().all(|x| { x.is_empty() }));
             } else {
-                let message = guard.first().unwrap();
+                let message = output.first().unwrap();
                 let real_chunk = match message {
                     DispatcherMessageBatch::Chunk(chunk) => chunk,
                     _ => panic!(),

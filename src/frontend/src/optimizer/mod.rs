@@ -35,6 +35,7 @@ pub use plan_visitor::{
     SysTableVisitor,
 };
 
+pub mod backfill_order_strategy;
 mod logical_optimization;
 mod optimizer_context;
 pub mod plan_expr_rewriter;
@@ -192,18 +193,6 @@ impl PlanRoot {
         }
         self.out_names = out_names;
         Ok(())
-    }
-
-    pub fn set_req_dist_as_same_as_req_order(&mut self) {
-        if self.required_order.len() != 0 {
-            let dist = self
-                .required_order
-                .column_orders
-                .iter()
-                .map(|o| o.column_index)
-                .collect_vec();
-            self.required_dist = RequiredDist::hash_shard(&dist)
-        }
     }
 
     /// Get the plan root's schema, only including the fields to be output.

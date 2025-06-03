@@ -15,14 +15,13 @@
 use core::fmt::Debug;
 use core::num::NonZeroU64;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::Arc;
 
 use anyhow::anyhow;
 use clickhouse::insert::Insert;
 use clickhouse::{Client as ClickHouseClient, Row as ClickHouseRow};
 use itertools::Itertools;
+use phf::{Set, phf_set};
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Decimal, ScalarRefImpl, Serial};
@@ -40,6 +39,7 @@ use super::decouple_checkpoint_log_sink::{
 };
 use super::writer::SinkWriter;
 use super::{DummySinkCommitCoordinator, SinkWriterMetrics, SinkWriterParam};
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::sink::{
     Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink, SinkError, SinkParam,
@@ -50,6 +50,10 @@ const QUERY_ENGINE: &str =
 const QUERY_COLUMN: &str =
     "select distinct ?fields from system.columns where database = ? and table = ? order by ?";
 pub const CLICKHOUSE_SINK: &str = "clickhouse";
+
+const ALLOW_EXPERIMENTAL_JSON_TYPE: &str = "allow_experimental_json_type";
+const INPUT_FORMAT_BINARY_READ_JSON_AS_STRING: &str = "input_format_binary_read_json_as_string";
+const OUTPUT_FORMAT_BINARY_WRITE_JSON_AS_STRING: &str = "output_format_binary_write_json_as_string";
 
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -70,6 +74,12 @@ pub struct ClickHouseCommon {
     #[serde(default = "default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
     pub commit_checkpoint_interval: u64,
+}
+
+impl EnforceSecret for ClickHouseCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "clickhouse.password", "clickhouse.user"
+    };
 }
 
 #[allow(clippy::enum_variant_names)]
@@ -310,7 +320,10 @@ impl ClickHouseCommon {
             .with_url(&self.url)
             .with_user(&self.user)
             .with_password(&self.password)
-            .with_database(&self.database);
+            .with_database(&self.database)
+            .with_option(ALLOW_EXPERIMENTAL_JSON_TYPE, "1")
+            .with_option(INPUT_FORMAT_BINARY_READ_JSON_AS_STRING, "1")
+            .with_option(OUTPUT_FORMAT_BINARY_WRITE_JSON_AS_STRING, "1");
         Ok(client)
     }
 }
@@ -324,12 +337,38 @@ pub struct ClickHouseConfig {
     pub r#type: String, // accept "append-only" or "upsert"
 }
 
+impl EnforceSecret for ClickHouseConfig {
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        ClickHouseCommon::enforce_one(prop)
+    }
+
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            ClickHouseCommon::enforce_one(prop)?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ClickHouseSink {
     pub config: ClickHouseConfig,
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
+}
+
+impl EnforceSecret for ClickHouseSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            ClickHouseConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 impl ClickHouseConfig {
@@ -466,9 +505,7 @@ impl ClickHouseSink {
             risingwave_common::types::DataType::Bytea => Err(SinkError::ClickHouse(
                 "clickhouse can not support Bytea".to_owned(),
             )),
-            risingwave_common::types::DataType::Jsonb => Err(SinkError::ClickHouse(
-                "clickhouse rust can not support Json".to_owned(),
-            )),
+            risingwave_common::types::DataType::Jsonb => Ok(ck_column.r#type.contains("JSON")),
             risingwave_common::types::DataType::Serial => {
                 Ok(ck_column.r#type.contains("UInt64") | ck_column.r#type.contains("Int64"))
             }
@@ -489,10 +526,12 @@ impl ClickHouseSink {
         Ok(())
     }
 }
+
 impl Sink for ClickHouseSink {
     type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = DecoupleCheckpointLogSinkerOf<ClickHouseSinkWriter>;
 
+    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &["commit_checkpoint_interval"];
     const SINK_NAME: &'static str = CLICKHOUSE_SINK;
 
     async fn validate(&self) -> Result<()> {
@@ -536,6 +575,11 @@ impl Sink for ClickHouseSink {
                 "`commit_checkpoint_interval` must be greater than 0"
             )));
         }
+        Ok(())
+    }
+
+    fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
+        ClickHouseConfig::from_btreemap(config.clone())?;
         Ok(())
     }
 
@@ -766,10 +810,6 @@ impl SinkWriter for ClickHouseSinkWriter {
         }
         Ok(())
     }
-
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
-        Ok(())
-    }
 }
 
 #[derive(ClickHouseRow, Deserialize, Clone)]
@@ -965,10 +1005,9 @@ impl ClickHouseFieldWithNull {
                 };
                 ClickHouseField::Int64(ticks)
             }
-            ScalarRefImpl::Jsonb(_) => {
-                return Err(SinkError::ClickHouse(
-                    "clickhouse rust interface can not support Json".to_owned(),
-                ));
+            ScalarRefImpl::Jsonb(v) => {
+                let json_str = v.to_string();
+                ClickHouseField::String(json_str)
             }
             ScalarRefImpl::Struct(v) => {
                 let mut struct_vec = vec![];

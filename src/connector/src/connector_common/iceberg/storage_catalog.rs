@@ -14,12 +14,18 @@
 
 //! This module provide storage catalog.
 
+#![expect(
+    clippy::disallowed_types,
+    reason = "construct iceberg::Error to implement the trait"
+)]
+
 use std::collections::HashMap;
 
 use async_trait::async_trait;
 use iceberg::io::{
-    FileIO, GCS_CREDENTIALS_JSON, GCS_DISABLE_CONFIG_LOAD, S3_ACCESS_KEY_ID,
-    S3_DISABLE_CONFIG_LOAD, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY,
+    AZBLOB_ACCOUNT_KEY, AZBLOB_ACCOUNT_NAME, AZBLOB_ENDPOINT, FileIO, GCS_CREDENTIALS_JSON,
+    GCS_DISABLE_CONFIG_LOAD, S3_ACCESS_KEY_ID, S3_DISABLE_CONFIG_LOAD, S3_ENDPOINT, S3_REGION,
+    S3_SECRET_ACCESS_KEY,
 };
 use iceberg::spec::{TableMetadata, TableMetadataBuilder};
 use iceberg::table::Table;
@@ -34,6 +40,7 @@ use typed_builder::TypedBuilder;
 pub enum StorageCatalogConfig {
     S3(StorageCatalogS3Config),
     Gcs(StorageCatalogGcsConfig),
+    Azblob(StorageCatalogAzblobConfig),
 }
 
 #[derive(Clone, Debug, TypedBuilder)]
@@ -51,6 +58,14 @@ pub struct StorageCatalogGcsConfig {
     warehouse: String,
     credential: Option<String>,
     enable_config_load: Option<bool>,
+}
+
+#[derive(Clone, Debug, TypedBuilder)]
+pub struct StorageCatalogAzblobConfig {
+    warehouse: String,
+    account_name: Option<String>,
+    account_key: Option<String>,
+    endpoint: Option<String>,
 }
 
 /// File system catalog.
@@ -90,6 +105,19 @@ impl StorageCatalog {
                 let enable_config_load = config.enable_config_load.unwrap_or(false);
                 file_io_builder = file_io_builder
                     .with_prop(GCS_DISABLE_CONFIG_LOAD, (!enable_config_load).to_string());
+                (config.warehouse.clone(), file_io_builder.build()?)
+            }
+            StorageCatalogConfig::Azblob(config) => {
+                let mut file_io_builder = FileIO::from_path(&config.warehouse)?;
+                if let Some(account_name) = &config.account_name {
+                    file_io_builder = file_io_builder.with_prop(AZBLOB_ACCOUNT_NAME, account_name)
+                };
+                if let Some(account_key) = &config.account_key {
+                    file_io_builder = file_io_builder.with_prop(AZBLOB_ACCOUNT_KEY, account_key)
+                };
+                if let Some(endpoint) = &config.endpoint {
+                    file_io_builder = file_io_builder.with_prop(AZBLOB_ENDPOINT, endpoint)
+                };
                 (config.warehouse.clone(), file_io_builder.build()?)
             }
         };

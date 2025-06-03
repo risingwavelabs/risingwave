@@ -56,7 +56,7 @@ pub async fn handle_create_database(
                     .notice(format!("database \"{}\" exists, skipping", database_name))
                     .into())
             } else {
-                Err(CatalogError::Duplicated("database", database_name, false).into())
+                Err(CatalogError::duplicated("database", database_name).into())
             };
         }
     }
@@ -74,7 +74,16 @@ pub async fn handle_create_database(
         session.user_id()
     };
 
-    let resource_group = resource_group.map(resolve_resource_group).transpose()?;
+    let resource_group = resource_group
+        .map(resolve_resource_group)
+        .transpose()?
+        .flatten();
+
+    if resource_group.is_some() {
+        risingwave_common::license::Feature::ResourceGroup
+            .check_available()
+            .map_err(|e| anyhow::anyhow!(e))?;
+    }
 
     let resource_group = resource_group.as_deref().unwrap_or(DEFAULT_RESOURCE_GROUP);
 

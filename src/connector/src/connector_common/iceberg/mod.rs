@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod compaction;
 mod jni_catalog;
 mod mock_catalog;
 mod storage_catalog;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -22,16 +24,23 @@ use ::iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_K
 use ::iceberg::table::Table;
 use ::iceberg::{Catalog, TableIdent};
 use anyhow::{Context, anyhow};
-use iceberg::io::{GCS_CREDENTIALS_JSON, GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD};
+use iceberg::io::{
+    AZBLOB_ACCOUNT_KEY, AZBLOB_ACCOUNT_NAME, AZBLOB_ENDPOINT, GCS_CREDENTIALS_JSON,
+    GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD,
+};
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
+use phf::{Set, phf_set};
 use risingwave_common::bail;
+use risingwave_common::util::env_var::env_var_is_true;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use url::Url;
 use with_options::WithOptions;
 
+use crate::connector_common::common::DISABLE_DEFAULT_CREDENTIAL;
 use crate::connector_common::iceberg::storage_catalog::StorageCatalogConfig;
 use crate::deserialize_optional_bool_from_string;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 
 #[serde_as]
@@ -52,6 +61,13 @@ pub struct IcebergCommon {
 
     #[serde(rename = "gcs.credential")]
     pub gcs_credential: Option<String>,
+
+    #[serde(rename = "azblob.account_name")]
+    pub azblob_account_name: Option<String>,
+    #[serde(rename = "azblob.account_key")]
+    pub azblob_account_key: Option<String>,
+    #[serde(rename = "azblob.endpoint_url")]
+    pub azblob_endpoint_url: Option<String>,
 
     /// Path of iceberg warehouse.
     #[serde(rename = "warehouse.path")]
@@ -110,9 +126,28 @@ pub struct IcebergCommon {
         deserialize_with = "deserialize_optional_bool_from_string"
     )]
     pub path_style_access: Option<bool>,
-    /// enable config load.
+    /// Enable config load. This parameter set to true will load warehouse credentials from the environment. Only allowed to be used in a self-hosted environment.
     #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
     pub enable_config_load: Option<bool>,
+
+    /// This is only used by iceberg engine to enable the hosted catalog.
+    #[serde(
+        rename = "hosted_catalog",
+        default,
+        deserialize_with = "deserialize_optional_bool_from_string"
+    )]
+    pub hosted_catalog: Option<bool>,
+}
+
+impl EnforceSecret for IcebergCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "s3.access.key",
+        "s3.secret.key",
+        "gcs.credential",
+        "catalog.credential",
+        "catalog.token",
+        "catalog.oauth2_server_uri",
+    };
 }
 
 impl IcebergCommon {
@@ -127,13 +162,21 @@ impl IcebergCommon {
             .unwrap_or_else(|| "risingwave".to_owned())
     }
 
+    pub fn enable_config_load(&self) -> bool {
+        // If the env var is set to true, we disable the default config load. (Cloud environment)
+        if env_var_is_true(DISABLE_DEFAULT_CREDENTIAL) {
+            return false;
+        }
+        self.enable_config_load.unwrap_or(false)
+    }
+
     /// For both V1 and V2.
     fn build_jni_catalog_configs(
         &self,
         java_catalog_props: &HashMap<String, String>,
     ) -> ConnectorResult<(HashMap<String, String>, HashMap<String, String>)> {
         let mut iceberg_configs = HashMap::new();
-        let enable_config_load = self.enable_config_load.unwrap_or(false);
+        let enable_config_load = self.enable_config_load();
         let file_io_props = {
             let catalog_type = self.catalog_type().to_owned();
 
@@ -158,6 +201,24 @@ impl IcebergCommon {
                 iceberg_configs.insert(GCS_CREDENTIALS_JSON.to_owned(), gcs_credential.clone());
                 if catalog_type != "rest" && catalog_type != "rest_rust" {
                     bail!("gcs unsupported in {} catalog", &catalog_type);
+                }
+            }
+
+            if let (
+                Some(azblob_account_name),
+                Some(azblob_account_key),
+                Some(azblob_endpoint_url),
+            ) = (
+                &self.azblob_account_name,
+                &self.azblob_account_key,
+                &self.azblob_endpoint_url,
+            ) {
+                iceberg_configs.insert(AZBLOB_ACCOUNT_NAME.to_owned(), azblob_account_name.clone());
+                iceberg_configs.insert(AZBLOB_ACCOUNT_KEY.to_owned(), azblob_account_key.clone());
+                iceberg_configs.insert(AZBLOB_ENDPOINT.to_owned(), azblob_endpoint_url.clone());
+
+                if catalog_type != "rest" && catalog_type != "rest_rust" {
+                    bail!("azblob unsupported in {} catalog", &catalog_type);
                 }
             }
 
@@ -373,14 +434,22 @@ impl IcebergCommon {
                             .secret_key(self.secret_key.clone())
                             .region(self.region.clone())
                             .endpoint(self.endpoint.clone())
-                            .enable_config_load(self.enable_config_load)
+                            .enable_config_load(Some(self.enable_config_load()))
                             .build(),
                     ),
                     "gs" | "gcs" => StorageCatalogConfig::Gcs(
                         storage_catalog::StorageCatalogGcsConfig::builder()
                             .warehouse(warehouse)
                             .credential(self.gcs_credential.clone())
-                            .enable_config_load(self.enable_config_load)
+                            .enable_config_load(Some(self.enable_config_load()))
+                            .build(),
+                    ),
+                    "azblob" => StorageCatalogConfig::Azblob(
+                        storage_catalog::StorageCatalogAzblobConfig::builder()
+                            .warehouse(warehouse)
+                            .account_name(self.azblob_account_name.clone())
+                            .account_key(self.azblob_account_key.clone())
+                            .endpoint(self.azblob_endpoint_url.clone())
                             .build(),
                     ),
                     scheme => bail!("Unsupported warehouse scheme: {}", scheme),

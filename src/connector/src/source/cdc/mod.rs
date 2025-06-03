@@ -30,6 +30,7 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use simd_json::prelude::ArrayTrait;
 pub use source::*;
 
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::source::{SourceProperties, SplitImpl, TryFromBTreeMap};
 use crate::{for_all_classified_sources, impl_cdc_source_type};
@@ -46,6 +47,9 @@ pub const CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY: &str = "snapshot.batch_size";
 pub const CDC_TRANSACTIONAL_KEY: &str = "transactional";
 pub const CDC_WAIT_FOR_STREAMING_START_TIMEOUT: &str = "cdc.source.wait.streaming.start.timeout";
 pub const CDC_AUTO_SCHEMA_CHANGE_KEY: &str = "auto.schema.change";
+
+// User can set strong-schema='true' to enable strong schema for mongo cdc source
+pub const CDC_MONGODB_STRONG_SCHEMA_KEY: &str = "strong_schema";
 
 pub const MYSQL_CDC_CONNECTOR: &str = Mysql::CDC_CONNECTOR_NAME;
 pub const POSTGRES_CDC_CONNECTOR: &str = Postgres::CDC_CONNECTOR_NAME;
@@ -142,6 +146,8 @@ impl<T: CdcSourceTypeTrait> TryFromBTreeMap for CdcProperties<T> {
         })
     }
 }
+
+impl<T: CdcSourceTypeTrait> EnforceSecret for CdcProperties<T> {} // todo: enforce jdbc like properties
 
 impl<T: CdcSourceTypeTrait> SourceProperties for CdcProperties<T>
 where

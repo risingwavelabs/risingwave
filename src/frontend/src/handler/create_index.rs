@@ -41,7 +41,7 @@ use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist}
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
-use crate::stream_fragmenter::build_graph;
+use crate::stream_fragmenter::{GraphJobType, build_graph};
 
 pub(crate) fn resolve_index_schema(
     session: &SessionImpl,
@@ -456,7 +456,7 @@ pub async fn handle_create_index(
             include,
             distributed_by,
         )?;
-        let graph = build_graph(plan)?;
+        let graph = build_graph(plan, Some(GraphJobType::Index))?;
 
         (graph, index_table, index)
     };
@@ -480,7 +480,7 @@ pub async fn handle_create_index(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_index(index, index_table, graph)
+        .create_index(index, index_table, graph, if_not_exists)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_INDEX))

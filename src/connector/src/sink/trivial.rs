@@ -15,8 +15,10 @@
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
+use phf::{Set, phf_set};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
 use crate::sink::{
     DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkError, SinkLogReader, SinkParam,
@@ -51,6 +53,10 @@ pub type TableSink = TrivialSink<TableSinkName>;
 #[derive(Debug)]
 pub struct TrivialSink<T: TrivialSinkName>(PhantomData<T>);
 
+impl<T: TrivialSinkName> EnforceSecret for TrivialSink<T> {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {};
+}
+
 impl<T: TrivialSinkName> TryFrom<SinkParam> for TrivialSink<T> {
     type Error = SinkError;
 
@@ -65,9 +71,11 @@ impl<T: TrivialSinkName> Sink for TrivialSink<T> {
 
     const SINK_NAME: &'static str = T::SINK_NAME;
 
-    // Disable sink decoupling for all trivial sinks because it introduces overhead without any benefit
-    fn is_sink_decouple(_user_specified: &SinkDecouple) -> Result<bool> {
-        Ok(false)
+    /// Enable sink decoupling for sink-into-table.
+    /// Disable sink decoupling for blackhole sink. It introduces overhead without any benefit
+    fn is_sink_decouple(user_specified: &SinkDecouple) -> Result<bool> {
+        // TODO(kwannoel): also enable by default, once it's shown to be stable
+        Ok(T::SINK_NAME == TABLE_SINK && matches!(user_specified, SinkDecouple::Enable))
     }
 
     async fn new_log_sinker(&self, _writer_env: SinkWriterParam) -> Result<Self::LogSinker> {

@@ -36,8 +36,9 @@ use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam};
 use crate::connector_common::{
     AwsAuthProps, KafkaCommon, KafkaConnectionProps, KafkaPrivateLinkCommon,
-    RdKafkaPropertiesCommon,
+    RdKafkaPropertiesCommon, read_kafka_log_level,
 };
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
@@ -250,6 +251,14 @@ pub struct KafkaConfig {
     pub aws_auth_props: AwsAuthProps,
 }
 
+impl EnforceSecret for KafkaConfig {
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        KafkaConnectionProps::enforce_one(prop)?;
+        AwsAuthProps::enforce_one(prop)?;
+        Ok(())
+    }
+}
+
 impl KafkaConfig {
     pub fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
         let config = serde_json::from_value::<KafkaConfig>(serde_json::to_value(values).unwrap())
@@ -294,6 +303,17 @@ pub struct KafkaSink {
     sink_from_name: String,
 }
 
+impl EnforceSecret for KafkaSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            KafkaConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
+}
+
 impl TryFrom<SinkParam> for KafkaSink {
     type Error = SinkError;
 
@@ -317,6 +337,22 @@ impl Sink for KafkaSink {
     type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = AsyncTruncateLogSinkerOf<KafkaSinkWriter>;
 
+    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &[
+        "properties.allow.auto.create.topics",
+        "properties.batch.num.messages",
+        "properties.batch.size",
+        "properties.enable.idempotence",
+        "properties.max.in.flight.requests.per.connection",
+        "properties.message.max.bytes",
+        "properties.message.send.max.retries",
+        "properties.message.timeout.ms",
+        "properties.queue.buffering.max.kbytes",
+        "properties.queue.buffering.max.messages",
+        "properties.queue.buffering.max.ms",
+        "properties.request.required.acks",
+        "properties.retry.backoff.ms",
+        "properties.receive.message.max.bytes",
+    ];
     const SINK_NAME: &'static str = KAFKA_SINK;
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
@@ -378,6 +414,11 @@ impl Sink for KafkaSink {
         }
         Ok(())
     }
+
+    fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
+        KafkaConfig::from_btreemap(config.clone())?;
+        Ok(())
+    }
 }
 
 /// When the `DeliveryFuture` the current `future_delivery_buffer`
@@ -436,6 +477,10 @@ impl KafkaSinkWriter {
             .await?;
             let producer_ctx = RwProducerContext::new(ctx_common);
             // Generate the producer
+
+            if let Some(log_level) = read_kafka_log_level() {
+                c.set_log_level(log_level);
+            }
             c.create_with_context(producer_ctx).await?
         };
 

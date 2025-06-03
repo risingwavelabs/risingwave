@@ -28,11 +28,14 @@ mod cast;
 mod expr;
 pub use expr::print_function_table;
 
+use crate::config::{Configuration, Feature};
+
 mod dml;
 mod functions;
 mod query;
 mod relation;
 mod scalar;
+mod table_functions;
 mod time_window;
 mod types;
 mod utils;
@@ -154,6 +157,9 @@ pub(crate) struct SqlGenerator<'a, R: Rng> {
     is_mview: bool,
 
     recursion_weight: f64,
+
+    /// Configuration to control weight.
+    config: Configuration,
     // /// Count number of subquery.
     // /// We don't want too many per query otherwise it is hard to debug.
     // with_statements: u64,
@@ -161,7 +167,7 @@ pub(crate) struct SqlGenerator<'a, R: Rng> {
 
 /// Generators
 impl<'a, R: Rng> SqlGenerator<'a, R> {
-    pub(crate) fn new(rng: &'a mut R, tables: Vec<Table>) -> Self {
+    pub(crate) fn new(rng: &'a mut R, tables: Vec<Table>, config: Configuration) -> Self {
         SqlGenerator {
             tables,
             rng,
@@ -170,10 +176,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             bound_columns: vec![],
             is_mview: false,
             recursion_weight: 0.3,
+            config,
         }
     }
 
-    pub(crate) fn new_for_mview(rng: &'a mut R, tables: Vec<Table>) -> Self {
+    pub(crate) fn new_for_mview(rng: &'a mut R, tables: Vec<Table>, config: Configuration) -> Self {
         // distinct aggregate is not allowed for MV
         SqlGenerator {
             tables,
@@ -183,6 +190,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             bound_columns: vec![],
             is_mview: true,
             recursion_weight: 0.3,
+            config,
         }
     }
 
@@ -227,5 +235,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             }
         }
         can_recurse
+    }
+
+    /// Decide whether to generate on config.
+    pub(crate) fn should_generate(&mut self, feature: Feature) -> bool {
+        self.config.should_generate(feature, self.rng)
     }
 }

@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use expect_test::expect;
-use foyer::CacheHint;
+use foyer::Hint;
 use futures::{FutureExt, StreamExt, pin_mut};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
@@ -35,7 +35,7 @@ use risingwave_storage::hummock::iterator::change_log::test_utils::{
     apply_test_log_data, gen_test_data,
 };
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::test_utils::*;
+use risingwave_storage::hummock::test_utils::{ReadOptions, *};
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::storage_value::StorageValue;
@@ -56,7 +56,7 @@ async fn test_empty_read() {
                 u64::MAX,
                 ReadOptions {
                     table_id: TableId { table_id: 2333 },
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
                 },
             )
@@ -73,7 +73,7 @@ async fn test_empty_read() {
             u64::MAX,
             ReadOptions {
                 table_id: TableId { table_id: 2333 },
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -138,30 +138,12 @@ async fn test_basic() {
     local.init_for_test(epoch1).await.unwrap();
 
     // try to write an empty batch, and hummock should write nothing
-    let size = local
-        .ingest_batch(
-            vec![],
-            WriteOptions {
-                epoch: epoch1,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    let size = local.ingest_batch(vec![]).await.unwrap();
 
     assert_eq!(size, 0);
 
     // Write the first batch.
-    local
-        .ingest_batch(
-            batch1,
-            WriteOptions {
-                epoch: epoch1,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch1).await.unwrap();
 
     let epoch2 = epoch1.next_epoch();
     hummock_storage.start_epoch(epoch2, HashSet::from_iter([Default::default()]));
@@ -173,7 +155,7 @@ async fn test_basic() {
             anchor.clone(),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -186,7 +168,7 @@ async fn test_basic() {
             gen_key_from_str(VirtualNode::ZERO, "bb"),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -201,7 +183,7 @@ async fn test_basic() {
             gen_key_from_str(VirtualNode::ZERO, "ab"),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -210,16 +192,7 @@ async fn test_basic() {
     assert_eq!(value, None);
 
     // Write the second batch.
-    local
-        .ingest_batch(
-            batch2,
-            WriteOptions {
-                epoch: epoch2,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch2).await.unwrap();
 
     let epoch3 = epoch2.next_epoch();
     hummock_storage.start_epoch(epoch3, HashSet::from_iter([Default::default()]));
@@ -231,7 +204,7 @@ async fn test_basic() {
             anchor.clone(),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -242,16 +215,7 @@ async fn test_basic() {
 
     // Write the third batch.
 
-    local
-        .ingest_batch(
-            batch3,
-            WriteOptions {
-                epoch: epoch3,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch3).await.unwrap();
 
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
 
@@ -261,7 +225,7 @@ async fn test_basic() {
             anchor.clone(),
             epoch3,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -275,7 +239,7 @@ async fn test_basic() {
             gen_key_from_str(VirtualNode::ZERO, "ff"),
             epoch3,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -295,7 +259,7 @@ async fn test_basic() {
             ),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -310,7 +274,7 @@ async fn test_basic() {
             anchor.clone(),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -325,7 +289,7 @@ async fn test_basic() {
             anchor.clone(),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -346,7 +310,7 @@ async fn test_basic() {
             epoch2,
             ReadOptions {
                 prefetch_options: PrefetchOptions::default(),
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -368,7 +332,7 @@ async fn test_basic() {
             epoch3,
             ReadOptions {
                 prefetch_options: PrefetchOptions::default(),
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -393,7 +357,7 @@ async fn test_basic() {
             gen_key_from_str(VirtualNode::ZERO, "bb"),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -406,7 +370,7 @@ async fn test_basic() {
             gen_key_from_str(VirtualNode::ZERO, "dd"),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -441,16 +405,7 @@ async fn test_state_store_sync() {
         .await;
     hummock_storage.start_epoch(epoch, HashSet::from_iter([Default::default()]));
     local.init_for_test(epoch).await.unwrap();
-    local
-        .ingest_batch(
-            batch1,
-            WriteOptions {
-                epoch,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch1).await.unwrap();
 
     // ingest 24B batch
     let mut batch2 = vec![
@@ -468,16 +423,7 @@ async fn test_state_store_sync() {
         ),
     ];
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    local
-        .ingest_batch(
-            batch2,
-            WriteOptions {
-                epoch,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch2).await.unwrap();
 
     // TODO: Uncomment the following lines after flushed sstable can be accessed.
     // FYI: https://github.com/risingwavelabs/risingwave/pull/1928#discussion_r852698719
@@ -498,16 +444,7 @@ async fn test_state_store_sync() {
         StorageValue::new_put("5555"),
     )];
     batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    local
-        .ingest_batch(
-            batch3,
-            WriteOptions {
-                epoch,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch3).await.unwrap();
 
     // TODO: Uncomment the following lines after flushed sstable can be accessed.
     // FYI: https://github.com/risingwavelabs/risingwave/pull/1928#discussion_r852698719
@@ -603,7 +540,7 @@ async fn test_reload_storage() {
             anchor.clone(),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -618,7 +555,7 @@ async fn test_reload_storage() {
             gen_key_from_str(VirtualNode::ZERO, "ab"),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -646,7 +583,7 @@ async fn test_reload_storage() {
             anchor.clone(),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -668,7 +605,7 @@ async fn test_reload_storage() {
             epoch1,
             ReadOptions {
                 prefetch_options: PrefetchOptions::default(),
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -683,7 +620,7 @@ async fn test_reload_storage() {
             anchor.clone(),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -698,7 +635,7 @@ async fn test_reload_storage() {
             anchor.clone(),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -719,7 +656,7 @@ async fn test_reload_storage() {
             epoch2,
             ReadOptions {
                 prefetch_options: PrefetchOptions::default(),
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -755,7 +692,7 @@ async fn test_reload_storage() {
 //                         gen_key_from_str(VirtualNode::ZERO, "aa"),
 //                         epoch,
 //                         ReadOptions {
-//                             cache_policy: CachePolicy::Fill(CacheHint::Normal),
+//                             cache_policy: CachePolicy::Fill(Hint::Normal),
 //                             ..Default::default()
 //                         }
 //                     )
@@ -770,7 +707,7 @@ async fn test_reload_storage() {
 //                         gen_key_from_str(VirtualNode::ZERO, "bb"),
 //                         epoch,
 //                         ReadOptions {
-//                             cache_policy: CachePolicy::Fill(CacheHint::Normal),
+//                             cache_policy: CachePolicy::Fill(Hint::Normal),
 //                             ..Default::default()
 //                         }
 //                     )
@@ -785,7 +722,7 @@ async fn test_reload_storage() {
 //                         gen_key_from_str(VirtualNode::ZERO, "cc"),
 //                         epoch,
 //                         ReadOptions {
-//                             cache_policy: CachePolicy::Fill(CacheHint::Normal),
+//                             cache_policy: CachePolicy::Fill(Hint::Normal),
 //                             ..Default::default()
 //                         }
 //                     )
@@ -802,7 +739,7 @@ async fn test_reload_storage() {
 //                     ),
 //                     epoch,
 //                     ReadOptions {
-//                         cache_policy: CachePolicy::Fill(CacheHint::Normal),
+//                         cache_policy: CachePolicy::Fill(Hint::Normal),
 //                         ..Default::default()
 //                     },
 //                 )
@@ -887,7 +824,7 @@ async fn test_reload_storage() {
 //                         gen_key_from_str(VirtualNode::ZERO, "aa"),
 //                         epoch,
 //                         ReadOptions {
-//                             cache_policy: CachePolicy::Fill(CacheHint::Normal),
+//                             cache_policy: CachePolicy::Fill(Hint::Normal),
 //                             ..Default::default()
 //                         }
 //                     )
@@ -901,7 +838,7 @@ async fn test_reload_storage() {
 //                     gen_key_from_str(VirtualNode::ZERO, "bb"),
 //                     epoch,
 //                     ReadOptions {
-//                         cache_policy: CachePolicy::Fill(CacheHint::Normal),
+//                         cache_policy: CachePolicy::Fill(Hint::Normal),
 //                         ..Default::default()
 //                     }
 //                 )
@@ -915,7 +852,7 @@ async fn test_reload_storage() {
 //                         gen_key_from_str(VirtualNode::ZERO, "cc"),
 //                         epoch,
 //                         ReadOptions {
-//                             cache_policy: CachePolicy::Fill(CacheHint::Normal),
+//                             cache_policy: CachePolicy::Fill(Hint::Normal),
 //                             ..Default::default()
 //                         }
 //                     )
@@ -931,7 +868,7 @@ async fn test_reload_storage() {
 //                     ),
 //                     epoch,
 //                     ReadOptions {
-//                         cache_policy: CachePolicy::Fill(CacheHint::Normal),
+//                         cache_policy: CachePolicy::Fill(Hint::Normal),
 //                         ..Default::default()
 //                     },
 //                 )
@@ -1050,16 +987,7 @@ async fn test_delete_get() {
         .new_local(NewLocalOptions::for_test(Default::default()))
         .await;
     local.init_for_test(epoch1).await.unwrap();
-    local
-        .ingest_batch(
-            batch1,
-            WriteOptions {
-                epoch: epoch1,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch1).await.unwrap();
     let epoch2 = epoch1.next_epoch();
     hummock_storage.start_epoch(epoch2, HashSet::from_iter([Default::default()]));
 
@@ -1075,16 +1003,7 @@ async fn test_delete_get() {
         gen_key_from_str(VirtualNode::ZERO, "bb"),
         StorageValue::new_delete(),
     )];
-    local
-        .ingest_batch(
-            batch2,
-            WriteOptions {
-                epoch: epoch2,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch2).await.unwrap();
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     let res = hummock_storage
         .seal_and_sync_epoch(epoch2, table_id_set)
@@ -1104,7 +1023,7 @@ async fn test_delete_get() {
                 gen_key_from_str(VirtualNode::ZERO, "bb"),
                 epoch2,
                 ReadOptions {
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
                 }
             )
@@ -1137,16 +1056,7 @@ async fn test_multiple_epoch_sync() {
     let table_id_set = HashSet::from_iter([local.table_id()]);
     hummock_storage.start_epoch(epoch1, HashSet::from_iter([Default::default()]));
     local.init_for_test(epoch1).await.unwrap();
-    local
-        .ingest_batch(
-            batch1,
-            WriteOptions {
-                epoch: epoch1,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch1).await.unwrap();
 
     let epoch2 = epoch1.next_epoch();
     hummock_storage.start_epoch(epoch2, HashSet::from_iter([Default::default()]));
@@ -1155,16 +1065,7 @@ async fn test_multiple_epoch_sync() {
         gen_key_from_str(VirtualNode::ZERO, "bb"),
         StorageValue::new_delete(),
     )];
-    local
-        .ingest_batch(
-            batch2,
-            WriteOptions {
-                epoch: epoch2,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch2).await.unwrap();
 
     let epoch3 = epoch2.next_epoch();
     hummock_storage.start_epoch(epoch3, HashSet::from_iter([Default::default()]));
@@ -1179,16 +1080,7 @@ async fn test_multiple_epoch_sync() {
         ),
     ];
     local.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
-    local
-        .ingest_batch(
-            batch3,
-            WriteOptions {
-                epoch: epoch3,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch3).await.unwrap();
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     let test_get = |read_committed: bool| {
         let hummock_storage_clone = &hummock_storage;
@@ -1200,7 +1092,7 @@ async fn test_multiple_epoch_sync() {
                         epoch1,
                         ReadOptions {
                             read_committed,
-                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                            cache_policy: CachePolicy::Fill(Hint::Normal),
                             ..Default::default()
                         }
                     )
@@ -1216,7 +1108,7 @@ async fn test_multiple_epoch_sync() {
                         epoch2,
                         ReadOptions {
                             read_committed,
-                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                            cache_policy: CachePolicy::Fill(Hint::Normal),
                             ..Default::default()
                         }
                     )
@@ -1231,7 +1123,7 @@ async fn test_multiple_epoch_sync() {
                         epoch3,
                         ReadOptions {
                             read_committed,
-                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                            cache_policy: CachePolicy::Fill(Hint::Normal),
                             ..Default::default()
                         }
                     )
@@ -1360,6 +1252,7 @@ async fn test_clear_shared_buffer() {
 /// 2. GlobalStateStore cannot read replicated ReadVersion.
 #[tokio::test]
 async fn test_replicated_local_hummock_storage() {
+    use risingwave_storage::store::ReadOptions;
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
 
     let (hummock_storage, meta_client) = with_hummock_storage(TEST_TABLE_ID).await;
@@ -1379,18 +1272,20 @@ async fn test_replicated_local_hummock_storage() {
             sst_to_context: Default::default(),
             new_table_fragment_infos: vec![],
             change_log_delta: Default::default(),
+            vector_index_delta: Default::default(),
             tables_to_commit: HashMap::from_iter([(TEST_TABLE_ID, epoch0)]),
         })
         .await
         .unwrap();
 
-    let read_options = ReadOptions {
+    let test_read_options = StateStoreTestReadOptions {
         table_id: TableId {
             table_id: TEST_TABLE_ID.table_id,
         },
-        cache_policy: CachePolicy::Fill(CacheHint::Normal),
+        cache_policy: CachePolicy::Fill(Hint::Normal),
         ..Default::default()
     };
+    let read_options: ReadOptions = test_read_options.clone().into();
 
     let mut local_hummock_storage = hummock_storage
         .new_local(NewLocalOptions::new_replicated(
@@ -1419,16 +1314,7 @@ async fn test_replicated_local_hummock_storage() {
     ];
 
     batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    local_hummock_storage
-        .ingest_batch(
-            batch1,
-            WriteOptions {
-                epoch: epoch1,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    local_hummock_storage.ingest_batch(batch1).await.unwrap();
 
     // Test local state store read for replicated data.
     {
@@ -1489,16 +1375,7 @@ async fn test_replicated_local_hummock_storage() {
     ];
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
-    local_hummock_storage_2
-        .ingest_batch(
-            batch2,
-            WriteOptions {
-                epoch: epoch2,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    local_hummock_storage_2.ingest_batch(batch2).await.unwrap();
 
     // Test Global State Store iter, epoch2
     {
@@ -1509,7 +1386,7 @@ async fn test_replicated_local_hummock_storage() {
                     VirtualNode::ZERO,
                 ),
                 epoch2,
-                read_options.clone(),
+                test_read_options.clone(),
             )
             .await
             .unwrap()
@@ -1545,7 +1422,7 @@ async fn test_replicated_local_hummock_storage() {
                     VirtualNode::ZERO,
                 ),
                 epoch1,
-                read_options,
+                test_read_options,
             )
             .await
             .unwrap()
@@ -1870,29 +1747,11 @@ async fn test_get_keyed_row() {
     local.init_for_test(epoch1).await.unwrap();
 
     // try to write an empty batch, and hummock should write nothing
-    let size = local
-        .ingest_batch(
-            vec![],
-            WriteOptions {
-                epoch: epoch1,
-                table_id,
-            },
-        )
-        .await
-        .unwrap();
+    let size = local.ingest_batch(vec![]).await.unwrap();
     assert_eq!(size, 0);
 
     // Write the first batch.
-    local
-        .ingest_batch(
-            batch1,
-            WriteOptions {
-                epoch: epoch1,
-                table_id,
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch1).await.unwrap();
 
     let epoch2 = epoch1.next_epoch();
     hummock_storage.start_epoch(epoch2, HashSet::from_iter([Default::default()]));
@@ -1904,7 +1763,7 @@ async fn test_get_keyed_row() {
             anchor.clone(),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -1918,7 +1777,7 @@ async fn test_get_keyed_row() {
             gen_key_from_str(VirtualNode::ZERO, "bb"),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -1937,7 +1796,7 @@ async fn test_get_keyed_row() {
             gen_key_from_str(VirtualNode::ZERO, "ab"),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -1946,16 +1805,7 @@ async fn test_get_keyed_row() {
     assert_eq!(res, None);
 
     // Write the second batch.
-    local
-        .ingest_batch(
-            batch2,
-            WriteOptions {
-                epoch: epoch2,
-                table_id,
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch2).await.unwrap();
 
     let epoch3 = epoch2.next_epoch();
     hummock_storage.start_epoch(epoch3, HashSet::from_iter([Default::default()]));
@@ -1967,7 +1817,7 @@ async fn test_get_keyed_row() {
             anchor.clone(),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -1978,16 +1828,7 @@ async fn test_get_keyed_row() {
     assert_eq!(value, Bytes::from("111111"));
 
     // Write the third batch.
-    local
-        .ingest_batch(
-            batch3,
-            WriteOptions {
-                epoch: epoch3,
-                table_id,
-            },
-        )
-        .await
-        .unwrap();
+    local.ingest_batch(batch3).await.unwrap();
 
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
 
@@ -1997,7 +1838,7 @@ async fn test_get_keyed_row() {
             anchor.clone(),
             epoch3,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -2011,7 +1852,7 @@ async fn test_get_keyed_row() {
             anchor.clone(),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -2027,7 +1868,7 @@ async fn test_get_keyed_row() {
             anchor.clone(),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -2054,7 +1895,7 @@ async fn test_get_keyed_row() {
             gen_key_from_str(VirtualNode::ZERO, "bb"),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -2071,7 +1912,7 @@ async fn test_get_keyed_row() {
             gen_key_from_str(VirtualNode::ZERO, "dd"),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )

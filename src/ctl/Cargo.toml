@@ -10,7 +10,7 @@ repository = { workspace = true }
 [dependencies]
 anyhow = "1"
 bytes = "1"
-chrono = "0.4"
+chrono = { workspace = true }
 clap = { workspace = true }
 comfy-table = "7"
 foyer = { workspace = true }
@@ -19,7 +19,7 @@ hex = "0.4"
 inquire = "0.7.0"
 itertools = { workspace = true }
 prost = { workspace = true }
-regex = "1.10.0"
+regex = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_frontend = { workspace = true }
@@ -31,6 +31,7 @@ risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_storage = { workspace = true }
 risingwave_stream = { workspace = true }
+rw-diagnose-tools = { git = "https://github.com/risingwavelabs/rw-diagnose-tools", rev = "380d1b7b23a77ee0bbb0d2b9d552de58db4490cc" }
 sea-orm = { workspace = true }
 serde = "1"
 serde_json = "1"

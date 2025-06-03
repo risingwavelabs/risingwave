@@ -16,7 +16,7 @@ bytes = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = { workspace = true }
 jsonwebtoken = "9"
-openssl = "0.10.70"
+openssl = "0.10.72"
 panic-message = "0.3"
 parking_lot = { workspace = true }
 peekable = { version = "0.3", features = ["tokio"] }
@@ -27,7 +27,7 @@ risingwave_sqlparser = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 socket2 = "0.5"
-thiserror = "1"
+thiserror = "2"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

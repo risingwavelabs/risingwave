@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
-use regex::Regex;
-use risingwave_common::catalog::Schema;
+use regex::{Captures, Regex};
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarRefImpl, ToText};
 use thiserror_ext::AsReport;
@@ -107,33 +108,39 @@ impl RowEncoder for TemplateEncoder {
 /// Encode a row according to a specified string template `user_id:{user_id}`.
 /// Data is encoded to string with [`ToText`].
 pub struct TemplateStringEncoder {
-    schema: Schema,
+    field_name_to_index: HashMap<String, (usize, Field)>,
     col_indices: Option<Vec<usize>>,
     template: String,
+    schema: Schema,
 }
 
 /// todo! improve the performance.
 impl TemplateStringEncoder {
     pub fn new(schema: Schema, col_indices: Option<Vec<usize>>, template: String) -> Self {
+        let field_name_to_index = schema
+            .fields()
+            .iter()
+            .enumerate()
+            .map(|(index, field)| (field.name.clone(), (index, field.clone())))
+            .collect();
         Self {
-            schema,
+            field_name_to_index,
             col_indices,
             template,
+            schema,
         }
     }
 
     pub fn check_string_format(format: &str, map: &HashMap<String, DataType>) -> Result<()> {
         // We will check if the string inside {} corresponds to a column name in rw.
-        // In other words, the content within {} should exclusively consist of column names from rw,
-        // which means '{{column_name}}' or '{{column_name1},{column_name2}}' would be incorrect.
-        let re = Regex::new(r"\{([^}]*)\}").unwrap();
+        let re = Regex::new(r"(\\\})|(\\\{)|\{([^}]*)\}").unwrap();
         if !re.is_match(format) {
             return Err(SinkError::Redis(
                 "Can't find {} in key_format or value_format".to_owned(),
             ));
         }
         for capture in re.captures_iter(format) {
-            if let Some(inner_content) = capture.get(1)
+            if let Some(inner_content) = capture.get(3)
                 && !map.contains_key(inner_content.as_str())
             {
                 return Err(SinkError::Redis(format!(
@@ -150,19 +157,27 @@ impl TemplateStringEncoder {
         row: impl Row,
         col_indices: impl Iterator<Item = usize>,
     ) -> Result<String> {
-        let mut s = self.template.clone();
-
-        for idx in col_indices {
-            let field = &self.schema[idx];
-            let name = &field.name;
-            let data = row.datum_at(idx);
-            // TODO: timestamptz ToText also depends on TimeZone
-            s = s.replace(
-                &format!("{{{}}}", name),
-                &data.to_text_with_type(&field.data_type),
-            );
-        }
-        Ok(s)
+        let s = self.template.clone();
+        let re = Regex::new(r"(\\\})|(\\\{)|\{([^}]*)\}").unwrap();
+        let col_indices: Vec<_> = col_indices.collect();
+        let replaced = re.replace_all(s.as_ref(), |caps: &Captures<'_>| {
+            if caps.get(1).is_some() {
+                Cow::Borrowed("}")
+            } else if caps.get(2).is_some() {
+                Cow::Borrowed("{")
+            } else if let Some(content) = caps.get(3) {
+                let (idx, field) = self.field_name_to_index.get(content.as_str()).unwrap();
+                if col_indices.contains(idx) {
+                    let data = row.datum_at(*idx).to_text_with_type(&field.data_type);
+                    Cow::Owned(data)
+                } else {
+                    Cow::Borrowed("")
+                }
+            } else {
+                Cow::Borrowed("")
+            }
+        });
+        Ok(replaced.to_string())
     }
 }
 
@@ -417,5 +432,215 @@ impl<T: SerTo<Vec<u8>>> SerTo<RedisSinkPayloadWriterInput> for T {
         Ok(RedisSinkPayloadWriterInput::String(
             String::from_utf8(bytes).map_err(|e| SinkError::Redis(e.to_report_string()))?,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::row::OwnedRow;
+    use risingwave_common::types::{DataType, ScalarImpl};
+
+    use super::*;
+
+    #[test]
+    fn test_template_format_validation() {
+        // Create a schema with test columns
+        let schema = Schema::new(vec![
+            Field {
+                data_type: DataType::Int32,
+                name: "id".to_owned(),
+            },
+            Field {
+                data_type: DataType::Varchar,
+                name: "name".to_owned(),
+            },
+            Field {
+                data_type: DataType::Varchar,
+                name: "email".to_owned(),
+            },
+        ]);
+
+        // Create a map of column names to their data types
+        let mut map = HashMap::new();
+        for field in schema.fields() {
+            map.insert(field.name.clone(), field.data_type.clone());
+        }
+
+        // Test various template formats
+        let valid_templates = vec![
+            "user:{id}",
+            "user:\\{{id}",
+            "user:\\{{id}\\}",
+            "user:\\{{id},{name}\\}",
+            "user:\\{prefix{id},suffix{name}\\}",
+            "user:\\{prefix{id},suffix{name},email:{email}\\}",
+            "user:\\{nested\\{deeply{id}\\}\\}",
+            "user:\\{outer\\{inner{id}\\},another{name}\\}",
+            "user:\\{complex\\{structure\\{with{id}\\},and{name}\\},email:{email}\\}",
+            "user:{id}{name}",
+            "user:\\\\{id}",
+            "user:\\\\\\{id}",
+            "user:\\a{id}",
+            "user:\\b{name}",
+            "user:{id}{name}{email}",
+        ];
+
+        for template in valid_templates {
+            // Validate the template format
+            assert!(
+                TemplateStringEncoder::check_string_format(template, &map).is_ok(),
+                "Template '{}' should be valid",
+                template
+            );
+        }
+
+        // Test invalid templates
+        let invalid_templates = vec![
+            "user:no_braces",        // No braces
+            "user:{invalid_column}", // Non-existent column
+            "user:{id",              // Unclosed brace
+            "user:id}",              // Unopened brace
+            "sadsadsad{}qw4e2ewq21", // Empty braces
+            "user:{}",
+            "user:{\\id}",
+        ];
+
+        for template in invalid_templates {
+            // Validate the template format
+            assert!(
+                TemplateStringEncoder::check_string_format(template, &map).is_err(),
+                "Template '{}' should be invalid",
+                template
+            );
+        }
+    }
+
+    #[test]
+    fn test_template_encoding() {
+        // Create a schema with test columns
+        let schema = Schema::new(vec![
+            Field {
+                data_type: DataType::Int32,
+                name: "id".to_owned(),
+            },
+            Field {
+                data_type: DataType::Varchar,
+                name: "name".to_owned(),
+            },
+            Field {
+                data_type: DataType::Varchar,
+                name: "email".to_owned(),
+            },
+        ]);
+
+        // Test cases with different template formats
+        let test_cases = vec![
+            ("user:{id}", "user:123", vec![0]),
+            ("user:\\{id\\}", "user:{id}", vec![0]),
+            ("user:\\{id,name\\}", "user:{id,name}", vec![0, 1]),
+            (
+                "user:\\{prefix{id},suffix{name}\\}",
+                "user:{prefix123,suffixJohn Doe}",
+                vec![0, 1],
+            ),
+            (
+                "user:\\{nested\\{deeply{id}\\}\\}",
+                "user:{nested{deeply123}}",
+                vec![0],
+            ),
+            (
+                "user:\\{outer\\{inner{id}\\},another{name}\\}",
+                "user:{outer{inner123},anotherJohn Doe}",
+                vec![0, 1],
+            ),
+            ("user:{id}{name}", "user:123John Doe", vec![0, 1]),
+            ("user:\\{id\\}{name}", "user:{id}John Doe", vec![0, 1]),
+            ("user:\\\\{id}", "user:\\{id}", vec![0]),
+            ("user:\\\\\\{id}", "user:\\\\{id}", vec![0]),
+            ("user:\\a{id}", "user:\\a123", vec![0]),
+            ("user:\\b{name}", "user:\\bJohn Doe", vec![1]),
+            (
+                "user:{id}{name}{email}",
+                "user:123John Doejohn@example.com",
+                vec![0, 1, 2],
+            ),
+        ];
+
+        for (template, expected, col_indices) in test_cases {
+            // Create an encoder with the template
+            let encoder = TemplateStringEncoder::new(
+                schema.clone(),
+                Some(col_indices.clone()),
+                template.to_owned(),
+            );
+
+            // Create a test row
+            let row = OwnedRow::new(vec![
+                Some(ScalarImpl::Int32(123)),
+                Some(ScalarImpl::Utf8("John Doe".into())),
+                Some(ScalarImpl::Utf8("john@example.com".into())),
+            ]);
+
+            // Encode the row
+            let result = encoder.encode_cols(row, col_indices.into_iter()).unwrap();
+
+            // Check the result
+            assert_eq!(result, expected, "Template '{}' encoding failed", template);
+        }
+    }
+
+    #[test]
+    fn test_complex_nested_template() {
+        // Create a schema with test columns
+        let schema = Schema::new(vec![
+            Field {
+                data_type: DataType::Int32,
+                name: "id".to_owned(),
+            },
+            Field {
+                data_type: DataType::Varchar,
+                name: "name".to_owned(),
+            },
+            Field {
+                data_type: DataType::Varchar,
+                name: "email".to_owned(),
+            },
+        ]);
+
+        // Create a map of column names to their data types
+        let mut map = HashMap::new();
+        for field in schema.fields() {
+            map.insert(field.name.clone(), field.data_type.clone());
+        }
+
+        // Test a very complex nested template
+        let complex_template = "user:\\{prefix{id},suffix{name},email:{email},nested\\{deeply{id}\\},outer\\{inner{name}\\}\\}";
+
+        // Validate the template format
+        assert!(TemplateStringEncoder::check_string_format(complex_template, &map).is_ok());
+
+        // Create an encoder with the template
+        let encoder = TemplateStringEncoder::new(
+            schema.clone(),
+            Some(vec![0, 1, 2]), // Include all columns
+            complex_template.to_owned(),
+        );
+
+        // Create a test row
+        let row = OwnedRow::new(vec![
+            Some(ScalarImpl::Int32(123)),
+            Some(ScalarImpl::Utf8("John Doe".into())),
+            Some(ScalarImpl::Utf8("john@example.com".into())),
+        ]);
+
+        // Encode the row
+        let result = encoder.encode_cols(row, vec![0, 1, 2].into_iter()).unwrap();
+
+        // Check that all column values are in the result
+        assert_eq!(
+            result,
+            "user:{prefix123,suffixJohn Doe,email:john@example.com,nested{deeply123},outer{innerJohn Doe}}"
+        );
     }
 }

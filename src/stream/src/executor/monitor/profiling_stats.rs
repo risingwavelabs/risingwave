@@ -14,7 +14,7 @@
 
 use std::sync::atomic::Ordering;
 
-use risingwave_common::monitor::in_mem::Count;
+use risingwave_common::monitor::in_mem::GuardedCount;
 
 use crate::executor::monitor::StreamingMetrics;
 
@@ -25,18 +25,18 @@ pub enum ProfileMetricsImpl {
 
 impl ProfileMetricsImpl {
     pub fn new(
+        executor_id: u64,
         stats: &StreamingMetrics,
-        operator_id: u64,
         enable_profiling: bool,
     ) -> ProfileMetricsImpl {
         if enable_profiling {
             ProfileMetricsImpl::ProfileMetrics(ProfileMetrics {
                 stream_node_output_row_count: stats
                     .mem_stream_node_output_row_count
-                    .new_or_get_counter(operator_id),
-                stream_node_output_blocking_duration_ms: stats
-                    .mem_stream_node_output_blocking_duration_ms
-                    .new_or_get_counter(operator_id),
+                    .new_count(executor_id),
+                stream_node_output_blocking_duration_ns: stats
+                    .mem_stream_node_output_blocking_duration_ns
+                    .new_count(executor_id),
             })
         } else {
             ProfileMetricsImpl::NoopProfileMetrics
@@ -45,23 +45,25 @@ impl ProfileMetricsImpl {
 }
 
 pub struct ProfileMetrics {
-    pub stream_node_output_row_count: Count,
-    pub stream_node_output_blocking_duration_ms: Count,
+    pub stream_node_output_row_count: GuardedCount,
+    pub stream_node_output_blocking_duration_ns: GuardedCount,
 }
 
 pub trait ProfileMetricsExt {
     fn inc_row_count(&self, count: u64);
-    fn inc_blocking_duration_ms(&self, duration: u64);
+    fn inc_blocking_duration_ns(&self, duration: u64);
 }
 
 impl ProfileMetricsExt for ProfileMetrics {
     fn inc_row_count(&self, count: u64) {
         self.stream_node_output_row_count
+            .count
             .fetch_add(count, Ordering::Relaxed);
     }
 
-    fn inc_blocking_duration_ms(&self, duration_ms: u64) {
-        self.stream_node_output_blocking_duration_ms
+    fn inc_blocking_duration_ns(&self, duration_ms: u64) {
+        self.stream_node_output_blocking_duration_ns
+            .count
             .fetch_add(duration_ms, Ordering::Relaxed);
     }
 }
@@ -74,11 +76,11 @@ impl ProfileMetricsExt for ProfileMetricsImpl {
         }
     }
 
-    fn inc_blocking_duration_ms(&self, duration: u64) {
+    fn inc_blocking_duration_ns(&self, duration: u64) {
         match self {
             ProfileMetricsImpl::NoopProfileMetrics => {}
             ProfileMetricsImpl::ProfileMetrics(metrics) => {
-                metrics.inc_blocking_duration_ms(duration)
+                metrics.inc_blocking_duration_ns(duration)
             }
         }
     }

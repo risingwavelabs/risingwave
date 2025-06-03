@@ -33,12 +33,19 @@ tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
 echo "--- Install dependencies"
 python3 -m pip install --break-system-packages -r ./e2e_test/requirements.txt
-apt-get -y install jq
 
 echo "--- e2e, inline test"
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_meta=info" \
 risedev ci-start ci-inline-source-test
+export SQLCMDSERVER=sqlserver-server SQLCMDUSER=SA SQLCMDPASSWORD="SomeTestOnly@SA" SQLCMDDBNAME=mydb SQLCMDPORT=1433
 
+echo "--- Install sql server client"
+curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list | sudo tee /etc/apt/sources.list.d/msprod.list
+apt-get update -y
+ACCEPT_EULA=Y DEBIAN_FRONTEND=noninteractive apt-get install -y mssql-tools unixodbc-dev
+export PATH="/opt/mssql-tools/bin/:$PATH"
+sleep 2
 # check if run debug only test
 if [ "$profile" == "ci-dev" ]; then
     echo "--- Run debug mode only tests"
@@ -69,13 +76,6 @@ echo "--- starting risingwave cluster"
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-1cn-1fe-with-recovery
 
-echo "--- Install sql server client"
-curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
-curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list | sudo tee /etc/apt/sources.list.d/msprod.list
-apt-get update -y
-ACCEPT_EULA=Y DEBIAN_FRONTEND=noninteractive apt-get install -y mssql-tools unixodbc-dev
-export PATH="/opt/mssql-tools/bin/:$PATH"
-sleep 2
 
 echo "--- mongodb cdc test"
 # install the mongo shell

@@ -41,7 +41,7 @@
 - input: CREATE SOURCE src FORMAT PLAIN ENCODE JSON
   formatted_sql: CREATE SOURCE src FORMAT PLAIN ENCODE JSON
 - input: CREATE SOURCE mysql_src with ( connector = 'mysql-cdc', hostname = 'localhost', port = '3306', database.name = 'mytest', server.id = '5601' )
-  formatted_sql: CREATE SOURCE mysql_src WITH (connector = 'mysql-cdc', hostname = 'localhost', port = '3306', database.name = 'mytest', server.id = '5601') FORMAT PLAIN ENCODE JSON
+  formatted_sql: CREATE SOURCE mysql_src WITH (connector = 'mysql-cdc', hostname = 'localhost', port = '3306', database.name = 'mytest', server.id = '5601')
 - input: CREATE TABLE sbtest10 (id INT PRIMARY KEY, k INT, c CHARACTER VARYING, pad CHARACTER VARYING) FROM sbtest TABLE 'mydb.sbtest10'
   formatted_sql: CREATE TABLE sbtest10 (id INT PRIMARY KEY, k INT, c CHARACTER VARYING, pad CHARACTER VARYING) FROM sbtest TABLE 'mydb.sbtest10'
 - input: CREATE TABLE sbtest10 (id INT PRIMARY KEY, k INT, c CHARACTER VARYING, pad CHARACTER VARYING) FROM sbtest
@@ -150,6 +150,10 @@
   formatted_sql: CREATE SINK snk FROM mv WITH (connector = 'kafka', connection = my_kafka_conn, topic = 'test_topic') FORMAT PLAIN ENCODE JSON
 - input: CREATE SINK snk FROM mv WITH (connector = 'kafka', connection = connection my_kafka_conn, topic = 'test_topic') format plain encode json;
   formatted_sql: CREATE SINK snk FROM mv WITH (connector = 'kafka', connection = my_kafka_conn, topic = 'test_topic') FORMAT PLAIN ENCODE JSON
+- input: CREATE SINK snk FROM mv WITH (connector = 'kafka', connection = connection my_kafka_conn, topic = 'test_topic') format plain encode json key encode bytes;
+  formatted_sql: CREATE SINK snk FROM mv WITH (connector = 'kafka', connection = my_kafka_conn, topic = 'test_topic') FORMAT PLAIN ENCODE JSON KEY ENCODE BYTES
+- input: CREATE SINK snk FROM mv WITH (connector = 'kafka', connection = connection my_kafka_conn, topic = 'test_topic') format plain encode text;
+  formatted_sql: CREATE SINK snk FROM mv WITH (connector = 'kafka', connection = my_kafka_conn, topic = 'test_topic') FORMAT PLAIN ENCODE TEXT
 - input: CREATE SINK snk into t FROM MV
   formatted_sql: CREATE SINK snk INTO t FROM MV
 - input: CREATE SINK snk into t AS SELECT * FROM t

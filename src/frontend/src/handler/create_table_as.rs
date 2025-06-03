@@ -25,7 +25,9 @@ use crate::handler::create_table::{
     ColumnIdGenerator, CreateTableProps, gen_create_table_plan_without_source,
 };
 use crate::handler::query::handle_query;
+use crate::stream_fragmenter::GraphJobType;
 use crate::{Binder, OptimizerContext, build_graph};
+
 pub async fn handle_create_as(
     handler_args: HandlerArgs,
     table_name: ObjectName,
@@ -125,7 +127,7 @@ pub async fn handle_create_as(
                 engine,
             },
         )?;
-        let graph = build_graph(plan)?;
+        let graph = build_graph(plan, Some(GraphJobType::Table))?;
 
         (graph, None, table)
     };
@@ -138,7 +140,13 @@ pub async fn handle_create_as(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_table(source, table, graph, TableJobType::Unspecified)
+        .create_table(
+            source,
+            table,
+            graph,
+            TableJobType::Unspecified,
+            if_not_exists,
+        )
         .await?;
 
     // Generate insert

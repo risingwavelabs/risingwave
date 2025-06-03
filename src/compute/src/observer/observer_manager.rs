@@ -18,9 +18,11 @@ use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::ObserverState;
 use risingwave_pb::meta::SubscribeResponse;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_rpc_client::ComputeClientPoolRef;
 
 pub struct ComputeObserverNode {
     system_params_manager: LocalSystemParamsManagerRef,
+    batch_client_pool: ComputeClientPoolRef,
 }
 
 impl ObserverState for ComputeObserverNode {
@@ -49,6 +51,13 @@ impl ObserverState for ComputeObserverNode {
                 Info::ComputeNodeTotalCpuCount(count) => {
                     LicenseManager::get().update_cpu_core_count(count as _);
                 }
+                Info::Recovery(_) => {
+                    // Reset batch client pool on recovery is always unnecessary
+                    // when serving and streaming have been separated.
+                    // It can still be used as a method to manually trigger a reset of the batch client pool.
+                    // TODO: invalidate a single batch client on any connection issue.
+                    self.batch_client_pool.invalidate_all();
+                }
                 _ => {
                     panic!("error type notification");
                 }
@@ -66,9 +75,13 @@ impl ObserverState for ComputeObserverNode {
 }
 
 impl ComputeObserverNode {
-    pub fn new(system_params_manager: LocalSystemParamsManagerRef) -> Self {
+    pub fn new(
+        system_params_manager: LocalSystemParamsManagerRef,
+        batch_client_pool: ComputeClientPoolRef,
+    ) -> Self {
         Self {
             system_params_manager,
+            batch_client_pool,
         }
     }
 }

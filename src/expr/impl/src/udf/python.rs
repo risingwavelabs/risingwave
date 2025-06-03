@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use arrow_schema_udf::{DataType, Field};
-use arrow_udf_python::{CallMode, Runtime};
+use arrow_udf_runtime::CallMode;
+use arrow_udf_runtime::python::Runtime;
 use futures_util::StreamExt;
 use risingwave_common::array::arrow::{UdfArrowConvert, UdfToArrow, arrow_schema_udf};
 
@@ -30,7 +31,7 @@ static PYTHON: UdfImplDescriptor = UdfImplDescriptor {
         })
     },
     build_fn: |opts| {
-        let mut runtime = Runtime::builder().sandboxed(true).build()?;
+        let mut runtime = Runtime::builder().build()?;
         if opts.kind.is_aggregate() {
             runtime.add_aggregate(
                 opts.name_in_runtime,

@@ -56,3 +56,23 @@
     WITH s AS (SELECT DISTINCT ON (a+1) true as id, * FROM t) SELECT a,b,c from s;
   expected_outputs:
     - batch_plan
+
+# Regression test for issue #19175: aggregation on DISTINCT ON results
+- sql: |
+    create table t (a int, b int, c int);
+    select count(*) from (select distinct on(a) * from t);
+  expected_outputs:
+    - batch_plan
+    - logical_plan
+- sql: |
+    create table t (a int, b int, c int);
+    select count(*) from (select distinct on(b) * from t);
+  expected_outputs:
+    - batch_plan
+    - logical_plan
+- sql: |
+    create table t (a int, b int, c int);
+    select count(*) from (select distinct on(a,b) * from t);
+  expected_outputs:
+    - batch_plan
+    - logical_plan

@@ -19,14 +19,13 @@ use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::actor::ActorStatus;
-use risingwave_meta_model::actor_dispatcher::DispatcherType;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::prelude::{
     Actor, Fragment, FragmentRelation, Sink, Source, StreamingJob, Table,
 };
 use risingwave_meta_model::{
-    ConnectorSplits, FragmentId, ObjectId, VnodeBitmap, actor, fragment, fragment_relation, sink,
-    source, streaming_job, table,
+    ConnectorSplits, DispatcherType, FragmentId, ObjectId, VnodeBitmap, actor, fragment,
+    fragment_relation, sink, source, streaming_job, table,
 };
 use risingwave_meta_model_migration::{
     Alias, CommonTableExpression, Expr, IntoColumnRef, QueryStatementBuilder, SelectStatement,
@@ -290,12 +289,12 @@ impl CatalogController {
         let txn = inner.db.begin().await?;
 
         let fragment_ids: Vec<FragmentId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
             .filter(fragment::Column::JobId.is_in(table_ids))
+            .into_tuple()
             .all(&txn)
-            .await?
-            .into_iter()
-            .map(|fragment| fragment.fragment_id)
-            .collect();
+            .await?;
 
         self.resolve_working_set_for_reschedule_helper(&txn, fragment_ids)
             .await

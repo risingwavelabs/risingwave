@@ -16,6 +16,7 @@
 
 use cfg_or_panic::cfg_or_panic;
 use clap::Parser;
+use risingwave_simulation::slt::slt_env::Opts;
 
 /// Deterministic simulation end-to-end test runner.
 ///
@@ -118,6 +119,10 @@ pub struct Args {
     #[clap(long)]
     generate_sqlsmith_queries: Option<String>,
 
+    /// Path to weight configuration file.
+    #[clap(long, default_value = "src/tests/sqlsmith/config.yml")]
+    weight_config_path: String,
+
     /// Run sqlsmith for differential testing
     #[clap(long)]
     run_differential_tests: bool,
@@ -190,6 +195,7 @@ async fn main() {
     }
 
     let seed = sqlsmith_seed();
+    let weight_config = risingwave_sqlsmith::config::Configuration::new(&args.weight_config_path);
     if let Some(count) = args.sqlsmith {
         cluster
             .run_on_client(async move {
@@ -202,6 +208,7 @@ async fn main() {
                         &args.files,
                         count,
                         &outdir,
+                        &weight_config,
                         Some(seed),
                     )
                     .await;
@@ -212,6 +219,7 @@ async fn main() {
                         rw.pg_client(),
                         &args.files,
                         count,
+                        &weight_config,
                         Some(seed),
                     )
                     .await
@@ -223,6 +231,7 @@ async fn main() {
                     rw.pg_client(),
                     &args.files,
                     count,
+                    &weight_config,
                     Some(seed),
                 )
                 .await;

@@ -17,14 +17,16 @@ use std::collections::HashMap;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
+use risingwave_pb::common::{ActorInfo, HostAddress};
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use tracing::warn;
 
+use crate::barrier::rpc::ControlStreamManager;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::controller::utils::compose_dispatchers;
 use crate::model::{
-    ActorId, DownstreamFragmentRelation, FragmentActorDispatchers, FragmentActorUpstreams,
+    ActorId, ActorUpstreams, DownstreamFragmentRelation, FragmentActorDispatchers,
     FragmentDownstreamRelation, FragmentId, StreamActor, StreamJobActorsToCreate,
 };
 
@@ -32,10 +34,11 @@ use crate::model::{
 struct FragmentInfo {
     distribution_type: DistributionType,
     actors: HashMap<ActorId, Option<Bitmap>>,
+    actor_location: HashMap<ActorId, HostAddress>,
 }
 
 pub(super) struct FragmentEdgeBuildResult {
-    pub(super) upstreams: HashMap<FragmentId, FragmentActorUpstreams>,
+    pub(super) upstreams: HashMap<FragmentId, HashMap<ActorId, ActorUpstreams>>,
     pub(super) dispatchers: FragmentActorDispatchers,
     pub(super) merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
 }
@@ -83,21 +86,30 @@ pub(super) struct FragmentEdgeBuilder {
 }
 
 impl FragmentEdgeBuilder {
-    pub(super) fn new(fragment_infos: impl Iterator<Item = &InflightFragmentInfo>) -> Self {
+    pub(super) fn new(
+        fragment_infos: impl Iterator<Item = &InflightFragmentInfo>,
+        control_stream_manager: &ControlStreamManager,
+    ) -> Self {
         let mut fragments = HashMap::new();
         for info in fragment_infos {
             fragments
-                .try_insert(
-                    info.fragment_id,
+                .try_insert(info.fragment_id, {
+                    let (actors, actor_location) = info
+                        .actors
+                        .iter()
+                        .map(|(actor_id, actor)| {
+                            (
+                                (*actor_id, actor.vnode_bitmap.clone()),
+                                (*actor_id, control_stream_manager.host_addr(actor.worker_id)),
+                            )
+                        })
+                        .unzip();
                     FragmentInfo {
                         distribution_type: info.distribution_type,
-                        actors: info
-                            .actors
-                            .iter()
-                            .map(|(actor_id, actor)| (*actor_id, actor.vnode_bitmap.clone()))
-                            .collect(),
-                    },
-                )
+                        actors,
+                        actor_location,
+                    }
+                })
                 .expect("non-duplicate");
         }
         Self {
@@ -132,7 +144,7 @@ impl FragmentEdgeBuilder {
             &downstream_fragment.actors,
             downstream.dispatcher_type,
             downstream.dist_key_indices.clone(),
-            downstream.output_indices.clone(),
+            downstream.output_mapping.clone(),
         );
         let downstream_fragment_upstreams = self
             .result
@@ -140,13 +152,20 @@ impl FragmentEdgeBuilder {
             .entry(downstream.downstream_fragment_id)
             .or_default();
         for (actor_id, dispatcher) in dispatchers {
+            let actor_location = &fragment.actor_location[&actor_id];
             for downstream_actor in &dispatcher.downstream_actor_id {
                 downstream_fragment_upstreams
                     .entry(*downstream_actor)
                     .or_default()
                     .entry(fragment_id)
                     .or_default()
-                    .insert(actor_id);
+                    .insert(
+                        actor_id,
+                        ActorInfo {
+                            actor_id,
+                            host: Some(actor_location.clone()),
+                        },
+                    );
             }
             self.result
                 .dispatchers
@@ -172,7 +191,7 @@ impl FragmentEdgeBuilder {
                         actor_id,
                         upstream_fragment_id: original_upstream_fragment_id,
                         new_upstream_fragment_id: Some(new_upstream_fragment_id),
-                        added_upstream_actor_id: new_upstreams.into_iter().collect(),
+                        added_upstream_actors: new_upstreams.into_values().collect(),
                         removed_upstream_actor_id: vec![],
                     })
                 } else if cfg!(debug_assertions) {

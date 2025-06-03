@@ -14,6 +14,7 @@
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::mem::take;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 use std::sync::{Arc, LazyLock};
@@ -34,6 +35,7 @@ use thiserror_ext::AsReport;
 use tokio::task::yield_now;
 use tracing::error;
 
+use crate::dispatch_measurement;
 use crate::error::StorageResult;
 use crate::hummock::HummockError;
 use crate::hummock::utils::{
@@ -43,6 +45,7 @@ use crate::hummock::utils::{
 use crate::mem_table::{KeyOp, MemTable};
 use crate::storage_value::StorageValue;
 use crate::store::*;
+use crate::vector::{MeasureDistanceBuilder, NearestBuilder};
 
 pub type BytesFullKey = FullKey<Bytes>;
 pub type BytesFullKeyRange = (Bound<BytesFullKey>, Bound<BytesFullKey>);
@@ -256,6 +259,7 @@ pub mod sled {
             RangeKvStateStore {
                 inner: SledRangeKv::new(path),
                 tables: Default::default(),
+                vectors: Default::default(),
             }
         }
 
@@ -263,6 +267,7 @@ pub mod sled {
             RangeKvStateStore {
                 inner: SledRangeKv::new_temp(),
                 tables: Default::default(),
+                vectors: Default::default(),
             }
         }
     }
@@ -562,6 +567,8 @@ impl TableState {
     }
 }
 
+type InMemVectorStore = Arc<RwLock<HashMap<TableId, Vec<(Vector, Bytes, u64)>>>>;
+
 /// An in-memory state store
 ///
 /// The in-memory state store is a [`BTreeMap`], which maps [`FullKey`] to value. It
@@ -573,6 +580,8 @@ pub struct RangeKvStateStore<R: RangeKv> {
     inner: R,
     /// `table_id` -> `prev_epoch` -> `curr_epoch`
     tables: Arc<parking_lot::Mutex<HashMap<TableId, TableState>>>,
+
+    vectors: InMemVectorStore,
 }
 
 fn to_full_key_range<R, B>(table_id: TableId, table_key_range: R) -> BytesFullKeyRange
@@ -677,18 +686,28 @@ pub struct RangeKvStateStoreReadSnapshot<R: RangeKv> {
     table_id: TableId,
 }
 
-impl<R: RangeKv> StateStoreRead for RangeKvStateStoreReadSnapshot<R> {
-    type Iter = RangeKvStateStoreIter<R>;
-    type RevIter = RangeKvStateStoreRevIter<R>;
-
-    async fn get_keyed_row(
+impl<R: RangeKv> StateStoreGet for RangeKvStateStoreReadSnapshot<R> {
+    async fn on_key_value<O: Send + 'static>(
         &self,
         key: TableKey<Bytes>,
         _read_options: ReadOptions,
-    ) -> StorageResult<Option<StateStoreKeyedRow>> {
+        on_key_value_fn: impl KeyValueFn<O>,
+    ) -> StorageResult<Option<O>> {
         self.inner
             .get_keyed_row_impl(key, self.epoch, self.table_id)
+            .and_then(|option| {
+                if let Some((key, value)) = option {
+                    on_key_value_fn(key.to_ref(), value.as_ref()).map(Some)
+                } else {
+                    Ok(None)
+                }
+            })
     }
+}
+
+impl<R: RangeKv> StateStoreRead for RangeKvStateStoreReadSnapshot<R> {
+    type Iter = RangeKvStateStoreIter<R>;
+    type RevIter = RangeKvStateStoreRevIter<R>;
 
     async fn iter(
         &self,
@@ -705,6 +724,48 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStoreReadSnapshot<R> {
     ) -> StorageResult<Self::RevIter> {
         self.inner
             .rev_iter_impl(key_range, self.epoch, self.table_id)
+    }
+}
+
+impl<R: RangeKv> StateStoreReadVector for RangeKvStateStoreReadSnapshot<R> {
+    async fn nearest<O: Send + 'static>(
+        &self,
+        vec: Vector,
+        options: VectorNearestOptions,
+        on_nearest_item_fn: impl OnNearestItemFn<O>,
+    ) -> StorageResult<Vec<O>> {
+        fn nearest_impl<M: MeasureDistanceBuilder, O>(
+            store: &InMemVectorStore,
+            epoch: u64,
+            table_id: TableId,
+            vec: Vector,
+            options: VectorNearestOptions,
+            on_nearest_item_fn: impl OnNearestItemFn<O>,
+        ) -> Vec<O> {
+            let mut builder = NearestBuilder::<'_, O, M>::new(vec.to_ref(), options.top_n);
+            builder.add(
+                store
+                    .read()
+                    .get(&table_id)
+                    .map(|vec| vec.iter())
+                    .into_iter()
+                    .flatten()
+                    .filter(|(_, _, vector_epoch)| epoch >= *vector_epoch)
+                    .map(|(vec, info, _)| (vec.to_ref(), info.as_ref())),
+                on_nearest_item_fn,
+            );
+            builder.finish()
+        }
+        dispatch_measurement!(options.measure, MeasurementType, {
+            Ok(nearest_impl::<MeasurementType, O>(
+                &self.inner.vectors,
+                self.epoch,
+                self.table_id,
+                vec,
+                options,
+                on_nearest_item_fn,
+            ))
+        })
     }
 }
 
@@ -831,20 +892,19 @@ impl<R: RangeKv> RangeKvStateStore<R> {
         &self,
         mut kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-        write_options: WriteOptions,
+        epoch: u64,
+        table_id: TableId,
     ) -> StorageResult<usize> {
-        let epoch = write_options.epoch;
-
         let mut delete_keys = BTreeSet::new();
         for del_range in delete_ranges {
             for (key, _) in self.inner.range(
                 (
-                    del_range.0.map(|table_key| {
-                        FullKey::new(write_options.table_id, TableKey(table_key), epoch)
-                    }),
-                    del_range.1.map(|table_key| {
-                        FullKey::new(write_options.table_id, TableKey(table_key), epoch)
-                    }),
+                    del_range
+                        .0
+                        .map(|table_key| FullKey::new(table_id, TableKey(table_key), epoch)),
+                    del_range
+                        .1
+                        .map(|table_key| FullKey::new(table_id, TableKey(table_key), epoch)),
                 ),
                 None,
             )? {
@@ -859,18 +919,24 @@ impl<R: RangeKv> RangeKvStateStore<R> {
         self.inner
             .ingest_batch(kv_pairs.into_iter().map(|(key, value)| {
                 size += key.len() + value.size();
-                (
-                    FullKey::new(write_options.table_id, key, epoch),
-                    value.user_value,
-                )
+                (FullKey::new(table_id, key, epoch), value.user_value)
             }))?;
         Ok(size)
+    }
+
+    fn ingest_vectors(&self, table_id: TableId, epoch: u64, vecs: Vec<(Vector, Bytes)>) {
+        self.vectors
+            .write()
+            .entry(table_id)
+            .or_default()
+            .extend(vecs.into_iter().map(|(vec, info)| (vec, info, epoch)));
     }
 }
 
 impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     type Local = RangeKvLocalStateStore<R>;
     type ReadSnapshot = RangeKvStateStoreReadSnapshot<R>;
+    type VectorWriter = RangeKvLocalStateStore<R>;
 
     async fn try_wait_epoch(
         &self,
@@ -892,10 +958,24 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     ) -> StorageResult<Self::ReadSnapshot> {
         Ok(self.new_read_snapshot_impl(epoch.get_epoch(), options.table_id))
     }
+
+    async fn new_vector_writer(&self, options: NewVectorWriterOptions) -> Self::VectorWriter {
+        RangeKvLocalStateStore::new(
+            self.clone(),
+            NewLocalOptions {
+                table_id: options.table_id,
+                op_consistency_level: Default::default(),
+                table_option: Default::default(),
+                is_replicated: false,
+                vnodes: Arc::new(Bitmap::from_bool_slice(&[true])),
+            },
+        )
+    }
 }
 
 pub struct RangeKvLocalStateStore<R: RangeKv> {
     mem_table: MemTable,
+    vectors: Vec<(Vector, Bytes)>,
     inner: RangeKvStateStore<R>,
 
     epoch: Option<EpochPair>,
@@ -916,6 +996,37 @@ impl<R: RangeKv> RangeKvLocalStateStore<R> {
             op_consistency_level: option.op_consistency_level,
             table_option: option.table_option,
             vnodes: option.vnodes,
+            vectors: vec![],
+        }
+    }
+
+    fn epoch(&self) -> u64 {
+        self.epoch.expect("should have set the epoch").curr
+    }
+}
+
+impl<R: RangeKv> StateStoreGet for RangeKvLocalStateStore<R> {
+    async fn on_key_value<O: Send + 'static>(
+        &self,
+        key: TableKey<Bytes>,
+        _read_options: ReadOptions,
+        on_key_value_fn: impl KeyValueFn<O>,
+    ) -> StorageResult<Option<O>> {
+        if let Some((key, value)) = match self.mem_table.buffer.get(&key) {
+            None => self
+                .inner
+                .get_keyed_row_impl(key, self.epoch(), self.table_id)?,
+            Some(op) => match op {
+                KeyOp::Insert(value) | KeyOp::Update((_, value)) => Some((
+                    FullKey::new(self.table_id, key, self.epoch()),
+                    value.clone(),
+                )),
+                KeyOp::Delete(_) => None,
+            },
+        } {
+            Ok(Some(on_key_value_fn(key.to_ref(), value.as_ref())?))
+        } else {
+            Ok(None)
         }
     }
 }
@@ -925,23 +1036,6 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
 
     type Iter<'a> = impl StateStoreIter + 'a;
     type RevIter<'a> = impl StateStoreIter + 'a;
-
-    async fn get(
-        &self,
-        key: TableKey<Bytes>,
-        _read_options: ReadOptions,
-    ) -> StorageResult<Option<Bytes>> {
-        match self.mem_table.buffer.get(&key) {
-            None => self
-                .inner
-                .get_keyed_row_impl(key, self.epoch(), self.table_id)
-                .map(|option| option.map(|(_, value)| value)),
-            Some(op) => match op {
-                KeyOp::Insert(value) | KeyOp::Update((_, value)) => Ok(Some(value.clone())),
-                KeyOp::Delete(_) => Ok(None),
-            },
-        }
-    }
 
     async fn iter(
         &self,
@@ -994,6 +1088,29 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
         Ok(self.mem_table.delete(key, old_val)?)
     }
 
+    async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
+        if self.vnodes.len() > 1 {
+            TableState::wait_epoch(
+                &self.inner.tables,
+                self.table_id,
+                self.epoch.expect("should have init").prev,
+            )
+            .await;
+        }
+        Ok(std::mem::replace(&mut self.vnodes, vnodes))
+    }
+
+    fn get_table_watermark(&self, _vnode: VirtualNode) -> Option<Bytes> {
+        // TODO: may store the written table watermark and have a correct implementation
+        None
+    }
+
+    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
+        self.inner.new_read_snapshot_impl(MAX_EPOCH, self.table_id)
+    }
+}
+
+impl<R: RangeKv> StateStoreWriteEpochControl for RangeKvLocalStateStore<R> {
     async fn flush(&mut self) -> StorageResult<usize> {
         let buffer = self.mem_table.drain().into_parts();
         let mut kv_pairs = Vec::with_capacity(buffer.len());
@@ -1013,7 +1130,6 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
                             &key,
                             &value,
                             sanity_check_read_snapshot,
-                            self.table_id,
                             self.table_option,
                             &self.op_consistency_level,
                         )
@@ -1027,7 +1143,6 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
                             &key,
                             &old_value,
                             sanity_check_read_snapshot,
-                            self.table_id,
                             self.table_option,
                             &self.op_consistency_level,
                         )
@@ -1042,7 +1157,6 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
                             &old_value,
                             &new_value,
                             sanity_check_read_snapshot,
-                            self.table_id,
                             self.table_option,
                             &self.op_consistency_level,
                         )
@@ -1052,22 +1166,11 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
                 }
             }
         }
-        self.inner.ingest_batch(
-            kv_pairs,
-            vec![],
-            WriteOptions {
-                epoch: self.epoch(),
-                table_id: self.table_id,
-            },
-        )
-    }
-
-    fn epoch(&self) -> u64 {
-        self.epoch.expect("should have set the epoch").curr
-    }
-
-    fn is_dirty(&self) -> bool {
-        self.mem_table.is_dirty()
+        let epoch = self.epoch();
+        self.inner
+            .ingest_vectors(self.table_id, epoch, take(&mut self.vectors));
+        self.inner
+            .ingest_batch(kv_pairs, vec![], epoch, self.table_id)
     }
 
     async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
@@ -1092,7 +1195,7 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
-        assert!(!self.is_dirty());
+        assert!(!self.mem_table.is_dirty());
         if let Some(value_checker) = opts.switch_op_consistency_level {
             self.mem_table.op_consistency_level.update(&value_checker);
         }
@@ -1163,14 +1266,10 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
                         })
                 })
                 .collect_vec();
-            if let Err(e) = self.inner.ingest_batch(
-                Vec::new(),
-                delete_ranges,
-                WriteOptions {
-                    epoch: self.epoch(),
-                    table_id: self.table_id,
-                },
-            ) {
+            if let Err(e) =
+                self.inner
+                    .ingest_batch(Vec::new(), delete_ranges, self.epoch(), self.table_id)
+            {
                 error!(error = %e.as_report(), "failed to write delete ranges of table watermark");
             }
         }
@@ -1179,26 +1278,12 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
     async fn try_flush(&mut self) -> StorageResult<()> {
         Ok(())
     }
+}
 
-    async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
-        if self.vnodes.len() > 1 {
-            TableState::wait_epoch(
-                &self.inner.tables,
-                self.table_id,
-                self.epoch.expect("should have init").prev,
-            )
-            .await;
-        }
-        Ok(std::mem::replace(&mut self.vnodes, vnodes))
-    }
-
-    fn get_table_watermark(&self, _vnode: VirtualNode) -> Option<Bytes> {
-        // TODO: may store the written table watermark and have a correct implementation
-        None
-    }
-
-    fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
-        self.inner.new_read_snapshot_impl(MAX_EPOCH, self.table_id)
+impl<R: RangeKv> StateStoreWriteVector for RangeKvLocalStateStore<R> {
+    fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()> {
+        self.vectors.push((vec, info));
+        Ok(())
     }
 }
 
@@ -1434,7 +1519,7 @@ mod tests {
     use crate::hummock::iterator::test_utils::{
         iterator_test_table_key_of, iterator_test_value_of,
     };
-    use crate::hummock::test_utils::StateStoreReadTestExt;
+    use crate::hummock::test_utils::{ReadOptions, *};
     use crate::memory::sled::SledStateStore;
 
     #[tokio::test]
@@ -1464,10 +1549,8 @@ mod tests {
                     ),
                 ],
                 vec![],
-                WriteOptions {
-                    epoch: 0,
-                    table_id: Default::default(),
-                },
+                0,
+                Default::default(),
             )
             .unwrap();
         state_store
@@ -1483,10 +1566,8 @@ mod tests {
                     ),
                 ],
                 vec![],
-                WriteOptions {
-                    epoch: test_epoch(1),
-                    table_id: Default::default(),
-                },
+                test_epoch(1),
+                Default::default(),
             )
             .unwrap();
         assert_eq!(
@@ -1556,7 +1637,7 @@ mod tests {
         );
         assert_eq!(
             state_store
-                .get(TableKey(Bytes::from("a")), 0, ReadOptions::default(),)
+                .get(TableKey(Bytes::from("a")), 0, ReadOptions::default())
                 .await
                 .unwrap(),
             Some(Bytes::from("v1"))
@@ -1644,10 +1725,8 @@ mod tests {
                     .map(|i| (make_key(*i), StorageValue::new_put(make_value(*i))))
                     .collect(),
                 vec![],
-                WriteOptions {
-                    epoch: epoch1,
-                    table_id,
-                },
+                epoch1,
+                table_id,
             )
             .unwrap();
         {
@@ -1676,10 +1755,8 @@ mod tests {
                     (make_key(3), StorageValue::new_put(make_value(3))),
                 ],
                 vec![],
-                WriteOptions {
-                    epoch: epoch2,
-                    table_id,
-                },
+                epoch2,
+                table_id,
             )
             .unwrap();
 

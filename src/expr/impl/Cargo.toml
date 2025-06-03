@@ -13,23 +13,17 @@ repository = { workspace = true }
 ignored = ["chrono-tz", "futures-async-stream"]
 
 [features]
-external-udf = ["arrow-udf-flight", "tonic", "ginepro"]
-js-udf = ["arrow-udf-js"]
-python-udf = ["arrow-udf-python"]
-wasm-udf = ["arrow-udf-wasm", "zstd"]
+udf = ["arrow-udf-runtime", "tonic", "ginepro", "zstd"]
 
 [dependencies]
 aho-corasick = "1"
 anyhow = "1"
-arrow-udf-flight = { workspace = true, optional = true }
-arrow-udf-js = { workspace = true, optional = true }
-arrow-udf-python = { workspace = true, optional = true }
-arrow-udf-wasm = { workspace = true, optional = true }
+arrow-udf-runtime = { workspace = true, optional = true }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 bytes = "1"
 # The feature setting is also used in src/expr/impl/src/udf/wasm.rs
-chrono = { version = "0.4", default-features = false, features = [
+chrono = { workspace = true, features = [
     "clock",
     "std",
 ] }
@@ -50,26 +44,26 @@ linkme = { workspace = true }
 md5 = "0.7"
 moka = { version = "0.12.0", features = ["sync"] }
 num-traits = "0.2"
-openssl = "0.10"
-regex = "1"
+openssl = "0.10.72"
+regex = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_expr = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
-self_cell = "1.1.0"
+self_cell = "1.2.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha1 = "0.10"
 sha2 = "0.10"
-smallvec = "1"
+smallvec = { workspace = true }
 sql-json-path = { version = "0.1", features = ["jsonbb"] }
-thiserror = "1"
+thiserror = "2"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["time"] }
-# For arrow-udf-flight
-tonic = { version = "0.12", optional = true }
+# For arrow-udf-runtime/remote
+tonic = { version = "0.12.3", optional = true }
 tracing = "0.1"
 zstd = { version = "0.13", default-features = false, optional = true }
 

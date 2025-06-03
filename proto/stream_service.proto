@@ -26,7 +26,7 @@ message InjectBarrierRequest {
 
   message BuildActorInfo {
     message UpstreamActors {
-      repeated uint32 actors = 1;
+      repeated common.ActorInfo actors = 1;
     }
     uint32 actor_id = 1;
     map<uint32, UpstreamActors> fragment_upstreams = 2;
@@ -36,7 +36,6 @@ message InjectBarrierRequest {
     plan_common.ExprContext expr_context = 6;
   }
 
-  repeated common.ActorInfo broadcast_info = 8;
   repeated FragmentBuildActorInfo actors_to_build = 9;
   repeated stream_plan.SubscriptionUpstreamInfo subscriptions_to_add = 10;
   repeated stream_plan.SubscriptionUpstreamInfo subscriptions_to_remove = 11;
@@ -78,7 +77,6 @@ message StreamingControlStreamRequest {
   message InitialPartialGraph {
     uint32 partial_graph_id = 1;
     repeated stream_plan.SubscriptionUpstreamInfo subscriptions = 2;
-    repeated common.ActorInfo actor_infos = 3;
   }
 
   message DatabaseInitialPartialGraph {
@@ -142,14 +140,14 @@ message StreamingControlStreamResponse {
   }
 }
 
-message GetMinUncommittedSstIdRequest {}
-message GetMinUncommittedSstIdResponse {
-  uint64 min_uncommitted_sst_id = 1;
+message GetMinUncommittedObjectIdRequest {}
+message GetMinUncommittedObjectIdResponse {
+  uint64 min_uncommitted_object_id = 1;
 }
 
 service StreamService {
   rpc StreamingControlStream(stream StreamingControlStreamRequest) returns (stream StreamingControlStreamResponse);
-  rpc GetMinUncommittedSstId(GetMinUncommittedSstIdRequest) returns (GetMinUncommittedSstIdResponse);
+  rpc GetMinUncommittedObjectId(GetMinUncommittedObjectIdRequest) returns (GetMinUncommittedObjectIdResponse);
 }
 
 // TODO: Lifecycle management for actors.

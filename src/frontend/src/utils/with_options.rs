@@ -17,22 +17,22 @@ use std::num::NonZeroU32;
 
 use risingwave_common::catalog::ConnectionId;
 pub use risingwave_connector::WithOptionsSecResolved;
-use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::connector_common::{
     PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY,
 };
 use risingwave_connector::source::kafka::private_link::{
     PRIVATELINK_ENDPOINT_KEY, insert_privatelink_broker_rewrite_map,
 };
+use risingwave_connector::{Get, GetKeyIter, WithPropertiesExt};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::telemetry::{PbTelemetryEventStage, TelemetryDatabaseObject};
 use risingwave_sqlparser::ast::{
-    ConnectionRefValue, CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
-    CreateSubscriptionStatement, SecretRefAsType, SecretRefValue, SqlOption, SqlOptionValue,
-    Statement, Value,
+    BackfillOrderStrategy, ConnectionRefValue, CreateConnectionStatement, CreateSinkStatement,
+    CreateSourceStatement, CreateSubscriptionStatement, SecretRefAsType, SecretRefValue, SqlOption,
+    SqlOptionValue, Statement, Value,
 };
 
 use super::OverwriteOptions;
@@ -52,6 +52,19 @@ pub struct WithOptions {
     inner: BTreeMap<String, String>,
     secret_ref: BTreeMap<String, SecretRefValue>,
     connection_ref: BTreeMap<String, ConnectionRefValue>,
+    backfill_order_strategy: BackfillOrderStrategy,
+}
+
+impl GetKeyIter for WithOptions {
+    fn key_iter(&self) -> impl Iterator<Item = &str> {
+        self.inner.keys().map(|s| s.as_str())
+    }
+}
+
+impl Get for WithOptions {
+    fn get(&self, key: &str) -> Option<&String> {
+        self.inner.get(key)
+    }
 }
 
 impl std::ops::Deref for WithOptions {
@@ -75,6 +88,7 @@ impl WithOptions {
             inner,
             secret_ref: Default::default(),
             connection_ref: Default::default(),
+            backfill_order_strategy: Default::default(),
         }
     }
 
@@ -88,6 +102,7 @@ impl WithOptions {
             inner,
             secret_ref,
             connection_ref,
+            backfill_order_strategy: Default::default(),
         }
     }
 
@@ -120,6 +135,7 @@ impl WithOptions {
             inner,
             secret_ref: self.secret_ref,
             connection_ref: self.connection_ref,
+            backfill_order_strategy: self.backfill_order_strategy,
         }
     }
 
@@ -145,6 +161,7 @@ impl WithOptions {
             inner,
             secret_ref: self.secret_ref.clone(),
             connection_ref: self.connection_ref.clone(),
+            backfill_order_strategy: self.backfill_order_strategy.clone(),
         }
     }
 
@@ -190,12 +207,16 @@ impl WithOptions {
         self.inner.contains_key(UPSTREAM_SOURCE_KEY)
             && self.inner.get(UPSTREAM_SOURCE_KEY).unwrap() != WEBHOOK_CONNECTOR
     }
+
+    pub fn backfill_order_strategy(&self) -> BackfillOrderStrategy {
+        self.backfill_order_strategy.clone()
+    }
 }
 
 pub(crate) fn resolve_connection_ref_and_secret_ref(
     with_options: WithOptions,
     session: &SessionImpl,
-    object: TelemetryDatabaseObject,
+    object: Option<TelemetryDatabaseObject>,
 ) -> RwResult<(WithOptionsSecResolved, PbConnectionType, Option<u32>)> {
     let connector_name = with_options.get_connector();
     let db_name: &str = &session.database();
@@ -219,45 +240,30 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
             } else {
                 return Err(RwError::from(ErrorCode::InvalidParameterValue(
                     "Private Link Service has been deprecated. Please create a new connection instead.".to_owned(),
-        )));
+                )));
             }
         };
 
-        // report to telemetry
-        report_event(
-            PbTelemetryEventStage::CreateStreamJob,
-            "connection_ref",
-            0,
-            connector_name.clone(),
-            Some(object),
-            {
-                connection_params.as_ref().map(|cp| {
-                    jsonbb::json!({
-                        "connection_type": cp.connection_type().as_str_name().to_owned()
+        if let Some(object) = object {
+            // report to telemetry
+            report_event(
+                PbTelemetryEventStage::CreateStreamJob,
+                "connection_ref",
+                0,
+                connector_name.clone(),
+                Some(object),
+                {
+                    connection_params.as_ref().map(|cp| {
+                        jsonbb::json!({
+                            "connection_type": cp.connection_type().as_str_name().to_owned()
+                        })
                     })
-                })
-            },
-        );
+                },
+            );
+        }
     }
 
-    let mut inner_secret_refs = {
-        let mut resolved_secret_refs = BTreeMap::new();
-        for (key, secret_ref) in secret_refs {
-            let (schema_name, secret_name) =
-                Binder::resolve_schema_qualified_name(db_name, secret_ref.secret_name.clone())?;
-            let secret_catalog = session.get_secret_by_name(schema_name, &secret_name)?;
-            let ref_as = match secret_ref.ref_as {
-                SecretRefAsType::Text => PbRefAsType::Text,
-                SecretRefAsType::File => PbRefAsType::File,
-            };
-            let pb_secret_ref = PbSecretRef {
-                secret_id: secret_catalog.id.secret_id(),
-                ref_as: ref_as.into(),
-            };
-            resolved_secret_refs.insert(key.clone(), pb_secret_ref);
-        }
-        resolved_secret_refs
-    };
+    let mut inner_secret_refs = resolve_secret_refs_inner(secret_refs, session)?;
 
     let mut connection_type = PbConnectionType::Unspecified;
     let connection_params_is_none_flag = connection_params.is_none();
@@ -337,8 +343,16 @@ pub(crate) fn resolve_secret_ref_in_with_options(
     session: &SessionImpl,
 ) -> RwResult<WithOptionsSecResolved> {
     let (options, secret_refs, _) = with_options.into_parts();
-    let mut resolved_secret_refs = BTreeMap::new();
+    let resolved_secret_refs = resolve_secret_refs_inner(secret_refs, session)?;
+    Ok(WithOptionsSecResolved::new(options, resolved_secret_refs))
+}
+
+fn resolve_secret_refs_inner(
+    secret_refs: BTreeMap<String, SecretRefValue>,
+    session: &SessionImpl,
+) -> RwResult<BTreeMap<String, PbSecretRef>> {
     let db_name: &str = &session.database();
+    let mut resolved_secret_refs = BTreeMap::new();
     for (key, secret_ref) in secret_refs {
         let (schema_name, secret_name) =
             Binder::resolve_schema_qualified_name(db_name, secret_ref.secret_name.clone())?;
@@ -353,7 +367,7 @@ pub(crate) fn resolve_secret_ref_in_with_options(
         };
         resolved_secret_refs.insert(key.clone(), pb_secret_ref);
     }
-    Ok(WithOptionsSecResolved::new(options, resolved_secret_refs))
+    Ok(resolved_secret_refs)
 }
 
 pub(crate) fn resolve_privatelink_in_with_option(
@@ -382,6 +396,7 @@ impl TryFrom<&[SqlOption]> for WithOptions {
         let mut inner: BTreeMap<String, String> = BTreeMap::new();
         let mut secret_ref: BTreeMap<String, SecretRefValue> = BTreeMap::new();
         let mut connection_ref: BTreeMap<String, ConnectionRefValue> = BTreeMap::new();
+        let mut backfill_order_strategy = BackfillOrderStrategy::Default;
         for option in options {
             let key = option.name.real_value();
             match &option.value {
@@ -405,6 +420,10 @@ impl TryFrom<&[SqlOption]> for WithOptions {
                             key
                         ))));
                     }
+                    continue;
+                }
+                SqlOptionValue::BackfillOrder(b) => {
+                    backfill_order_strategy = b.clone();
                     continue;
                 }
                 _ => {}
@@ -433,6 +452,7 @@ impl TryFrom<&[SqlOption]> for WithOptions {
             inner,
             secret_ref,
             connection_ref,
+            backfill_order_strategy,
         })
     }
 }

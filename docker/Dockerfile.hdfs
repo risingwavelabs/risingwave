@@ -102,7 +102,7 @@ ENV LD_LIBRARY_PATH ${JAVA_HOME_PATH}/lib/server:${LD_LIBRARY_PATH}
 ENV OPENSSL_STATIC=1
 
 RUN cargo fetch && \
-  cargo build -p risingwave_cmd_all --release -p risingwave_object_store --features hdfs-backend --features "rw-static-link" --features all-udf && \
+  cargo build -p risingwave_cmd_all --release -p risingwave_object_store --features hdfs-backend --features "rw-static-link" --features udf && \
   mkdir -p /risingwave/bin && \
   mv /risingwave/target/release/risingwave /risingwave/bin/ && \
   mv /risingwave/target/release/risingwave.dwp /risingwave/bin/ && \

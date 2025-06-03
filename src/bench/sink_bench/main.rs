@@ -109,7 +109,8 @@ impl LogReader for MockRangeLogReader {
                             prev_epoch,
                             LogStoreReadItem::Barrier {
                                 is_checkpoint: true,
-                                new_vnode_bitmap: None
+                                new_vnode_bitmap: None,
+                                is_stop: false,
                             },
                         ))
                     }
@@ -384,7 +385,10 @@ where
     <S as risingwave_connector::sink::Sink>::Coordinator: std::marker::Send,
     <S as risingwave_connector::sink::Sink>::Coordinator: 'static,
 {
-    if let Ok(coordinator) = sink.new_coordinator(DatabaseConnection::Disconnected).await {
+    if let Ok(coordinator) = sink
+        .new_coordinator(DatabaseConnection::Disconnected, None)
+        .await
+    {
         sink_writer_param.meta_client = Some(SinkMetaClient::MockMetaClient(MockMetaClient::new(
             Box::new(coordinator),
         )));

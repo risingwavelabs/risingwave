@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+if [[ -z "${RUST_MIN_STACK}" ]]; then
+  export RUST_MIN_STACK=4194304
+fi
+
 # Exits as soon as any line fails.
 set -euo pipefail
 
@@ -71,9 +75,6 @@ cluster_stop() {
 download_and_prepare_rw "$profile" common
 
 echo "--- Download artifacts"
-# preparing for external java udf tests
-mkdir -p e2e_test/udf/java/target/
-buildkite-agent artifact download udf.jar e2e_test/udf/java/target/
 # preparing for extended mode tests
 download-and-decompress-artifact risingwave_e2e_extended_mode_test-"$profile" target/debug/
 mv target/debug/risingwave_e2e_extended_mode_test-"$profile" target/debug/risingwave_e2e_extended_mode_test
@@ -89,6 +90,13 @@ cluster_start
 risedev slt -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
 risedev slt -p 4566 -d dev './e2e_test/backfill/sink/different_pk_and_dist_key.slt'
 
+if [[ "$profile" == "ci-release" ]]; then
+  echo "--- e2e, $mode, backfill"
+  # only run in release-mode. It's too slow for dev-mode.
+  risedev slt -p 4566 -d dev './e2e_test/backfill/backfill_order_control.slt'
+  risedev slt -p 4566 -d dev './e2e_test/backfill/backfill_order_control_recovery.slt'
+fi
+
 echo "--- Kill cluster"
 cluster_stop
 
@@ -98,14 +106,15 @@ cluster_start
 risedev slt -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profile}" --label "can-use-recover"
 risedev slt -p 4566 -d dev './e2e_test/background_ddl/basic.slt' --junit "batch-ddl-${profile}"
 
-if [[ $mode != "single-node" ]]; then
+if [[ "$mode" != "single-node" && "$mode" != "standalone" ]]; then
   risedev slt -p 4566 -d dev './e2e_test/visibility_mode/*.slt' --junit "batch-${profile}"
 fi
 
 risedev slt -p 4566 -d dev './e2e_test/ttl/ttl.slt'
 risedev slt -p 4566 -d dev './e2e_test/dml/*.slt'
-risedev slt -p 4566 -d dev './e2e_test/database/prepare.slt'
-risedev slt -p 4566 -d test './e2e_test/database/test.slt'
+
+echo "--- e2e, $mode, misc"
+risedev slt -p 4566 -d dev './e2e_test/misc/**/*.slt'
 
 echo "--- e2e, $mode, python_client"
 python3 ./e2e_test/python_client/main.py
@@ -116,10 +125,6 @@ python3 ./e2e_test/subscription/main.py
 
 echo "--- e2e, $mode, Apache Superset"
 risedev slt -p 4566 -d dev './e2e_test/superset/*.slt' --junit "batch-${profile}"
-
-echo "--- e2e, $mode, external udf"
-python3 -m pip install --break-system-packages arrow-udf==0.3.0
-risedev slt -p 4566 -d dev './e2e_test/udf/external/main.slt'
 
 echo "--- Kill cluster"
 cluster_stop

@@ -43,7 +43,9 @@ use super::stream::prelude::*;
 use super::utils::{
     Distill, IndicesDisplay, childless_record, infer_kv_log_store_table_catalog_inner,
 };
-use super::{ExprRewritable, PlanBase, PlanRef, StreamNode, StreamProject, generic};
+use super::{
+    ExprRewritable, PlanBase, PlanRef, StreamNode, StreamProject, StreamSyncLogStore, generic,
+};
 use crate::TableCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, FunctionCall, InputRef};
@@ -354,6 +356,9 @@ impl StreamSink {
             CreateType::Foreground
         };
         let (properties, secret_refs) = properties.into_parts();
+        let is_exactly_once = properties
+            .get("is_exactly_once")
+            .is_some_and(|v| v.to_lowercase() == "true");
         let mut sink_desc = SinkDesc {
             id: SinkId::placeholder(),
             name,
@@ -371,6 +376,7 @@ impl StreamSink {
             target_table: target_table.as_ref().map(|catalog| catalog.id()),
             extra_partition_col_idx,
             create_type,
+            is_exactly_once,
         };
 
         let unsupported_sink =
@@ -412,10 +418,22 @@ impl StreamSink {
                 SinkError::Config(anyhow!("File sink can only be created with sink_decouple enabled. Please run `set sink_decouple = true` first.")).into(),
             );
         }
+        if !sink_decouple && sink_desc.is_exactly_once {
+            return Err(
+                SinkError::Config(anyhow!("Exactly once sink can only be created with sink_decouple enabled. Please run `set sink_decouple = true` first.")).into(),
+            );
+        }
         let log_store_type = if sink_decouple {
             SinkLogStoreType::KvLogStore
         } else {
             SinkLogStoreType::InMemoryLogStore
+        };
+
+        // sink into table should have logstore for sink_decouple
+        let input = if sink_decouple && target_table.is_some() {
+            StreamSyncLogStore::new(input).into()
+        } else {
+            input
         };
 
         Ok(Self::new(input, sink_desc, log_store_type))

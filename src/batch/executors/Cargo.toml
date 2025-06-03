@@ -22,7 +22,7 @@ itertools = { workspace = true }
 linkme = { workspace = true }
 mysql_async = { workspace = true }
 opendal = { workspace = true }
-prometheus = { version = "0.13", features = ["process"] }
+prometheus = { version = "0.14", features = ["process"] }
 rand = { workspace = true }
 risingwave_batch = { workspace = true }
 risingwave_common = { workspace = true }

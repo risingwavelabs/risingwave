@@ -1190,11 +1190,16 @@ impl FromIntoArrow for Interval {
     type ArrowType = ArrowIntervalType;
 
     fn from_arrow(value: Self::ArrowType) -> Self {
-        <ArrowIntervalType as crate::array::arrow::ArrowIntervalTypeTrait>::to_interval(value)
+        Interval::from_month_day_usec(value.months, value.days, value.nanoseconds / 1000)
     }
 
     fn into_arrow(self) -> Self::ArrowType {
-        <ArrowIntervalType as crate::array::arrow::ArrowIntervalTypeTrait>::from_interval(self)
+        ArrowIntervalType {
+            months: self.months(),
+            days: self.days(),
+            // TODO: this may overflow and we need `try_into`
+            nanoseconds: self.usecs() * 1000,
+        }
     }
 }
 
@@ -1347,6 +1352,23 @@ impl TryFrom<&arrow_array::StringArray> for JsonbArray {
                 .transpose()
             })
             .try_collect()
+    }
+}
+
+impl From<&IntervalArray> for arrow_array::StringArray {
+    fn from(array: &IntervalArray) -> Self {
+        let mut builder =
+            arrow_array::builder::StringBuilder::with_capacity(array.len(), array.len() * 16);
+        for value in array.iter() {
+            match value {
+                Some(interval) => {
+                    write!(&mut builder, "{}", interval).unwrap();
+                    builder.append_value("");
+                }
+                None => builder.append_null(),
+            }
+        }
+        builder.finish()
     }
 }
 

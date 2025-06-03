@@ -23,7 +23,7 @@ use crate::executor::exchange::input::{
     assert_equal_dispatcher_barrier, new_input, process_dispatcher_msg,
 };
 use crate::executor::prelude::*;
-use crate::task::{FragmentId, SharedContext};
+use crate::task::{FragmentId, LocalBarrierManager};
 
 /// `ReceiverExecutor` is used along with a channel. After creating a mpsc channel,
 /// there should be a `ReceiverExecutor` running in the background, so as to push
@@ -41,8 +41,7 @@ pub struct ReceiverExecutor {
     /// Upstream fragment id.
     upstream_fragment_id: FragmentId,
 
-    /// Shared context of the stream manager.
-    context: Arc<SharedContext>,
+    local_barrier_manager: LocalBarrierManager,
 
     /// Metrics
     metrics: Arc<StreamingMetrics>,
@@ -63,7 +62,7 @@ impl ReceiverExecutor {
         fragment_id: FragmentId,
         upstream_fragment_id: FragmentId,
         input: BoxedInput,
-        context: Arc<SharedContext>,
+        local_barrier_manager: LocalBarrierManager,
         metrics: Arc<StreamingMetrics>,
         barrier_rx: mpsc::UnboundedReceiver<Barrier>,
     ) -> Self {
@@ -71,9 +70,9 @@ impl ReceiverExecutor {
             input,
             actor_context: ctx,
             upstream_fragment_id,
+            local_barrier_manager,
             metrics,
             fragment_id,
-            context,
             barrier_rx,
         }
     }
@@ -82,7 +81,6 @@ impl ReceiverExecutor {
     pub fn for_test(
         actor_id: ActorId,
         input: super::exchange::permit::Receiver,
-        shared_context: Arc<SharedContext>,
         local_barrier_manager: crate::task::LocalBarrierManager,
     ) -> Self {
         use super::exchange::input::LocalInput;
@@ -95,7 +93,7 @@ impl ReceiverExecutor {
             514,
             1919,
             LocalInput::new(input, 0).boxed_input(),
-            shared_context,
+            local_barrier_manager,
             StreamingMetrics::unused().into(),
             barrier_rx,
         )
@@ -144,7 +142,6 @@ impl Execute for ReceiverExecutor {
                             let new_upstream_fragment_id = update
                                 .new_upstream_fragment_id
                                 .unwrap_or(self.upstream_fragment_id);
-                            let added_upstream_actor_id = update.added_upstream_actor_id.clone();
                             let removed_upstream_actor_id: Vec<_> =
                                 if update.new_upstream_fragment_id.is_some() {
                                     vec![self.input.actor_id()]
@@ -157,20 +154,22 @@ impl Execute for ReceiverExecutor {
                                 vec![self.input.actor_id()],
                                 "the removed upstream actor should be the same as the current input"
                             );
-                            let upstream_actor_id = *added_upstream_actor_id
+                            let upstream_actor = update
+                                .added_upstream_actors
                                 .iter()
                                 .exactly_one()
                                 .expect("receiver should have exactly one upstream");
 
                             // Create new upstream receiver.
                             let mut new_upstream = new_input(
-                                &self.context,
+                                &self.local_barrier_manager,
                                 self.metrics.clone(),
                                 self.actor_context.id,
                                 self.fragment_id,
-                                upstream_actor_id,
+                                upstream_actor,
                                 new_upstream_fragment_id,
                             )
+                            .await
                             .context("failed to create upstream input")?;
 
                             // Poll the first barrier from the new upstream. It must be the same as
@@ -210,6 +209,7 @@ mod tests {
 
     use super::*;
     use crate::executor::{MessageInner as Message, UpdateMutation};
+    use crate::task::NewOutputRequest;
     use crate::task::barrier_test_utils::LocalBarrierTestEnv;
     use crate::task::test_utils::helper_make_local_actor;
 
@@ -220,16 +220,9 @@ mod tests {
 
         let barrier_test_env = LocalBarrierTestEnv::for_test().await;
 
-        let ctx = barrier_test_env.shared_context.clone();
         let metrics = Arc::new(StreamingMetrics::unused());
 
         // 1. Register info in context.
-
-        ctx.add_actors(
-            [actor_id, old, new]
-                .into_iter()
-                .map(helper_make_local_actor),
-        );
 
         // old -> actor_id
         // new -> actor_id
@@ -242,7 +235,7 @@ mod tests {
                 actor_id,
                 upstream_fragment_id,
                 new_upstream_fragment_id: None,
-                added_upstream_actor_id: vec![new],
+                added_upstream_actors: vec![helper_make_local_actor(new)],
                 removed_upstream_actor_id: vec![old],
             }
         };
@@ -262,13 +255,14 @@ mod tests {
         barrier_test_env.flush_all_events().await;
 
         let input = new_input(
-            &ctx,
+            &barrier_test_env.local_barrier_manager,
             metrics.clone(),
             actor_id,
             fragment_id,
-            old,
+            &helper_make_local_actor(old),
             upstream_fragment_id,
         )
+        .await
         .unwrap();
 
         let receiver = ReceiverExecutor::new(
@@ -276,7 +270,7 @@ mod tests {
             fragment_id,
             upstream_fragment_id,
             input,
-            ctx.clone(),
+            barrier_test_env.local_barrier_manager.clone(),
             metrics.clone(),
             barrier_test_env
                 .local_barrier_manager
@@ -287,11 +281,7 @@ mod tests {
 
         pin_mut!(receiver);
 
-        // 2. Take downstream receivers.
-        let txs = [old, new]
-            .into_iter()
-            .map(|id| (id, ctx.take_sender(&(id, actor_id)).unwrap()))
-            .collect::<HashMap<_, _>>();
+        let mut txs = HashMap::new();
         macro_rules! send {
             ($actors:expr, $msg:expr) => {
                 for actor in $actors {
@@ -326,15 +316,40 @@ mod tests {
             };
         }
 
+        macro_rules! collect_upstream_tx {
+            ($actors:expr) => {
+                for upstream_id in $actors {
+                    let mut output_requests = barrier_test_env
+                        .take_pending_new_output_requests(upstream_id)
+                        .await;
+                    assert_eq!(output_requests.len(), 1);
+                    let (downstream_actor_id, request) = output_requests.pop().unwrap();
+                    assert_eq!(actor_id, downstream_actor_id);
+                    let NewOutputRequest::Local(tx) = request else {
+                        unreachable!()
+                    };
+                    txs.insert(upstream_id, tx);
+                }
+            };
+        }
+
+        assert_recv_pending!();
+        barrier_test_env.flush_all_events().await;
+
+        // 2. Take downstream receivers.
+        collect_upstream_tx!([old]);
+
         // 3. Send a chunk.
         send!([old], Message::Chunk(StreamChunk::default()).into());
         recv!().unwrap().as_chunk().unwrap(); // We should be able to receive the chunk.
         assert_recv_pending!();
 
-        send!([new], Message::Barrier(b1.clone().into_dispatcher()).into());
+        send!([old], Message::Barrier(b1.clone().into_dispatcher()).into());
         assert_recv_pending!(); // We should not receive the barrier, as new is not the upstream.
 
-        send!([old], Message::Barrier(b1.clone().into_dispatcher()).into());
+        collect_upstream_tx!([new]);
+
+        send!([new], Message::Barrier(b1.clone().into_dispatcher()).into());
         recv!().unwrap().as_barrier().unwrap(); // We should now receive the barrier.
 
         // 5. Send a chunk to the removed upstream.

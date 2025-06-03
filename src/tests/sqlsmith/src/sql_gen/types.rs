@@ -179,6 +179,7 @@ pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<&'static FuncSi
                     && ![
                         PbAggKind::InternalLastSeenValue, // Use internally
                         PbAggKind::Sum0, // Used internally
+                        PbAggKind::ApproxCountDistinct,
                         PbAggKind::BitAnd,
                         PbAggKind::BitOr,
                         PbAggKind::BoolAnd,

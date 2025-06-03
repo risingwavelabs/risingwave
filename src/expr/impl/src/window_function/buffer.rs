@@ -32,7 +32,7 @@ pub(super) struct WindowBuffer<W: WindowImpl> {
     buffer: VecDeque<Entry<W::Key, W::Value>>,
     curr_idx: usize,
     left_idx: usize,       // inclusive, note this can be > `curr_idx`
-    right_excl_idx: usize, // exclusive, note this can be <= `curr_idx`
+    right_excl_idx: usize, // exclusive, note this can be <= `curr_idx` and even <= `left_idx`
     curr_delta: Option<Vec<(Op, W::Value)>>,
 }
 
@@ -103,7 +103,7 @@ impl<W: WindowImpl> WindowBuffer<W> {
     }
 
     fn curr_window_outer(&self) -> Range<usize> {
-        self.left_idx..self.right_excl_idx
+        self.left_idx..std::cmp::max(self.right_excl_idx, self.left_idx)
     }
 
     fn curr_window_exclusion(&self) -> Range<usize> {
@@ -122,7 +122,7 @@ impl<W: WindowImpl> WindowBuffer<W> {
 
     /// Iterate over values in the current window.
     pub fn curr_window_values(&self) -> impl DoubleEndedIterator<Item = &W::Value> {
-        assert!(self.left_idx <= self.right_excl_idx);
+        assert!(self.left_idx <= self.buffer.len()); // `left_idx` can be the same as `buffer.len()` when the buffer is empty
         assert!(self.right_excl_idx <= self.buffer.len());
 
         let (left, right) = self.curr_window_ranges();
@@ -167,7 +167,11 @@ impl<W: WindowImpl> WindowBuffer<W> {
             self.maintain_delta(old_outer, self.curr_window_outer());
         }
 
-        let min_needed_idx = std::cmp::min(self.left_idx, self.curr_idx);
+        let min_needed_idx = [self.left_idx, self.curr_idx, self.right_excl_idx]
+            .iter()
+            .min()
+            .copied()
+            .unwrap();
         self.curr_idx -= min_needed_idx;
         self.left_idx -= min_needed_idx;
         self.right_excl_idx -= min_needed_idx;

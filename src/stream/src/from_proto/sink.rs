@@ -141,13 +141,19 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             && let Some(url) = properties_with_secret.get("jdbc.url")
             && url.starts_with("jdbc:postgresql:")
         {
+            tracing::info!("switching to native postgres connector");
             let jdbc_url = parse_jdbc_url(url)
                 .map_err(|e| StreamExecutorError::from((SinkError::Config(e), sink_id.sink_id)))?;
+            properties_with_secret.insert(CONNECTOR_TYPE_KEY.to_owned(), "postgres".to_owned());
             properties_with_secret.insert("host".to_owned(), jdbc_url.host);
             properties_with_secret.insert("port".to_owned(), jdbc_url.port.to_string());
             properties_with_secret.insert("database".to_owned(), jdbc_url.db_name);
-            properties_with_secret.insert("user".to_owned(), jdbc_url.username);
-            properties_with_secret.insert("password".to_owned(), jdbc_url.password);
+            if let Some(username) = jdbc_url.username {
+                properties_with_secret.insert("user".to_owned(), username);
+            }
+            if let Some(password) = jdbc_url.password {
+                properties_with_secret.insert("password".to_owned(), password);
+            }
             if let Some(table_name) = properties_with_secret.get("table.name") {
                 properties_with_secret.insert("table".to_owned(), table_name.clone());
             }
@@ -225,6 +231,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             sink_id,
             sink_name,
             connector: connector.to_owned(),
+            streaming_config: params.env.config().as_ref().clone(),
         };
 
         let log_store_identity = format!(
@@ -268,8 +275,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 let input_schema = input_executor.schema();
                 let pk_info = resolve_pk_info(input_schema, &table)?;
 
-                let align_init_epoch = sink.is_coordinated_sink();
-
                 // TODO: support setting max row count in config
                 let factory = KvLogStoreFactory::new(
                     state_store,
@@ -279,7 +284,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     metrics,
                     log_store_identity,
                     pk_info,
-                    align_init_epoch,
                 );
 
                 SinkExecutor::new(
@@ -308,8 +312,8 @@ struct JdbcUrl {
     host: String,
     port: u16,
     db_name: String,
-    username: String,
-    password: String,
+    username: Option<String>,
+    password: Option<String>,
 }
 
 fn parse_jdbc_url(url: &str) -> anyhow::Result<JdbcUrl> {
@@ -333,7 +337,9 @@ fn parse_jdbc_url(url: &str) -> anyhow::Result<JdbcUrl> {
     let port = url
         .port()
         .ok_or_else(|| anyhow!("missing port in jdbc url"))?;
-    let db_name = url.path();
+    let Some(db_name) = url.path().strip_prefix('/') else {
+        bail!("missing db_name in jdbc url");
+    };
     let mut username = None;
     let mut password = None;
     for (key, value) in url.query_pairs() {
@@ -344,15 +350,13 @@ fn parse_jdbc_url(url: &str) -> anyhow::Result<JdbcUrl> {
             password = Some(value.to_string());
         }
     }
-    let username = username.ok_or_else(|| anyhow!("missing username in jdbc url"))?;
-    let password = password.ok_or_else(|| anyhow!("missing password in jdbc url"))?;
 
     Ok(JdbcUrl {
         host: host.to_owned(),
         port,
         db_name: db_name.to_owned(),
-        username: username.to_owned(),
-        password: password.to_owned(),
+        username,
+        password,
     })
 }
 
@@ -366,8 +370,8 @@ mod tests {
         let jdbc_url = parse_jdbc_url(url).unwrap();
         assert_eq!(jdbc_url.host, "localhost");
         assert_eq!(jdbc_url.port, 5432);
-        assert_eq!(jdbc_url.db_name, "/test");
-        assert_eq!(jdbc_url.username, "postgres");
-        assert_eq!(jdbc_url.password, "postgres");
+        assert_eq!(jdbc_url.db_name, "test");
+        assert_eq!(jdbc_url.username, Some("postgres".to_owned()));
+        assert_eq!(jdbc_url.password, Some("postgres".to_owned()));
     }
 }

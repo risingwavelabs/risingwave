@@ -614,7 +614,7 @@ impl LocalQueryExecution {
                         // TODO: should we use `pb::WorkerSlotMapping` here?
                         node.inner_side_vnode_mapping =
                             mapping.to_expanded().into_iter().map(u64::from).collect();
-                        node.worker_nodes = self.worker_node_manager.manager.list_worker_nodes();
+                        node.worker_nodes = self.worker_node_manager.manager.list_compute_nodes();
                     }
                     _ => unreachable!(),
                 }

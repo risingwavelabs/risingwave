@@ -33,13 +33,14 @@ use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
 use crate::handler::create_table::handle_create_table_plan;
 use crate::optimizer::OptimizerContext;
+use crate::optimizer::backfill_order_strategy::explain_backfill_order_in_dot_format;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{Convention, Explain};
 use crate::scheduler::BatchPlanFragmenter;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::{explain_stream_graph, explain_stream_graph_as_dot};
 
-async fn do_handle_explain(
+pub async fn do_handle_explain(
     handler_args: HandlerArgs,
     explain_options: ExplainOptions,
     stmt: Statement,
@@ -95,7 +96,7 @@ async fn do_handle_explain(
                 (Ok(plan), context)
             }
             Statement::CreateSink { stmt } => {
-                let plan = gen_sink_plan(handler_args, stmt, Some(explain_options))
+                let plan = gen_sink_plan(handler_args, stmt, Some(explain_options), false)
                     .await
                     .map(|plan| plan.sink_plan)?;
                 let context = plan.ctx();
@@ -189,7 +190,7 @@ async fn do_handle_explain(
                         gen_batch_plan_by_statement(&session, context, stmt).map(|x| x.plan)
                     }
 
-                    _ => bail_not_implemented!("unsupported statement {:?}", stmt),
+                    _ => bail_not_implemented!("unsupported statement for EXPLAIN: {stmt}"),
                 };
 
                 let plan = plan?;
@@ -201,6 +202,7 @@ async fn do_handle_explain(
 
         let explain_trace = context.is_explain_trace();
         let explain_verbose = context.is_explain_verbose();
+        let explain_backfill = context.is_explain_backfill();
         let explain_type = context.explain_type();
         let explain_format = context.explain_format();
 
@@ -233,7 +235,7 @@ async fn do_handle_explain(
                             }
                         }
                         Convention::Stream => {
-                            let graph = build_graph(plan.clone())?;
+                            let graph = build_graph(plan.clone(), None)?;
                             if explain_format == ExplainFormat::Dot {
                                 blocks.push(explain_stream_graph_as_dot(&graph, explain_verbose))
                             } else {
@@ -247,11 +249,25 @@ async fn do_handle_explain(
                 // if explain trace is on, the plan has been in the rows
                 if !explain_trace && let Ok(plan) = &plan {
                     match explain_format {
-                        ExplainFormat::Text => blocks.push(plan.explain_to_string()),
+                        ExplainFormat::Text => {
+                            blocks.push(plan.explain_to_string());
+                        }
                         ExplainFormat::Json => blocks.push(plan.explain_to_json()),
                         ExplainFormat::Xml => blocks.push(plan.explain_to_xml()),
                         ExplainFormat::Yaml => blocks.push(plan.explain_to_yaml()),
-                        ExplainFormat::Dot => blocks.push(plan.explain_to_dot()),
+                        ExplainFormat::Dot => {
+                            if explain_backfill {
+                                let dot_formatted_backfill_order =
+                                    explain_backfill_order_in_dot_format(
+                                        &session,
+                                        context.with_options().backfill_order_strategy(),
+                                        plan.clone(),
+                                    )?;
+                                blocks.push(dot_formatted_backfill_order);
+                            } else {
+                                blocks.push(plan.explain_to_dot());
+                            }
+                        }
                     }
                 }
             }
@@ -340,6 +356,6 @@ pub async fn handle_explain(
 
 #[derive(Fields)]
 #[fields(style = "TITLE CASE")]
-struct ExplainRow {
-    query_plan: String,
+pub(crate) struct ExplainRow {
+    pub query_plan: String,
 }

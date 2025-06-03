@@ -96,6 +96,7 @@ define_keywords!(
     AUTHORIZATION,
     AUTO,
     AVG,
+    BACKFILL,
     BASE64,
     BEGIN,
     BEGIN_FRAME,
@@ -247,6 +248,8 @@ define_keywords!(
     FOR,
     FOREIGN,
     FORMAT,
+    FRAGMENT,
+    FRAGMENTS,
     FRAME_ROW,
     FREE,
     FREEZE,
@@ -395,6 +398,7 @@ define_keywords!(
     PERIOD,
     PHYSICAL,
     PLACING,
+    PLAN,
     PORTION,
     POSITION,
     POSITION_REGEX,
@@ -635,6 +639,7 @@ pub const RESERVED_FOR_TABLE_ALIAS: &[Keyword] = &[
     Keyword::SET,
     Keyword::RETURNING,
     Keyword::EMIT,
+    Keyword::WINDOW,
 ];
 
 /// Can't be used as a column alias, so that `SELECT <expr> alias`

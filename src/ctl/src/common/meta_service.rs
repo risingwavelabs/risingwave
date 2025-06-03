@@ -43,8 +43,8 @@ impl MetaServiceOpts {
 For `./risedev d` use cases, please do the following:
 * use `./risedev ctl` to use risectl.
 
-For `./risedev apply-compose-deploy` users,
-* `RW_META_ADDR` will be printed out when deploying. Please copy the bash exports to your console.
+For production use cases,
+* please set `RW_META_ADDR` to the address of the meta node.
 
 Note: the default value of `RW_META_ADDR` is 'http://127.0.0.1:5690'.";
                 bail!(MESSAGE);

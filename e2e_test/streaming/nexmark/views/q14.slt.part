@@ -1,15 +1,6 @@
 statement ok
-CREATE FUNCTION count_char(s varchar, c varchar) RETURNS int LANGUAGE javascript AS $$
-export function count_char(s, c) {
-    var count = 0;
-    for (var cc of s) {
-        if (cc === c) {
-            count++;
-        }
-    }
-    return count;
-}
-$$;
+CREATE FUNCTION count_char(s varchar, c varchar) RETURNS int LANGUAGE SQL AS
+  $$SELECT LENGTH(s) - LENGTH(REPLACE(s, c, ''))$$;
 
 statement ok
 CREATE MATERIALIZED VIEW nexmark_q14 AS

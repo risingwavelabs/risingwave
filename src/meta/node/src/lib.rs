@@ -233,7 +233,12 @@ pub fn start(
         let prometheus_addr = opts.prometheus_listener_addr.map(|x| x.parse().unwrap());
         let meta_store_config = config.meta.meta_store_config.clone();
         let backend = match config.meta.backend {
-            MetaBackend::Mem => MetaStoreBackend::Mem,
+            MetaBackend::Mem => {
+                if opts.sql_endpoint.is_some() {
+                    tracing::warn!("`--sql-endpoint` is ignored when using `mem` backend");
+                }
+                MetaStoreBackend::Mem
+            }
             MetaBackend::Sql => MetaStoreBackend::Sql {
                 endpoint: opts
                     .sql_endpoint
@@ -386,6 +391,18 @@ pub fn start(
                     .meta
                     .developer
                     .hummock_time_travel_filter_out_objects_batch_size,
+                hummock_time_travel_filter_out_objects_v1: config
+                    .meta
+                    .developer
+                    .hummock_time_travel_filter_out_objects_v1,
+                hummock_time_travel_filter_out_objects_list_version_batch_size: config
+                    .meta
+                    .developer
+                    .hummock_time_travel_filter_out_objects_list_version_batch_size,
+                hummock_time_travel_filter_out_objects_list_delta_batch_size: config
+                    .meta
+                    .developer
+                    .hummock_time_travel_filter_out_objects_list_delta_batch_size,
                 min_delta_log_num_for_hummock_version_checkpoint: config
                     .meta
                     .min_delta_log_num_for_hummock_version_checkpoint,
@@ -418,6 +435,9 @@ pub fn start(
                 periodic_scheduling_compaction_group_merge_interval_sec: config
                     .meta
                     .periodic_scheduling_compaction_group_merge_interval_sec,
+                compaction_group_merge_dimension_threshold: config
+                    .meta
+                    .compaction_group_merge_dimension_threshold,
                 table_high_write_throughput_threshold: config
                     .meta
                     .table_high_write_throughput_threshold,

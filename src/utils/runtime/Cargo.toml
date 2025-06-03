@@ -19,7 +19,7 @@ either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hostname = "0.4"
 parking_lot = { workspace = true }
-pprof = { version = "0.14", features = ["flamegraph"] }
+pprof = { version = "0.15", features = ["flamegraph"] }
 risingwave_common = { workspace = true }
 risingwave_variables = { workspace = true }
 rlimit = "0.10"
@@ -57,7 +57,7 @@ opentelemetry_sdk = { workspace = true, features = [
 ] } # only enable `rt-tokio` feature under non-madsim target
 workspace-hack = { path = "../../workspace-hack" }
 fastrace = "0.7"
-fastrace-opentelemetry = "0.7"
+fastrace-opentelemetry = "0.10"
 
 [lints]
 workspace = true

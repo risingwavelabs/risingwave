@@ -5,6 +5,14 @@
 Suggest testing it with madsim, so you can reproduce the same results each time.
 See [Running with Madsim](./README.md#running-with-madsim).
 
+### Focused property testing
+
+When introducing a new feature, you can customize [config.yml](./config.yml) to
+set its weight to specify the generation probability (0-100%) and toggle its availability for targeted testing.
+
+To see how to control feature generation programmatically, refer to `config.rs` and
+the usage of the should_generate() function.
+
 ## Ignoring errors
 
 Sometimes you may encounter unrelated errors, since SqlSmith frontend tests run per PR.

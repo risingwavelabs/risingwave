@@ -37,8 +37,9 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFr
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, FragmentTypeFlag,
-    MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamContext,
-    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource, agg_call_state,
+    MaterializeNode, PbDispatchOutputMapping, ProjectNode, SimpleAggNode, SourceNode,
+    StreamContext, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource,
+    agg_call_state,
 };
 
 use crate::MetaResult;
@@ -233,7 +234,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Hash as i32,
                 dist_key_indices: vec![0],
-                output_indices: vec![0, 1, 2],
+                output_mapping: PbDispatchOutputMapping::simple(vec![0, 1, 2]).into(),
             }),
         }))),
         fields: vec![
@@ -393,7 +394,7 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
             dispatch_strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Simple as i32,
                 dist_key_indices: vec![],
-                output_indices: vec![],
+                output_mapping: PbDispatchOutputMapping::identical(0).into(), /* dummy length as it's not used */
             }),
             link_id: 4,
             upstream_id: 1,
@@ -403,7 +404,7 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
             dispatch_strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Hash as i32,
                 dist_key_indices: vec![0],
-                output_indices: vec![],
+                output_mapping: PbDispatchOutputMapping::identical(0).into(), /* dummy length as it's not used */
             }),
             link_id: 1,
             upstream_id: 2,
@@ -422,6 +423,7 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
         table_ids_cnt: 3,
         parallelism: None,
         max_parallelism: VirtualNode::COUNT_FOR_TEST as _,
+        backfill_order: Default::default(),
     }
 }
 

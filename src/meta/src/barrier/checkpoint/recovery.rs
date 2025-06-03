@@ -14,7 +14,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::mem::{replace, take};
-use std::sync::LazyLock;
 use std::task::{Context, Poll};
 
 use futures::FutureExt;
@@ -270,12 +269,7 @@ impl DatabaseRecoveringState {
             DatabaseRecoveringStage::Initializing {
                 initial_barrier_collector,
                 ..
-            } => Some((initial_barrier_collector.database_state(), {
-                static EMPTY_CREATING_JOBS: LazyLock<
-                    HashMap<TableId, CreatingStreamingJobControl>,
-                > = LazyLock::new(HashMap::new);
-                &EMPTY_CREATING_JOBS
-            })),
+            } => Some(initial_barrier_collector.database_state()),
         }
     }
 }
@@ -433,8 +427,9 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             },
         };
         let DatabaseRuntimeInfoSnapshot {
-            database_fragment_info,
+            job_infos,
             mut state_table_committed_epochs,
+            mut state_table_log_epochs,
             subscription_info,
             stream_actors,
             fragment_relations,
@@ -442,13 +437,15 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             mut background_jobs,
         } = runtime_info;
         let result: MetaResult<_> = try {
-            let mut builder = FragmentEdgeBuilder::new(database_fragment_info.fragment_infos());
+            let mut builder =
+                FragmentEdgeBuilder::new(job_infos.values().flatten(), control_stream_manager);
             builder.add_relations(&fragment_relations);
             let mut edges = builder.build();
             control_stream_manager.inject_database_initial_barrier(
                 self.database_id,
-                database_fragment_info,
+                job_infos,
                 &mut state_table_committed_epochs,
+                &mut state_table_log_epochs,
                 &mut edges,
                 &stream_actors,
                 &mut source_splits,

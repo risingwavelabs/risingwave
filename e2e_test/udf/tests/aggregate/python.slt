@@ -1,0 +1,28 @@
+statement ok
+create aggregate weighted_avg(value int, weight int) returns float language python as $$
+def create_state():
+    return (0, 0)
+def accumulate(state, value, weight):
+    if value is None or weight is None:
+        return state
+    (s, w) = state
+    s += value * weight
+    w += weight
+    return (s, w)
+def retract(state, value, weight):
+    if value is None or weight is None:
+        return state
+    (s, w) = state
+    s -= value * weight
+    w -= weight
+    return (s, w)
+def finish(state):
+    (sum, weight) = state
+    if weight == 0:
+        return None
+    else:
+        return sum / weight
+$$;
+
+include ./test.slt.part
+include ./drop.slt.part
