@@ -365,13 +365,15 @@ impl IcebergCompactionManager {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             // Run GC every hour by default
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+            const GC_LOOP_INTERVAL_SECS: u64 = 3600;
+            let mut interval =
+                tokio::time::interval(std::time::Duration::from_secs(GC_LOOP_INTERVAL_SECS));
 
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
                         if let Err(e) = manager.perform_gc_operations().await {
-                            tracing::error!("GC operations failed: {}", e);
+                            tracing::error!(error = %e, "GC operations failed");
                         }
                     },
                     _ = &mut shutdown_rx => {
@@ -397,8 +399,8 @@ impl IcebergCompactionManager {
 
         for sink_id in sink_ids {
             if let Err(e) = self.check_and_expire_snapshots(&sink_id).await {
-                tracing::warn!("Failed to perform GC for sink {}: {}", sink_id.sink_id, e);
                 // Continue with other tables even if one fails
+                tracing::error!(error = %e, "Failed to perform GC for sink {}", sink_id.sink_id);
             }
         }
 
@@ -409,12 +411,12 @@ impl IcebergCompactionManager {
     /// Check snapshot count for a specific table and trigger expiration if needed
     async fn check_and_expire_snapshots(&self, sink_id: &SinkId) -> MetaResult<()> {
         // Configurable thresholds - could be moved to config later
-        const MAX_SNAPSHOT_AGE_MS_DEFAULT: i64 = 24 * 60 * 60 * 1000; // 5 day
+        const MAX_SNAPSHOT_AGE_MS_DEFAULT: i64 = 24 * 60 * 60 * 1000; // 1 day
         let now = chrono::Utc::now().timestamp_millis();
         let expired_older_than = now - MAX_SNAPSHOT_AGE_MS_DEFAULT;
 
         let iceberg_config = self.load_iceberg_config(sink_id).await?;
-        if !iceberg_config.enable_expired_snapshots {
+        if !iceberg_config.enable_snapshot_expiration {
             return Ok(());
         }
 
@@ -425,7 +427,8 @@ impl IcebergCompactionManager {
             .map_err(|e| SinkError::Iceberg(e.into()))?;
 
         let metadata = table.metadata();
-        let snapshots = metadata.snapshots().collect_vec();
+        let mut snapshots = metadata.snapshots().collect_vec();
+        snapshots.sort_by_key(|s| s.timestamp_ms());
 
         if snapshots.is_empty() || snapshots.first().unwrap().timestamp_ms() > expired_older_than {
             // avoid commit empty table updates

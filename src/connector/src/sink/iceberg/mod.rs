@@ -153,9 +153,9 @@ pub struct IcebergConfig {
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub compaction_interval_sec: Option<u64>,
 
-    /// Whether to enable expired snapshots.
+    /// Whether to enable iceberg expired snapshots.
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
-    pub enable_expired_snapshots: bool,
+    pub enable_snapshot_expiration: bool,
 }
 
 impl EnforceSecret for IcebergConfig {
@@ -487,7 +487,7 @@ impl Sink for IcebergSink {
         "commit_checkpoint_interval",
         "enable_compaction",
         "compaction_interval_sec",
-        "enable_expired_snapshots",
+        "enable_snapshot_expiration",
     ];
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
@@ -2242,7 +2242,7 @@ mod test {
             ("table.name", "demo_table"),
             ("enable_compaction", "true"),
             ("compaction_interval_sec", "1800"),
-            ("enable_expired_snapshots", "true"),
+            ("enable_snapshot_expiration", "true"),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_owned(), v.to_owned()))
@@ -2292,7 +2292,7 @@ mod test {
             commit_retry_num: 8,
             enable_compaction: true,
             compaction_interval_sec: Some(DEFAULT_ICEBERG_COMPACTION_INTERVAL / 2),
-            enable_expired_snapshots: true,
+            enable_snapshot_expiration: true,
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);
