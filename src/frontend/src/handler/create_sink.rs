@@ -92,6 +92,27 @@ static SINK_ALLOWED_CONNECTION_SCHEMA_REGISTRY: LazyLock<HashSet<PbConnectionTyp
         }
     });
 
+/// A list of known FORMAT ENCODE options that should not be used in the WITH clause.
+/// These options should be specified in the FORMAT ENCODE clause instead.
+static FORMAT_ENCODE_OPTIONS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    hashset! {
+        // JSON encode options
+        "timestamptz.handling.mode",
+        "jsonb.handling.mode",
+        // Protobuf/Avro schema options
+        "schema.location", 
+        "schema.registry",
+        "message",
+        "key.message",
+        // AWS Glue schema registry
+        "aws.glue.schema_arn",
+        // Avro options
+        "map.handling.mode",
+        // Schema registry options
+        "schema.registry.name.strategy",
+    }
+});
+
 // used to store result of `gen_sink_plan`
 pub struct SinkPlanContext {
     pub query: Box<Query>,
@@ -214,6 +235,9 @@ pub async fn gen_sink_plan(
         .get(CONNECTOR_TYPE_KEY)
         .cloned()
         .ok_or_else(|| ErrorCode::BindError(format!("missing field '{CONNECTOR_TYPE_KEY}'")))?;
+
+    // Check for FORMAT ENCODE options in WITH clause and reject them
+    check_format_encode_options_in_with_clause(&resolved_with_options)?;
 
     let format_desc = match stmt.sink_schema {
         // Case A: new syntax `format ... encode ...`
@@ -904,6 +928,32 @@ pub fn validate_compatibility(connector: &str, format_desc: &FormatEncodeOptions
         .into());
     }
 
+    Ok(())
+}
+
+/// Check if any FORMAT ENCODE options are used in the WITH clause.
+/// Returns an error if such options are found.
+fn check_format_encode_options_in_with_clause(
+    resolved_with_options: &WithOptionsSecResolved,
+) -> Result<()> {
+    let (options, _) = resolved_with_options.clone().into_parts();
+    
+    for option_key in options.keys() {
+        if FORMAT_ENCODE_OPTIONS.contains(option_key.as_str()) {
+            return Err(RwError::from(ErrorCode::BindError(format!(
+                "FORMAT ENCODE option '{}' should not be specified in the WITH clause. \
+                 Please move it to the FORMAT ENCODE clause instead.\n\
+                 \n\
+                 Incorrect usage:\n\
+                 CREATE SINK ... WITH (..., {}='...') FORMAT ... ENCODE ...;\n\
+                 \n\
+                 Correct usage:\n\
+                 CREATE SINK ... WITH (...) FORMAT ... ENCODE ... ({}='...');",
+                option_key, option_key, option_key
+            ))));
+        }
+    }
+    
     Ok(())
 }
 

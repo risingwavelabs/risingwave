@@ -1,0 +1,124 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (
+  v1 int,
+  v2 varchar
+);
+
+# Test rejection of timestamptz.handling.mode in WITH clause
+statement error FORMAT ENCODE option 'timestamptz.handling.mode' should not be specified in the WITH clause
+create sink test_reject_timestamptz from t with (
+  connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+  topic = 'test-timestamptz',
+  timestamptz.handling.mode = 'utc_without_suffix'
+) format upsert encode json;
+
+# Test rejection of jsonb.handling.mode in WITH clause
+statement error FORMAT ENCODE option 'jsonb.handling.mode' should not be specified in the WITH clause
+create sink test_reject_jsonb from t with (
+  connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+  topic = 'test-jsonb',
+  jsonb.handling.mode = 'string'
+) format plain encode json;
+
+# Test rejection of schema.location in WITH clause
+statement error FORMAT ENCODE option 'schema.location' should not be specified in the WITH clause
+create sink test_reject_schema_location from t with (
+  connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+  topic = 'test-schema-location',
+  schema.location = 'file:///path/to/schema.proto'
+) format plain encode protobuf;
+
+# Test rejection of schema.registry in WITH clause
+statement error FORMAT ENCODE option 'schema.registry' should not be specified in the WITH clause
+create sink test_reject_schema_registry from t with (
+  connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+  topic = 'test-schema-registry',
+  schema.registry = 'http://localhost:8081'
+) format plain encode avro;
+
+# Test rejection of message in WITH clause
+statement error FORMAT ENCODE option 'message' should not be specified in the WITH clause
+create sink test_reject_message from t with (
+  connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+  topic = 'test-message',
+  message = 'MyMessage'
+) format plain encode protobuf;
+
+# Test rejection of key.message in WITH clause
+statement error FORMAT ENCODE option 'key.message' should not be specified in the WITH clause
+create sink test_reject_key_message from t with (
+  connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+  topic = 'test-key-message',
+  key.message = 'MyKeyMessage'
+) format plain encode protobuf;
+
+# Test rejection of aws.glue.schema_arn in WITH clause
+statement error FORMAT ENCODE option 'aws.glue.schema_arn' should not be specified in the WITH clause
+create sink test_reject_aws_glue from t with (
+  connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+  topic = 'test-aws-glue',
+  aws.glue.schema_arn = 'arn:aws:glue:us-east-1:123456789012:schema/my-schema'
+) format plain encode avro;
+
+# Test rejection of map.handling.mode in WITH clause 
+statement error FORMAT ENCODE option 'map.handling.mode' should not be specified in the WITH clause
+create sink test_reject_map_handling from t with (
+  connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+  topic = 'test-map-handling',
+  map.handling.mode = 'strict'
+) format plain encode avro;
+
+# Test rejection of schema.registry.name.strategy in WITH clause
+statement error FORMAT ENCODE option 'schema.registry.name.strategy' should not be specified in the WITH clause
+create sink test_reject_name_strategy from t with (
+  connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+  topic = 'test-name-strategy',
+  schema.registry.name.strategy = 'topic_record_name'
+) format plain encode avro;
+
+# Test that correct usage still works - timestamptz.handling.mode in FORMAT ENCODE clause
+statement ok
+create sink test_correct_timestamptz from t with (
+  connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+  topic = 'test-correct-timestamptz'
+) format upsert encode json (
+  timestamptz.handling.mode = 'utc_without_suffix'
+);
+
+# Verify the correct sink was created with proper format
+query TT
+SHOW CREATE SINK test_correct_timestamptz;
+----
+public.test_correct_timestamptz CREATE SINK test_correct_timestamptz FROM t WITH (connector = 'kafka', properties.bootstrap.server = 'message_queue:29092', topic = 'test-correct-timestamptz') FORMAT UPSERT ENCODE JSON (timestamptz.handling.mode = 'utc_without_suffix')
+
+# Test that normal WITH options (non-format-encode) still work
+statement ok
+create sink test_normal_options from t with (
+  connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+  topic = 'test-normal-options',
+  properties.key.serializer = 'org.apache.kafka.common.serialization.StringSerializer'
+) format plain encode json;
+
+# Clean up
+statement ok
+drop sink test_correct_timestamptz;
+
+statement ok
+drop sink test_normal_options;
+
+statement ok
+drop table t;
