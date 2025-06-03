@@ -28,7 +28,10 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::JsonbVal;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
-use risingwave_connector::source::{BackfillInfo, BoxSourceChunkStream, SourceContext, SourceCtrlOpts, SourceMuxMode, SplitId, SplitImpl, SplitMetaData};
+use risingwave_connector::source::{
+    BackfillInfo, BoxSourceChunkStream, SourceContext, SourceCtrlOpts, SourceMuxMode, SplitId,
+    SplitImpl, SplitMetaData,
+};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::TryWaitEpochOptions;
 use serde::{Deserialize, Serialize};
