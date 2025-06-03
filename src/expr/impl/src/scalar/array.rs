@@ -158,7 +158,7 @@ fn map_access<'a>(
 ///
 /// Caused by these errors (recent errors listed first):
 ///   1: Failed to bind expression: map_contains(MAP {1: 1}, CAST(NULL AS CHARACTER VARYING))
-///   2: Bind error: Cannot check if varchar exists in map(integer,integer)
+///   2: Bind error: Cannot check if character varying exists in map(integer,integer)
 /// ```
 #[function("map_contains(anymap, any) -> boolean")]
 fn map_contains(map: MapRef<'_>, key: ScalarRefImpl<'_>) -> Result<bool, ExprError> {
