@@ -166,8 +166,8 @@ impl CompleteBarrierTask {
         };
         if cfg!(debug_assertions) || Deployment::current().is_ci() {
             // Add a warning log so that debug mode / CI can observe it
-            if duration_sec > 5 {
-                tracing::warn!("high barrier latency observed!", event = ?event)
+            if duration_sec > 5.0 {
+                tracing::warn!("high barrier latency observed!", ?event)
             }
         }
         env.event_log_manager_ref()
