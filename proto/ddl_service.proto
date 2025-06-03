@@ -556,7 +556,10 @@ message AlterDatabaseParamRequest {
   }
 }
 
-message AlterDatabaseParamResponse {}
+message AlterDatabaseParamResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
 
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);

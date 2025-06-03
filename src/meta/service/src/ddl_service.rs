@@ -1180,22 +1180,23 @@ impl DdlService for DdlServiceImpl {
         let req = request.into_inner();
         let database_id = req.database_id;
 
-        if let Some(config_param) = req.param {
-            let param = match config_param {
-                alter_database_param_request::Param::BarrierIntervalMs(value) => {
-                    AlterDatabaseParam::BarrierIntervalMs(value.value)
-                }
-                alter_database_param_request::Param::CheckpointFrequency(value) => {
-                    AlterDatabaseParam::CheckpointFrequency(value.value)
-                }
-            };
-            self.ddl_controller
-                .run_command(DdlCommand::AlterDatabaseParam(database_id as _, param))
-                .await?;
-        }
+        let param = match req.param.unwrap() {
+            alter_database_param_request::Param::BarrierIntervalMs(value) => {
+                AlterDatabaseParam::BarrierIntervalMs(value.value)
+            }
+            alter_database_param_request::Param::CheckpointFrequency(value) => {
+                AlterDatabaseParam::CheckpointFrequency(value.value)
+            }
+        };
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterDatabaseParam(database_id as _, param))
+            .await?;
 
-        // If param is unspecified, we do nothing.
-        return Ok(Response::new(AlterDatabaseParamResponse {}));
+        return Ok(Response::new(AlterDatabaseParamResponse {
+            status: None,
+            version,
+        }));
     }
 }
 

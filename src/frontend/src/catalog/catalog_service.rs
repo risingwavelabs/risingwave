@@ -661,12 +661,12 @@ impl CatalogWriter for CatalogWriterImpl {
         database_id: DatabaseId,
         param: AlterDatabaseParam,
     ) -> Result<()> {
-        self.meta_client
+        let version = self
+            .meta_client
             .alter_database_param(database_id, param)
             .await
             .map_err(|e| anyhow!(e))?;
-
-        Ok(())
+        self.wait_version(version).await
     }
 }
 

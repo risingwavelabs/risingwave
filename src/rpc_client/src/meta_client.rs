@@ -564,7 +564,7 @@ impl MetaClient {
         &self,
         database_id: DatabaseId,
         param: AlterDatabaseParam,
-    ) -> Result<()> {
+    ) -> Result<WaitVersion> {
         let request = match param {
             AlterDatabaseParam::BarrierIntervalMs(barrier_interval_ms) => {
                 let barrier_interval_ms = OptionalUint32 {
@@ -589,9 +589,10 @@ impl MetaClient {
                 }
             }
         };
-        self.inner.alter_database_param(request).await?;
-
-        Ok(())
+        let resp = self.inner.alter_database_param(request).await?;
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     pub async fn alter_set_schema(
