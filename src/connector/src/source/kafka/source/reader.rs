@@ -43,8 +43,8 @@ use crate::source::kafka::{
     KAFKA_ISOLATION_LEVEL, KafkaContextCommon, KafkaProperties, KafkaSplit, RwConsumerContext,
 };
 use crate::source::{
-    BackfillInfo, BoxSourceChunkStream, Column, ReleaseHandle, SourceContextRef,
-    SplitId, SplitImpl, SplitMetaData, SplitReader, into_chunk_stream,
+    BackfillInfo, BoxSourceChunkStream, Column, ReleaseHandle, SourceContextRef, SplitId,
+    SplitImpl, SplitMetaData, SplitReader, into_chunk_stream,
 };
 
 enum MessageReader {
@@ -156,84 +156,143 @@ impl SplitReader for KafkaSplitReader {
         println!("source ctx {:#?}", source_ctx);
         println!("splits {:#?}", splits);
 
-        let mut config = ClientConfig::new();
-
-        let bootstrap_servers = &properties.connection.brokers;
-        let broker_rewrite_map = properties.privatelink_common.broker_rewrite_map.clone();
-
-        // disable partition eof
-        config.set("enable.partition.eof", "false");
-        config.set("auto.offset.reset", "smallest");
-        config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
-        config.set("bootstrap.servers", bootstrap_servers);
-
-        properties.connection.set_security_properties(&mut config);
-        properties.set_client(&mut config);
-
-        config.set("group.id", properties.group_id(source_ctx.fragment_id));
-
-        let ctx_common = KafkaContextCommon::new(
-            broker_rewrite_map,
-            Some(format!(
-                "fragment-{}-source-{}-actor-{}",
-                source_ctx.fragment_id, source_ctx.source_id, source_ctx.actor_id
-            )),
-            // thread consumer will keep polling in the background, we don't need to call `poll`
-            // explicitly
-            Some(source_ctx.metrics.rdkafka_native_metric.clone()),
-            properties.aws_auth_props,
-            properties.connection.is_aws_msk_iam(),
-        )
-        .await?;
-
-        let client_ctx = RwConsumerContext::new(ctx_common);
-
-        if let Some(log_level) = read_kafka_log_level() {
-            config.set_log_level(log_level);
-        }
-        let consumer: StreamConsumer<RwConsumerContext> = config
-            .create_with_context(client_ctx)
-            .await
-            .context("failed to create kafka consumer")?;
+        let mut offsets = HashMap::new();
+        let mut backfill_info = HashMap::new();
 
         let mut tpl = TopicPartitionList::with_capacity(splits.len());
 
-        let mut offsets = HashMap::new();
-        let mut backfill_info = HashMap::new();
-        for split in splits.clone() {
-            offsets.insert(split.id(), (split.start_offset, split.stop_offset));
+        let message_reader = if let Some(connection_id) = source_ctx.connection_id {
+            let reader = KafkaMuxReader::get_or_create(
+                connection_id.to_string(),
+                properties.clone(),
+                source_ctx.clone(),
+            )
+            .await?;
 
-            if let Some(offset) = split.start_offset {
-                tpl.add_partition_offset(
-                    split.topic.as_str(),
-                    split.partition,
-                    Offset::Offset(offset + 1),
-                )?;
-            } else {
-                tpl.add_partition(split.topic.as_str(), split.partition);
-            }
+            for split in splits.clone() {
+                offsets.insert(split.id(), (split.start_offset, split.stop_offset));
 
-            let (low, high) = consumer
-                .fetch_watermarks(
-                    split.topic.as_str(),
-                    split.partition,
-                    properties.common.sync_call_timeout,
-                )
-                .await?;
-            tracing::info!("fetch kafka watermarks: low: {low}, high: {high}, split: {split:?}");
-            // note: low is inclusive, high is exclusive, start_offset is exclusive
-            if low == high || split.start_offset.is_some_and(|offset| offset + 1 >= high) {
-                backfill_info.insert(split.id(), BackfillInfo::NoDataToBackfill);
-            } else {
-                debug_assert!(high > 0);
-                backfill_info.insert(
-                    split.id(),
-                    BackfillInfo::HasDataToBackfill {
-                        latest_offset: (high - 1).to_string(),
-                    },
+                if let Some(offset) = split.start_offset {
+                    tpl.add_partition_offset(
+                        split.topic.as_str(),
+                        split.partition,
+                        Offset::Offset(offset + 1),
+                    )?;
+                } else {
+                    tpl.add_partition(split.topic.as_str(), split.partition);
+                }
+
+                let (low, high) = reader
+                    .fetch_watermarks(
+                        split.topic.as_str(),
+                        split.partition,
+                        properties.common.sync_call_timeout,
+                    )
+                    .await?;
+                tracing::info!(
+                    "fetch kafka watermarks: low: {low}, high: {high}, split: {split:?}"
                 );
+                // note: low is inclusive, high is exclusive, start_offset is exclusive
+                if low == high || split.start_offset.is_some_and(|offset| offset + 1 >= high) {
+                    backfill_info.insert(split.id(), BackfillInfo::NoDataToBackfill);
+                } else {
+                    debug_assert!(high > 0);
+                    backfill_info.insert(
+                        split.id(),
+                        BackfillInfo::HasDataToBackfill {
+                            latest_offset: (high - 1).to_string(),
+                        },
+                    );
+                }
             }
-        }
+            let receiver: Receiver<OwnedMessage> =
+                reader.register_topic_partition_list(tpl).await?;
+
+            MessageReader::MuxReader { reader, receiver }
+        } else {
+            let mut config = ClientConfig::new();
+
+            let bootstrap_servers = &properties.connection.brokers;
+            let broker_rewrite_map = properties.privatelink_common.broker_rewrite_map.clone();
+
+            // disable partition eof
+            config.set("enable.partition.eof", "false");
+            config.set("auto.offset.reset", "smallest");
+            config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
+            config.set("bootstrap.servers", bootstrap_servers);
+
+            properties.connection.set_security_properties(&mut config);
+            properties.set_client(&mut config);
+
+            config.set("group.id", properties.group_id(source_ctx.fragment_id));
+
+            let ctx_common = KafkaContextCommon::new(
+                broker_rewrite_map,
+                Some(format!(
+                    "fragment-{}-source-{}-actor-{}",
+                    source_ctx.fragment_id, source_ctx.source_id, source_ctx.actor_id
+                )),
+                // thread consumer will keep polling in the background, we don't need to call `poll`
+                // explicitly
+                Some(source_ctx.metrics.rdkafka_native_metric.clone()),
+                properties.aws_auth_props,
+                properties.connection.is_aws_msk_iam(),
+            )
+            .await?;
+
+            let client_ctx = RwConsumerContext::new(ctx_common);
+
+            if let Some(log_level) = read_kafka_log_level() {
+                config.set_log_level(log_level);
+            }
+
+            let consumer: StreamConsumer<RwConsumerContext> = config
+                .create_with_context(client_ctx)
+                .await
+                .context("failed to create kafka consumer")?;
+
+            for split in splits.clone() {
+                offsets.insert(split.id(), (split.start_offset, split.stop_offset));
+
+                if let Some(offset) = split.start_offset {
+                    tpl.add_partition_offset(
+                        split.topic.as_str(),
+                        split.partition,
+                        Offset::Offset(offset + 1),
+                    )?;
+                } else {
+                    tpl.add_partition(split.topic.as_str(), split.partition);
+                }
+
+                let (low, high) = consumer
+                    .fetch_watermarks(
+                        split.topic.as_str(),
+                        split.partition,
+                        properties.common.sync_call_timeout,
+                    )
+                    .await?;
+                tracing::info!(
+                    "fetch kafka watermarks: low: {low}, high: {high}, split: {split:?}"
+                );
+                // note: low is inclusive, high is exclusive, start_offset is exclusive
+                if low == high || split.start_offset.is_some_and(|offset| offset + 1 >= high) {
+                    backfill_info.insert(split.id(), BackfillInfo::NoDataToBackfill);
+                } else {
+                    debug_assert!(high > 0);
+                    backfill_info.insert(
+                        split.id(),
+                        BackfillInfo::HasDataToBackfill {
+                            latest_offset: (high - 1).to_string(),
+                        },
+                    );
+                }
+            }
+
+            consumer.assign(&tpl)?;
+
+            MessageReader::Consumer(consumer)
+        };
+
         tracing::info!(
             topic = properties.common.topic,
             source_name = source_ctx.source_name,
@@ -243,25 +302,6 @@ impl SplitReader for KafkaSplitReader {
             "backfill_info: {:?}",
             backfill_info
         );
-
-        consumer.assign(&tpl)?;
-
-        let message_reader = if let Some(connection_id) = source_ctx.connection_id {
-            let reader =
-                KafkaMuxReader::get_or_create(connection_id.to_string(), bootstrap_servers.clone())
-                    .await;
-
-            let splits2 = splits
-                .iter()
-                .map(|split| (split.topic.clone(), split.partition))
-                .collect_vec();
-
-            let receiver: Receiver<OwnedMessage> = reader.register_splits(&splits2).await?;
-
-            MessageReader::MuxReader { reader, receiver }
-        } else {
-            MessageReader::Consumer(consumer)
-        };
 
         // The two parameters below are only used by developers for performance testing purposes,
         // so we panic here on purpose if the input is not correctly recognized.
@@ -297,20 +337,20 @@ impl SplitReader for KafkaSplitReader {
         let cleanup = match &self.message_reader {
             MessageReader::MuxReader { reader, .. } => {
                 let reader = Arc::clone(reader);
-                let splits2 = self
-                    .splits
-                    .iter()
-                    .map(|split| (split.topic.clone(), split.partition))
-                    .collect_vec();
+
+                let mut tpl = TopicPartitionList::new();
+                for split in &self.splits {
+                    tpl.add_partition(split.topic.as_str(), split.partition);
+                }
+
                 ReleaseHandle::new(async move {
-                    let splits2 = splits2.clone();
-                    let _ = reader.unregister_splits(&splits2).await;
+                    let _ = reader.unregister_topic_partition_list(tpl).await;
                 })
             }
             _ => ReleaseHandle::noop(),
         };
 
-        let data_stream = self.into_data_stream(); // 原生成器
+        let data_stream = self.into_data_stream();
         let chunk_stream = into_chunk_stream(data_stream, parser_cfg, source_context);
 
         Box::pin(StreamWithSyncCleanup {
