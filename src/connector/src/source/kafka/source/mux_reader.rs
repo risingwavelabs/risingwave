@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Context;
 use futures::{StreamExt, StreamExt as _};
 use once_cell::sync::OnceCell;
 use rdkafka::consumer::{Consumer, StreamConsumer};
@@ -9,11 +10,18 @@ use rdkafka::message::OwnedMessage;
 use rdkafka::{ClientConfig, Message, TopicPartitionList};
 use tokio::sync::{RwLock, mpsc};
 
+use crate::connector_common::read_kafka_log_level;
+use crate::error::ConnectorResult as Result;
+use crate::source::kafka::{
+    KAFKA_ISOLATION_LEVEL, KafkaContextCommon, KafkaProperties, RwConsumerContext,
+};
+use crate::source::{SourceContext, SourceContextRef};
+
 /// Global key == `connection_id` (already unique in metadata)
 pub type ReaderKey = String;
 
 pub struct KafkaMuxReader {
-    consumer: StreamConsumer,
+    consumer: StreamConsumer<RwConsumerContext>,
     /// (topic, partition) -> sender  (each topic unique within this connection)
     senders: RwLock<HashMap<(String, i32), mpsc::Sender<OwnedMessage>>>,
 }
@@ -28,21 +36,55 @@ impl KafkaMuxReader {
     /// Create or reuse the reader for a given connection.
     /// `connection_id` : globally unique identifier assigned by metadata.
     /// `brokers`       : comma‑separated list for this connection.
-    pub async fn get_or_create(connection_id: ReaderKey, brokers: String) -> Arc<Self> {
+    pub async fn get_or_create(
+        connection_id: ReaderKey,
+        properties: KafkaProperties,
+        source_ctx: SourceContextRef,
+    ) -> Result<Arc<Self>> {
         // fast path – already exists
         if let Some(r) = Self::registry().read().await.get(&connection_id).cloned() {
-            return r;
+            return Ok(r);
         }
 
-        // build single group.id derived from connection id
-        let group_id = format!("conn-{connection_id}");
-        let consumer: StreamConsumer = ClientConfig::new()
-            .set("bootstrap.servers", &brokers)
-            .set("group.id", &group_id)
-            .set("enable.auto.commit", "false")
-            .create()
+        let mut config = ClientConfig::new();
+
+        let bootstrap_servers = &properties.connection.brokers;
+        let broker_rewrite_map = properties.privatelink_common.broker_rewrite_map.clone();
+
+        // disable partition eof
+        config.set("enable.partition.eof", "false");
+        config.set("auto.offset.reset", "smallest");
+        config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
+        config.set("bootstrap.servers", bootstrap_servers);
+
+        properties.connection.set_security_properties(&mut config);
+        properties.set_client(&mut config);
+
+        config.set("group.id", properties.group_id(source_ctx.fragment_id));
+
+        let ctx_common = KafkaContextCommon::new(
+            broker_rewrite_map,
+            Some(format!(
+                "fragment-{}-source-{}-actor-{}",
+                source_ctx.fragment_id, source_ctx.source_id, source_ctx.actor_id
+            )),
+            // thread consumer will keep polling in the background, we don't need to call `poll`
+            // explicitly
+            Some(source_ctx.metrics.rdkafka_native_metric.clone()),
+            properties.aws_auth_props,
+            properties.connection.is_aws_msk_iam(),
+        )
+        .await?;
+
+        let client_ctx = RwConsumerContext::new(ctx_common);
+
+        if let Some(log_level) = read_kafka_log_level() {
+            config.set_log_level(log_level);
+        }
+        let consumer: StreamConsumer<RwConsumerContext> = config
+            .create_with_context(client_ctx)
             .await
-            .expect("failed to create kafka consumer");
+            .context("failed to create kafka consumer")?;
 
         let reader = Arc::new(Self {
             consumer,
@@ -53,7 +95,7 @@ impl KafkaMuxReader {
             .await
             .insert(connection_id, Arc::clone(&reader));
         tokio::spawn(Self::poll_loop(Arc::clone(&reader)));
-        reader
+        Ok(reader)
     }
 
     async fn poll_loop(this: Arc<Self>) {
@@ -72,18 +114,19 @@ impl KafkaMuxReader {
         }
     }
 
-    pub async fn register_splits(
+    pub async fn register_topic_partition_list(
         &self,
-        splits: &[(String, i32)],
+        tpl: TopicPartitionList,
     ) -> anyhow::Result<mpsc::Receiver<OwnedMessage>> {
-        if splits.is_empty() {
+        if tpl.count() == 0 {
             anyhow::bail!("splits list is empty");
         }
         {
             let map = self.senders.read().await;
-            for (t, p) in splits {
-                if map.contains_key(&(t.clone(), *p)) {
-                    anyhow::bail!("split ({t},{p}) already registered");
+            for element in tpl.elements() {
+                let key = (element.topic().to_owned(), element.partition());
+                if map.contains_key(&key) {
+                    anyhow::bail!("split ({:?}) already registered", key);
                 }
             }
         }
@@ -91,44 +134,40 @@ impl KafkaMuxReader {
         let (tx, rx) = mpsc::channel(1024);
         {
             let mut map = self.senders.write().await;
-            for (t, p) in splits {
-                map.insert((t.clone(), *p), tx.clone());
+            for element in tpl.elements() {
+                map.insert(
+                    (element.topic().to_owned(), element.partition()),
+                    tx.clone(),
+                );
             }
         }
 
-        let mut tpl = TopicPartitionList::new();
-        for (t, p) in splits {
-            tpl.add_partition(t, *p);
-        }
         self.consumer
             .incremental_assign(&tpl)
             .map_err(|e| anyhow::anyhow!("assign failed: {e}"))?;
         Ok(rx)
     }
 
-    pub async fn unregister_splits(&self, splits: &[(String, i32)]) -> anyhow::Result<()> {
-        if splits.is_empty() {
+    pub async fn unregister_topic_partition_list(&self, tpl: TopicPartitionList) -> anyhow::Result<()> {
+        if tpl.count() == 0 {
             return Ok(());
         }
         {
             let map = self.senders.read().await;
-            for (t, p) in splits {
-                if !map.contains_key(&(t.clone(), *p)) {
-                    anyhow::bail!("split ({t},{p}) not registered");
+            for element in tpl.elements() {
+                let key = (element.topic().to_owned(), element.partition());
+                if !map.contains_key(&key) {
+                    anyhow::bail!("split ({:?}) not registered", key);
                 }
             }
         }
         {
             let mut map = self.senders.write().await;
-            for (t, p) in splits {
-                map.remove(&(t.clone(), *p));
+            for element in tpl.elements() {
+                map.remove(&(element.topic().to_owned(), element.partition()));
             }
         }
 
-        let mut tpl = TopicPartitionList::new();
-        for (t, p) in splits {
-            tpl.add_partition(t, *p);
-        }
         self.consumer
             .incremental_unassign(&tpl)
             .map_err(|e| anyhow::anyhow!("unassign failed: {e}"))?;
