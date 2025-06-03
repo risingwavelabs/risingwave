@@ -13,12 +13,15 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_expr::bail;
 use risingwave_sqlparser::ast::{Ident, ObjectName, SqlOption};
 
-use super::alter_sink_props::{AlterSinkObject, handle_alter_sink_props};
 use super::alter_table_column::fetch_table_catalog_for_alter;
 use super::{HandlerArgs, RwPgResponse};
+use crate::catalog::root_catalog::SchemaPath;
 use crate::error::{ErrorCode, Result};
+use crate::utils::resolve_connection_ref_and_secret_ref;
+use crate::{Binder, WithOptions};
 
 pub async fn handle_alter_table_props(
     handler_args: HandlerArgs,
@@ -26,8 +29,11 @@ pub async fn handle_alter_table_props(
     changed_props: Vec<SqlOption>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
+    let db_name = &session.database();
+    let search_path = session.config().search_path();
+    let user_name = &session.user_name();
     let original_table = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
-    if let Some(sink_name) = original_table.iceberg_sink_name()
+    let (sink_id, source_id, table_id) = if let Some(sink_name) = original_table.iceberg_sink_name()
         && let Some(source_name) = original_table.iceberg_source_name()
     {
         let mut source_names = table_name.0.clone();
@@ -36,22 +42,55 @@ pub async fn handle_alter_table_props(
         sink_names.pop();
         source_names.push(Ident::new_unchecked(source_name));
         sink_names.push(Ident::new_unchecked(sink_name));
-        handle_alter_sink_props(
-            handler_args,
-            AlterSinkObject::IcebergTable(
-                table_name,
-                ObjectName(sink_names),
-                ObjectName(source_names),
-            ),
-            changed_props,
-        )
-        .await?;
+        let reader = session.env().catalog_reader().read_guard();
+        let (schema_name, real_table_name) =
+            Binder::resolve_schema_qualified_name(db_name, table_name)?;
+        let (_schema_name, real_sink_name) =
+            Binder::resolve_schema_qualified_name(db_name, ObjectName(sink_names))?;
+        let (_schema_name, real_source_name) =
+            Binder::resolve_schema_qualified_name(db_name, ObjectName(source_names))?;
+        let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+        let (sink, _schema_name) =
+            reader.get_sink_by_name(db_name, schema_path, &real_sink_name)?;
+        let (source, _schema_name) =
+            reader.get_source_by_name(db_name, schema_path, &real_source_name)?;
+        let (table, schema_name) =
+            reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
+        if sink.target_table.is_some() {
+            bail!("ALTER iceberg table config is not for sink into table")
+        }
+        session.check_privilege_for_drop_alter(schema_name, &**sink)?;
+        session.check_privilege_for_drop_alter(schema_name, &**source)?;
+        session.check_privilege_for_drop_alter(schema_name, &**table)?;
+        (sink.id.sink_id, source.id, table.id.table_id)
     } else {
         return Err(ErrorCode::NotSupported(
             "ALTER TABLE With is only supported for iceberg tables".to_owned(),
             "Try `ALTER TABLE .. ADD/DROP COLUMN ...`".to_owned(),
         )
         .into());
+    };
+
+    let meta_client = session.env().meta_client();
+    let (resolved_with_options, _, connector_conn_ref) = resolve_connection_ref_and_secret_ref(
+        WithOptions::try_from(changed_props.as_ref() as &[SqlOption])?,
+        &session,
+        None,
+    )?;
+    let (changed_props, changed_secret_refs) = resolved_with_options.into_parts();
+    if !changed_secret_refs.is_empty() || connector_conn_ref.is_some() {
+        bail!("ALTER ICEBERG TABLE does not support SECRET or CONNECTION now")
     }
+    meta_client
+        .alter_iceberg_table_props(
+            table_id,
+            sink_id,
+            source_id,
+            changed_props,
+            changed_secret_refs,
+            connector_conn_ref,
+        )
+        .await?;
+
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))
 }

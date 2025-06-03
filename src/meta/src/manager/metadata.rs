@@ -24,7 +24,7 @@ use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
-use risingwave_pb::meta::alter_connector_props_request::ObjectType;
+use risingwave_pb::meta::alter_connector_props_request::AlterIcebergTablePropsObject;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamScanType};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
@@ -708,13 +708,29 @@ impl MetadataManager {
         &self,
         sink_id: SinkId,
         props: BTreeMap<String, String>,
-        object_type: ObjectType,
     ) -> MetaResult<HashMap<String, String>> {
         let new_props = self
             .catalog_controller
-            .update_sink_props_by_sink_id(sink_id, props, object_type)
+            .update_sink_props_by_sink_id(sink_id, props)
             .await
             .unwrap();
+        Ok(new_props)
+    }
+
+    pub async fn update_iceberg_table_props_by_table_id(
+        &self,
+        table_id: TableId,
+        props: BTreeMap<String, String>,
+        alter_iceberg_table_props: AlterIcebergTablePropsObject,
+    ) -> MetaResult<HashMap<String, String>> {
+        let new_props = self
+            .catalog_controller
+            .update_iceberg_table_props_by_table_id(
+                table_id.table_id as _,
+                props,
+                alter_iceberg_table_props,
+            )
+            .await?;
         Ok(new_props)
     }
 
