@@ -28,6 +28,7 @@ use risingwave_pb::catalog::PbSink;
 use risingwave_pb::iceberg_compaction::{
     IcebergCompactionTask, SubscribeIcebergCompactionEventRequest,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -373,7 +374,7 @@ impl IcebergCompactionManager {
                 tokio::select! {
                     _ = interval.tick() => {
                         if let Err(e) = manager.perform_gc_operations().await {
-                            tracing::error!(error = %e, "GC operations failed");
+                            tracing::error!(error = ?e.as_report(), "GC operations failed");
                         }
                     },
                     _ = &mut shutdown_rx => {
@@ -400,7 +401,7 @@ impl IcebergCompactionManager {
         for sink_id in sink_ids {
             if let Err(e) = self.check_and_expire_snapshots(&sink_id).await {
                 // Continue with other tables even if one fails
-                tracing::error!(error = %e, "Failed to perform GC for sink {}", sink_id.sink_id);
+                tracing::error!(error = ?e.as_report(), "Failed to perform GC for sink {}", sink_id.sink_id);
             }
         }
 
