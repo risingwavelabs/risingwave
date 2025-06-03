@@ -24,7 +24,6 @@ use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
-use risingwave_pb::meta::alter_connector_props_request::AlterIcebergTablePropsObject;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamScanType};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
@@ -721,7 +720,9 @@ impl MetadataManager {
         &self,
         table_id: TableId,
         props: BTreeMap<String, String>,
-        alter_iceberg_table_props: AlterIcebergTablePropsObject,
+        alter_iceberg_table_props: Option<
+            risingwave_pb::meta::alter_connector_props_request::PbExtraOptions,
+        >,
     ) -> MetaResult<HashMap<String, String>> {
         let new_props = self
             .catalog_controller

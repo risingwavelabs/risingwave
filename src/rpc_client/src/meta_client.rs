@@ -76,7 +76,7 @@ use risingwave_pb::iceberg_compaction::{
     subscribe_iceberg_compaction_event_request,
 };
 use risingwave_pb::meta::alter_connector_props_request::{
-    AlterConnectorPropsObject, AlterIcebergTablePropsObject, ObjectType,
+    AlterConnectorPropsObject, AlterIcebergTableIds, ExtraOptions,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
@@ -1319,9 +1319,8 @@ impl MetaClient {
             changed_props: changed_props.into_iter().collect(),
             changed_secret_refs: changed_secret_refs.into_iter().collect(),
             connector_conn_ref,
-            object_type: Some(ObjectType::AlterConnectorPropsObject(
-                AlterConnectorPropsObject::Sink as i32,
-            )),
+            object_type: AlterConnectorPropsObject::Sink as i32,
+            extra_options: None,
         };
         let _resp = self.inner.alter_connector_props(req).await?;
         Ok(())
@@ -1341,12 +1340,11 @@ impl MetaClient {
             changed_props: changed_props.into_iter().collect(),
             changed_secret_refs: changed_secret_refs.into_iter().collect(),
             connector_conn_ref,
-            object_type: Some(ObjectType::AlterIcebergTablePropsObject(
-                AlterIcebergTablePropsObject {
-                    sink_id: sink_id as i32,
-                    source_id: source_id as i32,
-                },
-            )),
+            object_type: AlterConnectorPropsObject::IcebergTable as i32,
+            extra_options: Some(ExtraOptions::AlterIcebergTableIds(AlterIcebergTableIds {
+                sink_id: sink_id as i32,
+                source_id: source_id as i32,
+            })),
         };
         let _resp = self.inner.alter_connector_props(req).await?;
         Ok(())

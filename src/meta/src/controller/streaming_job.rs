@@ -34,7 +34,7 @@ use risingwave_meta_model::*;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::PbOptionalAssociatedSourceId;
 use risingwave_pb::catalog::{PbCreateType, PbTable};
-use risingwave_pb::meta::alter_connector_props_request::AlterIcebergTablePropsObject;
+use risingwave_pb::meta::alter_connector_props_request::AlterIcebergTableIds;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{
@@ -1673,9 +1673,12 @@ impl CatalogController {
         &self,
         table_id: TableId,
         props: BTreeMap<String, String>,
-        alter_iceberg_table_props: AlterIcebergTablePropsObject,
+        alter_iceberg_table_props: Option<
+            risingwave_pb::meta::alter_connector_props_request::PbExtraOptions,
+        >,
     ) -> MetaResult<HashMap<String, String>> {
-        let AlterIcebergTablePropsObject { sink_id, source_id } = alter_iceberg_table_props;
+        let risingwave_pb::meta::alter_connector_props_request::PbExtraOptions::AlterIcebergTableIds(AlterIcebergTableIds { sink_id, source_id }) = alter_iceberg_table_props.
+            ok_or_else(|| MetaError::invalid_parameter("alter_iceberg_table_props is required"))?;
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 

@@ -25,7 +25,7 @@ use risingwave_meta::model;
 use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::{SourceManagerRunningInfo, ThrottleConfig};
 use risingwave_meta_model::{FragmentId, ObjectId, SinkId, SourceId, StreamingParallelism};
-use risingwave_pb::meta::alter_connector_props_request::{AlterConnectorPropsObject, ObjectType};
+use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
 use risingwave_pb::meta::list_table_fragments_response::{
@@ -500,10 +500,8 @@ impl StreamManagerService for StreamServiceImpl {
         request: Request<AlterConnectorPropsRequest>,
     ) -> Result<Response<AlterConnectorPropsResponse>, Status> {
         let request = request.into_inner();
-        let new_config = match request.object_type {
-            Some(ObjectType::AlterConnectorPropsObject(val))
-                if val == AlterConnectorPropsObject::Sink as i32 =>
-            {
+        let new_config = match AlterConnectorPropsObject::try_from(request.object_type) {
+            Ok(AlterConnectorPropsObject::Sink) => {
                 self.metadata_manager
                     .update_sink_props_by_sink_id(
                         request.object_id as i32,
@@ -511,12 +509,12 @@ impl StreamManagerService for StreamServiceImpl {
                     )
                     .await?
             }
-            Some(ObjectType::AlterIcebergTablePropsObject(object)) => {
+            Ok(AlterConnectorPropsObject::IcebergTable) => {
                 self.metadata_manager
                     .update_iceberg_table_props_by_table_id(
                         TableId::from(request.object_id),
                         request.changed_props.clone().into_iter().collect(),
-                        object,
+                        request.extra_options,
                     )
                     .await?
             }
