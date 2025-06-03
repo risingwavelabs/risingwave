@@ -21,7 +21,6 @@ use parking_lot::{RawRwLock, RwLock};
 use risingwave_common::catalog::{
     AlterDatabaseParam, CatalogVersion, FunctionId, IndexId, ObjectId,
 };
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
@@ -108,16 +107,10 @@ pub trait CatalogWriter: Send + Sync {
         source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
-        mapping: ColIndexMapping,
         job_type: TableJobType,
     ) -> Result<()>;
 
-    async fn replace_source(
-        &self,
-        source: PbSource,
-        graph: StreamFragmentGraph,
-        mapping: ColIndexMapping,
-    ) -> Result<()>;
+    async fn replace_source(&self, source: PbSource, graph: StreamFragmentGraph) -> Result<()>;
 
     async fn create_index(
         &self,
@@ -365,14 +358,12 @@ impl CatalogWriter for CatalogWriterImpl {
         source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
-        mapping: ColIndexMapping,
         job_type: TableJobType,
     ) -> Result<()> {
         let version = self
             .meta_client
             .replace_job(
                 graph,
-                mapping,
                 ReplaceJob::ReplaceTable(ReplaceTable {
                     source,
                     table: Some(table),
@@ -383,17 +374,11 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn replace_source(
-        &self,
-        source: PbSource,
-        graph: StreamFragmentGraph,
-        mapping: ColIndexMapping,
-    ) -> Result<()> {
+    async fn replace_source(&self, source: PbSource, graph: StreamFragmentGraph) -> Result<()> {
         let version = self
             .meta_client
             .replace_job(
                 graph,
-                mapping,
                 ReplaceJob::ReplaceSource(ReplaceSource {
                     source: Some(source),
                 }),

@@ -1,0 +1,10 @@
+[server]
+telemetry_enabled = false
+metrics_level = "Disabled"
+
+[system]
+max_concurrent_creating_streaming_jobs = 0
+
+[meta]
+meta_leader_lease_secs = 10
+max_heartbeat_interval_secs = 5

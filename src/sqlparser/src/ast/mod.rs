@@ -47,8 +47,8 @@ pub use self::legacy_source::{CompatibleFormatEncode, get_delimiter};
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
     Corresponding, Cte, CteInner, Distinct, Fetch, Join, JoinConstraint, JoinOperator, LateralView,
-    OrderByExpr, Query, Select, SelectItem, SetExpr, SetOperator, TableAlias, TableFactor,
-    TableWithJoins, Top, Values, With,
+    NamedWindow, OrderByExpr, Query, Select, SelectItem, SetExpr, SetOperator, TableAlias,
+    TableFactor, TableWithJoins, Top, Values, With,
 };
 pub use self::statement::*;
 pub use self::value::{
@@ -865,13 +865,25 @@ impl fmt::Display for Expr {
     }
 }
 
-/// A window specification (i.e. `OVER (PARTITION BY .. ORDER BY .. etc.)`)
+/// A window specification (i.e. `OVER (PARTITION BY .. ORDER BY .. etc.)`).
+/// This is used both for named window definitions and inline window specifications.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct WindowSpec {
     pub partition_by: Vec<Expr>,
     pub order_by: Vec<OrderByExpr>,
     pub window_frame: Option<WindowFrame>,
+}
+
+/// A window definition that can appear in the OVER clause of a window function.
+/// This can be either an inline window specification or a reference to a named window.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum Window {
+    /// Inline window specification: `OVER (PARTITION BY ... ORDER BY ...)`
+    Spec(WindowSpec),
+    /// Named window reference: `OVER window_name`
+    Name(Ident),
 }
 
 impl fmt::Display for WindowSpec {
@@ -895,6 +907,15 @@ impl fmt::Display for WindowSpec {
             window_frame.fmt(f)?;
         }
         Ok(())
+    }
+}
+
+impl fmt::Display for Window {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Window::Spec(spec) => write!(f, "({})", spec),
+            Window::Name(name) => write!(f, "{}", name),
+        }
     }
 }
 
@@ -2939,7 +2960,7 @@ pub struct Function {
     /// `FILTER` clause of the function call, for aggregate and window (not supported yet) functions.
     pub filter: Option<Box<Expr>>,
     /// `OVER` clause of the function call, for window functions.
-    pub over: Option<WindowSpec>,
+    pub over: Option<Window>,
 }
 
 impl Function {
@@ -2968,7 +2989,7 @@ impl fmt::Display for Function {
             write!(f, " FILTER (WHERE {})", filter)?;
         }
         if let Some(o) = &self.over {
-            write!(f, " OVER ({})", o)?;
+            write!(f, " OVER {}", o)?;
         }
         Ok(())
     }

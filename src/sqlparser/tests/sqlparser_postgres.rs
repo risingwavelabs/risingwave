@@ -1060,7 +1060,8 @@ fn parse_array() {
                 lateral_views: vec![],
                 selection: None,
                 group_by: vec![],
-                having: None
+                having: None,
+                window: vec![],
             })),
             order_by: vec![],
             limit: None,
@@ -1099,7 +1100,8 @@ fn parse_array() {
                 lateral_views: vec![],
                 selection: None,
                 group_by: vec![],
-                having: None
+                having: None,
+                window: vec![],
             })),
             order_by: vec![],
             limit: None,
@@ -1144,7 +1146,8 @@ fn parse_array() {
                 lateral_views: vec![],
                 selection: None,
                 group_by: vec![],
-                having: None
+                having: None,
+                window: vec![],
             })),
             order_by: vec![],
             limit: None,
