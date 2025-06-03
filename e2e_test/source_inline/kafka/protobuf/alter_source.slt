@@ -106,21 +106,15 @@ DROP SOURCE src_user;
 
 # Test ALTER SOURCE REFRESH SCHEMA with generated columns
 # This tests the fix for the bug where ALTER SOURCE REFRESH SCHEMA fails for sources with generated columns
+# Reusing the same topic as the previous test
 
-system ok
-rpk topic delete pb_alter_source_gen_col_test || true; \
-(rpk sr subject delete 'pb_alter_source_gen_col_test-value' && rpk sr subject delete 'pb_alter_source_gen_col_test-value' --permanent) || true;
-
-system ok
-python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "pb_alter_source_gen_col_test" 20 user
-
-# Create source with generated column
+# Create source with generated column using the same topic
 statement ok
 CREATE SOURCE src_user_gen (*, t int as id+1)
 INCLUDE timestamp
 WITH (
     ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
-    topic = 'pb_alter_source_gen_col_test',
+    topic = 'pb_alter_source_test',
     scan.startup.mode = 'earliest'
 )
 FORMAT PLAIN ENCODE PROTOBUF(
@@ -148,13 +142,8 @@ SELECT id, t FROM mv_user_gen LIMIT 5;
 3 4
 4 5
 
-# Push more events with extended fields (add 'age' field)
-system ok
-python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "pb_alter_source_gen_col_test" 5 user_with_more_fields
-
-sleep 5s
-
 # This should work - refresh schema without affecting generated column
+# The topic already has the extended schema from the previous test
 statement ok
 ALTER SOURCE src_user_gen REFRESH SCHEMA;
 
@@ -174,7 +163,7 @@ sleep 2s
 query III
 SELECT COUNT(*), MIN(t), MAX(t) FROM mv_user_gen_after WHERE t = id + 1;
 ----
-25 1 20
+30 1 20
 
 statement ok
 DROP MATERIALIZED VIEW mv_user_gen_after;
