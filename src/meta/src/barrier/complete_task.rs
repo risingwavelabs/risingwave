@@ -22,6 +22,7 @@ use futures::future::try_join_all;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::must_match;
+use risingwave_common::util::deployment::Deployment;
 use risingwave_pb::hummock::HummockVersionStats;
 use tokio::task::JoinHandle;
 
@@ -163,6 +164,12 @@ impl CompleteBarrierTask {
                 .unwrap_or_else(|| "barrier".to_owned()),
             barrier_kind: command_ctx.barrier_info.kind.as_str_name().to_owned(),
         };
+        if cfg!(debug_assertions) || Deployment::current().is_ci() {
+            // Add a warning log so that debug mode / CI can observe it
+            if duration_sec > 5 {
+                tracing::warn!("high barrier latency observed!", event = ?event)
+            }
+        }
         env.event_log_manager_ref()
             .add_event_logs(vec![event_log::Event::BarrierComplete(event)]);
     }
