@@ -1,0 +1,321 @@
+# Test for issue #21798: e2e test for sink (with/without connector) into table (with/without connector)
+# This test covers all possible combinations of source tables and sink types.
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# ==============================================================================
+# Test 1: sink (without connector, sink into table) from table (without connector) into table (without connector)
+# ==============================================================================
+
+statement ok
+create table source_table_regular (id int primary key, name varchar, value int);
+
+statement ok
+insert into source_table_regular values (1, 'alice', 100), (2, 'bob', 200), (3, 'charlie', 300);
+
+statement ok
+create table target_table_regular (id int primary key, name varchar, value int);
+
+# Create sink into table (without connector)
+statement ok
+create sink sink_regular_to_regular into target_table_regular as select * from source_table_regular;
+
+statement ok
+flush;
+
+# Verify data was sunk correctly
+query III rowsort
+select * from target_table_regular;
+----
+1 alice 100
+2 bob 200
+3 charlie 300
+
+# Test updates
+statement ok
+update source_table_regular set value = 150 where id = 1;
+
+query III rowsort
+select * from target_table_regular;
+----
+1 alice 150
+2 bob 200
+3 charlie 300
+
+# Test deletes
+statement ok
+delete from source_table_regular where id = 3;
+
+query III rowsort
+select * from target_table_regular;
+----
+1 alice 150
+2 bob 200
+
+# Clean up
+statement ok
+drop sink sink_regular_to_regular;
+
+statement ok
+drop table target_table_regular;
+
+statement ok
+drop table source_table_regular;
+
+# ==============================================================================
+# Test 2: sink (without connector, sink into table) from table (with connector) into table (without connector)
+# ==============================================================================
+
+# Create source table with datagen connector
+statement ok
+create table source_table_with_connector (id int, name varchar, value int) with (
+    connector = 'datagen',
+    fields.id.kind = 'sequence',
+    fields.id.start = '1',
+    fields.id.end = '5',
+    fields.name.kind = 'random',
+    fields.name.length = '8',
+    fields.value.kind = 'random',
+    fields.value.min = '100',
+    fields.value.max = '500',
+    datagen.rows.per.second = '5',
+    datagen.split.num = '1'
+);
+
+# Create target table without connector
+statement ok
+create table target_table_from_connector (id int primary key, name varchar, value int);
+
+# Wait for some data to be generated
+sleep 2s
+
+statement ok
+flush;
+
+# Create sink into table from connector table
+statement ok
+create sink sink_connector_to_regular into target_table_from_connector as select id, name, value from source_table_with_connector;
+
+# Wait for data to flow through
+sleep 3s
+
+query I
+select count(*) from target_table_from_connector;
+----
+5
+
+# Verify schema is correct
+query I
+select count(*) from target_table_from_connector where id between 1 and 5;
+----
+5
+
+# Clean up
+statement ok
+drop sink sink_connector_to_regular;
+
+statement ok
+drop table target_table_from_connector;
+
+statement ok
+drop table source_table_with_connector;
+
+# ==============================================================================
+# Test 3: sink (with connector) from table (without connector)  
+# ==============================================================================
+
+# Create regular table 
+statement ok
+create table source_regular_for_connector (id int primary key, name varchar, value int);
+
+statement ok
+insert into source_regular_for_connector values (1, 'test1', 100), (2, 'test2', 200);
+
+statement ok
+flush;
+
+# Create sink with connector (blackhole for testing)
+statement ok
+create sink sink_regular_with_connector from source_regular_for_connector with (
+    connector = 'blackhole',
+    type = 'upsert',
+    primary_key = 'id'
+);
+
+# Test that sink was created successfully and handles data
+statement ok
+insert into source_regular_for_connector values (3, 'test3', 300);
+
+statement ok
+update source_regular_for_connector set value = 250 where id = 2;
+
+statement ok
+delete from source_regular_for_connector where id = 1;
+
+# Sink should handle all operations without error
+statement ok
+flush;
+
+# Clean up
+statement ok
+drop sink sink_regular_with_connector;
+
+statement ok
+drop table source_regular_for_connector;
+
+# ==============================================================================
+# Test 4: sink (with connector) from table (with connector)
+# ==============================================================================
+
+# Create source table with connector
+statement ok
+create table source_connector_for_connector (id int, name varchar, value int) with (
+    connector = 'datagen',
+    fields.id.kind = 'sequence',
+    fields.id.start = '10',
+    fields.id.end = '12',
+    fields.name.kind = 'random',
+    fields.name.length = '6',
+    fields.value.kind = 'random',
+    fields.value.min = '1000',
+    fields.value.max = '2000',
+    datagen.rows.per.second = '3',
+    datagen.split.num = '1'
+);
+
+# Wait for data generation
+sleep 2s
+
+statement ok
+flush;
+
+# Create sink with connector from source with connector
+statement ok
+create sink sink_connector_with_connector from source_connector_for_connector with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+# Let data flow
+sleep 3s
+
+# Sink should handle streaming data without error
+statement ok
+flush;
+
+# Clean up
+statement ok
+drop sink sink_connector_with_connector;
+
+statement ok
+drop table source_connector_for_connector;
+
+# ==============================================================================
+# Test 5: Additional edge cases
+# ==============================================================================
+
+# Test append-only sink into table without primary key
+statement ok
+create table source_for_append (id int, value varchar);
+
+statement ok
+insert into source_for_append values (1, 'a'), (2, 'b');
+
+statement ok
+create table target_append_only (id int, value varchar, created_at timestamp default now());
+
+statement ok
+create sink sink_append_only into target_append_only as select id, value from source_for_append with (type = 'append-only', force_append_only = 'true');
+
+statement ok
+flush;
+
+query II rowsort
+select id, value from target_append_only;
+----
+1 a
+2 b
+
+# Test that updates create new rows (append-only behavior)
+statement ok
+update source_for_append set value = 'a_updated' where id = 1;
+
+query II
+select id, value from target_append_only order by id, value;
+----
+1 a
+1 a_updated
+2 b
+
+# Clean up
+statement ok
+drop sink sink_append_only;
+
+statement ok
+drop table target_append_only;
+
+statement ok
+drop table source_for_append;
+
+# ==============================================================================
+# Test 6: Test error cases and boundary conditions
+# ==============================================================================
+
+statement ok
+create table test_source (id int, name varchar);
+
+statement ok
+create table test_target (id int primary key, name varchar);
+
+# Test: Cannot create sink with connector 'table' (should fail)
+statement error unsupported sink type table
+create sink invalid_table_sink from test_source with (connector = 'table');
+
+# Test: Cannot sink into a table that is actually a source with connector
+statement ok
+create table test_source_table (id int, name varchar) with (
+    connector = 'datagen',
+    fields.id.kind = 'sequence',
+    fields.id.start = '1',
+    fields.id.end = '3',
+    fields.name.kind = 'random',
+    fields.name.length = '5',
+    datagen.rows.per.second = '2'
+);
+
+# Wait for data generation
+sleep 2s
+
+# This should fail because you cannot sink into a source table (table with connector)
+statement error
+create sink invalid_sink_to_source into test_source_table as select * from test_source;
+
+# Test valid sink into regular table
+statement ok
+create sink valid_sink into test_target as select id, name from test_source;
+
+statement ok
+insert into test_source values (1, 'test');
+
+statement ok
+flush;
+
+query II
+select * from test_target;
+----
+1 test
+
+# Clean up
+statement ok
+drop sink valid_sink;
+
+statement ok
+drop table test_source_table;
+
+statement ok
+drop table test_target;
+
+statement ok
+drop table test_source;
