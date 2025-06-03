@@ -1,0 +1,42 @@
+init_sqls = [
+    'CREATE SCHEMA IF NOT EXISTS demo_db',
+    'DROP TABLE IF EXISTS demo_db.demo_table',
+    '''
+    CREATE TABLE demo_db.demo_table (
+    id bigint,
+    merchant_id int,
+    amount decimal(12,2),
+    created_at timestamp,
+    last_updated_at timestamp,
+    new_col int
+    ) USING iceberg
+    TBLPROPERTIES ('format-version'='2');
+    '''
+]
+
+slt = 'test_case/cdc/postgres_cdc_load.slt'
+
+verify_schema = ['bigint','int','decimal(12,2)','timestamp','timestamp','int']
+
+verify_sql = 'SELECT id, merchant_id, amount, created_at, last_updated_at, new_col FROM demo_db.demo_table ORDER BY id ASC'
+
+verify_data = """
+1,101,100.50,2024-01-01 10:00:00,2024-01-01 10:00:00,1
+2,102,200.75,2024-01-01 11:00:00,2024-01-01 11:00:00,2
+3,103,150.25,2024-01-01 12:00:00,2024-01-01 12:00:00,3
+4,104,300.00,2024-01-01 13:00:00,2024-01-01 13:00:00,4
+5,105,450.80,2024-01-01 14:00:00,2024-01-01 14:00:00,5
+6,106,275.90,2024-01-01 15:00:00,2024-01-01 15:00:00,6
+7,107,325.60,2024-01-01 16:00:00,2024-01-01 16:00:00,7
+8,108,180.40,2024-01-01 17:00:00,2024-01-01 17:00:00,8
+9,109,500.25,2024-01-01 18:00:00,2024-01-01 18:00:00,9
+10,110,220.75,2024-01-01 19:00:00,2024-01-01 19:00:00,10
+11,111,350.50,2024-01-01 20:00:00,2024-01-01 20:00:00,11
+12,112,425.80,2024-01-01 21:00:00,2024-01-01 21:00:00,12
+13,113,175.30,2024-01-01 22:00:00,2024-01-01 22:00:00,13
+"""
+
+drop_sqls = [
+    'DROP TABLE IF EXISTS demo_db.demo_table',
+    'DROP SCHEMA IF EXISTS demo_db'
+]

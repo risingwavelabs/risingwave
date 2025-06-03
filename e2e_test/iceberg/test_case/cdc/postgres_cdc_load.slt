@@ -1,0 +1,145 @@
+# Postgres CDC with Iceberg table engine test
+statement ok
+set sink_decouple = false;
+
+# import data to postgres
+system ok
+psql -c "\\i ./test_case/cdc/postgres_cdc.sql"
+
+statement ok
+create source ingestion.api_db_ingestion_auto_schema with (
+    connector = 'postgres-cdc',
+    hostname = '${PGHOST:localhost}',
+    port = '${PGPORT:5432}',
+    username = '${PGUSER:$USER}',
+    password = '${PGPASSWORD:}',
+    database.name = '${PGDATABASE:postgres}',
+    schema.name = 'ingestion',
+    auto.schema.change = 'true',
+    slot.name = 'ingestion_cdc_slot'
+);
+
+statement ok
+create table transactions ( 
+    id bigint,
+    merchant_id int,
+    amount numeric,
+    created_at timestamp,
+    last_updated_at timestamp,
+    new_col int,
+    PRIMARY KEY (id)
+) FROM ingestion.api_db_ingestion_auto_schema TABLE 'ingestion.transactions';
+
+# Sink into iceberg (verified by postgres_cdc.toml)
+statement ok
+CREATE SINK s1 AS select * from transactions WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    force_append_only = 'false',
+    catalog.name = 'demo',
+    database.name = 'demo_db',
+    table.name = 'demo_table',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    primary_key = 'id'
+);
+
+statement ok
+set sink_decouple = true
+
+# iceberg table engine with Postgres CDC table
+statement ok
+create secret my_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
+create connection public.iceberg_conn with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    hosted_catalog = true
+);
+
+statement ok
+set iceberg_engine_connection = 'public.iceberg_conn';
+
+statement ok
+create table ingestion.pg_transactions_auto_internal_stg ( 
+    id bigint,
+    merchant_id int,
+    amount numeric,
+    created_at timestamp,
+    last_updated_at timestamp,
+    new_col int,
+    PRIMARY KEY (id)
+)
+with (commit_checkpoint_interval = 1)
+FROM ingestion.api_db_ingestion_auto_schema TABLE 'ingestion.transactions'
+ENGINE = iceberg;
+
+statement ok
+FLUSH;
+
+sleep 20s
+
+query I
+select count(*) from transactions;
+----
+8
+
+query I
+select count(*) from ingestion.pg_transactions_auto_internal_stg;
+----
+8
+
+# insert new data to postgres
+system ok
+psql -c "\\i ./test_case/cdc/postgres_cdc_insert.sql"
+
+statement ok
+FLUSH;
+
+sleep 20s
+
+query IIRRTTI
+SELECT id, merchant_id, amount, created_at, last_updated_at, new_col FROM ingestion.pg_transactions_auto_internal_stg ORDER BY id ASC;
+----
+1 101 100.50 2024-01-01 10:00:00 2024-01-01 10:00:00 1
+2 102 200.75 2024-01-01 11:00:00 2024-01-01 11:00:00 2
+3 103 150.25 2024-01-01 12:00:00 2024-01-01 12:00:00 3
+4 104 300.00 2024-01-01 13:00:00 2024-01-01 13:00:00 4
+5 105 450.80 2024-01-01 14:00:00 2024-01-01 14:00:00 5
+6 106 275.90 2024-01-01 15:00:00 2024-01-01 15:00:00 6
+7 107 325.60 2024-01-01 16:00:00 2024-01-01 16:00:00 7
+8 108 180.40 2024-01-01 17:00:00 2024-01-01 17:00:00 8
+9 109 500.25 2024-01-01 18:00:00 2024-01-01 18:00:00 9
+10 110 220.75 2024-01-01 19:00:00 2024-01-01 19:00:00 10
+11 111 350.50 2024-01-01 20:00:00 2024-01-01 20:00:00 11
+12 112 425.80 2024-01-01 21:00:00 2024-01-01 21:00:00 12
+13 113 175.30 2024-01-01 22:00:00 2024-01-01 22:00:00 13
+
+statement ok
+drop sink s1;
+
+statement ok
+drop table ingestion.pg_transactions_auto_internal_stg;
+
+statement ok
+drop table transactions;
+
+statement ok
+drop source ingestion.api_db_ingestion_auto_schema;
+
+statement ok
+drop connection public.iceberg_conn;
+
+statement ok
+drop secret my_secret;
