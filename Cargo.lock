@@ -10199,6 +10199,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "prost-helpers-pb-data"
+version = "2.5.0-alpha"
+dependencies = [
+ "proc-macro2",
+ "prost 0.13.4",
+ "quote",
+ "syn 2.0.101",
+]
+
+[[package]]
 name = "prost-reflect"
 version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11845,6 +11855,61 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_data"
+version = "2.5.0-alpha"
+dependencies = [
+ "ahash 0.8.11",
+ "anyhow",
+ "arrow-array 54.3.1",
+ "arrow-array 55.1.0",
+ "arrow-buffer 54.3.1",
+ "arrow-buffer 55.1.0",
+ "arrow-cast 54.3.1",
+ "arrow-cast 55.1.0",
+ "arrow-schema 54.3.1",
+ "arrow-schema 55.1.0",
+ "auto_impl",
+ "bitfield-struct",
+ "bytes",
+ "chrono",
+ "chrono-tz",
+ "easy-ext",
+ "educe",
+ "either",
+ "enum-as-inner",
+ "ethnum",
+ "expect-test",
+ "hashbrown 0.15.2",
+ "itertools 0.14.0",
+ "itoa",
+ "jiff",
+ "jsonbb",
+ "memcomparable",
+ "more-asserts",
+ "num-integer",
+ "num-traits",
+ "postgres-types",
+ "pretty_assertions",
+ "rand 0.9.0",
+ "risingwave_common_estimate_size",
+ "risingwave_error",
+ "rust_decimal",
+ "ryu",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "smallvec",
+ "speedate",
+ "static_assertions",
+ "strum 0.27.1",
+ "strum_macros 0.27.1",
+ "tempfile",
+ "thiserror 2.0.12",
+ "tinyvec",
+ "workspace-hack",
+]
+
+[[package]]
 name = "risingwave_dml"
 version = "2.5.0-alpha"
 dependencies = [
@@ -12460,6 +12525,27 @@ dependencies = [
  "risingwave_error",
  "serde",
  "static_assertions",
+ "strum 0.27.1",
+ "thiserror 2.0.12",
+ "walkdir",
+ "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_pb_data"
+version = "2.5.0-alpha"
+dependencies = [
+ "enum-as-inner",
+ "fs-err",
+ "madsim-tonic",
+ "madsim-tonic-build",
+ "pbjson",
+ "pbjson-build",
+ "prost 0.13.4",
+ "prost-build 0.13.4",
+ "prost-helpers-pb-data",
+ "risingwave_error",
+ "serde",
  "strum 0.27.1",
  "thiserror 2.0.12",
  "walkdir",

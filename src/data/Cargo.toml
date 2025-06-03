@@ -1,0 +1,74 @@
+[package]
+name = "risingwave_data"
+description = "Core data structures for RisingWave (array, types, row)"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[dependencies]
+ahash = "0.8"
+anyhow = "1"
+arrow-54-array = { package = "arrow-array", version = "54" }
+arrow-54-buffer = { package = "arrow-buffer", version = "54" }
+arrow-54-cast = { package = "arrow-cast", version = "54" }
+arrow-54-schema = { package = "arrow-schema", version = "54" }
+arrow-55-array = { package = "arrow-array", version = "55" }
+arrow-55-buffer = { package = "arrow-buffer", version = "55" }
+arrow-55-cast = { package = "arrow-cast", version = "55" }
+arrow-55-schema = { package = "arrow-schema", version = "55" }
+auto_impl = "1"
+bitfield-struct = "0.11"
+bytes = "1"
+chrono = { workspace = true, features = [
+    "clock",
+    "std",
+] }
+chrono-tz = { version = "0.10", features = ["case-insensitive"] }
+easy-ext = "1"
+educe = "0.6"
+either = "1"
+enum-as-inner = "0.6"
+ethnum = { version = "1", features = ["serde"] }
+hashbrown = "0.15.2"
+itertools = { workspace = true }
+itoa = "1.0"
+jiff = "0.1.15"
+jsonbb = { workspace = true }
+memcomparable = { version = "0.2", features = ["decimal"] }
+num-integer = "0.1"
+num-traits = "0.2"
+postgres-types = { version = "0.2.6", features = [
+    "derive",
+    "with-chrono-0_4",
+    "with-serde_json-1",
+] }
+risingwave_common_estimate_size = { workspace = true }
+risingwave_error = { workspace = true }
+rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
+ryu = "1.0"
+serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
+serde_json = "1"
+smallvec = { workspace = true }
+speedate = "0.15.0"
+static_assertions = "1"
+strum = "0.27"
+strum_macros = "0.27"
+thiserror = "2"
+tinyvec = { version = "1", features = ["rustc_1_55", "grab_spare_slice"] }
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../workspace-hack" }
+
+[dev-dependencies]
+expect-test = "1"
+more-asserts = "0.3"
+pretty_assertions = "1"
+rand = { workspace = true }
+tempfile = "3"
+
+[lints]
+workspace = true

@@ -1,0 +1,33 @@
+[package]
+name = "risingwave_pb_data"
+description = "Core protobuf data structures for RisingWave"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[dependencies]
+enum-as-inner = "0.6"
+pbjson = "0.7"
+prost = { workspace = true }
+prost-helpers = { path = "helpers", package = "prost-helpers-pb-data" }
+risingwave_error = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+strum = { version = "0.27", features = ["derive"] }
+thiserror = "2"
+tonic = { workspace = true }
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../workspace-hack" }
+
+[build-dependencies]
+fs-err = "3.1"
+pbjson-build = "0.7"
+prost-build = { workspace = true }
+tonic-build = { workspace = true }
+walkdir = "2"
+
+[lints]
+workspace = true

@@ -19,6 +19,7 @@ members = [
     "src/connector/codec",
     "src/connector/with_options",
     "src/ctl",
+    "src/data",
     "src/dml",
     "src/error",
     "src/expr/core",
@@ -37,6 +38,8 @@ members = [
     "src/meta/node",
     "src/meta/service",
     "src/object_store",
+    "src/pb_data",
+    "src/pb_data/helpers",
     "src/prost",
     "src/prost/helpers",
     "src/risedevtool",
@@ -242,6 +245,7 @@ risingwave_compute = { path = "./src/compute" }
 risingwave_ctl = { path = "./src/ctl" }
 risingwave_connector = { path = "./src/connector" }
 risingwave_connector_codec = { path = "./src/connector/codec" }
+risingwave_data = { path = "./src/data" }
 risingwave_dml = { path = "./src/dml" }
 risingwave_error = { path = "./src/error" }
 risingwave_expr = { path = "./src/expr/core" }
@@ -260,6 +264,7 @@ risingwave_meta_model_migration = { path = "src/meta/model/migration" }
 risingwave_meta_node = { path = "./src/meta/node" }
 risingwave_object_store = { path = "./src/object_store" }
 risingwave_pb = { path = "./src/prost" }
+risingwave_pb_data = { path = "./src/pb_data" }
 risingwave_rpc_client = { path = "./src/rpc_client" }
 risingwave_rt = { path = "./src/utils/runtime" }
 risingwave_sqlparser = { path = "./src/sqlparser" }
