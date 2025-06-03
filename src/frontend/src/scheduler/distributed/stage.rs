@@ -65,6 +65,7 @@ use crate::scheduler::distributed::stage::StageState::Pending;
 use crate::scheduler::plan_fragmenter::{
     ExecutionPlanNode, PartitionInfo, QueryStageRef, ROOT_TASK_ID, StageId, TaskId,
 };
+use crate::scheduler::task_context::StageStats;
 use crate::scheduler::{ExecutionContextRef, SchedulerError, SchedulerResult};
 
 const TASK_SCHEDULING_PARALLELISM: usize = 10;
@@ -94,7 +95,7 @@ pub enum StageEvent {
         reason: SchedulerError,
     },
     /// All tasks in stage finished.
-    Completed(#[allow(dead_code)] StageId),
+    Completed(#[allow(dead_code)] StageId, Option<StageStats>),
 }
 
 #[derive(Clone)]
@@ -484,10 +485,14 @@ impl StageRunner {
         let mut finished_task_cnt = 0;
         let mut sent_signal_to_next = false;
 
+        let mut stage_stats = StageStats::new();
         while let Some(status_res_inner) = all_streams.next().await {
             match status_res_inner {
                 Ok(status) => {
                     use risingwave_pb::task_service::task_info_response::TaskStatus as PbTaskStatus;
+                    if let Some(ref task_stats) = status.task_stats {
+                        stage_stats.add_task_stats(task_stats);
+                    }
                     match PbTaskStatus::try_from(status.task_status).unwrap() {
                         PbTaskStatus::Running => {
                             running_task_cnt += 1;
@@ -512,7 +517,7 @@ impl StageRunner {
                             if finished_task_cnt == self.tasks.keys().len() {
                                 // All tasks finished without failure, we should not break
                                 // this loop
-                                self.notify_stage_completed().await;
+                                self.notify_stage_completed(Some(stage_stats)).await;
                                 sent_signal_to_next = true;
                                 break;
                             }
@@ -711,7 +716,8 @@ impl StageRunner {
                     warn!("Send task execution failed");
                 }
             }
-            _ => self.notify_stage_completed().await,
+            // TODO: collect stage stats for root stage
+            _ => self.notify_stage_completed(None).await,
         }
 
         tracing::trace!(
@@ -861,13 +867,13 @@ impl StageRunner {
     }
 
     /// Notify query execution that this stage completed.
-    async fn notify_stage_completed(&self) {
+    async fn notify_stage_completed(&self, stage_stats: Option<StageStats>) {
         self.notify_stage_state_changed(
             |old_state| {
                 assert_matches!(old_state, StageState::Running);
                 StageState::Completed
             },
-            QueryMessage::Stage(StageEvent::Completed(self.stage.id)),
+            QueryMessage::Stage(StageEvent::Completed(self.stage.id, stage_stats)),
         )
         .await
     }

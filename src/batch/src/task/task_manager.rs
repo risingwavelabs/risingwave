@@ -177,6 +177,7 @@ impl BatchManager {
                     task_id: Some(task_id.to_prost()),
                     task_status: TaskStatus::Ping.into(),
                     error_message: "".to_owned(),
+                    task_stats: None,
                 })
                 .await
                 .is_err()

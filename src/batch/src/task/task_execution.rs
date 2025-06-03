@@ -19,6 +19,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use futures::StreamExt;
 use parking_lot::Mutex;
+use risingwave_batch::task::task_stats::TaskStatsRef;
 use risingwave_common::array::DataChunk;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
@@ -29,7 +30,7 @@ use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
-use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
+use risingwave_pb::task_service::{GetDataResponse, PbTaskStats, TaskInfoResponse};
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::task::JoinHandle;
@@ -406,7 +407,7 @@ impl BatchTaskExecution {
         // After we init the output receivers, it's must safe to schedule next stage -- able to send
         // TaskStatus::Running here.
         // Init the state receivers. Swap out later.
-        self.change_state_notify(TaskStatus::Running, state_tx.as_mut(), None)
+        self.change_state_notify(TaskStatus::Running, state_tx.as_mut(), None, None)
             .await?;
 
         // Clone `self` to make compiler happy because of the move block.
@@ -424,7 +425,7 @@ impl BatchTaskExecution {
             };
 
             if let Err(e) = this
-                .change_state_notify(TaskStatus::Failed, state_tx, Some(err_str))
+                .change_state_notify(TaskStatus::Failed, state_tx, Some(err_str), None)
                 .await
             {
                 warn!(
@@ -477,6 +478,7 @@ impl BatchTaskExecution {
         task_status: TaskStatus,
         state_tx: Option<&mut StateReporter>,
         err_str: Option<String>,
+        table_stats: Option<TaskStatsRef>,
     ) -> Result<()> {
         self.change_state(task_status);
         // Notify frontend the task status.
@@ -486,6 +488,7 @@ impl BatchTaskExecution {
                     task_id: Some(self.task_id.to_prost()),
                     task_status: task_status.into(),
                     error_message: err_str.unwrap_or("".to_owned()),
+                    task_stats: table_stats.map(|t| PbTaskStats::from(t.as_ref())),
                 })
                 .await
         } else {
@@ -606,7 +609,10 @@ impl BatchTaskExecution {
             }
         }
 
-        if let Err(e) = self.change_state_notify(state, state_tx, err_str).await {
+        if let Err(e) = self
+            .change_state_notify(state, state_tx, err_str, self.context.task_stats().clone())
+            .await
+        {
             warn!(
                 error = %e.as_report(),
                 "The status receiver in FE has closed so the status push is failed",

@@ -18,6 +18,10 @@ message TaskId {
   uint32 task_id = 3;
 }
 
+message TaskStats {
+  uint64 row_scan_count = 1;
+}
+
 message TaskInfoResponse {
   enum TaskStatus {
     // Note: Requirement of proto3: first enum must be 0.
@@ -34,6 +38,7 @@ message TaskInfoResponse {
   TaskStatus task_status = 2;
   // Optional error message for failed task.
   string error_message = 3;
+  optional TaskStats task_stats = 4;
 }
 
 message CreateTaskRequest {

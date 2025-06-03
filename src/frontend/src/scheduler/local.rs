@@ -98,6 +98,7 @@ impl LocalQueryExecution {
             query_id = %self.query.query_id,
             "Starting to run query"
         );
+        // TODO: collect query stats for local mode
         let context = FrontendBatchTaskContext::create(self.session.clone());
         let task_id = TaskId {
             query_id: self.query.query_id.id.clone(),

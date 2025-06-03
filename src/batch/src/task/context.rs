@@ -26,6 +26,7 @@ use risingwave_storage::StateStoreImpl;
 
 use crate::error::Result;
 use crate::monitor::{BatchMetrics, BatchMetricsInner, BatchSpillMetrics};
+use crate::task::task_stats::{TaskStats, TaskStatsRef};
 use crate::task::{BatchEnvironment, TaskOutput, TaskOutputId};
 use crate::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 
@@ -66,6 +67,8 @@ pub trait BatchTaskContext: Send + Sync + 'static {
     fn create_executor_mem_context(&self, executor_id: &str) -> MemoryContext;
 
     fn worker_node_manager(&self) -> Option<WorkerNodeManagerRef>;
+
+    fn task_stats(&self) -> Option<TaskStatsRef>;
 }
 
 /// Batch task context on compute node.
@@ -129,6 +132,10 @@ impl BatchTaskContext for ComputeNodeContext {
     fn worker_node_manager(&self) -> Option<WorkerNodeManagerRef> {
         None
     }
+
+    fn task_stats(&self) -> Option<TaskStatsRef> {
+        None
+    }
 }
 
 impl ComputeNodeContext {
@@ -140,17 +147,89 @@ impl ComputeNodeContext {
         })
     }
 
-    pub fn create(env: BatchEnvironment) -> Arc<dyn BatchTaskContext> {
+    pub fn create(env: BatchEnvironment) -> Self {
         let mem_context = env.task_manager().memory_context_ref();
         let batch_metrics = Arc::new(BatchMetricsInner::new(
             env.task_manager().metrics(),
             env.executor_metrics(),
             env.iceberg_scan_metrics(),
         ));
-        Arc::new(Self {
+        Self {
             env,
             batch_metrics,
             mem_context,
+        }
+    }
+}
+
+/// Batch task context specific to one task execution.
+#[derive(Clone)]
+pub struct BatchTaskContextImpl {
+    compute_node_context: ComputeNodeContext,
+
+    task_stats: TaskStatsRef,
+}
+
+impl BatchTaskContextImpl {
+    pub fn new(compute_node_context: ComputeNodeContext) -> Arc<dyn BatchTaskContext> {
+        Arc::new(Self {
+            compute_node_context,
+            task_stats: Arc::new(TaskStats::new()),
         })
+    }
+}
+
+impl BatchTaskContext for BatchTaskContextImpl {
+    fn get_task_output(&self, task_output_id: TaskOutputId) -> Result<TaskOutput> {
+        self.compute_node_context.get_task_output(task_output_id)
+    }
+
+    fn catalog_reader(&self) -> SysCatalogReaderRef {
+        self.compute_node_context.catalog_reader()
+    }
+
+    fn is_local_addr(&self, peer_addr: &HostAddr) -> bool {
+        self.compute_node_context.is_local_addr(peer_addr)
+    }
+
+    fn dml_manager(&self) -> DmlManagerRef {
+        self.compute_node_context.dml_manager()
+    }
+
+    fn state_store(&self) -> StateStoreImpl {
+        self.compute_node_context.state_store()
+    }
+
+    fn batch_metrics(&self) -> Option<BatchMetrics> {
+        self.compute_node_context.batch_metrics()
+    }
+
+    fn spill_metrics(&self) -> Arc<BatchSpillMetrics> {
+        self.compute_node_context.spill_metrics()
+    }
+
+    fn client_pool(&self) -> ComputeClientPoolRef {
+        self.compute_node_context.client_pool()
+    }
+
+    fn get_config(&self) -> &BatchConfig {
+        self.compute_node_context.get_config()
+    }
+
+    fn source_metrics(&self) -> Arc<SourceMetrics> {
+        self.compute_node_context.source_metrics()
+    }
+
+    fn create_executor_mem_context(&self, executor_id: &str) -> MemoryContext {
+        self.compute_node_context
+            .create_executor_mem_context(executor_id)
+    }
+
+    fn worker_node_manager(&self) -> Option<WorkerNodeManagerRef> {
+        self.compute_node_context.worker_node_manager()
+    }
+
+    fn task_stats(&self) -> Option<TaskStatsRef> {
+        Some(self.task_stats.clone())
     }
 }

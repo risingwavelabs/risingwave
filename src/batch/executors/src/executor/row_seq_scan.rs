@@ -13,10 +13,12 @@
 // limitations under the License.
 use std::ops::Deref;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use futures::{StreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use prometheus::Histogram;
+use risingwave_batch::task::task_stats::TaskStatsRef;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Schema};
@@ -54,6 +56,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
     epoch: BatchQueryEpoch,
     limit: Option<u64>,
     as_of: Option<AsOf>,
+    task_stats: Option<TaskStatsRef>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AsOf {
@@ -96,6 +99,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         limit: Option<u64>,
         metrics: Option<BatchMetrics>,
         as_of: Option<AsOf>,
+        task_stats: Option<TaskStatsRef>,
     ) -> Self {
         Self {
             chunk_size,
@@ -107,6 +111,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             epoch,
             limit,
             as_of,
+            task_stats,
         }
     }
 }
@@ -158,6 +163,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             source.context().get_config().developer.chunk_size as u32
         };
         let metrics = source.context().batch_metrics();
+        let task_stats = source.context().task_stats();
 
         dispatch_state_store!(source.context().state_store(), state_store, {
             let table = BatchTable::new_partial(state_store, column_ids, vnodes, table_desc);
@@ -171,6 +177,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 limit,
                 metrics,
                 as_of,
+                task_stats,
             )))
         })
     }
@@ -203,6 +210,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             epoch,
             limit,
             as_of,
+            task_stats,
         } = *self;
         let table = Arc::new(table);
         // as_of takes precedence
@@ -236,9 +244,15 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
 
         // the number of rows have been returned as execute result
         let mut returned = 0;
+        fn collect_table_stats(task_stats: Option<TaskStatsRef>, returned: u64) {
+            if let Some(ref t) = task_stats {
+                t.row_scan_count.fetch_add(returned, Ordering::Relaxed);
+            }
+        }
         if let Some(limit) = &limit
             && returned >= *limit
         {
+            collect_table_stats(task_stats, returned);
             return Ok(());
         }
         let mut data_chunk_builder = DataChunkBuilder::new(table.schema().data_types(), chunk_size);
@@ -254,6 +268,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                     if let Some(limit) = &limit
                         && returned >= *limit
                     {
+                        collect_table_stats(task_stats, returned);
                         return Ok(());
                     }
                 }
@@ -265,6 +280,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             if let Some(limit) = &limit
                 && returned >= *limit
             {
+                collect_table_stats(task_stats, returned);
                 return Ok(());
             }
         }
@@ -290,10 +306,12 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                 if let Some(limit) = &limit
                     && returned >= *limit
                 {
+                    collect_table_stats(task_stats, returned);
                     return Ok(());
                 }
             }
         }
+        collect_table_stats(task_stats, returned);
     }
 
     async fn execute_point_get(

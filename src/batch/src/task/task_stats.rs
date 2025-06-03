@@ -12,19 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use context::*;
-pub use env::*;
-pub use task_execution::*;
-pub use task_manager::*;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-mod broadcast_channel;
-mod channel;
-mod consistent_hash_shuffle_channel;
-mod context;
-mod data_chunk_in_channel;
-mod env;
-mod fifo_channel;
-mod hash_shuffle_channel;
-mod task_execution;
-mod task_manager;
-pub mod task_stats;
+use risingwave_pb::task_service::PbTaskStats;
+
+pub type TaskStatsRef = Arc<TaskStats>;
+
+pub struct TaskStats {
+    pub row_scan_count: AtomicU64,
+}
+
+impl TaskStats {
+    pub fn new() -> Self {
+        Self {
+            row_scan_count: AtomicU64::new(0),
+        }
+    }
+}
+
+impl From<&TaskStats> for PbTaskStats {
+    fn from(t: &TaskStats) -> Self {
+        Self {
+            row_scan_count: t.row_scan_count.load(Ordering::Relaxed),
+        }
+    }
+}
