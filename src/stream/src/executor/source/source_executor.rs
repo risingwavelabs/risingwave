@@ -28,8 +28,8 @@ use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
-    ConnectorState, SourceContext, SourceCtrlOpts, SourceMuxMode, SplitId, SplitImpl,
-    SplitMetaData, StreamChunkWithState, WaitCheckpointTask,
+    ConnectorState, SourceContext, SourceCtrlOpts, SourceMuxMode, SplitId,
+    SplitImpl, SplitMetaData, StreamChunkWithState, WaitCheckpointTask,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::TryWaitEpochOptions;
@@ -81,6 +81,7 @@ impl<S: StateStore> SourceExecutor<S> {
         rate_limit_rps: Option<u32>,
         is_shared_non_cdc: bool,
     ) -> Self {
+        println!("creating source executor");
         Self {
             actor_ctx,
             stream_source_core,

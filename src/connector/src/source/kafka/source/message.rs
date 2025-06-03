@@ -15,7 +15,7 @@
 use std::borrow::Cow;
 
 use itertools::Itertools;
-use rdkafka::message::{BorrowedMessage, Headers, OwnedHeaders, OwnedMessage};
+use rdkafka::message::{Headers, OwnedHeaders, OwnedMessage};
 use rdkafka::{Message, Timestamp};
 use risingwave_common::types::{
     Datum, DatumCow, DatumRef, ListValue, ScalarImpl, ScalarRefImpl, StructValue,

@@ -11706,6 +11706,7 @@ dependencies = [
  "paste",
  "pg_bigdecimal",
  "phf",
+ "pin-project",
  "postgres-openssl",
  "pretty_assertions",
  "proc-macro2",

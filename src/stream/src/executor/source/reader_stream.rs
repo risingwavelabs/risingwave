@@ -19,7 +19,10 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::reader::desc::SourceDesc;
-use risingwave_connector::source::{BoxSourceChunkStream, ConnectorState, CreateSplitReaderResult, SourceContext, SourceCtrlOpts, SourceMuxMode, SplitMetaData, StreamChunkWithState};
+use risingwave_connector::source::{
+    BoxSourceChunkStream, ConnectorState, CreateSplitReaderResult, SourceContext,
+    SourceCtrlOpts, SourceMuxMode, SplitMetaData, StreamChunkWithState,
+};
 use thiserror_ext::AsReport;
 use tokio::sync::{mpsc, oneshot};
 
@@ -127,6 +130,137 @@ impl StreamReaderBuilder {
         self.reader_stream = Some(stream);
         Ok(res)
     }
+
+    // pub(crate) fn into_retry_stream2(
+    //     mut self,
+    //     state: ConnectorState,
+    //     is_initial_build: bool,
+    // ) -> (
+    //     BoxStream<'static, StreamExecutorResult<StreamChunkWithState>>,
+    //     ReleaseHandle,
+    // ) {
+    //     let (column_ids, source_ctx) = self.prepare_source_stream_build();
+    //     let source_ctx_ref = Arc::new(source_ctx);
+    //
+    //     let mut latest_splits_info = {
+    //         if let Some(splits) = state.as_ref() {
+    //             splits
+    //                 .iter()
+    //                 .map(|split| (split.id(), split.clone()))
+    //                 .collect::<HashMap<_, _>>()
+    //         } else {
+    //             HashMap::new()
+    //         }
+    //     };
+    //
+    //     let (Some(split_idx), Some(offset_idx)) =
+    //         get_split_offset_col_idx(&self.source_desc.columns)
+    //     else {
+    //         unreachable!("Partition and offset columns must be set.");
+    //     };
+    //
+    //     // 当前活跃 reader 的释放句柄
+    //     let mut last_handle: Option<ReleaseHandle> = None;
+    //
+    //     // ==== 2. 生成 retry 流 ====
+    //     let retry_stream = async_stream::stream! {
+    //         'build_loop: loop {
+    //             // ----- 先同步释放旧 reader -----
+    //             if let Some(handle) = last_handle.take() {
+    //                 handle.sync_release();     // 等待 unregister_splits 完成
+    //             }
+    //
+    //            let bootstrap_state = if latest_splits_info.is_empty() {
+    //                 None
+    //             } else {
+    //                 Some(latest_splits_info.values().cloned().collect_vec())
+    //             };
+    //             tracing::debug!(
+    //                 "build stream source reader with state: {:?}",
+    //                 bootstrap_state
+    //             );
+    //
+    //
+    //             // ----- 构建新 reader -----
+    //             let build_stream_result = if let Some(exist_stream) = self.reader_stream.take() {
+    //                 Ok((exist_stream, CreateSplitReaderResult::default()))
+    //             } else {
+    //                 self.source_desc
+    //                     .source
+    //                     .build_stream(
+    //                         bootstrap_state,
+    //                         column_ids.clone(),
+    //                         source_ctx_ref.clone(),
+    //                         is_initial_build,          // 仅首次 build 时可 seek_to_latest
+    //                     )
+    //                     .await
+    //                     .map_err(StreamExecutorError::connector_error)
+    //             };
+    //
+    //             if let Err(e) = build_stream_result {
+    //                 if is_initial_build {
+    //                     yield Err(StreamExecutorError::connector_error(e));
+    //                     break 'build_loop;
+    //                 } else {
+    //                     tracing::warn!(
+    //                         error = %e.as_report(),
+    //                         source_name = self.source_name,
+    //                         source_id = self.source_id.table_id,
+    //                         actor_id = self.actor_ctx.id,
+    //                         "build stream source reader error, retry in 1s"
+    //                     );
+    //                     tokio::time::sleep(Duration::from_secs(1)).await;
+    //                     continue 'build_loop;
+    //                 }
+    //             }
+    //
+    //             let (raw_stream, CreateSplitReaderResult{release_handle, ..}) = build_stream_result.unwrap();
+    //
+    //             last_handle = Some(release_handle);
+    //
+    //
+    //             let stream = apply_rate_limit(raw_stream, self.rate_limit).boxed();
+    //
+    //             #[for_await]
+    //             'consume_loop: for msg in stream {
+    //                 match msg {
+    //                     Ok(chunk) => {
+    //                         // 更新每个 split 的 latest offset
+    //                         for (_, row) in chunk.rows() {
+    //                             let split  = row.datum_at(split_idx).unwrap().into_utf8();
+    //                             let offset = row.datum_at(offset_idx).unwrap().into_utf8();
+    //                             latest_splits_info
+    //                                 .get_mut(&Arc::from(split.to_owned()))
+    //                                 .map(|split_impl| split_impl.update_in_place(offset.to_owned()));
+    //                         }
+    //                         yield Ok((chunk, latest_splits_info.clone()));
+    //                     }
+    //                     Err(e) => {
+    //                         tracing::warn!(
+    //                             error = %e.as_report(),
+    //                             source_name = self.source_name,
+    //                             source_id   = self.source_id.table_id,
+    //                             actor_id    = self.actor_ctx.id,
+    //                             "stream source reader error"
+    //                         );
+    //                         break 'consume_loop;
+    //                     }
+    //                 }
+    //             }
+    //
+    //             tracing::info!("stream reader quit, retry in 1s");
+    //             tokio::time::sleep(Duration::from_secs(1)).await;
+    //         }
+    //     };
+    //
+    //     let boxed_stream: BoxStream<'static, StreamExecutorResult<StreamChunkWithState>> =
+    //         Box::pin(retry_stream);
+    //
+    //     (
+    //         boxed_stream,
+    //         last_handle.unwrap_or_else(ReleaseHandle::noop),
+    //     )
+    // }
 
     #[try_stream(ok = StreamChunkWithState, error = StreamExecutorError)]
     pub(crate) async fn into_retry_stream(mut self, state: ConnectorState, is_initial_build: bool) {

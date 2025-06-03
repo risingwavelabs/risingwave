@@ -21,18 +21,15 @@ use std::time::Duration;
 
 use anyhow::Context;
 use async_trait::async_trait;
-use futures::stream::BoxStream;
-use futures::{StreamExt, TryStreamExt};
+use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::error::KafkaError;
 use rdkafka::message::OwnedMessage;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
-use scopeguard::defer;
 use tokio::sync::mpsc::Receiver;
 use tokio_stream::Stream;
 use tokio_stream::wrappers::ReceiverStream;
@@ -46,7 +43,7 @@ use crate::source::kafka::{
     KAFKA_ISOLATION_LEVEL, KafkaContextCommon, KafkaProperties, KafkaSplit, RwConsumerContext,
 };
 use crate::source::{
-    BackfillInfo, BoxSourceChunkStream, Column, ReleaseHandle, SourceContextRef, SourceMuxMode,
+    BackfillInfo, BoxSourceChunkStream, Column, ReleaseHandle, SourceContextRef,
     SplitId, SplitImpl, SplitMetaData, SplitReader, into_chunk_stream,
 };
 
@@ -98,6 +95,51 @@ pub struct KafkaSplitReader {
     source_ctx: SourceContextRef,
 }
 
+use std::task::Poll;
+
+use pin_project::{pin_project, pinned_drop};
+use tokio::runtime::Handle;
+
+#[pin_project(PinnedDrop)]
+pub struct StreamWithSyncCleanup<S> {
+    #[pin]
+    inner: S,
+    handle: ReleaseHandle,
+}
+
+impl<S: Stream> Stream for StreamWithSyncCleanup<S> {
+    type Item = S::Item;
+
+    fn poll_next(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        self.project().inner.poll_next(cx)
+    }
+}
+
+#[pinned_drop]
+impl<S> PinnedDrop for StreamWithSyncCleanup<S> {
+    fn drop(self: Pin<&mut Self>) {
+        let handle = std::mem::replace(
+            // Safety: we are in drop, it's OK to get a mutable reference
+            unsafe { self.map_unchecked_mut(|s| &mut s.handle) }.get_mut(),
+            ReleaseHandle::noop(),
+        );
+
+        if let Some(fut) = handle.into_future() {
+            if let Ok(h) = Handle::try_current() {
+                tokio::task::block_in_place(|| h.block_on(fut));
+            } else {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap();
+                rt.block_on(fut);
+            }
+        }
+    }
+}
 #[async_trait]
 impl SplitReader for KafkaSplitReader {
     type Properties = KafkaProperties;
@@ -250,9 +292,31 @@ impl SplitReader for KafkaSplitReader {
     }
 
     fn into_stream(self) -> BoxSourceChunkStream {
-        let parser_config = self.parser_config.clone();
+        let parser_cfg = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
-        into_chunk_stream(self.into_data_stream(), parser_config, source_context)
+        let cleanup = match &self.message_reader {
+            MessageReader::MuxReader { reader, .. } => {
+                let reader = Arc::clone(reader);
+                let splits2 = self
+                    .splits
+                    .iter()
+                    .map(|split| (split.topic.clone(), split.partition))
+                    .collect_vec();
+                ReleaseHandle::new(async move {
+                    let splits2 = splits2.clone();
+                    let _ = reader.unregister_splits(&splits2).await;
+                })
+            }
+            _ => ReleaseHandle::noop(),
+        };
+
+        let data_stream = self.into_data_stream(); // 原生成器
+        let chunk_stream = into_chunk_stream(data_stream, parser_cfg, source_context);
+
+        Box::pin(StreamWithSyncCleanup {
+            inner: chunk_stream,
+            handle: cleanup,
+        })
     }
 
     fn backfill_info(&self) -> HashMap<SplitId, BackfillInfo> {
@@ -288,27 +352,6 @@ impl SplitReader for KafkaSplitReader {
             MessageReader::MuxReader { .. } => {
                 todo!()
             }
-        }
-    }
-
-    fn release_handle(&self) -> ReleaseHandle {
-        match &self.message_reader {
-            MessageReader::MuxReader { reader, .. } => {
-                let reader = Arc::clone(reader);
-                let splits = self.splits.clone();
-                // let splits = splits.clone();
-
-                ReleaseHandle::new(async move {
-                    let splits2 = splits
-                        .iter()
-                        .map(|split| (split.topic.clone(), split.partition))
-                        .collect_vec();
-                    if let Err(e) = reader.unregister_splits(&splits2).await {
-                        tracing::warn!("unregister_splits failed during release: {}", e);
-                    }
-                })
-            }
-            _ => ReleaseHandle::noop(),
         }
     }
 }
