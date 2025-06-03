@@ -1,7 +1,7 @@
 control substitution on
 
 system ok
-rpk topic create kafka_alter_connector_props -p 3
+rpk topic create kafka_alter_connector_props -p 1
 
 system ok
 cat <<EOF | rpk topic produce 'kafka_alter_connector_props' -f "%k^%v\n"
@@ -33,6 +33,7 @@ CREATE TABLE plain_students_1 (
     weight REAL,
 )
 WITH (
+    connector = 'kafka',
     connection = conn,
     topic = 'kafka_alter_connector_props'
 )
