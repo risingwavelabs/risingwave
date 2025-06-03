@@ -105,6 +105,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             table_pk_order_types,
             table_pk_indices,
         );
+        dbg!(&external_table);
 
         let vnodes = params.vnode_bitmap.map(Arc::new);
         // cdc backfill should be singleton, so vnodes must be None.

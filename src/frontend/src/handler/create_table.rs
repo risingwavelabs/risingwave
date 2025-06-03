@@ -61,7 +61,7 @@ use risingwave_sqlparser::ast::{
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
 use thiserror_ext::AsReport;
 
-use super::create_source::{CreateSourceType, SqlColumnStrategy, bind_columns_from_source};
+use super::create_source::{CreateSourceType, SqlColumnStrategy};
 use super::{RwPgResponse, create_sink, create_source};
 use crate::binder::{Clause, SecureCompareContext, bind_data_type};
 use crate::catalog::root_catalog::SchemaPath;
@@ -822,6 +822,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         Rc::new(cdc_table_desc),
         context.clone(),
         options,
+        SourceNodeKind::CreateTable,
     );
 
     let scan_node: PlanRef = logical_scan.into();
@@ -874,7 +875,7 @@ pub fn derive_cdc_table_desc(
     column_defs: Vec<ColumnDef>,
     mut columns: Vec<ColumnCatalog>,
     pk_names: Vec<String>,
-    cdc_with_options: WithOptionsSecResolved,
+    shared_source_with_options: WithOptionsSecResolved,
     col_id_gen: &mut ColumnIdGenerator,
     include_column_options: IncludeOption,
     table_or_source_name: ObjectName,
@@ -883,7 +884,7 @@ pub fn derive_cdc_table_desc(
     // append additional columns to the end
     handle_addition_columns(
         None,
-        &cdc_with_options,
+        &shared_source_with_options,
         include_column_options,
         &mut columns,
         true,
@@ -921,7 +922,7 @@ pub fn derive_cdc_table_desc(
         .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
         .collect();
 
-    let (options, secret_refs) = cdc_with_options.into_parts();
+    let (options, secret_refs) = shared_source_with_options.into_parts();
 
     let non_generated_column_descs = columns
         .iter()
@@ -1215,7 +1216,7 @@ pub fn get_shared_source_info(
 }
 
 // For both table from cdc source and table with cdc connector
-fn generated_columns_check_for_cdc_table(columns: &Vec<ColumnDef>) -> Result<()> {
+pub fn generated_columns_check_for_cdc_table(columns: &Vec<ColumnDef>) -> Result<()> {
     let mut found_generated_column = false;
     for column in columns {
         let mut is_generated = false;
@@ -1232,7 +1233,7 @@ fn generated_columns_check_for_cdc_table(columns: &Vec<ColumnDef>) -> Result<()>
         } else if found_generated_column {
             return Err(ErrorCode::NotSupported(
                 "Non-generated column found after a generated column.".into(),
-                "Ensure that all generated columns appear at the end of the cdc table definition."
+                "Ensure that all generated columns appear at the end of the cdc table/source definition."
                     .into(),
             )
             .into());

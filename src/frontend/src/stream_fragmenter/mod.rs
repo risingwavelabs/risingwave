@@ -327,6 +327,13 @@ fn build_fragment(
 
                 if let Some(source) = node.source_inner.as_ref()
                     && let Some(source_info) = source.info.as_ref()
+                    && source_info.is_shared()
+                {
+                    current_fragment.fragment_type_mask |= FragmentTypeFlag::SharedCdcSource as u32;
+                }
+
+                if let Some(source) = node.source_inner.as_ref()
+                    && let Some(source_info) = source.info.as_ref()
                     && ((source_info.is_shared() && !source_info.is_distributed)
                         || source.with_properties.is_new_fs_connector()
                         || source.with_properties.is_iceberg_connector())
@@ -384,6 +391,7 @@ fn build_fragment(
             NodeBody::CdcFilter(node) => {
                 current_fragment.fragment_type_mask |= FragmentTypeFlag::CdcFilter as u32;
                 // memorize upstream source id for later use
+                dbg!(node.upstream_source_id);
                 state
                     .dependent_table_ids
                     .insert(node.upstream_source_id.into());

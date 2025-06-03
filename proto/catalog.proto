@@ -161,11 +161,11 @@ message Source {
 message CdcEtlSourceInfo {
   /// Shared cdc source
   uint32 shared_source_id = 1;
-    
+  /// external table name
+  string external_table_name = 2;
+
   /// properties will be passed into the `StreamScanNode`
-  map<string, string> properties = 2;
-    /// Secret refs
-  map<string, secret.SecretRef> secret_refs = 3;
+  map<string, string> properties = 3;
 }
 
 enum SinkType {

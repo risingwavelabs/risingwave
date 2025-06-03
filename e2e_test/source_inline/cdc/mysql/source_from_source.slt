@@ -1,0 +1,174 @@
+# create and drop CDC mysql tables concurrently
+
+control substitution on
+
+statement ok
+ALTER SYSTEM SET max_concurrent_creating_streaming_jobs TO 1;
+
+system ok
+mysql -e "
+    DROP DATABASE IF EXISTS testdb1; CREATE DATABASE testdb1;
+    USE testdb1;
+    CREATE TABLE tt1 (v1 int primary key, v2 timestamp);
+    INSERT INTO tt1 VALUES (1, '2023-10-23 10:00:00');
+"
+
+system ok
+mysql -e "
+    DROP USER IF EXISTS 'shared-cdc'@'%';
+    CREATE USER 'shared-cdc'@'%' IDENTIFIED BY 'abcdef';
+    GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'shared-cdc'@'%';
+    #
+    FLUSH PRIVILEGES;
+"
+
+statement ok
+create source s1 with (
+  ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+  username = 'shared-cdc',
+  password = 'abcdef',
+  database.name = 'testdb1',
+);
+
+
+sleep 2s
+
+
+statement ok
+create SOURCE elt1_s1 (
+  *
+) from s1 table 'testdb1.tt1';
+
+statement ok
+create SOURCE elt2_s1 (
+  *
+) from s1 table 'testdb1.tt1';
+
+sleep 2s
+
+# The source is resumed.
+# SourceExecutor does not handle historical data, and only receives new data after it's created.
+# But it can receive offset update at the beginning and periodically
+# via the heartbeat message.
+system ok
+internal_table.mjs --name s --type '' --count
+----
+count: 1
+
+
+statement ok
+create materialized view m1_etl1 as select * from elt1_s1;
+
+statement ok
+create materialized view m2_etl1 as select v2 from elt1_s1;
+
+statement ok
+create materialized view m1_etl2 as select v2 from elt2_s1;
+
+sleep 5s
+
+
+query TTTT
+describe elt1_s1;
+----
+v1 integer false NULL
+v2 timestamp with time zone false NULL
+primary key v1 NULL NULL
+table description elt1_s1 NULL NULL
+
+
+query TTTT
+describe m1_etl1;
+----
+v1 integer false NULL
+v2 timestamp with time zone false NULL
+_rw_timestamp timestamp with time zone true NULL
+primary key v1 NULL NULL
+distribution key v1 NULL NULL
+table description m1_etl1 NULL NULL
+
+
+query TTTT
+describe m2_etl1;
+----
+v2 timestamp with time zone false NULL
+v1 integer true NULL
+_rw_timestamp timestamp with time zone true NULL
+primary key v1 NULL NULL
+distribution key v1 NULL NULL
+table description m2_etl1 NULL NULL
+
+# upstream
+system ok
+mysql -e "
+    INSERT INTO testdb1.tt1 VALUES (2, '2023-10-24 11:00:00');
+"
+
+# wait for the CDC job to process the new data
+sleep 2s
+
+
+query error Querying a CDC ETL source is not supported in batch mode
+select * from elt1_s1;
+
+
+query IT
+select * from m1_etl1 order by v1;
+----
+1 2023-10-23 10:00:00+00:00
+2 2023-10-24 11:00:00+00:00
+
+
+query T
+select * from m2_etl1 order by v2;
+----
+2023-10-23 10:00:00+00:00
+2023-10-24 11:00:00+00:00
+
+
+# upstream
+system ok
+mysql -e "
+    DELETE FROM testdb1.tt1 WHERE v1 = 2;
+"
+
+# wait for the CDC job to process the new delete
+sleep 2s
+
+query IT
+select * from m1_etl2;
+----
+2023-10-23 10:00:00+00:00
+
+
+statement error Permission denied: PermissionDenied: source used by 2 other objects.
+drop source s1;
+
+statement error Permission denied: PermissionDenied: source used by 2 other objects.
+drop source elt1_s1;
+
+statement ok
+drop materialized view m1_etl1;
+
+statement ok
+drop materialized view m2_etl1;
+
+statement ok
+drop source elt1_s1;
+
+statement error Permission denied: PermissionDenied: source used by 1 other objects.
+drop source s1;
+
+statement ok
+drop source s1 cascade;
+
+query T
+show materialized views;
+----
+
+
+query T
+show sources;
+----
+
+

@@ -1042,6 +1042,7 @@ enum FragmentTypeFlag {
   // Note: this flag is not available in old fragments, so only suitable for debugging purpose.
   FRAGMENT_TYPE_FLAG_FS_FETCH = 4096;
   FRAGMENT_TYPE_FLAG_CROSS_DB_SNAPSHOT_BACKFILL_STREAM_SCAN = 8192;
+  FRAGMENT_TYPE_FLAG_SHARED_CDC_SOURCE = 16384;
 }
 
 // The streaming context associated with a stream plan

@@ -305,11 +305,7 @@ impl From<ObjectModel<source::Model>> for PbSource {
             created_at_cluster_version: value.1.created_at_cluster_version,
             secret_refs: secret_ref_map,
             rate_limit: value.0.rate_limit.map(|v| v as _),
-            cdc_etl_info: value
-                .0
-                .cdc_elt_info
-                .as_ref()
-                .map(|info| info.to_protobuf()),
+            cdc_etl_info: value.0.cdc_etl_info.as_ref().map(|info| info.to_protobuf()),
         }
     }
 }

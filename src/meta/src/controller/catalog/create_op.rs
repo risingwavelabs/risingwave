@@ -179,9 +179,16 @@ impl CatalogController {
         let source: source::ActiveModel = pb_source.clone().into();
         Source::insert(source).exec(&txn).await?;
 
-        // add secret dependency
-        let dep_relation_ids = secret_ids.iter().chain(connection_ids.iter());
-        if !secret_ids.is_empty() || !connection_ids.is_empty() {
+        // add secret, connection and etl source dependency
+        let shared_source_id = pb_source
+            .cdc_etl_info
+            .clone()
+            .map(|info| info.shared_source_id);
+        let dep_relation_ids = secret_ids
+            .iter()
+            .chain(connection_ids.iter())
+            .chain(shared_source_id.iter());
+        if !secret_ids.is_empty() || !connection_ids.is_empty() || shared_source_id.is_some() {
             ObjectDependency::insert_many(dep_relation_ids.map(|id| {
                 object_dependency::ActiveModel {
                     oid: Set(*id as _),

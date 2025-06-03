@@ -27,7 +27,7 @@ use risingwave_connector::source::cdc::{
 };
 use risingwave_pb::stream_plan::StreamCdcScanOptions;
 
-use super::GenericPlanNode;
+use super::{GenericPlanNode, SourceNodeKind};
 use crate::WithOptions;
 use crate::catalog::ColumnId;
 use crate::error::Result;
@@ -41,6 +41,7 @@ use crate::optimizer::property::{FunctionalDependencySet, MonotonicityMap, Water
 pub struct CdcScan {
     pub table_name: String,
     /// Include `output_col_idx` and columns required in `predicate`
+    /// Currently not in use, but needed when we push the column pruning to the source node.
     pub output_col_idx: Vec<usize>,
     /// Descriptor of the external table for CDC
     pub cdc_table_desc: Rc<CdcTableDesc>,
@@ -49,6 +50,7 @@ pub struct CdcScan {
     pub ctx: OptimizerContextRef,
 
     pub options: CdcScanOptions,
+    pub kind: SourceNodeKind,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq)]
@@ -169,6 +171,7 @@ impl CdcScan {
         cdc_table_desc: Rc<CdcTableDesc>,
         ctx: OptimizerContextRef,
         options: CdcScanOptions,
+        kind: SourceNodeKind,
     ) -> Self {
         Self {
             table_name,
@@ -176,6 +179,7 @@ impl CdcScan {
             cdc_table_desc,
             ctx,
             options,
+            kind,
         }
     }
 
@@ -200,7 +204,7 @@ impl GenericPlanNode for CdcScan {
             .iter()
             .map(|tb_idx| {
                 let col = &self.get_table_columns()[*tb_idx];
-                Field::from_with_table_name_prefix(col, &self.table_name)
+                col.into()
             })
             .collect();
         Schema { fields }

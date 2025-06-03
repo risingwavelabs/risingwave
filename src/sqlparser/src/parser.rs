@@ -2199,10 +2199,6 @@ impl Parser<'_> {
             parser_err!("CDC source cannot define columns and constraints");
         }
 
-        // row format for nexmark source must be native
-        // default row format for datagen source is native
-        let format_encode = self.parse_format_encode_with_connector(&connector, cdc_source_job)?;
-
         // Check if source is created FROM another source
         let from_source = if self.parse_keyword(Keyword::FROM) {
             let source_name = self.parse_object_name()?;
@@ -2219,6 +2215,14 @@ impl Parser<'_> {
             })
         } else {
             None
+        };
+        let format_encode = if from_source.is_none() {
+            // row format for nexmark source must be native
+            // default row format for datagen source is native
+            self.parse_format_encode_with_connector(&connector, cdc_source_job)?
+        } else {
+            // source from source deos not support format encode
+            FormatEncodeOptions::none().into()
         };
 
         Ok(Statement::CreateSource {
