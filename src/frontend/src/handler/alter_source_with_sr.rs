@@ -77,6 +77,7 @@ fn encode_type_to_encode(from: EncodeType) -> Option<Encode> {
 /// - Hidden columns and `INCLUDE ... AS ...` columns are ignored. Because it's only for the special handling of alter sr.
 ///   For the newly resolved `columns_from_resolve_source` (created by [`bind_columns_from_source`]), it doesn't contain hidden columns (`_row_id`) and `INCLUDE ... AS ...` columns.
 ///   This is fragile and we should really refactor it later.
+/// - Generated columns are ignored when calculating dropped columns, because they are defined in SQL and should be preserved during schema refresh.
 /// - Column with the same name but different data type is considered as a different column, i.e., altering the data type of a column
 ///   will be treated as dropping the old column and adding a new column. Note that we don't reject here like we do in `ALTER TABLE REFRESH SCHEMA`,
 ///   because there's no data persistence (thus compatibility concern) in the source case.
@@ -86,6 +87,7 @@ fn columns_minus(columns_a: &[ColumnCatalog], columns_b: &[ColumnCatalog]) -> Ve
         .filter(|col_a| {
             !col_a.is_hidden()
                 && !col_a.is_connector_additional_column()
+                && !col_a.is_generated()
                 && !columns_b.iter().any(|col_b| {
                     col_a.name() == col_b.name() && col_a.data_type() == col_b.data_type()
                 })

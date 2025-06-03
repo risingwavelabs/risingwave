@@ -1,0 +1,85 @@
+control substitution on
+
+statement ok
+SET streaming_use_shared_source TO false;
+
+system ok
+rpk topic delete pb_alter_source_gen_col_test || true; \
+(rpk sr subject delete 'pb_alter_source_gen_col_test-value' && rpk sr subject delete 'pb_alter_source_gen_col_test-value' --permanent) || true;
+
+system ok
+python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "pb_alter_source_gen_col_test" 20 user
+
+# Create source with generated column
+statement ok
+CREATE SOURCE src_user_gen (*, t int as id+1)
+INCLUDE timestamp
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'pb_alter_source_gen_col_test',
+    scan.startup.mode = 'earliest'
+)
+FORMAT PLAIN ENCODE PROTOBUF(
+    schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+    message = 'test.User'
+);
+
+query T
+SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 'src_user_gen';
+----
+CREATE SOURCE src_user_gen (id INT, name CHARACTER VARYING, address CHARACTER VARYING, city CHARACTER VARYING, gender CHARACTER VARYING, sc STRUCT<file_name CHARACTER VARYING>, t INT AS id + 1) INCLUDE timestamp
+
+# Test that generated column works
+statement ok
+CREATE MATERIALIZED VIEW mv_user_gen AS SELECT id, t FROM src_user_gen;
+
+sleep 2s
+
+query II rowsort
+SELECT id, t FROM mv_user_gen LIMIT 5;
+----
+0 1
+1 2
+2 3
+3 4
+4 5
+
+# Push more events with extended fields (add 'age' field)
+system ok
+python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "pb_alter_source_gen_col_test" 5 user_with_more_fields
+
+sleep 5s
+
+# This should work - refresh schema without affecting generated column
+statement ok
+ALTER SOURCE src_user_gen REFRESH SCHEMA;
+
+# Verify the generated column is still there and the new field 'age' is added
+query T
+SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 'src_user_gen';
+----
+CREATE SOURCE src_user_gen (id INT, name CHARACTER VARYING, address CHARACTER VARYING, city CHARACTER VARYING, gender CHARACTER VARYING, sc STRUCT<file_name CHARACTER VARYING>, t INT AS id + 1, age INT) INCLUDE timestamp
+
+# Test that generated column still works after schema refresh
+statement ok
+CREATE MATERIALIZED VIEW mv_user_gen_after AS SELECT id, t, age FROM src_user_gen;
+
+sleep 2s
+
+# Verify data - generated column should still work correctly
+query III
+SELECT COUNT(*), MIN(t), MAX(t) FROM mv_user_gen_after WHERE t = id + 1;
+----
+25 1 20
+
+statement ok
+DROP MATERIALIZED VIEW mv_user_gen_after;
+
+statement ok
+DROP MATERIALIZED VIEW mv_user_gen;
+
+statement ok
+DROP SOURCE src_user_gen;
+
+statement ok
+SET streaming_use_shared_source TO true;
