@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
+use std::cmp::{Ordering, min};
 use std::collections::BinaryHeap;
 use std::mem::replace;
 
@@ -129,10 +129,23 @@ impl<I> BoundedNearest<I> {
         }
     }
 
-    pub fn collect(mut self) -> Vec<I> {
+    pub fn collect(self) -> Vec<I> {
+        self.collect_with(|item| item, None)
+    }
+
+    pub fn collect_with<O>(mut self, mut f: impl FnMut(I) -> O, limit: Option<usize>) -> Vec<O> {
         let size = self.heap.0.len();
+        let size = if let Some(limit) = limit {
+            min(size, limit)
+        } else {
+            size
+        };
         let mut vec = Vec::with_capacity(size);
         let uninit_slice = vec.spare_capacity_mut();
+        while self.heap.0.len() > size {
+            self.heap.pop();
+        }
+        assert_eq!(size, self.heap.0.len());
         let mut i = size;
         // elements are popped from max to min, so we write elements from back to front to ensure that the output is sorted ascendingly.
         while let Some(node) = self.heap.0.pop() {
@@ -140,7 +153,7 @@ impl<I> BoundedNearest<I> {
             // safety: `i` is initialized as the size of `self.heap`. It must have decremented for once, and can
             // decrement for at most `size` time, so it must be that 0 <= i < size
             unsafe {
-                uninit_slice.get_unchecked_mut(i).write(node.item);
+                uninit_slice.get_unchecked_mut(i).write(f(node.item));
             }
         }
         assert_eq!(i, 0);
@@ -164,5 +177,79 @@ impl<'a, I> IntoIterator for &'a BoundedNearest<I> {
 
     fn into_iter(self) -> Self::IntoIter {
         self.heap.0.iter().map(|node| (node.distance, &node.item))
+    }
+}
+
+impl<I> IntoIterator for BoundedNearest<I> {
+    type Item = (VectorDistance, I);
+
+    type IntoIter = impl Iterator<Item = Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.heap
+            .0
+            .into_iter()
+            .map(|node| (node.distance, node.item))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cmp::min;
+
+    use itertools::Itertools;
+    use rand::{Rng, rng};
+
+    use crate::vector::test_utils::{gen_info, top_n};
+    use crate::vector::utils::BoundedNearest;
+
+    fn test_inner(count: usize, n: usize, limit: Option<usize>) {
+        let input = (0..count).map(|i| (rng().random::<f32>(), i)).collect_vec();
+        let mut nearest = BoundedNearest::new(n);
+        for &(distance, item) in &input {
+            nearest.insert(distance, || item);
+        }
+        let output = nearest.collect_with(gen_info, limit);
+        let mut expected_output = input
+            .iter()
+            .map(|(distance, i)| (*distance, gen_info(*i)))
+            .collect_vec();
+        let n = if let Some(limit) = limit {
+            min(n, limit)
+        } else {
+            n
+        };
+        top_n(&mut expected_output, n);
+        let expected_output = expected_output
+            .into_iter()
+            .map(|(_, info)| info)
+            .collect_vec();
+        assert_eq!(output, expected_output);
+    }
+
+    #[test]
+    fn test_not_full_top_n() {
+        test_inner(5, 10, None);
+        test_inner(5, 10, Some(3));
+        test_inner(5, 10, Some(5));
+        test_inner(5, 10, Some(7));
+    }
+
+    #[test]
+    fn test_exact_size_top_n() {
+        test_inner(10, 10, None);
+        test_inner(10, 10, Some(8));
+        test_inner(10, 10, Some(10));
+        test_inner(10, 10, Some(12));
+    }
+
+    #[test]
+    fn test_oversize_top_n() {
+        test_inner(20, 10, None);
+        test_inner(20, 10, Some(8));
+        test_inner(20, 10, Some(10));
+        test_inner(20, 10, Some(15));
+        test_inner(20, 10, Some(20));
+        test_inner(20, 10, Some(25));
     }
 }
