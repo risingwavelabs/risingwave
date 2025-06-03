@@ -83,37 +83,64 @@ chmod +x ./target/debug/risingwave_e2e_extended_mode_test
 echo "--- Install Python Dependencies"
 python3 -m pip install --break-system-packages -r ./e2e_test/requirements.txt
 
-echo "--- e2e, $mode, streaming"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_stream::common::table::state_table=warn" \
-cluster_start
-# Please make sure the regression is expected before increasing the timeout.
-risedev slt -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
-risedev slt -p 4566 -d dev './e2e_test/backfill/sink/different_pk_and_dist_key.slt'
+# Skip streaming and basic batch tests for cluster mode since parallel tests cover these
+if [[ "$mode" == "standalone" || "$mode" == "single-node" ]]; then
+  echo "--- e2e, $mode, streaming"
+  RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_stream::common::table::state_table=warn" \
+  cluster_start
+  # Please make sure the regression is expected before increasing the timeout.
+  risedev slt -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
+  risedev slt -p 4566 -d dev './e2e_test/backfill/sink/different_pk_and_dist_key.slt'
 
-if [[ "$profile" == "ci-release" ]]; then
+  if [[ "$profile" == "ci-release" ]]; then
+    echo "--- e2e, $mode, backfill"
+    # only run in release-mode. It's too slow for dev-mode.
+    risedev slt -p 4566 -d dev './e2e_test/backfill/backfill_order_control.slt'
+    risedev slt -p 4566 -d dev './e2e_test/backfill/backfill_order_control_recovery.slt'
+  fi
+
+  echo "--- Kill cluster"
+  cluster_stop
+
+  echo "--- e2e, $mode, batch"
+  RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+  cluster_start
+  risedev slt -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profile}" --label "can-use-recover"
+  risedev slt -p 4566 -d dev './e2e_test/background_ddl/basic.slt' --junit "batch-ddl-${profile}"
+
+  if [[ "$mode" != "single-node" && "$mode" != "standalone" ]]; then
+    risedev slt -p 4566 -d dev './e2e_test/visibility_mode/*.slt' --junit "batch-${profile}"
+  fi
+
+  risedev slt -p 4566 -d dev './e2e_test/ttl/ttl.slt'
+  risedev slt -p 4566 -d dev './e2e_test/dml/*.slt'
+else
+  # For cluster mode, only run backfill tests that are not covered by parallel tests
   echo "--- e2e, $mode, backfill"
-  # only run in release-mode. It's too slow for dev-mode.
-  risedev slt -p 4566 -d dev './e2e_test/backfill/backfill_order_control.slt'
-  risedev slt -p 4566 -d dev './e2e_test/backfill/backfill_order_control_recovery.slt'
+  RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_stream::common::table::state_table=warn" \
+  cluster_start
+  risedev slt -p 4566 -d dev './e2e_test/backfill/sink/different_pk_and_dist_key.slt'
+
+  if [[ "$profile" == "ci-release" ]]; then
+    # only run in release-mode. It's too slow for dev-mode.
+    risedev slt -p 4566 -d dev './e2e_test/backfill/backfill_order_control.slt'
+    risedev slt -p 4566 -d dev './e2e_test/backfill/backfill_order_control_recovery.slt'
+  fi
+
+  echo "--- Kill cluster"
+  cluster_stop
+
+  echo "--- e2e, $mode, additional batch tests"
+  RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+  cluster_start
+  risedev slt -p 4566 -d dev './e2e_test/background_ddl/basic.slt' --junit "batch-ddl-${profile}"
+  risedev slt -p 4566 -d dev './e2e_test/ttl/ttl.slt'
+  risedev slt -p 4566 -d dev './e2e_test/dml/*.slt'
 fi
-
-echo "--- Kill cluster"
-cluster_stop
-
-echo "--- e2e, $mode, batch"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cluster_start
-risedev slt -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profile}" --label "can-use-recover"
-risedev slt -p 4566 -d dev './e2e_test/background_ddl/basic.slt' --junit "batch-ddl-${profile}"
-
-if [[ "$mode" != "single-node" && "$mode" != "standalone" ]]; then
-  risedev slt -p 4566 -d dev './e2e_test/visibility_mode/*.slt' --junit "batch-${profile}"
-fi
-
-risedev slt -p 4566 -d dev './e2e_test/ttl/ttl.slt'
-risedev slt -p 4566 -d dev './e2e_test/dml/*.slt'
 
 echo "--- e2e, $mode, misc"
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+cluster_start
 risedev slt -p 4566 -d dev './e2e_test/misc/**/*.slt'
 
 echo "--- e2e, $mode, python_client"

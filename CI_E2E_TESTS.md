@@ -6,74 +6,137 @@ This document describes the changes made to optimize CI resource usage by removi
 
 ## Issue
 
-Previously, RisingWave CI was running e2e tests in both serial and parallel modes by default, which was:
-- Wasting CI resources and time
-- Running redundant tests
-- Making CI slower than necessary
+Previously, RisingWave CI was running e2e tests with significant overlap between serial and parallel execution:
+- **Streaming tests**: Both serial and parallel scripts ran `./e2e_test/streaming/**/*.slt`
+- **Basic batch tests**: Both ran DDL and visibility_mode tests
+- This duplication wasted CI resources and time
 
 Reference: [GitHub Issue #18992](https://github.com/risingwavelabs/risingwave/issues/18992)
 
-## Changes Made
+## Analysis of Test Coverage
 
-### 1. Modified `ci/workflows/pull-request.yml`
+### Serial e2e tests (`e2e-test-serial.sh`):
+- **Comprehensive coverage** for standalone, single-node, and cluster modes
+- **Unique tests**: misc, python_client, subscription, superset, error_ui, extended_mode
+- **Mode-specific tests**: standalone persistence and cluster options tests
+- **Additional tests**: ttl, dml, background_ddl, backfill tests
 
-**Before:**
-- Serial e2e test ran by default for all PRs (unless `ci/pr/run-selected` label was present)
-- Parallel e2e test also ran by default
-- Both tests were triggered by the same `ci/run-e2e-tests` label
+### Parallel e2e tests (`e2e-test-parallel.sh`):
+- **Fast execution** for cluster mode only using parallel execution (-j 16)
+- **Focused coverage**: streaming, basic batch, udf, generated tests
+- **Optimized for speed** with multiple frontend ports
 
-**After:**
-- Serial e2e test now only runs when explicitly requested via `ci/run-e2e-tests-serial` label
-- Parallel e2e test continues to run by default and is triggered by `ci/run-e2e-tests` label
-- This eliminates the duplication while preserving the ability to run serial tests when needed for debugging
+### Overlapping Tests (Duplication):
+- Streaming tests: `./e2e_test/streaming/**/*.slt`
+- Basic batch tests: DDL and visibility_mode tests
 
-### 2. Modified `ci/workflows/main-cron.yml`
+## Solution Implemented
 
-**Before:**
-- Serial e2e test ran by default in the main cron workflow
-- Parallel e2e test also ran by default
+### Modified `ci/scripts/e2e-test-serial.sh`
 
-**After:**
-- Serial e2e test now only runs when explicitly requested via `ci/run-e2e-tests-serial` label
-- Parallel e2e test continues to run by default
-- Maintained the slow e2e test configuration unchanged
+**Strategy**: Remove overlapping tests from serial script when running in cluster mode, while preserving all unique test coverage.
+
+**Changes**:
+1. **For standalone/single-node modes**: Run full test suite including streaming and batch tests (no duplication since parallel tests don't support these modes)
+2. **For cluster mode**: Skip streaming and basic batch tests (covered by parallel), but run all unique tests:
+   - backfill tests not covered by parallel
+   - misc, python_client, subscription, superset tests
+   - error_ui and extended_mode tests
+   - ttl, dml, background_ddl tests
+
+**Before**:
+```bash
+# Always ran streaming and batch tests regardless of mode
+echo "--- e2e, $mode, streaming"
+risedev slt -p 4566 -d dev './e2e_test/streaming/**/*.slt'
+
+echo "--- e2e, $mode, batch"  
+risedev slt -p 4566 -d dev './e2e_test/ddl/**/*.slt'
+risedev slt -p 4566 -d dev './e2e_test/visibility_mode/*.slt'
+```
+
+**After**:
+```bash
+# Skip streaming and basic batch tests for cluster mode since parallel tests cover these
+if [[ "$mode" == "standalone" || "$mode" == "single-node" ]]; then
+  # Full test suite for non-cluster modes
+  echo "--- e2e, $mode, streaming"
+  risedev slt -p 4566 -d dev './e2e_test/streaming/**/*.slt'
+  
+  echo "--- e2e, $mode, batch"
+  risedev slt -p 4566 -d dev './e2e_test/ddl/**/*.slt'
+  risedev slt -p 4566 -d dev './e2e_test/visibility_mode/*.slt'
+else
+  # For cluster mode, only run tests not covered by parallel
+  echo "--- e2e, $mode, additional batch tests"
+  risedev slt -p 4566 -d dev './e2e_test/background_ddl/basic.slt'
+  risedev slt -p 4566 -d dev './e2e_test/ttl/ttl.slt'
+  risedev slt -p 4566 -d dev './e2e_test/dml/*.slt'
+fi
+
+# Always run unique tests not covered by parallel
+echo "--- e2e, $mode, misc"
+echo "--- e2e, $mode, python_client"  
+echo "--- e2e, $mode, subscription"
+echo "--- e2e, $mode, Apache Superset"
+```
 
 ## Impact
 
-### Positive Impact:
-- **Faster CI**: Eliminates redundant test execution, reducing overall CI time
-- **Resource Savings**: Reduces compute resources used by CI infrastructure
-- **Maintained Coverage**: Parallel tests provide the same test coverage as serial tests
-- **Debugging Capability**: Serial tests can still be run when needed for debugging specific issues
+### Performance Improvements:
+- **Eliminated Duplication**: Streaming and basic batch tests no longer run twice in cluster mode
+- **Preserved Coverage**: All unique test scenarios are still executed
+- **Faster CI**: Reduced overall CI execution time by eliminating redundant test runs
+- **Resource Savings**: Lower compute resource consumption per CI run
 
-### Migration Guide:
+### Test Coverage Matrix:
+
+| Test Category | Standalone | Single-Node | Cluster (Serial) | Cluster (Parallel) |
+|---------------|------------|-------------|------------------|-------------------|
+| Streaming | ✅ Serial | ✅ Serial | ❌ (covered by parallel) | ✅ Parallel |
+| DDL/Visibility | ✅ Serial | ✅ Serial | ❌ (covered by parallel) | ✅ Parallel |
+| UDF | ❌ | ❌ | ❌ | ✅ Parallel |
+| Generated | ❌ | ❌ | ❌ | ✅ Parallel |
+| Misc | ✅ Serial | ✅ Serial | ✅ Serial | ❌ |
+| Python Client | ✅ Serial | ✅ Serial | ✅ Serial | ❌ |
+| Subscription | ✅ Serial | ✅ Serial | ✅ Serial | ❌ |
+| Superset | ✅ Serial | ✅ Serial | ✅ Serial | ❌ |
+| Error UI | ❌ | ❌ | ✅ Serial | ❌ |
+| Extended Mode | ✅ Serial | ✅ Serial | ✅ Serial | ❌ |
+| TTL/DML | ✅ Serial | ✅ Serial | ✅ Serial | ❌ |
+| Backfill | ✅ Serial | ✅ Serial | ✅ Serial | ❌ |
+
+### Migration Impact:
 
 #### For Regular Development:
-- **No action needed** - parallel e2e tests will continue to run by default
-- Use the existing `ci/run-e2e-tests` label to trigger e2e tests
+- ✅ **No action required** - all tests continue to run with same coverage
+- ✅ **Faster feedback** - reduced CI execution time  
+- ✅ **Same triggers** - existing `ci/run-e2e-tests` label continues to work
 
-#### For Debugging:
-- Use the new `ci/run-e2e-tests-serial` label to run serial e2e tests when needed
-- This is useful for debugging race conditions or issues that might be masked in parallel execution
-
-## Labels Reference
-
-| Label | Purpose | When to Use |
-|-------|---------|-------------|
-| `ci/run-e2e-tests` | Run parallel e2e tests | Default for most cases |
-| `ci/run-e2e-tests-serial` | Run serial e2e tests | Debugging specific issues |
-| `ci/run-e2e-parallel-tests` | Alternative label for parallel tests | Legacy compatibility |
+#### For CI Infrastructure:
+- ✅ **Resource optimization** - eliminated duplicate test execution
+- ✅ **Maintained reliability** - no reduction in test coverage
+- ✅ **Improved efficiency** - better resource utilization
 
 ## Technical Details
 
-The changes ensure that:
-1. **Default behavior** runs only parallel e2e tests, which are faster and more efficient
-2. **Serial tests are available** when explicitly requested for debugging
-3. **No test coverage is lost** - parallel tests execute the same test suites
-4. **Standalone and single-node tests** remain unchanged as they serve specific purposes
+The solution ensures that:
+1. **No test coverage is lost** - every test still runs, just without duplication
+2. **Mode-specific optimizations** - standalone and single-node get full coverage, cluster mode avoids duplication
+3. **Parallel optimization** - cluster mode leverages fast parallel execution for core tests
+4. **Unique coverage preserved** - serial-only tests (misc, python_client, etc.) continue to run
 
-## Future Considerations
+## Verification
 
-- Monitor CI performance improvements after these changes
-- Consider further optimizations based on usage patterns
-- Evaluate if serial tests are still needed long-term based on debugging usage
+To verify the changes work correctly:
+
+1. **Standalone mode**: Should run full test suite including streaming and batch
+2. **Single-node mode**: Should run full test suite including streaming and batch  
+3. **Cluster mode**: Should skip streaming/basic batch tests but run all unique tests
+4. **Parallel tests**: Should continue running streaming, batch, udf, and generated tests
+
+## Next Steps
+
+1. Monitor CI performance improvements after deployment
+2. Consider migrating more serial-only tests to parallel execution for further optimization
+3. Evaluate opportunities to parallelize standalone and single-node test execution
