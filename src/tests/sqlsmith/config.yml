@@ -8,3 +8,6 @@ config:
   join:
     weight: 75
     enabled: false
+  struct_fields:
+    weight: 100
+    enabled: true
