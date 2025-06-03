@@ -13,8 +13,6 @@
 // limitations under the License.
 
 use std::cmp::max;
-use std::collections::HashMap;
-use std::hash::RandomState;
 
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
@@ -176,6 +174,9 @@ impl ToStream for LogicalUnion {
         &self,
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
+        type FixedState = std::hash::BuildHasherDefault<std::hash::DefaultHasher>;
+        type TypeMap<T> = std::collections::HashMap<DataType, T, FixedState>;
+
         let original_schema = self.base.schema().clone();
         let original_schema_len = original_schema.len();
         let mut rewrites = vec![];
@@ -237,9 +238,9 @@ impl ToStream for LogicalUnion {
             // If all inputs have the same stream key column types, we have a small merged_stream_key. Otherwise, we will have a large merged_stream_key.
 
             let (merged_stream_key_types, types_offset) = {
-                let mut max_types_counter = HashMap::<_, _, RandomState>::default();
+                let mut max_types_counter = TypeMap::default();
                 for (new_input, _) in &rewrites {
-                    let mut types_counter = HashMap::<_, _, RandomState>::default();
+                    let mut types_counter = TypeMap::default();
                     for x in new_input.expect_stream_key() {
                         types_counter
                             .entry(new_input.schema().fields[*x].data_type())
@@ -255,7 +256,7 @@ impl ToStream for LogicalUnion {
                 }
 
                 let mut merged_stream_key_types = vec![];
-                let mut types_offset = HashMap::<_, _, RandomState>::default();
+                let mut types_offset = TypeMap::default();
                 let mut offset = 0;
                 for (key, val) in max_types_counter {
                     let _ = types_offset.insert(key.clone(), offset);
@@ -289,7 +290,7 @@ impl ToStream for LogicalUnion {
                         .collect_vec();
                     // merged_stream_key
                     let mut input_stream_keys = input_stream_key_nulls.clone();
-                    let mut types_counter = HashMap::<_, _, RandomState>::default();
+                    let mut types_counter = TypeMap::default();
                     for stream_key_idx in new_input.expect_stream_key() {
                         let data_type =
                             new_input.schema().fields[*stream_key_idx].data_type.clone();
