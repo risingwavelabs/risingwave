@@ -26,6 +26,7 @@ use risingwave_sqlparser::ast::{
     Cte, Distinct, Expr, Ident, Query, Select, SelectItem, SetExpr, TableWithJoins, Value, With,
 };
 
+use crate::config::Feature;
 use crate::sql_gen::utils::create_table_with_joins_from_table;
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext, Table};
 
@@ -190,12 +191,13 @@ impl<R: Rng> SqlGenerator<'_, R> {
             selection,
             group_by,
             having,
+            window: vec![], // TODO: generate named window definition
         };
         (select, schema)
     }
 
     fn gen_select_list(&mut self, num_select_items: usize) -> (Vec<SelectItem>, Vec<Column>) {
-        let can_agg = self.flip_coin();
+        let can_agg = self.should_generate(Feature::Agg);
         let context = SqlGeneratorContext::new_with_can_agg(can_agg);
         (0..num_select_items)
             .map(|i| self.gen_select_item(i, context))
@@ -249,7 +251,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn gen_where(&mut self) -> Option<Expr> {
-        if self.flip_coin() {
+        if self.should_generate(Feature::Where) {
             let context = SqlGeneratorContext::new_with_can_agg(false);
             Some(self.gen_expr(&DataType::Boolean, context))
         } else {

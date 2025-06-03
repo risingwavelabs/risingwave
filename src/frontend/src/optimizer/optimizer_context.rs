@@ -199,6 +199,10 @@ impl OptimizerContext {
         self.explain_options.trace
     }
 
+    pub fn is_explain_backfill(&self) -> bool {
+        self.explain_options.backfill
+    }
+
     pub fn explain_type(&self) -> ExplainType {
         self.explain_options.explain_type.clone()
     }
@@ -218,7 +222,7 @@ impl OptimizerContext {
         }
         let mut optimizer_trace = self.optimizer_trace.borrow_mut();
         let string = str.into();
-        tracing::trace!(target: "explain_trace", "\n{}", string);
+        tracing::info!(target: "explain_trace", "\n{}", string);
         optimizer_trace.push(string);
         optimizer_trace.push("\n".to_owned());
     }

@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use anyhow::anyhow;
+use futures::TryStreamExt;
 use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::Epoch;
@@ -25,11 +26,11 @@ use risingwave_hummock_sdk::time_travel::{
 };
 use risingwave_hummock_sdk::version::{GroupDeltaCommon, HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockEpoch, HummockSstableId, HummockSstableObjectId,
+    CompactionGroupId, HummockEpoch, HummockObjectId, HummockSstableId, HummockSstableObjectId,
 };
 use risingwave_meta_model::hummock_sstable_info::SstableInfoV2Backend;
 use risingwave_meta_model::{
-    hummock_epoch_to_version, hummock_sstable_info, hummock_time_travel_delta,
+    HummockVersionId, hummock_epoch_to_version, hummock_sstable_info, hummock_time_travel_delta,
     hummock_time_travel_version,
 };
 use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta};
@@ -38,6 +39,7 @@ use sea_orm::{
     ColumnTrait, Condition, DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter,
     QueryOrder, QuerySelect, TransactionTrait,
 };
+use tracing::info;
 
 use crate::hummock::HummockManager;
 use crate::hummock::error::{Error, Result};
@@ -116,7 +118,9 @@ impl HummockManager {
             (
                 latest_valid_version.id,
                 latest_valid_version.get_sst_ids(true),
-                latest_valid_version.get_object_ids(true),
+                latest_valid_version
+                    .get_object_ids(true)
+                    .collect::<HashSet<_>>(),
             )
         };
         let mut object_ids_to_delete: HashSet<_> = HashSet::default();
@@ -163,7 +167,7 @@ impl HummockManager {
                                 .iter()
                                 .skip(start_idx * delete_sst_batch_size)
                                 .take(delete_sst_batch_size)
-                                .copied(),
+                                .map(|sst_id| sst_id.inner()),
                         ),
                     )
                     .exec(txn)
@@ -225,7 +229,7 @@ impl HummockManager {
                 )
                 .await?;
             }
-            let new_object_ids = prev_version.get_object_ids(true);
+            let new_object_ids: HashSet<_> = prev_version.get_object_ids(true).collect();
             object_ids_to_delete.extend(&new_object_ids - &latest_valid_version_object_ids);
             next_version_sst_ids = sst_ids;
         }
@@ -270,17 +274,28 @@ impl HummockManager {
         Ok(())
     }
 
-    pub(crate) async fn filter_out_objects_by_time_travel(
+    pub(crate) async fn filter_out_objects_by_time_travel_v1(
         &self,
-        objects: impl Iterator<Item = HummockSstableObjectId>,
-        batch_size: usize,
-    ) -> Result<HashSet<HummockSstableObjectId>> {
+        objects: impl Iterator<Item = HummockObjectId>,
+    ) -> Result<HashSet<HummockObjectId>> {
+        let batch_size = self
+            .env
+            .opts
+            .hummock_time_travel_filter_out_objects_batch_size;
+        info!("filter out objects by time travel v1, only sst will remain in the result set");
         // The input object count is much smaller than time travel pinned object count in meta store.
         // So search input object in meta store.
-        let mut result: HashSet<_> = objects.collect();
-        let mut remain: VecDeque<_> = result.iter().copied().collect();
-        while !remain.is_empty() {
-            let batch = remain.drain(..std::cmp::min(remain.len(), batch_size));
+        let mut result: HashSet<_> = objects
+            .filter(|object_id| match object_id {
+                HummockObjectId::Sstable(_) => true,
+                HummockObjectId::VectorFile(_) => false,
+            })
+            .collect();
+        let mut remain_sst: VecDeque<_> = result.iter().copied().collect();
+        while !remain_sst.is_empty() {
+            let batch = remain_sst
+                .drain(..std::cmp::min(remain_sst.len(), batch_size))
+                .map(|object_id| object_id.as_raw().inner());
             let reject_object_ids: Vec<risingwave_meta_model::HummockSstableObjectId> =
                 hummock_sstable_info::Entity::find()
                     .filter(hummock_sstable_info::Column::ObjectId.is_in(batch))
@@ -290,10 +305,99 @@ impl HummockManager {
                     .all(&self.env.meta_store_ref().conn)
                     .await?;
             for reject in reject_object_ids {
-                let object_id = HummockSstableObjectId::try_from(reject).unwrap();
+                let reject: u64 = reject.try_into().unwrap();
+                let object_id = HummockObjectId::Sstable(HummockSstableObjectId::from(reject));
                 result.remove(&object_id);
             }
         }
+        Ok(result)
+    }
+
+    pub(crate) async fn filter_out_objects_by_time_travel(
+        &self,
+        objects: impl Iterator<Item = HummockObjectId>,
+    ) -> Result<HashSet<HummockObjectId>> {
+        if self.env.opts.hummock_time_travel_filter_out_objects_v1 {
+            return self.filter_out_objects_by_time_travel_v1(objects).await;
+        }
+        let mut result: HashSet<_> = objects.collect();
+
+        // filtered out object id pinned by time travel hummock version
+        {
+            let mut prev_version_id: Option<HummockVersionId> = None;
+            loop {
+                let query = hummock_time_travel_version::Entity::find();
+                let query = if let Some(prev_version_id) = prev_version_id {
+                    query.filter(hummock_time_travel_version::Column::VersionId.gt(prev_version_id))
+                } else {
+                    query
+                };
+                let mut version_stream = query
+                    .order_by_asc(hummock_time_travel_version::Column::VersionId)
+                    .limit(
+                        self.env
+                            .opts
+                            .hummock_time_travel_filter_out_objects_list_version_batch_size
+                            as u64,
+                    )
+                    .stream(&self.env.meta_store_ref().conn)
+                    .await?;
+                let mut next_prev_version_id = None;
+                while let Some(model) = version_stream.try_next().await? {
+                    let version =
+                        HummockVersion::from_persisted_protobuf(&model.version.to_protobuf());
+                    for object_id in version.get_object_ids(true) {
+                        result.remove(&object_id);
+                    }
+                    next_prev_version_id = Some(model.version_id);
+                }
+                if let Some(next_prev_version_id) = next_prev_version_id {
+                    prev_version_id = Some(next_prev_version_id);
+                } else {
+                    break;
+                }
+            }
+        }
+
+        // filtered out object ids pinned by time travel hummock version delta
+        {
+            let mut prev_version_id: Option<HummockVersionId> = None;
+            loop {
+                let query = hummock_time_travel_delta::Entity::find();
+                let query = if let Some(prev_version_id) = prev_version_id {
+                    query.filter(hummock_time_travel_delta::Column::VersionId.gt(prev_version_id))
+                } else {
+                    query
+                };
+                let mut version_stream = query
+                    .order_by_asc(hummock_time_travel_delta::Column::VersionId)
+                    .limit(
+                        self.env
+                            .opts
+                            .hummock_time_travel_filter_out_objects_list_delta_batch_size
+                            as u64,
+                    )
+                    .stream(&self.env.meta_store_ref().conn)
+                    .await?;
+                let mut next_prev_version_id = None;
+                while let Some(model) = version_stream.try_next().await? {
+                    let version_delta = HummockVersionDelta::from_persisted_protobuf(
+                        &model.version_delta.to_protobuf(),
+                    );
+                    // set exclude_table_change_log to true because in time travel delta we ignore the table change log
+                    for object_id in version_delta.newly_added_object_ids(true) {
+                        result.remove(&object_id);
+                    }
+                    next_prev_version_id = Some(model.version_id);
+                }
+                if let Some(next_prev_version_id) = next_prev_version_id {
+                    prev_version_id = Some(next_prev_version_id);
+                } else {
+                    break;
+                }
+            }
+        }
+
         Ok(result)
     }
 
@@ -387,9 +491,13 @@ impl HummockManager {
         let sst_info_fetch_batch_size = self.env.opts.hummock_time_travel_sst_info_fetch_batch_size;
         while !sst_ids.is_empty() {
             let sst_infos = hummock_sstable_info::Entity::find()
-                .filter(hummock_sstable_info::Column::SstId.is_in(
-                    sst_ids.drain(..std::cmp::min(sst_info_fetch_batch_size, sst_ids.len())),
-                ))
+                .filter(
+                    hummock_sstable_info::Column::SstId.is_in(
+                        sst_ids
+                            .drain(..std::cmp::min(sst_info_fetch_batch_size, sst_ids.len()))
+                            .map(|sst_id| sst_id.inner()),
+                    ),
+                )
                 .all(&sql_store.conn)
                 .await?;
             for sst_info in sst_infos {
@@ -442,8 +550,8 @@ impl HummockManager {
                         break;
                     };
                     batch.push(hummock_sstable_info::ActiveModel {
-                        sst_id: Set(sst_info.sst_id.try_into().unwrap()),
-                        object_id: Set(sst_info.object_id.try_into().unwrap()),
+                        sst_id: Set(sst_info.sst_id.inner().try_into().unwrap()),
+                        object_id: Set(sst_info.object_id.inner().try_into().unwrap()),
                         sstable_info: Set(SstableInfoV2Backend::from(&sst_info.to_protobuf())),
                     });
                     remain -= 1;

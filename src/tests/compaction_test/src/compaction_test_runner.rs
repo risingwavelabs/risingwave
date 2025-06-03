@@ -23,7 +23,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use bytes::{BufMut, Bytes, BytesMut};
 use clap::Parser;
-use foyer::CacheHint;
+use foyer::Hint;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
     MetaConfig, NoOverride, extract_storage_memory_config, load_config,
@@ -269,7 +269,9 @@ async fn init_metadata_for_replay(
         .await?;
 
     // shift the sst id to avoid conflict with the original meta node
-    let _ = new_meta_client.get_new_sst_ids(SST_ID_SHIFT_COUNT).await?;
+    let _ = new_meta_client
+        .get_new_object_ids(SST_ID_SHIFT_COUNT)
+        .await?;
 
     tracing::info!("Finished initializing the new Meta");
     Ok(())
@@ -639,7 +641,7 @@ async fn open_hummock_iters(
             .iter(
                 range.clone(),
                 ReadOptions {
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
                 },
             )

@@ -43,6 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "expr",
         "health",
         "hummock",
+        "iceberg_compaction",
         "java_binding",
         "meta",
         "monitor_service",
@@ -83,6 +84,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ".stream_plan.StreamSource",
         ".batch_plan.SourceNode",
         ".batch_plan.IcebergScanNode",
+        ".iceberg_compaction.IcebergCompactionTask",
     ];
 
     // Build protobuf structs.

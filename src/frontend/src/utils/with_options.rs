@@ -273,24 +273,7 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
         }
     }
 
-    let mut inner_secret_refs = {
-        let mut resolved_secret_refs = BTreeMap::new();
-        for (key, secret_ref) in secret_refs {
-            let (schema_name, secret_name) =
-                Binder::resolve_schema_qualified_name(db_name, secret_ref.secret_name.clone())?;
-            let secret_catalog = session.get_secret_by_name(schema_name, &secret_name)?;
-            let ref_as = match secret_ref.ref_as {
-                SecretRefAsType::Text => PbRefAsType::Text,
-                SecretRefAsType::File => PbRefAsType::File,
-            };
-            let pb_secret_ref = PbSecretRef {
-                secret_id: secret_catalog.id.secret_id(),
-                ref_as: ref_as.into(),
-            };
-            resolved_secret_refs.insert(key.clone(), pb_secret_ref);
-        }
-        resolved_secret_refs
-    };
+    let mut inner_secret_refs = resolve_secret_refs_inner(secret_refs, session)?;
 
     let mut connection_type = PbConnectionType::Unspecified;
     let connection_params_is_none_flag = connection_params.is_none();
@@ -370,8 +353,16 @@ pub(crate) fn resolve_secret_ref_in_with_options(
     session: &SessionImpl,
 ) -> RwResult<WithOptionsSecResolved> {
     let (options, secret_refs, _) = with_options.into_parts();
-    let mut resolved_secret_refs = BTreeMap::new();
+    let resolved_secret_refs = resolve_secret_refs_inner(secret_refs, session)?;
+    Ok(WithOptionsSecResolved::new(options, resolved_secret_refs))
+}
+
+fn resolve_secret_refs_inner(
+    secret_refs: BTreeMap<String, SecretRefValue>,
+    session: &SessionImpl,
+) -> RwResult<BTreeMap<String, PbSecretRef>> {
     let db_name: &str = &session.database();
+    let mut resolved_secret_refs = BTreeMap::new();
     for (key, secret_ref) in secret_refs {
         let (schema_name, secret_name) =
             Binder::resolve_schema_qualified_name(db_name, secret_ref.secret_name.clone())?;
@@ -386,7 +377,7 @@ pub(crate) fn resolve_secret_ref_in_with_options(
         };
         resolved_secret_refs.insert(key.clone(), pb_secret_ref);
     }
-    Ok(WithOptionsSecResolved::new(options, resolved_secret_refs))
+    Ok(resolved_secret_refs)
 }
 
 pub(crate) fn resolve_privatelink_in_with_option(

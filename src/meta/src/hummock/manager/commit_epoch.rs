@@ -26,12 +26,12 @@ use risingwave_hummock_sdk::table_stats::{
     PbTableStatsMap, add_prost_table_stats_map, purge_prost_table_stats, to_prost_table_stats_map,
 };
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
+use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockSstableObjectId, LocalSstableInfo,
 };
-use risingwave_pb::hummock::CompactionConfig;
-use risingwave_pb::hummock::compact_task::{self};
+use risingwave_pb::hummock::{CompactionConfig, compact_task};
 use sea_orm::TransactionTrait;
 
 use crate::hummock::error::{Error, Result};
@@ -44,7 +44,7 @@ use crate::hummock::metrics_utils::{
     get_or_create_local_table_stat, trigger_epoch_stat, trigger_local_table_stat, trigger_sst_stat,
 };
 use crate::hummock::model::CompactionGroup;
-use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
+use crate::hummock::sequence::{next_compaction_group_id, next_sstable_id};
 use crate::hummock::time_travel::should_mark_next_time_travel_version_snapshot;
 use crate::hummock::{
     HummockManager, commit_multi_var_with_provided_txn, start_measure_real_process_timer,
@@ -61,6 +61,7 @@ pub struct CommitEpochInfo {
     pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
     pub new_table_fragment_infos: Vec<NewTableFragmentInfo>,
     pub change_log_delta: HashMap<TableId, ChangeLogDelta>,
+    pub vector_index_delta: HashMap<TableId, VectorIndexDelta>,
     /// `table_id` -> `committed_epoch`
     pub tables_to_commit: HashMap<TableId, u64>,
 }
@@ -75,6 +76,7 @@ impl HummockManager {
             sst_to_context,
             new_table_fragment_infos,
             change_log_delta,
+            vector_index_delta,
             tables_to_commit,
         } = commit_info;
         let mut versioning_guard = self.versioning.write().await;
@@ -199,6 +201,7 @@ impl HummockManager {
             &new_table_ids,
             new_table_watermarks,
             change_log_delta,
+            vector_index_delta,
         );
         if should_mark_next_time_travel_version_snapshot(&time_travel_delta) {
             // Unable to invoke mark_next_time_travel_version_snapshot because versioning is already mutable borrowed.
@@ -361,7 +364,7 @@ impl HummockManager {
                     None => {
                         tracing::warn!(
                             table_id = *table_id,
-                            object_id = commit_sst.sst_info.object_id,
+                            object_id = %commit_sst.sst_info.object_id,
                             "table doesn't belong to any compaction group",
                         );
                     }
@@ -375,7 +378,7 @@ impl HummockManager {
         // Generate new SST IDs for each compaction group
         // `next_sstable_object_id` will update the global SST ID and reserve the new SST IDs
         // So we need to get the new SST ID first and then split the SSTs
-        let mut new_sst_id = next_sstable_object_id(&self.env, new_sst_id_number).await?;
+        let mut new_sst_id = next_sstable_id(&self.env, new_sst_id_number).await?;
         let mut commit_sstables: BTreeMap<u64, Vec<SstableInfo>> = BTreeMap::new();
 
         for (mut sst, group_table_ids) in sst_to_cg_vec {
@@ -408,8 +411,8 @@ impl HummockManager {
 
                 if new_sst_size == 0 {
                     tracing::warn!(
-                        id = sst.sst_info.sst_id,
-                        object_id = sst.sst_info.object_id,
+                        id = %sst.sst_info.sst_id,
+                        object_id = %sst.sst_info.object_id,
                         match_ids = ?match_ids,
                         "Sstable doesn't contain any data for tables",
                     );
@@ -418,8 +421,8 @@ impl HummockManager {
                 let old_sst_size = origin_sst_size.saturating_sub(new_sst_size);
                 if old_sst_size == 0 {
                     tracing::warn!(
-                        id = sst.sst_info.sst_id,
-                        object_id = sst.sst_info.object_id,
+                        id = %sst.sst_info.sst_id,
+                        object_id = %sst.sst_info.object_id,
                         match_ids = ?match_ids,
                         origin_sst_size = origin_sst_size,
                         new_sst_size = new_sst_size,
@@ -516,7 +519,7 @@ fn rewrite_commit_sstables_to_sub_level(
     overlapping_sstables
 }
 
-fn is_ordered_subset(vec_1: &Vec<u64>, vec_2: &Vec<u64>) -> bool {
+fn is_ordered_subset<T: PartialEq>(vec_1: &Vec<T>, vec_2: &Vec<T>) -> bool {
     let mut vec_2_iter = vec_2.iter().peekable();
     for item in vec_1 {
         if vec_2_iter.peek() == Some(&item) {

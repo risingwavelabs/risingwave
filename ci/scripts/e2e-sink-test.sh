@@ -45,9 +45,6 @@ buildkite-agent artifact download risingwave-connector.tar.gz ./
 mkdir ./connector-node
 tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
-echo "--- download pg dependencies"
-apt-get -y install postgresql-client jq
-
 echo "--- prepare mysql"
 # prepare environment mysql sink
 mysql --host=mysql --port=3306 -u root -p123456 -e "CREATE DATABASE IF NOT EXISTS test;"

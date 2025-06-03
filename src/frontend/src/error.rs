@@ -22,7 +22,7 @@ use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
 use risingwave_expr::ExprError;
 use risingwave_pb::PbFieldNotFound;
-use risingwave_rpc_client::error::{RpcError, TonicStatusWrapper};
+use risingwave_rpc_client::error::{RpcError, ToTonicStatus, TonicStatusWrapper};
 use thiserror::Error;
 use thiserror_ext::AsReport;
 use tokio::task::JoinError;
@@ -267,5 +267,11 @@ impl From<BoxedError> for RwError {
 impl From<risingwave_sqlparser::parser::ParserError> for ErrorCode {
     fn from(e: risingwave_sqlparser::parser::ParserError) -> Self {
         ErrorCode::InvalidInputSyntax(e.to_report_string())
+    }
+}
+
+impl From<RwError> for tonic::Status {
+    fn from(err: RwError) -> Self {
+        err.to_status(tonic::Code::Internal, "RwError")
     }
 }

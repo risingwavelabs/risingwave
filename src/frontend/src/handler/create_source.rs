@@ -813,6 +813,8 @@ pub enum SqlColumnStrategy {
     Ignore,
 }
 
+/// Entrypoint for binding source connector.
+/// Common logic shared by `CREATE SOURCE` and `CREATE TABLE`.
 #[allow(clippy::too_many_arguments)]
 pub async fn bind_create_source_or_table_with_connector(
     handler_args: HandlerArgs,
@@ -875,6 +877,16 @@ pub async fn bind_create_source_or_table_with_connector(
 
     let sql_pk_names = bind_sql_pk_names(sql_columns_defs, bind_table_constraints(&constraints)?)?;
 
+    // FIXME: ideally we can support it, but current way of handling iceberg additional columns are problematic.
+    // They are treated as normal user columns, so they will be lost if we allow user to specify columns.
+    // See `extract_iceberg_columns`
+    if with_properties.is_iceberg_connector() && !sql_columns_defs.is_empty() {
+        return Err(RwError::from(InvalidInputSyntax(
+            r#"Schema is automatically inferred for iceberg source and should not be specified
+
+HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<columns>) WITH (...)`."#.to_owned(),
+        )));
+    }
     let columns_from_sql = bind_sql_columns(sql_columns_defs, false)?;
 
     let mut columns = bind_all_columns(
@@ -1244,10 +1256,14 @@ pub async fn handle_create_source(
 
     if create_source_type.is_shared() {
         let graph = generate_stream_graph_for_source(handler_args, source_catalog)?;
-        catalog_writer.create_source(source, Some(graph)).await?;
+        catalog_writer
+            .create_source(source, Some(graph), stmt.if_not_exists)
+            .await?;
     } else {
         // For other sources we don't create a streaming job
-        catalog_writer.create_source(source, None).await?;
+        catalog_writer
+            .create_source(source, None, stmt.if_not_exists)
+            .await?;
     }
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SOURCE))

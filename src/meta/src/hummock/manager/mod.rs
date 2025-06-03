@@ -71,6 +71,7 @@ mod utils;
 mod worker;
 
 pub use commit_epoch::{CommitEpochInfo, NewTableFragmentInfo};
+pub use compaction::compaction_event_loop::*;
 use compaction::*;
 pub use compaction::{GroupState, GroupStateValidator};
 pub(crate) use utils::*;
@@ -125,6 +126,7 @@ pub struct HummockManager {
     pub metrics: Arc<MetaMetrics>,
 
     pub compactor_manager: CompactorManagerRef,
+    pub iceberg_compactor_manager: Arc<IcebergCompactorManager>,
     event_sender: HummockManagerEventSender,
     object_store: ObjectStoreRef,
     version_checkpoint_path: String,
@@ -166,6 +168,7 @@ macro_rules! start_measure_real_process_timer {
 }
 pub(crate) use start_measure_real_process_timer;
 
+use super::IcebergCompactorManager;
 use crate::controller::SqlMetaStore;
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::manager::worker::HummockManagerEventSender;
@@ -290,6 +293,8 @@ impl HummockManager {
             env.opts.table_stat_throuput_window_seconds_for_merge,
         ) as i64;
 
+        let iceberg_compactor_manager = Arc::new(IcebergCompactorManager::new());
+
         let instance = HummockManager {
             env,
             versioning: MonitoredRwLock::new(
@@ -314,8 +319,8 @@ impl HummockManager {
             ),
             metrics,
             metadata_manager,
-            // compaction_request_channel: parking_lot::RwLock::new(None),
             compactor_manager,
+            iceberg_compactor_manager,
             event_sender: tx,
             object_store,
             version_checkpoint_path,

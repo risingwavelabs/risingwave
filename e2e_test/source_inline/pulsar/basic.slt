@@ -1,11 +1,13 @@
+control substitution on
+
 system ok
-curl "http://pulsar-server:8080/admin/v2/brokers/ready"
+curl "$PULSAR_HTTP_URL/admin/v2/brokers/ready"
 ----
 ok
 
 
 system ok
-PULSAR_BROKER_URL=pulsar://pulsar-server:6650 pulsar_produce.py 'persistent://public/default/topic-0' <<EOF
+pulsar_produce.py 'persistent://public/default/topic-0' <<EOF
 {"f1":12,"f2":"foo"}
 {"f1":17,"f2":"bar"}
 EOF
@@ -17,7 +19,7 @@ create table t (
   f2 varchar)
 with (
   connector = 'pulsar',
-  service.url = 'pulsar://pulsar-server:6650',
+  service.url = '${PULSAR_BROKER_URL}',
   topic = 'persistent://public/default/topic-0',
 ) format plain encode json;
 
@@ -31,4 +33,4 @@ statement ok
 drop table t;
 
 system ok
-curl --fail-with-body -X DELETE 'http://pulsar-server:8080/admin/v2/persistent/public/default/topic-0'
+curl --fail-with-body -X DELETE "$PULSAR_HTTP_URL/admin/v2/persistent/public/default/topic-0"

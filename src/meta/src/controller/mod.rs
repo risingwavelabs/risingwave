@@ -180,6 +180,8 @@ impl From<ObjectModel<database::Model>> for PbDatabase {
             name: value.0.name,
             owner: value.1.owner_id as _,
             resource_group: value.0.resource_group.clone(),
+            barrier_interval_ms: value.0.barrier_interval_ms.map(|v| v as u32),
+            checkpoint_frequency: value.0.checkpoint_frequency.map(|v| v as u64),
         }
     }
 }

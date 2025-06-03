@@ -978,12 +978,39 @@ enum DispatcherType {
   DISPATCHER_TYPE_NO_SHUFFLE = 4;
 }
 
+// The method to map the upstream columns in the dispatcher before dispatching.
+//
+// - For intra-job exchange, typically the upstream and downstream columns are the same. `indices`
+//   will be `0..len` and `types` will be empty.
+//
+// - For inter-job exchange,
+//   * if the downstream only requires a subset of the upstream columns, `indices` will be the
+//     indices of the required columns in the upstream columns.
+//   * if some columns are added to the upstream, `indices` will help to maintain the same schema
+//     from the view of the downstream.
+//   * if some columns are altered to different (composite) types, `types` will be used to convert
+//     the upstream columns to the downstream columns to maintain the same schema.
+message DispatchOutputMapping {
+  message TypePair {
+    data.DataType upstream = 1;
+    data.DataType downstream = 2;
+  }
+
+  // Indices of the columns to output.
+  repeated uint32 indices = 1;
+  // Besides the indices, we may also need to convert the types of some columns.
+  // - If no type conversion is needed, this field will be empty.
+  // - If type conversion is needed, this will have the same length as `indices`. Only columns with
+  //   type conversion will have `upstream` and `downstream` field set.
+  repeated TypePair types = 2;
+}
+
 // The property of an edge in the fragment graph.
 // This is essientially a "logical" version of `Dispatcher`. See the doc of `Dispatcher` for more details.
 message DispatchStrategy {
   DispatcherType type = 1;
   repeated uint32 dist_key_indices = 2;
-  repeated uint32 output_indices = 3;
+  DispatchOutputMapping output_mapping = 3;
 }
 
 // A dispatcher redistribute messages.
@@ -993,10 +1020,8 @@ message Dispatcher {
   // Indices of the columns to be used for hashing.
   // For dispatcher types other than HASH, this is ignored.
   repeated uint32 dist_key_indices = 2;
-  // Indices of the columns to output.
-  // In most cases, this contains all columns in the input. But for some cases like MV on MV or
-  // schema change, we may only output a subset of the columns.
-  repeated uint32 output_indices = 6;
+  // The method to map the upstream columns in the dispatcher before dispatching.
+  DispatchOutputMapping output_mapping = 6;
   // The hash mapping for consistent hash.
   // For dispatcher types other than HASH, this is ignored.
   ActorMapping hash_mapping = 3;
@@ -1051,17 +1076,8 @@ message StreamContext {
   string timezone = 1;
 }
 
-message BackfillOrderAuto {}
-
-message BackfillOrderFixed {
+message BackfillOrder {
   map<uint32, common.Uint32Vector> order = 1;
-}
-
-message BackfillOrderStrategy {
-  oneof strategy {
-    BackfillOrderAuto auto = 1;
-    BackfillOrderFixed fixed = 2;
-  }
 }
 
 // Representation of a graph of stream fragments.
@@ -1127,5 +1143,5 @@ message StreamFragmentGraph {
   uint32 max_parallelism = 7;
 
   // The backfill order strategy for the fragments.
-  BackfillOrderStrategy backfill_order_strategy = 8;
+  BackfillOrder backfill_order = 8;
 }

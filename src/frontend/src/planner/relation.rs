@@ -92,10 +92,8 @@ impl Planner {
             table_cardinality,
         );
 
-        match (base_table.table_catalog.engine, self.plan_for()) {
-            (Engine::Hummock, PlanFor::Stream)
-            | (Engine::Hummock, PlanFor::Batch)
-            | (Engine::Hummock, PlanFor::BatchDql) => {
+        match base_table.table_catalog.engine {
+            Engine::Hummock => {
                 match as_of {
                     None
                     | Some(AsOf::ProcessTime)
@@ -108,110 +106,119 @@ impl Planner {
                 };
                 Ok(scan.into())
             }
-            (Engine::Iceberg, PlanFor::Stream) | (Engine::Iceberg, PlanFor::Batch) => {
-                match as_of {
-                    None
-                    | Some(AsOf::VersionNum(_))
-                    | Some(AsOf::TimestampString(_))
-                    | Some(AsOf::TimestampNum(_)) => {}
-                    Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
-                        bail_not_implemented!("As Of ProcessTime() is not supported yet.")
+            Engine::Iceberg => {
+                let is_append_only = base_table.table_catalog.append_only;
+                let use_iceberg_source = match (self.plan_for(), is_append_only) {
+                    (PlanFor::StreamIcebergEngineInternal, _) => false,
+                    (PlanFor::BatchDql, _) => true,
+                    (PlanFor::Stream | PlanFor::Batch, is_append_only) => is_append_only,
+                };
+
+                if !use_iceberg_source {
+                    match as_of {
+                        None
+                        | Some(AsOf::VersionNum(_))
+                        | Some(AsOf::TimestampString(_))
+                        | Some(AsOf::TimestampNum(_)) => {}
+                        Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+                            bail_not_implemented!("As Of ProcessTime() is not supported yet.")
+                        }
+                        Some(AsOf::VersionString(_)) => {
+                            bail_not_implemented!("As Of Version is not supported yet.")
+                        }
                     }
-                    Some(AsOf::VersionString(_)) => {
-                        bail_not_implemented!("As Of Version is not supported yet.")
-                    }
-                }
-                Ok(scan.into())
-            }
-            (Engine::Iceberg, PlanFor::BatchDql) => {
-                match as_of {
-                    None
-                    | Some(AsOf::VersionNum(_))
-                    | Some(AsOf::TimestampString(_))
-                    | Some(AsOf::TimestampNum(_)) => {}
-                    Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
-                        bail_not_implemented!("As Of ProcessTime() is not supported yet.")
-                    }
-                    Some(AsOf::VersionString(_)) => {
-                        bail_not_implemented!("As Of Version is not supported yet.")
-                    }
-                }
-                let opt_ctx = self.ctx();
-                let session = opt_ctx.session_ctx();
-                let db_name = &session.database();
-                let catalog_reader = session.env().catalog_reader().read_guard();
-                let mut source_catalog = None;
-                for schema in catalog_reader.iter_schemas(db_name).unwrap() {
-                    if schema
-                        .get_table_by_id(&base_table.table_catalog.id)
-                        .is_some()
-                    {
-                        source_catalog = schema.get_source_by_name(
-                            &base_table.table_catalog.iceberg_source_name().unwrap(),
-                        );
-                        break;
-                    }
-                }
-                if let Some(source_catalog) = source_catalog {
-                    let column_map: HashMap<String, (usize, ColumnCatalog)> = source_catalog
-                        .columns
-                        .clone()
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, column)| (column.name().to_owned(), (i, column)))
-                        .collect();
-                    let exprs = scan
-                        .table_catalog()
-                        .column_schema()
-                        .fields()
-                        .iter()
-                        .map(|field| {
-                            let source_filed_name = if field.name == ROW_ID_COLUMN_NAME {
-                                RISINGWAVE_ICEBERG_ROW_ID
-                            } else {
-                                &field.name
-                            };
-                            if let Some((i, source_column)) = column_map.get(source_filed_name) {
-                                if source_column.column_desc.data_type == field.data_type {
-                                    ExprImpl::InputRef(
-                                        InputRef::new(*i, field.data_type.clone()).into(),
-                                    )
-                                } else {
-                                    let mut input_ref = ExprImpl::InputRef(
-                                        InputRef::new(
-                                            *i,
-                                            source_column.column_desc.data_type.clone(),
-                                        )
-                                        .into(),
-                                    );
-                                    FunctionCall::cast_mut(
-                                        &mut input_ref,
-                                        field.data_type().clone(),
-                                        CastContext::Explicit,
-                                    )
-                                    .unwrap();
-                                    input_ref
-                                }
-                            } else {
-                                // fields like `_rw_timestamp`, would not be found in source.
-                                ExprImpl::Literal(
-                                    Literal::new(None, field.data_type.clone()).into(),
-                                )
-                            }
-                        })
-                        .collect_vec();
-                    let logical_source = LogicalSource::with_catalog(
-                        Rc::new(source_catalog.deref().clone()),
-                        SourceNodeKind::CreateMViewOrBatch,
-                        self.ctx(),
-                        as_of,
-                    )?;
-                    Ok(LogicalProject::new(logical_source.into(), exprs).into())
+                    Ok(scan.into())
                 } else {
-                    bail!(
-                        "failed to plan a iceberg engine table: {}. Can't find the corresponding iceberg source. Maybe you need to recreate the table",
-                        base_table.table_catalog.name()
-                    );
+                    match as_of {
+                        None
+                        | Some(AsOf::VersionNum(_))
+                        | Some(AsOf::TimestampString(_))
+                        | Some(AsOf::TimestampNum(_)) => {}
+                        Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+                            bail_not_implemented!("As Of ProcessTime() is not supported yet.")
+                        }
+                        Some(AsOf::VersionString(_)) => {
+                            bail_not_implemented!("As Of Version is not supported yet.")
+                        }
+                    }
+                    let opt_ctx = self.ctx();
+                    let session = opt_ctx.session_ctx();
+                    let db_name = &session.database();
+                    let catalog_reader = session.env().catalog_reader().read_guard();
+                    let mut source_catalog = None;
+                    for schema in catalog_reader.iter_schemas(db_name).unwrap() {
+                        if schema
+                            .get_table_by_id(&base_table.table_catalog.id)
+                            .is_some()
+                        {
+                            source_catalog = schema.get_source_by_name(
+                                &base_table.table_catalog.iceberg_source_name().unwrap(),
+                            );
+                            break;
+                        }
+                    }
+                    if let Some(source_catalog) = source_catalog {
+                        let column_map: HashMap<String, (usize, ColumnCatalog)> = source_catalog
+                            .columns
+                            .clone()
+                            .into_iter()
+                            .enumerate()
+                            .map(|(i, column)| (column.name().to_owned(), (i, column)))
+                            .collect();
+                        let exprs = scan
+                            .table_catalog()
+                            .column_schema()
+                            .fields()
+                            .iter()
+                            .map(|field| {
+                                let source_filed_name = if field.name == ROW_ID_COLUMN_NAME {
+                                    RISINGWAVE_ICEBERG_ROW_ID
+                                } else {
+                                    &field.name
+                                };
+                                if let Some((i, source_column)) = column_map.get(source_filed_name)
+                                {
+                                    if source_column.column_desc.data_type == field.data_type {
+                                        ExprImpl::InputRef(
+                                            InputRef::new(*i, field.data_type.clone()).into(),
+                                        )
+                                    } else {
+                                        let mut input_ref = ExprImpl::InputRef(
+                                            InputRef::new(
+                                                *i,
+                                                source_column.column_desc.data_type.clone(),
+                                            )
+                                            .into(),
+                                        );
+                                        FunctionCall::cast_mut(
+                                            &mut input_ref,
+                                            field.data_type().clone(),
+                                            CastContext::Explicit,
+                                        )
+                                        .unwrap();
+                                        input_ref
+                                    }
+                                } else {
+                                    // fields like `_rw_timestamp`, would not be found in source.
+                                    ExprImpl::Literal(
+                                        Literal::new(None, field.data_type.clone()).into(),
+                                    )
+                                }
+                            })
+                            .collect_vec();
+                        let logical_source = LogicalSource::with_catalog(
+                            Rc::new(source_catalog.deref().clone()),
+                            SourceNodeKind::CreateMViewOrBatch,
+                            self.ctx(),
+                            as_of,
+                        )?;
+                        Ok(LogicalProject::new(logical_source.into(), exprs).into())
+                    } else {
+                        bail!(
+                            "failed to plan a iceberg engine table: {}. Can't find the corresponding iceberg source. Maybe you need to recreate the table",
+                            base_table.table_catalog.name()
+                        );
+                    }
                 }
             }
         }
@@ -226,7 +233,7 @@ impl Planner {
         } else if source.is_etl_source() {
             match self.plan_for() {
                 PlanFor::Stream => {}
-                PlanFor::BatchDql | PlanFor::Batch => {
+                PlanFor::BatchDql | PlanFor::Batch | PlanFor::StreamIcebergEngineInternal => {
                     return Err(ErrorCode::NotSupported(
                         "Querying a CDC ETL source is not supported in batch mode".to_owned(),
                         "HINT: create TABLE from the source instead".to_owned(),
@@ -252,6 +259,36 @@ impl Planner {
                 }
                 Some(AsOf::VersionString(_)) => {
                     bail_not_implemented!("As Of Version is not supported yet.")
+                }
+            }
+
+            // validate the source has pk. We raise an error here to avoid panic in expect_stream_key later
+            // for a nicer error message.
+            if matches!(self.plan_for(), PlanFor::Stream) {
+                let has_pk =
+                    source.catalog.row_id_index.is_some() || !source.catalog.pk_col_ids.is_empty();
+                if !has_pk {
+                    // in older version, iceberg source doesn't have row_id, thus may hit this
+                    let is_iceberg = source.catalog.is_iceberg_connector();
+                    // only iceberg should hit this.
+                    debug_assert!(is_iceberg);
+                    if is_iceberg {
+                        return Err(ErrorCode::BindError(format!(
+                        "Cannot create a stream job from an iceberg source without a primary key.\nThe iceberg source might be created in an older version of RisingWave. Please try recreating the source.\nSource: {:?}",
+                        source.catalog
+                    ))
+                    .into());
+                    } else {
+                        return Err(ErrorCode::BindError(format!(
+                            "Cannot create a stream job from a source without a primary key.
+This is a bug. We would appreciate a bug report at:
+https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Fbug&template=bug_report.yml
+
+source: {:?}",
+                            source.catalog
+                        ))
+                        .into());
+                    }
                 }
             }
             Ok(LogicalSource::with_catalog(

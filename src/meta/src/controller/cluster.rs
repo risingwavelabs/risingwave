@@ -172,9 +172,10 @@ impl ClusterController {
         let inner = self.inner.write().await;
         let worker = inner.activate_worker(worker_id).await?;
 
-        // Notify frontends of new compute node.
+        // Notify frontends of new compute node and frontend node.
         // Always notify because a running worker's property may have been changed.
-        if worker.r#type() == PbWorkerType::ComputeNode {
+        if worker.r#type() == PbWorkerType::ComputeNode || worker.r#type() == PbWorkerType::Frontend
+        {
             self.env
                 .notification_manager()
                 .notify_frontend(Operation::Add, Info::Node(worker.clone()))
@@ -191,13 +192,15 @@ impl ClusterController {
     pub async fn delete_worker(&self, host_address: HostAddress) -> MetaResult<WorkerNode> {
         let worker = self.inner.write().await.delete_worker(host_address).await?;
 
-        if worker.r#type() == PbWorkerType::ComputeNode {
+        if worker.r#type() == PbWorkerType::ComputeNode || worker.r#type() == PbWorkerType::Frontend
+        {
             self.env
                 .notification_manager()
                 .notify_frontend(Operation::Delete, Info::Node(worker.clone()))
                 .await;
-
-            self.update_compute_node_total_cpu_count().await?;
+            if worker.r#type() == PbWorkerType::ComputeNode {
+                self.update_compute_node_total_cpu_count().await?;
+            }
         }
 
         // Notify local subscribers.
@@ -428,9 +431,9 @@ pub struct StreamingClusterInfo {
 
 // Encapsulating the use of parallelism
 impl StreamingClusterInfo {
-    pub fn parallelism(&self, resource_group: String) -> usize {
+    pub fn parallelism(&self, resource_group: &str) -> usize {
         let available_worker_ids =
-            filter_workers_by_resource_group(&self.worker_nodes, resource_group.as_str());
+            filter_workers_by_resource_group(&self.worker_nodes, resource_group);
 
         self.worker_nodes
             .values()

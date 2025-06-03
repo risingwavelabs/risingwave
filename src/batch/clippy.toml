@@ -1,6 +1,8 @@
 disallowed-methods = []
 
-disallowed-types = []
+disallowed-types = [
+    { path = "iceberg::Error", reason = "Please use `risingwave_common::error::IcebergError` instead." },
+]
 
 doc-valid-idents = [
     "RisingWave",

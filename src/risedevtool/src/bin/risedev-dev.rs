@@ -31,8 +31,9 @@ use risedev::{
     CompactorService, ComputeNodeService, ConfigExpander, ConfigureTmuxTask, DummyService,
     EnsureStopService, ExecuteContext, FrontendService, GrafanaService, KafkaService,
     MetaNodeService, MinioService, MySqlService, PostgresService, PrometheusService, PubsubService,
-    RISEDEV_NAME, RedisService, SchemaRegistryService, ServiceConfig, SqlServerService,
-    SqliteConfig, Task, TaskGroup, TempoService, generate_risedev_env, preflight_check,
+    PulsarService, RISEDEV_NAME, RedisService, SchemaRegistryService, ServiceConfig,
+    SqlServerService, SqliteConfig, Task, TaskGroup, TempoService, generate_risedev_env,
+    preflight_check,
 };
 use sqlx::mysql::MySqlConnectOptions;
 use sqlx::postgres::PgConnectOptions;
@@ -280,6 +281,17 @@ fn task_main(
                     task.execute(&mut ctx)?;
                     ctx.pb
                         .set_message(format!("pubsub {}:{}", c.address, c.port));
+                }
+                ServiceConfig::Pulsar(c) => {
+                    PulsarService::new(c.clone()).execute(&mut ctx)?;
+                    let mut task = risedev::TcpReadyCheckTask::new(
+                        c.address.clone(),
+                        c.broker_port,
+                        c.user_managed,
+                    )?;
+                    task.execute(&mut ctx)?;
+                    ctx.pb
+                        .set_message(format!("pulsar {}:{}", c.address, c.broker_port));
                 }
                 ServiceConfig::Redis(c) => {
                     let mut service = RedisService::new(c.clone())?;
