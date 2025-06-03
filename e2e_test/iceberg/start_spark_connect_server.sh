@@ -27,9 +27,8 @@ fi
 
 
 SPARK_FILE="spark-${SPARK_VERSION}-bin-hadoop3.tgz"
-
 if [ ! -d "spark-${SPARK_VERSION}-bin-hadoop3" ];then
-    wget --no-verbose https://dlcdn.apache.org/spark/spark-${SPARK_VERSION}/$SPARK_FILE
+    wget --no-verbose https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/$SPARK_FILE
     tar -xzf $SPARK_FILE --no-same-owner
 fi
 

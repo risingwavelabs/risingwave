@@ -877,32 +877,17 @@ impl Parser<'_> {
         };
 
         let over = if self.parse_keyword(Keyword::OVER) {
-            // TODO: support window names (`OVER mywin`) in place of inline specification
-            self.expect_token(&Token::LParen)?;
-            let partition_by = if self.parse_keywords(&[Keyword::PARTITION, Keyword::BY]) {
-                // a list of possibly-qualified column names
-                self.parse_comma_separated(Parser::parse_expr)?
-            } else {
-                vec![]
-            };
-            let order_by_window = if self.parse_keywords(&[Keyword::ORDER, Keyword::BY]) {
-                self.parse_comma_separated(Parser::parse_order_by_expr)?
-            } else {
-                vec![]
-            };
-            let window_frame = if !self.consume_token(&Token::RParen) {
-                let window_frame = self.parse_window_frame()?;
+            if self.peek_token() == Token::LParen {
+                // Inline window specification: OVER (...)
+                self.expect_token(&Token::LParen)?;
+                let window_spec = self.parse_window_spec()?;
                 self.expect_token(&Token::RParen)?;
-                Some(window_frame)
+                Some(Window::Spec(window_spec))
             } else {
-                None
-            };
-
-            Some(WindowSpec {
-                partition_by,
-                order_by: order_by_window,
-                window_frame,
-            })
+                // Named window: OVER window_name
+                let window_name = self.parse_identifier()?;
+                Some(Window::Name(window_name))
+            }
         } else {
             None
         };
@@ -4734,6 +4719,12 @@ impl Parser<'_> {
             None
         };
 
+        let window = if self.parse_keyword(Keyword::WINDOW) {
+            self.parse_comma_separated(Parser::parse_named_window)?
+        } else {
+            vec![]
+        };
+
         Ok(Select {
             distinct,
             projection,
@@ -4742,6 +4733,7 @@ impl Parser<'_> {
             selection,
             group_by,
             having,
+            window,
         })
     }
 
@@ -5888,6 +5880,40 @@ impl Parser<'_> {
     fn parse_use(&mut self) -> ModalResult<Statement> {
         let db_name = self.parse_object_name()?;
         Ok(Statement::Use { db_name })
+    }
+
+    /// Parse a named window definition for the WINDOW clause
+    pub fn parse_named_window(&mut self) -> ModalResult<NamedWindow> {
+        let name = self.parse_identifier()?;
+        self.expect_keywords(&[Keyword::AS])?;
+        self.expect_token(&Token::LParen)?;
+        let window_spec = self.parse_window_spec()?;
+        self.expect_token(&Token::RParen)?;
+        Ok(NamedWindow { name, window_spec })
+    }
+
+    /// Parse a window specification (contents of OVER clause or WINDOW clause)
+    pub fn parse_window_spec(&mut self) -> ModalResult<WindowSpec> {
+        let partition_by = if self.parse_keywords(&[Keyword::PARTITION, Keyword::BY]) {
+            self.parse_comma_separated(Parser::parse_expr)?
+        } else {
+            vec![]
+        };
+        let order_by = if self.parse_keywords(&[Keyword::ORDER, Keyword::BY]) {
+            self.parse_comma_separated(Parser::parse_order_by_expr)?
+        } else {
+            vec![]
+        };
+        let window_frame = if !self.peek_token().eq(&Token::RParen) {
+            Some(self.parse_window_frame()?)
+        } else {
+            None
+        };
+        Ok(WindowSpec {
+            partition_by,
+            order_by,
+            window_frame,
+        })
     }
 }
 

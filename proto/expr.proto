@@ -308,6 +308,9 @@ message ExprNode {
     //UUID functions
     GEN_RANDOM_UUID = 750;
     GEN_UUID_FROM_BYTEA = 751;
+    
+    // Internal function for schema change
+    COMPOSITE_CAST = 800;
 
     // Non-pure functions below (> 1000)
     // ------------------------

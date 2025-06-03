@@ -507,6 +507,13 @@ impl DataType {
         }
     }
 
+    pub fn into_struct(self) -> StructType {
+        match self {
+            DataType::Struct(t) => t,
+            t => panic!("expect struct type, got {t}"),
+        }
+    }
+
     pub fn as_map(&self) -> &MapType {
         match self {
             DataType::Map(t) => t,
