@@ -32,11 +32,58 @@ impl ExprRewriter for ConstEvalRewriter {
                 }
             }
         } else if let ExprImpl::Parameter(_) = expr {
-            unreachable!(
-                "Parameter should not appear here. It will be replaced by a literal before this step."
-            )
+            // Parameters should be handled gracefully, as they may appear before replacement
+            // in some code paths (e.g., during index creation). Return the parameter as-is.
+            expr
         } else {
             default_rewrite_expr(self, expr)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::expr::Parameter;
+    use crate::binder::ParameterTypes;
+    use risingwave_common::types::DataType;
+
+    #[test]
+    fn test_const_eval_rewriter_handles_parameter() {
+        // Create a parameter expression
+        let param_types = ParameterTypes::new();
+        let param = Parameter::new(1, param_types);
+        let param_expr: ExprImpl = param.into();
+        
+        // Create a const eval rewriter
+        let mut rewriter = ConstEvalRewriter { error: None };
+        
+        // This should not panic and should return the parameter as-is
+        let result = rewriter.rewrite_expr(param_expr.clone());
+        
+        // The result should be the same parameter (not rewritten)
+        assert!(matches!(result, ExprImpl::Parameter(_)));
+        
+        // No error should occur
+        assert!(rewriter.error.is_none());
+    }
+    
+    #[test]
+    fn test_const_eval_rewriter_handles_constant() {
+        // Create a literal expression  
+        let literal = Literal::new(Some(42i32.into()), DataType::Int32);
+        let literal_expr: ExprImpl = literal.into();
+        
+        // Create a const eval rewriter
+        let mut rewriter = ConstEvalRewriter { error: None };
+        
+        // This should return the same literal (already constant)
+        let result = rewriter.rewrite_expr(literal_expr.clone());
+        
+        // The result should be a literal
+        assert!(matches!(result, ExprImpl::Literal(_)));
+        
+        // No error should occur
+        assert!(rewriter.error.is_none());
     }
 }
