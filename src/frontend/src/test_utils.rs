@@ -25,9 +25,9 @@ use pgwire::pg_response::StatementType;
 use pgwire::pg_server::{BoxedError, SessionId, SessionManager, UserAuthenticator};
 use pgwire::types::Row;
 use risingwave_common::catalog::{
-    DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
-    FunctionId, IndexId, NON_RESERVED_USER_ID, ObjectId, PG_CATALOG_SCHEMA_NAME,
-    RW_CATALOG_SCHEMA_NAME, TableId,
+    AlterDatabaseParam, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
+    DEFAULT_SUPER_USER_ID, FunctionId, IndexId, NON_RESERVED_USER_ID, ObjectId,
+    PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME, TableId,
 };
 use risingwave_common::hash::{VirtualNode, VnodeCount, VnodeCountCompat};
 use risingwave_common::session_config::SessionConfig;
@@ -251,6 +251,8 @@ impl CatalogWriter for MockCatalogWriter {
         db_name: &str,
         owner: UserId,
         resource_group: &str,
+        barrier_interval_ms: Option<u32>,
+        checkpoint_frequency: Option<u64>,
     ) -> Result<()> {
         let database_id = self.gen_id();
         self.catalog.write().create_database(&PbDatabase {
@@ -258,6 +260,8 @@ impl CatalogWriter for MockCatalogWriter {
             id: database_id,
             owner,
             resource_group: resource_group.to_owned(),
+            barrier_interval_ms,
+            checkpoint_frequency,
         });
         self.create_schema(database_id, DEFAULT_SCHEMA_NAME, owner)
             .await?;
@@ -692,6 +696,28 @@ impl CatalogWriter for MockCatalogWriter {
     ) -> Result<()> {
         todo!()
     }
+
+    async fn alter_database_param(
+        &self,
+        database_id: u32,
+        param: AlterDatabaseParam,
+    ) -> Result<()> {
+        let mut pb_database = {
+            let reader = self.catalog.read();
+            let database = reader.get_database_by_id(&database_id)?.to_owned();
+            database.to_prost()
+        };
+        match param {
+            AlterDatabaseParam::BarrierIntervalMs(interval) => {
+                pb_database.barrier_interval_ms = interval;
+            }
+            AlterDatabaseParam::CheckpointFrequency(frequency) => {
+                pb_database.checkpoint_frequency = frequency;
+            }
+        }
+        self.catalog.write().update_database(&pb_database);
+        Ok(())
+    }
 }
 
 impl MockCatalogWriter {
@@ -704,6 +730,8 @@ impl MockCatalogWriter {
             name: DEFAULT_DATABASE_NAME.to_owned(),
             owner: DEFAULT_SUPER_USER_ID,
             resource_group: DEFAULT_RESOURCE_GROUP.to_owned(),
+            barrier_interval_ms: None,
+            checkpoint_frequency: None,
         });
         catalog.write().create_schema(&PbSchema {
             id: 1,

@@ -20,6 +20,7 @@ use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
+use risingwave_common::catalog::AlterDatabaseParam;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
@@ -163,6 +164,7 @@ pub enum DdlCommand {
     CommentOn(Comment),
     CreateSubscription(Subscription),
     DropSubscription(SubscriptionId, DropMode),
+    AlterDatabaseParam(DatabaseId, AlterDatabaseParam),
 }
 
 impl DdlCommand {
@@ -188,7 +190,8 @@ impl DdlCommand {
             | DdlCommand::CommentOn(_)
             | DdlCommand::CreateSecret(_)
             | DdlCommand::AlterSecret(_)
-            | DdlCommand::AlterSwapRename(_) => true,
+            | DdlCommand::AlterSwapRename(_)
+            | DdlCommand::AlterDatabaseParam(_, _) => true,
             DdlCommand::CreateStreamingJob { .. }
             | DdlCommand::CreateNonSharedSource(_)
             | DdlCommand::ReplaceStreamJob(_)
@@ -377,6 +380,9 @@ impl DdlController {
                     ctrl.drop_subscription(subscription_id, drop_mode).await
                 }
                 DdlCommand::AlterSwapRename(objects) => ctrl.alter_swap_rename(objects).await,
+                DdlCommand::AlterDatabaseParam(database_id, param) => {
+                    ctrl.alter_database_param(database_id, param).await
+                }
             }
         }
         .in_current_span();
@@ -531,6 +537,17 @@ impl DdlController {
             None,
         )
         .await
+    }
+
+    async fn alter_database_param(
+        &self,
+        database_id: DatabaseId,
+        param: AlterDatabaseParam,
+    ) -> MetaResult<NotificationVersion> {
+        self.metadata_manager
+            .catalog_controller
+            .alter_database_param(database_id, param)
+            .await
     }
 
     // The 'secret' part of the request we receive from the frontend is in plaintext;

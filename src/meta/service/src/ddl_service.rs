@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use rand::rng as thread_rng;
 use rand::seq::IndexedRandom;
 use replace_job_plan::{ReplaceSource, ReplaceTable};
-use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager};
@@ -1164,6 +1164,32 @@ impl DdlService for DdlServiceImpl {
             .await?;
 
         Ok(Response::new(AlterResourceGroupResponse {}))
+    }
+
+    async fn alter_database_param(
+        &self,
+        request: Request<AlterDatabaseParamRequest>,
+    ) -> Result<Response<AlterDatabaseParamResponse>, Status> {
+        let req = request.into_inner();
+        let database_id = req.database_id;
+
+        let param = match req.param.unwrap() {
+            alter_database_param_request::Param::BarrierIntervalMs(value) => {
+                AlterDatabaseParam::BarrierIntervalMs(value.value)
+            }
+            alter_database_param_request::Param::CheckpointFrequency(value) => {
+                AlterDatabaseParam::CheckpointFrequency(value.value)
+            }
+        };
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterDatabaseParam(database_id as _, param))
+            .await?;
+
+        return Ok(Response::new(AlterDatabaseParamResponse {
+            status: None,
+            version,
+        }));
     }
 }
 

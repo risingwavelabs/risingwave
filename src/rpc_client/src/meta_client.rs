@@ -29,7 +29,9 @@ use list_rate_limits_response::RateLimitInfo;
 use lru::LruCache;
 use replace_job_plan::ReplaceJob;
 use risingwave_common::RW_VERSION;
-use risingwave_common::catalog::{FunctionId, IndexId, ObjectId, SecretId, TableId};
+use risingwave_common::catalog::{
+    AlterDatabaseParam, FunctionId, IndexId, ObjectId, SecretId, TableId,
+};
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, MetaConfig};
 use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::monitor::EndpointExt;
@@ -55,7 +57,7 @@ use risingwave_pb::catalog::{
 use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
 use risingwave_pb::cloud_service::*;
 use risingwave_pb::common::worker_node::Property;
-use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
+use risingwave_pb::common::{HostAddress, OptionalUint32, OptionalUint64, WorkerNode, WorkerType};
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::create_materialized_view_request::PbBackfillType;
@@ -552,6 +554,41 @@ impl MetaClient {
             owner_id,
         };
         let resp = self.inner.alter_owner(request).await?;
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
+    }
+
+    pub async fn alter_database_param(
+        &self,
+        database_id: DatabaseId,
+        param: AlterDatabaseParam,
+    ) -> Result<WaitVersion> {
+        let request = match param {
+            AlterDatabaseParam::BarrierIntervalMs(barrier_interval_ms) => {
+                let barrier_interval_ms = OptionalUint32 {
+                    value: barrier_interval_ms,
+                };
+                AlterDatabaseParamRequest {
+                    database_id,
+                    param: Some(alter_database_param_request::Param::BarrierIntervalMs(
+                        barrier_interval_ms,
+                    )),
+                }
+            }
+            AlterDatabaseParam::CheckpointFrequency(checkpoint_frequency) => {
+                let checkpoint_frequency = OptionalUint64 {
+                    value: checkpoint_frequency,
+                };
+                AlterDatabaseParamRequest {
+                    database_id,
+                    param: Some(alter_database_param_request::Param::CheckpointFrequency(
+                        checkpoint_frequency,
+                    )),
+                }
+            }
+        };
+        let resp = self.inner.alter_database_param(request).await?;
         Ok(resp
             .version
             .ok_or_else(|| anyhow!("wait version not set"))?)
@@ -2203,6 +2240,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
             ,{ ddl_client, alter_resource_group, AlterResourceGroupRequest, AlterResourceGroupResponse }
+            ,{ ddl_client, alter_database_param, AlterDatabaseParamRequest, AlterDatabaseParamResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
