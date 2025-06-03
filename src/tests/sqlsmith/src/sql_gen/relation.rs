@@ -21,7 +21,7 @@ use risingwave_sqlparser::ast::{
 
 use crate::config::Feature;
 use crate::sql_gen::types::BINARY_INEQUALITY_OP_TABLE;
-use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext};
+use crate::sql_gen::{Column, SqlGenerator};
 use crate::{BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Table};
 
 fn create_binary_expr(op: BinaryOperator, left: String, right: String) -> Expr {
@@ -119,10 +119,11 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn gen_bool_with_tables(&mut self, tables: Vec<Table>) -> Expr {
-        let old_context = self.new_local_context();
+        let old_enabled = self.config.enable_generate(Feature::Agg);
         self.add_relations_to_context(tables);
-        let expr = self.gen_expr(&Boolean, SqlGeneratorContext::new_with_can_agg(false));
-        self.restore_context(old_context);
+        self.config.set_enabled(Feature::Agg, false);
+        let expr = self.gen_expr(&Boolean);
+        self.config.set_enabled(Feature::Agg, old_enabled);
         expr
     }
 

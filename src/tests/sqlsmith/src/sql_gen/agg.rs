@@ -21,8 +21,9 @@ use risingwave_sqlparser::ast::{
     Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgList, Ident, ObjectName, OrderByExpr,
 };
 
+use crate::config::Feature;
 use crate::sql_gen::types::AGG_FUNC_TABLE;
-use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
+use crate::sql_gen::SqlGenerator;
 
 impl<R: Rng> SqlGenerator<'_, R> {
     pub fn gen_agg(&mut self, ret: &DataType) -> Expr {
@@ -40,12 +41,11 @@ impl<R: Rng> SqlGenerator<'_, R> {
             return self.gen_simple_scalar(ret);
         }
 
-        let context = SqlGeneratorContext::new();
-        let context = context.set_inside_agg();
+        self.config.set_enabled(Feature::Agg, true);
         let exprs: Vec<Expr> = func
             .inputs_type
             .iter()
-            .map(|t| self.gen_expr(t.as_exact(), context))
+            .map(|t| self.gen_expr(t.as_exact()))
             .collect();
 
         // DISTINCT now only works with agg kinds except `ApproxCountDistinct`, and with at least
@@ -57,12 +57,12 @@ impl<R: Rng> SqlGenerator<'_, R> {
         let distinct = distinct_allowed && self.flip_coin();
 
         let filter = if self.flip_coin() {
-            let context = SqlGeneratorContext::new_with_can_agg(false);
+            let old_enabled = self.config.enable_generate(Feature::Agg);
+            self.config.set_enabled(Feature::Agg, true);
             // ENABLE: https://github.com/risingwavelabs/risingwave/issues/4762
             // Prevent correlated query with `FILTER`
-            let old_ctxt = self.new_local_context();
-            let expr = Some(Box::new(self.gen_expr(&DataType::Boolean, context)));
-            self.restore_context(old_ctxt);
+            let expr = Some(Box::new(self.gen_expr(&DataType::Boolean)));
+            self.config.set_enabled(Feature::Agg, old_enabled);
             expr
         } else {
             None
