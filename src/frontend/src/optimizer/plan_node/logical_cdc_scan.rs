@@ -151,7 +151,7 @@ impl LogicalCdcScan {
             connect_properties,
             secret_refs: connect_secret_refs,
         });
-        dbg!(&cdc_table_desc);
+
         let etl_source_properties = WithOptions::new_with_options(cdc_etl_info.properties);
 
         let options = CdcScanOptions::from_with_options(&etl_source_properties)?;
@@ -273,9 +273,7 @@ impl LogicalCdcScan {
             external_table_name: cdc_table_desc.external_table_name.clone(),
             pk: cdc_table_desc.pk.clone(),
             columns: cdc_table_desc.columns.clone(),
-            stream_key: output_stream_key
-                .clone()
-                .unwrap_or(original_stream_key),
+            stream_key: output_stream_key.clone().unwrap_or(original_stream_key),
             connect_properties: cdc_table_desc.connect_properties.clone(),
             secret_refs: cdc_table_desc.secret_refs.clone(),
         });

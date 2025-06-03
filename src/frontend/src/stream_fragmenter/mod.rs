@@ -391,7 +391,6 @@ fn build_fragment(
             NodeBody::CdcFilter(node) => {
                 current_fragment.fragment_type_mask |= FragmentTypeFlag::CdcFilter as u32;
                 // memorize upstream source id for later use
-                dbg!(node.upstream_source_id);
                 state
                     .dependent_table_ids
                     .insert(node.upstream_source_id.into());

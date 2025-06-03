@@ -868,6 +868,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
 }
 
 // Derive the (cdc table desc, column ids) from the source catalog and the cdc with options.
+#[allow(clippy::too_many_arguments)]
 pub fn derive_cdc_table_desc(
     session: &SessionImpl,
     source: Arc<SourceCatalog>,
@@ -1119,7 +1120,7 @@ pub(super) async fn handle_create_table_plan(
                 session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
             // cdc table cannot be append-only
-            let (shared_source, cdc_with_options) = get_shared_source_info(&session, cdc_table)?;
+            let (shared_source, cdc_with_options) = get_shared_source_info(session, cdc_table)?;
 
             let (columns, pk_names) = match wildcard_idx {
                 Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,

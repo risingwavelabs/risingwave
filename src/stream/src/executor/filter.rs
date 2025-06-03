@@ -45,7 +45,6 @@ impl FilterExecutor {
         chunk: StreamChunk,
         filter: Arc<ArrayImpl>,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        dbg!(&chunk, "filter received chunk");
         let (data_chunk, ops) = chunk.into_parts();
 
         let (columns, vis) = data_chunk.into_parts();

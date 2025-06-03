@@ -18,7 +18,7 @@ use std::str::FromStr;
 use anyhow::anyhow;
 use educe::Educe;
 use pretty_xmlish::Pretty;
-use risingwave_common::catalog::{CdcTableDesc, ColumnDesc, Field, Schema};
+use risingwave_common::catalog::{CdcTableDesc, ColumnDesc, Schema};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_connector::source::cdc::{

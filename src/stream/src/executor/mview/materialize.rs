@@ -184,7 +184,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             let msg = match msg {
                 Message::Watermark(w) => Message::Watermark(w),
                 Message::Chunk(chunk) => {
-                    dbg!(&chunk, "materialize executor received chunk");
                     self.metrics
                         .materialize_input_row_count
                         .inc_by(chunk.cardinality() as u64);

@@ -1647,7 +1647,6 @@ impl DdlController {
             .metadata_manager
             .get_upstream_root_fragments(&upstream_table_ids)
             .await?;
-        dbg!(&upstream_table_ids, &upstream_root_fragments);
 
         if snapshot_backfill_info.is_some() {
             match stream_job {

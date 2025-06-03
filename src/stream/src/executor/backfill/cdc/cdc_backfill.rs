@@ -221,7 +221,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                 // ignore chunk if we need backfill, since we can read the data from the snapshot
                             } else {
                                 // forward the chunk to downstream
-                                dbg!(&chunk, "cdc_backfill receive chunk upstream");
                                 yield Message::Chunk(chunk);
                             }
                         }
@@ -483,7 +482,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     }
                                 }
                                 Message::Chunk(chunk) => {
-                                    dbg!(&chunk, "cdc_backfill receive chunk upstream");
                                     // skip empty upstream chunk
                                     if chunk.cardinality() == 0 {
                                         continue;
@@ -536,7 +534,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     // We should not mark the chunk anymore,
                                     // otherwise, we will ignore some rows in the buffer.
                                     for chunk in upstream_chunk_buffer.drain(..) {
-                                        dbg!(&chunk, "cdc_backfill receive chunk snapshot");
                                         yield Message::Chunk(mapping_chunk(
                                             chunk,
                                             &self.output_indices,
@@ -552,7 +549,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     // just use the last row to update `current_pos`.
                                     current_pk_pos = Some(get_new_pos(&chunk, &pk_indices));
 
-                                    dbg!(&chunk, "cdc_backfill receive chunk snapshot");
                                     tracing::trace!(
                                         "got a snapshot chunk: len {}, current_pk_pos {:?}",
                                         chunk.cardinality(),
@@ -746,12 +742,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     // break after the state have been saved
                     break;
                 }
-                if let Message::Chunk(chunk) = &msg {
-                    dbg!(
-                        &chunk,
-                        "cdc_backfill receive message after backfill finished"
-                    );
-                }
+
                 yield msg;
             }
         }
@@ -767,12 +758,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 if let Message::Barrier(barrier) = &msg {
                     // commit state just to bump the epoch of state table
                     state_impl.commit_state(barrier.epoch).await?;
-                }
-                if let Message::Chunk(chunk) = &msg {
-                    dbg!(
-                        &chunk,
-                        "cdc_backfill receive message after backfill finished"
-                    );
                 }
                 yield msg;
             }

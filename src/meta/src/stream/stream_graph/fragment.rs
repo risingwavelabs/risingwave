@@ -1024,12 +1024,6 @@ impl CompleteStreamFragmentGraph {
 
                             // Build the extra edges between the upstream `Materialize` and the downstream `StreamScan`
                             // of the new materialized view.
-                            dbg!(
-                                upstream_table_id,
-                                output_columns,
-                                &upstream_root_fragments,
-                                fragment.inner.get_node().unwrap().get_identity(),
-                            );
                             let upstream_fragment = upstream_root_fragments
                                 .get(&upstream_table_id)
                                 .context("upstream materialized view fragment not found")?;

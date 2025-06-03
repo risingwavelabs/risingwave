@@ -102,7 +102,7 @@ use crate::handler::create_table::{
 use crate::handler::util::{
     SourceSchemaCompatExt, check_connector_match_connection_type, ensure_connection_type_allowed,
 };
-use crate::optimizer::plan_node::generic::{CdcScanOptions, SourceNodeKind};
+use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
 use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
@@ -178,7 +178,7 @@ pub enum CreateSourceType {
     NonShared,
     /// create table with connector
     Table,
-    /// The cdc source for an upstream table created after a `SharedCdc`` Source
+    /// The cdc source for an upstream table created after a `SharedCdc` Source
     CdcEtl,
 }
 
@@ -1057,7 +1057,7 @@ pub async fn bind_create_source_from_source(
     sql_column_defs: &[ColumnDef],
     wildcard_idx: Option<usize>,
     include_column_options: IncludeOption,
-    mut col_id_gen: &mut ColumnIdGenerator,
+    col_id_gen: &mut ColumnIdGenerator,
     _create_source_type: CreateSourceType,
     source_rate_limit: Option<u32>,
     cdc_table_info: CdcTableInfo,
@@ -1070,7 +1070,7 @@ pub async fn bind_create_source_from_source(
         session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
     let (shared_source, shared_source_with_options) =
-        get_shared_source_info(&session, &cdc_table_info)?;
+        get_shared_source_info(session, &cdc_table_info)?;
 
     let (columns, pk_names) = match wildcard_idx {
         Some(_) => bind_cdc_table_schema_externally(shared_source_with_options.clone()).await?,
@@ -1084,20 +1084,20 @@ pub async fn bind_create_source_from_source(
     };
 
     let source_info = StreamSourceInfo {
-        format: shared_source.info.format.clone(),
-        row_encode: shared_source.info.row_encode.clone(),
+        format: shared_source.info.format,
+        row_encode: shared_source.info.row_encode,
         ..Default::default()
     };
 
     let (cdc_table_desc, columns, pk_column_ids) = derive_cdc_table_desc(
-        &session,
+        session,
         shared_source.clone(),
         cdc_table_info.external_table_name.clone(),
         sql_column_defs.to_vec(),
         columns,
         pk_names,
         shared_source_with_options,
-        &mut col_id_gen,
+        col_id_gen,
         include_column_options,
         full_name,
         TableId::placeholder(),
