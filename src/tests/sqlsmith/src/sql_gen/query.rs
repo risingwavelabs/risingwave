@@ -28,7 +28,7 @@ use risingwave_sqlparser::ast::{
 
 use crate::config::Feature;
 use crate::sql_gen::utils::create_table_with_joins_from_table;
-use crate::sql_gen::{Column, SqlGenerator, Table};
+use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext, Table};
 
 /// Generators
 impl<R: Rng> SqlGenerator<'_, R> {
@@ -197,14 +197,14 @@ impl<R: Rng> SqlGenerator<'_, R> {
 
     fn gen_select_list(&mut self, num_select_items: usize) -> (Vec<SelectItem>, Vec<Column>) {
         let can_agg = self.should_generate(Feature::Agg);
-        self.config.set_enabled(Feature::Agg, can_agg);
+        let context = SqlGeneratorContext::new_with_can_agg(can_agg);
         (0..num_select_items)
-            .map(|i| self.gen_select_item(i))
+            .map(|i| self.gen_select_item(i, context))
             .unzip()
     }
 
-    fn gen_select_item(&mut self, i: usize) -> (SelectItem, Column) {
-        let (ret_type, expr) = self.gen_arbitrary_expr();
+    fn gen_select_item(&mut self, i: usize, context: SqlGeneratorContext) -> (SelectItem, Column) {
+        let (ret_type, expr) = self.gen_arbitrary_expr(context);
 
         let alias = format!("col_{}", i);
         (
@@ -251,8 +251,8 @@ impl<R: Rng> SqlGenerator<'_, R> {
 
     fn gen_where(&mut self) -> Option<Expr> {
         if self.should_generate(Feature::Where) {
-            self.config.set_enabled(Feature::Agg, false);
-            Some(self.gen_expr(&DataType::Boolean))
+            let context = SqlGeneratorContext::new_with_can_agg(false);
+            Some(self.gen_expr(&DataType::Boolean, context))
         } else {
             None
         }
@@ -322,7 +322,8 @@ impl<R: Rng> SqlGenerator<'_, R> {
 
     fn gen_having(&mut self, have_group_by: bool) -> Option<Expr> {
         if have_group_by & self.flip_coin() {
-            Some(self.gen_expr(&DataType::Boolean))
+            let context = SqlGeneratorContext::new();
+            Some(self.gen_expr(&DataType::Boolean, context))
         } else {
             None
         }

@@ -23,13 +23,13 @@ use risingwave_sqlparser::ast::{
 };
 
 use crate::sql_gen::types::{FUNC_TABLE, IMPLICIT_CAST_TABLE, INVARIANT_FUNC_SET};
-use crate::sql_gen::SqlGenerator;
+use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
 
 impl<R: Rng> SqlGenerator<'_, R> {
-    pub fn gen_func(&mut self, ret: &DataType) -> Expr {
+    pub fn gen_func(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
         match self.rng.random_bool(0.1) {
-            true => self.gen_special_func(ret),
-            false => self.gen_fixed_func(ret),
+            true => self.gen_special_func(ret, context),
+            false => self.gen_fixed_func(ret, context),
         }
     }
 
@@ -38,21 +38,21 @@ impl<R: Rng> SqlGenerator<'_, R> {
     /// These require custom logic for arguments.
     /// For instance, `OVERLAY` requires a positive length argument,
     /// and `CONCAT` and `CONCAT_WS` require variable number of arguments.
-    fn gen_special_func(&mut self, ret: &DataType) -> Expr {
+    fn gen_special_func(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
         use DataType as T;
         match ret {
             T::Varchar => match self.rng.random_range(0..=4) {
-                0 => self.gen_case(ret),
-                1 => self.gen_coalesce(ret),
-                2 => self.gen_concat(),
-                3 => self.gen_concat_ws(),
-                4 => self.gen_overlay(),
+                0 => self.gen_case(ret, context),
+                1 => self.gen_coalesce(ret, context),
+                2 => self.gen_concat(context),
+                3 => self.gen_concat_ws(context),
+                4 => self.gen_overlay(context),
                 _ => unreachable!(),
             },
-            T::Bytea => self.gen_decode(),
+            T::Bytea => self.gen_decode(context),
             _ => match self.rng.random_bool(0.5) {
-                true => self.gen_case(ret),
-                false => self.gen_coalesce(ret),
+                true => self.gen_case(ret, context),
+                false => self.gen_coalesce(ret, context),
             },
             // TODO: gen_regexpr
             // TODO: gen functions which return list, struct
@@ -61,9 +61,9 @@ impl<R: Rng> SqlGenerator<'_, R> {
 
     /// We do custom generation for the `OVERLAY` function call.
     /// See: [`https://github.com/risingwavelabs/risingwave/issues/10695`] for rationale.
-    fn gen_overlay(&mut self) -> Expr {
-        let expr = Box::new(self.gen_expr(&DataType::Varchar));
-        let new_substring = Box::new(self.gen_expr(&DataType::Varchar));
+    fn gen_overlay(&mut self, context: SqlGeneratorContext) -> Expr {
+        let expr = Box::new(self.gen_expr(&DataType::Varchar, context));
+        let new_substring = Box::new(self.gen_expr(&DataType::Varchar, context));
         let start = Box::new(self.gen_range_scalar(&DataType::Int32, 1, 10).unwrap());
         let count = if self.flip_coin() {
             None
@@ -80,50 +80,50 @@ impl<R: Rng> SqlGenerator<'_, R> {
         }
     }
 
-    fn gen_case(&mut self, ret: &DataType) -> Expr {
+    fn gen_case(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
         let n = self.rng.random_range(1..4);
         Expr::Case {
             operand: None,
-            conditions: self.gen_n_exprs_with_type(n, &DataType::Boolean),
-            results: self.gen_n_exprs_with_type(n, ret),
-            else_result: Some(Box::new(self.gen_expr(ret))),
+            conditions: self.gen_n_exprs_with_type(n, &DataType::Boolean, context),
+            results: self.gen_n_exprs_with_type(n, ret, context),
+            else_result: Some(Box::new(self.gen_expr(ret, context))),
         }
     }
 
-    fn gen_coalesce(&mut self, ret: &DataType) -> Expr {
-        let non_null = self.gen_expr(ret);
+    fn gen_coalesce(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
+        let non_null = self.gen_expr(ret, context);
         let position = self.rng.random_range(0..10);
         let mut args = (0..10).map(|_| Expr::Value(Value::Null)).collect_vec();
         args[position] = non_null;
         Expr::Function(make_simple_func("coalesce", &args))
     }
 
-    fn gen_concat(&mut self) -> Expr {
-        Expr::Function(make_simple_func("concat", &self.gen_concat_args()))
+    fn gen_concat(&mut self, context: SqlGeneratorContext) -> Expr {
+        Expr::Function(make_simple_func("concat", &self.gen_concat_args(context)))
     }
 
-    fn gen_concat_ws(&mut self) -> Expr {
-        let sep = self.gen_expr(&DataType::Varchar);
-        let mut args = self.gen_concat_args();
+    fn gen_concat_ws(&mut self, context: SqlGeneratorContext) -> Expr {
+        let sep = self.gen_expr(&DataType::Varchar, context);
+        let mut args = self.gen_concat_args(context);
         args.insert(0, sep);
         Expr::Function(make_simple_func("concat_ws", &args))
     }
 
-    fn gen_concat_args(&mut self) -> Vec<Expr> {
+    fn gen_concat_args(&mut self, context: SqlGeneratorContext) -> Vec<Expr> {
         let n = self.rng.random_range(1..4);
         (0..n)
             .map(|_| {
                 if self.rng.random_bool(0.1) {
-                    self.gen_explicit_cast(&DataType::Varchar)
+                    self.gen_explicit_cast(&DataType::Varchar, context)
                 } else {
-                    self.gen_expr(&DataType::Varchar)
+                    self.gen_expr(&DataType::Varchar, context)
                 }
             })
             .collect()
     }
 
-    fn gen_decode(&mut self) -> Expr {
-        let input_string = self.gen_expr(&DataType::Bytea);
+    fn gen_decode(&mut self, context: SqlGeneratorContext) -> Expr {
+        let input_string = self.gen_expr(&DataType::Bytea, context);
         let encoding = &["base64", "hex", "escape"].choose(&mut self.rng).unwrap();
         let args = vec![
             input_string,
@@ -137,7 +137,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         Expr::Function(make_simple_func("decode", &args))
     }
 
-    fn gen_fixed_func(&mut self, ret: &DataType) -> Expr {
+    fn gen_fixed_func(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
         let funcs = match FUNC_TABLE.get(ret) {
             None => return self.gen_simple_scalar(ret),
             Some(funcs) => funcs,
@@ -153,9 +153,9 @@ impl<R: Rng> SqlGenerator<'_, R> {
                     && self.flip_coin()
                 {
                     let from_ty = &from_tys.choose(&mut self.rng).unwrap().from_type;
-                    self.gen_implicit_cast(from_ty)
+                    self.gen_implicit_cast(from_ty, context)
                 } else {
-                    self.gen_expr(t.as_exact())
+                    self.gen_expr(t.as_exact(), context)
                 }
             })
             .collect();

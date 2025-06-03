@@ -20,9 +20,8 @@ use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_frontend::expr::cast_sigs;
 use risingwave_sqlparser::ast::{Expr, Ident, OrderByExpr, Value};
 
-use crate::config::Feature;
 use crate::sql_gen::types::data_type_to_ast_data_type;
-use crate::sql_gen::SqlGenerator;
+use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
 
 static STRUCT_FIELD_NAMES: [&str; 26] = [
     "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s",
@@ -38,25 +37,25 @@ impl<R: Rng> SqlGenerator<'_, R> {
     ///    Only columns present in GROUP BY can be selected.
     ///
     /// `inside_agg` indicates if we are calling `gen_expr` inside an aggregate.
-    pub(crate) fn gen_expr(&mut self, typ: &DataType) -> Expr {
+    pub(crate) fn gen_expr(&mut self, typ: &DataType, context: SqlGeneratorContext) -> Expr {
         if !self.can_recurse() {
             // Stop recursion with a simple scalar or column.
             // Weight it more towards columns, scalar has much higher chance of being generated,
             // since it is usually used as fail-safe expression.
             return match self.rng.random_bool(0.1) {
                 true => self.gen_simple_scalar(typ),
-                false => self.gen_col(typ),
+                false => self.gen_col(typ, context),
             };
         }
 
         if *typ == DataType::Boolean && self.rng.random_bool(0.05) {
             return match self.rng.random_bool(0.5) {
                 true => {
-                    let (ty, expr) = self.gen_arbitrary_expr();
+                    let (ty, expr) = self.gen_arbitrary_expr(context);
                     let n = self.rng.random_range(1..=10);
                     Expr::InList {
                         expr: Box::new(Expr::Nested(Box::new(expr))),
-                        list: self.gen_n_exprs_with_type(n, &ty),
+                        list: self.gen_n_exprs_with_type(n, &ty, context),
                         negated: self.flip_coin(),
                     }
                 }
@@ -91,11 +90,11 @@ impl<R: Rng> SqlGenerator<'_, R> {
         // - `a1 >= a2 IN b`
         // ...
         // We just nest compound expressions to avoid this.
-        let range = if self.enable_generate(Feature::Agg) { 100 } else { 50 };
+        let range = if context.can_gen_agg() { 100 } else { 50 };
         match self.rng.random_range(0..=range) {
-            0..=35 => Expr::Nested(Box::new(self.gen_func(typ))),
-            36..=40 => self.gen_exists(typ),
-            41..=50 => self.gen_explicit_cast(typ),
+            0..=35 => Expr::Nested(Box::new(self.gen_func(typ, context))),
+            36..=40 => self.gen_exists(typ, context),
+            41..=50 => self.gen_explicit_cast(typ, context),
             51..=100 => self.gen_agg(typ),
             _ => unreachable!(),
         }
@@ -174,14 +173,14 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     /// Generates an arbitrary expression, but biased towards datatypes present in bound columns.
-    pub(crate) fn gen_arbitrary_expr(&mut self) -> (DataType, Expr) {
+    pub(crate) fn gen_arbitrary_expr(&mut self, context: SqlGeneratorContext) -> (DataType, Expr) {
         let ret_type = self.gen_data_type();
-        let expr = self.gen_expr(&ret_type);
+        let expr = self.gen_expr(&ret_type, context);
         (ret_type, expr)
     }
 
-    fn gen_col(&mut self, typ: &DataType) -> Expr {
-        let columns = if !self.enable_generate(Feature::Agg) {
+    fn gen_col(&mut self, typ: &DataType, context: SqlGeneratorContext) -> Expr {
+        let columns = if context.is_inside_agg() {
             if self.bound_relations.is_empty() {
                 return self.gen_simple_scalar(typ);
             }
@@ -213,12 +212,13 @@ impl<R: Rng> SqlGenerator<'_, R> {
         &mut self,
         n: usize,
         ret: &DataType,
+        context: SqlGeneratorContext,
     ) -> Vec<Expr> {
-        (0..n).map(|_| self.gen_expr(ret)).collect()
+        (0..n).map(|_| self.gen_expr(ret, context)).collect()
     }
 
-    fn gen_exists(&mut self, ret: &DataType) -> Expr {
-        if *ret != DataType::Boolean || self.enable_generate(Feature::Agg) {
+    fn gen_exists(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
+        if *ret != DataType::Boolean || context.can_gen_agg() {
             return self.gen_simple_scalar(ret);
         };
         // Generating correlated subquery tends to create queries which cannot be unnested.
