@@ -120,6 +120,8 @@ CREATE MATERIALIZED VIEW mv_user_gen_more AS SELECT id, t, age FROM src_user_gen
 statement ok
 ALTER TABLE t_user REFRESH SCHEMA;
 
+sleep 5s
+
 query ????
 SELECT COUNT(*), MAX(age), MIN(age), SUM(age) FROM mv_user_more;
 ----
