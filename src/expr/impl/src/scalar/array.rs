@@ -134,12 +134,12 @@ fn map_access<'a>(
 /// select
 ///     map_contains(MAP{1:1}, 1),
 ///     map_contains(MAP{1:1}, 2),
-///     map_contains(MAP{1:1}, NULL::varchar),
+///     map_contains(MAP{1:1}, NULL),
+///     map_contains(MAP{1:1}, '1'),
 ///     map_contains(MAP{1:1}, 1.0),
-///     -- polymorphic type
 ///     map_contains(MAP{'a':'1','b':'2'}, 'ab');
 /// ----
-/// t f NULL f f
+/// t f NULL t f f
 /// ```
 #[function("map_contains(anymap, any) -> boolean")]
 fn map_contains(map: MapRef<'_>, key: ScalarRefImpl<'_>) -> Result<bool, ExprError> {
