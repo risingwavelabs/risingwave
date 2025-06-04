@@ -1410,7 +1410,7 @@ mod tests {
         ";
         assert_eq!(
             redact_sql(sql, keywords),
-            "CREATE SOURCE temp (k BIGINT, v CHARACTER VARYING) WITH (connector = 'datagen', v1 = 123, v2 = '[REDACTED]', v3 = false, v4 = '[REDACTED]') FORMAT PLAIN ENCODE JSON (a = '1', b = '[REDACTED]')"
+            "CREATE SOURCE temp (k BIGINT, v CHARACTER VARYING) WITH (connector = 'datagen', v1 = 123, v2 = [REDACTED], v3 = false, v4 = [REDACTED]) FORMAT PLAIN ENCODE JSON (a = '1', b = [REDACTED])"
         );
     }
 }
