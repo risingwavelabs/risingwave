@@ -98,7 +98,7 @@ pub struct CreateStreamingJobContext {
 
     pub streaming_job: StreamingJob,
 
-    pub fragment_backfill_ordering: Option<FragmentBackfillOrder>,
+    pub fragment_backfill_ordering: FragmentBackfillOrder,
 }
 
 impl CreateStreamingJobContext {

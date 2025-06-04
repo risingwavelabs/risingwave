@@ -25,6 +25,8 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::Event as Respon
 use risingwave_pb::hummock::{
     CancelCompactTask, CompactTaskAssignment, CompactTaskProgress, SubscribeCompactionEventResponse,
 };
+use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventResponse;
+use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::MetaResult;
@@ -32,17 +34,35 @@ use crate::manager::MetaSrvEnv;
 use crate::model::MetadataModelError;
 
 pub type CompactorManagerRef = Arc<CompactorManager>;
+pub type IcebergCompactorManagerRef = Arc<IcebergCompactorManager>;
 
 pub const TASK_RUN_TOO_LONG: &str = "running too long";
 pub const TASK_NOT_FOUND: &str = "task not found";
 pub const TASK_NORMAL: &str = "task is normal, please wait some time";
 
+type CompactorSubscribeStreamSender = UnboundedSender<MetaResult<SubscribeCompactionEventResponse>>;
+type CompactorSubscribeStreamReceiver =
+    UnboundedReceiver<MetaResult<SubscribeCompactionEventResponse>>;
+
+type IcebergCompactorSubscribeStreamSender =
+    UnboundedSender<MetaResult<SubscribeIcebergCompactionEventResponse>>;
+type IcebergCompactorSubscribeStreamReceiver =
+    UnboundedReceiver<MetaResult<SubscribeIcebergCompactionEventResponse>>;
+
+type CompactorSubscribeResponseEvent = ResponseEvent;
+
+type IcebergCompactorSubscribeResponseEvent = IcebergResponseEvent;
+
 /// Wraps the stream between meta node and compactor node.
 /// Compactor node will re-establish the stream when the previous one fails.
-#[derive(Debug)]
 pub struct Compactor {
     context_id: HummockContextId,
-    sender: UnboundedSender<MetaResult<SubscribeCompactionEventResponse>>,
+    sender: CompactorSubscribeStreamSender,
+}
+
+pub struct IcebergCompactor {
+    context_id: HummockContextId,
+    sender: IcebergCompactorSubscribeStreamSender,
 }
 
 struct TaskHeartbeat {
@@ -59,14 +79,11 @@ struct TaskHeartbeat {
 }
 
 impl Compactor {
-    pub fn new(
-        context_id: HummockContextId,
-        sender: UnboundedSender<MetaResult<SubscribeCompactionEventResponse>>,
-    ) -> Self {
+    pub fn new(context_id: HummockContextId, sender: CompactorSubscribeStreamSender) -> Self {
         Self { context_id, sender }
     }
 
-    pub fn send_event(&self, event: ResponseEvent) -> MetaResult<()> {
+    pub fn send_event(&self, event: CompactorSubscribeResponseEvent) -> MetaResult<()> {
         fail_point!("compaction_send_task_fail", |_| Err(anyhow::anyhow!(
             "compaction_send_task_fail"
         )
@@ -74,11 +91,11 @@ impl Compactor {
 
         self.sender
             .send(Ok(SubscribeCompactionEventResponse {
-                event: Some(event),
                 create_at: SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
+                    .duration_since(SystemTime::UNIX_EPOCH)
                     .expect("Clock may have gone backwards")
                     .as_millis() as u64,
+                event: Some(event),
             }))
             .map_err(|e| anyhow::anyhow!(e))?;
 
@@ -86,19 +103,10 @@ impl Compactor {
     }
 
     pub fn cancel_task(&self, task_id: u64) -> MetaResult<()> {
-        self.sender
-            .send(Ok(SubscribeCompactionEventResponse {
-                event: Some(ResponseEvent::CancelCompactTask(CancelCompactTask {
-                    context_id: self.context_id,
-                    task_id,
-                })),
-                create_at: SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .expect("Clock may have gone backwards")
-                    .as_millis() as u64,
-            }))
-            .map_err(|e| anyhow::anyhow!(e))?;
-        Ok(())
+        self.send_event(ResponseEvent::CancelCompactTask(CancelCompactTask {
+            context_id: self.context_id,
+            task_id,
+        }))
     }
 
     pub fn cancel_tasks(&self, task_ids: &Vec<u64>) -> MetaResult<()> {
@@ -111,6 +119,14 @@ impl Compactor {
     pub fn context_id(&self) -> HummockContextId {
         self.context_id
     }
+}
+
+pub trait CompactorManagerTrait {
+    fn add_compactor(&self, context_id: HummockContextId) -> CompactorSubscribeStreamReceiver;
+    fn remove_compactor(&self, context_id: HummockContextId);
+    fn get_compactor(&self, context_id: HummockContextId) -> Option<Arc<Compactor>>;
+    fn next_compactor(&self) -> Option<Arc<Compactor>>;
+    fn compactor_num(&self) -> usize;
 }
 
 /// `CompactorManagerInner` maintains compactors which can process compact task.
@@ -170,7 +186,6 @@ impl CompactorManagerInner {
 
     pub fn next_compactor(&self) -> Option<Arc<Compactor>> {
         use rand::Rng;
-
         if self.compactor_map.is_empty() {
             return None;
         }
@@ -190,12 +205,14 @@ impl CompactorManagerInner {
     pub fn add_compactor(
         &mut self,
         context_id: HummockContextId,
-    ) -> UnboundedReceiver<MetaResult<SubscribeCompactionEventResponse>> {
+    ) -> CompactorSubscribeStreamReceiver {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+
         self.compactor_map
             .insert(context_id, Arc::new(Compactor::new(context_id, tx)));
 
-        tracing::info!("Added compactor session {}", context_id);
+        tracing::info!(context_id = context_id, "Added compactor session");
+
         rx
     }
 
@@ -207,11 +224,9 @@ impl CompactorManagerInner {
     }
 
     pub fn remove_compactor(&mut self, context_id: HummockContextId) {
-        self.compactor_map.remove(&context_id);
-
-        // To remove the heartbeats, they need to be forcefully purged,
-        // which is only safe when the context has been completely removed from meta.
-        tracing::info!("Removed compactor session {}", context_id);
+        if self.compactor_map.remove(&context_id).is_some() {
+            tracing::info!(context_id = context_id, "Removed compactor session")
+        };
     }
 
     pub fn get_compactor(&self, context_id: HummockContextId) -> Option<Arc<Compactor>> {
@@ -414,10 +429,7 @@ impl CompactorManager {
         self.inner.read().next_compactor()
     }
 
-    pub fn add_compactor(
-        &self,
-        context_id: HummockContextId,
-    ) -> UnboundedReceiver<MetaResult<SubscribeCompactionEventResponse>> {
+    pub fn add_compactor(&self, context_id: HummockContextId) -> CompactorSubscribeStreamReceiver {
         self.inner.write().add_compactor(context_id)
     }
 
@@ -471,6 +483,98 @@ impl CompactorManager {
     }
 }
 
+impl IcebergCompactor {
+    pub fn new(
+        context_id: HummockContextId,
+        sender: IcebergCompactorSubscribeStreamSender,
+    ) -> Self {
+        Self { context_id, sender }
+    }
+
+    pub fn context_id(&self) -> HummockContextId {
+        self.context_id
+    }
+
+    pub fn send_event(&self, event: IcebergCompactorSubscribeResponseEvent) -> MetaResult<()> {
+        fail_point!("iceberg_compaction_send_task_fail", |_| Err(
+            anyhow::anyhow!("iceberg_compaction_send_task_fail").into()
+        ));
+
+        self.sender
+            .send(Ok(SubscribeIcebergCompactionEventResponse {
+                create_at: SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .expect("Clock may have gone backwards")
+                    .as_millis() as u64,
+                event: Some(event),
+            }))
+            .map_err(|e| anyhow::anyhow!(e))?;
+
+        Ok(())
+    }
+}
+
+pub struct IcebergCompactorManagerInner {
+    pub compactor_map: HashMap<HummockContextId, Arc<IcebergCompactor>>,
+}
+
+pub struct IcebergCompactorManager {
+    inner: Arc<RwLock<IcebergCompactorManagerInner>>,
+}
+
+impl IcebergCompactorManager {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(IcebergCompactorManagerInner {
+                compactor_map: HashMap::new(),
+            })),
+        }
+    }
+
+    pub fn add_compactor(
+        &self,
+        context_id: HummockContextId,
+    ) -> IcebergCompactorSubscribeStreamReceiver {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        self.inner
+            .write()
+            .compactor_map
+            .insert(context_id, Arc::new(IcebergCompactor::new(context_id, tx)));
+        tracing::info!(context_id = context_id, "Added iceberg compactor session");
+        rx
+    }
+
+    pub fn remove_compactor(&self, context_id: HummockContextId) {
+        if self
+            .inner
+            .write()
+            .compactor_map
+            .remove(&context_id)
+            .is_some()
+        {
+            tracing::info!(context_id = context_id, "Removed iceberg compactor session");
+        }
+    }
+
+    pub fn get_compactor(&self, context_id: HummockContextId) -> Option<Arc<IcebergCompactor>> {
+        self.inner.read().compactor_map.get(&context_id).cloned()
+    }
+
+    pub fn next_compactor(&self) -> Option<Arc<IcebergCompactor>> {
+        use rand::Rng;
+        let compactor_map = &self.inner.read().compactor_map;
+        if compactor_map.is_empty() {
+            return None;
+        }
+        let rand_index = rand::rng().random_range(0..compactor_map.len());
+        compactor_map.values().nth(rand_index).cloned()
+    }
+
+    pub fn compactor_num(&self) -> usize {
+        self.inner.read().compactor_map.len()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -484,7 +588,7 @@ mod tests {
     use crate::hummock::test_utils::{
         add_ssts, register_table_ids_to_compaction_group, setup_compute_env,
     };
-    use crate::hummock::{CompactorManager, MockHummockMetaClient};
+    use crate::hummock::{CompactorManager, IcebergCompactorManager, MockHummockMetaClient};
 
     #[tokio::test]
     async fn test_compactor_manager() {
@@ -495,7 +599,7 @@ mod tests {
             let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(
                 MockHummockMetaClient::new(hummock_manager.clone(), context_id),
             );
-            let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
+            let compactor_manager = hummock_manager.compactor_manager.clone();
             register_table_ids_to_compaction_group(
                 hummock_manager.as_ref(),
                 &[1],
@@ -567,5 +671,35 @@ mod tests {
         compactor_manager.remove_compactor(context_id);
         assert_eq!(compactor_manager.compactor_num(), 0);
         assert!(compactor_manager.get_compactor(context_id).is_none());
+    }
+
+    #[test]
+    fn test_iceberg_compactor_manager() {
+        // Test Add and Remove Iceberg Compactor
+        let iceberg_context_id = 1000;
+        let iceberg_compactor_manager = IcebergCompactorManager::new();
+        assert_eq!(iceberg_compactor_manager.compactor_num(), 0);
+        assert!(
+            iceberg_compactor_manager
+                .get_compactor(iceberg_context_id)
+                .is_none()
+        );
+        iceberg_compactor_manager.add_compactor(iceberg_context_id);
+        assert_eq!(iceberg_compactor_manager.compactor_num(), 1);
+        assert_eq!(
+            iceberg_compactor_manager
+                .get_compactor(iceberg_context_id)
+                .unwrap()
+                .context_id(),
+            iceberg_context_id
+        );
+        // Test remove
+        iceberg_compactor_manager.remove_compactor(iceberg_context_id);
+        assert_eq!(iceberg_compactor_manager.compactor_num(), 0);
+        assert!(
+            iceberg_compactor_manager
+                .get_compactor(iceberg_context_id)
+                .is_none()
+        );
     }
 }

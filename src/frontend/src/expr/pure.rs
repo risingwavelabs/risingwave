@@ -64,6 +64,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::SecToTimestamptz
             | Type::AtTimeZone
             | Type::DateTrunc
+            | Type::DateBin
             | Type::MakeDate
             | Type::MakeTime
             | Type::MakeTimestamp
@@ -183,6 +184,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::ArrayPosition
             | Type::ArrayContains
             | Type::ArrayContained
+            | Type::ArrayFlatten
             | Type::HexToInt256
             | Type::JsonbConcat
             | Type::JsonbAccess
@@ -268,7 +270,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::MapLength
             | Type::VnodeUser
             | Type::RwEpochToTs
-            | Type::CheckNotNull =>
+            | Type::CheckNotNull
+            | Type::CompositeCast =>
             // expression output is deterministic(same result for the same input)
             {
                 func_call

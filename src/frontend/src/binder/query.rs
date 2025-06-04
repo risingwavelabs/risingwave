@@ -85,12 +85,20 @@ impl BoundQuery {
     /// * The second example is correlated, because it depend on a correlated input ref (`a1`) that
     ///   goes out.
     /// * The last example is also correlated. because it cannot be evaluated independently either.
-    pub fn is_correlated(&self, depth: Depth) -> bool {
-        self.body.is_correlated(depth + 1)
+    pub fn is_correlated_by_depth(&self, depth: Depth) -> bool {
+        self.body.is_correlated_by_depth(depth + 1)
             || self
                 .extra_order_exprs
                 .iter()
                 .any(|e| e.has_correlated_input_ref_by_depth(depth + 1))
+    }
+
+    pub fn is_correlated_by_correlated_id(&self, correlated_id: CorrelatedId) -> bool {
+        self.body.is_correlated_by_correlated_id(correlated_id)
+            || self
+                .extra_order_exprs
+                .iter()
+                .any(|e| e.has_correlated_input_ref_by_correlated_id(correlated_id))
     }
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(

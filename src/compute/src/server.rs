@@ -263,7 +263,7 @@ pub async fn compute_node_serve(
             let (handle, shutdown_sender) = start_compactor(
                 compactor_context,
                 hummock_meta_client.clone(),
-                storage.sstable_object_id_manager().clone(),
+                storage.object_id_manager().clone(),
                 storage.compaction_catalog_manager_ref().clone(),
             );
             sub_tasks.push((handle, shutdown_sender));
@@ -534,9 +534,8 @@ fn total_storage_memory_limit_bytes(storage_memory_config: &StorageMemoryConfig)
 
 /// Checks whether an embedded compactor starts with a compute node.
 fn embedded_compactor_enabled(state_store_url: &str, disable_remote_compactor: bool) -> bool {
-    // We treat `hummock+memory-shared` as a shared storage, so we won't start the compactor
-    // along with the compute node.
-    state_store_url == "hummock+memory"
+    // Always start an embedded compactor if the state store is in-memory.
+    state_store_url.starts_with("hummock+memory")
         || state_store_url.starts_with("hummock+disk")
         || disable_remote_compactor
 }

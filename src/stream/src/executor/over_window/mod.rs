@@ -16,6 +16,7 @@ mod eowc;
 mod frame_finder;
 mod general;
 mod over_partition;
+mod range_cache;
 
 pub use eowc::{EowcOverWindowExecutor, EowcOverWindowExecutorArgs};
 pub use general::{OverWindowExecutor, OverWindowExecutorArgs};

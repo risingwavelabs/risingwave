@@ -93,13 +93,28 @@ impl RewriteExprsRecursive for Relation {
 }
 
 impl Relation {
-    pub fn is_correlated(&self, depth: Depth) -> bool {
+    pub fn is_correlated_by_depth(&self, depth: Depth) -> bool {
         match self {
-            Relation::Subquery(subquery) => subquery.query.is_correlated(depth),
+            Relation::Subquery(subquery) => subquery.query.is_correlated_by_depth(depth),
             Relation::Join(join) | Relation::Apply(join) => {
                 join.cond.has_correlated_input_ref_by_depth(depth)
-                    || join.left.is_correlated(depth)
-                    || join.right.is_correlated(depth)
+                    || join.left.is_correlated_by_depth(depth)
+                    || join.right.is_correlated_by_depth(depth)
+            }
+            _ => false,
+        }
+    }
+
+    pub fn is_correlated_by_correlated_id(&self, correlated_id: CorrelatedId) -> bool {
+        match self {
+            Relation::Subquery(subquery) => {
+                subquery.query.is_correlated_by_correlated_id(correlated_id)
+            }
+            Relation::Join(join) | Relation::Apply(join) => {
+                join.cond
+                    .has_correlated_input_ref_by_correlated_id(correlated_id)
+                    || join.left.is_correlated_by_correlated_id(correlated_id)
+                    || join.right.is_correlated_by_correlated_id(correlated_id)
             }
             _ => false,
         }

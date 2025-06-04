@@ -70,13 +70,14 @@ def_anyhow_newtype! {
     async_nats::error::Error<async_nats::jetstream::context::RequestErrorKind> => "Nats error",
     NatsJetStreamError => "Nats error",
 
-    iceberg::Error => "IcebergV2 error",
+    risingwave_common::error::IcebergError => "IcebergV2 error",
     redis::RedisError => "Redis error",
     risingwave_common::array::arrow::arrow_schema_iceberg::ArrowError => "Arrow error",
     google_cloud_pubsub::client::google_cloud_auth::error::Error => "Google Cloud error",
     rumqttc::tokio_rustls::rustls::Error => "TLS error",
     rumqttc::v5::ClientError => "MQTT SDK error",
     rumqttc::v5::OptionError => "MQTT Option error",
+    rumqttc::v5::ConnectionError => "MQTT Connection error",
     MqttError => "MQTT Source error",
     mongodb::error::Error => "Mongodb error",
 
@@ -90,5 +91,12 @@ pub type ConnectorResult<T, E = ConnectorError> = std::result::Result<T, E>;
 impl From<ConnectorError> for RpcError {
     fn from(value: ConnectorError) -> Self {
         RpcError::Internal(value.0)
+    }
+}
+
+#[expect(clippy::disallowed_types)]
+impl From<iceberg::Error> for ConnectorError {
+    fn from(value: iceberg::Error) -> Self {
+        risingwave_common::error::IcebergError::from(value).into()
     }
 }

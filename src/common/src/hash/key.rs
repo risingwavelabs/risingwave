@@ -80,7 +80,7 @@ const_assert_eq!(
 
 const_assert_eq!(
     std::mem::size_of::<HeapNullBitmap>(),
-    std::mem::size_of::<usize>() * 4,
+    std::mem::size_of::<usize>() * 3,
 );
 
 /// We use a trait for `NullBitmap` so we can parameterize structs on it.

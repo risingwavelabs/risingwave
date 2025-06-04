@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+if [[ -z "${RUST_MIN_STACK}" ]]; then
+  export RUST_MIN_STACK=4194304
+fi
+
 # Exits as soon as any line fails.
 set -euo pipefail
 
@@ -90,6 +94,7 @@ if [[ "$profile" == "ci-release" ]]; then
   echo "--- e2e, $mode, backfill"
   # only run in release-mode. It's too slow for dev-mode.
   risedev slt -p 4566 -d dev './e2e_test/backfill/backfill_order_control.slt'
+  risedev slt -p 4566 -d dev './e2e_test/backfill/backfill_order_control_recovery.slt'
 fi
 
 echo "--- Kill cluster"
@@ -107,8 +112,9 @@ fi
 
 risedev slt -p 4566 -d dev './e2e_test/ttl/ttl.slt'
 risedev slt -p 4566 -d dev './e2e_test/dml/*.slt'
-risedev slt -p 4566 -d dev './e2e_test/database/prepare.slt'
-risedev slt -p 4566 -d test './e2e_test/database/test.slt'
+
+echo "--- e2e, $mode, misc"
+risedev slt -p 4566 -d dev './e2e_test/misc/**/*.slt'
 
 echo "--- e2e, $mode, python_client"
 python3 ./e2e_test/python_client/main.py

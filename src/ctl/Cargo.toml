@@ -10,7 +10,7 @@ repository = { workspace = true }
 [dependencies]
 anyhow = "1"
 bytes = "1"
-chrono = "0.4"
+chrono = { workspace = true }
 clap = { workspace = true }
 comfy-table = "7"
 foyer = { workspace = true }
@@ -19,7 +19,7 @@ hex = "0.4"
 inquire = "0.7.0"
 itertools = { workspace = true }
 prost = { workspace = true }
-regex = "1.10.0"
+regex = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_frontend = { workspace = true }

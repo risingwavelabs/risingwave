@@ -45,6 +45,7 @@ use futures::stream::{BoxStream, Peekable};
 use futures::{Stream, StreamExt};
 pub use hummock_meta_client::{
     CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
+    IcebergCompactionEventItem,
 };
 pub use meta_client::{MetaClient, SinkCoordinationRpcClient};
 use moka::future::Cache;

@@ -19,8 +19,6 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::hash::VnodeCount;
-use risingwave_common::types::DataType;
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::catalog::{Source, Table};
@@ -41,7 +39,6 @@ use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, InputRef, Literal};
 use crate::handler::create_sink::{fetch_incoming_sinks, insert_merger_to_union_with_project};
 use crate::session::SessionImpl;
-use crate::session::current::notice_to_user;
 use crate::{Binder, TableCatalog};
 
 /// Used in auto schema change process
@@ -94,13 +91,7 @@ pub async fn get_replace_table_plan(
     new_definition: Statement,
     old_catalog: &Arc<TableCatalog>,
     sql_column_strategy: SqlColumnStrategy,
-) -> Result<(
-    Option<Source>,
-    Table,
-    StreamFragmentGraph,
-    ColIndexMapping,
-    TableJobType,
-)> {
+) -> Result<(Option<Source>, Table, StreamFragmentGraph, TableJobType)> {
     // Create handler args as if we're creating a new table with the altered definition.
     let handler_args = HandlerArgs::new(session.clone(), &new_definition, Arc::from(""))?;
     let col_id_gen = ColumnIdGenerator::new_alter(old_catalog);
@@ -115,47 +106,6 @@ pub async fn get_replace_table_plan(
         sql_column_strategy,
     )
     .await?;
-
-    // Calculate the mapping from the original columns to the new columns.
-    // This will be used to map the output of the table in the dispatcher to make
-    // existing downstream jobs work correctly.
-    let col_index_mapping = ColIndexMapping::new(
-        old_catalog
-            .columns()
-            .iter()
-            .map(|old_c| {
-                table.columns.iter().position(|new_c| {
-                    let new_c = new_c.get_column_desc().unwrap();
-
-                    // We consider both the column ID and the data type.
-                    // If either of them does not match, we will treat it as a new column.
-                    //
-                    // TODO: Since we've succeeded in assigning column IDs in the step above,
-                    //       the new data type is actually _compatible_ with the old one.
-                    //       Theoretically, it's also possible to do some sort of mapping for
-                    //       the downstream job to work correctly. However, the current impl
-                    //       only supports simple column projection, which we may improve in
-                    //       future works.
-                    //       However, by treating it as a new column, we can at least reject
-                    //       the case where the column with type change is referenced by any
-                    //       downstream jobs (because the original column is considered dropped).
-                    let id_matches = || new_c.column_id == old_c.column_id().get_id();
-                    let type_matches = || {
-                        let original_data_type = old_c.data_type();
-                        let new_data_type = DataType::from(new_c.column_type.as_ref().unwrap());
-                        let matches = original_data_type == &new_data_type;
-                        if !matches {
-                            notice_to_user(format!("the data type of column \"{}\" has changed, treating as a new column", old_c.name()));
-                        }
-                        matches
-                    };
-
-                    id_matches() && type_matches()
-                })
-            })
-            .collect(),
-        table.columns.len(),
-    );
 
     let incoming_sink_ids: HashSet<_> = old_catalog.incoming_sinks.iter().copied().collect();
 
@@ -180,7 +130,7 @@ pub async fn get_replace_table_plan(
     table.incoming_sinks = incoming_sink_ids.iter().copied().collect();
     table.maybe_vnode_count = VnodeCount::set(old_catalog.vnode_count()).to_protobuf();
 
-    Ok((source, table, graph, col_index_mapping, job_type))
+    Ok((source, table, graph, job_type))
 }
 
 pub(crate) fn hijack_merger_for_target_table(
@@ -417,7 +367,7 @@ pub async fn handle_alter_table_column(
 
         _ => unreachable!(),
     };
-    let (source, table, graph, col_index_mapping, job_type) = get_replace_table_plan(
+    let (source, table, graph, job_type) = get_replace_table_plan(
         &session,
         table_name,
         definition,
@@ -429,7 +379,7 @@ pub async fn handle_alter_table_column(
     let catalog_writer = session.catalog_writer()?;
 
     catalog_writer
-        .replace_table(source, table, graph, col_index_mapping, job_type)
+        .replace_table(source, table, graph, job_type)
         .await?;
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))
 }

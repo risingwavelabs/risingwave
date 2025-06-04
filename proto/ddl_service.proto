@@ -56,6 +56,7 @@ message DropSchemaResponse {
 message CreateSourceRequest {
   catalog.Source source = 1;
   stream_plan.StreamFragmentGraph fragment_graph = 2;
+  bool if_not_exists = 3;
 }
 
 message CreateSourceResponse {
@@ -91,6 +92,7 @@ message CreateSinkRequest {
   optional ReplaceJobPlan affected_table_change = 3;
   // The list of object IDs that this sink depends on.
   repeated uint32 dependencies = 4;
+  bool if_not_exists = 5;
 }
 
 message CreateSinkResponse {
@@ -147,6 +149,8 @@ message CreateMaterializedViewRequest {
 
   // The specific resource group to use for the materialized view. If not set, the database resource group is used.
   optional string specific_resource_group = 5;
+
+  bool if_not_exists = 6;
 }
 
 message CreateMaterializedViewResponse {
@@ -209,6 +213,7 @@ message CreateTableRequest {
   catalog.Table materialized_view = 2;
   stream_plan.StreamFragmentGraph fragment_graph = 3;
   TableJobType job_type = 4;
+  bool if_not_exists = 5;
 }
 
 message CreateTableResponse {
@@ -352,6 +357,7 @@ message CreateIndexRequest {
   catalog.Index index = 1;
   catalog.Table index_table = 2;
   stream_plan.StreamFragmentGraph fragment_graph = 3;
+  bool if_not_exists = 4;
 }
 
 message CreateIndexResponse {
@@ -372,9 +378,6 @@ message DropIndexResponse {
 message ReplaceJobPlan {
   // The new materialization plan, where all schema are updated.
   stream_plan.StreamFragmentGraph fragment_graph = 1;
-  // The mapping from the old columns to the new columns of the table.
-  // If no column modifications occur (such as for sinking into table), this will be None.
-  catalog.ColIndexMapping table_col_index_mapping = 2;
 
   message ReplaceTable {
     // The new table catalog, with the correct (old) table ID and a new version.
@@ -542,6 +545,19 @@ message AutoSchemaChangeRequest {
 
 message AutoSchemaChangeResponse {}
 
+message AlterDatabaseParamRequest {
+  uint32 database_id = 1;
+  oneof param {
+    common.OptionalUint32 barrier_interval_ms = 2;
+    common.OptionalUint64 checkpoint_frequency = 3;
+  }
+}
+
+message AlterDatabaseParamResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -584,4 +600,5 @@ service DdlService {
   rpc CommentOn(CommentOnRequest) returns (CommentOnResponse);
   rpc AutoSchemaChange(AutoSchemaChangeRequest) returns (AutoSchemaChangeResponse);
   rpc AlterSwapRename(AlterSwapRenameRequest) returns (AlterSwapRenameResponse);
+  rpc AlterDatabaseParam(AlterDatabaseParamRequest) returns (AlterDatabaseParamResponse);
 }

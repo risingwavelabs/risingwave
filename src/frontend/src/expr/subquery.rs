@@ -51,8 +51,32 @@ impl Subquery {
         Self { query, kind }
     }
 
-    pub fn is_correlated(&self, depth: Depth) -> bool {
-        self.query.is_correlated(depth)
+    pub fn is_correlated_by_depth(&self, depth: Depth) -> bool {
+        let is_correlated = match &self.kind {
+            SubqueryKind::In(expr) => expr.has_correlated_input_ref_by_depth(depth),
+            SubqueryKind::Some(expr, _) | SubqueryKind::All(expr, _) => {
+                expr.has_correlated_input_ref_by_depth(depth)
+            }
+            SubqueryKind::Array
+            | SubqueryKind::Scalar
+            | SubqueryKind::UpdateSet
+            | SubqueryKind::Existential => false,
+        };
+        is_correlated || self.query.is_correlated_by_depth(depth)
+    }
+
+    pub fn is_correlated_by_correlated_id(&self, correlated_id: CorrelatedId) -> bool {
+        let is_correlated = match &self.kind {
+            SubqueryKind::In(expr) => expr.has_correlated_input_ref_by_correlated_id(correlated_id),
+            SubqueryKind::Some(expr, _) | SubqueryKind::All(expr, _) => {
+                expr.has_correlated_input_ref_by_correlated_id(correlated_id)
+            }
+            SubqueryKind::Array
+            | SubqueryKind::Scalar
+            | SubqueryKind::UpdateSet
+            | SubqueryKind::Existential => false,
+        };
+        is_correlated || self.query.is_correlated_by_correlated_id(correlated_id)
     }
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
@@ -63,6 +87,25 @@ impl Subquery {
         let mut correlated_indices = self
             .query
             .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id);
+
+        match &mut self.kind {
+            SubqueryKind::In(expr) => {
+                correlated_indices.extend(
+                    expr.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                );
+            }
+            SubqueryKind::Some(expr, _) | SubqueryKind::All(expr, _) => {
+                correlated_indices.extend(
+                    expr.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                );
+            }
+            SubqueryKind::Array
+            | SubqueryKind::Scalar
+            | SubqueryKind::UpdateSet
+            | SubqueryKind::Existential => {
+                // No additional correlated indices to collect for these kinds.
+            }
+        }
         correlated_indices.sort();
         correlated_indices.dedup();
         correlated_indices
