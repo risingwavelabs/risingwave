@@ -75,9 +75,7 @@ statement error
 SELECT age FROM mv_user_gen;
 
 # Test that generated column works before schema refresh
-sleep 2s
-
-query II rowsort
+query II rowsort retry 3 backoff 5s
 SELECT id, t FROM mv_user_gen LIMIT 5;
 ----
 0 1
@@ -90,9 +88,7 @@ SELECT id, t FROM mv_user_gen LIMIT 5;
 system ok
 python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "pb_alter_source_test" 5 user_with_more_fields
 
-sleep 5s
-
-# Refresh both source schemas simultaneously
+# Refresh source schema
 statement ok
 ALTER SOURCE src_user REFRESH SCHEMA;
 
@@ -120,7 +116,7 @@ CREATE MATERIALIZED VIEW mv_user_gen_more AS SELECT id, t, age FROM src_user_gen
 statement ok
 ALTER TABLE t_user REFRESH SCHEMA;
 
-query ????
+query ???? retry 3 backoff 5s
 SELECT COUNT(*), MAX(age), MIN(age), SUM(age) FROM mv_user_more;
 ----
 25	104	0	510
@@ -140,9 +136,7 @@ SELECT COUNT(*), MIN(t), MAX(t) FROM mv_user_gen_more WHERE t = id + 1;
 system ok
 python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "pb_alter_source_test" 5 user_with_more_fields
 
-sleep 5s
-
-query ????
+query ???? retry 3 backoff 5s
 SELECT COUNT(*), MAX(age), MIN(age), SUM(age) FROM t_user;
 ----
 30	104	100	510
