@@ -178,7 +178,7 @@ describe sink3;
 v1 integer false NULL
 v2 integer false NULL
 v3 integer false NULL
-t3._row_id serial true NULL
+"t3._row_id" serial true NULL
 distribution key t3._row_id NULL NULL
 table description sink3 NULL NULL
 
@@ -188,7 +188,7 @@ show columns from sink3;
 v1 integer false NULL
 v2 integer false NULL
 v3 integer false NULL
-t3._row_id serial true NULL
+"t3._row_id" serial true NULL
 
 statement ok
 drop sink sink3;
