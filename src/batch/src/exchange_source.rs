@@ -23,10 +23,16 @@ use crate::execution::grpc_exchange::GrpcExchangeSource;
 use crate::execution::local_exchange::LocalExchangeSource;
 use crate::executor::test_utils::FakeExchangeSource;
 use crate::task::TaskId;
+use crate::task::task_stats::TaskStats;
+
+pub enum ExchangeData {
+    DataChunk(DataChunk),
+    TaskStats(TaskStats),
+}
 
 /// Each `ExchangeSource` maps to one task, it takes the execution result from task chunk by chunk.
 pub trait ExchangeSource: Send + Debug {
-    fn take_data(&mut self) -> impl Future<Output = Result<Option<DataChunk>>> + '_;
+    fn take_data(&mut self) -> impl Future<Output = Result<Option<ExchangeData>>> + '_;
 
     /// Get upstream task id.
     fn get_task_id(&self) -> TaskId;
@@ -40,7 +46,7 @@ pub enum ExchangeSourceImpl {
 }
 
 impl ExchangeSourceImpl {
-    pub async fn take_data(&mut self) -> Result<Option<DataChunk>> {
+    pub async fn take_data(&mut self) -> Result<Option<ExchangeData>> {
         match self {
             ExchangeSourceImpl::Grpc(grpc) => grpc.take_data().await,
             ExchangeSourceImpl::Local(local) => local.take_data().await,
@@ -61,7 +67,14 @@ impl ExchangeSourceImpl {
         let mut source = self;
         loop {
             match source.take_data().await {
-                Ok(Some(chunk)) => yield chunk,
+                Ok(Some(data)) => {
+                    match data {
+                        ExchangeData::DataChunk(chunk) => yield chunk,
+                        ExchangeData::TaskStats(_task_stats) => {
+                            // TODO: Collect task stats for MergeSortExchange.
+                        }
+                    }
+                }
                 Ok(None) => break,
                 Err(e) => return Err(e),
             }

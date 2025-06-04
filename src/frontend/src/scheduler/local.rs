@@ -51,7 +51,7 @@ use crate::catalog::{FragmentId, TableId};
 use crate::error::RwError;
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
-use crate::scheduler::task_context::FrontendBatchTaskContext;
+use crate::scheduler::task_context::{FrontendBatchTaskContext, QueryStats};
 use crate::scheduler::{SchedulerError, SchedulerResult};
 use crate::session::{FrontendEnv, SessionImpl};
 
@@ -93,12 +93,11 @@ impl LocalQueryExecution {
     }
 
     #[try_stream(ok = DataChunk, error = RwError)]
-    pub async fn run_inner(self) {
+    pub async fn run_inner(self, query_stats_tx: tokio::sync::oneshot::Sender<QueryStats>) {
         debug!(
             query_id = %self.query.query_id,
             "Starting to run query"
         );
-        // TODO: collect query stats for local mode
         let context = FrontendBatchTaskContext::create(self.session.clone());
         let task_id = TaskId {
             query_id: self.query.query_id.id.clone(),
@@ -108,7 +107,8 @@ impl LocalQueryExecution {
 
         let plan_fragment = self.create_plan_fragment()?;
         let plan_node = plan_fragment.root.unwrap();
-
+        let task_stats = context.task_stats().clone();
+        // TODO: collect stage stats for root stage
         let executor = ExecutorBuilder::new(
             &plan_node,
             &task_id,
@@ -126,15 +126,25 @@ impl LocalQueryExecution {
         for chunk in executor.execute() {
             yield chunk?;
         }
+        let mut query_stats = QueryStats::new();
+        if let Some(ref task_stats) = task_stats {
+            query_stats.add_task_stats(&task_stats);
+        }
+        let _ = query_stats_tx
+            .send(query_stats)
+            .inspect_err(|_| tracing::warn!("Failed to send query stats."));
     }
 
-    fn run(self) -> BoxStream<'static, Result<DataChunk, RwError>> {
+    fn run(
+        self,
+        query_stats_tx: tokio::sync::oneshot::Sender<QueryStats>,
+    ) -> BoxStream<'static, Result<DataChunk, RwError>> {
         let span = tracing::info_span!(
             "local_execute",
             query_id = self.query.query_id.id,
             epoch = ?self.batch_query_epoch,
         );
-        Box::pin(self.run_inner().instrument(span))
+        Box::pin(self.run_inner(query_stats_tx).instrument(span))
     }
 
     pub fn stream_rows(self) -> LocalQueryStream {
@@ -153,8 +163,11 @@ impl LocalQueryExecution {
         let meta_client = self.front_env.meta_client_ref();
 
         let sender1 = sender.clone();
+        let (query_stats_tx, query_stats_rx) = tokio::sync::oneshot::channel();
         let exec = async move {
-            let mut data_stream = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));
+            let mut data_stream = self
+                .run(query_stats_tx)
+                .map(|r| r.map_err(|e| Box::new(e) as BoxedError));
             while let Some(mut r) = data_stream.next().await {
                 // append a query cancelled error if the query is cancelled.
                 if r.is_err() && shutdown_rx.is_cancelled() {
@@ -167,6 +180,15 @@ impl LocalQueryExecution {
                     return;
                 }
             }
+            // Record the stats field in the handle_query span.
+            match query_stats_rx.await {
+                Ok(query_stats) => {
+                    tracing::Span::current().record("stats", tracing::field::display(&query_stats));
+                }
+                Err(_) => {
+                    tracing::warn!("Failed to receive query stats.")
+                }
+            }
         };
 
         use risingwave_expr::expr_context::*;
@@ -176,6 +198,7 @@ impl LocalQueryExecution {
         };
 
         // box is necessary, otherwise the size of `exec` will double each time it is nested.
+        let exec = tracing::Instrument::instrument(exec, tracing::Span::current()).boxed();
         let exec = async move { CATALOG_READER::scope(catalog_reader, exec).await }.boxed();
         let exec = async move { USER_INFO_READER::scope(user_info_reader, exec).await }.boxed();
         let exec = async move { DB_NAME::scope(db_name, exec).await }.boxed();

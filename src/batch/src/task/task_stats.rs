@@ -29,6 +29,11 @@ impl TaskStats {
             row_scan_count: AtomicU64::new(0),
         }
     }
+
+    pub fn add(&self, t: &TaskStats) {
+        self.row_scan_count
+            .fetch_add(t.row_scan_count.load(Ordering::Relaxed), Ordering::Relaxed);
+    }
 }
 
 impl From<&TaskStats> for PbTaskStats {
@@ -36,5 +41,25 @@ impl From<&TaskStats> for PbTaskStats {
         Self {
             row_scan_count: t.row_scan_count.load(Ordering::Relaxed),
         }
+    }
+}
+
+impl From<TaskStats> for PbTaskStats {
+    fn from(t: TaskStats) -> Self {
+        (&t).into()
+    }
+}
+
+impl From<&PbTaskStats> for TaskStats {
+    fn from(t: &PbTaskStats) -> Self {
+        Self {
+            row_scan_count: AtomicU64::new(t.row_scan_count),
+        }
+    }
+}
+
+impl From<PbTaskStats> for TaskStats {
+    fn from(t: PbTaskStats) -> Self {
+        (&t).into()
     }
 }

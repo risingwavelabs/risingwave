@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use risingwave_batch::exchange_source::ExchangeData;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::util::addr::HostAddr;
@@ -245,16 +246,26 @@ impl<CS: 'static + Send + CreateSource> GenericExchangeExecutor<CS> {
 
         loop {
             if let Some(res) = source.take_data().await? {
-                if res.cardinality() == 0 {
-                    debug!("Exchange source {:?} output empty chunk.", source);
-                }
+                match res {
+                    ExchangeData::DataChunk(data_chunk) => {
+                        if data_chunk.cardinality() == 0 {
+                            debug!("Exchange source {:?} output empty chunk.", source);
+                        }
 
-                if let Some(counter) = counter {
-                    counter.inc_by(res.cardinality().try_into().unwrap());
-                }
+                        if let Some(counter) = counter {
+                            counter.inc_by(data_chunk.cardinality().try_into().unwrap());
+                        }
 
-                yield res;
-                continue;
+                        yield data_chunk;
+                        continue;
+                    }
+                    ExchangeData::TaskStats(task_stats) => {
+                        // Accumulate TaskStats of child stage in order to collect QueryStats for local mode.
+                        if let Some(ref stats) = context.task_stats() {
+                            stats.add(&task_stats);
+                        }
+                    }
+                }
             }
             break;
         }

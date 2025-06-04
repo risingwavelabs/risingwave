@@ -14,10 +14,12 @@
 
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use prometheus::core::Atomic;
 use risingwave_batch::error::Result;
 use risingwave_batch::monitor::BatchMetrics;
+use risingwave_batch::task::task_stats::{TaskStats, TaskStatsRef};
 use risingwave_batch::task::{BatchTaskContext, TaskOutput, TaskOutputId};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::catalog::SysCatalogReaderRef;
@@ -26,7 +28,6 @@ use risingwave_common::memory::MemoryContext;
 use risingwave_common::metrics::TrAdderAtomic;
 use risingwave_common::util::addr::{HostAddr, is_local_address};
 use risingwave_connector::source::monitor::SourceMetrics;
-use risingwave_pb::task_service::PbTaskStats;
 use risingwave_rpc_client::ComputeClientPoolRef;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
@@ -38,6 +39,8 @@ pub struct FrontendBatchTaskContext {
     session: Arc<SessionImpl>,
 
     mem_context: MemoryContext,
+
+    task_stats: TaskStatsRef,
 }
 
 impl FrontendBatchTaskContext {
@@ -47,6 +50,7 @@ impl FrontendBatchTaskContext {
         Arc::new(Self {
             session,
             mem_context,
+            task_stats: Arc::new(TaskStats::new()),
         })
     }
 }
@@ -107,8 +111,8 @@ impl BatchTaskContext for FrontendBatchTaskContext {
         Some(self.session.env().worker_node_manager_ref())
     }
 
-    fn task_stats(&self) -> Option<risingwave_batch::task::task_stats::TaskStatsRef> {
-        None
+    fn task_stats(&self) -> Option<TaskStatsRef> {
+        Some(self.task_stats.clone())
     }
 }
 
@@ -124,8 +128,8 @@ impl QueryStats {
         Self { row_scan_count: 0 }
     }
 
-    pub fn add_task_stats(&mut self, task_stats: &PbTaskStats) {
-        self.row_scan_count += task_stats.row_scan_count;
+    pub fn add_task_stats(&mut self, task_stats: &TaskStats) {
+        self.row_scan_count += task_stats.row_scan_count.load(Ordering::Relaxed);
     }
 
     pub fn add_stage_stats(&mut self, stage_stats: &StageStats) {

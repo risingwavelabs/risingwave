@@ -14,10 +14,8 @@
 
 use std::fmt::{Debug, Formatter};
 
-use risingwave_common::array::DataChunk;
-
 use crate::error::Result;
-use crate::exchange_source::ExchangeSource;
+use crate::exchange_source::{ExchangeData, ExchangeSource};
 use crate::task::{BatchTaskContext, TaskId, TaskOutput, TaskOutputId};
 
 /// Exchange data from a local task execution.
@@ -51,7 +49,9 @@ impl Debug for LocalExchangeSource {
 }
 
 impl ExchangeSource for LocalExchangeSource {
-    async fn take_data(&mut self) -> Result<Option<DataChunk>> {
+    async fn take_data(&mut self) -> Result<Option<ExchangeData>> {
+        // According to DefaultCreateSource::create_source, root stage will always "exchange remotely".
+        // So a LocalExchangeSource will never return ExchangeData::TaskStats.
         let ret = self.task_output.direct_take_data().await?;
         if let Some(data) = ret {
             let data = data.compact();
@@ -61,7 +61,7 @@ impl ExchangeSource for LocalExchangeSource {
                 self.task_output.id(),
                 data
             );
-            Ok(Some(data))
+            Ok(Some(ExchangeData::DataChunk(data)))
         } else {
             Ok(None)
         }

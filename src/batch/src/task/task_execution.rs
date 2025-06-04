@@ -181,6 +181,7 @@ impl TaskOutput {
                     let pb = chunk.to_protobuf().await;
                     let resp = GetDataResponse {
                         record_batch: Some(pb),
+                        task_stats: None,
                     };
                     writer.write(Ok(resp)).await?;
                 }

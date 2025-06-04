@@ -63,6 +63,7 @@ message GetTaskInfoRequest {
 
 message GetDataResponse {
   data.DataChunk record_batch = 2;
+  optional TaskStats task_stats = 3;
 }
 
 message FastInsertRequest {

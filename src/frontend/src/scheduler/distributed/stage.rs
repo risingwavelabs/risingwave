@@ -30,6 +30,7 @@ use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_batch::error::BatchError;
 use risingwave_batch::executor::ExecutorBuilder;
+use risingwave_batch::task::task_stats::TaskStats;
 use risingwave_batch::task::{ShutdownMsg, ShutdownSender, ShutdownToken, TaskId as TaskIdBatch};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
@@ -491,7 +492,7 @@ impl StageRunner {
                 Ok(status) => {
                     use risingwave_pb::task_service::task_info_response::TaskStatus as PbTaskStatus;
                     if let Some(ref task_stats) = status.task_stats {
-                        stage_stats.add_task_stats(task_stats);
+                        stage_stats.add_task_stats(&TaskStats::from(task_stats));
                     }
                     match PbTaskStatus::try_from(status.task_status).unwrap() {
                         PbTaskStatus::Running => {

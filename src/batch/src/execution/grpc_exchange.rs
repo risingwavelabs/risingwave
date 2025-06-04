@@ -25,7 +25,7 @@ use risingwave_rpc_client::error::RpcError;
 use tonic::Streaming;
 
 use crate::error::Result;
-use crate::exchange_source::ExchangeSource;
+use crate::exchange_source::{ExchangeData, ExchangeSource};
 use crate::task::TaskId;
 
 /// Use grpc client as the source.
@@ -75,7 +75,7 @@ impl Debug for GrpcExchangeSource {
 }
 
 impl ExchangeSource for GrpcExchangeSource {
-    async fn take_data(&mut self) -> Result<Option<DataChunk>> {
+    async fn take_data(&mut self) -> Result<Option<ExchangeData>> {
         let res = match self.stream.next().await {
             None => {
                 return Ok(None);
@@ -83,13 +83,16 @@ impl ExchangeSource for GrpcExchangeSource {
             Some(r) => r,
         };
         let task_data = res.map_err(RpcError::from_batch_status)?;
+        if let Some(task_stats) = task_data.task_stats {
+            return Ok(Some(ExchangeData::TaskStats(task_stats.into())));
+        }
         let data = DataChunk::from_protobuf(task_data.get_record_batch()?)?.compact();
         trace!(
             "Receiver taskOutput = {:?}, data = {:?}",
             self.task_output_id, data
         );
 
-        Ok(Some(data))
+        Ok(Some(ExchangeData::DataChunk(data)))
     }
 
     fn get_task_id(&self) -> TaskId {

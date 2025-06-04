@@ -14,12 +14,13 @@
 
 use std::sync::Arc;
 
+use risingwave_batch::rpc::service::exchange::ExchangeWriter;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::task_service::task_service_server::TaskService;
 use risingwave_pb::task_service::{
     CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest, FastInsertRequest,
-    FastInsertResponse, GetDataResponse, TaskInfoResponse, fast_insert_response,
+    FastInsertResponse, GetDataResponse, PbTaskStats, TaskInfoResponse, fast_insert_response,
 };
 use risingwave_storage::dispatch_state_store;
 use thiserror_ext::AsReport;
@@ -172,6 +173,7 @@ impl BatchServiceImpl {
             "local execute request: plan:{:?} with task id:{:?}",
             plan, task_id
         );
+        let task_stats = context.task_stats().clone();
         let task = BatchTaskExecution::new(&task_id, plan, context, epoch, mgr.runtime())?;
         let task = Arc::new(task);
         let (tx, rx) = tokio::sync::mpsc::channel(mgr.config().developer.local_execute_buffer_size);
@@ -205,7 +207,19 @@ impl BatchServiceImpl {
         // Always spawn a task and do not block current function.
         mgr.runtime().spawn(async move {
             match output.take_data(&mut writer).await {
-                Ok(_) => Ok(()),
+                Ok(_) => {
+                    // Send task stats to frontend for local mode query.
+                    if let Err(e) = writer
+                        .write(Ok(GetDataResponse {
+                            record_batch: None,
+                            task_stats: task_stats.map(|t| PbTaskStats::from(t.as_ref())),
+                        }))
+                        .await
+                    {
+                        return tx.send(Err(e.into())).await;
+                    }
+                    Ok(())
+                }
                 Err(e) => tx.send(Err(e.into())).await,
             }
         });

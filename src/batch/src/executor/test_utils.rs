@@ -24,7 +24,7 @@ use super::{
     register_executor,
 };
 use crate::error::{BatchError, Result};
-use crate::exchange_source::ExchangeSource;
+use crate::exchange_source::{ExchangeData, ExchangeSource};
 use crate::task::TaskId;
 
 #[derive(Debug, Clone)]
@@ -39,9 +39,9 @@ impl FakeExchangeSource {
 }
 
 impl ExchangeSource for FakeExchangeSource {
-    async fn take_data(&mut self) -> Result<Option<DataChunk>> {
+    async fn take_data(&mut self) -> Result<Option<ExchangeData>> {
         if let Some(chunk) = self.chunks.pop() {
-            Ok(chunk)
+            Ok(chunk.map(|c| ExchangeData::DataChunk(c)))
         } else {
             Ok(None)
         }
