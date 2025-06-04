@@ -1723,9 +1723,7 @@ pub async fn create_iceberg_engine_table(
             "true" => {
                 risingwave_common::license::Feature::IcebergCompaction
                     .check_available()
-                    .map_err(|e| {
-                        anyhow::anyhow!("Iceberg compaction feature is not available: {}", e)
-                    })?;
+                    .map_err(|e| anyhow::anyhow!(e))?;
 
                 sink_with.insert(ENABLE_COMPACTION.to_owned(), "true".to_owned());
             }
@@ -1782,9 +1780,7 @@ pub async fn create_iceberg_engine_table(
             "true" => {
                 risingwave_common::license::Feature::IcebergCompaction
                     .check_available()
-                    .map_err(|e| {
-                        anyhow::anyhow!("Iceberg compaction feature is not available: {}", e)
-                    })?;
+                    .map_err(|e| anyhow::anyhow!(e))?;
                 sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "true".to_owned());
             }
             "false" => {
