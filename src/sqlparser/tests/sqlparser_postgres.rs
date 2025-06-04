@@ -471,7 +471,7 @@ fn parse_show() {
     assert_eq!(
         stmt,
         Statement::ShowVariable {
-            variable: vec!["all".into(), "all".into()]
+            variable: vec![Ident::new_unchecked("ALL"), Ident::new_unchecked("ALL")]
         }
     )
 }
@@ -492,7 +492,7 @@ fn parse_deallocate() {
     assert_eq!(
         stmt,
         Statement::Deallocate {
-            name: "all".into(),
+            name: Ident::new_unchecked("ALL"),
             prepare: false,
         }
     );
@@ -511,7 +511,7 @@ fn parse_deallocate() {
     assert_eq!(
         stmt,
         Statement::Deallocate {
-            name: "all".into(),
+            name: Ident::new_unchecked("ALL"),
             prepare: true,
         }
     );
@@ -772,7 +772,7 @@ fn parse_create_function() {
             ]),
             returns: Some(CreateFunctionReturns::Value(DataType::Int)),
             params: CreateFunctionBody {
-                language: Some("sql".into()),
+                language: Some(Ident::new_unchecked("SQL")),
                 behavior: Some(FunctionBehavior::Immutable),
                 as_: Some(FunctionDefinition::SingleQuotedDef(
                     "select $1 + $2;".into()
@@ -797,7 +797,7 @@ fn parse_create_function() {
             ]),
             returns: Some(CreateFunctionReturns::Value(DataType::Int)),
             params: CreateFunctionBody {
-                language: Some("sql".into()),
+                language: Some(Ident::new_unchecked("SQL")),
                 as_: Some(FunctionDefinition::DoubleDollarDef(
                     "select $1 - $2;".into()
                 )),
@@ -822,7 +822,7 @@ fn parse_create_function() {
             ]),
             returns: Some(CreateFunctionReturns::Value(DataType::Int)),
             params: CreateFunctionBody {
-                language: Some("sql".into()),
+                language: Some(Ident::new_unchecked("SQL")),
                 return_: Some(Expr::BinaryOp {
                     left: Box::new(Expr::Parameter { index: 1 }),
                     op: BinaryOperator::Plus,
@@ -853,7 +853,7 @@ fn parse_create_function() {
             ]),
             returns: Some(CreateFunctionReturns::Value(DataType::Int)),
             params: CreateFunctionBody {
-                language: Some("sql".into()),
+                language: Some(Ident::new_unchecked("SQL")),
                 behavior: Some(FunctionBehavior::Immutable),
                 return_: Some(Expr::BinaryOp {
                     left: Box::new(Expr::Identifier("a".into())),
@@ -884,7 +884,7 @@ fn parse_create_function() {
                 data_type: DataType::Int,
             }])),
             params: CreateFunctionBody {
-                language: Some("sql".into()),
+                language: Some(Ident::new_unchecked("SQL")),
                 return_: Some(Expr::Identifier("a".into())),
                 ..Default::default()
             },
@@ -906,7 +906,7 @@ fn parse_create_function() {
             ]),
             returns: Some(CreateFunctionReturns::Value(DataType::Int)),
             params: CreateFunctionBody {
-                language: Some("sql".into()),
+                language: Some(Ident::new_unchecked("SQL")),
                 behavior: Some(FunctionBehavior::Immutable),
                 as_: Some(FunctionDefinition::SingleQuotedDef(
                     "select $1 + $2;".into()
