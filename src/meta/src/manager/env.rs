@@ -28,6 +28,7 @@ use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{
     FrontendClientPool, FrontendClientPoolRef, StreamClientPool, StreamClientPoolRef,
 };
+use risingwave_sqlparser::ast::RedactSqlOptionKeywordsRef;
 use sea_orm::EntityTrait;
 
 use crate::MetaResult;
@@ -270,6 +271,7 @@ pub struct MetaOpts {
     pub compute_client_config: RpcClientConfig,
     pub stream_client_config: RpcClientConfig,
     pub frontend_client_config: RpcClientConfig,
+    pub redact_sql_option_keywords: RedactSqlOptionKeywordsRef,
 }
 
 impl MetaOpts {
@@ -356,6 +358,7 @@ impl MetaOpts {
             compute_client_config: RpcClientConfig::default(),
             stream_client_config: RpcClientConfig::default(),
             frontend_client_config: RpcClientConfig::default(),
+            redact_sql_option_keywords: Arc::new(Default::default()),
         }
     }
 }
