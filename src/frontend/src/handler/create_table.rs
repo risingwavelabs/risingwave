@@ -1798,7 +1798,7 @@ pub async fn create_iceberg_engine_table(
         // remove enable_snapshot_expiration from source options, otherwise it will be considered as an unknown field.
         source
             .as_mut()
-            .map(|x| x.with_properties.remove("enable_snapshot_expiration"));
+            .map(|x| x.with_properties.remove(ENABLE_SNAPSHOT_EXPIRATION));
     } else {
         sink_with.insert(
             ENABLE_SNAPSHOT_EXPIRATION.to_owned(),
