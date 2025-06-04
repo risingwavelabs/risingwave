@@ -1718,17 +1718,14 @@ pub async fn create_iceberg_engine_table(
     const COMPACTION_INTERVAL_SEC: &str = "compaction_interval_sec";
     const ENABLE_SNAPSHOT_EXPIRATION: &str = "enable_snapshot_expiration";
 
-    let iceberg_compaction_license_val =
-        risingwave_common::license::Feature::IcebergCompaction.check_available();
     if let Some(enable_compaction) = handler_args.with_options.get(ENABLE_COMPACTION) {
         match enable_compaction.to_lowercase().as_str() {
             "true" => {
-                if iceberg_compaction_license_val.is_err() {
-                    bail!(
-                        "Iceberg compaction feature is not available: {:?}",
-                        iceberg_compaction_license_val.unwrap_err()
-                    );
-                }
+                risingwave_common::license::Feature::IcebergCompaction
+                    .check_available()
+                    .map_err(|e| {
+                        anyhow::anyhow!("Iceberg compaction feature is not available: {}", e)
+                    })?;
 
                 sink_with.insert(ENABLE_COMPACTION.to_owned(), "true".to_owned());
             }
@@ -1751,7 +1748,10 @@ pub async fn create_iceberg_engine_table(
     } else {
         sink_with.insert(
             ENABLE_COMPACTION.to_owned(),
-            iceberg_compaction_license_val.is_ok().to_string(),
+            risingwave_common::license::Feature::IcebergCompaction
+                .check_available()
+                .is_ok()
+                .to_string(),
         );
     }
 
@@ -1780,15 +1780,11 @@ pub async fn create_iceberg_engine_table(
     {
         match enable_snapshot_expiration.to_lowercase().as_str() {
             "true" => {
-                if iceberg_compaction_license_val.is_err() {
-                    // If the iceberg compaction feature is not available, we should not enable snapshot expiration.
-                    // This is because snapshot expiration relies on compaction to clean up old snapshots.
-                    // So we will bail out here.
-                    bail!(
-                        "Iceberg compaction feature is not available: {:?}",
-                        iceberg_compaction_license_val.unwrap_err()
-                    );
-                }
+                risingwave_common::license::Feature::IcebergCompaction
+                    .check_available()
+                    .map_err(|e| {
+                        anyhow::anyhow!("Iceberg compaction feature is not available: {}", e)
+                    })?;
                 sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "true".to_owned());
             }
             "false" => {
@@ -1810,7 +1806,10 @@ pub async fn create_iceberg_engine_table(
     } else {
         sink_with.insert(
             ENABLE_SNAPSHOT_EXPIRATION.to_owned(),
-            iceberg_compaction_license_val.is_ok().to_string(),
+            risingwave_common::license::Feature::IcebergCompaction
+                .check_available()
+                .is_ok()
+                .to_string(),
         );
     }
 
