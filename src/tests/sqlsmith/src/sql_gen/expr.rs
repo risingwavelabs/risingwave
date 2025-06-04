@@ -91,7 +91,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         // - `a1 >= a2 IN b`
         // ...
         // We just nest compound expressions to avoid this.
-        let range = if context.can_gen_agg(self.should_generate(Feature::Agg)) {
+        let range = if !context.is_inside_agg() && self.should_generate(Feature::Agg) {
             100
         } else {
             50
@@ -223,7 +223,9 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn gen_exists(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
-        if *ret != DataType::Boolean || context.can_gen_agg(self.should_generate(Feature::Agg)) {
+        if *ret != DataType::Boolean
+            || (!context.is_inside_agg() && self.should_generate(Feature::Agg))
+        {
             return self.gen_simple_scalar(ret);
         };
         // Generating correlated subquery tends to create queries which cannot be unnested.

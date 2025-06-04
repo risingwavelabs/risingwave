@@ -40,8 +40,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
             return self.gen_simple_scalar(ret);
         }
 
-        let mut context = SqlGeneratorContext::new(false);
-        context.set_inside_agg(true);
+        let context = SqlGeneratorContext::new(true);
         let exprs: Vec<Expr> = func
             .inputs_type
             .iter()

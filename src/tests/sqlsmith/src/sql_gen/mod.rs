@@ -104,14 +104,6 @@ impl SqlGeneratorContext {
         SqlGeneratorContext { inside_agg }
     }
 
-    pub fn set_inside_agg(&mut self, inside_agg: bool) {
-        self.inside_agg = inside_agg;
-    }
-
-    pub fn can_gen_agg(self, can_agg: bool) -> bool {
-        can_agg && !self.inside_agg
-    }
-
     pub fn is_inside_agg(self) -> bool {
         self.inside_agg
     }
