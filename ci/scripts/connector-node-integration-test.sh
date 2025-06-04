@@ -44,7 +44,7 @@ echo "$java_version"
 # cd ${RISINGWAVE_ROOT}/java
 # mvn --batch-mode --update-snapshots clean package -DskipTests
 
-echo "--- install postgresql client"
+echo "--- install postgresql server"
 DEBIAN_FRONTEND=noninteractive TZ=America/New_York apt-get -y install tzdata
 sudo apt install postgresql postgresql-contrib libpq-dev -y
 sudo service postgresql start || sudo pg_ctlcluster 14 main start
@@ -63,7 +63,7 @@ sleep 3
 wget --no-verbose https://dl.minio.io/client/mc/release/linux-amd64/mc > /dev/null
 chmod +x mc
 MC_PATH=${PWD}/mc
-${MC_PATH} config host add minio http://127.0.0.1:9000 minioadmin minioadmin
+${MC_PATH} alias set minio http://127.0.0.1:9000 minioadmin minioadmin
 
 echo "--- starting connector-node service"
 mkdir -p "${RISINGWAVE_ROOT}"/java/connector-node/assembly/target/
