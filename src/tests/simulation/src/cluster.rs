@@ -485,6 +485,8 @@ impl Cluster {
                 conf.config_path.as_str(),
                 "--listen-addr",
                 "0.0.0.0:4566",
+                "--health-check-listener-addr",
+                "0.0.0.0:6786",
                 "--advertise-addr",
                 &format!("192.168.2.{i}:4566"),
                 "--temp-secret-file-dir",
@@ -913,7 +915,29 @@ impl Cluster {
                 {
                     break;
                 }
-                tokio::time::sleep(Duration::from_millis(10)).await;
+                tokio::time::sleep(Duration::from_nanos(10)).await;
+            }
+        })
+        .await?;
+        Ok(())
+    }
+
+    /// This function only works if all actors in your cluster are following adaptive scaling.
+    pub async fn wait_for_scale(&mut self, parallelism: usize) -> Result<()> {
+        let timeout = Duration::from_secs(200);
+        let mut session = self.start_session();
+        tokio::time::timeout(timeout, async {
+            loop {
+                let parallelism_sql = format!(
+                    "select count(parallelism) filter (where parallelism != {parallelism})\
+                from (select count(*) parallelism from rw_actors group by fragment_id);"
+                );
+                if let Ok(result) = session.run(&parallelism_sql).await
+                    && result == "0"
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_nanos(10)).await;
             }
         })
         .await?;

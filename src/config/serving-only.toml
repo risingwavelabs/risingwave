@@ -5,7 +5,7 @@ shared_buffer_capacity_mb = 1
 compactor_memory_limit_mb = 1
 # Suppose a serving-only CN has 16GB memory in total, we recommend using 30% by default: 16*0.3=4.8
 block_cache_capacity_mb = 4800
-# Suppose a serving-only CN has 16GB memory in toal, we recommend using 10% by default: 16*0.1=1.6
+# Suppose a serving-only CN has 16GB memory in total, we recommend using 10% by default: 16*0.1=1.6
 meta_cache_capacity_mb = 1600
 # There will be 16GB - 4.8GB - 1.6GB - reserved memory 16GB * 0.2 (recommended and hard coded by developers) = 6.4GB for executing serving queries. We call it "compute memory".
 

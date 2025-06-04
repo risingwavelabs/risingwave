@@ -18,7 +18,9 @@ pub enum DmlError {
     #[error("table schema has changed, please try again later")]
     SchemaChanged,
 
-    #[error("no available table reader in streaming executors")]
+    #[error(
+        "DML is not permitted during cluster recovery (no available table reader in streaming executors)"
+    )]
     NoReader,
 
     #[error("table reader closed")]

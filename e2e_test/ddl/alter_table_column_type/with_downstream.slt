@@ -1,0 +1,70 @@
+statement ok
+set RW_IMPLICIT_FLUSH to true;
+
+statement ok
+create table my_table(v struct<a int, b varchar>);
+
+statement ok
+insert into my_table(v) values (row(1, 'hello'));
+
+statement ok
+create materialized view mv1 as select (v).a, (v).b, v from my_table;
+
+query ITT rowsort
+select * from mv1;
+----
+1       hello   (1,hello)
+
+
+# 1. Add field to the struct.
+
+statement ok
+alter table my_table alter column v type struct<x boolean, a int, b varchar>;
+
+statement ok
+insert into my_table(v) values (row(true, 2, 'world'));
+
+# Existing downstream will still see `v` with old type.
+query ITT rowsort
+select * from mv1;
+----
+1       hello   (1,hello)
+2       world   (2,world)
+
+
+# 2. Remove field from the struct.
+
+statement ok
+alter table my_table alter column v type struct<x boolean, b varchar>;
+
+statement ok
+insert into my_table(v) values (row(false, 'ohayou'));
+
+# Existing downstream will still see `v` with old type.
+# Dropped field will be padded with NULLs.
+query ITT rowsort
+select * from mv1;
+----
+1       hello   (1,hello)
+2       world   (2,world)
+NULL    ohayou  (,ohayou)
+
+
+# 3. New downstream will see the latest type.
+
+statement error
+create materialized view mv2 as select (v).a, (v).b, v from my_table;
+
+statement ok
+create materialized view mv2 as select (v).b, (v).x, v from my_table;
+
+query TTT rowsort
+select * from mv2;
+----
+hello   NULL    (,hello)
+ohayou  f       (f,ohayou)
+world   t       (t,world)
+
+
+statement ok
+drop table my_table cascade;

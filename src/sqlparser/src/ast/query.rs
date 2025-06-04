@@ -205,6 +205,8 @@ pub struct Select {
     pub group_by: Vec<Expr>,
     /// HAVING
     pub having: Option<Expr>,
+    /// WINDOW
+    pub window: Vec<NamedWindow>,
 }
 
 impl fmt::Display for Select {
@@ -227,6 +229,9 @@ impl fmt::Display for Select {
         }
         if let Some(ref having) = self.having {
             write!(f, " HAVING {}", having)?;
+        }
+        if !self.window.is_empty() {
+            write!(f, " WINDOW {}", display_comma_separated(&self.window))?;
         }
         Ok(())
     }
@@ -704,5 +709,19 @@ impl fmt::Display for Values {
             write!(f, "({})", display_comma_separated(row))?;
         }
         Ok(())
+    }
+}
+
+/// A named window definition in the WINDOW clause
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct NamedWindow {
+    pub name: Ident,
+    pub window_spec: WindowSpec,
+}
+
+impl fmt::Display for NamedWindow {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} AS ({})", self.name, self.window_spec)
     }
 }

@@ -347,6 +347,8 @@ impl Catalog {
             let database = self.get_database_mut(id).unwrap();
             database.name = name;
             database.owner = proto.owner;
+            database.barrier_interval_ms = proto.barrier_interval_ms;
+            database.checkpoint_frequency = proto.checkpoint_frequency;
         }
     }
 

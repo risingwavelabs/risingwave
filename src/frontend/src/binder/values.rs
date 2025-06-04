@@ -60,9 +60,14 @@ impl BoundValues {
         self.rows.iter_mut().flatten()
     }
 
-    pub fn is_correlated(&self, depth: Depth) -> bool {
+    pub fn is_correlated_by_depth(&self, depth: Depth) -> bool {
         self.exprs()
             .any(|expr| expr.has_correlated_input_ref_by_depth(depth))
+    }
+
+    pub fn is_correlated_by_correlated_id(&self, correlated_id: CorrelatedId) -> bool {
+        self.exprs()
+            .any(|expr| expr.has_correlated_input_ref_by_correlated_id(correlated_id))
     }
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
@@ -145,7 +150,7 @@ impl Binder {
         {
             bail_not_implemented!("Subquery in VALUES");
         }
-        if bound_values.is_correlated(1) {
+        if bound_values.is_correlated_by_depth(1) {
             bail_not_implemented!("CorrelatedInputRef in VALUES");
         }
         Ok(bound_values)

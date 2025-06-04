@@ -17,7 +17,9 @@ use std::fmt::Display;
 use std::sync::LazyLock;
 
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::{HummockSstableId, HummockSstableObjectId, TypedPrimitive};
+use risingwave_hummock_sdk::{
+    HummockRawObjectId, HummockSstableId, HummockSstableObjectId, TypedPrimitive,
+};
 use risingwave_meta_model::hummock_sequence;
 use risingwave_meta_model::hummock_sequence::{
     COMPACTION_GROUP_ID, COMPACTION_TASK_ID, META_BACKUP_ID, SSTABLE_OBJECT_ID,
@@ -116,6 +118,13 @@ pub async fn next_sstable_id(
     env: &MetaSrvEnv,
     num: impl TryInto<u32> + Display + Copy,
 ) -> Result<HummockSstableId> {
+    next_unique_id(env, num).await
+}
+
+pub async fn next_raw_object_id(
+    env: &MetaSrvEnv,
+    num: impl TryInto<u32> + Display + Copy,
+) -> Result<HummockRawObjectId> {
     next_unique_id(env, num).await
 }
 

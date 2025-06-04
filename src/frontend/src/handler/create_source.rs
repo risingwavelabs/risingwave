@@ -1119,10 +1119,14 @@ pub async fn handle_create_source(
 
     if create_source_type.is_shared() {
         let graph = generate_stream_graph_for_source(handler_args, source_catalog)?;
-        catalog_writer.create_source(source, Some(graph)).await?;
+        catalog_writer
+            .create_source(source, Some(graph), stmt.if_not_exists)
+            .await?;
     } else {
         // For other sources we don't create a streaming job
-        catalog_writer.create_source(source, None).await?;
+        catalog_writer
+            .create_source(source, None, stmt.if_not_exists)
+            .await?;
     }
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SOURCE))

@@ -27,7 +27,7 @@ use risingwave_hummock_sdk::key::{
     TableKey, TableKeyRange, is_empty_key_range, vnode, vnode_range,
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
+use risingwave_hummock_sdk::table_watermark::{PkPrefixTableWatermarksIndex, WatermarkSerdeType};
 use risingwave_hummock_sdk::version::{HummockVersion, LocalHummockVersion};
 use risingwave_hummock_sdk::{HummockRawObjectId, HummockReadEpoch, SyncResult};
 use risingwave_rpc_client::HummockMetaClient;
@@ -58,7 +58,7 @@ use crate::hummock::utils::{wait_for_epoch, wait_for_update};
 use crate::hummock::write_limiter::{WriteLimiter, WriteLimiterRef};
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockStorageIterator, HummockStorageRevIterator,
-    MemoryLimiter, SstableObjectIdManager, SstableObjectIdManagerRef, SstableStoreRef,
+    MemoryLimiter, ObjectIdManager, ObjectIdManagerRef, SstableStoreRef,
 };
 use crate::mem_table::ImmutableMemtable;
 use crate::monitor::{CompactorMetrics, HummockStateStoreMetrics};
@@ -94,7 +94,7 @@ pub struct HummockStorage {
 
     compaction_catalog_manager_ref: CompactionCatalogManagerRef,
 
-    sstable_object_id_manager: SstableObjectIdManagerRef,
+    object_id_manager: ObjectIdManagerRef,
 
     buffer_tracker: BufferTracker,
 
@@ -127,8 +127,10 @@ pub fn get_committed_read_version_tuple(
     mut key_range: TableKeyRange,
     epoch: HummockEpoch,
 ) -> (TableKeyRange, ReadVersionTuple) {
-    if let Some(table_watermarks) = version.table_watermarks.get(&table_id) {
-        TableWatermarksIndex::new_committed(
+    if let Some(table_watermarks) = version.table_watermarks.get(&table_id)
+        && let WatermarkSerdeType::PkPrefix = table_watermarks.watermark_type
+    {
+        PkPrefixTableWatermarksIndex::new_committed(
             table_watermarks.clone(),
             version
                 .state_table_info
@@ -155,7 +157,7 @@ impl HummockStorage {
         compactor_metrics: Arc<CompactorMetrics>,
         await_tree_config: Option<await_tree::Config>,
     ) -> HummockResult<Self> {
-        let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
+        let object_id_manager = Arc::new(ObjectIdManager::new(
             hummock_meta_client.clone(),
             options.sstable_id_remote_fetch_number,
         ));
@@ -210,7 +212,7 @@ impl HummockStorage {
             pinned_version,
             compactor_context.clone(),
             compaction_catalog_manager_ref.clone(),
-            sstable_object_id_manager.clone(),
+            object_id_manager.clone(),
             state_store_metrics.clone(),
         );
 
@@ -219,7 +221,7 @@ impl HummockStorage {
         let instance = Self {
             context: compactor_context,
             compaction_catalog_manager_ref: compaction_catalog_manager_ref.clone(),
-            sstable_object_id_manager,
+            object_id_manager,
             buffer_tracker: hummock_event_handler.buffer_tracker().clone(),
             version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
             hummock_event_sender: event_tx.clone(),
@@ -567,8 +569,8 @@ impl HummockStorage {
         self.context.sstable_store.clone()
     }
 
-    pub fn sstable_object_id_manager(&self) -> &SstableObjectIdManagerRef {
-        &self.sstable_object_id_manager
+    pub fn object_id_manager(&self) -> &ObjectIdManagerRef {
+        &self.object_id_manager
     }
 
     pub fn compaction_catalog_manager_ref(&self) -> CompactionCatalogManagerRef {

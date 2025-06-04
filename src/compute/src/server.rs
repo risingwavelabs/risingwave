@@ -263,7 +263,7 @@ pub async fn compute_node_serve(
             let (handle, shutdown_sender) = start_compactor(
                 compactor_context,
                 hummock_meta_client.clone(),
-                storage.sstable_object_id_manager().clone(),
+                storage.object_id_manager().clone(),
                 storage.compaction_catalog_manager_ref().clone(),
             );
             sub_tasks.push((handle, shutdown_sender));

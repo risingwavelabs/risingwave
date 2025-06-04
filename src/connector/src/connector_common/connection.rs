@@ -20,9 +20,11 @@ use opendal::Operator;
 use opendal::services::{Azblob, Gcs, S3};
 use phf::{Set, phf_set};
 use rdkafka::ClientConfig;
+use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use risingwave_common::bail;
 use risingwave_common::secret::LocalSecretManager;
+use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_pb::catalog::PbConnection;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
@@ -30,6 +32,7 @@ use tonic::async_trait;
 use url::Url;
 use with_options::WithOptions;
 
+use crate::connector_common::common::DISABLE_DEFAULT_CREDENTIAL;
 use crate::connector_common::{
     AwsAuthProps, IcebergCommon, KafkaConnectionProps, KafkaPrivateLinkCommon,
 };
@@ -98,6 +101,21 @@ impl Connection for KafkaConnection {
     }
 }
 
+pub fn read_kafka_log_level() -> Option<RDKafkaLogLevel> {
+    let log_level = std::env::var("RISINGWAVE_KAFKA_LOG_LEVEL").ok()?;
+    match log_level.to_uppercase().as_str() {
+        "DEBUG" => Some(RDKafkaLogLevel::Debug),
+        "INFO" => Some(RDKafkaLogLevel::Info),
+        "WARN" => Some(RDKafkaLogLevel::Warning),
+        "ERROR" => Some(RDKafkaLogLevel::Error),
+        "CRITICAL" => Some(RDKafkaLogLevel::Critical),
+        "EMERG" => Some(RDKafkaLogLevel::Emerg),
+        "ALERT" => Some(RDKafkaLogLevel::Alert),
+        "NOTICE" => Some(RDKafkaLogLevel::Notice),
+        _ => None,
+    }
+}
+
 impl KafkaConnection {
     async fn build_client(&self) -> ConnectorResult<BaseConsumer<RwConsumerContext>> {
         let mut config = ClientConfig::new();
@@ -116,6 +134,10 @@ impl KafkaConnection {
         )
         .await?;
         let client_ctx = RwConsumerContext::new(ctx_common);
+
+        if let Some(log_level) = read_kafka_log_level() {
+            config.set_log_level(log_level);
+        }
         let client: BaseConsumer<RwConsumerContext> =
             config.create_with_context(client_ctx).await?;
         if self.inner.is_aws_msk_iam() {
@@ -211,6 +233,10 @@ pub struct IcebergConnection {
 
     #[serde(rename = "catalog.jdbc.password")]
     pub jdbc_password: Option<String>,
+
+    /// Enable config load. This parameter set to true will load warehouse credentials from the environment. Only allowed to be used in a self-hosted environment.
+    #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
+    pub enable_config_load: Option<bool>,
 
     /// This is only used by iceberg engine to enable the hosted catalog.
     #[serde(
@@ -317,6 +343,12 @@ impl Connection for IcebergConnection {
             }
         }
 
+        if env_var_is_true(DISABLE_DEFAULT_CREDENTIAL)
+            && matches!(self.enable_config_load, Some(true))
+        {
+            bail!("`enable_config_load` can't be enabled in this environment");
+        }
+
         if self.hosted_catalog.unwrap_or(false) {
             // If `hosted_catalog` is set, we don't need to test the catalog, but just ensure no catalog fields are set.
             if self.catalog_type.is_some() {
@@ -367,7 +399,7 @@ impl Connection for IcebergConnection {
             path_style_access: self.path_style_access,
             database_name: Some("test_database".to_owned()),
             table_name: "test_table".to_owned(),
-            enable_config_load: Some(false),
+            enable_config_load: self.enable_config_load,
             hosted_catalog: self.hosted_catalog,
         };
 

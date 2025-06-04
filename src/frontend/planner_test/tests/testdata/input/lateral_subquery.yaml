@@ -143,3 +143,44 @@
     );
   expected_outputs:
     - batch_plan
+- name: use lateral join to express asof join
+  sql: |
+    create table t1 (
+      price_at date,
+      qid varchar,
+      price float,
+      currency varchar,
+    );
+    create table t2 (
+      ex_date date,
+      qid varchar,
+      factor float,
+    );
+    create table t3 (
+      price_at date,
+      qid varchar
+    );
+    SELECT
+        *
+    FROM t1
+    LEFT JOIN LATERAL (
+        SELECT
+            t2.ex_date,
+            t2.factor
+        FROM (
+          select * from t2
+        ) t2
+        WHERE
+            t1.qid = t2.qid
+            AND t1.price_at IN (
+                SELECT MAX(t3.price_at) AS price_at from t3
+                WHERE
+                    t3.price_at < t2.ex_date
+                    AND t3.qid = t2.qid
+            )
+        ORDER BY t2.ex_date
+        LIMIT 1
+    ) t2 ON TRUE;
+  expected_outputs:
+    - batch_plan
+    - stream_plan

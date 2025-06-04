@@ -443,7 +443,10 @@ fn parse_set() {
     one_statement_parses_to("SET SESSION a = b", "SET a = b");
     for (sql, err_msg) in [
         ("SET", "expected identifier, found: EOF"),
-        ("SET a b", "expected equals sign or TO, found: b"),
+        (
+            "SET a b",
+            "expected '=' or 'TO' after config parameter, found: b",
+        ),
         ("SET a =", "expected parameter value"),
     ] {
         let error = parse_sql_statements(sql).unwrap_err().to_string();
@@ -1057,7 +1060,8 @@ fn parse_array() {
                 lateral_views: vec![],
                 selection: None,
                 group_by: vec![],
-                having: None
+                having: None,
+                window: vec![],
             })),
             order_by: vec![],
             limit: None,
@@ -1096,7 +1100,8 @@ fn parse_array() {
                 lateral_views: vec![],
                 selection: None,
                 group_by: vec![],
-                having: None
+                having: None,
+                window: vec![],
             })),
             order_by: vec![],
             limit: None,
@@ -1141,7 +1146,8 @@ fn parse_array() {
                 lateral_views: vec![],
                 selection: None,
                 group_by: vec![],
-                having: None
+                having: None,
+                window: vec![],
             })),
             order_by: vec![],
             limit: None,

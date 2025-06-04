@@ -51,6 +51,10 @@ const QUERY_COLUMN: &str =
     "select distinct ?fields from system.columns where database = ? and table = ? order by ?";
 pub const CLICKHOUSE_SINK: &str = "clickhouse";
 
+const ALLOW_EXPERIMENTAL_JSON_TYPE: &str = "allow_experimental_json_type";
+const INPUT_FORMAT_BINARY_READ_JSON_AS_STRING: &str = "input_format_binary_read_json_as_string";
+const OUTPUT_FORMAT_BINARY_WRITE_JSON_AS_STRING: &str = "output_format_binary_write_json_as_string";
+
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct ClickHouseCommon {
@@ -316,7 +320,10 @@ impl ClickHouseCommon {
             .with_url(&self.url)
             .with_user(&self.user)
             .with_password(&self.password)
-            .with_database(&self.database);
+            .with_database(&self.database)
+            .with_option(ALLOW_EXPERIMENTAL_JSON_TYPE, "1")
+            .with_option(INPUT_FORMAT_BINARY_READ_JSON_AS_STRING, "1")
+            .with_option(OUTPUT_FORMAT_BINARY_WRITE_JSON_AS_STRING, "1");
         Ok(client)
     }
 }
@@ -498,9 +505,7 @@ impl ClickHouseSink {
             risingwave_common::types::DataType::Bytea => Err(SinkError::ClickHouse(
                 "clickhouse can not support Bytea".to_owned(),
             )),
-            risingwave_common::types::DataType::Jsonb => Err(SinkError::ClickHouse(
-                "clickhouse rust can not support Json".to_owned(),
-            )),
+            risingwave_common::types::DataType::Jsonb => Ok(ck_column.r#type.contains("JSON")),
             risingwave_common::types::DataType::Serial => {
                 Ok(ck_column.r#type.contains("UInt64") | ck_column.r#type.contains("Int64"))
             }
@@ -1000,10 +1005,9 @@ impl ClickHouseFieldWithNull {
                 };
                 ClickHouseField::Int64(ticks)
             }
-            ScalarRefImpl::Jsonb(_) => {
-                return Err(SinkError::ClickHouse(
-                    "clickhouse rust interface can not support Json".to_owned(),
-                ));
+            ScalarRefImpl::Jsonb(v) => {
+                let json_str = v.to_string();
+                ClickHouseField::String(json_str)
             }
             ScalarRefImpl::Struct(v) => {
                 let mut struct_vec = vec![];

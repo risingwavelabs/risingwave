@@ -29,6 +29,7 @@ pub mod anyhow;
 pub mod common;
 pub mod macros;
 pub mod tonic;
+pub mod wrappers;
 
 // Re-export the `thiserror-ext` crate.
 pub use thiserror_ext;

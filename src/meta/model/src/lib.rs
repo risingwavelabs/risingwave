@@ -46,6 +46,8 @@ pub mod hummock_time_travel_delta;
 pub mod hummock_time_travel_version;
 pub mod hummock_version_delta;
 pub mod hummock_version_stats;
+pub mod iceberg_namespace_properties;
+pub mod iceberg_tables;
 pub mod index;
 pub mod object;
 pub mod object_dependency;
@@ -409,6 +411,12 @@ derive_from_blob!(ConnectorSplits, risingwave_pb::source::ConnectorSplits);
 derive_from_blob!(VnodeBitmap, risingwave_pb::common::Buffer);
 derive_from_blob!(ActorMapping, risingwave_pb::stream_plan::PbActorMapping);
 derive_from_blob!(ExprContext, risingwave_pb::plan_common::PbExprContext);
+
+derive_array_from_blob!(
+    TypePairArray,
+    risingwave_pb::stream_plan::dispatch_output_mapping::TypePair,
+    PbTypePairArray
+);
 
 derive_array_from_blob!(
     HummockVersionDeltaArray,

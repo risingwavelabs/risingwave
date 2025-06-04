@@ -14,6 +14,11 @@
 
 //! This module provide storage catalog.
 
+#![expect(
+    clippy::disallowed_types,
+    reason = "construct iceberg::Error to implement the trait"
+)]
+
 use std::collections::HashMap;
 
 use async_trait::async_trait;

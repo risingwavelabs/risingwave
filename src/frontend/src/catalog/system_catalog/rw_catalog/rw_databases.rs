@@ -28,6 +28,8 @@ struct RwDatabases {
     owner: i32,
     acl: Vec<String>,
     resource_group: String,
+    barrier_interval_ms: Option<i32>,
+    checkpoint_frequency: Option<i64>,
 }
 
 #[system_catalog(table, "rw_catalog.rw_databases")]
@@ -45,6 +47,8 @@ fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDatabases>> {
             owner: db.owner() as i32,
             acl: get_acl_items(&Object::DatabaseId(db.id()), false, &users, username_map),
             resource_group: db.resource_group.clone(),
+            barrier_interval_ms: db.barrier_interval_ms.map(|v| v as i32),
+            checkpoint_frequency: db.checkpoint_frequency.map(|v| v as i64),
         })
         .collect())
 }
