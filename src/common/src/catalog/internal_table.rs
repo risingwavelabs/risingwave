@@ -35,6 +35,12 @@ pub fn generate_internal_table_name_with_type(
     )
 }
 
+pub fn is_backfill_table(table_name: &str) -> bool {
+    let parts: Vec<&str> = table_name.split('_').collect();
+    let parts_len = parts.len();
+    parts_len >= 2 && parts[parts_len - 2] == "streamscan"
+}
+
 pub fn get_dist_key_in_pk_indices<I: Eq + Copy + Debug, O: TryFrom<usize>>(
     dist_key_indices: &[I],
     pk_indices: &[I],
