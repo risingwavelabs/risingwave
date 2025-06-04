@@ -23,13 +23,35 @@ FORMAT PLAIN ENCODE PROTOBUF(
     message = 'test.User'
 );
 
+# Create source with generated column to test ALTER SOURCE REFRESH SCHEMA with generated columns
+statement ok
+CREATE SOURCE src_user_gen (*, t int as id+1)
+INCLUDE timestamp
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'pb_alter_source_test',
+    scan.startup.mode = 'earliest'
+)
+FORMAT PLAIN ENCODE PROTOBUF(
+    schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+    message = 'test.User'
+);
+
 query T
 SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 'src_user';
 ----
 CREATE SOURCE src_user (id INT, name CHARACTER VARYING, address CHARACTER VARYING, city CHARACTER VARYING, gender CHARACTER VARYING, sc STRUCT<file_name CHARACTER VARYING>) INCLUDE timestamp
 
+query T
+SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 'src_user_gen';
+----
+CREATE SOURCE src_user_gen (id INT, name CHARACTER VARYING, address CHARACTER VARYING, city CHARACTER VARYING, gender CHARACTER VARYING, sc STRUCT<file_name CHARACTER VARYING>, t INT AS id + 1) INCLUDE timestamp
+
 statement ok
 CREATE MATERIALIZED VIEW mv_user AS SELECT * FROM src_user;
+
+statement ok
+CREATE MATERIALIZED VIEW mv_user_gen AS SELECT id, t FROM src_user_gen;
 
 statement ok
 CREATE TABLE t_user WITH (
@@ -49,23 +71,50 @@ SELECT age FROM mv_user;
 statement error
 SELECT age FROM t_user;
 
+statement error
+SELECT age FROM mv_user_gen;
+
+# Test that generated column works before schema refresh
+sleep 2s
+
+query II rowsort
+SELECT id, t FROM mv_user_gen LIMIT 5;
+----
+0 1
+1 2
+2 3
+3 4
+4 5
+
 # Push more events with extended fields
 system ok
 python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "pb_alter_source_test" 5 user_with_more_fields
 
 sleep 5s
 
-# Refresh source schema
+# Refresh both source schemas simultaneously
 statement ok
 ALTER SOURCE src_user REFRESH SCHEMA;
 
+statement ok
+ALTER SOURCE src_user_gen REFRESH SCHEMA;
+
+# Verify both sources now have the age column, and generated column is preserved
 query T
 SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 'src_user';
 ----
 CREATE SOURCE src_user (id INT, name CHARACTER VARYING, address CHARACTER VARYING, city CHARACTER VARYING, gender CHARACTER VARYING, sc STRUCT<file_name CHARACTER VARYING>, age INT) INCLUDE timestamp
 
+query T
+SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 'src_user_gen';
+----
+CREATE SOURCE src_user_gen (id INT, name CHARACTER VARYING, address CHARACTER VARYING, city CHARACTER VARYING, gender CHARACTER VARYING, sc STRUCT<file_name CHARACTER VARYING>, t INT AS id + 1, age INT) INCLUDE timestamp
+
 statement ok
 CREATE MATERIALIZED VIEW mv_user_more AS SELECT * FROM src_user;
+
+statement ok
+CREATE MATERIALIZED VIEW mv_user_gen_more AS SELECT id, t, age FROM src_user_gen;
 
 # Refresh table schema. It consume new data before refresh, so the new fields are NULLs
 statement ok
@@ -81,6 +130,12 @@ SELECT COUNT(*), MAX(age), MIN(age), SUM(age) FROM t_user;
 ----
 25	NULL	NULL	NULL
 
+# Verify generated column still works correctly after schema refresh
+query III
+SELECT COUNT(*), MIN(t), MAX(t) FROM mv_user_gen_more WHERE t = id + 1;
+----
+25 1 20
+
 # Push more events with extended fields
 system ok
 python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "pb_alter_source_test" 5 user_with_more_fields
@@ -92,8 +147,17 @@ SELECT COUNT(*), MAX(age), MIN(age), SUM(age) FROM t_user;
 ----
 30	104	100	510
 
+# Final verification that generated column still works
+query III
+SELECT COUNT(*), MIN(t), MAX(t) FROM mv_user_gen_more WHERE t = id + 1;
+----
+30 1 20
+
 statement ok
 DROP MATERIALIZED VIEW mv_user_more;
+
+statement ok
+DROP MATERIALIZED VIEW mv_user_gen_more;
 
 statement ok
 DROP TABLE t_user;
@@ -102,7 +166,13 @@ statement ok
 DROP MATERIALIZED VIEW mv_user;
 
 statement ok
+DROP MATERIALIZED VIEW mv_user_gen;
+
+statement ok
 DROP SOURCE src_user;
+
+statement ok
+DROP SOURCE src_user_gen;
 
 statement ok
 SET streaming_use_shared_source TO true;
