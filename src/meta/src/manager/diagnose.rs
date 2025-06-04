@@ -28,7 +28,7 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::EventLog;
 use risingwave_pb::meta::event_log::Event;
 use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
-use risingwave_sqlparser::ast::{CompatibleFormatEncode, Statement, Value};
+use risingwave_sqlparser::ast::RedactSqlOptionKeywordsRef;
 use risingwave_sqlparser::parser::Parser;
 use serde_json::json;
 use thiserror_ext::AsReport;
@@ -48,6 +48,7 @@ pub struct DiagnoseCommand {
     event_log_manager: EventLogManagerRef,
     prometheus_client: Option<prometheus_http_query::Client>,
     prometheus_selector: String,
+    redact_sql_option_keywords: RedactSqlOptionKeywordsRef,
 }
 
 impl DiagnoseCommand {
@@ -58,6 +59,7 @@ impl DiagnoseCommand {
         event_log_manager: EventLogManagerRef,
         prometheus_client: Option<prometheus_http_query::Client>,
         prometheus_selector: String,
+        redact_sql_option_keywords: RedactSqlOptionKeywordsRef,
     ) -> Self {
         Self {
             metadata_manager,
@@ -66,6 +68,7 @@ impl DiagnoseCommand {
             event_log_manager,
             prometheus_client,
             prometheus_selector,
+            redact_sql_option_keywords,
         }
     }
 
@@ -693,8 +696,8 @@ impl DiagnoseCommand {
             for (id, (name, schema_id, definition)) in items {
                 obj_id_to_name.insert(id, name.clone());
                 let mut row = Row::new();
-                let may_redact =
-                    redact_all_sql_options(&definition).unwrap_or_else(|| "[REDACTED]".into());
+                let may_redact = redact_sql(&definition, self.redact_sql_option_keywords.clone())
+                    .unwrap_or_else(|| "[REDACTED]".into());
                 row.add_cell(id.into());
                 row.add_cell(name.into());
                 row.add_cell(schema_id.into());
@@ -775,51 +778,13 @@ fn merge_prometheus_selector<'a>(selectors: impl IntoIterator<Item = &'a str>) -
     selectors.into_iter().filter(|s| !s.is_empty()).join(",")
 }
 
-fn redact_all_sql_options(sql: &str) -> Option<String> {
-    let Ok(mut statements) = Parser::parse_sql(sql) else {
-        return None;
-    };
-    let mut redacted = String::new();
-    for statement in &mut statements {
-        let options = match statement {
-            Statement::CreateTable {
-                with_options,
-                format_encode,
-                ..
-            } => {
-                let format_encode = match format_encode {
-                    Some(CompatibleFormatEncode::V2(cs)) => Some(&mut cs.row_options),
-                    _ => None,
-                };
-                (Some(with_options), format_encode)
-            }
-            Statement::CreateSource { stmt } => {
-                let format_encode = match &mut stmt.format_encode {
-                    CompatibleFormatEncode::V2(cs) => Some(&mut cs.row_options),
-                    _ => None,
-                };
-                (Some(&mut stmt.with_properties.0), format_encode)
-            }
-            Statement::CreateSink { stmt } => {
-                let format_encode = match &mut stmt.sink_schema {
-                    Some(cs) => Some(&mut cs.row_options),
-                    _ => None,
-                };
-                (Some(&mut stmt.with_properties.0), format_encode)
-            }
-            _ => (None, None),
-        };
-        if let Some(options) = options.0 {
-            for option in options {
-                option.value = Value::SingleQuotedString("[REDACTED]".into()).into();
-            }
-        }
-        if let Some(options) = options.1 {
-            for option in options {
-                option.value = Value::SingleQuotedString("[REDACTED]".into()).into();
-            }
-        }
-        writeln!(&mut redacted, "{statement}").unwrap();
+fn redact_sql(sql: &str, keywords: RedactSqlOptionKeywordsRef) -> Option<String> {
+    match Parser::parse_sql(sql) {
+        Ok(sqls) => Some(
+            sqls.into_iter()
+                .map(|sql| sql.to_redacted_string(keywords.clone()))
+                .join(";"),
+        ),
+        Err(_) => None,
     }
-    Some(redacted)
 }
