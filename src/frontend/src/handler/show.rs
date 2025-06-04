@@ -24,7 +24,7 @@ use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
-use risingwave_common::types::{DataType, Fields, Timestamptz};
+use risingwave_common::types::{DataType, Datum, Fields, Timestamptz, ToOwnedDatum, WithDataType};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
 use risingwave_expr::scalar::like::{i_like_default, like_default};
@@ -164,17 +164,72 @@ struct ShowObjectRow {
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 pub struct ShowColumnRow {
-    pub name: String,
+    pub name: ShowColumnName,
     pub r#type: String,
     pub is_hidden: Option<String>, // XXX: why not bool?
     pub description: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+enum ShowColumnNameSegment {
+    Field(Ident),
+    ListElement,
+}
+
+impl ShowColumnNameSegment {
+    pub fn field(name: &str) -> Self {
+        ShowColumnNameSegment::Field(Ident::from_real_value(name))
+    }
+}
+
+/// The name of a column in the output of `SHOW COLUMNS` or `DESCRIBE`.
+#[derive(Clone, Debug)]
+pub struct ShowColumnName(Vec<ShowColumnNameSegment>);
+
+impl ShowColumnName {
+    /// Create a special column name without quoting. Used only for extra information like `primary key`
+    /// in the output of `DESCRIBE`.
+    pub fn special(name: &str) -> Self {
+        ShowColumnName(vec![ShowColumnNameSegment::Field(Ident::new_unchecked(
+            name,
+        ))])
+    }
+}
+
+impl WithDataType for ShowColumnName {
+    fn default_data_type() -> DataType {
+        DataType::Varchar
+    }
+}
+
+impl ToOwnedDatum for ShowColumnName {
+    fn to_owned_datum(self) -> Datum {
+        use std::fmt::Write;
+
+        let mut s = String::new();
+        for segment in self.0 {
+            match segment {
+                ShowColumnNameSegment::Field(ident) => {
+                    if !s.is_empty() {
+                        // TODO: shall we add parentheses, so that it's valid field access SQL?
+                        s.push('.');
+                    }
+                    write!(s, "{ident}").unwrap();
+                }
+                ShowColumnNameSegment::ListElement => {
+                    s.push_str("[1]");
+                }
+            }
+        }
+        s.to_owned_datum()
+    }
 }
 
 impl ShowColumnRow {
     /// Create a row with the given information. If the data type is a struct or list,
     /// flatten the data type to also generate rows for its fields.
     fn flatten(
-        name: String,
+        name: ShowColumnName,
         data_type: DataType,
         is_hidden: bool,
         description: Option<String>,
@@ -196,22 +251,16 @@ impl ShowColumnRow {
         match data_type {
             DataType::Struct(st) => {
                 rows.extend(st.iter().flat_map(|(field_name, field_data_type)| {
-                    Self::flatten(
-                        format!("{}.{}", name, field_name),
-                        field_data_type.clone(),
-                        is_hidden,
-                        None,
-                    )
+                    let mut name = name.clone();
+                    name.0.push(ShowColumnNameSegment::field(field_name));
+                    Self::flatten(name, field_data_type.clone(), is_hidden, None)
                 }));
             }
 
             DataType::List(inner @ box DataType::Struct(_)) => {
-                rows.extend(Self::flatten(
-                    format!("{}[1]", name),
-                    *inner,
-                    is_hidden,
-                    None,
-                ));
+                let mut name = name.clone();
+                name.0.push(ShowColumnNameSegment::ListElement);
+                rows.extend(Self::flatten(name, *inner, is_hidden, None));
             }
 
             _ => {}
@@ -222,7 +271,7 @@ impl ShowColumnRow {
 
     pub fn from_catalog(col: ColumnCatalog) -> Vec<Self> {
         Self::flatten(
-            col.column_desc.name,
+            ShowColumnName(vec![ShowColumnNameSegment::field(&col.column_desc.name)]),
             col.column_desc.data_type,
             col.is_hidden,
             col.column_desc.description,
