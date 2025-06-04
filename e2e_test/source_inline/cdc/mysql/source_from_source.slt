@@ -51,7 +51,7 @@ sleep 2s
 # But it can receive offset update at the beginning and periodically
 # via the heartbeat message.
 system ok
-internal_table.mjs --name s --type '' --count
+internal_table.mjs --name s1 --type '' --count
 ----
 count: 1
 
