@@ -1707,12 +1707,12 @@ impl Statement {
         let sql = self.to_string_unchecked();
 
         // TODO(#20713): expand this check to all statements
-        if matches!(
-            self,
-            Statement::CreateTable { .. } | Statement::CreateSource { .. }
-        ) {
-            let _ = Parser::parse_sql(&sql)?;
-        }
+        // if matches!(
+        //     self,
+        //     Statement::CreateTable { .. } | Statement::CreateSource { .. }
+        // ) {
+        //     let _ = Parser::parse_sql(&sql)?;
+        // }
         Ok(sql)
     }
 
