@@ -23,6 +23,7 @@ use rdkafka::consumer::ConsumerContext;
 use rdkafka::message::DeliveryResult;
 use rdkafka::producer::ProducerContext;
 use rdkafka::{ClientContext, Statistics};
+use thiserror_ext::AsReport;
 use tokio::runtime::Runtime;
 
 use super::private_link::{BrokerAddrRewriter, PrivateLinkContextRole};
@@ -133,7 +134,7 @@ impl KafkaContextCommon {
             let credentials_provider = credentials_provider.clone();
             let signer_timeout_sec = *signer_timeout_sec;
             let (token, expiration_time_ms) = {
-                tokio::task::block_in_place(move || {
+                let result = tokio::task::block_in_place(move || {
                     KAFKA_SOURCE_RUNTIME.block_on(async {
                         timeout(
                             Duration::from_secs(signer_timeout_sec),
@@ -144,9 +145,11 @@ impl KafkaContextCommon {
                         )
                         .await
                     })
-                })
-                .unwrap()
-                .unwrap()
+                });
+                let timeout_result =
+                    result.map_err(|_e| "generating AWS MSK IAM token timeout".to_owned())?;
+                timeout_result
+                    .map_err(|e| format!("generating AWS MSK IAM token error: {}", e.as_report()))?
             };
             Ok(OAuthToken {
                 token,
