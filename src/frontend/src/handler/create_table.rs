@@ -1726,7 +1726,7 @@ pub async fn create_iceberg_engine_table(
                 if iceberg_compaction_license_val.is_err() {
                     bail!(
                         "Iceberg compaction feature is not available: {:?}",
-                        iceberg_compaction_license_val.unwrap_err().as_report()
+                        iceberg_compaction_license_val.unwrap_err()
                     );
                 }
 
@@ -1786,7 +1786,7 @@ pub async fn create_iceberg_engine_table(
                     // So we will bail out here.
                     bail!(
                         "Iceberg compaction feature is not available: {:?}",
-                        iceberg_compaction_license_val.unwrap_err().as_report()
+                        iceberg_compaction_license_val.unwrap_err()
                     );
                 }
                 sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "true".to_owned());
