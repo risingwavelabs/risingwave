@@ -261,7 +261,7 @@ drop schema show_another_schema;
 
 # Composite type should be expanded to multiple rows in `SHOW COLUMNS`.
 statement ok
-create table t5 (v struct<a int, b struct<b int, c struct<d int, e int>[]>>[]);
+create table t5 (v struct<A int, b struct<"x.Y" int, "C" struct<d int, e int>[]>>[]);
 
 query TTTT
 show columns from t5;
@@ -270,11 +270,11 @@ v	            struct[]	                false	NULL
 v[1]	        struct	                    false	NULL
 v[1].a	        integer	                    false	NULL
 v[1].b	        struct	                    false	NULL
-v[1].b.b	    integer	                    false	NULL
-v[1].b.c	    struct[]	                false	NULL
-v[1].b.c[1]	    struct	                    false	NULL
-v[1].b.c[1].d	integer	                    false	NULL
-v[1].b.c[1].e	integer	                    false	NULL
+v[1].b."x.Y"    integer	                    false	NULL
+v[1].b."C"	    struct[]	                false	NULL
+v[1].b."C"[1]	struct	                    false	NULL
+v[1].b."C"[1].d	integer	                    false	NULL
+v[1].b."C"[1].e	integer	                    false	NULL
 _row_id	        serial	                    true	NULL
 _rw_timestamp	timestamp with time zone	true	NULL
 
