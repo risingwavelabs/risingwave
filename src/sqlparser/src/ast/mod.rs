@@ -2866,6 +2866,19 @@ impl fmt::Display for DefaultPrivilegeOperation {
     }
 }
 
+impl DefaultPrivilegeOperation {
+    pub fn for_schemas(&self) -> bool {
+        match &self {
+            DefaultPrivilegeOperation::Grant { object_type, .. } => {
+                object_type == &PrivilegeObjectType::Schemas
+            }
+            DefaultPrivilegeOperation::Revoke { object_type, .. } => {
+                object_type == &PrivilegeObjectType::Schemas
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AssignmentValue {

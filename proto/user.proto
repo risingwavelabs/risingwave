@@ -154,11 +154,11 @@ message AlterDefaultPrivilegeRequest {
     GrantPrivilege grant_privilege = 4;
     RevokePrivilege revoke_privilege = 5;
   }
+  uint32 granted_by = 6;
 }
 
 message AlterDefaultPrivilegeResponse {
   common.Status status = 1;
-  uint64 version = 2;
 }
 
 service UserService {

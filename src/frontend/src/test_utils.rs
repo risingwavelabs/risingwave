@@ -976,6 +976,7 @@ impl UserInfoWriter for MockUserInfoWriter {
         _database_id: DatabaseId,
         _schemas: Vec<SchemaId>,
         _operation: AlterDefaultPrivilegeOperation,
+        _operated_by: UserId,
     ) -> Result<()> {
         todo!()
     }

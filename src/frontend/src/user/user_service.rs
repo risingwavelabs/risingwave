@@ -75,6 +75,7 @@ pub trait UserInfoWriter: Send + Sync {
         database_id: DatabaseId,
         schemas: Vec<SchemaId>,
         operation: AlterDefaultPrivilegeOperation,
+        granted_by: UserId,
     ) -> Result<()>;
 }
 
@@ -144,12 +145,12 @@ impl UserInfoWriter for UserInfoWriterImpl {
         database_id: DatabaseId,
         schemas: Vec<SchemaId>,
         operation: AlterDefaultPrivilegeOperation,
+        granted_by: UserId,
     ) -> Result<()> {
-        let version = self
-            .meta_client
-            .alter_default_privilege(users, database_id, schemas, operation)
+        self.meta_client
+            .alter_default_privilege(users, database_id, schemas, operation, granted_by)
             .await?;
-        self.wait_version(version).await
+        Ok(())
     }
 }
 

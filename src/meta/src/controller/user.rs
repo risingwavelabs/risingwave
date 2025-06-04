@@ -15,15 +15,20 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::{DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG};
-use risingwave_meta_model::prelude::{Object, User, UserPrivilege};
+use risingwave_common::catalog::{DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG, SYSTEM_SCHEMAS};
+use risingwave_meta_model::object::ObjectType;
+use risingwave_meta_model::prelude::{Object, Schema, User, UserDefaultPrivilege, UserPrivilege};
 use risingwave_meta_model::user_privilege::Action;
-use risingwave_meta_model::{AuthInfo, PrivilegeId, UserId, object, user, user_privilege};
+use risingwave_meta_model::{
+    AuthInfo, DatabaseId, PrivilegeId, SchemaId, UserId, object, schema, user,
+    user_default_privilege, user_privilege,
+};
+use risingwave_pb::common::PbObjectType;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
 use risingwave_pb::user::update_user_request::PbUpdateField;
-use risingwave_pb::user::{PbGrantPrivilege, PbUserInfo};
+use risingwave_pb::user::{PbAction, PbGrantPrivilege, PbUserInfo};
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{OnConflict, SimpleExpr, Value};
 use sea_orm::{
@@ -33,10 +38,10 @@ use sea_orm::{
 
 use crate::controller::catalog::CatalogController;
 use crate::controller::utils::{
-    PartialUserPrivilege, check_user_name_duplicate, ensure_privileges_not_referred,
-    ensure_user_id, extract_grant_obj_id, get_index_state_tables_by_table_id,
-    get_internal_tables_by_id, get_object_owner, get_referring_privileges_cascade,
-    get_user_privilege, list_user_info_by_ids,
+    PartialUserPrivilege, check_user_name_duplicate, ensure_object_id,
+    ensure_privileges_not_referred, ensure_user_id, extract_grant_obj_id,
+    get_index_state_tables_by_table_id, get_internal_tables_by_id, get_object_owner,
+    get_referring_privileges_cascade, get_user_privilege, list_user_info_by_ids,
 };
 use crate::manager::{IGNORED_NOTIFICATION_VERSION, NotificationVersion};
 use crate::{MetaError, MetaResult};
@@ -506,12 +511,122 @@ impl CatalogController {
         let version = self.notify_users_update(user_infos).await;
         Ok(version)
     }
+
+    pub async fn grant_default_privileges(
+        &self,
+        user_ids: Vec<UserId>,
+        database_id: DatabaseId,
+        schema_ids: Vec<SchemaId>,
+        grantor: UserId,
+        actions: Vec<PbAction>,
+        object_type: PbObjectType,
+        grantees: Vec<UserId>,
+        with_grant_option: bool,
+    ) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        for user_id in &user_ids {
+            ensure_user_id(*user_id, &txn).await?;
+        }
+        ensure_object_id(ObjectType::Database, database_id, &txn).await?;
+        for schema_id in &schema_ids {
+            ensure_object_id(ObjectType::Schema, *schema_id, &txn).await?;
+        }
+        for grantee in &grantees {
+            ensure_user_id(*grantee, &txn).await?;
+        }
+        if schema_ids.is_empty() {
+            assert_eq!(
+                object_type,
+                PbObjectType::Schema,
+                "object type must be Schema when schema_ids is empty"
+            );
+        }
+        // TODO: add a new column to distinguish the object type between
+        // table and materialized view.
+
+        let mut default_privileges = vec![];
+        for user_id in user_ids {
+            for grantee in &grantees {
+                for action in &actions {
+                    if schema_ids.is_empty() {
+                        default_privileges.push(user_default_privilege::ActiveModel {
+                            id: Default::default(),
+                            database_id: Set(database_id),
+                            schema_id: Set(None),
+                            object_type: Set(object_type.into()),
+                            user_id: Set(user_id),
+                            grantee: Set(*grantee),
+                            granted_by: Set(grantor as _),
+                            action: Set((*action).into()),
+                            with_grant_option: Set(with_grant_option),
+                        });
+                        continue;
+                    }
+                    for schema_id in &schema_ids {
+                        default_privileges.push(user_default_privilege::ActiveModel {
+                            id: Default::default(),
+                            database_id: Set(database_id),
+                            schema_id: Set(Some(*schema_id)),
+                            object_type: Set(object_type.into()),
+                            user_id: Set(user_id),
+                            grantee: Set(*grantee),
+                            granted_by: Set(grantor as _),
+                            action: Set((*action).into()),
+                            with_grant_option: Set(with_grant_option),
+                        });
+                    }
+                }
+            }
+        }
+
+        let mut on_conflict = OnConflict::columns([
+            user_default_privilege::Column::UserId,
+            user_default_privilege::Column::DatabaseId,
+            user_default_privilege::Column::SchemaId,
+            user_default_privilege::Column::ObjectType,
+            user_default_privilege::Column::Grantee,
+            user_default_privilege::Column::Action,
+        ]);
+        if with_grant_option {
+            on_conflict.update_column(user_default_privilege::Column::WithGrantOption);
+        } else {
+            // Workaround to support MYSQL for `DO NOTHING`.
+            on_conflict.update_column(user_default_privilege::Column::UserId);
+        }
+        UserDefaultPrivilege::insert_many(default_privileges)
+            .on_conflict(on_conflict)
+            .do_nothing()
+            .exec(&txn)
+            .await?;
+
+        txn.commit().await?;
+        Ok(())
+    }
+
+    pub async fn revoke_default_privileges(
+        &self,
+        user_ids: Vec<UserId>,
+        database_id: DatabaseId,
+        schema_ids: Vec<SchemaId>,
+        grantor: UserId,
+        actions: Vec<PbAction>,
+        object_type: PbObjectType,
+        grantees: Vec<UserId>,
+        revoke_grant_option: bool,
+    ) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        for user_id in &user_ids {
+            ensure_user_id(*user_id, &txn).await?;
+        }
+        todo!("Implement default privileges for users")
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_meta_model::DatabaseId;
-    use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
+    use risingwave_pb::user::grant_privilege::{PbActionWithGrantOption, PbObject};
 
     use super::*;
     use crate::manager::MetaSrvEnv;

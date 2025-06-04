@@ -19,6 +19,7 @@ impl MigrationTrait for Migration {
                     .col(integer_null(UserDefaultPrivilege::SchemaId))
                     .col(string(UserDefaultPrivilege::ObjectType))
                     .col(integer(UserDefaultPrivilege::UserId))
+                    .col(integer(UserDefaultPrivilege::Grantee))
                     .col(integer(UserDefaultPrivilege::GrantedBy))
                     .col(string(UserDefaultPrivilege::Action))
                     .col(boolean(UserDefaultPrivilege::WithGrantOption))
@@ -41,14 +42,21 @@ impl MigrationTrait for Migration {
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk_user_default_privilege_target_user_id")
+                            .name("fk_user_default_privilege_user_id")
                             .from(UserDefaultPrivilege::Table, UserDefaultPrivilege::UserId)
                             .to(User::Table, User::UserId)
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk_user_default_privilege_source_user_id")
+                            .name("fk_user_default_privilege_grantee_user_id")
+                            .from(UserDefaultPrivilege::Table, UserDefaultPrivilege::Grantee)
+                            .to(User::Table, User::UserId)
+                            .on_delete(ForeignKeyAction::Cascade),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_user_default_privilege_granted_user_id")
                             .from(UserDefaultPrivilege::Table, UserDefaultPrivilege::GrantedBy)
                             .to(User::Table, User::UserId)
                             .on_delete(ForeignKeyAction::Cascade),
@@ -74,6 +82,7 @@ enum UserDefaultPrivilege {
     SchemaId,
     ObjectType,
     UserId,
+    Grantee,
     GrantedBy,
     Action,
     WithGrantOption,

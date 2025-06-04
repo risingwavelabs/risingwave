@@ -922,15 +922,17 @@ impl MetaClient {
         database_id: DatabaseId,
         schema_ids: Vec<SchemaId>,
         operation: AlterDefaultPrivilegeOperation,
-    ) -> Result<u64> {
+        granted_by: u32,
+    ) -> Result<()> {
         let request = AlterDefaultPrivilegeRequest {
             user_ids,
             database_id,
             schema_ids,
             operation: Some(operation),
+            granted_by,
         };
-        let resp = self.inner.alter_default_privilege(request).await?;
-        Ok(resp.version)
+        self.inner.alter_default_privilege(request).await?;
+        Ok(())
     }
 
     /// Unregister the current node from the cluster.

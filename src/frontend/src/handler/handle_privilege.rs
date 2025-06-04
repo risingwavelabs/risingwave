@@ -14,8 +14,10 @@
 
 use std::collections::HashSet;
 
+use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::acl;
+use risingwave_common::catalog::is_system_schema;
 use risingwave_pb::common::PbObjectType;
 use risingwave_pb::user::alter_default_privilege_request::{
     Operation as AlterDefaultPrivilegeOperation, PbGrantPrivilege as OpGrantPrivilege,
@@ -555,7 +557,26 @@ pub async fn handle_alter_default_privileges(
     // If schema names are not specified,
     // users will be grant/revoke privileges on all schemas in the current database.
     let schemas = match schema_names {
-        None => vec![],
+        None => {
+            if !operation.for_schemas() {
+                let catalog_reader = session.env().catalog_reader();
+                let reader = catalog_reader.read_guard();
+                let schemas = reader
+                    .get_database_by_id(&session.database_id())?
+                    .iter_schemas()
+                    .filter(|schema| !is_system_schema(&schema.name))
+                    .map(|schema| schema.id())
+                    .collect_vec();
+                if schemas.is_empty() {
+                    return Ok(PgResponse::empty_result(
+                        StatementType::ALTER_DEFAULT_PRIVILEGES,
+                    ));
+                }
+                schemas
+            } else {
+                vec![]
+            }
+        }
         Some(names) => {
             let catalog_reader = session.env().catalog_reader();
             let reader = catalog_reader.read_guard();
@@ -609,7 +630,13 @@ pub async fn handle_alter_default_privileges(
 
     let user_info_writer = session.user_info_writer()?;
     user_info_writer
-        .alter_default_privilege(users, session.database_id(), schemas, alter_operation)
+        .alter_default_privilege(
+            users,
+            session.database_id(),
+            schemas,
+            alter_operation,
+            session.user_id(),
+        )
         .await?;
 
     Ok(PgResponse::empty_result(

@@ -27,6 +27,7 @@ pub struct Model {
     pub schema_id: Option<SchemaId>,
     pub object_type: ObjectType,
     pub user_id: UserId,
+    pub grantee: UserId,
     pub granted_by: UserId,
     pub action: Action,
     pub with_grant_option: bool,
@@ -53,6 +54,14 @@ pub enum Relation {
     #[sea_orm(
         belongs_to = "super::user::Entity",
         from = "Column::UserId",
+        to = "super::user::Column::UserId",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    User3,
+    #[sea_orm(
+        belongs_to = "super::user::Entity",
+        from = "Column::Grantee",
         to = "super::user::Column::UserId",
         on_update = "NoAction",
         on_delete = "Cascade"
