@@ -191,6 +191,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
             selection,
             group_by,
             having,
+            window: vec![], // TODO: generate named window definition
         };
         (select, schema)
     }

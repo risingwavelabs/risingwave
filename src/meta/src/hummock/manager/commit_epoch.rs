@@ -26,12 +26,12 @@ use risingwave_hummock_sdk::table_stats::{
     PbTableStatsMap, add_prost_table_stats_map, purge_prost_table_stats, to_prost_table_stats_map,
 };
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
+use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockSstableObjectId, LocalSstableInfo,
 };
-use risingwave_pb::hummock::CompactionConfig;
-use risingwave_pb::hummock::compact_task::{self};
+use risingwave_pb::hummock::{CompactionConfig, compact_task};
 use sea_orm::TransactionTrait;
 
 use crate::hummock::error::{Error, Result};
@@ -61,6 +61,7 @@ pub struct CommitEpochInfo {
     pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
     pub new_table_fragment_infos: Vec<NewTableFragmentInfo>,
     pub change_log_delta: HashMap<TableId, ChangeLogDelta>,
+    pub vector_index_delta: HashMap<TableId, VectorIndexDelta>,
     /// `table_id` -> `committed_epoch`
     pub tables_to_commit: HashMap<TableId, u64>,
 }
@@ -75,6 +76,7 @@ impl HummockManager {
             sst_to_context,
             new_table_fragment_infos,
             change_log_delta,
+            vector_index_delta,
             tables_to_commit,
         } = commit_info;
         let mut versioning_guard = self.versioning.write().await;
@@ -199,6 +201,7 @@ impl HummockManager {
             &new_table_ids,
             new_table_watermarks,
             change_log_delta,
+            vector_index_delta,
         );
         if should_mark_next_time_travel_version_snapshot(&time_travel_delta) {
             // Unable to invoke mark_next_time_travel_version_snapshot because versioning is already mutable borrowed.

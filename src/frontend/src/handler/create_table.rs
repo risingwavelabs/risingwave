@@ -89,6 +89,9 @@ use crate::{Binder, Explain, TableCatalog, WithOptions};
 
 mod col_id_gen;
 pub use col_id_gen::*;
+use risingwave_connector::sink::iceberg::parse_partition_by_exprs;
+
+use crate::handler::drop_table::handle_drop_table;
 
 fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
     for option_def in &c.options {
@@ -1429,7 +1432,7 @@ pub async fn handle_create_table(
         Engine::Hummock => {
             let catalog_writer = session.catalog_writer()?;
             catalog_writer
-                .create_table(source, hummock_table, graph, job_type)
+                .create_table(source, hummock_table, graph, job_type, if_not_exists)
                 .await?;
         }
         Engine::Iceberg => {
@@ -1441,6 +1444,7 @@ pub async fn handle_create_table(
                 graph,
                 table_name,
                 job_type,
+                if_not_exists,
             )
             .await?;
         }
@@ -1466,6 +1470,7 @@ pub async fn create_iceberg_engine_table(
     graph: StreamFragmentGraph,
     table_name: ObjectName,
     job_type: PbTableJobType,
+    if_not_exists: bool,
 ) -> Result<()> {
     let meta_client = session.env().meta_client();
     let meta_store_endpoint = meta_client.get_meta_store_endpoint().await?;
@@ -1709,6 +1714,139 @@ pub async fn create_iceberg_engine_table(
 
     sink_with.insert("is_exactly_once".to_owned(), "true".to_owned());
 
+    const ENABLE_COMPACTION: &str = "enable_compaction";
+    const COMPACTION_INTERVAL_SEC: &str = "compaction_interval_sec";
+    const ENABLE_SNAPSHOT_EXPIRATION: &str = "enable_snapshot_expiration";
+
+    if let Some(enable_compaction) = handler_args.with_options.get(ENABLE_COMPACTION) {
+        match enable_compaction.to_lowercase().as_str() {
+            "true" => {
+                risingwave_common::license::Feature::IcebergCompaction
+                    .check_available()
+                    .map_err(|e| anyhow::anyhow!(e))?;
+
+                sink_with.insert(ENABLE_COMPACTION.to_owned(), "true".to_owned());
+            }
+            "false" => {
+                sink_with.insert(ENABLE_COMPACTION.to_owned(), "false".to_owned());
+            }
+            _ => {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "enable_compaction must be true or false: {}",
+                    enable_compaction
+                ))
+                .into());
+            }
+        }
+
+        // remove enable_compaction from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove("enable_compaction"));
+    } else {
+        sink_with.insert(
+            ENABLE_COMPACTION.to_owned(),
+            risingwave_common::license::Feature::IcebergCompaction
+                .check_available()
+                .is_ok()
+                .to_string(),
+        );
+    }
+
+    if let Some(compaction_interval_sec) = handler_args.with_options.get(COMPACTION_INTERVAL_SEC) {
+        let compaction_interval_sec = compaction_interval_sec.parse::<u64>().map_err(|_| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "compaction_interval_sec must be a positive integer: {}",
+                commit_checkpoint_interval
+            ))
+        })?;
+        if compaction_interval_sec == 0 {
+            bail!("compaction_interval_sec must be a positive integer: 0");
+        }
+        sink_with.insert(
+            "compaction_interval_sec".to_owned(),
+            compaction_interval_sec.to_string(),
+        );
+        // remove compaction_interval_sec from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove("compaction_interval_sec"));
+    }
+
+    if let Some(enable_snapshot_expiration) =
+        handler_args.with_options.get(ENABLE_SNAPSHOT_EXPIRATION)
+    {
+        match enable_snapshot_expiration.to_lowercase().as_str() {
+            "true" => {
+                risingwave_common::license::Feature::IcebergCompaction
+                    .check_available()
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "true".to_owned());
+            }
+            "false" => {
+                sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "false".to_owned());
+            }
+            _ => {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "enable_snapshot_expiration must be true or false: {}",
+                    enable_snapshot_expiration
+                ))
+                .into());
+            }
+        }
+
+        // remove enable_snapshot_expiration from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove(ENABLE_SNAPSHOT_EXPIRATION));
+    } else {
+        sink_with.insert(
+            ENABLE_SNAPSHOT_EXPIRATION.to_owned(),
+            risingwave_common::license::Feature::IcebergCompaction
+                .check_available()
+                .is_ok()
+                .to_string(),
+        );
+    }
+
+    let partition_by = handler_args
+        .with_options
+        .get("partition_by")
+        .map(|v| v.to_owned());
+
+    if let Some(partition_by) = &partition_by {
+        let mut partition_columns = vec![];
+        for (column, _) in parse_partition_by_exprs(partition_by.clone())? {
+            table_catalog
+                .columns()
+                .iter()
+                .find(|col| col.name().eq_ignore_ascii_case(&column))
+                .ok_or_else(|| {
+                    ErrorCode::InvalidInputSyntax(format!(
+                        "Partition source column does not exist in schema: {}",
+                        column
+                    ))
+                })?;
+
+            partition_columns.push(column.to_owned());
+        }
+
+        ensure_partition_columns_are_prefix_of_primary_key(&partition_columns, &pks).map_err(
+            |_| {
+                ErrorCode::InvalidInputSyntax(
+                    "The partition columns should be the prefix of the primary key".to_owned(),
+                )
+            },
+        )?;
+
+        sink_with.insert("partition_by".to_owned(), partition_by.to_owned());
+
+        // remove partition_by from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove("partition_by"));
+    }
+
     sink_handler_args.with_options =
         WithOptions::new(sink_with, Default::default(), connection_ref.clone());
 
@@ -1742,10 +1880,21 @@ pub async fn create_iceberg_engine_table(
     // TODO(iceberg): make iceberg engine table creation ddl atomic
     let has_connector = source.is_some();
     catalog_writer
-        .create_table(source, table, graph, job_type)
+        .create_table(source, table, graph, job_type, if_not_exists)
         .await?;
-    create_sink::handle_create_sink(sink_handler_args, create_sink_stmt, true).await?;
-    create_source::handle_create_source(source_handler_args, create_source_stmt).await?;
+    let res = create_sink::handle_create_sink(sink_handler_args, create_sink_stmt, true).await;
+    if res.is_err() {
+        // Since we don't support ddl atomicity, we need to drop the partial created table.
+        handle_drop_table(handler_args.clone(), table_name.clone(), true, true).await?;
+        res?;
+    }
+    let res = create_source::handle_create_source(source_handler_args, create_source_stmt).await;
+    if res.is_err() {
+        // Since we don't support ddl atomicity, we need to drop the partial created table.
+        handle_drop_table(handler_args.clone(), table_name.clone(), true, true).await?;
+        res?;
+    }
+
     if has_connector {
         alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
             handler_args,
@@ -1783,6 +1932,26 @@ pub fn check_create_table_with_source(
         })?;
     }
     Ok(format_encode)
+}
+
+fn ensure_partition_columns_are_prefix_of_primary_key(
+    partition_columns: &[String],
+    primary_key_columns: &[String],
+) -> std::result::Result<(), String> {
+    if partition_columns.len() > primary_key_columns.len() {
+        return Err("Partition columns cannot be longer than primary key columns.".to_owned());
+    }
+
+    for (i, partition_col) in partition_columns.iter().enumerate() {
+        if primary_key_columns.get(i) != Some(partition_col) {
+            return Err(format!(
+                "Partition column '{}' is not a prefix of the primary key.",
+                partition_col
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]

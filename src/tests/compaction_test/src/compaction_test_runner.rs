@@ -269,7 +269,9 @@ async fn init_metadata_for_replay(
         .await?;
 
     // shift the sst id to avoid conflict with the original meta node
-    let _ = new_meta_client.get_new_sst_ids(SST_ID_SHIFT_COUNT).await?;
+    let _ = new_meta_client
+        .get_new_object_ids(SST_ID_SHIFT_COUNT)
+        .await?;
 
     tracing::info!("Finished initializing the new Meta");
     Ok(())

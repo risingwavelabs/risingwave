@@ -337,6 +337,7 @@ impl Strong {
             | ExprType::HasSchemaPrivilege
             | ExprType::InetAton
             | ExprType::InetNtoa
+            | ExprType::CompositeCast
             | ExprType::RwEpochToTs => false,
             ExprType::Unspecified => unreachable!(),
         }

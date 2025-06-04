@@ -36,7 +36,7 @@ use risingwave_storage::compaction_catalog_manager::CompactionCatalogAgentRef;
 use risingwave_storage::hummock::compactor::CompactorContext;
 use risingwave_storage::hummock::compactor::compactor_runner::compact_with_agent;
 use risingwave_storage::hummock::test_utils::{ReadOptions, *};
-use risingwave_storage::hummock::{CachePolicy, GetObjectId, SstableObjectIdManager};
+use risingwave_storage::hummock::{CachePolicy, GetObjectId, ObjectIdManager};
 use risingwave_storage::store::*;
 use serial_test::serial;
 
@@ -49,15 +49,14 @@ use crate::test_utils::gen_key_from_bytes;
 #[tokio::test]
 #[cfg(feature = "sync_point")]
 #[serial]
-async fn test_syncpoints_sstable_object_id_manager() {
+async fn test_syncpoints_object_id_manager() {
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_id) =
         setup_compute_env(8080).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
         worker_id as _,
     ));
-    let sstable_object_id_manager =
-        Arc::new(SstableObjectIdManager::new(hummock_meta_client.clone(), 5));
+    let object_id_manager = Arc::new(ObjectIdManager::new(hummock_meta_client.clone(), 5));
 
     // Block filling cache after fetching ids.
     sync_point::hook("MAP_NEXT_SST_OBJECT_ID.BEFORE_FILL_CACHE", || async {
@@ -70,9 +69,9 @@ async fn test_syncpoints_sstable_object_id_manager() {
     });
 
     // Start the task that fetches new ids.
-    let mut sstable_object_id_manager_clone = sstable_object_id_manager.clone();
+    let object_id_manager_clone = object_id_manager.clone();
     let leader_task = tokio::spawn(async move {
-        sstable_object_id_manager_clone
+        object_id_manager_clone
             .get_new_sst_object_id()
             .await
             .unwrap();
@@ -87,9 +86,9 @@ async fn test_syncpoints_sstable_object_id_manager() {
     // Start tasks that waits to be notified.
     let mut follower_tasks = vec![];
     for _ in 0..3 {
-        let mut sstable_object_id_manager_clone = sstable_object_id_manager.clone();
+        let object_id_manager_clone = object_id_manager.clone();
         let follower_task = tokio::spawn(async move {
-            sstable_object_id_manager_clone
+            object_id_manager_clone
                 .get_new_sst_object_id()
                 .await
                 .unwrap();
@@ -122,8 +121,7 @@ async fn test_syncpoints_test_failpoints_fetch_ids() {
         hummock_manager_ref.clone(),
         worker_id as _,
     ));
-    let sstable_object_id_manager =
-        Arc::new(SstableObjectIdManager::new(hummock_meta_client.clone(), 5));
+    let object_id_manager = Arc::new(ObjectIdManager::new(hummock_meta_client.clone(), 5));
 
     // Block fetching ids.
     sync_point::hook("MAP_NEXT_SST_OBJECT_ID.BEFORE_FETCH", || async {
@@ -134,10 +132,10 @@ async fn test_syncpoints_test_failpoints_fetch_ids() {
     });
 
     // Start the task that fetches new ids.
-    let mut sstable_object_id_manager_clone = sstable_object_id_manager.clone();
+    let object_id_manager_clone = object_id_manager.clone();
     let leader_task = tokio::spawn(async move {
         fail::cfg("get_new_sst_ids_err", "return").unwrap();
-        sstable_object_id_manager_clone
+        object_id_manager_clone
             .get_new_sst_object_id()
             .await
             .unwrap_err();
@@ -150,9 +148,9 @@ async fn test_syncpoints_test_failpoints_fetch_ids() {
     // Start tasks that waits to be notified.
     let mut follower_tasks = vec![];
     for _ in 0..3 {
-        let mut sstable_object_id_manager_clone = sstable_object_id_manager.clone();
+        let object_id_manager_clone = object_id_manager.clone();
         let follower_task = tokio::spawn(async move {
-            sstable_object_id_manager_clone
+            object_id_manager_clone
                 .get_new_sst_object_id()
                 .await
                 .unwrap();
@@ -180,7 +178,7 @@ pub async fn compact_once(
     hummock_manager_ref: HummockManagerRef,
     compact_ctx: CompactorContext,
     compaction_catalog_agent_ref: CompactionCatalogAgentRef,
-    sstable_object_id_manager: Arc<SstableObjectIdManager>,
+    object_id_manager: Arc<ObjectIdManager>,
 ) {
     // 2. get compact task
     let manual_compcation_option = ManualCompactionOption {
@@ -206,7 +204,7 @@ pub async fn compact_once(
         compact_ctx,
         compact_task.clone(),
         rx,
-        Box::new(sstable_object_id_manager),
+        object_id_manager,
         compaction_catalog_agent_ref.clone(),
     )
     .await;
@@ -261,7 +259,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         .await
         .unwrap();
 
-    let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
+    let object_id_manager = Arc::new(ObjectIdManager::new(
         hummock_meta_client.clone(),
         storage
             .storage_opts()
@@ -327,7 +325,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         hummock_manager_ref.clone(),
         compact_ctx.clone(),
         compaction_catalog_agent_ref.clone(),
-        sstable_object_id_manager.clone(),
+        object_id_manager.clone(),
     )
     .await;
 
@@ -368,7 +366,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         hummock_manager_ref.clone(),
         compact_ctx.clone(),
         compaction_catalog_agent_ref.clone(),
-        sstable_object_id_manager.clone(),
+        object_id_manager.clone(),
     )
     .await;
 
@@ -410,7 +408,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         hummock_manager_ref.clone(),
         compact_ctx.clone(),
         compaction_catalog_agent_ref.clone(),
-        sstable_object_id_manager.clone(),
+        object_id_manager.clone(),
     )
     .await;
 
@@ -445,7 +443,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         hummock_manager_ref.clone(),
         compact_ctx.clone(),
         compaction_catalog_agent_ref.clone(),
-        sstable_object_id_manager.clone(),
+        object_id_manager.clone(),
     )
     .await;
 

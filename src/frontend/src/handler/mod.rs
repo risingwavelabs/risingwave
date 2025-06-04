@@ -24,11 +24,13 @@ use pgwire::pg_response::StatementType::{self, ABORT, BEGIN, COMMIT, ROLLBACK, S
 use pgwire::pg_response::{PgResponse, PgResponseBuilder, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, Row};
+use risingwave_common::catalog::AlterDatabaseParam;
 use risingwave_common::types::Fields;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_pb::meta::PbThrottleTarget;
 use risingwave_sqlparser::ast::*;
+use thiserror_ext::AsReport;
 use util::get_table_catalog_by_table_name;
 
 use self::util::{DataChunkToRowSetAdapter, SourceSchemaCompatExt};
@@ -40,6 +42,7 @@ use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
+mod alter_database_param;
 mod alter_owner;
 mod alter_parallelism;
 mod alter_rename;
@@ -97,7 +100,7 @@ pub mod extended_handle;
 pub mod fetch_cursor;
 mod flush;
 pub mod handle_privilege;
-mod kill_process;
+pub mod kill_process;
 pub mod privilege;
 pub mod query;
 mod recover;
@@ -424,6 +427,8 @@ pub async fn handle(
             if_not_exists,
             owner,
             resource_group,
+            barrier_interval_ms,
+            checkpoint_frequency,
         } => {
             create_database::handle_create_database(
                 handler_args,
@@ -431,6 +436,8 @@ pub async fn handle(
                 if_not_exists,
                 owner,
                 resource_group,
+                barrier_interval_ms,
+                checkpoint_frequency,
             )
             .await
         }
@@ -485,8 +492,7 @@ pub async fn handle(
             if_exists,
             drop_mode,
         }) => {
-            let mut cascade = false;
-            if let AstOption::Some(DropMode::Cascade) = drop_mode {
+            let cascade = if let AstOption::Some(DropMode::Cascade) = drop_mode {
                 match object_type {
                     ObjectType::MaterializedView
                     | ObjectType::View
@@ -495,16 +501,16 @@ pub async fn handle(
                     | ObjectType::Subscription
                     | ObjectType::Index
                     | ObjectType::Table
-                    | ObjectType::Schema => {
-                        cascade = true;
-                    }
+                    | ObjectType::Schema => true,
                     ObjectType::Database
                     | ObjectType::User
                     | ObjectType::Connection
                     | ObjectType::Secret => {
                         bail_not_implemented!("DROP CASCADE");
                     }
-                };
+                }
+            } else {
+                false
             };
             match object_type {
                 ObjectType::Table => {
@@ -535,31 +541,14 @@ pub async fn handle(
                     .await
                 }
                 ObjectType::Database => {
-                    drop_database::handle_drop_database(
-                        handler_args,
-                        object_name,
-                        if_exists,
-                        drop_mode.into(),
-                    )
-                    .await
+                    drop_database::handle_drop_database(handler_args, object_name, if_exists).await
                 }
                 ObjectType::Schema => {
-                    drop_schema::handle_drop_schema(
-                        handler_args,
-                        object_name,
-                        if_exists,
-                        drop_mode.into(),
-                    )
-                    .await
+                    drop_schema::handle_drop_schema(handler_args, object_name, if_exists, cascade)
+                        .await
                 }
                 ObjectType::User => {
-                    drop_user::handle_drop_user(
-                        handler_args,
-                        object_name,
-                        if_exists,
-                        drop_mode.into(),
-                    )
-                    .await
+                    drop_user::handle_drop_user(handler_args, object_name, if_exists).await
                 }
                 ObjectType::View => {
                     drop_view::handle_drop_view(handler_args, object_name, if_exists, cascade).await
@@ -685,6 +674,74 @@ pub async fn handle(
                     name,
                     new_owner_name,
                     StatementType::ALTER_DATABASE,
+                )
+                .await
+            }
+            AlterDatabaseOperation::SetParam(config_param) => {
+                let ConfigParam { param, value } = config_param;
+
+                let database_param = match param.real_value().to_uppercase().as_str() {
+                    "BARRIER_INTERVAL_MS" => {
+                        let barrier_interval_ms = match value {
+                            SetVariableValue::Default => None,
+                            SetVariableValue::Single(SetVariableValueSingle::Literal(
+                                Value::Number(num),
+                            )) => {
+                                let num = num.parse::<u32>().map_err(|e| {
+                                    ErrorCode::InvalidInputSyntax(format!(
+                                        "barrier_interval_ms must be a u32 integer: {}",
+                                        e.as_report()
+                                    ))
+                                })?;
+                                Some(num)
+                            }
+                            _ => {
+                                return Err(ErrorCode::InvalidInputSyntax(
+                                    "barrier_interval_ms must be a u32 integer or DEFAULT"
+                                        .to_owned(),
+                                )
+                                .into());
+                            }
+                        };
+                        AlterDatabaseParam::BarrierIntervalMs(barrier_interval_ms)
+                    }
+                    "CHECKPOINT_FREQUENCY" => {
+                        let checkpoint_frequency = match value {
+                            SetVariableValue::Default => None,
+                            SetVariableValue::Single(SetVariableValueSingle::Literal(
+                                Value::Number(num),
+                            )) => {
+                                let num = num.parse::<u64>().map_err(|e| {
+                                    ErrorCode::InvalidInputSyntax(format!(
+                                        "checkpoint_frequency must be a u64 integer: {}",
+                                        e.as_report()
+                                    ))
+                                })?;
+                                Some(num)
+                            }
+                            _ => {
+                                return Err(ErrorCode::InvalidInputSyntax(
+                                    "checkpoint_frequency must be a u64 integer or DEFAULT"
+                                        .to_owned(),
+                                )
+                                .into());
+                            }
+                        };
+                        AlterDatabaseParam::CheckpointFrequency(checkpoint_frequency)
+                    }
+                    _ => {
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "Unsupported database config parameter: {}",
+                            param.real_value()
+                        ))
+                        .into());
+                    }
+                };
+
+                alter_database_param::handle_alter_database_param(
+                    handler_args,
+                    name,
+                    database_param,
                 )
                 .await
             }
@@ -1159,7 +1216,7 @@ pub async fn handle(
             session,
         } => transaction::handle_set(handler_args, modes, snapshot, session).await,
         Statement::CancelJobs(jobs) => handle_cancel(handler_args, jobs).await,
-        Statement::Kill(process_id) => handle_kill(handler_args, process_id).await,
+        Statement::Kill(worker_process_id) => handle_kill(handler_args, worker_process_id).await,
         Statement::Comment {
             object_type,
             object_name,

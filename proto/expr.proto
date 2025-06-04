@@ -305,6 +305,9 @@ message ExprNode {
     MAP_INSERT = 709;
     MAP_DELETE = 710;
 
+    // Internal function for schema change
+    COMPOSITE_CAST = 800;
+
     // Non-pure functions below (> 1000)
     // ------------------------
     // Internal functions

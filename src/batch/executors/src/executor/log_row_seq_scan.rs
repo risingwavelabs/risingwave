@@ -47,7 +47,7 @@ pub struct LogRowSeqScanExecutor<S: StateStore> {
     schema: Schema,
 
     /// Batch metrics.
-    /// None: Local mode don't record mertics.
+    /// None: Local mode don't record metrics.
     metrics: Option<BatchMetrics>,
 
     table: BatchTable<S>,
