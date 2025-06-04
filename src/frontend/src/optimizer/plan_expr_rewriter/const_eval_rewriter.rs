@@ -31,10 +31,11 @@ impl ExprRewriter for ConstEvalRewriter {
                     expr
                 }
             }
-        } else if let ExprImpl::Parameter(_) = expr {
-            self.error = Some((ErrorCode::InvalidInputSyntax(
-                "Parameter should not appear here. It will be replaced by a literal before this step.".to_owned(),
-            )).into());
+        } else if let ExprImpl::Parameter(param) = &expr {
+            self.error = Some(
+                (ErrorCode::InvalidInputSyntax(format!("there is no parameter ${}", param.index)))
+                    .into(),
+            );
             expr
         } else {
             default_rewrite_expr(self, expr)
