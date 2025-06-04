@@ -969,6 +969,9 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::compactor_max_preload_meta_file_count")]
     pub compactor_max_preload_meta_file_count: usize,
 
+    #[serde(default = "default::storage::vector_file_block_size_kb")]
+    pub vector_file_block_size_kb: usize,
+
     /// Object storage configuration
     /// 1. General configuration
     /// 2. Some special configuration of Backend
@@ -1978,6 +1981,10 @@ pub mod default {
 
         pub fn compactor_max_preload_meta_file_count() -> usize {
             32
+        }
+
+        pub fn vector_file_block_size_kb() -> usize {
+            1024
         }
 
         // deprecated
