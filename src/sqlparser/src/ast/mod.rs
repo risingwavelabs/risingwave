@@ -179,7 +179,8 @@ impl Ident {
         }
     }
 
-    /// Convert a real value back to Ident. Behaves the same as SQL function `quote_ident`.
+    /// Convert a real value back to Ident. Behaves the same as SQL function `quote_ident` or
+    /// `QuoteIdent` wrapper in `common` crate.
     pub fn from_real_value(value: &str) -> Self {
         let needs_quotes = value
             .chars()
