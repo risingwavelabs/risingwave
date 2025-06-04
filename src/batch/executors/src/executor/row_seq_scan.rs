@@ -45,7 +45,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
     identity: String,
 
     /// Batch metrics.
-    /// None: Local mode don't record mertics.
+    /// None: Local mode don't record metrics.
     metrics: Option<BatchMetrics>,
 
     table: BatchTable<S>,

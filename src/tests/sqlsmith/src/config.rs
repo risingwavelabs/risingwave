@@ -24,6 +24,8 @@ pub enum Feature {
     Where,
     Agg,
     Join,
+    NaturalJoin,
+    UsingJoin,
 }
 
 impl fmt::Display for Feature {
@@ -32,6 +34,8 @@ impl fmt::Display for Feature {
             Feature::Where => "where",
             Feature::Agg => "agg",
             Feature::Join => "join",
+            Feature::NaturalJoin => "natural join",
+            Feature::UsingJoin => "using join",
         };
         write!(f, "{}", s)
     }

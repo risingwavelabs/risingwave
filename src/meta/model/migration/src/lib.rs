@@ -41,6 +41,7 @@ mod m20250509_102041_remove_dispatcher;
 mod m20250514_114514_dispatcher_type_mapping;
 mod m20250522_074525_iceberg_tables;
 mod m20250522_074947_iceberg_namespace_properties;
+mod m20250528_064717_barrier_interval_per_database;
 mod utils;
 
 pub struct Migrator;
@@ -120,6 +121,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250514_114514_dispatcher_type_mapping::Migration),
             Box::new(m20250522_074525_iceberg_tables::Migration),
             Box::new(m20250522_074947_iceberg_namespace_properties::Migration),
+            Box::new(m20250528_064717_barrier_interval_per_database::Migration),
         ]
     }
 }

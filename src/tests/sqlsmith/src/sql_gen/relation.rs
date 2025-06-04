@@ -252,6 +252,24 @@ impl<R: Rng> SqlGenerator<'_, R> {
         right_columns: Vec<Column>,
         right_table: Table,
     ) -> Option<JoinConstraint> {
+        let common_columns: Vec<_> = left_columns
+            .iter()
+            .filter_map(|l_col| {
+                right_columns
+                    .iter()
+                    .find(|r_col| r_col.name == l_col.name)?;
+                Some(Ident::new_unchecked(l_col.name.clone()))
+            })
+            .collect();
+
+        if !common_columns.is_empty() && self.should_generate(Feature::NaturalJoin) {
+            return Some(JoinConstraint::Natural);
+        }
+
+        if !common_columns.is_empty() && self.should_generate(Feature::UsingJoin) {
+            return Some(JoinConstraint::Using(common_columns));
+        }
+
         let expr = self.gen_join_on_expr(left_columns, left_table, right_columns, right_table)?;
         Some(JoinConstraint::On(expr))
     }
