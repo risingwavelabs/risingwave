@@ -7,4 +7,10 @@ config:
     enabled: true
   join:
     weight: 75
-    enabled: false
+    enabled: true
+  natural_join:
+    weight: 25
+    enabled: true
+  using_join:
+    weight: 25
+    enabled: true
