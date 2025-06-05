@@ -66,7 +66,7 @@ SELECT count(*) from plain_students;
 ----
 3
 
-statement error Invalid Parameter Value: Invalid parameter: connector kafka does not support alter property `topic`, allowed props: `properties.enable.ssl.certificate.verification`, `properties.sync.call.timeout`, `properties.fetch.max.bytes`, `properties.queued.max.messages.kbytes`, `properties.enable.auto.commit`, `properties.message.max.bytes`, `properties.queued.min.messages`, `properties.fetch.wait.max.ms`, `properties.client.id`, `properties.ssl.endpoint.identification.algorithm`, `properties.security.protocol`, `properties.sasl.mechanism`, `properties.fetch.queue.backoff.ms`, `properties.receive.message.max.bytes`, `properties.sasl.password`, `properties.statistics.interval.ms`, `properties.sasl.username`
+statement error Invalid Parameter Value: Invalid parameter: connector kafka does not support alter property `topic`
 ALTER TABLE plain_students CONNECTOR WITH ( topic = secret s2 );
 
 statement ok
