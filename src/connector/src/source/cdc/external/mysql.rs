@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use chrono::{DateTime, NaiveDateTime};
@@ -344,6 +345,7 @@ pub fn mysql_type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType>
 pub struct MySqlExternalTableReader {
     rw_schema: Schema,
     field_names: String,
+    config: ExternalTableConfig,
     // use mutex to provide shared mutable access to the connection
     conn: tokio::sync::Mutex<mysql_async::Conn>,
 }
@@ -379,6 +381,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
 
 impl MySqlExternalTableReader {
     pub async fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
+        let cloned_config = config.clone();
         let mut opts_builder = mysql_async::OptsBuilder::default()
             .user(Some(config.username))
             .pass(Some(config.password))
@@ -409,6 +412,7 @@ impl MySqlExternalTableReader {
         Ok(Self {
             rw_schema,
             field_names,
+            config: cloned_config,
             conn: tokio::sync::Mutex::new(conn),
         })
     }
@@ -416,6 +420,30 @@ impl MySqlExternalTableReader {
     pub fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
         // schema name is the database name in mysql
         format!("`{}`.`{}`", table_name.schema_name, table_name.table_name)
+    }
+
+    async fn reconnect(&self, )-> Result<mysql_async::Conn, mysql_async::Error> {
+        let mut opts_builder = mysql_async::OptsBuilder::default()
+            .user(Some(self.config.username.clone()))
+            .pass(Some(self.config.password.clone()))
+            .ip_or_hostname(self.config.host.clone())
+            .tcp_port(self.config.port.parse::<u16>().unwrap())
+            .db_name(Some(self.config.database.clone()));
+
+        opts_builder = match self.config.ssl_mode {
+            SslMode::Disabled | SslMode::Preferred => opts_builder.ssl_opts(None),
+            // verify-ca and verify-full are same as required for mysql now
+            SslMode::Required | SslMode::VerifyCa | SslMode::VerifyFull => {
+                let ssl_without_verify = mysql_async::SslOpts::default()
+                    .with_danger_accept_invalid_certs(true)
+                    .with_danger_skip_domain_validation(true);
+                opts_builder.ssl_opts(Some(ssl_without_verify))
+            }
+        };
+
+        let conn = mysql_async::Conn::new(mysql_async::Opts::from(opts_builder)).await?;
+        Ok(conn)
+
     }
 
     pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
@@ -457,22 +485,44 @@ impl MySqlExternalTableReader {
         };
 
         let mut conn = self.conn.lock().await;
-
+        println!("准备执行exec_drop");
+        let q1 = conn.exec_drop("SET time_zone = if(not sleep(2), \"+00:00\", \"\")", ());
+        match tokio::time::timeout(Duration::from_secs(1), q1).await {
+            Ok(result) => {
+                println!("Operation completed: {:?}", result);
+            }
+            Err(_) => {
+                println!("Operation timed out");
+            }
+        };
+        *conn = self.reconnect().await?;
         // Set session timezone to UTC
-        conn.exec_drop("SET time_zone = \"+00:00\"", ()).await?;
-
+        println!("exec_drop结束");
         if start_pk_row.is_none() {
-            let rs_stream = sql.stream::<mysql_async::Row, _>(&mut *conn).await?;
+            println!("这里");
+            let rs_stream = sql
+                .stream::<mysql_async::Row, _>(&mut *conn)
+                .await
+                .map_err(|e| {
+                    println!("0Error occurred: {:?}", e);
+                    e
+                })?;
             let row_stream = rs_stream.map(|row| {
                 // convert mysql row into OwnedRow
-                let mut row = row?;
+                let mut row = row.map_err(|e| {
+                    println!("1Error occurred: {:?}", e);
+                    e
+                })?;
                 Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
             });
 
             pin_mut!(row_stream);
             #[for_await]
             for row in row_stream {
-                let row = row?;
+                let row = row.map_err(|e| {
+                    println!("1Error occurred: {:?}", e);
+                    e
+                })?;
                 yield row;
             }
         } else {
