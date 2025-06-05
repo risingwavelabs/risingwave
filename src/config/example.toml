@@ -233,10 +233,22 @@ compactor_max_preload_meta_file_count = 32
 vector_file_block_size_kb = 64
 time_travel_version_cache_capacity = 10
 
+[storage.cache]
+vector_block_cache_capacity_mb = 16
+vector_block_cache_shard_num = 16
+vector_meta_cache_capacity_mb = 16
+vector_meta_cache_shard_num = 16
+
 [storage.cache.block_cache_eviction]
 algorithm = "Lru"
 
 [storage.cache.meta_cache_eviction]
+algorithm = "Lru"
+
+[storage.cache.vector_block_cache_eviction_config]
+algorithm = "Lru"
+
+[storage.cache.vector_meta_cache_eviction_config]
 algorithm = "Lru"
 
 [storage.data_file_cache]

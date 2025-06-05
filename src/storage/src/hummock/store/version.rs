@@ -1153,12 +1153,12 @@ impl HummockVersionReader {
                 let mut builder = NearestBuilder::<'_, O, M>::new(target.to_ref(), options.top_n);
                 for vector_file in &flat.vector_store.vector_files {
                     let meta = self.sstable_store.get_vector_file_meta(vector_file).await?;
-                    for block_meta in &meta.block_metas {
+                    for (i, block_meta) in meta.block_metas.iter().enumerate() {
                         let block = self
                             .sstable_store
-                            .get_vector_block(vector_file, block_meta)
+                            .get_vector_block(vector_file, i, block_meta)
                             .await?;
-                        builder.add(&block, &on_nearest_item_fn);
+                        builder.add(&**block, &on_nearest_item_fn);
                     }
                 }
                 Ok(builder.finish())
