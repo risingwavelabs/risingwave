@@ -354,13 +354,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     schema_table_name.clone(),
                     external_database_name.clone(),
                 );
-                println!("重建snapshot_read_full_table");
                 let right_snapshot = pin!(
                     upstream_table_reader
                         .snapshot_read_full_table(read_args, self.options.snapshot_batch_size)
                         .map(Either::Right)
                 );
-                println!("重建完成");
                 let (right_snapshot, snapshot_valve) = pausable(right_snapshot);
                 if is_snapshot_paused {
                     snapshot_valve.pause();
@@ -394,9 +392,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         match mutation {
                                             Mutation::Pause => {
                                                 is_snapshot_paused = true;
-                                                println!(
-                                                    "is_snapshot_paused = {is_snapshot_paused}"
-                                                );
                                                 snapshot_valve.pause();
                                             }
                                             Mutation::Resume => {
@@ -412,9 +407,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                                     rate_limit_to_zero = self
                                                         .rate_limit_rps
                                                         .is_some_and(|val| val == 0);
-                                                    println!(
-                                                        "rate_limit_to_zero = {rate_limit_to_zero}"
-                                                    );
                                                     // update and persist current backfill progress without draining the buffered upstream chunks
                                                     state_impl
                                                         .mutate_state(
@@ -466,10 +458,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                             ?current_pk_pos,
                                             ?snapshot_read_row_cnt,
                                             "Prepare to start a new snapshot"
-                                        );
-                                        println!(
-                                            "break, 重建, !is_snapshot_paused && !rate_limit_to_zero = {}",
-                                            !is_snapshot_paused && !rate_limit_to_zero
                                         );
                                         // Break the loop for consuming snapshot and prepare to start a new snapshot
                                         break;
@@ -593,7 +581,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                         .instrument_await("consume_snapshot_stream_once")
                         .await
                 {
-                    println!("break后，重建前poll一次");
                     let Either::Right(msg) = msg else {
                         bail!("BUG: snapshot_read contains upstream messages");
                     };
@@ -717,6 +704,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 .await?;
         }
 
+        upstream_table_reader.disconnect().await?;
         // drop reader to release db connection
         drop(upstream_table_reader);
 

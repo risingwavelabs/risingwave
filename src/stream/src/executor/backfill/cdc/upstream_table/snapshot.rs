@@ -43,6 +43,8 @@ pub trait UpstreamTableRead {
     fn current_cdc_offset(
         &self,
     ) -> impl Future<Output = StreamExecutorResult<Option<CdcOffset>>> + Send + '_;
+
+    async fn disconnect(&self) -> StreamExecutorResult<()>;
 }
 
 #[derive(Debug, Clone)]
@@ -241,6 +243,11 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
         let binlog = binlog.await?;
         Ok(Some(binlog))
     }
+
+    async fn disconnect(&self) -> StreamExecutorResult<()> {
+        self.reader.disconnect().await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -283,9 +290,7 @@ mod tests {
         let config =
             serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
                 .unwrap();
-        let reader = MySqlExternalTableReader::new(config, rw_schema.clone())
-            .await
-            .unwrap();
+        let reader = MySqlExternalTableReader::new(config, rw_schema.clone()).unwrap();
 
         let mut cnt: usize = 0;
         let mut start_pk = Some(OwnedRow::new(vec![Some(ScalarImpl::Int64(0))]));

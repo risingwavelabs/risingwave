@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use chrono::{DateTime, NaiveDateTime};
@@ -345,14 +344,12 @@ pub fn mysql_type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType>
 pub struct MySqlExternalTableReader {
     rw_schema: Schema,
     field_names: String,
-    config: ExternalTableConfig,
-    // use mutex to provide shared mutable access to the connection
-    conn: tokio::sync::Mutex<mysql_async::Conn>,
+    pool: mysql_async::Pool,
 }
 
 impl ExternalTableReader for MySqlExternalTableReader {
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
-        let mut conn = self.conn.lock().await;
+        let mut conn = self.pool.get_conn().await?;
 
         let sql = "SHOW MASTER STATUS".to_owned();
         let mut rs = conn.query::<mysql_async::Row, _>(sql).await?;
@@ -361,7 +358,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
             .exactly_one()
             .ok()
             .context("expect exactly one row when reading binlog offset")?;
-
+        drop(conn);
         Ok(CdcOffset::MySql(MySqlOffset {
             filename: row.take("File").unwrap(),
             position: row.take("Position").unwrap(),
@@ -377,11 +374,15 @@ impl ExternalTableReader for MySqlExternalTableReader {
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
         self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
     }
+
+    async fn disconnect(&self) -> ConnectorResult<()> {
+        self.pool.clone().disconnect().await?;
+        Ok(())
+    }
 }
 
 impl MySqlExternalTableReader {
-    pub async fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
-        let cloned_config = config.clone();
+    pub fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
         let mut opts_builder = mysql_async::OptsBuilder::default()
             .user(Some(config.username))
             .pass(Some(config.password))
@@ -399,8 +400,7 @@ impl MySqlExternalTableReader {
                 opts_builder.ssl_opts(Some(ssl_without_verify))
             }
         };
-
-        let conn = mysql_async::Conn::new(mysql_async::Opts::from(opts_builder)).await?;
+        let pool = mysql_async::Pool::new(opts_builder);
 
         let field_names = rw_schema
             .fields
@@ -412,38 +412,13 @@ impl MySqlExternalTableReader {
         Ok(Self {
             rw_schema,
             field_names,
-            config: cloned_config,
-            conn: tokio::sync::Mutex::new(conn),
+            pool,
         })
     }
 
     pub fn get_normalized_table_name(table_name: &SchemaTableName) -> String {
         // schema name is the database name in mysql
         format!("`{}`.`{}`", table_name.schema_name, table_name.table_name)
-    }
-
-    async fn reconnect(&self, )-> Result<mysql_async::Conn, mysql_async::Error> {
-        let mut opts_builder = mysql_async::OptsBuilder::default()
-            .user(Some(self.config.username.clone()))
-            .pass(Some(self.config.password.clone()))
-            .ip_or_hostname(self.config.host.clone())
-            .tcp_port(self.config.port.parse::<u16>().unwrap())
-            .db_name(Some(self.config.database.clone()));
-
-        opts_builder = match self.config.ssl_mode {
-            SslMode::Disabled | SslMode::Preferred => opts_builder.ssl_opts(None),
-            // verify-ca and verify-full are same as required for mysql now
-            SslMode::Required | SslMode::VerifyCa | SslMode::VerifyFull => {
-                let ssl_without_verify = mysql_async::SslOpts::default()
-                    .with_danger_accept_invalid_certs(true)
-                    .with_danger_skip_domain_validation(true);
-                opts_builder.ssl_opts(Some(ssl_without_verify))
-            }
-        };
-
-        let conn = mysql_async::Conn::new(mysql_async::Opts::from(opts_builder)).await?;
-        Ok(conn)
-
     }
 
     pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
@@ -484,45 +459,24 @@ impl MySqlExternalTableReader {
             )
         };
 
-        let mut conn = self.conn.lock().await;
-        println!("准备执行exec_drop");
-        let q1 = conn.exec_drop("SET time_zone = if(not sleep(2), \"+00:00\", \"\")", ());
-        match tokio::time::timeout(Duration::from_secs(1), q1).await {
-            Ok(result) => {
-                println!("Operation completed: {:?}", result);
-            }
-            Err(_) => {
-                println!("Operation timed out");
-            }
-        };
-        *conn = self.reconnect().await?;
+        let mut conn = self.pool.get_conn().await?;
         // Set session timezone to UTC
-        println!("exec_drop结束");
+        conn.exec_drop("SET time_zone = \"+00:00\"", ()).await?;
+        drop(conn);
+
+        let mut conn = self.pool.get_conn().await?;
+        // Set session timezone to UTC
         if start_pk_row.is_none() {
-            println!("这里");
-            let rs_stream = sql
-                .stream::<mysql_async::Row, _>(&mut *conn)
-                .await
-                .map_err(|e| {
-                    println!("0Error occurred: {:?}", e);
-                    e
-                })?;
+            let rs_stream = sql.stream::<mysql_async::Row, _>(&mut conn).await?;
             let row_stream = rs_stream.map(|row| {
                 // convert mysql row into OwnedRow
-                let mut row = row.map_err(|e| {
-                    println!("1Error occurred: {:?}", e);
-                    e
-                })?;
+                let mut row = row?;
                 Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
             });
-
             pin_mut!(row_stream);
             #[for_await]
             for row in row_stream {
-                let row = row.map_err(|e| {
-                    println!("1Error occurred: {:?}", e);
-                    e
-                })?;
+                let row = row?;
                 yield row;
             }
         } else {
@@ -563,7 +517,7 @@ impl MySqlExternalTableReader {
             tracing::debug!("snapshot read params: {:?}", &params);
             let rs_stream = sql
                 .with(Params::from(params))
-                .stream::<mysql_async::Row, _>(&mut *conn)
+                .stream::<mysql_async::Row, _>(&mut conn)
                 .await?;
 
             let row_stream = rs_stream.map(|row| {
@@ -571,7 +525,6 @@ impl MySqlExternalTableReader {
                 let mut row = row?;
                 Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
             });
-
             pin_mut!(row_stream);
             #[for_await]
             for row in row_stream {
@@ -726,9 +679,7 @@ mod tests {
         let config =
             serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
                 .unwrap();
-        let reader = MySqlExternalTableReader::new(config, rw_schema)
-            .await
-            .unwrap();
+        let reader = MySqlExternalTableReader::new(config, rw_schema).unwrap();
         let offset = reader.current_cdc_offset().await.unwrap();
         println!("BinlogOffset: {:?}", offset);
 
