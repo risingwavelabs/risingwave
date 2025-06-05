@@ -13,7 +13,7 @@ arc-swap = { workspace = true }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 await-tree = { workspace = true }
-bergloom-core = { git = "https://github.com/nimtable/BergLoom.git", rev = "6d0b40672bfe0f5f279810c62b4293e7fb5407df" }
+bergloom-core = { git = "https://github.com/nimtable/BergLoom.git", rev = "af1e24ab52dc9132b4c342e83baaa739fbc853ca" }
 bytes = { version = "1", features = ["serde"] }
 dyn-clone = "1.0.14"
 either = "1"

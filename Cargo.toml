@@ -161,13 +161,13 @@ otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev =
 prost = { version = "0.13" }
 prost-build = { version = "0.13" }
 # branch dev_rebase_main_20250325
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "7c7c84c651df4763c8601b0c84245a82e29814bb", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "b1619c554c2922ddad00cc0564fa79eaec62af5b", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
 ] }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "7c7c84c651df4763c8601b0c84245a82e29814bb" }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "7c7c84c651df4763c8601b0c84245a82e29814bb" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "b1619c554c2922ddad00cc0564fa79eaec62af5b" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "b1619c554c2922ddad00cc0564fa79eaec62af5b" }
 opendal = "0.49"
 arrow-udf-runtime = "0.8.0"
 clap = { version = "4", features = ["cargo", "derive", "env"] }

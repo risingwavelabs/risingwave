@@ -1849,7 +1849,7 @@ checksum = "3a8241f3ebb85c056b509d4327ad0358fbbba6ffb340bf388f26350aeda225b1"
 [[package]]
 name = "bergloom-codegen"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/BergLoom.git?rev=6d0b40672bfe0f5f279810c62b4293e7fb5407df#6d0b40672bfe0f5f279810c62b4293e7fb5407df"
+source = "git+https://github.com/nimtable/BergLoom.git?rev=af1e24ab52dc9132b4c342e83baaa739fbc853ca#af1e24ab52dc9132b4c342e83baaa739fbc853ca"
 dependencies = [
  "prost 0.12.6",
  "prost-build 0.12.6",
@@ -1860,7 +1860,7 @@ dependencies = [
 [[package]]
 name = "bergloom-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/BergLoom.git?rev=6d0b40672bfe0f5f279810c62b4293e7fb5407df#6d0b40672bfe0f5f279810c62b4293e7fb5407df"
+source = "git+https://github.com/nimtable/BergLoom.git?rev=af1e24ab52dc9132b4c342e83baaa739fbc853ca#af1e24ab52dc9132b4c342e83baaa739fbc853ca"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1870,7 +1870,6 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "iceberg",
- "iceberg-catalog-sql",
  "iceberg-datafusion",
  "mixtrics",
  "parquet 54.2.0",
@@ -2176,9 +2175,9 @@ dependencies = [
 
 [[package]]
 name = "bstr"
-version = "1.6.2"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c2f7349907b712260e64b0afe2f84692af14a454be26187d9df565c7f69266a"
+checksum = "234113d19d0d7d613b40e86fb654acf958910802bcceab913a4f9e7cda03b1a4"
 dependencies = [
  "memchr",
 ]
@@ -6796,7 +6795,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=7c7c84c651df4763c8601b0c84245a82e29814bb#7c7c84c651df4763c8601b0c84245a82e29814bb"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=b1619c554c2922ddad00cc0564fa79eaec62af5b#b1619c554c2922ddad00cc0564fa79eaec62af5b"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0",
@@ -6848,7 +6847,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=7c7c84c651df4763c8601b0c84245a82e29814bb#7c7c84c651df4763c8601b0c84245a82e29814bb"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=b1619c554c2922ddad00cc0564fa79eaec62af5b#b1619c554c2922ddad00cc0564fa79eaec62af5b"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6865,7 +6864,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=7c7c84c651df4763c8601b0c84245a82e29814bb#7c7c84c651df4763c8601b0c84245a82e29814bb"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=b1619c554c2922ddad00cc0564fa79eaec62af5b#b1619c554c2922ddad00cc0564fa79eaec62af5b"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6883,22 +6882,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "iceberg-catalog-sql"
-version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=7c7c84c651df4763c8601b0c84245a82e29814bb#7c7c84c651df4763c8601b0c84245a82e29814bb"
-dependencies = [
- "async-trait",
- "iceberg",
- "serde_json",
- "sqlx",
- "typed-builder 0.20.1",
- "uuid",
-]
-
-[[package]]
 name = "iceberg-datafusion"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=7c7c84c651df4763c8601b0c84245a82e29814bb#7c7c84c651df4763c8601b0c84245a82e29814bb"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=b1619c554c2922ddad00cc0564fa79eaec62af5b#b1619c554c2922ddad00cc0564fa79eaec62af5b"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -10220,10 +10206,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22505a5c94da8e3b7c2996394d1c933236c4d743e81a410bcca4e6989fc066a4"
 dependencies = [
  "bytes",
- "heck 0.4.1",
- "itertools 0.10.5",
+ "heck 0.5.0",
+ "itertools 0.12.1",
  "log",
- "multimap 0.8.3",
+ "multimap 0.10.0",
  "once_cell",
  "petgraph 0.6.5",
  "prettyplease 0.2.15",
@@ -10274,7 +10260,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "syn 2.0.101",
