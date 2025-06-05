@@ -62,7 +62,7 @@ pub enum BatchError {
         ExprError,
     ),
 
-    #[error("Serialize/deserialize error: {0}")]
+    #[error("Serialization error: {0}")]
     Serde(
         #[source]
         #[backtrace]
@@ -129,7 +129,7 @@ pub enum BatchError {
         Arc<Self>,
     ),
 
-    #[error("Empty workers found")]
+    #[error("No worker nodes available")]
     EmptyWorkerNodes,
 
     #[error("Serving vnode mapping not found for fragment {0}")]

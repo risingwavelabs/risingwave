@@ -344,7 +344,7 @@ pub async fn gen_sink_plan(
         for column in sink_catalog.full_columns() {
             if !column.can_dml() {
                 unreachable!(
-                    "can not derive generated columns and system column `_rw_timestamp` in a sink's catalog, but meet one"
+                    "cannot derive generated columns and system column `_rw_timestamp` in a sink's catalog"
                 );
             }
         }

@@ -70,7 +70,7 @@ pub(super) fn get_column_names(
             for (i, alias) in select.aliases.iter().enumerate() {
                 if alias.is_none() {
                     return Err(ErrorCode::BindError(format!(
-                    "An alias must be specified for the {} expression (counting from 1) in result relation", ordinal(i+1)
+                    "An alias is required for the {} expression in the result relation", ordinal(i+1)
                 ))
                 .into());
                 }
@@ -460,7 +460,7 @@ pub mod tests {
         let err = frontend.run_sql(sql).await.unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Bind error: An alias must be specified for the 1st expression (counting from 1) in result relation"
+            "Bind error: An alias is required for the 1st expression in the result relation"
         );
 
         // some expression without alias is forbidden.
@@ -468,7 +468,7 @@ pub mod tests {
         let err = frontend.run_sql(sql).await.unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Bind error: An alias must be specified for the 1st expression (counting from 1) in result relation"
+            "Bind error: An alias is required for the 1st expression in the result relation"
         );
     }
 

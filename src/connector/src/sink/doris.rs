@@ -192,7 +192,7 @@ impl DorisSink {
                 Ok(doris_data_type.contains("STRING") | doris_data_type.contains("VARCHAR"))
             }
             risingwave_common::types::DataType::Time => {
-                Err(SinkError::Doris("doris can not support Time".to_owned()))
+                Err(SinkError::Doris("doris cannot support Time".to_owned()))
             }
             risingwave_common::types::DataType::Timestamp => {
                 Ok(doris_data_type.contains("DATETIME"))
@@ -201,20 +201,20 @@ impl DorisSink {
                 "TIMESTAMP WITH TIMEZONE is not supported for Doris sink as Doris doesn't store time values with timezone information. Please convert to TIMESTAMP first.".to_owned(),
             )),
             risingwave_common::types::DataType::Interval => Err(SinkError::Doris(
-                "doris can not support Interval".to_owned(),
+                "doris cannot support Interval".to_owned(),
             )),
             risingwave_common::types::DataType::Struct(_) => Ok(doris_data_type.contains("STRUCT")),
             risingwave_common::types::DataType::List(_) => Ok(doris_data_type.contains("ARRAY")),
             risingwave_common::types::DataType::Bytea => {
-                Err(SinkError::Doris("doris can not support Bytea".to_owned()))
+                Err(SinkError::Doris("doris cannot support Bytea".to_owned()))
             }
             risingwave_common::types::DataType::Jsonb => Ok(doris_data_type.contains("JSON")),
             risingwave_common::types::DataType::Serial => Ok(doris_data_type.contains("BIGINT")),
             risingwave_common::types::DataType::Int256 => {
-                Err(SinkError::Doris("doris can not support Int256".to_owned()))
+                Err(SinkError::Doris("doris cannot support Int256".to_owned()))
             }
             risingwave_common::types::DataType::Map(_) => {
-                Err(SinkError::Doris("doris can not support Map".to_owned()))
+                Err(SinkError::Doris("doris cannot support Map".to_owned()))
             }
         }
     }

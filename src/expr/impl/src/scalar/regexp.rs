@@ -501,7 +501,7 @@ fn regexp_split_to_array(text: &str, regex: &RegexpContext) -> Option<ListValue>
             // The before match is possibly empty
             if !empty_flag {
                 // We'll push an empty string to conform with postgres
-                // If there does not exists a empty match before
+                // If there does not exist an empty match before
                 builder.append(Some(""));
             }
             start = end;

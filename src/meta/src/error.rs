@@ -70,7 +70,7 @@ pub enum MetaErrorInner {
     #[construct(skip)]
     CatalogIdNotFound(&'static str, String),
 
-    #[error("table_fragment not exist: id={0}")]
+    #[error("table fragment does not exist: id={0}")]
     FragmentNotFound(u32),
 
     #[error("{0} with name {1} exists{under_creation}", under_creation = (.2).map(|_| " but under creation").unwrap_or(""))]
