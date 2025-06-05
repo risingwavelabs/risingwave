@@ -23,6 +23,7 @@ use itertools::{Itertools, repeat_n};
 use super::DataType;
 use crate::catalog::ColumnId;
 use crate::util::iter_util::ZipEqFast;
+use crate::util::quote_ident::QuoteIdent;
 
 /// A cheaply cloneable struct type.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -205,7 +206,7 @@ impl Display for StructType {
                 f,
                 "struct<{}>",
                 self.iter()
-                    .map(|(name, ty)| format!("{} {}", name, ty))
+                    .map(|(name, ty)| format!("{} {}", QuoteIdent(name), ty))
                     .join(", ")
             )
         }
