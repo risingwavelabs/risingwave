@@ -519,7 +519,7 @@ impl Sink for IcebergSink {
     }
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        let table = self.create_and_validate_table().await.unwrap();
+        let table = self.create_and_validate_table().await?;
         let inner = if let Some(unique_column_ids) = &self.unique_column_ids {
             IcebergSinkWriter::new_upsert(table, unique_column_ids.clone(), &writer_param).await?
         } else {

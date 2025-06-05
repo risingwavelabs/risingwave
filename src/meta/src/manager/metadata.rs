@@ -711,8 +711,7 @@ impl MetadataManager {
         let new_props = self
             .catalog_controller
             .update_sink_props_by_sink_id(sink_id, props)
-            .await
-            .unwrap();
+            .await?;
         Ok(new_props)
     }
 
