@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use anyhow::bail;
 use itertools::Itertools;
-use risingwave_common::catalog::is_backfill_table;
+use risingwave_common::catalog::{Field, Schema, is_backfill_table};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::aggregate::AggType;
 pub use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
@@ -28,7 +28,7 @@ use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::expr::{AggCall, ExprImpl, InputRef, Literal, OrderBy, TableFunctionType};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalProject, LogicalScan, LogicalTableFunction, LogicalUnion,
+    LogicalAgg, LogicalProject, LogicalScan, LogicalTableFunction, LogicalUnion, LogicalValues,
 };
 use crate::optimizer::{OptimizerContext, PlanRef};
 use crate::utils::{Condition, GroupBy};
@@ -57,6 +57,17 @@ impl TableFunctionToInternalBackfillProgressRule {
         ctx: Rc<OptimizerContext>,
         backfilling_tables: Vec<Arc<TableCatalog>>,
     ) -> anyhow::Result<PlanRef> {
+        if backfilling_tables.is_empty() {
+            let fields = vec![
+                Field::new("job_id", DataType::Int32),
+                Field::new("fragment_id", DataType::Int32),
+                Field::new("backfill_state_table_id", DataType::Int32),
+                Field::new("current_row_count", DataType::Int64),
+            ];
+            let plan = LogicalValues::new(vec![], Schema::new(fields), ctx.clone());
+            return Ok(plan.into());
+        }
+
         let mut all_progress = Vec::with_capacity(backfilling_tables.len());
         for table in backfilling_tables {
             let backfill_info = BackfillInfo::new(&table)?;
