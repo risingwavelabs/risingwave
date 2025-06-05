@@ -381,6 +381,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         None,
         None,
         None,
+        None,
     ));
 
     // check result
