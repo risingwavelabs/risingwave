@@ -43,7 +43,7 @@ chrono = { workspace = true, features = [
     "clock",
     "std",
 ] }
-clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "d38c8b6391af098b724c114e5a4746aedab6ab8e", features = [
+clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "f05029d2cb65164d61fa8699dd955f808375a618", features = [
     "time",
 ] }
 csv = "1.3"

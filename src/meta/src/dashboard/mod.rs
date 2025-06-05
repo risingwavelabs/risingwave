@@ -24,7 +24,6 @@ use axum::extract::{Extension, Path};
 use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use risingwave_common::util::StackTraceResponseExt;
 use risingwave_rpc_client::ComputeClientPool;
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
@@ -37,6 +36,7 @@ use crate::manager::diagnose::DiagnoseCommandRef;
 
 #[derive(Clone)]
 pub struct DashboardService {
+    pub await_tree_reg: await_tree::Registry,
     pub dashboard_addr: SocketAddr,
     pub prometheus_client: Option<prometheus_http_query::Client>,
     pub prometheus_selector: String,
@@ -72,7 +72,7 @@ pub(super) mod handlers {
     use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
     use risingwave_pb::monitor_service::{
         GetStreamingStatsResponse, HeapProfilingResponse, ListHeapProfilingResponse,
-        StackTraceRequest, StackTraceResponse,
+        StackTraceResponse,
     };
     use risingwave_pb::stream_plan::FragmentTypeFlag;
     use risingwave_pb::user::PbUserInfo;
@@ -82,6 +82,7 @@ pub(super) mod handlers {
 
     use super::*;
     use crate::controller::fragment::StreamingJobInfo;
+    use crate::rpc::await_tree::{dump_cluster_await_tree, dump_worker_node_await_tree};
 
     pub struct DashboardError(anyhow::Error);
     pub type Result<T> = std::result::Result<T, DashboardError>;
@@ -359,40 +360,26 @@ pub(super) mod handlers {
         Ok(Json(object_dependencies))
     }
 
-    async fn dump_await_tree_inner(
-        worker_nodes: impl IntoIterator<Item = &WorkerNode>,
-        compute_clients: &ComputeClientPool,
-        params: AwaitTreeDumpParams,
-    ) -> Result<Json<StackTraceResponse>> {
-        let mut all = StackTraceResponse::default();
-
-        let req = StackTraceRequest {
-            actor_traces_format: match params.format.as_str() {
-                "text" => ActorTracesFormat::Text as i32,
-                "json" => ActorTracesFormat::Json as i32,
-                _ => {
-                    return Err(err(anyhow!(
-                        "Unsupported format `{}`, only `text` and `json` are supported for now",
-                        params.format
-                    )));
-                }
-            },
-        };
-
-        for worker_node in worker_nodes {
-            let client = compute_clients.get(worker_node).await.map_err(err)?;
-            let result = client.stack_trace(req).await.map_err(err)?;
-
-            all.merge_other(result);
-        }
-
-        Ok(all.into())
-    }
-
     #[derive(Debug, Deserialize)]
     pub struct AwaitTreeDumpParams {
         #[serde(default = "await_tree_default_format")]
         format: String,
+    }
+
+    impl AwaitTreeDumpParams {
+        /// Parse the `format` parameter to [`ActorTracesFormat`].
+        pub fn actor_traces_format(&self) -> Result<ActorTracesFormat> {
+            Ok(match self.format.as_str() {
+                "text" => ActorTracesFormat::Text,
+                "json" => ActorTracesFormat::Json,
+                _ => {
+                    return Err(err(anyhow!(
+                        "Unsupported format `{}`, only `text` and `json` are supported for now",
+                        self.format
+                    )));
+                }
+            })
+        }
     }
 
     fn await_tree_default_format() -> String {
@@ -404,13 +391,17 @@ pub(super) mod handlers {
         Query(params): Query<AwaitTreeDumpParams>,
         Extension(srv): Extension<Service>,
     ) -> Result<Json<StackTraceResponse>> {
-        let worker_nodes = srv
-            .metadata_manager
-            .list_worker_node(Some(WorkerType::ComputeNode), None)
-            .await
-            .map_err(err)?;
+        let actor_traces_format = params.actor_traces_format()?;
 
-        dump_await_tree_inner(&worker_nodes, &srv.compute_clients, params).await
+        let res = dump_cluster_await_tree(
+            &srv.metadata_manager,
+            &srv.await_tree_reg,
+            actor_traces_format,
+        )
+        .await
+        .map_err(err)?;
+
+        Ok(res.into())
     }
 
     pub async fn dump_await_tree(
@@ -418,6 +409,8 @@ pub(super) mod handlers {
         Query(params): Query<AwaitTreeDumpParams>,
         Extension(srv): Extension<Service>,
     ) -> Result<Json<StackTraceResponse>> {
+        let actor_traces_format = params.actor_traces_format()?;
+
         let worker_node = srv
             .metadata_manager
             .get_worker_by_id(worker_id)
@@ -426,7 +419,11 @@ pub(super) mod handlers {
             .context("worker node not found")
             .map_err(err)?;
 
-        dump_await_tree_inner(std::iter::once(&worker_node), &srv.compute_clients, params).await
+        let res = dump_worker_node_await_tree(std::iter::once(&worker_node), actor_traces_format)
+            .await
+            .map_err(err)?;
+
+        Ok(res.into())
     }
 
     pub async fn heap_profile(

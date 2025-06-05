@@ -151,3 +151,11 @@ message ColumnOrder {
 message Uint32Vector {
   repeated uint32 data = 1;
 }
+
+message OptionalUint32 {
+  optional uint32 value = 1;
+}
+
+message OptionalUint64 {
+  optional uint64 value = 1;
+}
