@@ -27,7 +27,8 @@ use crate::task::task_stats::TaskStats;
 
 pub enum ExchangeData {
     DataChunk(DataChunk),
-    TaskStats(TaskStats),
+    /// Only local execution mode will send this type of message.
+    LocalModeTaskStats(TaskStats),
 }
 
 /// Each `ExchangeSource` maps to one task, it takes the execution result from task chunk by chunk.

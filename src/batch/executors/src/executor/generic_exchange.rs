@@ -259,7 +259,7 @@ impl<CS: 'static + Send + CreateSource> GenericExchangeExecutor<CS> {
                         yield data_chunk;
                         continue;
                     }
-                    ExchangeData::TaskStats(task_stats) => {
+                    ExchangeData::LocalModeTaskStats(task_stats) => {
                         // Accumulate TaskStats of child stage in order to collect QueryStats for local mode.
                         if let Some(ref stats) = context.task_stats() {
                             stats.add(&task_stats);

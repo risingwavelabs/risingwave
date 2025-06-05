@@ -102,7 +102,7 @@ async fn to_data_chunk_stream(
         let data = data?;
         match data {
             ExchangeData::DataChunk(data_chunk) => yield data_chunk,
-            ExchangeData::TaskStats(t) => {
+            ExchangeData::LocalModeTaskStats(t) => {
                 // Accumulate TaskStats of child stage in order to collect QueryStats for local mode.
                 if let Some(ref task_stats) = task_stats {
                     task_stats.add(&t);

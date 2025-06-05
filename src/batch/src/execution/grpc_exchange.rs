@@ -84,7 +84,7 @@ impl ExchangeSource for GrpcExchangeSource {
         };
         let task_data = res.map_err(RpcError::from_batch_status)?;
         if let Some(task_stats) = task_data.task_stats {
-            return Ok(Some(ExchangeData::TaskStats(task_stats.into())));
+            return Ok(Some(ExchangeData::LocalModeTaskStats(task_stats.into())));
         }
         let data = DataChunk::from_protobuf(task_data.get_record_batch()?)?.compact();
         trace!(
