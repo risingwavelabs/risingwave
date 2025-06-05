@@ -18,11 +18,13 @@ use either::Either;
 use itertools::Itertools;
 use risingwave_common::acl::AclMode;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{Field, debug_assert_column_ids_distinct, is_system_schema};
+use risingwave_common::catalog::{
+    Field, ObjectId, debug_assert_column_ids_distinct, is_system_schema,
+};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::user::grant_privilege::PbObject;
-use risingwave_sqlparser::ast::{AsOf, Statement, TableAlias};
+use risingwave_sqlparser::ast::{AsOf, ObjectName, Statement, TableAlias};
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 
@@ -70,6 +72,45 @@ impl BoundSource {
 }
 
 impl Binder {
+    /// This function binds a streaming job: table, sink, index, materialized views.
+    /// Even those being _created_ will be bound by this function.
+    pub fn bind_streaming_relation_id_by_name(&mut self, name: ObjectName) -> Result<ObjectId> {
+        if let Ok(sink) = self.bind_sink_by_name(name.clone()) {
+            return Ok(sink.sink_catalog.id.sink_id);
+        }
+
+        let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
+
+        // hold the owned_paths, so we can drop immutable borrow of self
+        let owned_paths = match schema_name.as_ref() {
+            Some(schema_name) => vec![schema_name.clone()],
+            None => self.search_path.path().iter().cloned().collect_vec(),
+        };
+
+        let paths = owned_paths
+            .iter()
+            .map(|path| SchemaPath::Name(path))
+            .collect_vec();
+
+        for path in paths {
+            if let Ok((table_catalog, schema_name)) =
+                self.catalog
+                    .get_any_table_by_name(&self.db_name, path, &table_name)
+            {
+                let table_id = table_catalog.id().table_id;
+                // check acl
+                self.resolve_table_relation(table_catalog.clone(), schema_name, None)?;
+                return Ok(table_id);
+            }
+        }
+
+        Err(CatalogError::NotFound(
+            "materialized view, index, table or sink",
+            table_name.to_owned(),
+        )
+        .into())
+    }
+
     /// Binds table or source, or logical view according to what we get from the catalog.
     pub fn bind_relation_by_name_inner(
         &mut self,
