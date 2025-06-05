@@ -211,12 +211,12 @@ mod tests {
     #[tokio::test]
     async fn test_map_filter_basic() {
         test_map_filter_case(
-            "(map_filter:map(varchar,int4) $0:map(varchar,int4) \
-             (function:boolean $0:varchar $1:int4 (greater_than:boolean $1:int4 1:int4)))",
-            "M<T,i>          M<T,i>
-             {(a,1),(b,2)}   {(b,2)}
-             {(c,3),(d,4)}   {(c,3),(d,4)}
-             {(e,0),(f,1)}   {}",
+            "(map_filter:map<varchar,int4> $0:map<varchar,int4> \
+            (function:boolean $0:varchar $1:int4 (greater_than:boolean $1:int4 1:int4)))",
+            "map<T,i>          map<T,i>
+             {a:1,b:2}   {b:2}
+             {c:3,d:4}   {c:3,d:4}
+             {e:0,f:1}   {}",
         )
         .await;
     }

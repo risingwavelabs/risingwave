@@ -33,7 +33,7 @@ use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use crate::hash::HashCode;
 use crate::row::Row;
-use crate::types::{DataType, DatumRef, StructType, ToOwnedDatum, ToText};
+use crate::types::{DataType, DatumRef, MapType, StructType, ToOwnedDatum, ToText};
 use crate::util::chunk_coalesce::DataChunkBuilder;
 use crate::util::hash_util::finalize_hashers;
 use crate::util::iter_util::ZipEqFast;
@@ -725,6 +725,17 @@ impl DataChunkTestExt for DataChunk {
             if let Some(s) = s.strip_suffix("[]") {
                 return DataType::List(Box::new(parse_type(s)));
             }
+
+            if let Some(inner) = s.strip_prefix("map<").and_then(|s| s.strip_suffix('>')) {
+                let mut parts = inner.split(',');
+                let key_type = parts.next().expect("Key type expected");
+                let value_type = parts.next().expect("Value type expected");
+                return DataType::Map(MapType::from_kv(
+                    parse_type(key_type),
+                    parse_type(value_type),
+                ));
+            }
+
             match s {
                 "B" => DataType::Boolean,
                 "I" => DataType::Int64,
@@ -771,7 +782,8 @@ impl DataChunkTestExt for DataChunk {
                 let datum = match val_str {
                     "." => None,
                     "(empty)" => Some("".into()),
-                    _ => Some(ScalarImpl::from_text(val_str, ty).unwrap()),
+                    // `from_text_for_test` has support for Map.
+                    _ => Some(ScalarImpl::from_text_for_test(val_str, ty).unwrap()),
                 };
                 builder.append(datum);
             }
