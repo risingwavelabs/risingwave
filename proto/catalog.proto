@@ -532,6 +532,8 @@ message Database {
   string name = 2;
   uint32 owner = 3;
   string resource_group = 4;
+  optional uint32 barrier_interval_ms = 5;
+  optional uint64 checkpoint_frequency = 6;
 }
 
 message Comment {

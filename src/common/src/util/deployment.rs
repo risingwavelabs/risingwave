@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
 use enum_as_inner::EnumAsInner;
 
 use super::env_var::env_var_is_true;
@@ -31,12 +33,15 @@ pub enum Deployment {
 impl Deployment {
     /// Returns the deployment environment detected from current environment variables.
     pub fn current() -> Self {
-        if env_var_is_true("RISINGWAVE_CI") {
-            Self::Ci
-        } else if env_var_is_true("RISINGWAVE_CLOUD") {
-            Self::Cloud
-        } else {
-            Self::Other
-        }
+        static CURRENT: LazyLock<Deployment> = LazyLock::new(|| {
+            if env_var_is_true("RISINGWAVE_CI") {
+                Deployment::Ci
+            } else if env_var_is_true("RISINGWAVE_CLOUD") {
+                Deployment::Cloud
+            } else {
+                Deployment::Other
+            }
+        });
+        *CURRENT
     }
 }

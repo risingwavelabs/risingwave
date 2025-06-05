@@ -18,8 +18,9 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
-use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, ObjectId};
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::catalog::{
+    AlterDatabaseParam, CatalogVersion, FunctionId, IndexId, ObjectId,
+};
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
@@ -70,6 +71,8 @@ pub trait CatalogWriter: Send + Sync {
         db_name: &str,
         owner: UserId,
         resource_group: &str,
+        barrier_interval_ms: Option<u32>,
+        checkpoint_frequency: Option<u64>,
     ) -> Result<()>;
 
     async fn create_schema(
@@ -87,6 +90,7 @@ pub trait CatalogWriter: Send + Sync {
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
         specific_resource_group: Option<String>,
+        if_not_exists: bool,
     ) -> Result<()>;
 
     async fn create_table(
@@ -95,6 +99,7 @@ pub trait CatalogWriter: Send + Sync {
         table: PbTable,
         graph: StreamFragmentGraph,
         job_type: PbTableJobType,
+        if_not_exists: bool,
     ) -> Result<()>;
 
     async fn replace_table(
@@ -102,28 +107,24 @@ pub trait CatalogWriter: Send + Sync {
         source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
-        mapping: ColIndexMapping,
         job_type: TableJobType,
     ) -> Result<()>;
 
-    async fn replace_source(
-        &self,
-        source: PbSource,
-        graph: StreamFragmentGraph,
-        mapping: ColIndexMapping,
-    ) -> Result<()>;
+    async fn replace_source(&self, source: PbSource, graph: StreamFragmentGraph) -> Result<()>;
 
     async fn create_index(
         &self,
         index: PbIndex,
         table: PbTable,
         graph: StreamFragmentGraph,
+        if_not_exists: bool,
     ) -> Result<()>;
 
     async fn create_source(
         &self,
         source: PbSource,
         graph: Option<StreamFragmentGraph>,
+        if_not_exists: bool,
     ) -> Result<()>;
 
     async fn create_sink(
@@ -132,6 +133,7 @@ pub trait CatalogWriter: Send + Sync {
         graph: StreamFragmentGraph,
         affected_table_change: Option<PbReplaceJobPlan>,
         dependencies: HashSet<ObjectId>,
+        if_not_exists: bool,
     ) -> Result<()>;
 
     async fn create_subscription(&self, subscription: PbSubscription) -> Result<()>;
@@ -234,6 +236,12 @@ pub trait CatalogWriter: Send + Sync {
     ) -> Result<()>;
 
     async fn alter_swap_rename(&self, object: alter_swap_rename_request::Object) -> Result<()>;
+
+    async fn alter_database_param(
+        &self,
+        database_id: DatabaseId,
+        param: AlterDatabaseParam,
+    ) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -250,6 +258,8 @@ impl CatalogWriter for CatalogWriterImpl {
         db_name: &str,
         owner: UserId,
         resource_group: &str,
+        barrier_interval_ms: Option<u32>,
+        checkpoint_frequency: Option<u64>,
     ) -> Result<()> {
         let version = self
             .meta_client
@@ -258,6 +268,8 @@ impl CatalogWriter for CatalogWriterImpl {
                 id: 0,
                 owner,
                 resource_group: resource_group.to_owned(),
+                barrier_interval_ms,
+                checkpoint_frequency,
             })
             .await?;
         self.wait_version(version).await
@@ -288,11 +300,18 @@ impl CatalogWriter for CatalogWriterImpl {
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
         specific_resource_group: Option<String>,
+        if_not_exists: bool,
     ) -> Result<()> {
         let create_type = table.get_create_type().unwrap_or(PbCreateType::Foreground);
         let version = self
             .meta_client
-            .create_materialized_view(table, graph, dependencies, specific_resource_group)
+            .create_materialized_view(
+                table,
+                graph,
+                dependencies,
+                specific_resource_group,
+                if_not_exists,
+            )
             .await?;
         if matches!(create_type, PbCreateType::Foreground) {
             self.wait_version(version).await?
@@ -310,8 +329,12 @@ impl CatalogWriter for CatalogWriterImpl {
         index: PbIndex,
         table: PbTable,
         graph: StreamFragmentGraph,
+        if_not_exists: bool,
     ) -> Result<()> {
-        let version = self.meta_client.create_index(index, table, graph).await?;
+        let version = self
+            .meta_client
+            .create_index(index, table, graph, if_not_exists)
+            .await?;
         self.wait_version(version).await
     }
 
@@ -321,10 +344,11 @@ impl CatalogWriter for CatalogWriterImpl {
         table: PbTable,
         graph: StreamFragmentGraph,
         job_type: PbTableJobType,
+        if_not_exists: bool,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .create_table(source, table, graph, job_type)
+            .create_table(source, table, graph, job_type, if_not_exists)
             .await?;
         self.wait_version(version).await
     }
@@ -334,14 +358,12 @@ impl CatalogWriter for CatalogWriterImpl {
         source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
-        mapping: ColIndexMapping,
         job_type: TableJobType,
     ) -> Result<()> {
         let version = self
             .meta_client
             .replace_job(
                 graph,
-                mapping,
                 ReplaceJob::ReplaceTable(ReplaceTable {
                     source,
                     table: Some(table),
@@ -352,17 +374,11 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn replace_source(
-        &self,
-        source: PbSource,
-        graph: StreamFragmentGraph,
-        mapping: ColIndexMapping,
-    ) -> Result<()> {
+    async fn replace_source(&self, source: PbSource, graph: StreamFragmentGraph) -> Result<()> {
         let version = self
             .meta_client
             .replace_job(
                 graph,
-                mapping,
                 ReplaceJob::ReplaceSource(ReplaceSource {
                     source: Some(source),
                 }),
@@ -375,8 +391,12 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         source: PbSource,
         graph: Option<StreamFragmentGraph>,
+        if_not_exists: bool,
     ) -> Result<()> {
-        let version = self.meta_client.create_source(source, graph).await?;
+        let version = self
+            .meta_client
+            .create_source(source, graph, if_not_exists)
+            .await?;
         self.wait_version(version).await
     }
 
@@ -386,10 +406,17 @@ impl CatalogWriter for CatalogWriterImpl {
         graph: StreamFragmentGraph,
         affected_table_change: Option<ReplaceJobPlan>,
         dependencies: HashSet<ObjectId>,
+        if_not_exists: bool,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .create_sink(sink, graph, affected_table_change, dependencies)
+            .create_sink(
+                sink,
+                graph,
+                affected_table_change,
+                dependencies,
+                if_not_exists,
+            )
             .await?;
         self.wait_version(version).await
     }
@@ -612,6 +639,19 @@ impl CatalogWriter for CatalogWriterImpl {
             .map_err(|e| anyhow!(e))?;
 
         Ok(())
+    }
+
+    async fn alter_database_param(
+        &self,
+        database_id: DatabaseId,
+        param: AlterDatabaseParam,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_database_param(database_id, param)
+            .await
+            .map_err(|e| anyhow!(e))?;
+        self.wait_version(version).await
     }
 }
 

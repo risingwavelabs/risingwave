@@ -95,7 +95,6 @@ use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
 
 pub const ICEBERG_SINK: &str = "iceberg";
-pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
 
 fn default_commit_retry_num() -> u32 {
     8
@@ -153,6 +152,10 @@ pub struct IcebergConfig {
     #[serde(default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub compaction_interval_sec: Option<u64>,
+
+    /// Whether to enable iceberg expired snapshots.
+    #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    pub enable_snapshot_expiration: bool,
 }
 
 impl EnforceSecret for IcebergConfig {
@@ -242,6 +245,15 @@ impl IcebergConfig {
 
     pub fn full_table_name(&self) -> Result<TableIdent> {
         self.common.full_table_name().map_err(Into::into)
+    }
+
+    pub fn catalog_name(&self) -> String {
+        self.common.catalog_name()
+    }
+
+    pub fn compaction_interval_sec(&self) -> u64 {
+        // default to 1 hour
+        self.compaction_interval_sec.unwrap_or(3600)
     }
 }
 
@@ -380,45 +392,13 @@ impl IcebergSink {
             };
 
             let partition_spec = match &self.config.partition_by {
-                Some(partition_field) => {
+                Some(partition_by) => {
                     let mut partition_fields = Vec::<UnboundPartitionField>::new();
-                    // captures column, transform(column), transform(n,column), transform(n, column)
-                    let re = Regex::new(
-                        r"(?<transform>\w+)(\(((?<n>\d+)?(?:,|(,\s)))?(?<field>\w+)\))?",
-                    )
-                    .unwrap();
-                    if !re.is_match(partition_field) {
-                        bail!(format!(
-                            "Invalid partition fields: {}\nHINT: Supported formats are column, transform(column), transform(n,column), transform(n, column)",
-                            partition_field
-                        ))
-                    }
-                    let caps = re.captures_iter(partition_field);
-                    for (i, mat) in caps.enumerate() {
-                        let (column, transform) =
-                            if mat.name("n").is_none() && mat.name("field").is_none() {
-                                (&mat["transform"], Transform::Identity)
-                            } else {
-                                let mut func = mat["transform"].to_owned();
-                                if func == "bucket" || func == "truncate" {
-                                    let n = &mat
-                                        .name("n")
-                                        .ok_or_else(|| {
-                                            SinkError::Iceberg(anyhow!(
-                                                "The `n` must be set with `bucket` and `truncate`"
-                                            ))
-                                        })?
-                                        .as_str();
-                                    func = format!("{func}[{n}]");
-                                }
-                                (
-                                    &mat["field"],
-                                    Transform::from_str(&func)
-                                        .map_err(|e| SinkError::Iceberg(anyhow!(e)))?,
-                                )
-                            };
-
-                        match iceberg_schema.field_id_by_name(column) {
+                    for (i, (column, transform)) in parse_partition_by_exprs(partition_by.clone())?
+                        .into_iter()
+                        .enumerate()
+                    {
+                        match iceberg_schema.field_id_by_name(&column) {
                             Some(id) => partition_fields.push(
                                 UnboundPartitionField::builder()
                                     .source_id(id)
@@ -512,6 +492,7 @@ impl Sink for IcebergSink {
         "commit_checkpoint_interval",
         "enable_compaction",
         "compaction_interval_sec",
+        "enable_snapshot_expiration",
     ];
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
@@ -524,9 +505,10 @@ impl Sink for IcebergSink {
                 .check_available()
                 .map_err(|e| anyhow::anyhow!(e))?;
         }
-
-        if self.config.enable_compaction && self.config.compaction_interval_sec.is_none() {
-            bail!("`compaction_interval` must be set when `enable_compaction` is true");
+        if self.config.enable_compaction {
+            risingwave_common::license::Feature::IcebergCompaction
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
         }
 
         let _ = self.create_and_validate_table().await?;
@@ -540,11 +522,11 @@ impl Sink for IcebergSink {
             if iceberg_config.enable_compaction {
                 if compaction_interval == 0 {
                     bail!(
-                        "`compaction_interval` must be greater than 0 when `enable_compaction` is true"
+                        "`compaction_interval_sec` must be greater than 0 when `enable_compaction` is true"
                     );
                 }
             } else {
-                bail!("`compaction_interval` can only be set when `enable_compaction` is true");
+                bail!("`compaction_interval_sec` can only be set when `enable_compaction` is true");
             }
         }
 
@@ -1866,7 +1848,7 @@ impl IcebergSinkCommitter {
             && iceberg_compact_stat_sender
                 .send(IcebergSinkCompactionUpdate {
                     sink_id: SinkId::new(self.sink_id),
-                    compaction_interval: self.config.compaction_interval_sec.unwrap(),
+                    compaction_interval: self.config.compaction_interval_sec(),
                 })
                 .is_err()
         {
@@ -2025,6 +2007,44 @@ pub fn deserialize_metadata(bytes: Vec<u8>) -> Vec<Vec<u8>> {
     serde_json::from_slice(&bytes).unwrap()
 }
 
+pub fn parse_partition_by_exprs(
+    expr: String,
+) -> std::result::Result<Vec<(String, Transform)>, anyhow::Error> {
+    // captures column, transform(column), transform(n,column), transform(n, column)
+    let re = Regex::new(r"(?<transform>\w+)(\(((?<n>\d+)?(?:,|(,\s)))?(?<field>\w+)\))?").unwrap();
+    if !re.is_match(&expr) {
+        bail!(format!(
+            "Invalid partition fields: {}\nHINT: Supported formats are column, transform(column), transform(n,column), transform(n, column)",
+            expr
+        ))
+    }
+    let caps = re.captures_iter(&expr);
+
+    let mut partition_columns = vec![];
+
+    for mat in caps {
+        let (column, transform) = if mat.name("n").is_none() && mat.name("field").is_none() {
+            (&mat["transform"], Transform::Identity)
+        } else {
+            let mut func = mat["transform"].to_owned();
+            if func == "bucket" || func == "truncate" {
+                let n = &mat
+                    .name("n")
+                    .ok_or_else(|| anyhow!("The `n` must be set with `bucket` and `truncate`"))?
+                    .as_str();
+                func = format!("{func}[{n}]");
+            }
+            (
+                &mat["field"],
+                Transform::from_str(&func)
+                    .with_context(|| format!("invalid transform function {}", func))?,
+            )
+        };
+        partition_columns.push((column.to_owned(), transform));
+    }
+    Ok(partition_columns)
+}
+
 #[cfg(test)]
 mod test {
     use std::collections::BTreeMap;
@@ -2035,7 +2055,9 @@ mod test {
 
     use crate::connector_common::IcebergCommon;
     use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
-    use crate::sink::iceberg::{DEFAULT_ICEBERG_COMPACTION_INTERVAL, IcebergConfig};
+    use crate::sink::iceberg::IcebergConfig;
+
+    pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
 
     #[test]
     fn test_compatible_arrow_schema() {
@@ -2226,6 +2248,7 @@ mod test {
             ("table.name", "demo_table"),
             ("enable_compaction", "true"),
             ("compaction_interval_sec", "1800"),
+            ("enable_snapshot_expiration", "true"),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_owned(), v.to_owned()))
@@ -2275,6 +2298,7 @@ mod test {
             commit_retry_num: 8,
             enable_compaction: true,
             compaction_interval_sec: Some(DEFAULT_ICEBERG_COMPACTION_INTERVAL / 2),
+            enable_snapshot_expiration: true,
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);

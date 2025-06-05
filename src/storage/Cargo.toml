@@ -13,6 +13,7 @@ arc-swap = { workspace = true }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 await-tree = { workspace = true }
+bergloom-core = { git = "https://github.com/nimtable/BergLoom.git", rev = "88cafc208ee7a90d1f0c2a72078de05172801e73" }
 bytes = { version = "1", features = ["serde"] }
 dyn-clone = "1.0.14"
 either = "1"
@@ -22,6 +23,7 @@ foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
+iceberg = { workspace = true }
 itertools = { workspace = true }
 libc = "0.2"
 lz4 = "1.28.0"
@@ -38,6 +40,7 @@ risingwave_backup = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_common_service = { workspace = true }
+risingwave_connector = { workspace = true }
 risingwave_expr = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_hummock_trace = { workspace = true }
