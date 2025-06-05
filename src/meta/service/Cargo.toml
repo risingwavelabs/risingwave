@@ -10,6 +10,7 @@ repository = { workspace = true }
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
+await-tree = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = { workspace = true }
 rand = { workspace = true }

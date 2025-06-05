@@ -19,6 +19,7 @@ use risingwave_sqlparser::ast::{
     Ident, ObjectName, TableAlias, TableFactor, TableWithJoins, Value,
 };
 
+use crate::config::Feature;
 use crate::sql_gen::types::BINARY_INEQUALITY_OP_TABLE;
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext};
 use crate::{BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Table};
@@ -36,12 +37,14 @@ fn create_equi_expr(left: String, right: String) -> Expr {
 impl<R: Rng> SqlGenerator<'_, R> {
     /// A relation specified in the FROM clause.
     pub(crate) fn gen_from_relation(&mut self) -> (TableWithJoins, Vec<Table>) {
-        match self.rng.random_range(1..=4) {
-            1..=1 => self.gen_no_join(),
-            2..=3 => self
+        if !self.should_generate(Feature::Join) {
+            return self.gen_no_join();
+        }
+        match self.rng.random_range(1..=3) {
+            1..=2 => self
                 .gen_simple_join_clause()
                 .unwrap_or_else(|| self.gen_no_join()),
-            4..=4 => self.gen_more_joins(),
+            3..=3 => self.gen_more_joins(),
             // TODO(kwannoel): cycles, bushy joins.
             _ => unreachable!(),
         }
@@ -118,7 +121,9 @@ impl<R: Rng> SqlGenerator<'_, R> {
     fn gen_bool_with_tables(&mut self, tables: Vec<Table>) -> Expr {
         let old_context = self.new_local_context();
         self.add_relations_to_context(tables);
-        let expr = self.gen_expr(&Boolean, SqlGeneratorContext::new_with_can_agg(false));
+        self.config.set_enabled(Feature::Agg, false);
+        let expr = self.gen_expr(&Boolean, SqlGeneratorContext::new(false));
+        self.config.set_enabled(Feature::Agg, true);
         self.restore_context(old_context);
         expr
     }
@@ -249,6 +254,24 @@ impl<R: Rng> SqlGenerator<'_, R> {
         right_columns: Vec<Column>,
         right_table: Table,
     ) -> Option<JoinConstraint> {
+        let common_columns: Vec<_> = left_columns
+            .iter()
+            .filter_map(|l_col| {
+                right_columns
+                    .iter()
+                    .find(|r_col| r_col.name == l_col.name)?;
+                Some(Ident::new_unchecked(l_col.name.clone()))
+            })
+            .collect();
+
+        if !common_columns.is_empty() && self.should_generate(Feature::NaturalJoin) {
+            return Some(JoinConstraint::Natural);
+        }
+
+        if !common_columns.is_empty() && self.should_generate(Feature::UsingJoin) {
+            return Some(JoinConstraint::Using(common_columns));
+        }
+
         let expr = self.gen_join_on_expr(left_columns, left_table, right_columns, right_table)?;
         Some(JoinConstraint::On(expr))
     }

@@ -22,6 +22,7 @@ disallowed-types = [
     { path = "num_traits::ToPrimitive", reason = "Please use `From` or `TryFrom` with `OrderedFloat` instead." },
     { path = "num_traits::NumCast", reason = "Please use `From` or `TryFrom` with `OrderedFloat` instead." },
     { path = "aws_smithy_types::error::display::DisplayErrorContext", reason = "Please use `thiserror_ext::AsReport` instead." },
+    { path = "iceberg::Error", reason = "Please use `risingwave_common::error::IcebergError` instead." },
 ]
 disallowed-macros = [
     { path = "lazy_static::lazy_static", reason = "Please use `std::sync::LazyLock` instead." },

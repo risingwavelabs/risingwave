@@ -1,0 +1,58 @@
+statement ok
+set RW_IMPLICIT_FLUSH to true;
+
+statement ok
+create table my_table(v struct<a int, b varchar>);
+
+statement ok
+create index my_index on my_table(v, (v).a + 1, (v).b);
+
+# Test with `pg_get_indexdef`
+query T
+select pg_get_indexdef('my_index'::regclass, i, true) from generate_series(1, 3) g(i);
+----
+v
+(Field(v, 0:Int32) + 1:Int32)
+Field(v, 1:Int32)
+
+# Add a new field at the beginning of the struct.
+statement ok
+alter table my_table alter column v type struct<x boolean, a int, b varchar>;
+
+# Field index of `(v).a` and `(v).b` are shifted.
+# `v` is wrapped by `CompositeCast` and cannot be matched anymore, as a new field is missing.
+query T
+select pg_get_indexdef('my_index'::regclass, i, true) from generate_series(1, 3) g(i);
+----
+CompositeCast(v)
+(Field(v, 1:Int32) + 1:Int32)
+Field(v, 2:Int32)
+
+# Remove the newly added field, as if it never existed.
+statement ok
+alter table my_table alter column v type struct<a int, b varchar>;
+
+# `v` is unwrapped and valid again.
+query T
+select pg_get_indexdef('my_index'::regclass, i, true) from generate_series(1, 3) g(i);
+----
+v
+(Field(v, 0:Int32) + 1:Int32)
+Field(v, 1:Int32)
+
+# Remove the field `a` from the struct.
+statement ok
+alter table my_table alter column v type struct<b varchar>;
+
+# Field index of `(v).b` is shifted.
+# For `(v).a + 1`, `v` is wrapped by `CompositeCast` and cannot be matched anymore.
+# This is okay because `v.a` does not exist anymore and won't be queried by the user.
+query T
+select pg_get_indexdef('my_index'::regclass, i, true) from generate_series(1, 3) g(i);
+----
+CompositeCast(v)
+(Field(CompositeCast(v), 0:Int32) + 1:Int32)
+Field(v, 0:Int32)
+
+statement ok
+drop table my_table cascade;

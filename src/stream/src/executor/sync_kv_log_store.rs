@@ -632,6 +632,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                             }
                                             let write_state_post_write_barrier =
                                                 Self::write_barrier(
+                                                    self.actor_context.id,
                                                     &mut write_state,
                                                     barrier.clone(),
                                                     &self.metrics,
@@ -643,6 +644,11 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                             let update_vnode_bitmap = barrier
                                                 .as_update_vnode_bitmap(self.actor_context.id);
                                             let barrier_epoch = barrier.epoch;
+                                            tracing::trace!(
+                                                ?update_vnode_bitmap,
+                                                actor_id = self.actor_context.id,
+                                                "update vnode bitmap"
+                                            );
 
                                             yield Message::Barrier(barrier);
 
@@ -886,13 +892,14 @@ impl<S: StateStoreRead> ReadFuture<S> {
 // Write methods
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     async fn write_barrier<'a>(
+        actor_id: u32,
         write_state: &'a mut LogStoreWriteState<S::Local>,
         barrier: Barrier,
         metrics: &SyncedKvLogStoreMetrics,
         progress: LogStoreVnodeProgress,
         buffer: &mut SyncedLogStoreBuffer,
     ) -> StreamExecutorResult<LogStorePostSealCurrentEpoch<'a, S::Local>> {
-        tracing::trace!(?progress, "applying truncation");
+        tracing::trace!(actor_id, ?progress, "applying truncation");
         // TODO(kwannoel): As an optimization we can also change flushed chunks to be flushed items
         // to reduce memory consumption of logstore.
 

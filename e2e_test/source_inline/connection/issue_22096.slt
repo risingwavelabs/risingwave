@@ -1,0 +1,22 @@
+control substitution on
+
+system ok
+rpk topic create 'json-dummy'
+
+statement ok
+create connection conn with (type = 'kafka', properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}');
+
+statement ok
+create table t (f1 int) with (connector = 'kafka', connection = conn, topic = 'json-dummy') format plain encode json;
+
+system ok
+curl "${RISEDEV_RW_META_DASHBOARD_ADDR}/api/monitor/diagnose/"
+
+statement ok
+drop table t;
+
+statement ok
+drop connection conn;
+
+system ok
+rpk topic delete 'json-dummy'

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_sqlparser::ast::{DropMode, ObjectName};
+use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
@@ -25,12 +25,8 @@ pub async fn handle_drop_user(
     handler_args: HandlerArgs,
     user_name: ObjectName,
     if_exists: bool,
-    mode: Option<DropMode>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    if mode.is_some() {
-        return Err(ErrorCode::BindError("Drop user not support drop mode".to_owned()).into());
-    }
 
     let user_name = Binder::resolve_user_name(user_name)?;
     let user_info_reader = session.env().user_info_reader();

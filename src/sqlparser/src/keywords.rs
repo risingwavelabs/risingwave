@@ -96,6 +96,7 @@ define_keywords!(
     AUTHORIZATION,
     AUTO,
     AVG,
+    BACKFILL,
     BASE64,
     BEGIN,
     BEGIN_FRAME,
@@ -638,6 +639,7 @@ pub const RESERVED_FOR_TABLE_ALIAS: &[Keyword] = &[
     Keyword::SET,
     Keyword::RETURNING,
     Keyword::EMIT,
+    Keyword::WINDOW,
 ];
 
 /// Can't be used as a column alias, so that `SELECT <expr> alias`

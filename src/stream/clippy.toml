@@ -7,7 +7,9 @@ disallowed-methods = [
     { path = "risingwave_expr::expr::Expression::eval_row", reason = "Please use `NonStrictExpression::eval_row_infallible` instead." },
 ]
 
-disallowed-types = []
+disallowed-types = [
+    { path = "iceberg::Error", reason = "Please use `risingwave_common::error::IcebergError` instead." },
+]
 
 doc-valid-idents = [
     "RisingWave",

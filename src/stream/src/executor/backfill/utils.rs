@@ -358,6 +358,18 @@ pub(crate) fn mark_chunk_ref_by_vnode<S: StateStore, SD: ValueRowSerde>(
                 cmp_datum_iter(pk.iter(), current_pos.iter(), pk_order.iter().copied()).is_le()
             }
         };
+        if !visible {
+            tracing::trace!(
+                source = "upstream",
+                state = "process_barrier",
+                action = "mark_chunk",
+                ?vnode,
+                ?op,
+                ?pk,
+                ?row,
+                "update_filtered",
+            );
+        }
         new_visibility.append(visible);
 
         normalize_unmatched_updates(

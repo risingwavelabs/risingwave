@@ -272,6 +272,12 @@ impl From<&PbDataType> for DataType {
     }
 }
 
+impl From<PbDataType> for DataType {
+    fn from(proto: PbDataType) -> DataType {
+        DataType::from(&proto)
+    }
+}
+
 impl From<DataTypeName> for PbTypeName {
     fn from(type_name: DataTypeName) -> Self {
         match type_name {
@@ -485,6 +491,13 @@ impl DataType {
     }
 
     pub fn as_struct(&self) -> &StructType {
+        match self {
+            DataType::Struct(t) => t,
+            t => panic!("expect struct type, got {t}"),
+        }
+    }
+
+    pub fn into_struct(self) -> StructType {
         match self {
             DataType::Struct(t) => t,
             t => panic!("expect struct type, got {t}"),

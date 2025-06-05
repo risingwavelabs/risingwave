@@ -23,6 +23,7 @@ use itertools::{Itertools, repeat_n};
 use super::DataType;
 use crate::catalog::ColumnId;
 use crate::util::iter_util::ZipEqFast;
+use crate::util::quote_ident::QuoteIdent;
 
 /// A cheaply cloneable struct type.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -167,6 +168,14 @@ impl StructType {
         self.0.field_ids.as_ref().map(|ids| ids.iter().copied())
     }
 
+    /// Gets the field id at the given index.
+    ///
+    /// Returns `None` if they are not present. See documentation on the field `field_ids`
+    /// for the cases.
+    pub fn id_at(&self, index: usize) -> Option<ColumnId> {
+        self.0.field_ids.as_ref().map(|ids| ids[index])
+    }
+
     /// Get an iterator over the field ids, or a sequence of placeholder ids if they are not present.
     pub fn ids_or_placeholder(&self) -> impl ExactSizeIterator<Item = ColumnId> + '_ {
         match self.ids() {
@@ -197,7 +206,7 @@ impl Display for StructType {
                 f,
                 "struct<{}>",
                 self.iter()
-                    .map(|(name, ty)| format!("{} {}", name, ty))
+                    .map(|(name, ty)| format!("{} {}", QuoteIdent(name), ty))
                     .join(", ")
             )
         }

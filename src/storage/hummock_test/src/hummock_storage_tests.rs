@@ -33,7 +33,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::table_watermark::{
-    TableWatermarksIndex, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
+    PkPrefixTableWatermarksIndex, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
 use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo};
 use risingwave_meta::hummock::test_utils::get_compaction_group_id_by_table_id;
@@ -2280,7 +2280,7 @@ async fn test_table_watermark() {
             .get(&TEST_TABLE_ID)
             .unwrap()
             .committed_epoch;
-        let table_watermarks = TableWatermarksIndex::new_committed(
+        let table_watermarks = PkPrefixTableWatermarksIndex::new_committed(
             version
                 .table_watermarks
                 .get(&TEST_TABLE_ID)
@@ -2475,6 +2475,7 @@ async fn test_commit_multi_epoch() {
                         }],
                         new_table_fragment_infos,
                         change_log_delta: Default::default(),
+                        vector_index_delta: Default::default(),
                         tables_to_commit,
                     })
                     .await
@@ -2801,6 +2802,7 @@ async fn test_commit_with_large_size() {
                         sstables,
                         new_table_fragment_infos,
                         change_log_delta: Default::default(),
+                        vector_index_delta: Default::default(),
                         tables_to_commit,
                     })
                     .await

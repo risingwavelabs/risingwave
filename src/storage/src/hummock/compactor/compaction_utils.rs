@@ -52,7 +52,7 @@ use crate::hummock::{
 use crate::monitor::StoreLocalStatistic;
 
 pub struct RemoteBuilderFactory<W: SstableWriterFactory, F: FilterBuilder> {
-    pub object_id_getter: Box<dyn GetObjectId>,
+    pub object_id_getter: Arc<dyn GetObjectId>,
     pub limiter: Arc<MemoryLimiter>,
     pub options: SstableBuilderOptions,
     pub policy: CachePolicy,

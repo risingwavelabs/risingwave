@@ -18,6 +18,7 @@
 
 use std::fmt::Write;
 
+use risingwave_common::util::quote_ident::QuoteIdent;
 use risingwave_expr::function;
 
 /// Returns the character with the specified Unicode code point.
@@ -366,20 +367,7 @@ pub fn to_hex_i64(n: i64, writer: &mut impl Write) {
 /// ```
 #[function("quote_ident(varchar) -> varchar")]
 pub fn quote_ident(s: &str, writer: &mut impl Write) {
-    let needs_quotes = s.chars().any(|c| !matches!(c, 'a'..='z' | '0'..='9' | '_'));
-    if !needs_quotes {
-        write!(writer, "{}", s).unwrap();
-        return;
-    }
-    write!(writer, "\"").unwrap();
-    for c in s.chars() {
-        if c == '"' {
-            write!(writer, "\"\"").unwrap();
-        } else {
-            write!(writer, "{c}").unwrap();
-        }
-    }
-    write!(writer, "\"").unwrap();
+    write!(writer, "{}", QuoteIdent(s)).unwrap();
 }
 
 /// Returns the first n characters in the string.

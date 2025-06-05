@@ -13,8 +13,7 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
-use std::thread;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::anyhow;
 use aws_config::Region;
@@ -24,6 +23,7 @@ use rdkafka::consumer::ConsumerContext;
 use rdkafka::message::DeliveryResult;
 use rdkafka::producer::ProducerContext;
 use rdkafka::{ClientContext, Statistics};
+use tokio::runtime::Runtime;
 
 use super::private_link::{BrokerAddrRewriter, PrivateLinkContextRole};
 use super::stats::RdKafkaStats;
@@ -33,9 +33,6 @@ use crate::error::ConnectorResult;
 struct IamAuthEnv {
     credentials_provider: SharedCredentialsProvider,
     region: Region,
-    // XXX(runji): madsim does not support `Handle` for now
-    #[cfg(not(madsim))]
-    rt: tokio::runtime::Handle,
     signer_timeout_sec: u64,
 }
 
@@ -75,8 +72,6 @@ impl KafkaContextCommon {
             Some(IamAuthEnv {
                 credentials_provider,
                 region,
-                #[cfg(not(madsim))]
-                rt: tokio::runtime::Handle::current(),
                 signer_timeout_sec: auth
                     .msk_signer_timeout_sec
                     .unwrap_or(Self::default_msk_signer_timeout_sec()),
@@ -96,6 +91,14 @@ impl KafkaContextCommon {
         10
     }
 }
+
+pub static KAFKA_SOURCE_RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .thread_name("rw-frontend")
+        .enable_all()
+        .build()
+        .expect("failed to build frontend runtime")
+});
 
 impl KafkaContextCommon {
     fn stats(&self, statistics: Statistics) {
@@ -122,17 +125,16 @@ impl KafkaContextCommon {
         if let Some(IamAuthEnv {
             credentials_provider,
             region,
-            rt,
             signer_timeout_sec,
+            ..
         }) = &self.auth
         {
             let region = region.clone();
             let credentials_provider = credentials_provider.clone();
-            let rt = rt.clone();
             let signer_timeout_sec = *signer_timeout_sec;
             let (token, expiration_time_ms) = {
-                let handle = thread::spawn(move || {
-                    rt.block_on(async {
+                tokio::task::block_in_place(move || {
+                    KAFKA_SOURCE_RUNTIME.block_on(async {
                         timeout(
                             Duration::from_secs(signer_timeout_sec),
                             generate_auth_token_from_credentials_provider(
@@ -142,8 +144,9 @@ impl KafkaContextCommon {
                         )
                         .await
                     })
-                });
-                handle.join().unwrap()??
+                })
+                .unwrap()
+                .unwrap()
             };
             Ok(OAuthToken {
                 token,

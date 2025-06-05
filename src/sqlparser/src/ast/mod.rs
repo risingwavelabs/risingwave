@@ -47,8 +47,8 @@ pub use self::legacy_source::{CompatibleFormatEncode, get_delimiter};
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
     Corresponding, Cte, CteInner, Distinct, Fetch, Join, JoinConstraint, JoinOperator, LateralView,
-    OrderByExpr, Query, Select, SelectItem, SetExpr, SetOperator, TableAlias, TableFactor,
-    TableWithJoins, Top, Values, With,
+    NamedWindow, OrderByExpr, Query, Select, SelectItem, SetExpr, SetOperator, TableAlias,
+    TableFactor, TableWithJoins, Top, Values, With,
 };
 pub use self::statement::*;
 pub use self::value::{
@@ -179,7 +179,8 @@ impl Ident {
         }
     }
 
-    /// Convert a real value back to Ident. Behaves the same as SQL function `quote_ident`.
+    /// Convert a real value back to Ident. Behaves the same as SQL function `quote_ident` or
+    /// `QuoteIdent` wrapper in `common` crate.
     pub fn from_real_value(value: &str) -> Self {
         let needs_quotes = value
             .chars()
@@ -865,13 +866,25 @@ impl fmt::Display for Expr {
     }
 }
 
-/// A window specification (i.e. `OVER (PARTITION BY .. ORDER BY .. etc.)`)
+/// A window specification (i.e. `OVER (PARTITION BY .. ORDER BY .. etc.)`).
+/// This is used both for named window definitions and inline window specifications.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct WindowSpec {
     pub partition_by: Vec<Expr>,
     pub order_by: Vec<OrderByExpr>,
     pub window_frame: Option<WindowFrame>,
+}
+
+/// A window definition that can appear in the OVER clause of a window function.
+/// This can be either an inline window specification or a reference to a named window.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum Window {
+    /// Inline window specification: `OVER (PARTITION BY ... ORDER BY ...)`
+    Spec(WindowSpec),
+    /// Named window reference: `OVER window_name`
+    Name(Ident),
 }
 
 impl fmt::Display for WindowSpec {
@@ -895,6 +908,15 @@ impl fmt::Display for WindowSpec {
             window_frame.fmt(f)?;
         }
         Ok(())
+    }
+}
+
+impl fmt::Display for Window {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Window::Spec(spec) => write!(f, "({})", spec),
+            Window::Name(name) => write!(f, "{}", name),
+        }
     }
 }
 
@@ -1188,6 +1210,8 @@ pub struct ExplainOptions {
     pub verbose: bool,
     // Trace plan transformation of the optimizer step by step
     pub trace: bool,
+    // Display backfill order
+    pub backfill: bool,
     // explain's plan type
     pub explain_type: ExplainType,
     // explain's plan format
@@ -1199,6 +1223,7 @@ impl Default for ExplainOptions {
         Self {
             verbose: false,
             trace: false,
+            backfill: false,
             explain_type: ExplainType::Physical,
             explain_format: ExplainFormat::Text,
         }
@@ -1217,6 +1242,9 @@ impl fmt::Display for ExplainOptions {
             }
             if self.trace {
                 option_strs.push("TRACE".to_owned());
+            }
+            if self.backfill {
+                option_strs.push("BACKFILL".to_owned());
             }
             if self.explain_type == default.explain_type {
                 option_strs.push(self.explain_type.to_string());
@@ -1508,7 +1536,7 @@ pub enum Statement {
     CancelJobs(JobIdents),
     /// KILL COMMAND
     /// Kill process in the show processlist.
-    Kill(i32),
+    Kill(String),
     /// DROP
     Drop(DropStatement),
     /// DROP FUNCTION
@@ -1592,6 +1620,8 @@ pub enum Statement {
         if_not_exists: bool,
         owner: Option<ObjectName>,
         resource_group: Option<SetVariableValue>,
+        barrier_interval_ms: Option<u32>,
+        checkpoint_frequency: Option<u64>,
     },
     /// GRANT privileges ON objects TO grantees
     Grant {
@@ -1883,6 +1913,8 @@ impl Statement {
                 if_not_exists,
                 owner,
                 resource_group,
+                barrier_interval_ms,
+                checkpoint_frequency,
             } => {
                 write!(f, "CREATE DATABASE")?;
                 if *if_not_exists {
@@ -1894,6 +1926,12 @@ impl Statement {
                 }
                 if let Some(resource_group) = resource_group {
                     write!(f, " RESOURCE_GROUP = {}", resource_group)?;
+                }
+                if let Some(barrier_interval_ms) = barrier_interval_ms {
+                    write!(f, " BARRIER_INTERVAL_MS = {}", barrier_interval_ms)?;
+                }
+                if let Some(checkpoint_frequency) = checkpoint_frequency {
+                    write!(f, " CHECKPOINT_FREQUENCY = {}", checkpoint_frequency)?;
                 }
 
                 Ok(())
@@ -2381,8 +2419,8 @@ impl Statement {
                 write!(f, "CANCEL JOBS {}", display_comma_separated(&jobs.0))?;
                 Ok(())
             }
-            Statement::Kill(process_id) => {
-                write!(f, "KILL {}", process_id)?;
+            Statement::Kill(worker_process_id) => {
+                write!(f, "KILL '{}'", worker_process_id)?;
                 Ok(())
             }
             Statement::Recover => {
@@ -2923,7 +2961,7 @@ pub struct Function {
     /// `FILTER` clause of the function call, for aggregate and window (not supported yet) functions.
     pub filter: Option<Box<Expr>>,
     /// `OVER` clause of the function call, for window functions.
-    pub over: Option<WindowSpec>,
+    pub over: Option<Window>,
 }
 
 impl Function {
@@ -2952,7 +2990,7 @@ impl fmt::Display for Function {
             write!(f, " FILTER (WHERE {})", filter)?;
         }
         if let Some(o) = &self.over {
-            write!(f, " OVER ({})", o)?;
+            write!(f, " OVER {}", o)?;
         }
         Ok(())
     }
@@ -3045,7 +3083,7 @@ impl fmt::Display for SqlOption {
             })
             .unwrap_or(false);
         if should_redact {
-            write!(f, "{} = '[REDACTED]'", self.name)
+            write!(f, "{} = [REDACTED]", self.name)
         } else {
             write!(f, "{} = {}", self.name, self.value)
         }
@@ -3569,6 +3607,19 @@ impl fmt::Display for CreateFunctionUsing {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ConfigParam {
+    pub param: Ident,
+    pub value: SetVariableValue,
+}
+
+impl fmt::Display for ConfigParam {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "SET {} = {}", self.param, self.value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SetVariableValue {
     Single(SetVariableValueSingle),
     List(Vec<SetVariableValueSingle>),
@@ -3697,7 +3748,7 @@ impl fmt::Display for BackfillOrderStrategy {
 
 impl Statement {
     pub fn to_redacted_string(&self, keywords: RedactSqlOptionKeywordsRef) -> String {
-        REDACT_SQL_OPTION_KEYWORDS.sync_scope(keywords, || self.to_string())
+        REDACT_SQL_OPTION_KEYWORDS.sync_scope(keywords, || self.to_string_unchecked())
     }
 
     /// Create a new `CREATE TABLE` statement with the given `name` and empty fields.

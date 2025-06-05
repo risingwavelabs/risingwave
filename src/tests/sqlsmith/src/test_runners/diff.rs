@@ -20,6 +20,7 @@ use rand::Rng;
 use similar::{ChangeTag, TextDiff};
 use tokio_postgres::{Client, SimpleQueryMessage};
 
+use crate::config::Configuration;
 use crate::test_runners::utils::{
     Result, create_base_tables, create_mviews, drop_mview_table, drop_tables, format_drop_mview,
     generate_rng, populate_tables, run_query, run_query_inner, set_variable, update_base_tables,
@@ -31,6 +32,7 @@ pub async fn run_differential_testing(
     client: &Client,
     testdata: &str,
     count: usize,
+    config: &Configuration,
     seed: Option<u64>,
 ) -> Result<()> {
     let mut rng = generate_rng(seed);
@@ -42,20 +44,27 @@ pub async fn run_differential_testing(
     let base_tables = create_base_tables(testdata, client).await.unwrap();
 
     let rows_per_table = 50;
-    let inserts = populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
+    let inserts = populate_tables(
+        client,
+        &mut rng,
+        base_tables.clone(),
+        rows_per_table,
+        config,
+    )
+    .await;
     tracing::info!("Populated base tables");
 
-    let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client)
+    let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client, config)
         .await
         .unwrap();
     tracing::info!("Created tables");
 
     // Generate an update for some inserts, on the corresponding table.
-    update_base_tables(client, &mut rng, &base_tables, &inserts).await;
+    update_base_tables(client, &mut rng, &base_tables, &inserts, config).await;
     tracing::info!("Ran updates");
 
     for i in 0..count {
-        diff_stream_and_batch(&mut rng, tables.clone(), client, i).await?
+        diff_stream_and_batch(&mut rng, tables.clone(), client, i, config).await?
     }
 
     drop_tables(&mviews, testdata, client).await;
@@ -72,10 +81,12 @@ async fn diff_stream_and_batch(
     mvs_and_base_tables: Vec<Table>,
     client: &Client,
     i: usize,
+    config: &Configuration,
 ) -> Result<()> {
     // Generate some mviews
     let mview_name = format!("stream_{}", i);
-    let (batch, stream, table) = differential_sql_gen(rng, mvs_and_base_tables, &mview_name)?;
+    let (batch, stream, table) =
+        differential_sql_gen(rng, mvs_and_base_tables, &mview_name, config)?;
     diff_stream_and_batch_with_sqls(client, i, &batch, &stream, &mview_name, &table).await
 }
 

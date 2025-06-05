@@ -32,7 +32,7 @@ use tracing::{Instrument, error};
 use super::{MonitoredStateStoreGetStats, MonitoredStateStoreIterStats, MonitoredStorageMetrics};
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
+use crate::hummock::{HummockStorage, ObjectIdManagerRef};
 use crate::monitor::monitored_storage_metrics::StateStoreIterStats;
 use crate::monitor::{StateStoreIterLogStats, StateStoreIterStatsTrait};
 use crate::store::*;
@@ -368,8 +368,8 @@ impl MonitoredStateStore<HummockStorage> {
         self.inner.sstable_store()
     }
 
-    pub fn sstable_object_id_manager(&self) -> SstableObjectIdManagerRef {
-        self.inner.sstable_object_id_manager().clone()
+    pub fn object_id_manager(&self) -> ObjectIdManagerRef {
+        self.inner.object_id_manager().clone()
     }
 }
 
