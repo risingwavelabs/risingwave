@@ -1714,37 +1714,46 @@ pub async fn create_iceberg_engine_table(
 
     sink_with.insert("is_exactly_once".to_owned(), "true".to_owned());
 
-    if let Some(enable_compaction) = handler_args.with_options.get("enable_compaction") {
-        if enable_compaction.eq_ignore_ascii_case("true") {
-            risingwave_common::license::Feature::IcebergCompaction
-                .check_available()
-                .map_err(|e| anyhow::anyhow!(e))?;
-            sink_with.insert("enable_compaction".to_owned(), "true".to_owned());
-        } else if enable_compaction.eq_ignore_ascii_case("false") {
-            sink_with.insert("enable_compaction".to_owned(), "false".to_owned());
-        } else {
-            return Err(ErrorCode::InvalidInputSyntax(format!(
-                "enable_compaction must be true or false: {}",
-                enable_compaction
-            ))
-            .into());
+    const ENABLE_COMPACTION: &str = "enable_compaction";
+    const COMPACTION_INTERVAL_SEC: &str = "compaction_interval_sec";
+    const ENABLE_SNAPSHOT_EXPIRATION: &str = "enable_snapshot_expiration";
+
+    if let Some(enable_compaction) = handler_args.with_options.get(ENABLE_COMPACTION) {
+        match enable_compaction.to_lowercase().as_str() {
+            "true" => {
+                risingwave_common::license::Feature::IcebergCompaction
+                    .check_available()
+                    .map_err(|e| anyhow::anyhow!(e))?;
+
+                sink_with.insert(ENABLE_COMPACTION.to_owned(), "true".to_owned());
+            }
+            "false" => {
+                sink_with.insert(ENABLE_COMPACTION.to_owned(), "false".to_owned());
+            }
+            _ => {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "enable_compaction must be true or false: {}",
+                    enable_compaction
+                ))
+                .into());
+            }
         }
+
         // remove enable_compaction from source options, otherwise it will be considered as an unknown field.
         source
             .as_mut()
             .map(|x| x.with_properties.remove("enable_compaction"));
     } else {
         sink_with.insert(
-            "enable_compaction".to_owned(),
-            Feature::IcebergCompaction
+            ENABLE_COMPACTION.to_owned(),
+            risingwave_common::license::Feature::IcebergCompaction
                 .check_available()
                 .is_ok()
                 .to_string(),
         );
     }
 
-    if let Some(compaction_interval_sec) = handler_args.with_options.get("compaction_interval_sec")
-    {
+    if let Some(compaction_interval_sec) = handler_args.with_options.get(COMPACTION_INTERVAL_SEC) {
         let compaction_interval_sec = compaction_interval_sec.parse::<u64>().map_err(|_| {
             ErrorCode::InvalidInputSyntax(format!(
                 "compaction_interval_sec must be a positive integer: {}",
@@ -1762,6 +1771,42 @@ pub async fn create_iceberg_engine_table(
         source
             .as_mut()
             .map(|x| x.with_properties.remove("compaction_interval_sec"));
+    }
+
+    if let Some(enable_snapshot_expiration) =
+        handler_args.with_options.get(ENABLE_SNAPSHOT_EXPIRATION)
+    {
+        match enable_snapshot_expiration.to_lowercase().as_str() {
+            "true" => {
+                risingwave_common::license::Feature::IcebergCompaction
+                    .check_available()
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "true".to_owned());
+            }
+            "false" => {
+                sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "false".to_owned());
+            }
+            _ => {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "enable_snapshot_expiration must be true or false: {}",
+                    enable_snapshot_expiration
+                ))
+                .into());
+            }
+        }
+
+        // remove enable_snapshot_expiration from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove(ENABLE_SNAPSHOT_EXPIRATION));
+    } else {
+        sink_with.insert(
+            ENABLE_SNAPSHOT_EXPIRATION.to_owned(),
+            risingwave_common::license::Feature::IcebergCompaction
+                .check_available()
+                .is_ok()
+                .to_string(),
+        );
     }
 
     let partition_by = handler_args

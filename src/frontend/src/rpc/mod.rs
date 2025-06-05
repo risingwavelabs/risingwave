@@ -137,7 +137,7 @@ async fn get_new_table_plan(
     let (new_table_definition, original_catalog) =
         get_new_table_definition_for_cdc_table(&session, table_name.clone(), &new_version_columns)
             .await?;
-    let (_, table, graph, col_index_mapping, job_type) = get_replace_table_plan(
+    let (_, table, graph, job_type) = get_replace_table_plan(
         &session,
         table_name,
         new_table_definition,
@@ -155,6 +155,5 @@ async fn get_new_table_plan(
             },
         )),
         fragment_graph: Some(graph),
-        table_col_index_mapping: Some(col_index_mapping.to_protobuf()),
     })
 }

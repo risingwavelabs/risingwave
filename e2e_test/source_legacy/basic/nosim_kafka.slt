@@ -48,11 +48,11 @@ dimensions.height double precision false NULL
 dimensions.length double precision false NULL
 dimensions.width double precision false NULL
 map jsonb false NULL
-notMap struct false NULL
-notMap.a character varying false NULL
+"notMap" struct false NULL
+"notMap".a character varying false NULL
 price double precision false NULL
-productId bigint false NULL
-productName character varying false NULL
+"productId" bigint false NULL
+"productName" character varying false NULL
 tags character varying[] false NULL
 _row_id serial true NULL
 _rw_timestamp timestamp with time zone true NULL

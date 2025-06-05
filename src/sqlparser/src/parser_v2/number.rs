@@ -36,8 +36,8 @@ where
         .parse_next(input)
 }
 
-/// Consume an unsigned literal integer/long
-pub fn literal_uint<S>(input: &mut S) -> ModalResult<u64>
+/// Consume an unsigned literal long
+pub fn literal_u64<S>(input: &mut S) -> ModalResult<u64>
 where
     S: TokenStream,
 {
@@ -84,7 +84,7 @@ where
 
     delimited(
         Token::LParen,
-        cut_err(literal_uint.try_map(move |v| {
+        cut_err(literal_u64.try_map(move |v| {
             if range.contains(&v) {
                 Ok(v)
             } else {
