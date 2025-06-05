@@ -178,6 +178,8 @@ pub enum DataType {
     Map(MapType),
 }
 
+impl !PartialOrd for DataType {}
+
 // For DataType::List
 impl std::str::FromStr for Box<DataType> {
     type Err = BoxedError;
