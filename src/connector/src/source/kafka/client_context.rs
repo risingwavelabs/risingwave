@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, LazyLock};
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use aws_config::Region;
 use aws_sdk_s3::config::SharedCredentialsProvider;
 use rdkafka::client::{BrokerAddr, OAuthToken};
@@ -23,7 +23,6 @@ use rdkafka::consumer::ConsumerContext;
 use rdkafka::message::DeliveryResult;
 use rdkafka::producer::ProducerContext;
 use rdkafka::{ClientContext, Statistics};
-use thiserror_ext::AsReport;
 use tokio::runtime::Runtime;
 
 use super::private_link::{BrokerAddrRewriter, PrivateLinkContextRole};
@@ -146,10 +145,10 @@ impl KafkaContextCommon {
                         .await
                     })
                 });
-                let timeout_result =
-                    result.map_err(|_e| "generating AWS MSK IAM token timeout".to_owned())?;
-                timeout_result
-                    .map_err(|e| format!("generating AWS MSK IAM token error: {}", e.as_report()))?
+                result
+                    .map_err(|_e| "generating AWS MSK IAM token timeout".to_owned())?
+                    .map_err(|e| anyhow!(e))
+                    .context("failed to generate AWS MSK IAM token")?
             };
             Ok(OAuthToken {
                 token,
