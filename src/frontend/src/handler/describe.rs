@@ -21,7 +21,6 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use pretty_xmlish::{Pretty, PrettyConfig};
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_common::types::{DataType, Fields};
-use risingwave_expr::bail;
 use risingwave_pb::meta::FragmentDistribution;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::table_fragments::fragment;
@@ -33,7 +32,7 @@ use super::show::ShowColumnRow;
 use super::{RwPgResponse, fields_to_descriptors};
 use crate::binder::{Binder, Relation};
 use crate::catalog::CatalogError;
-use crate::error::{ErrorCode, Result};
+use crate::error::Result;
 use crate::handler::show::ShowColumnName;
 use crate::handler::{HandlerArgs, RwPgResponseBuilderExt};
 
@@ -260,45 +259,8 @@ pub async fn handle_describe_fragments(
     let session = handler_args.session.clone();
     let job_id = {
         let mut binder = Binder::new_for_system(&session);
-
         Binder::validate_cross_db_reference(&session.database(), &object_name)?;
-        let not_found_err = CatalogError::NotFound("stream job", object_name.to_string());
-
-        if let Ok(relation) = binder.bind_relation_by_name(object_name.clone(), None, None, false) {
-            match relation {
-                Relation::Source(s) => {
-                    if s.is_shared() {
-                        s.catalog.id
-                    } else {
-                        bail!(ErrorCode::NotSupported(
-                            "non shared source has no fragments to describe".to_owned(),
-                            "Use `DESCRIBE` instead.".to_owned(),
-                        ));
-                    }
-                }
-                Relation::BaseTable(t) => t.table_catalog.id.table_id,
-                Relation::SystemTable(_t) => {
-                    bail!(ErrorCode::NotSupported(
-                        "system table has no fragments to describe".to_owned(),
-                        "Use `DESCRIBE` instead.".to_owned(),
-                    ));
-                }
-                Relation::Share(_s) => {
-                    bail!(ErrorCode::NotSupported(
-                        "view has no fragments to describe".to_owned(),
-                        "Use `DESCRIBE` instead.".to_owned(),
-                    ));
-                }
-                _ => {
-                    // Other relation types (Subquery, Join, etc.) are not directly describable.
-                    return Err(not_found_err.into());
-                }
-            }
-        } else if let Ok(sink) = binder.bind_sink_by_name(object_name.clone()) {
-            sink.sink_catalog.id.sink_id
-        } else {
-            return Err(not_found_err.into());
-        }
+        binder.bind_streaming_relation_id_by_name(object_name.clone())?
     };
 
     let meta_client = session.env().meta_client();
