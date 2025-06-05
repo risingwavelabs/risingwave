@@ -72,8 +72,10 @@ Like other stream processors, RisingWave supports:
 
 But RisingWave does more. It provides both **online and offline storage**:
 
-* **Online serving:** Row-based storage for ad-hoc point/range queries with single-digit millisecond latency.
-* **Offline persistence:** Apache Iceberg-based storage that persists streaming data at low cost, enabling open access by other query engines.
+* **Online serving:** Row-based storage optimized for point and range queries with single-digit millisecond latency.
+* **Offline persistence:** Built-in Apache Iceberg™ integration for low-cost, durable storage with open access for external query engines.
+
+With RisingWave, real-time data isn’t just processed — it’s stored, queried, and shared across your entire stack.
 
 ## Key design decisions
 
