@@ -53,76 +53,78 @@ impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
 }
 
 impl TableFunctionToInternalBackfillProgressRule {
-    fn build_u32_expr(id: u32) -> ExprImpl {
-        ExprImpl::Literal(Box::new(Literal::new(
-            Some(ScalarImpl::Int32(id as i32)),
-            DataType::Int32,
-        )))
-    }
-
     fn build_plan(
         ctx: Rc<OptimizerContext>,
         backfilling_tables: Vec<Arc<TableCatalog>>,
     ) -> anyhow::Result<PlanRef> {
         let mut all_progress = Vec::with_capacity(backfilling_tables.len());
         for table in backfilling_tables {
-            let Some(job_id) = table.job_id else {
-                bail!("`job_id` column not found in backfill table");
-            };
-            let Some(row_count_column_index) =
-                table.columns.iter().position(|c| c.name() == "row_count")
-            else {
-                bail!("`row_count` column not found in backfill table");
-            };
-            let fragment_id = table.fragment_id;
-            let table_id = table.id;
+            let backfill_info = BackfillInfo::new(&table)?;
 
-            let scan = LogicalScan::create(
-                table.name.clone(),
-                table,
-                vec![],
-                ctx.clone(),
-                None,
-                Default::default(),
-            );
+            let scan = Self::build_scan(ctx.clone(), table);
+            let agg = Self::build_agg(&backfill_info, scan)?;
+            let project = Self::build_project(&backfill_info, agg)?;
 
-            let select_exprs = vec![ExprImpl::AggCall(Box::new(AggCall::new(
-                AggType::Builtin(PbAggKind::Sum),
-                vec![ExprImpl::InputRef(Box::new(InputRef {
-                    index: row_count_column_index,
-                    data_type: DataType::Int64,
-                }))],
-                false,
-                OrderBy::any(),
-                Condition::true_cond(),
-                vec![],
-            )?))];
-            let group_by = GroupBy::GroupKey(vec![]);
-            let (agg, _, _) = LogicalAgg::create(select_exprs, group_by, None, scan.into())?;
-
-            let current_count_per_vnode = ExprImpl::InputRef(Box::new(InputRef {
-                index: 0,
-                data_type: DataType::Decimal,
-            }))
-            .cast_explicit(DataType::Int64)?;
-
-            let project = {
-                let job_id_expr = Self::build_u32_expr(job_id.table_id);
-                let fragment_id_expr = Self::build_u32_expr(fragment_id);
-                let table_id_expr = Self::build_u32_expr(table_id.table_id);
-                LogicalProject::new(
-                    agg,
-                    vec![
-                        job_id_expr,
-                        fragment_id_expr,
-                        table_id_expr,
-                        current_count_per_vnode,
-                    ],
-                )
-            };
             all_progress.push(project.into());
         }
         Ok(LogicalUnion::new(true, all_progress).into())
+    }
+
+    fn build_scan(ctx: Rc<OptimizerContext>, table: Arc<TableCatalog>) -> LogicalScan {
+        LogicalScan::create(
+            table.name.clone(),
+            table,
+            vec![],
+            ctx.clone(),
+            None,
+            Default::default(),
+        )
+    }
+
+    fn build_agg(backfill_info: &BackfillInfo, scan: LogicalScan) -> anyhow::Result<PlanRef> {
+        let select_exprs = vec![ExprImpl::AggCall(Box::new(AggCall::new(
+            AggType::Builtin(PbAggKind::Sum),
+            vec![ExprImpl::InputRef(Box::new(InputRef {
+                index: backfill_info.row_count_column_index,
+                data_type: DataType::Int64,
+            }))],
+            false,
+            OrderBy::any(),
+            Condition::true_cond(),
+            vec![],
+        )?))];
+        let group_by = GroupBy::GroupKey(vec![]);
+        let (agg, _, _) = LogicalAgg::create(select_exprs, group_by, None, scan.into())?;
+        Ok(agg)
+    }
+
+    fn build_project(backfill_info: &BackfillInfo, agg: PlanRef) -> anyhow::Result<LogicalProject> {
+        let job_id_expr = Self::build_u32_expr(backfill_info.job_id);
+        let fragment_id_expr = Self::build_u32_expr(backfill_info.fragment_id);
+        let table_id_expr = Self::build_u32_expr(backfill_info.table_id);
+
+        let current_count_per_vnode = ExprImpl::InputRef(Box::new(InputRef {
+            index: 0,
+            data_type: DataType::Decimal,
+        }))
+        .cast_explicit(DataType::Int64)?;
+
+        Ok(LogicalProject::new(
+            agg,
+            vec![
+                job_id_expr,
+                fragment_id_expr,
+                table_id_expr,
+                current_count_per_vnode,
+            ],
+        ))
+    }
+
+    fn build_u32_expr(id: u32) -> ExprImpl {
+        ExprImpl::Literal(Box::new(Literal::new(
+            Some(ScalarImpl::Int32(id as i32)),
+            DataType::Int32,
+        )))
     }
 }
 
@@ -137,5 +139,33 @@ fn get_backfilling_tables(reader: CatalogReadGuard) -> Vec<Arc<TableCatalog>> {
 impl TableFunctionToInternalBackfillProgressRule {
     pub fn create() -> BoxedRule {
         Box::new(TableFunctionToInternalBackfillProgressRule {})
+    }
+}
+
+struct BackfillInfo {
+    job_id: u32,
+    row_count_column_index: usize,
+    fragment_id: u32,
+    table_id: u32,
+}
+
+impl BackfillInfo {
+    fn new(table: &TableCatalog) -> anyhow::Result<Self> {
+        let Some(job_id) = table.job_id else {
+            bail!("`job_id` column not found in backfill table");
+        };
+        let Some(row_count_column_index) =
+            table.columns.iter().position(|c| c.name() == "row_count")
+        else {
+            bail!("`row_count` column not found in backfill table");
+        };
+        let fragment_id = table.fragment_id;
+        let table_id = table.id;
+        Ok(Self {
+            job_id: job_id.table_id,
+            row_count_column_index,
+            fragment_id,
+            table_id: table_id.table_id,
+        })
     }
 }
