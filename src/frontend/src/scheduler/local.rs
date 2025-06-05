@@ -108,7 +108,7 @@ impl LocalQueryExecution {
         let plan_fragment = self.create_plan_fragment()?;
         let plan_node = plan_fragment.root.unwrap();
         let task_stats = context.task_stats().clone();
-        // TODO: collect stage stats for root stage
+        // TODO: Collect stage stats for root stage if any stats in TaskStats becomes relevant to root stage in the future.
         let executor = ExecutorBuilder::new(
             &plan_node,
             &task_id,
@@ -128,7 +128,7 @@ impl LocalQueryExecution {
         }
         let mut query_stats = QueryStats::new();
         if let Some(ref task_stats) = task_stats {
-            query_stats.add_task_stats(&task_stats);
+            query_stats.add_task_stats(task_stats);
         }
         let _ = query_stats_tx
             .send(query_stats)

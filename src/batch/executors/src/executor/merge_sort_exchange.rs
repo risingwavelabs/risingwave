@@ -15,10 +15,13 @@
 use std::sync::Arc;
 
 use futures_async_stream::try_stream;
+use risingwave_batch::exchange_source::ExchangeData;
+use risingwave_batch::task::task_stats::TaskStatsRef;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_expr::codegen::BoxStream;
 use risingwave_pb::batch_plan::PbExchangeSource;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -88,6 +91,27 @@ impl<CS: 'static + Send + CreateSource> Executor for MergeSortExchangeExecutorIm
         self.do_execute()
     }
 }
+
+#[try_stream(boxed, ok = DataChunk, error = BatchError)]
+async fn to_data_chunk_stream(
+    exchange_data_stream: BoxStream<'static, Result<ExchangeData>>,
+    task_stats: Option<TaskStatsRef>,
+) {
+    #[for_await]
+    for data in exchange_data_stream {
+        let data = data?;
+        match data {
+            ExchangeData::DataChunk(data_chunk) => yield data_chunk,
+            ExchangeData::TaskStats(t) => {
+                // Accumulate TaskStats of child stage in order to collect QueryStats for local mode.
+                if let Some(ref task_stats) = task_stats {
+                    task_stats.add(&t);
+                }
+            }
+        }
+    }
+}
+
 /// Everytime `execute` is called, it tries to produce a chunk of size
 /// `self.chunk_size`. It is possible that the chunk's size is smaller than the
 /// `self.chunk_size` as the executor runs out of input from `sources`.
@@ -99,10 +123,13 @@ impl<CS: 'static + Send + CreateSource> MergeSortExchangeExecutorImpl<CS> {
             let new_source = self.source_creators[source_idx]
                 .create_source(&*self.context, &self.proto_sources[source_idx])
                 .await?;
-
+            let data_chunk_stream = to_data_chunk_stream(
+                new_source.take_data_stream(),
+                self.context.task_stats().clone(),
+            );
             sources.push(Box::new(WrapStreamExecutor::new(
                 self.schema.clone(),
-                new_source.take_data_stream(),
+                data_chunk_stream,
             )));
         }
 

@@ -171,7 +171,7 @@ pub struct BatchTaskContextImpl {
 }
 
 impl BatchTaskContextImpl {
-    pub fn new(compute_node_context: ComputeNodeContext) -> Arc<dyn BatchTaskContext> {
+    pub fn create(compute_node_context: ComputeNodeContext) -> Arc<dyn BatchTaskContext> {
         Arc::new(Self {
             compute_node_context,
             task_stats: Arc::new(TaskStats::new()),

@@ -70,7 +70,7 @@ impl TaskService for BatchServiceImpl {
 
         let (state_tx, state_rx) = tokio::sync::mpsc::channel(TASK_STATUS_BUFFER_SIZE);
         let state_reporter = StateReporter::new_with_dist_sender(state_tx);
-        let context = BatchTaskContextImpl::new(ComputeNodeContext::create(self.env.clone()));
+        let context = BatchTaskContextImpl::create(ComputeNodeContext::create(self.env.clone()));
         let res = self
             .mgr
             .fire_task(
@@ -168,7 +168,7 @@ impl BatchServiceImpl {
         let tracing_context = TracingContext::from_protobuf(&tracing_context);
         let expr_context = expr_context.expect("no expression context found");
 
-        let context = BatchTaskContextImpl::new(ComputeNodeContext::create(env.clone()));
+        let context = BatchTaskContextImpl::create(ComputeNodeContext::create(env.clone()));
         trace!(
             "local execute request: plan:{:?} with task id:{:?}",
             plan, task_id

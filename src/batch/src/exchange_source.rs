@@ -62,19 +62,12 @@ impl ExchangeSourceImpl {
         }
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
+    #[try_stream(boxed, ok = ExchangeData, error = BatchError)]
     pub async fn take_data_stream(self) {
         let mut source = self;
         loop {
             match source.take_data().await {
-                Ok(Some(data)) => {
-                    match data {
-                        ExchangeData::DataChunk(chunk) => yield chunk,
-                        ExchangeData::TaskStats(_task_stats) => {
-                            // TODO: Collect task stats for MergeSortExchange.
-                        }
-                    }
-                }
+                Ok(Some(chunk)) => yield chunk,
                 Ok(None) => break,
                 Err(e) => return Err(e),
             }

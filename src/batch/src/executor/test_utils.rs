@@ -41,7 +41,7 @@ impl FakeExchangeSource {
 impl ExchangeSource for FakeExchangeSource {
     async fn take_data(&mut self) -> Result<Option<ExchangeData>> {
         if let Some(chunk) = self.chunks.pop() {
-            Ok(chunk.map(|c| ExchangeData::DataChunk(c)))
+            Ok(chunk.map(ExchangeData::DataChunk))
         } else {
             Ok(None)
         }

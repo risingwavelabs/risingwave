@@ -114,6 +114,7 @@ mod tests {
             for _ in 0..3 {
                 tx.send(Ok(GetDataResponse {
                     record_batch: Some(DataChunk::default()),
+                    task_stats: None,
                 }))
                 .await
                 .unwrap();

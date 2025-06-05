@@ -717,7 +717,7 @@ impl StageRunner {
                     warn!("Send task execution failed");
                 }
             }
-            // TODO: collect stage stats for root stage
+            // Collect stage stats for root stage if any stats in TaskStats becomes relevant to root stage in the future.
             _ => self.notify_stage_completed(None).await,
         }
 
