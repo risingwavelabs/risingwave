@@ -93,11 +93,11 @@ StreamDml { columns: [id, name, age, created_at, data] } { output: [ id, name, a
 statement error
 DESCRIBE FRAGMENTS describe_plan_test.src;
 ----
-    db error: ERROR: Failed to run the query
+db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Catalog error
-  2: materialized view, index, table or sink not found: src
+  2: materialized view, index, table or sink not found: describe_plan_test.src
 
 
 skipif madsim
@@ -184,11 +184,11 @@ StreamSink { type: upsert, columns: [id, name, age, created_at, type], downstrea
 query error
 DESCRIBE FRAGMENTS describe_plan_test."view-with-dashes";
 ----
-    db error: ERROR: Failed to run the query
+db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Catalog error
-  2: materialized view, index, table or sink not found: view-with-dashes
+  2: materialized view, index, table or sink not found: describe_plan_test."view-with-dashes"
 
 
 # Test error cases
@@ -196,22 +196,22 @@ Caused by these errors (recent errors listed first):
 query error
 DESCRIBE FRAGMENTS non_existent_schema.some_table;
 ----
-    db error: ERROR: Failed to run the query
+db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Catalog error
-  2: materialized view, index, table or sink not found: some_table
+  2: materialized view, index, table or sink not found: non_existent_schema.some_table
 
 
 # Non-existent relation in existing schema
 query error
 DESCRIBE FRAGMENTS describe_plan_test.non_existent_table;
 ----
-    db error: ERROR: Failed to run the query
+db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Catalog error
-  2: materialized view, index, table or sink not found: non_existent_table
+  2: materialized view, index, table or sink not found: describe_plan_test.non_existent_table
 
 
 
@@ -219,22 +219,22 @@ Caused by these errors (recent errors listed first):
 query error
 DESCRIBE FRAGMENTS pg_catalog.pg_tables;
 ----
-    db error: ERROR: Failed to run the query
+db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Catalog error
-  2: materialized view, index, table or sink not found: pg_tables
+  2: materialized view, index, table or sink not found: pg_catalog.pg_tables
 
 
 # System table (should fail)
 query error
 DESCRIBE FRAGMENTS pg_catalog.rw_system_tables;
 ----
-    db error: ERROR: Failed to run the query
+db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Catalog error
-  2: materialized view, index, table or sink not found: rw_system_tables
+  2: materialized view, index, table or sink not found: pg_catalog.rw_system_tables
 
 
 # Creating stream job

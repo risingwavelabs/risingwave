@@ -79,7 +79,8 @@ impl Binder {
             return Ok(sink.sink_catalog.id.sink_id);
         }
 
-        let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
+        let (schema_name, table_name) =
+            Self::resolve_schema_qualified_name(&self.db_name, name.clone())?;
 
         // hold the owned_paths, so we can drop immutable borrow of self
         let owned_paths = match schema_name.as_ref() {
@@ -104,11 +105,10 @@ impl Binder {
             }
         }
 
-        Err(CatalogError::NotFound(
-            "materialized view, index, table or sink",
-            table_name.to_owned(),
+        Err(
+            CatalogError::NotFound("materialized view, index, table or sink", name.to_string())
+                .into(),
         )
-        .into())
     }
 
     /// Binds table or source, or logical view according to what we get from the catalog.
