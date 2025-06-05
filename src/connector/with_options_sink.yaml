@@ -577,6 +577,11 @@ IcebergConfig:
     comments: The interval of iceberg compaction
     required: false
     default: Default::default
+  - name: enable_snapshot_expiration
+    field_type: bool
+    comments: Whether to enable iceberg expired snapshots.
+    required: false
+    default: Default::default
 KafkaConfig:
   fields:
   - name: topic

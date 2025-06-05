@@ -124,7 +124,7 @@ where
             let first_row_set = match first_row_set {
                 None => {
                     return Err(PsqlError::Uncategorized(
-                        anyhow::anyhow!("no affected rows in output").into(),
+                        "no affected rows in output".into(),
                     ));
                 }
                 Some(row) => row.map_err(PsqlError::SimpleQueryError)?,

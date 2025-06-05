@@ -102,8 +102,7 @@ impl Connection for KafkaConnection {
 }
 
 pub fn read_kafka_log_level() -> Option<RDKafkaLogLevel> {
-    let log_level =
-        std::env::var("RISINGWAVE_KAFKA_LOG_LEVEL").unwrap_or_else(|_| "INFO".to_owned());
+    let log_level = std::env::var("RISINGWAVE_KAFKA_LOG_LEVEL").ok()?;
     match log_level.to_uppercase().as_str() {
         "DEBUG" => Some(RDKafkaLogLevel::Debug),
         "INFO" => Some(RDKafkaLogLevel::Info),
@@ -113,13 +112,7 @@ pub fn read_kafka_log_level() -> Option<RDKafkaLogLevel> {
         "EMERG" => Some(RDKafkaLogLevel::Emerg),
         "ALERT" => Some(RDKafkaLogLevel::Alert),
         "NOTICE" => Some(RDKafkaLogLevel::Notice),
-        _ => {
-            tracing::info!(
-                "Invalid RISINGWAVE_KAFKA_LOG_LEVEL: {}, using INFO instead",
-                log_level
-            );
-            None
-        }
+        _ => None,
     }
 }
 

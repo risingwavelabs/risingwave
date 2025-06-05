@@ -983,7 +983,7 @@ impl ExprRewriter for LogicalAggBuilder {
     }
 
     fn rewrite_subquery(&mut self, subquery: crate::expr::Subquery) -> ExprImpl {
-        if subquery.is_correlated(0) {
+        if subquery.is_correlated_by_depth(0) {
             self.error = Some(
                 not_implemented!(
                     issue = 2275,

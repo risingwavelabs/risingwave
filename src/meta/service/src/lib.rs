@@ -29,6 +29,7 @@ pub mod heartbeat_service;
 pub mod hosted_iceberg_catalog_service;
 pub mod hummock_service;
 pub mod meta_member_service;
+pub mod monitor_service;
 pub mod notification_service;
 pub mod scale_service;
 pub mod serving_service;
