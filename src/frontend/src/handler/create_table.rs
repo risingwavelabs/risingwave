@@ -28,7 +28,6 @@ use risingwave_common::catalog::{
     RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, TableId,
 };
 use risingwave_common::config::MetaBackend;
-use risingwave_common::license::Feature;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
@@ -60,7 +59,6 @@ use risingwave_sqlparser::ast::{
     Statement, TableConstraint, WebhookSourceInfo, WithProperties,
 };
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
-use thiserror_ext::AsReport;
 
 use super::create_source::{CreateSourceType, SqlColumnStrategy, bind_columns_from_source};
 use super::{RwPgResponse, alter_streaming_rate_limit, create_sink, create_source};
