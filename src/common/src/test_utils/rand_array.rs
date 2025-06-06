@@ -27,7 +27,7 @@ use rand::{Rng, SeedableRng};
 use crate::array::{Array, ArrayBuilder, ArrayRef, ListValue, MapValue, StructValue};
 use crate::types::{
     DataType, Date, Decimal, Int256, Interval, JsonbVal, MapType, NativeType, Scalar, Serial, Time,
-    Timestamp, Timestamptz,
+    Timestamp, Timestamptz, Uuid,
 };
 
 pub trait RandValue {
@@ -196,6 +196,12 @@ where
 {
     let array: A = seed_rand_array(size, seed, null_ratio);
     Arc::new(array.into())
+}
+
+impl RandValue for Uuid {
+    fn rand_value<R: Rng>(_rand: &mut R) -> Self {
+        Self(uuid::Uuid::new_v4())
+    }
 }
 
 #[cfg(test)]

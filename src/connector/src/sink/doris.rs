@@ -216,6 +216,9 @@ impl DorisSink {
             risingwave_common::types::DataType::Map(_) => {
                 Err(SinkError::Doris("doris can not support Map".to_owned()))
             }
+            risingwave_common::types::DataType::Uuid => {
+                Err(SinkError::Doris("doris can not support Uuid".to_owned()))
+            }
         }
     }
 }

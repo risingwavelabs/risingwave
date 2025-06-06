@@ -1061,9 +1061,9 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         }
         AstDataType::Bytea => DataType::Bytea,
         AstDataType::Jsonb => DataType::Jsonb,
+        AstDataType::Uuid => DataType::Uuid,
         AstDataType::Regclass
         | AstDataType::Regproc
-        | AstDataType::Uuid
         | AstDataType::Decimal(_, _)
         | AstDataType::Time(true) => return Err(new_err().into()),
     };

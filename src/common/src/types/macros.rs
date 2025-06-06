@@ -58,8 +58,9 @@ macro_rules! for_all_variants {
             { Serial,       Serial,       serial,       $crate::types::Serial,      $crate::types::Serial,              $crate::array::SerialArray,         $crate::array::SerialArrayBuilder       },
             { Struct,       Struct,       struct,       $crate::types::StructValue, $crate::types::StructRef<'scalar>,  $crate::array::StructArray,         $crate::array::StructArrayBuilder       },
             { List,         List,         list,         $crate::types::ListValue,   $crate::types::ListRef<'scalar>,    $crate::array::ListArray,           $crate::array::ListArrayBuilder         },
-            { Map,          Map,          map,          $crate::types::MapValue,    $crate::types::MapRef<'scalar>,     $crate::array::MapArray,            $crate::array::MapArrayBuilder         },
-            { Bytea,        Bytea,        bytea,        Box<[u8]>,                  &'scalar [u8],                      $crate::array::BytesArray,          $crate::array::BytesArrayBuilder        }
+            { Map,          Map,          map,          $crate::types::MapValue,    $crate::types::MapRef<'scalar>,     $crate::array::MapArray,            $crate::array::MapArrayBuilder          },
+            { Bytea,        Bytea,        bytea,        Box<[u8]>,                  &'scalar [u8],                      $crate::array::BytesArray,          $crate::array::BytesArrayBuilder        },
+            { Uuid,         Uuid,         uuid,        $crate::types::Uuid,          $crate::types::UuidRef<'scalar>,   $crate::array::UuidArray,           $crate::array::UuidArrayBuilder         }
         }
     };
 }
