@@ -145,6 +145,15 @@ impl CommandContext {
                     .unregister_table_ids(unregistered_state_table_ids.iter().cloned())
                     .await?;
             }
+            Command::ConnectorPropsChange(obj_id_map_props) => {
+                // todo: we dont know the type of the object id, it can be a source or a sink. Should carry more info in the barrier command.
+                barrier_manager_context
+                    .source_manager
+                    .apply_source_change(SourceChange::UpdateSourceProps {
+                        source_id_map_new_props: obj_id_map_props.clone(),
+                    })
+                    .await;
+            }
             Command::CreateStreamingJob {
                 info,
                 job_type,
@@ -318,7 +327,6 @@ impl CommandContext {
             }
             Command::DropSubscription { .. } => {}
             Command::MergeSnapshotBackfillStreamingJobs(_) => {}
-            Command::ConnectorPropsChange(_) => {}
             Command::StartFragmentBackfill { .. } => {}
         }
 
