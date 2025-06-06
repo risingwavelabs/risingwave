@@ -46,7 +46,8 @@ impl Debug for StructType {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, educe::Educe)]
+#[educe(PartialEq, Eq, Hash)] // ignore ids for backward compatibility
 struct StructTypeInner {
     /// The name and data type of each field.
     ///
@@ -57,22 +58,12 @@ struct StructTypeInner {
     ///
     /// Only present if this data type is persisted within a table schema (`ColumnDesc`)
     /// in a new version of the catalog that supports nested-schema evolution.
+    #[educe(PartialEq(ignore), Hash(ignore))]
     field_ids: Option<Box<[ColumnId]>>,
 
     /// Whether the fields are unnamed.
+    #[educe(PartialEq(ignore), Hash(ignore))]
     is_unnamed: bool,
-}
-
-impl PartialEq for StructTypeInner {
-    fn eq(&self, other: &Self) -> bool {
-        self.fields == other.fields
-    }
-}
-impl Eq for StructTypeInner {}
-impl std::hash::Hash for StructTypeInner {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.fields.hash(state);
-    }
 }
 
 impl StructType {
