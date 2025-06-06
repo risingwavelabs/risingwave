@@ -978,6 +978,12 @@ pub struct StorageConfig {
 
     #[serde(default = "default::storage::time_travel_version_cache_capacity")]
     pub time_travel_version_cache_capacity: u64,
+
+    // iceberg compaction
+    #[serde(default = "default::storage::iceberg_compaction_target_file_size_mb")]
+    pub iceberg_compaction_target_file_size_mb: u32,
+    #[serde(default = "default::storage::iceberg_compaction_enable_validate")]
+    pub iceberg_compaction_enable_validate: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
@@ -1980,6 +1986,14 @@ pub mod default {
 
         pub fn time_travel_version_cache_capacity() -> u64 {
             10
+        }
+
+        pub fn iceberg_compaction_target_file_size_mb() -> u32 {
+            1024
+        }
+
+        pub fn iceberg_compaction_enable_validate() -> bool {
+            false
         }
     }
 

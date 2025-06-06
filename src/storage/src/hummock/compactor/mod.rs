@@ -456,14 +456,20 @@ pub fn start_compactor_iceberg(
 
                                 running_task_parallelism
                                     .fetch_add(parallelism, Ordering::SeqCst);
+                                let iceberg_compaction_target_file_size_bytes =
+                                        (compactor_context.storage_opts.iceberg_compaction_target_file_size_mb * 1024 * 1024) as usize;
+                                let iceberg_compaction_enable_validate =
+                                        compactor_context.storage_opts.iceberg_compaction_enable_validate;
                                 executor.spawn(async move {
                                     let (tx, rx) = tokio::sync::oneshot::channel();
                                     shutdown.lock().unwrap().insert(task_id, tx);
 
                                     let compaction_config = Arc::new(IcebergCompactionConfigBuilder::default()
-                                        .batch_parallelism(parallelism as usize)
-                                        .target_partitions(parallelism as usize)
-                                        .build()
+                                            .batch_parallelism(parallelism as usize)
+                                            .target_partitions(parallelism as usize)
+                                            .target_file_size(iceberg_compaction_target_file_size_bytes)
+                                            .validate_compaction(iceberg_compaction_enable_validate)
+                                            .build()
                                     );
 
                                     iceberg_runner.compact_iceberg(
