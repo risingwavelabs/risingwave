@@ -275,6 +275,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         None,
         None,
         None,
+        None,
     ));
     let mut stream = scan.execute();
     let result = stream.next().await;
@@ -343,6 +344,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         test_batch_query_epoch(),
         1024,
         "RowSeqScanExecutor2".to_owned(),
+        None,
         None,
         None,
         None,
@@ -426,6 +428,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         None,
         None,
         None,
+        None,
     ));
 
     let mut stream = scan.execute();
@@ -502,6 +505,7 @@ async fn test_row_seq_scan() -> StreamResult<()> {
         test_batch_query_epoch(),
         1,
         "RowSeqScanExecutor2".to_owned(),
+        None,
         None,
         None,
         None,

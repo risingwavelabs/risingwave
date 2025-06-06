@@ -23,10 +23,17 @@ use crate::execution::grpc_exchange::GrpcExchangeSource;
 use crate::execution::local_exchange::LocalExchangeSource;
 use crate::executor::test_utils::FakeExchangeSource;
 use crate::task::TaskId;
+use crate::task::task_stats::TaskStats;
+
+pub enum ExchangeData {
+    DataChunk(DataChunk),
+    /// Only local execution mode will send this type of message.
+    LocalModeTaskStats(TaskStats),
+}
 
 /// Each `ExchangeSource` maps to one task, it takes the execution result from task chunk by chunk.
 pub trait ExchangeSource: Send + Debug {
-    fn take_data(&mut self) -> impl Future<Output = Result<Option<DataChunk>>> + '_;
+    fn take_data(&mut self) -> impl Future<Output = Result<Option<ExchangeData>>> + '_;
 
     /// Get upstream task id.
     fn get_task_id(&self) -> TaskId;
@@ -40,7 +47,7 @@ pub enum ExchangeSourceImpl {
 }
 
 impl ExchangeSourceImpl {
-    pub async fn take_data(&mut self) -> Result<Option<DataChunk>> {
+    pub async fn take_data(&mut self) -> Result<Option<ExchangeData>> {
         match self {
             ExchangeSourceImpl::Grpc(grpc) => grpc.take_data().await,
             ExchangeSourceImpl::Local(local) => local.take_data().await,
@@ -56,7 +63,7 @@ impl ExchangeSourceImpl {
         }
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
+    #[try_stream(boxed, ok = ExchangeData, error = BatchError)]
     pub async fn take_data_stream(self) {
         let mut source = self;
         loop {
