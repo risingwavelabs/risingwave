@@ -121,10 +121,9 @@ get_old_version() {
     local VERSION_OFFSET=1
   fi
 
-  # First we obtain a list of versions from git branch names.
-  # Then we normalize them to semver format (MAJOR.MINOR.PATCH).
-  echo "--- git branch origin output"
-  git branch -r | grep origin
+  # First get the new version to offset against
+  get_new_version
+  echo "--- NEW VERSION: $NEW_VERSION"
 
   # Extract X.Y.Z tags
   echo "--- VERSION BRANCHES"
@@ -136,21 +135,37 @@ get_old_version() {
   local sorted_versions=$(echo -e "$tags" | sort -V)
   echo "$sorted_versions"
 
-  # We handle the edge case where the current branch is the one being released.
-  # If so, we need to prune it from the list.
-  # We cannot simply use 'git branch --show-current', because buildkite checks out with the commit,
-  # rather than branch. So the current state is detached.
-  # Instead we rely on BUILDKITE_BRANCH, provided by buildkite.
-  local current_branch=$(echo "$BUILDKITE_BRANCH" | tr -d 'v')
-  echo "--- CURRENT BRANCH: $current_branch"
+  # Find the index of NEW_VERSION in the sorted list
+  local new_version_index=$(echo -e "$sorted_versions" | grep -n "$NEW_VERSION" | cut -d: -f1)
+  if [[ -z $new_version_index ]]; then
+    echo "Could not find NEW_VERSION ($NEW_VERSION) in git tags, looking for latest version in same minor series"
+    # Extract major.minor from NEW_VERSION
+    local major_minor=$(echo "$NEW_VERSION" | cut -d. -f1,2)
+    # Find the latest version in the same minor series
+    local latest_in_series=$(echo -e "$sorted_versions" | grep "^$major_minor\." | tail -n1)
+    if [[ -n "$latest_in_series" ]]; then
+      echo "Found latest version in series $major_minor: $latest_in_series"
+      new_version_index=$(echo -e "$sorted_versions" | grep -n "$latest_in_series" | cut -d: -f1)
+    else
+      echo "No version found in series $major_minor, using latest tag as reference"
+      # Get the total number of versions
+      local total_versions=$(echo -e "$sorted_versions" | wc -l)
+      # Use the latest version's index + 1 as reference
+      new_version_index=$((total_versions + 1))
+    fi
+    echo "Using reference index: $new_version_index"
+  fi
 
-  echo "--- PRUNED VERSIONS"
-  local pruned_versions=$(echo -e "$sorted_versions" | grep -v "$current_branch")
-  echo "$pruned_versions"
+  # Calculate the target index by subtracting the offset
+  local target_index=$((new_version_index - VERSION_OFFSET))
 
-  # Then we take the Nth latest version.
-  # We set $OLD_VERSION to this.
-  OLD_VERSION=$(echo -e "$pruned_versions" | tail -n $VERSION_OFFSET | head -1)
+  # Get the version at the target index
+  OLD_VERSION=$(echo -e "$sorted_versions" | sed -n "${target_index}p")
+  if [[ -z $OLD_VERSION ]]; then
+    echo "Error: Could not find version at offset $VERSION_OFFSET from reference version"
+    exit 1
+  fi
+  echo "--- OLD VERSION: $OLD_VERSION"
 }
 
 get_new_version() {
@@ -163,19 +178,14 @@ get_rw_versions() {
   get_old_version
   get_new_version
 
-  # FIXME(kwannoel): This check does not always hold.
-  # The new/current version may not be up-to-date.
-  # The new version is derived from Cargo.toml, which may not be up-to-date.
-  # The old version are derived from git tags, which are up-to-date.
-  # Then we assert that `$OLD_VERSION` <= `$NEW_VERSION`.
-  #  if version_le "$OLD_VERSION" "$NEW_VERSION"
-  #  then
-  #    echo "OLD_VERSION: $OLD_VERSION"
-  #    echo "NEW_VERSION: $NEW_VERSION"
-  #  else
-  #    echo "ERROR: $OLD_VERSION >= $NEW_VERSION"
-  #    exit 1
-  #  fi
+  if version_le "$OLD_VERSION" "$NEW_VERSION"
+  then
+    echo "OLD_VERSION: $OLD_VERSION"
+    echo "NEW_VERSION: $NEW_VERSION"
+  else
+    echo "ERROR: $OLD_VERSION >= $NEW_VERSION"
+    exit 1
+  fi
 }
 
 # Setup table and materialized view.
