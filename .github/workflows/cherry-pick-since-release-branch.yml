@@ -17,7 +17,7 @@ on:
         type: string
 
 env:
-  GH_TOKEN: ${{ github.token }}
+  GH_TOKEN: ${{ secrets.RISINGWAVE_CI_GITHUB_TOKEN }}
 
 jobs:
   get-target-release-branches:
@@ -119,7 +119,7 @@ jobs:
           pr_labels: "cherry-pick"
           pr_body: "Cherry picking #${{ needs.get-target-release-branches.outputs.pr_number }} onto branch ${{ matrix.branch }}"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RISINGWAVE_CI_GITHUB_TOKEN }}
 
   # This job runs after all cherry-pick attempts and reports the final status
   report_status:
