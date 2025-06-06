@@ -45,7 +45,8 @@ impl Debug for StructType {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, educe::Educe)]
+#[educe(PartialEq, Eq, Hash)] // ignore ids for backward compatibility
 struct StructTypeInner {
     /// The name and data type of each field.
     ///
@@ -56,9 +57,11 @@ struct StructTypeInner {
     ///
     /// Only present if this data type is persisted within a table schema (`ColumnDesc`)
     /// in a new version of the catalog that supports nested-schema evolution.
+    #[educe(PartialEq(ignore), Hash(ignore))]
     field_ids: Option<Box<[ColumnId]>>,
 
     /// Whether the fields are unnamed.
+    #[educe(PartialEq(ignore), Hash(ignore))]
     is_unnamed: bool,
 }
 
