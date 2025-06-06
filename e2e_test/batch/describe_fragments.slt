@@ -97,8 +97,7 @@ db error: ERROR: Failed to run the query
 
 Caused by:
   Not supported: non shared source has no fragments to describe
-HINT: Use `DESCRIBE` instead.
-
+HINT: USE `DESCRIBE` instead
 
 
 skipif madsim
@@ -189,8 +188,7 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Catalog error
-  2: stream job not found: describe_plan_test."view-with-dashes"
-
+  2: materialized view, index, table or sink not found: describe_plan_test."view-with-dashes"
 
 
 # Test error cases
@@ -202,7 +200,7 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Catalog error
-  2: stream job not found: non_existent_schema.some_table
+  2: materialized view, index, table or sink not found: non_existent_schema.some_table
 
 
 # Non-existent relation in existing schema
@@ -213,7 +211,8 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Catalog error
-  2: stream job not found: describe_plan_test.non_existent_table
+  2: materialized view, index, table or sink not found: describe_plan_test.non_existent_table
+
 
 
 # System table (view)
@@ -224,8 +223,7 @@ db error: ERROR: Failed to run the query
 
 Caused by:
   Not supported: view has no fragments to describe
-HINT: Use `DESCRIBE` instead.
-
+HINT: USE `DESCRIBE` instead
 
 
 # System table (should fail)
@@ -236,10 +234,54 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Catalog error
-  2: stream job not found: pg_catalog.rw_system_tables
+  2: materialized view, index, table or sink not found: pg_catalog.rw_system_tables
 
 
+# Creating stream job
+statement ok
+create table describe_plan_test.t (v1 int);
 
+skipif madsim
+statement ok
+insert into describe_plan_test.t select * from generate_series(1, 10000);
+
+skipif madsim
+statement ok
+set background_ddl=true;
+
+skipif madsim
+statement ok
+set backfill_rate_limit=1;
+
+statement ok
+create materialized view describe_plan_test.backfilling_mv as select * from describe_plan_test.t;
+
+skipif madsim
+statement ok
+set background_ddl=false;
+
+skipif madsim
+statement ok
+set backfill_rate_limit=default;
+
+statement ok
+flush;
+
+skipif madsim
+system ok
+psql_validate.py --db $__DATABASE__ --sql "DESCRIBE FRAGMENTS describe_plan_test.backfilling_mv" \
+--expected 'Fragment % (Actor %)
+StreamMaterialize { columns: [v1, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
+├── output: [ t.v1, t._row_id ]
+├── stream key: [ t._row_id ]
+└── StreamTableScan { table: t, columns: [v1, _row_id] } { output: [ t.v1, t._row_id ], stream key: [ t._row_id ] }
+    ├── Upstream { output: [ v1, _row_id ], stream key: [] }
+    └── BatchPlanNode { output: [ v1, _row_id ], stream key: [] }
+'
+
+
+statement ok
+drop materialized view describe_plan_test.backfilling_mv;
 
 # Clean up
 statement ok
