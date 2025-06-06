@@ -22,12 +22,14 @@ view,
 "select 
   progress.job_id,
   progress.fragment_id,
+  concat(job_schemas.name, '.', job_tables.name) as job_name,
+  concat(upstream_schemas.name, '.', upstream_tables.name) as upstream_table_name,
   concat(
-    progress.current_row_count::numeric / stats.total_key_count::numeric * 100,
+    coalesce(progress.current_row_count::numeric / stats.total_key_count::numeric * 100, 0),
     '%',
     ' ',
     '(',
-    progress.current_row_count,
+    coalesce(progress.current_row_count, 0),
     '/',
     stats.total_key_count,
     ')'
@@ -35,6 +37,10 @@ view,
 FROM internal_backfill_progress() progress
 JOIN rw_table_scan scan_info ON progress.job_id = scan_info.job_id AND progress.fragment_id = scan_info.fragment_id
 JOIN rw_table_stats stats ON scan_info.backfill_target_table_id = stats.id
+JOIN rw_relations job_tables ON scan_info.job_id = job_tables.id
+JOIN rw_schemas job_schemas ON job_tables.schema_id = job_schemas.id
+JOIN rw_relations upstream_tables ON scan_info.backfill_target_table_id = upstream_tables.id
+JOIN rw_schemas upstream_schemas ON upstream_tables.schema_id = upstream_schemas.id
 "
 )]
 #[derive(Fields)]
@@ -42,6 +48,8 @@ struct RwFragmentBackfillProgress {
     job_id: i32,
     #[primary_key]
     fragment_id: i32,
+    job_name: String,
+    upstream_table_name: String,
     progress: String,
 }
 
