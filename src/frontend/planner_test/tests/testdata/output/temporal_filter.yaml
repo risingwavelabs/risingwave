@@ -415,10 +415,10 @@
     create table t (t timestamp with time zone, a int);
     select * from t where (t > NOW() - INTERVAL '1 hour' OR t is NULL OR a < 1) AND (t < NOW() - INTERVAL '1 hour' OR a > 1);
   stream_plan: |-
-    StreamMaterialize { columns: [t, a, $src(hidden), t._row_id(hidden), $src#1(hidden)], stream_key: [t._row_id, $src, $src#1], pk_columns: [t._row_id, $src, $src#1], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [t, a, t._row_id(hidden), $src(hidden), $src#1(hidden)], stream_key: [t._row_id, $src, $src#1], pk_columns: [t._row_id, $src, $src#1], pk_conflict: NoCheck }
     └─StreamUnion { all: true }
       ├─StreamExchange { dist: HashShard(t._row_id, $src, 0:Int32) }
-      │ └─StreamProject { exprs: [t.t, t.a, $src, t._row_id, 0:Int32] }
+      │ └─StreamProject { exprs: [t.t, t.a, t._row_id, $src, 0:Int32] }
       │   └─StreamDynamicFilter { predicate: (t.t < $expr2), output: [t.t, t.a, t._row_id, $src], cleaned_by_watermark: true }
       │     ├─StreamFilter { predicate: Not((t.a > 1:Int32)) }
       │     │ └─StreamShare { id: 13 }
@@ -443,7 +443,7 @@
       │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]] }
       │         └─StreamNow { output: [now] }
       └─StreamExchange { dist: HashShard(t._row_id, $src, 1:Int32) }
-        └─StreamProject { exprs: [t.t, t.a, $src, t._row_id, 1:Int32] }
+        └─StreamProject { exprs: [t.t, t.a, t._row_id, $src, 1:Int32] }
           └─StreamFilter { predicate: (t.a > 1:Int32) }
             └─StreamShare { id: 13 }
               └─StreamUnion { all: true }
