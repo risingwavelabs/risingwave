@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, anyhow};
 use assert_matches::assert_matches;
+use await_tree::{InstrumentAwait, span};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use prometheus::HistogramTimer;
@@ -246,6 +247,8 @@ impl BarrierScheduler {
         database_id: DatabaseId,
         commands: Vec<Command>,
     ) -> MetaResult<()> {
+        let commands_display = commands.iter().join(", ");
+
         let mut contexts = Vec::with_capacity(commands.len());
         let mut scheduleds = Vec::with_capacity(commands.len());
 
@@ -269,6 +272,7 @@ impl BarrierScheduler {
             // Wait for this command to be injected, and record the result.
             tracing::trace!("waiting for injected_rx");
             injected_rx
+                .instrument_await(span!("run_commands_wait_injected({commands_display})"))
                 .await
                 .ok()
                 .context("failed to inject barrier")??;
@@ -276,6 +280,7 @@ impl BarrierScheduler {
             tracing::trace!("waiting for collect_rx");
             // Throw the error if it occurs when collecting this barrier.
             collect_rx
+                .instrument_await(span!("run_commands_wait_collected({commands_display})"))
                 .await
                 .ok()
                 .context("failed to collect barrier")??;
