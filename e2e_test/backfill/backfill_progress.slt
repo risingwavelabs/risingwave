@@ -1,0 +1,70 @@
+statement ok
+drop table if exists t;
+
+statement ok
+drop table if exists t2;
+
+statement ok
+drop table if exists t3;
+
+query I
+select job_id from rw_catalog.rw_fragment_backfill_progress;
+----
+
+statement ok
+create table t(v1 int, v2 int);
+
+statement ok
+create table t2(v1 int, v2 int);
+
+statement ok
+create table t3(v1 int, v2 int);
+
+statement ok
+insert into t select * from generate_series(1, 10000);
+
+statement ok
+insert into t2 select * from generate_series(1, 10000);
+
+statement ok
+insert into t3 select * from generate_series(1, 10000);
+
+statement ok
+flush;
+
+statement ok
+set backfill_rate_limit=1;
+
+statement ok
+set background_ddl=true;
+
+statement ok
+set streaming_parallelism=1;
+
+statement ok
+create materialized view m1 as
+  select x.v1, x.v2
+  from
+    t x
+      join t y on x.v1 = y.v1
+      join t2 on x.v1 = t2.v1
+      join t3 on t3.v1 = t2.v1
+
+# Can't validate, because the progress varies. Just make sure it doesn't panic.
+statement ok
+select job_id from rw_catalog.rw_fragment_backfill_progress;
+
+statement ok
+set streaming_parallelism=default;
+
+statement ok
+drop materialized view m1;
+
+statement ok
+drop table t;
+
+statement ok
+drop table t2;
+
+statement ok
+drop table t3;
