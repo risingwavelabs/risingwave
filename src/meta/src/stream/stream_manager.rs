@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
+use await_tree::{InstrumentAwait, span};
 use futures::FutureExt;
 use futures::future::join_all;
 use itertools::Itertools;
@@ -259,6 +260,13 @@ impl GlobalStreamManager {
         ctx: CreateStreamingJobContext,
         run_command_notifier: Option<oneshot::Sender<MetaResult<()>>>,
     ) -> MetaResult<NotificationVersion> {
+        let await_tree_key = format!("Create Streaming Job Worker ({})", ctx.streaming_job.id());
+        let await_tree_span = span!(
+            "{:?}({})",
+            ctx.streaming_job.job_type(),
+            ctx.streaming_job.name()
+        );
+
         let table_id = stream_job_fragments.stream_job_id();
         let database_id = ctx.streaming_job.database_id().into();
         let (sender, mut receiver) = tokio::sync::mpsc::channel(10);
@@ -270,6 +278,7 @@ impl GlobalStreamManager {
             let res: MetaResult<_> = try {
                 let (source_change, streaming_job) = stream_manager
                     .run_create_streaming_job_command(stream_job_fragments, ctx)
+                    .instrument_await("run_create_streaming_job_command")
                     .inspect(move |result| {
                         if let Some(tx) = run_command_notifier {
                             let _ = tx.send(match result {
@@ -289,8 +298,12 @@ impl GlobalStreamManager {
                         streaming_job.database_id().into(),
                         streaming_job.id() as _,
                     )
+                    .instrument_await("wait_streaming_job_finished")
                     .await?;
-                stream_manager.source_manager.apply_source_change(source_change).await;
+                stream_manager.source_manager
+                    .apply_source_change(source_change)
+                    .instrument_await("apply_source_change")
+                    .await;
                 tracing::debug!(?streaming_job, "stream job finish");
                 version
             };
@@ -315,9 +328,17 @@ impl GlobalStreamManager {
             }
         }
         .in_current_span();
+
+        let fut = (self.env.await_tree_reg())
+            .register(await_tree_key, await_tree_span)
+            .instrument(Box::pin(fut));
         tokio::spawn(fut);
 
-        while let Some(state) = receiver.recv().await {
+        while let Some(state) = receiver
+            .recv()
+            .instrument_await("recv_creating_state")
+            .await
+        {
             match state {
                 CreatingState::Failed { reason } => {
                     tracing::debug!(id=?table_id, "stream job failed");
@@ -346,6 +367,7 @@ impl GlobalStreamManager {
                             self.metadata_manager
                                 .catalog_controller
                                 .try_abort_creating_streaming_job(table_id.table_id as _, true)
+                                .instrument_await("try_abort_creating_streaming_job")
                                 .await?;
 
                             self.barrier_scheduler
@@ -404,12 +426,14 @@ impl GlobalStreamManager {
             self.metadata_manager
                 .catalog_controller
                 .prepare_streaming_job(&stream_job_fragments, &streaming_job, true)
+                .instrument_await("prepare_streaming_job_for_replace")
                 .await?;
 
             let tmp_table_id = stream_job_fragments.stream_job_id();
             let init_split_assignment = self
                 .source_manager
                 .allocate_splits(&stream_job_fragments)
+                .instrument_await("allocate_splits_for_replace")
                 .await?;
 
             replace_table_command = Some(ReplaceStreamJobPlan {
@@ -431,6 +455,7 @@ impl GlobalStreamManager {
         let mut init_split_assignment = self
             .source_manager
             .allocate_splits(&stream_job_fragments)
+            .instrument_await("allocate_splits")
             .await?;
         init_split_assignment.extend(
             self.source_manager
@@ -439,6 +464,7 @@ impl GlobalStreamManager {
                     &new_no_shuffle,
                     &upstream_actors,
                 )
+                .instrument_await("allocate_splits_for_backfill")
                 .await?,
         );
 

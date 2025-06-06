@@ -1075,9 +1075,9 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
 name = "await-tree"
-version = "0.3.0-alpha.3"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd6f3024942b436658bb064b41f05a0732b0ab5850ed6e9857da321aa9f128aa"
+checksum = "4aec83d33c078452a764b777d1e8d6c17d8c999213ccfb7914740293f1e0fa9a"
 dependencies = [
  "coarsetime",
  "derive_builder",
@@ -1089,6 +1089,7 @@ dependencies = [
  "pin-project",
  "serde",
  "task-local",
+ "tokio",
  "tracing",
  "weak-table",
 ]
