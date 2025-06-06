@@ -1300,14 +1300,6 @@ async fn bind_cdc_table_schema_externally(
     cdc_with_options: WithOptionsSecResolved,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
     // read cdc table schema from external db or parsing the schema from SQL definitions
-    Feature::CdcTableSchemaMap.check_available().map_err(
-        |err: risingwave_common::license::FeatureNotAvailable| {
-            ErrorCode::NotSupported(
-                err.to_report_string(),
-                "Please define the schema manually".to_owned(),
-            )
-        },
-    )?;
     let (options, secret_refs) = cdc_with_options.into_parts();
     let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
         .context("failed to extract external table config")?;
