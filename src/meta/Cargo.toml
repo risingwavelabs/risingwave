@@ -12,6 +12,7 @@ anyhow = "1"
 arc-swap = { workspace = true }
 assert_matches = "1"
 async-trait = "0.1"
+await-tree = { workspace = true }
 base64-url = { version = "3.0.0" }
 bytes = { version = "1", features = ["serde"] }
 chrono = { workspace = true }
