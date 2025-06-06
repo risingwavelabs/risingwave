@@ -308,7 +308,6 @@ impl VectorFileMeta {
         encoded_footer
     }
 
-    #[expect(dead_code)]
     pub fn decode_footer(buf: &[u8]) -> HummockResult<Self> {
         if buf.len() < size_of::<u64>() + size_of::<u32>() + size_of::<u32>() {
             return Err(HummockError::decode_error("footer too short"));

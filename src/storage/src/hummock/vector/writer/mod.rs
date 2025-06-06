@@ -28,11 +28,37 @@ use crate::vector::Vector;
 
 pub(crate) struct VectorWriterImpl {
     flushed_vector_files: Vec<VectorFileInfo>,
+    sstable_store: SstableStoreRef,
     vector_file_builder: VectorFileBuilder,
 }
 
+pub(crate) fn new_vector_file_builder(
+    dimension: usize,
+    next_vector_id: usize,
+    sstable_store: SstableStoreRef,
+    object_id_manager: ObjectIdManagerRef,
+    storage_opts: &StorageOpts,
+) -> VectorFileBuilder {
+    VectorFileBuilder::new(
+        dimension,
+        Box::new(move || {
+            let object_id_manager = object_id_manager.clone();
+            let sstable_store = sstable_store.clone();
+            async move {
+                let object_id = object_id_manager.get_new_object_id().await?;
+                let path =
+                    sstable_store.get_object_data_path(HummockObjectId::VectorFile(object_id));
+                let uploader = sstable_store.create_streaming_uploader(&path).await?;
+                Ok((object_id, uploader))
+            }
+            .boxed()
+        }),
+        next_vector_id,
+        storage_opts.vector_file_block_size_kb * 1024,
+    )
+}
+
 impl VectorWriterImpl {
-    #[expect(dead_code)]
     pub(crate) fn new(
         index: &VectorIndex,
         sstable_store: SstableStoreRef,
@@ -42,33 +68,22 @@ impl VectorWriterImpl {
         let VectorIndexImpl::Flat(flat_index) = &index.inner;
         Self {
             flushed_vector_files: vec![],
-            vector_file_builder: VectorFileBuilder::new(
+            sstable_store: sstable_store.clone(),
+            vector_file_builder: new_vector_file_builder(
                 index.dimension,
-                Box::new(move || {
-                    let object_id_manager = object_id_manager.clone();
-                    let sstable_store = sstable_store.clone();
-                    async move {
-                        let object_id = object_id_manager.get_new_object_id().await?;
-                        let path = sstable_store
-                            .get_object_data_path(HummockObjectId::VectorFile(object_id));
-                        let uploader = sstable_store.create_streaming_uploader(&path).await?;
-                        Ok((object_id, uploader))
-                    }
-                    .boxed()
-                }),
                 flat_index.vector_store.next_vector_id,
-                storage_opts.vector_file_block_size_kb * 1024,
+                sstable_store,
+                object_id_manager,
+                storage_opts,
             ),
         }
     }
 
-    #[expect(dead_code)]
     pub(crate) fn insert(&mut self, vec: Vector, info: Bytes) -> HummockResult<()> {
         self.vector_file_builder.add(vec.to_ref(), info.as_ref());
         Ok(())
     }
 
-    #[expect(dead_code)]
     pub(crate) fn seal_current_epoch(&mut self) -> Option<VectorIndexAdd> {
         assert!(self.vector_file_builder.is_empty());
         if self.flushed_vector_files.is_empty() {
@@ -82,9 +97,10 @@ impl VectorWriterImpl {
         }))
     }
 
-    #[expect(dead_code)]
     pub(crate) async fn flush(&mut self) -> HummockResult<usize> {
-        if let Some((file_info, _blocks, _meta)) = self.vector_file_builder.finish().await? {
+        if let Some((file_info, blocks, meta)) = self.vector_file_builder.finish().await? {
+            self.sstable_store
+                .insert_vector_cache(file_info.object_id, meta, blocks);
             let size = file_info.file_size as _;
             self.flushed_vector_files.push(file_info);
             Ok(size)
@@ -93,7 +109,6 @@ impl VectorWriterImpl {
         }
     }
 
-    #[expect(dead_code)]
     pub(crate) async fn try_flush(&mut self) -> HummockResult<()> {
         self.vector_file_builder.try_flush().await
     }
