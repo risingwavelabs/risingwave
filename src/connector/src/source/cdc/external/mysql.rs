@@ -462,10 +462,7 @@ impl MySqlExternalTableReader {
         let mut conn = self.pool.get_conn().await?;
         // Set session timezone to UTC
         conn.exec_drop("SET time_zone = \"+00:00\"", ()).await?;
-        drop(conn);
 
-        // Use a new connection to read data to avoid abnormal drop of `exec_drop` and cause stream unclean.
-        let mut conn = self.pool.get_conn().await?;
         if start_pk_row.is_none() {
             let rs_stream = sql.stream::<mysql_async::Row, _>(&mut conn).await?;
             let row_stream = rs_stream.map(|row| {
