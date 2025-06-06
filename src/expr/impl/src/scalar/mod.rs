@@ -65,6 +65,7 @@ mod jsonb_set;
 mod length;
 mod lower;
 mod make_time;
+mod map_filter;
 mod md5;
 mod overlay;
 mod position;
