@@ -23,9 +23,10 @@ use itertools::{Itertools, repeat_n};
 use super::DataType;
 use crate::catalog::ColumnId;
 use crate::util::iter_util::ZipEqFast;
+use crate::util::quote_ident::QuoteIdent;
 
 /// A cheaply cloneable struct type.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct StructType(Arc<StructTypeInner>);
 
 impl Debug for StructType {
@@ -45,7 +46,7 @@ impl Debug for StructType {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct StructTypeInner {
     /// The name and data type of each field.
     ///
@@ -205,7 +206,7 @@ impl Display for StructType {
                 f,
                 "struct<{}>",
                 self.iter()
-                    .map(|(name, ty)| format!("{} {}", name, ty))
+                    .map(|(name, ty)| format!("{} {}", QuoteIdent(name), ty))
                     .join(", ")
             )
         }
