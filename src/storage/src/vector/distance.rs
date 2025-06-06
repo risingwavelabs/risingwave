@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::simd::Simd;
+use std::simd::num::SimdFloat;
+
 use crate::vector::{
     MeasureDistance, MeasureDistanceBuilder, VectorDistance, VectorItem, VectorRef,
 };
@@ -155,14 +158,42 @@ impl MeasureDistanceBuilder for InnerProductDistance {
     }
 }
 
+#[cfg_attr(not(test), expect(dead_code))]
+fn inner_product_trivial(first: VectorRef<'_>, second: VectorRef<'_>) -> VectorDistance {
+    let len = first.0.len();
+    assert_eq!(len, second.0.len());
+    -(0..len)
+        .map(|i| first.0[i] * second.0[i])
+        .sum::<VectorItem>()
+}
+
+#[cfg_attr(not(test), expect(dead_code))]
+fn inner_product_simd(first: VectorRef<'_>, second: VectorRef<'_>) -> VectorDistance {
+    let len = first.0.len();
+    assert_eq!(len, second.0.len());
+    let mut sum = 0.0;
+    let mut start = 0;
+    let mut end = start + 32;
+    while end <= len {
+        let this = Simd::<VectorItem, 32>::from_slice(&first.0[start..end]);
+        let target = Simd::<VectorItem, 32>::from_slice(&second.0[start..end]);
+        sum += (this * target).reduce_sum();
+        start += 32;
+        end += 32;
+    }
+    -((start..len)
+        .map(|i| first.0[i] * second.0[i])
+        .sum::<VectorDistance>()
+        + sum)
+}
+
+fn inner_product_faiss(first: VectorRef<'_>, second: VectorRef<'_>) -> VectorDistance {
+    -faiss::utils::fvec_inner_product(first.0, second.0)
+}
+
 impl<'a> MeasureDistance for InnerProductDistanceMeasure<'a> {
     fn measure(&self, other: VectorRef<'_>) -> VectorDistance {
-        // TODO: use some library with simd support
-        let len = self.0.0.len();
-        assert_eq!(len, other.0.len());
-        -(0..len)
-            .map(|i| self.0.0[i] * other.0[i])
-            .sum::<VectorDistance>()
+        inner_product_faiss(self.0, other)
     }
 }
 
@@ -172,6 +203,7 @@ mod tests {
     use expect_test::expect;
 
     use super::*;
+    use crate::vector::test_utils::gen_vector;
     use crate::vector::{MeasureDistanceBuilder, Vector, VectorInner};
 
     const VECTOR_LEN: usize = 10;
@@ -185,6 +217,14 @@ mod tests {
         0.9755903, 0.42836714, 0.45131344, 0.8602846, 0.61997443, 0.9501612, 0.65076965,
         0.22877127, 0.97690505, 0.44438475,
     ];
+
+    const FLOAT_ALLOWED_BIAS: f32 = 1e-5;
+
+    macro_rules! assert_eq_float {
+        ($first:expr, $second:expr) => {
+            assert!(($first - $second) < FLOAT_ALLOWED_BIAS)
+        };
+    }
 
     #[test]
     fn test_distance() {
@@ -223,6 +263,13 @@ mod tests {
             InnerProductDistance::distance(first_vec, second_vec),
             -(v1_1 * v2_1 + v1_2 * v2_2)
         );
+        {
+            let v1 = gen_vector(128);
+            let v2 = gen_vector(128);
+            let trivial = inner_product_trivial(v1.to_ref(), v2.to_ref());
+            assert_eq_float!(inner_product_simd(v1.to_ref(), v2.to_ref()), trivial);
+            assert_eq_float!(inner_product_faiss(v1.to_ref(), v2.to_ref()), trivial);
+        }
     }
 
     #[test]
