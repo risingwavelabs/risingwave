@@ -146,6 +146,26 @@ impl StarrocksConfig {
         }
         Ok(config)
     }
+
+    pub fn get_host_with_scheme(&self) -> String {
+        let host = self.common.host.trim();
+        if host.starts_with("http://") || host.starts_with("https://") {
+            host.to_string()
+        } else {
+            format!("http://{}", host)
+        }
+    }
+
+    pub fn get_host_without_scheme(&self) -> String {
+        let host = self.common.host.trim();
+        if let Some(stripped) = host.strip_prefix("http://") {
+            stripped.to_string()
+        } else if let Some(stripped) = host.strip_prefix("https://") {
+            stripped.to_string()
+        } else {
+            host.to_string()
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -288,7 +308,7 @@ impl Sink for StarrocksSink {
         }
         // check reachability
         let mut client = StarrocksSchemaClient::new(
-            self.config.common.host.clone(),
+            self.config.get_host_without_scheme(),
             self.config.common.mysql_port.clone(),
             self.config.common.table.clone(),
             self.config.common.database.clone(),
@@ -406,7 +426,11 @@ impl StarrocksSinkWriter {
             .build();
 
         let txn_request_builder = StarrocksTxnRequestBuilder::new(
-            format!("http://{}:{}", config.common.host, config.common.http_port),
+            format!(
+                "{}:{}",
+                config.get_host_with_scheme(),
+                config.common.http_port
+            ),
             header,
             config.stream_load_http_timeout_ms,
         )?;
