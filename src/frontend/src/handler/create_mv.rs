@@ -70,9 +70,10 @@ pub(super) fn get_column_names(
             for (i, alias) in select.aliases.iter().enumerate() {
                 if alias.is_none() {
                     return Err(ErrorCode::BindError(format!(
-                    "An alias is required for the {} expression in the result relation", ordinal(i+1)
-                ))
-                .into());
+                        "An alias is required for the {} expression in the result relation",
+                        ordinal(i + 1)
+                    ))
+                    .into());
                 }
             }
         }
