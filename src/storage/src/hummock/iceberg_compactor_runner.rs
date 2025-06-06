@@ -101,15 +101,12 @@ impl IcebergCompactorRunner {
         Ok(all_data_file_size.div_ceil(MAX_SIZE_PER_PARTITION))
     }
 
-    pub async fn compact_iceberg(self, shutdown_rx: Receiver<()>, parallelism: usize) {
-        // TODO: consider target_file_size
+    pub async fn compact_iceberg(
+        self,
+        shutdown_rx: Receiver<()>,
+        compaction_config: Arc<CompactionConfig>,
+    ) {
         let compact = async move {
-            let compaction_config = Arc::new(CompactionConfig {
-                batch_parallelism: Some(parallelism),
-                target_partitions: Some(parallelism),
-                data_file_prefix: None,
-            });
-
             let retry_config = RewriteDataFilesCommitManagerRetryConfig::default();
 
             let compaction = Compaction::builder()

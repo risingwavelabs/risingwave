@@ -15,6 +15,7 @@
 mod compaction_executor;
 mod compaction_filter;
 pub mod compaction_utils;
+use bergloom_core::config::CompactionConfigBuilder as IcebergCompactionConfigBuilder;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ValidationTask};
 use risingwave_pb::compactor::{DispatchCompactionTaskRequest, dispatch_compaction_task_request};
 use risingwave_pb::hummock::PbCompactTask;
@@ -459,9 +460,15 @@ pub fn start_compactor_iceberg(
                                     let (tx, rx) = tokio::sync::oneshot::channel();
                                     shutdown.lock().unwrap().insert(task_id, tx);
 
+                                    let compaction_config = Arc::new(IcebergCompactionConfigBuilder::default()
+                                        .batch_parallelism(parallelism as usize)
+                                        .target_partitions(parallelism as usize)
+                                        .build()
+                                    );
+
                                     iceberg_runner.compact_iceberg(
                                         rx,
-                                        parallelism as usize,
+                                        compaction_config,
                                     )
                                     .await;
 
