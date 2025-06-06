@@ -25,8 +25,9 @@ use foyer::{
     HybridCacheBuilder, HybridCacheEntry, HybridCacheProperties,
 };
 use futures::{StreamExt, future};
+use prost::Message;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::vector_index::VectorFileInfo;
+use risingwave_hummock_sdk::vector_index::{HnswGraphFileInfo, VectorFileInfo};
 use risingwave_hummock_sdk::{
     HummockObjectId, HummockSstableObjectId, HummockVectorFileId, SST_OBJECT_SUFFIX,
 };
@@ -34,6 +35,7 @@ use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
     ObjectError, ObjectMetadataIter, ObjectResult, ObjectStoreRef, ObjectStreamingUploader,
 };
+use risingwave_pb::hummock::PbHnswGraph;
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
@@ -558,6 +560,17 @@ impl SstableStore {
             self.vector_block_cache
                 .insert((object_id, idx), Box::new(block));
         }
+    }
+
+    pub async fn get_hnsw_graph(
+        &self,
+        graph_file: &HnswGraphFileInfo,
+    ) -> HummockResult<PbHnswGraph> {
+        let graph_file_path =
+            self.get_object_data_path(HummockObjectId::HnswGraphFile(graph_file.object_id));
+        let encoded_graph = self.store.read(&graph_file_path, ..).await?;
+        let graph = PbHnswGraph::decode(encoded_graph.as_ref())?;
+        Ok(graph)
     }
 
     pub fn get_sst_data_path(&self, object_id: impl Into<HummockSstableObjectId>) -> String {
