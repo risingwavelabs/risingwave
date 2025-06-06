@@ -1149,9 +1149,7 @@ pub(super) async fn handle_create_table_plan(
                     let (options, secret_refs) = cdc_with_options.clone().into_parts();
                     let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
                         .context("failed to extract external table config")?;
-                    ExternalTableImpl::connect(config, Some(defined_column_descs))
-                        .await
-                        .context("failed to auto derive table schema")?;
+                    ExternalTableImpl::connect(config, Some(defined_column_descs)).await?;
 
                     // NOTE: if the external table has a default column, we will only treat it as a normal column.
                     (columns, pk_names)

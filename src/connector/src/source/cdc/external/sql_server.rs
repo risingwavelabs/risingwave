@@ -132,13 +132,16 @@ impl SqlServerExternalTable {
                         let col_name: &str = row.try_get(0)?.unwrap();
                         let col_type: &str = row.try_get(1)?.unwrap();
 
+                        let rw_data_type = column_name_to_data_type
+                            .as_ref()
+                            .and_then(|map| map.get(col_name));
                         column_descs.push(ColumnDesc::named(
                             col_name,
                             ColumnId::placeholder(),
                             check_mssql_type_and_convert_to_rw_type(
                                 col_type,
                                 col_name,
-                                column_name_to_data_type.clone(),
+                                rw_data_type,
                             )?,
                         ));
                     }
@@ -201,12 +204,8 @@ impl SqlServerExternalTable {
 fn check_mssql_type_and_convert_to_rw_type(
     upstream_col_type: &str,
     upstream_col_name: &str,
-    column_name_to_data_type: Option<HashMap<String, DataType>>,
+    rw_data_type: Option<&DataType>,
 ) -> ConnectorResult<DataType> {
-    let rw_data_type = column_name_to_data_type
-        .as_ref()
-        .and_then(|map| map.get(upstream_col_name));
-
     let converted_data_type = match upstream_col_type.to_lowercase().as_str() {
         "bit" => DataType::Boolean,
         "binary" | "varbinary" => DataType::Bytea,
