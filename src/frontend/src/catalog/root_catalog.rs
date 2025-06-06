@@ -694,6 +694,10 @@ impl Catalog {
         Err(CatalogError::NotFound("table id", table_id.to_string()))
     }
 
+    pub fn iter_tables(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
+        self.table_by_id.values()
+    }
+
     // Used by test_utils only.
     pub fn alter_table_name_by_id(&mut self, table_id: &TableId, table_name: &str) {
         let mut found = false;
