@@ -151,14 +151,14 @@
         ├─StreamExchange { dist: HashShard(fact1.v1) }
         │ └─StreamUnion { all: true }
         │   ├─StreamExchange { dist: HashShard(fact1._row_id, dim1._row_id, fact1.v1, 0:Int32) }
-        │   │ └─StreamProject { exprs: [fact1.v1, fact1.v1, fact1._row_id, dim1._row_id, 0:Int32] }
+        │   │ └─StreamProject { exprs: [fact1.v1, fact1._row_id, dim1._row_id, fact1.v1, 0:Int32] }
         │   │   └─StreamHashJoin { type: LeftOuter, predicate: fact1.v1 = dim1.v1, output: [fact1.v1, fact1._row_id, dim1._row_id] }
         │   │     ├─StreamExchange { dist: HashShard(fact1.v1) }
         │   │     │ └─StreamTableScan { table: fact1, columns: [fact1.v1, fact1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [fact1._row_id], pk: [_row_id], dist: UpstreamHashShard(fact1._row_id) }
         │   │     └─StreamExchange { dist: HashShard(dim1.v1) }
         │   │       └─StreamTableScan { table: dim1, columns: [dim1.v1, dim1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [dim1._row_id], pk: [_row_id], dist: UpstreamHashShard(dim1._row_id) }
         │   └─StreamExchange { dist: HashShard(fact2._row_id, dim2._row_id, fact2.v1, 1:Int32) }
-        │     └─StreamProject { exprs: [fact2.v1, fact2.v1, fact2._row_id, dim2._row_id, 1:Int32] }
+        │     └─StreamProject { exprs: [fact2.v1, fact2._row_id, dim2._row_id, fact2.v1, 1:Int32] }
         │       └─StreamHashJoin { type: LeftOuter, predicate: fact2.v1 = dim2.v1, output: [fact2.v1, fact2._row_id, dim2._row_id] }
         │         ├─StreamExchange { dist: HashShard(fact2.v1) }
         │         │ └─StreamTableScan { table: fact2, columns: [fact2.v1, fact2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [fact2._row_id], pk: [_row_id], dist: UpstreamHashShard(fact2._row_id) }
@@ -167,14 +167,14 @@
         └─StreamExchange { dist: HashShard(fact3.v1) }
           └─StreamUnion { all: true }
             ├─StreamExchange { dist: HashShard(fact3._row_id, dim3._row_id, fact3.v1, 0:Int32) }
-            │ └─StreamProject { exprs: [fact3.v1, fact3.v1, fact3._row_id, dim3._row_id, 0:Int32] }
+            │ └─StreamProject { exprs: [fact3.v1, fact3._row_id, dim3._row_id, fact3.v1, 0:Int32] }
             │   └─StreamHashJoin { type: LeftOuter, predicate: fact3.v1 = dim3.v1, output: [fact3.v1, fact3._row_id, dim3._row_id] }
             │     ├─StreamExchange { dist: HashShard(fact3.v1) }
             │     │ └─StreamTableScan { table: fact3, columns: [fact3.v1, fact3._row_id], stream_scan_type: ArrangementBackfill, stream_key: [fact3._row_id], pk: [_row_id], dist: UpstreamHashShard(fact3._row_id) }
             │     └─StreamExchange { dist: HashShard(dim3.v1) }
             │       └─StreamTableScan { table: dim3, columns: [dim3.v1, dim3._row_id], stream_scan_type: ArrangementBackfill, stream_key: [dim3._row_id], pk: [_row_id], dist: UpstreamHashShard(dim3._row_id) }
             └─StreamExchange { dist: HashShard(fact4._row_id, dim4._row_id, fact4.v1, 1:Int32) }
-              └─StreamProject { exprs: [fact4.v1, fact4.v1, fact4._row_id, dim4._row_id, 1:Int32] }
+              └─StreamProject { exprs: [fact4.v1, fact4._row_id, dim4._row_id, fact4.v1, 1:Int32] }
                 └─StreamHashJoin { type: LeftOuter, predicate: fact4.v1 = dim4.v1, output: [fact4.v1, fact4._row_id, dim4._row_id] }
                   ├─StreamExchange { dist: HashShard(fact4.v1) }
                   │ └─StreamTableScan { table: fact4, columns: [fact4.v1, fact4._row_id], stream_scan_type: ArrangementBackfill, stream_key: [fact4._row_id], pk: [_row_id], dist: UpstreamHashShard(fact4._row_id) }
