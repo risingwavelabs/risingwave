@@ -48,9 +48,44 @@ pub struct KinesisProperties {
     pub common: KinesisCommon,
 
     #[serde(flatten)]
+    pub reader_config: KinesisReaderConfig,
+
+    #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
 }
 
+const fn kinesis_reader_default_eof_retry_interval_ms() -> u64 {
+    1000
+}
+
+const fn kinesis_reader_default_error_retry_interval_ms() -> u64 {
+    200
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
+pub struct KinesisReaderConfig {
+    #[serde(
+        rename = "kinesis.reader.eof_retry_interval_ms",
+        default = "kinesis_reader_default_eof_retry_interval_ms"
+    )]
+    pub eof_retry_interval_ms: u64,
+
+    #[serde(
+        rename = "kinesis.reader.error_retry_interval_ms",
+        default = "kinesis_reader_default_error_retry_interval_ms"
+    )]
+    pub error_retry_interval_ms: u64,
+}
+
+impl Default for KinesisReaderConfig {
+    fn default() -> Self {
+        Self {
+            eof_retry_interval_ms: kinesis_reader_default_eof_retry_interval_ms(),
+            error_retry_interval_ms: kinesis_reader_default_error_retry_interval_ms(),
+        }
+    }
+}
 impl SourceProperties for KinesisProperties {
     type Split = KinesisSplit;
     type SplitEnumerator = KinesisSplitEnumerator;
