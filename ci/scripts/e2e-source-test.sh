@@ -63,7 +63,7 @@ cp src/connector/src/test_data/complex-schema.json ./json-complex-schema
 
 
 echo "--- e2e, ci-1cn-1fe, mysql & postgres cdc"
-
+cargo test -- --ignored test_mysql_async_with_connection_pool
 # import data to mysql
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source_legacy/cdc/mysql_cdc.sql
 
