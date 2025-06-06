@@ -19,7 +19,7 @@ use risingwave_frontend_macro::system_catalog;
 #[system_catalog(
 view,
 "rw_catalog.rw_fragment_backfill_progress",
-"select 
+"select
   progress.job_id,
   progress.fragment_id,
   concat(job_schemas.name, '.', job_tables.name) as job_name,
@@ -52,4 +52,3 @@ struct RwFragmentBackfillProgress {
     upstream_table_name: String,
     progress: String,
 }
-

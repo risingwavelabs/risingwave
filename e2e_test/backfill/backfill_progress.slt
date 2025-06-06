@@ -42,10 +42,10 @@ statement ok
 set streaming_parallelism=1;
 
 statement ok
-create materialized view m1 as 
-  select x.v1, x.v2 
+create materialized view m1 as
+  select x.v1, x.v2
   from
-    t x 
+    t x
       join t y on x.v1 = y.v1
       join t2 on x.v1 = t2.v1
       join t3 on t3.v1 = t2.v1
