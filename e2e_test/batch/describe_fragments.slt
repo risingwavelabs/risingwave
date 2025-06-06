@@ -241,12 +241,15 @@ Caused by these errors (recent errors listed first):
 statement ok
 create table describe_plan_test.t (v1 int);
 
+skipif madsim
 statement ok
 insert into describe_plan_test.t select * from generate_series(1, 10000);
 
+skipif madsim
 statement ok
 set background_ddl=true;
 
+skipif madsim
 statement ok
 set backfill_rate_limit=1;
 
@@ -256,6 +259,7 @@ create materialized view describe_plan_test.backfilling_mv as select * from desc
 statement ok
 flush;
 
+skipif madsim
 system ok
 psql_validate.py --db $__DATABASE__ --sql "DESCRIBE FRAGMENTS describe_plan_test.backfilling_mv" \
 --expected 'Fragment % (Actor %)
