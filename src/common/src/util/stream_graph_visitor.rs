@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_fragment_graph::StreamFragment;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{StreamNode, agg_call_state};
+use risingwave_pb::stream_plan::{StreamNode, StreamScanNode, agg_call_state};
 
 /// A utility for visiting and mutating the [`NodeBody`] of the [`StreamNode`]s recursively.
 pub fn visit_stream_node_mut(stream_node: &mut StreamNode, mut f: impl FnMut(&mut NodeBody)) {
@@ -296,6 +296,14 @@ pub fn visit_stream_node_tables_inner<F>(
     } else {
         visit_body(stream_node.node_body.as_mut().unwrap())
     }
+}
+
+pub fn visit_stream_node_stream_scan(stream_node: &StreamNode, mut f: impl FnMut(&StreamScanNode)) {
+    visit_stream_node(stream_node, |body| {
+        if let NodeBody::StreamScan(node) = body {
+            f(node)
+        }
+    })
 }
 
 pub fn visit_stream_node_internal_tables<F>(stream_node: &mut StreamNode, f: F)
