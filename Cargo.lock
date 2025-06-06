@@ -1089,7 +1089,6 @@ dependencies = [
  "pin-project",
  "serde",
  "task-local",
- "tokio",
  "tracing",
  "weak-table",
 ]
