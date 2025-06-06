@@ -95,9 +95,9 @@ DESCRIBE FRAGMENTS describe_plan_test.src;
 ----
 db error: ERROR: Failed to run the query
 
-Caused by these errors (recent errors listed first):
-  1: Catalog error
-  2: materialized view, index, table or sink not found: describe_plan_test.src
+Caused by:
+  Not supported: non shared source has no fragments to describe
+HINT: USE `DESCRIBE` instead
 
 
 skipif madsim
@@ -221,9 +221,9 @@ DESCRIBE FRAGMENTS pg_catalog.pg_tables;
 ----
 db error: ERROR: Failed to run the query
 
-Caused by these errors (recent errors listed first):
-  1: Catalog error
-  2: materialized view, index, table or sink not found: pg_catalog.pg_tables
+Caused by:
+  Not supported: view has no fragments to describe
+HINT: USE `DESCRIBE` instead
 
 
 # System table (should fail)

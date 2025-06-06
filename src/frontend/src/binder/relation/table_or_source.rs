@@ -103,6 +103,32 @@ impl Binder {
                 self.resolve_table_relation(table_catalog.clone(), schema_name, None)?;
                 return Ok(table_id);
             }
+            if let Ok((_view_catalog, _)) =
+                self.catalog
+                    .get_view_by_name(&self.db_name, path, &table_name)
+            {
+                return Err(ErrorCode::NotSupported(
+                    "view has no fragments to describe".to_owned(),
+                    "USE `DESCRIBE` instead".to_owned(),
+                )
+                .into());
+            }
+            if let Ok((source_catalog, _)) =
+                self.catalog
+                    .get_source_by_name(&self.db_name, path, &table_name)
+            {
+                if !source_catalog.info.is_shared() {
+                    return Err(ErrorCode::NotSupported(
+                        "non shared source has no fragments to describe".to_owned(),
+                        "USE `DESCRIBE` instead".to_owned(),
+                    )
+                    .into());
+                } else {
+                    let id = source_catalog.id;
+                    self.resolve_source_relation(&source_catalog.clone(), None, false)?;
+                    return Ok(id);
+                }
+            }
         }
 
         Err(
