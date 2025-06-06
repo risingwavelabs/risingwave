@@ -39,7 +39,7 @@ mod iterator;
 mod shared_buffer_compact;
 pub(super) mod task_progress;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -90,7 +90,9 @@ use crate::compaction_catalog_manager::{
 };
 use crate::hummock::compactor::compaction_utils::calculate_task_parallelism;
 use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, compact_done};
-use crate::hummock::iceberg_compactor_runner::IcebergCompactorRunner;
+use crate::hummock::iceberg_compactor_runner::{
+    IcebergCompactionTaskStatistics, IcebergCompactorRunner,
+};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::{
     BlockedXor16FilterBuilder, FilterBuilder, HummockError, SharedComapctorObjectIdManager,
@@ -289,12 +291,16 @@ pub fn start_compactor_iceberg(
     compactor_context: CompactorContext,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 ) -> (JoinHandle<()>, Sender<()>) {
-    type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
+    type IcebergCompactionRunningTaskContext =
+        Arc<Mutex<(HashMap<u64, Sender<()>>, HashSet<String>)>>;
+
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let stream_retry_interval = Duration::from_secs(30);
     let periodic_event_update_interval = Duration::from_millis(1000);
 
-    let max_task_parallelism: u32 = (compactor_context.compaction_executor.worker_num() as f32
+    let worker_num = compactor_context.compaction_executor.worker_num();
+
+    let max_task_parallelism: u32 = (worker_num as f32
         * compactor_context.storage_opts.compactor_max_task_multiplier)
         .ceil() as u32;
     let running_task_parallelism = Arc::new(AtomicU32::new(0));
@@ -308,7 +314,8 @@ pub fn start_compactor_iceberg(
     );
 
     let join_handle = tokio::spawn(async move {
-        let shutdown_map = CompactionShutdownMap::default();
+        let iceberg_compaction_running_task_context: IcebergCompactionRunningTaskContext =
+            Arc::new(Mutex::new((HashMap::new(), HashSet::new())));
         let mut min_interval = tokio::time::interval(stream_retry_interval);
         let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
 
@@ -420,19 +427,29 @@ pub fn start_compactor_iceberg(
                             None => continue 'consume_stream,
                         };
                         // todo!: add metrics
-                        let shutdown = shutdown_map.clone();
+                        let iceberg_compaction_running_task_context =
+                            iceberg_compaction_running_task_context.clone();
+                        let context = compactor_context.clone();
                         match event {
                             risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::CompactTask(iceberg_compaction_task) => {
                                 let task_id = iceberg_compaction_task.task_id;
-                                let(parallelism,iceberg_runner) = match async move {
+                                let(input_parallelism, output_parallelism ,iceberg_runner, task_statistics) = match async move {
                                     let iceberg_runner = IcebergCompactorRunner::new(
                                         iceberg_compaction_task,
                                     ).await?;
-                                    let parallelism = iceberg_runner.calculate_task_parallelism().await?.min(max_task_parallelism);
-                                    Ok::<(u32,IcebergCompactorRunner),HummockError>((parallelism, iceberg_runner))
+
+                                    let task_statistics = iceberg_runner
+                                        .analyze_task_statistics()
+                                        .await?;
+
+                                    let (input_parallelism, output_parallelism) = iceberg_runner.calculate_task_parallelism(
+                                        &task_statistics,
+                                        worker_num as u32
+                                    )?;
+                                    Ok::<(u32, u32, IcebergCompactorRunner, IcebergCompactionTaskStatistics),HummockError>((input_parallelism, output_parallelism, iceberg_runner, task_statistics))
                                 }.await{
-                                    Ok((parallelism, iceberg_runner)) => {
-                                        (parallelism, iceberg_runner)
+                                    Ok((input_parallelism, output_parallelism, iceberg_runner, task_statistics)) => {
+                                        (input_parallelism, output_parallelism, iceberg_runner, task_statistics)
                                     }
                                     Err(e) => {
                                         tracing::warn!(error = %e.as_report(), "Failed to calculate iceberg task parallelism {}", task_id);
@@ -440,14 +457,35 @@ pub fn start_compactor_iceberg(
                                     }
                                 };
 
+                                let task_unique_ident = format!(
+                                    "{}-{:?}",
+                                    iceberg_runner.iceberg_config.catalog_name(),
+                                    iceberg_runner.table_ident
+                                );
+
+                                {
+                                    let running_task_context_guard = iceberg_compaction_running_task_context
+                                        .lock()
+                                        .unwrap();
+
+                                    if running_task_context_guard.1.contains(&task_unique_ident) {
+                                        tracing::warn!(
+                                            "Iceberg compaction task {} already running, skip",
+                                            task_id
+                                        );
+                                        continue 'consume_stream;
+                                    }
+                                }
+
                                 if (max_task_parallelism
                                     - running_task_parallelism.load(Ordering::SeqCst))
-                                    < parallelism
+                                    < input_parallelism
                                 {
                                     tracing::warn!(
-                                        "Not enough core parallelism to serve the iceberg compaction task{} task_parallelism {} running_task_parallelism {} max_task_parallelism {}",
+                                        "Not enough core parallelism to serve the iceberg compaction task {} input_parallelism {} output_parallelism {} running_task_parallelism {} max_task_parallelism {}",
                                         task_id,
-                                        parallelism,
+                                        input_parallelism,
+                                        output_parallelism,
                                         max_task_parallelism,
                                         running_task_parallelism.load(Ordering::Relaxed),
                                     );
@@ -455,38 +493,62 @@ pub fn start_compactor_iceberg(
                                 }
 
                                 running_task_parallelism
-                                    .fetch_add(parallelism, Ordering::SeqCst);
+                                    .fetch_add(input_parallelism, Ordering::SeqCst);
                                 let iceberg_compaction_target_file_size_bytes =
-                                        (compactor_context.storage_opts.iceberg_compaction_target_file_size_mb * 1024 * 1024) as usize;
+                                        (context.storage_opts.iceberg_compaction_target_file_size_mb * 1024 * 1024) as u64;
                                 let iceberg_compaction_enable_validate =
-                                        compactor_context.storage_opts.iceberg_compaction_enable_validate;
+                                        context.storage_opts.iceberg_compaction_enable_validate;
+
+                                tracing::info!(
+                                    "Start iceberg compaction task {} {:?} with input_parallelism {} output_parallelism {} target file size {} bytes enable validate {} task statistics: {:?}",
+                                    task_id,
+                                    task_unique_ident,
+                                    input_parallelism,
+                                    output_parallelism,
+                                    iceberg_compaction_target_file_size_bytes,
+                                    iceberg_compaction_enable_validate,
+                                    task_statistics
+                                );
+
                                 executor.spawn(async move {
                                     let (tx, rx) = tokio::sync::oneshot::channel();
-                                    shutdown.lock().unwrap().insert(task_id, tx);
+                                    {
+                                        let mut running_task_context_guard =
+                                            iceberg_compaction_running_task_context.lock().unwrap();
+                                        running_task_context_guard.0.insert(task_id, tx);
+                                        running_task_context_guard.1.insert(task_unique_ident.clone());
+                                    }
+                                    let task_id = iceberg_runner.task_id;
 
                                     let compaction_config = Arc::new(IcebergCompactionConfigBuilder::default()
-                                            .batch_parallelism(parallelism as usize)
-                                            .target_partitions(parallelism as usize)
-                                            .target_file_size(iceberg_compaction_target_file_size_bytes)
-                                            .validate_compaction(iceberg_compaction_enable_validate)
-                                            .build()
+                                        .batch_parallelism(input_parallelism as usize)
+                                        .target_partitions(output_parallelism as usize)
+                                        .target_file_size(iceberg_compaction_target_file_size_bytes)
+                                        .enable_validate_compaction(iceberg_compaction_enable_validate)
+                                        .build()
                                     );
 
                                     iceberg_runner.compact_iceberg(
                                         rx,
                                         compaction_config,
+                                        context.clone(),
                                     )
                                     .await;
 
-                                    shutdown.lock().unwrap().remove(&task_id);
-                                    running_task_parallelism.fetch_sub(parallelism, Ordering::SeqCst);
+                                    {
+                                        let mut context_guard =
+                                            iceberg_compaction_running_task_context.lock().unwrap();
+                                        context_guard.0.remove(&task_id);
+                                        context_guard.1.remove(&task_unique_ident);
+                                    }
+                                    running_task_parallelism.fetch_sub(input_parallelism, Ordering::SeqCst);
                                 });
                             },
                             risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::PullTaskAck(_) => {
                                 // set flag
                                 pull_task_ack = true;
                             },
-                    }
+                        }
                     }
                     Some(Err(e)) => {
                         tracing::warn!("Failed to consume stream. {}", e.message());
