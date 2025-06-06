@@ -54,6 +54,7 @@ impl std::fmt::Debug for Literal {
                     | DataType::Interval
                     | DataType::Jsonb
                     | DataType::Int256
+                    | DataType::UInt256
                     | DataType::Struct(_)
                     | DataType::Map(_) => write!(
                         f,

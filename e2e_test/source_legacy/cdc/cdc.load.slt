@@ -228,6 +228,23 @@ create table numeric_to_varchar (
 );
 
 statement ok
+create table numeric_to_rw_uint256 (
+  id int,
+  num rw_uint256,
+  PRIMARY KEY (id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ schema.name = 'public',
+ table.name = 'numeric_table',
+ slot.name = 'numeric_to_rw_uint256'
+);
+
+statement ok
 create table enum_to_varchar (
   id int,
   current_mood varchar,
