@@ -101,7 +101,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"sum({metric('compaction_commit_counter')}) by (catalog_name, table_ident)",
-                            "{{catalog_name}}-{{table_name}}",
+                            "{{catalog_name}}-{{table_ident}}",
                         ),
                     ],
                 ),
@@ -112,7 +112,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"sum({metric('compaction_rewritten_bytes')}) by (catalog_name, table_ident)",
-                            "{{catalog_name}}-{{table_name}}",
+                            "{{catalog_name}}-{{table_ident}}",
                         ),
                     ],
                 ),
@@ -123,7 +123,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"sum({metric('compaction_rewritten_files_count')}) by (catalog_name, table_ident)",
-                            "{{catalog_name}}-{{table_name}}",
+                            "{{catalog_name}}-{{table_ident}}",
                         ),
                     ],
                 ),
@@ -134,7 +134,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"sum({metric('compaction_added_files_count')}) by (catalog_name, table_ident)",
-                            "{{catalog_name}}-{{table_name}}",
+                            "{{catalog_name}}-{{table_ident}}",
                         ),
                     ],
                 ),
@@ -145,19 +145,19 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"sum({metric('compaction_failed_data_files_count')}) by (catalog_name, table_ident)",
-                            "{{catalog_name}}-{{table_name}}",
+                            "{{catalog_name}}-{{table_ident}}",
                         ),
                     ],
                 ),
 
-                panels.timeseries_latency(
+                panels.timeseries_latency_ms(
                     "Iceberg Compaction Commit Duration",
-                    "",
+                    "iceberg compaction commit duration in milliseconds",
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('compaction_commit_duration')}[$__rate_interval])) by (le, sink_id, sink_name))",
-                                f"p{legend}" + " @ {{catalog_name}} {{table_name}}",
+                                f"histogram_quantile({quantile}, sum(rate({metric('compaction_commit_duration')}[$__rate_interval])) by (catalog_name, table_ident))",
+                                f"p{legend}" + " @ {{catalog_name}} {{table_ident}}",
                             ),
                             [50, 99, "max"],
                         ),
@@ -166,12 +166,12 @@ def _(outer_panels: Panels):
 
                 panels.timeseries_latency(
                     "Iceberg Compaction Duration",
-                    "",
+                    "iceberg compaction duration in seconds",
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('compaction_duration')}[$__rate_interval])) by (le, sink_id, sink_name))",
-                                f"p{legend}" + " @ {{catalog_name}} {{table_name}}",
+                                f"histogram_quantile({quantile}, sum(rate({metric('compaction_duration')}[$__rate_interval])) by (catalog_name, table_ident))",
+                                f"p{legend}" + " @ {{catalog_name}} {{table_ident}}",
                             ),
                             [50, 99, "max"],
                         ),
