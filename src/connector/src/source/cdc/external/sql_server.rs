@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
 use anyhow::{Context, anyhow};
 use futures::stream::BoxStream;
@@ -78,11 +79,20 @@ pub struct SqlServerExternalTable {
 }
 
 impl SqlServerExternalTable {
-    pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
+    pub async fn connect(
+        config: ExternalTableConfig,
+        defined_column_descs: Option<Vec<ColumnDesc>>,
+    ) -> ConnectorResult<Self> {
         tracing::debug!("connect to sql server");
-
         let mut client_config = Config::new();
 
+        let column_name_to_data_type: Option<HashMap<String, DataType>> =
+            defined_column_descs.map(|rw_schema| {
+                rw_schema
+                    .iter()
+                    .map(|column| (column.name.clone(), column.data_type.clone()))
+                    .collect()
+            });
         client_config.host(&config.host);
         client_config.database(&config.database);
         client_config.port(config.port.parse::<u16>().unwrap());
@@ -121,10 +131,18 @@ impl SqlServerExternalTable {
                     QueryItem::Row(row) => {
                         let col_name: &str = row.try_get(0)?.unwrap();
                         let col_type: &str = row.try_get(1)?.unwrap();
+
+                        let rw_data_type = column_name_to_data_type
+                            .as_ref()
+                            .and_then(|map| map.get(col_name));
                         column_descs.push(ColumnDesc::named(
                             col_name,
                             ColumnId::placeholder(),
-                            mssql_type_to_rw_type(col_type, col_name)?,
+                            check_mssql_type_and_convert_to_rw_type(
+                                col_type,
+                                col_name,
+                                rw_data_type,
+                            )?,
                         ));
                     }
                 }
@@ -183,8 +201,12 @@ impl SqlServerExternalTable {
     }
 }
 
-fn mssql_type_to_rw_type(col_type: &str, col_name: &str) -> ConnectorResult<DataType> {
-    let dtype = match col_type.to_lowercase().as_str() {
+fn check_mssql_type_and_convert_to_rw_type(
+    upstream_col_type: &str,
+    upstream_col_name: &str,
+    rw_data_type: Option<&DataType>,
+) -> ConnectorResult<DataType> {
+    let converted_data_type = match upstream_col_type.to_lowercase().as_str() {
         "bit" => DataType::Boolean,
         "binary" | "varbinary" => DataType::Bytea,
         "tinyint" | "smallint" => DataType::Int16,
@@ -192,24 +214,36 @@ fn mssql_type_to_rw_type(col_type: &str, col_name: &str) -> ConnectorResult<Data
         "bigint" => DataType::Int64,
         "real" => DataType::Float32,
         "float" => DataType::Float64,
-        "decimal" | "numeric" => DataType::Decimal,
+        "money" | "decimal" | "numeric" => DataType::Decimal,
         "date" => DataType::Date,
         "time" => DataType::Time,
         "datetime" | "datetime2" | "smalldatetime" => DataType::Timestamp,
         "datetimeoffset" => DataType::Timestamptz,
         "char" | "nchar" | "varchar" | "nvarchar" | "text" | "ntext" | "xml"
         | "uniqueidentifier" => DataType::Varchar,
-        "money" => DataType::Decimal,
         mssql_type => {
             return Err(anyhow!(
                 "Unsupported Sql Server data type: {:?}, column name: {}",
                 mssql_type,
-                col_name
+                upstream_col_name
             )
             .into());
         }
     };
-    Ok(dtype)
+
+    if let Some(user_defined_type) = rw_data_type {
+        if user_defined_type != &converted_data_type {
+            return Err(anyhow!(
+                "Type mismatch for column '{}': upstream data type {:?} should convert to {:?}, but found {:?}",
+                upstream_col_name,
+                upstream_col_type,
+                converted_data_type,
+                user_defined_type
+            ).into());
+        }
+    }
+
+    Ok(converted_data_type)
 }
 
 #[derive(Debug)]
