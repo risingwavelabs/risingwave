@@ -33,7 +33,9 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::{OptimizerContext, PlanRef};
 use crate::utils::{Condition, GroupBy};
 
-/// Transform a special `TableFunction` (with `FILE_SCAN` table function type) into a `LogicalFileScan`
+/// Transform the `internal_backfill_progress()` table function
+/// into a plan graph which will scan the state tables of backfill nodes.
+/// It will return the progress of the backfills, partitioned by the backfill node's fragment id.
 pub struct TableFunctionToInternalBackfillProgressRule {}
 impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
     fn apply(&self, plan: PlanRef) -> ApplyResult {
