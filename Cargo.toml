@@ -160,6 +160,8 @@ tonic-build = { package = "madsim-tonic-build", version = "0.5" }
 otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "e6cd165b9bc85783b42c106e99186b86b73e3507" }
 prost = { version = "0.13" }
 prost-build = { version = "0.13" }
+prost-reflect = { version = "0.15", features = ["serde"] }
+prost-types = { version = "0.13" }
 # branch dev_rebase_main_20250325
 iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "e026f860432bbdacfa282b9d72b501230ce5ea22", features = [
     "storage-s3",

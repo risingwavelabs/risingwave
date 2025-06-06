@@ -22,8 +22,8 @@ jsonbb = { workspace = true }
 jst = { package = 'jsonschema-transpiler', git = "https://github.com/mozilla/jsonschema-transpiler", rev = "c1a89d720d118843d8bcca51084deb0ed223e4b4" }
 num-bigint = "0.4"
 prost = { workspace = true, features = ["no-recursion-limit"] }
-prost-reflect = { version = "0.15", features = ["serde"] }
-prost-types = "0.13"
+prost-reflect = { workspace = true }
+prost-types = { workspace = true }
 protox = "0.8"
 reqwest = { version = "0.12.2", features = ["json"] }
 risingwave_common = { workspace = true }
@@ -43,7 +43,7 @@ hex = "0.4"
 tokio = { version = "0.2", package = "madsim-tokio" }
 
 [build-dependencies]
-prost-build = "0.13"
+prost-build = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
