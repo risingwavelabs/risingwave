@@ -119,6 +119,8 @@ pub struct StorageOpts {
     pub meta_file_cache_runtime_config: foyer::RuntimeOptions,
     pub meta_file_cache_throttle: foyer::Throttle,
 
+    pub vector_file_block_size_kb: usize,
+
     /// The storage url for storing backups.
     pub backup_storage_url: String,
     /// The storage directory for storing backups.
@@ -264,6 +266,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             time_travel_version_cache_capacity: c.storage.time_travel_version_cache_capacity,
             compactor_max_overlap_sst_count: c.storage.compactor_max_overlap_sst_count,
             compactor_max_preload_meta_file_count: c.storage.compactor_max_preload_meta_file_count,
+            vector_file_block_size_kb: c.storage.vector_file_block_size_kb,
         }
     }
 }
