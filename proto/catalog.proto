@@ -102,6 +102,8 @@ message WebhookSourceInfo {
   expr.ExprNode signature_expr = 2;
   // Return until the data is persisted in the storage layer or not. Default is true.
   bool wait_for_persistence = 3;
+  // Whether request is batched as jsonl. Default is false.
+  bool is_batched = 4;
 }
 
 message Source {

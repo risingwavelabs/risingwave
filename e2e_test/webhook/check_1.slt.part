@@ -27,3 +27,17 @@ query TT
 select data ->> 'source', data->> 'auth_algo' from validate_raw_string;
 ----
 github hmac_sha1
+
+query TT
+select data ->> 'source', data->> 'auth_algo' from batched;
+----
+github hmac_sha1
+github hmac_sha1
+github hmac_sha1
+github hmac_sha1
+github hmac_sha1
+github hmac_sha1
+github hmac_sha1
+github hmac_sha1
+github hmac_sha1
+github hmac_sha1

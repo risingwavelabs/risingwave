@@ -944,4 +944,5 @@ pub struct WebhookSourceInfo {
     pub secret_ref: Option<SecretRefValue>,
     pub signature_expr: Expr,
     pub wait_for_persistence: bool,
+    pub is_batched: bool,
 }

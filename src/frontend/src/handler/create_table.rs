@@ -2167,6 +2167,7 @@ fn bind_webhook_info(
         secret_ref,
         signature_expr,
         wait_for_persistence,
+        is_batched,
     } = webhook_info;
 
     // validate secret_ref
@@ -2212,6 +2213,7 @@ fn bind_webhook_info(
         secret_ref: pb_secret_ref,
         signature_expr: Some(expr.to_expr_proto()),
         wait_for_persistence,
+        is_batched,
     };
 
     Ok(pb_webhook_info)
