@@ -47,7 +47,9 @@ import useFetch from "../lib/api/fetch"
 import {
   getFragmentsByJobId,
   getRelationIdInfos,
+  getRelationDependencies,
   getStreamingJobs,
+  StreamingJob,
 } from "../lib/api/streaming"
 import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
@@ -234,6 +236,7 @@ export class ChannelStatsSnapshot {
 export default function Streaming() {
   const { response: streamingJobList } = useFetch(getStreamingJobs)
   const { response: relationIdInfos } = useFetch(getRelationIdInfos)
+  const { response: relationDeps } = useFetch(getRelationDependencies)
 
   const [jobId, setJobId] = useQueryState("id", parseAsInteger)
   const [selectedFragmentId, setSelectedFragmentId] = useState<number>()
@@ -299,6 +302,27 @@ export default function Streaming() {
   }, [fragments?.fragments])
 
   const planNodeDependencies = planNodeDependenciesCallback()
+
+  // ========================== Upstream / Downstream Jobs ==========================
+  const upstreamJobs = useMemo(() => {
+    if (!relationDeps || !streamingJobList || jobId === undefined) return []
+    const deps = relationDeps.get(jobId) ?? []
+    return streamingJobList.filter((j) => deps.includes(j.id))
+  }, [relationDeps, streamingJobList, jobId])
+
+  const downstreamJobs = useMemo(() => {
+    if (!relationDeps || !streamingJobList || jobId === undefined) return []
+    const list: StreamingJob[] = []
+    relationDeps.forEach((deps: number[], relId: number) => {
+      if (deps.includes(jobId)) {
+        const job = streamingJobList.find((j) => j.id === relId)
+        if (job) {
+          list.push(job)
+        }
+      }
+    })
+    return list
+  }, [relationDeps, streamingJobList, jobId])
 
   const [searchActorId, setSearchActorId] = useState<string>("")
   const [searchFragId, setSearchFragId] = useState<string>("")
@@ -451,6 +475,26 @@ export default function Streaming() {
                         Max Parallelism
                       </Td>
                       <Td isNumeric>{job.maxParallelism}</Td>
+                    </Tr>
+                    <Tr>
+                      <Td fontWeight="medium">Upstream Job(s)</Td>
+                      <Td isNumeric>
+                        {upstreamJobs.length > 0
+                          ? upstreamJobs
+                              .map((j) => `(${j.id}) ${j.name}`)
+                              .join(", ")
+                          : "-"}
+                      </Td>
+                    </Tr>
+                    <Tr>
+                      <Td fontWeight="medium">Downstream Job(s)</Td>
+                      <Td isNumeric>
+                        {downstreamJobs.length > 0
+                          ? downstreamJobs
+                              .map((j) => `(${j.id}) ${j.name}`)
+                              .join(", ")
+                          : "-"}
+                      </Td>
                     </Tr>
                   </Tbody>
                 </Table>
