@@ -314,7 +314,7 @@ ALTER TABLE a RENAME TO c;
 query T
 SELECT definition FROM rw_materialized_views WHERE name = 'mv';
 ----
-CREATE MATERIALIZED VIEW mv AS WITH a_log AS changelog from "c", b_log AS changelog from b SELECT 'a' AS tbl, * FROM a_log UNION ALL SELECT 'b', * FROM b_log
+CREATE MATERIALIZED VIEW mv AS WITH a_log AS changelog from c, b_log AS changelog from b SELECT 'a' AS tbl, * FROM a_log UNION ALL SELECT 'b', * FROM b_log
 
 statement ok
 DROP MATERIALIZED VIEW mv;
