@@ -111,7 +111,11 @@ impl crate::source::UnknownFields for KinesisProperties {
 
 #[cfg(test)]
 mod test {
-    use maplit::hashmap;
+    use maplit::{hashmap, btreemap};
+
+    use crate::WithOptionsSecResolved;
+    use crate::source::ConnectorProperties;
+
 
     use super::*;
 
@@ -127,5 +131,21 @@ mod test {
         let kinesis_props: KinesisProperties =
             serde_json::from_value(serde_json::to_value(props).unwrap()).unwrap();
         assert_eq!(kinesis_props.start_timestamp_millis, Some(123456789));
+    }
+
+    #[test]
+    fn test_kinesis_props() {
+        let x = btreemap! {
+            "connector".to_owned() => "kinesis".to_owned(),
+            "scan.startup.mode".to_owned() => "latest".to_owned(),
+            "stream".to_owned() => "sample_stream".to_owned(),
+            "aws.region".to_owned() => "us-east-1".to_owned(),
+            "endpoint".to_owned() => "https://kinesis.us-east-1.amazonaws.com".to_owned(),
+            "aws.credentials.access_key_id".to_owned() => "access_key".to_owned(),
+            "aws.credentials.secret_access_key".to_owned() => "secret_key".to_owned(),
+        };
+        let _connector_props = ConnectorProperties::extract(
+            WithOptionsSecResolved::without_secrets(x), true
+        ).unwrap();
     }
 }
