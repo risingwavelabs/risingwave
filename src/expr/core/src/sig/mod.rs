@@ -426,6 +426,9 @@ pub enum SigDataType {
     AnyStruct,
     /// TODO: not all type can be used as a map key.
     AnyMap,
+    /// Vector of a certain size
+    /// Named without `Any` prefix to align with PostgreSQL
+    Vector,
 }
 
 impl From<DataType> for SigDataType {
@@ -442,6 +445,7 @@ impl std::fmt::Display for SigDataType {
             Self::AnyArray => write!(f, "anyarray"),
             Self::AnyStruct => write!(f, "anystruct"),
             Self::AnyMap => write!(f, "anymap"),
+            Self::Vector => write!(f, "vector"),
         }
     }
 }
@@ -455,6 +459,7 @@ impl SigDataType {
             Self::AnyArray => dt.is_array(),
             Self::AnyStruct => dt.is_struct(),
             Self::AnyMap => dt.is_map(),
+            Self::Vector => matches!(dt, DataType::Vector(_)),
         }
     }
 

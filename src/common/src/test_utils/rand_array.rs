@@ -24,7 +24,7 @@ use rand::prelude::Distribution;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 
-use crate::array::{Array, ArrayBuilder, ArrayRef, ListValue, MapValue, StructValue};
+use crate::array::{Array, ArrayBuilder, ArrayRef, ListValue, MapValue, StructValue, VectorVal};
 use crate::types::{
     DataType, Date, Decimal, Int256, Interval, JsonbVal, MapType, NativeType, Scalar, Serial, Time,
     Timestamp, Timestamptz,
@@ -151,6 +151,12 @@ impl RandValue for ListValue {
     }
 }
 
+impl RandValue for VectorVal {
+    fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
+        todo!("VECTOR_PLACEHOLDER")
+    }
+}
+
 impl RandValue for MapValue {
     fn rand_value<R: Rng>(_rand: &mut R) -> Self {
         // dummy value
@@ -208,6 +214,8 @@ mod tests {
         macro_rules! gen_rand_array {
             ($( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
             $(
+                // todo!("VECTOR_PLACEHOLDER")
+                if stringify!($data_type) != "Vector"
                 {
                     let array = seed_rand_array::<$array>(10, 1024, 0.5);
                     assert_eq!(10, array.len());
