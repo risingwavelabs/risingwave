@@ -57,6 +57,7 @@ mod alter_swap_rename;
 mod alter_system;
 mod alter_table_column;
 pub mod alter_table_drop_connector;
+pub mod alter_table_props;
 mod alter_table_with_sr;
 pub mod alter_user;
 pub mod cancel_job;
@@ -853,6 +854,9 @@ pub async fn handle(
                     StatementType::ALTER_TABLE,
                 )
                 .await
+            }
+            AlterTableOperation::SetTableProps { changed_props } => {
+                alter_table_props::handle_alter_table_props(handler_args, name, changed_props).await
             }
             AlterTableOperation::AddConstraint { .. }
             | AlterTableOperation::DropConstraint { .. }

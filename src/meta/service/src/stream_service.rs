@@ -500,17 +500,31 @@ impl StreamManagerService for StreamServiceImpl {
         request: Request<AlterConnectorPropsRequest>,
     ) -> Result<Response<AlterConnectorPropsResponse>, Status> {
         let request = request.into_inner();
-        if request.object_type != (AlterConnectorPropsObject::Sink as i32) {
-            unimplemented!()
-        }
-
-        let new_config = self
-            .metadata_manager
-            .update_sink_props_by_sink_id(
-                request.object_id as i32,
-                request.changed_props.clone().into_iter().collect(),
-            )
-            .await?;
+        let new_config = match AlterConnectorPropsObject::try_from(request.object_type) {
+            Ok(AlterConnectorPropsObject::Sink) => {
+                self.metadata_manager
+                    .update_sink_props_by_sink_id(
+                        request.object_id as i32,
+                        request.changed_props.clone().into_iter().collect(),
+                    )
+                    .await?
+            }
+            Ok(AlterConnectorPropsObject::IcebergTable) => {
+                self.metadata_manager
+                    .update_iceberg_table_props_by_table_id(
+                        TableId::from(request.object_id),
+                        request.changed_props.clone().into_iter().collect(),
+                        request.extra_options,
+                    )
+                    .await?
+            }
+            _ => {
+                unimplemented!(
+                    "Unsupported object type for AlterConnectorProps: {:?}",
+                    request.object_type
+                );
+            }
+        };
 
         let database_id = self
             .metadata_manager
