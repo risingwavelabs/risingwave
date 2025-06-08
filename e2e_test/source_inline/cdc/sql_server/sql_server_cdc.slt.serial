@@ -189,6 +189,8 @@ Caused by these errors (recent errors listed first):
   1: connector error
   2: Sql Server table 'dbo'.'wrong_orders' not found in 'mydb'
 
+
+
 # invalid schema name
 statement error Sql Server table 'wrong_dbo'.'orders' doesn't exist
 CREATE TABLE shared_orders (
