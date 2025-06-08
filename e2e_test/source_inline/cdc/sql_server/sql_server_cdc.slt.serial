@@ -172,7 +172,7 @@ CREATE TABLE shared_orders (
 )  from mssql_source table 'orders';
 
 # invalid table name
-statement error Sql Server table 'dbo'.'wrong_orders' doesn't exist
+query error
 CREATE TABLE shared_orders (
     order_id INT,
     order_date BIGINT,
@@ -182,6 +182,12 @@ CREATE TABLE shared_orders (
     order_status SMALLINT,
     PRIMARY KEY (order_id)
 )  from mssql_source table 'mydb.dbo.wrong_orders';
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: connector error
+  2: Sql Server table 'dbo'.'wrong_orders' not found in 'mydb'
 
 # invalid schema name
 statement error Sql Server table 'wrong_dbo'.'orders' doesn't exist
