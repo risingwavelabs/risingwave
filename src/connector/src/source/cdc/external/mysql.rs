@@ -698,6 +698,11 @@ mod tests {
         }
     }
 
+    /// To run this test:
+    ///
+    /// ```bash
+    /// cargo test --package risingwave_connector --lib -- --ignored test_mysql_async_with_connection_pool
+    /// ```
     #[ignore]
     #[tokio::test]
     async fn test_mysql_async_with_connection_pool() {
