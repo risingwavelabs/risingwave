@@ -53,8 +53,8 @@ use risingwave_hummock_sdk::table_stats::{
 use risingwave_hummock_sdk::table_watermark::WatermarkSerdeType;
 use risingwave_hummock_sdk::version::{GroupDelta, IntraLevelDelta};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockCompactionTaskId, HummockSstableObjectId, HummockVersionId,
-    compact_task_to_string, statistics_compact_task,
+    CompactionGroupId, HummockCompactionTaskId, HummockSstableId, HummockSstableObjectId,
+    HummockVersionId, compact_task_to_string, statistics_compact_task,
 };
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
@@ -151,7 +151,8 @@ impl HummockVersionTransaction<'_> {
             .entry(compact_task.compaction_group_id)
             .or_default()
             .group_deltas;
-        let mut removed_table_ids_map: BTreeMap<u32, HashSet<u64>> = BTreeMap::default();
+        let mut removed_table_ids_map: BTreeMap<u32, HashSet<HummockSstableId>> =
+            BTreeMap::default();
 
         for level in &compact_task.input_ssts {
             let level_idx = level.level_idx;

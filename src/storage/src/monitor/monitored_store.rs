@@ -32,7 +32,7 @@ use tracing::{Instrument, error};
 use super::{MonitoredStateStoreGetStats, MonitoredStateStoreIterStats, MonitoredStorageMetrics};
 use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
+use crate::hummock::{HummockStorage, ObjectIdManagerRef};
 use crate::monitor::monitored_storage_metrics::StateStoreIterStats;
 use crate::monitor::{StateStoreIterLogStats, StateStoreIterStatsTrait};
 use crate::store::*;
@@ -206,6 +206,18 @@ impl<S: StateStoreReadLog> StateStoreReadLog for MonitoredStateStore<S> {
     }
 }
 
+impl<S: StateStoreReadVector> StateStoreReadVector for MonitoredTableStateStore<S> {
+    fn nearest<O: Send + 'static>(
+        &self,
+        vec: Vector,
+        options: VectorNearestOptions,
+        on_nearest_item_fn: impl OnNearestItemFn<O>,
+    ) -> impl StorageFuture<'_, Vec<O>> {
+        // TODO: monitor
+        self.inner.nearest(vec, options, on_nearest_item_fn)
+    }
+}
+
 impl<S: LocalStateStore> LocalStateStore for MonitoredTableStateStore<S> {
     type FlushedSnapshotReader = MonitoredTableStateStore<S::FlushedSnapshotReader>;
 
@@ -266,7 +278,7 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredTableStateStore<S> {
     }
 }
 
-impl<S: LocalStateStore> StateStoreWriteEpochControl for MonitoredTableStateStore<S> {
+impl<S: StateStoreWriteEpochControl> StateStoreWriteEpochControl for MonitoredTableStateStore<S> {
     fn flush(&mut self) -> impl Future<Output = StorageResult<usize>> + Send + '_ {
         self.inner.flush().instrument_await("store_flush".verbose())
     }
@@ -287,9 +299,17 @@ impl<S: LocalStateStore> StateStoreWriteEpochControl for MonitoredTableStateStor
     }
 }
 
+impl<S: StateStoreWriteVector> StateStoreWriteVector for MonitoredTableStateStore<S> {
+    fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()> {
+        // TODO: monitor
+        self.inner.insert(vec, info)
+    }
+}
+
 impl<S: StateStore> StateStore for MonitoredStateStore<S> {
     type Local = MonitoredTableStateStore<S::Local>;
     type ReadSnapshot = MonitoredTableStateStore<S::ReadSnapshot>;
+    type VectorWriter = MonitoredTableStateStore<S::VectorWriter>;
 
     fn try_wait_epoch(
         &self,
@@ -332,6 +352,15 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
             options.table_id,
         ))
     }
+
+    async fn new_vector_writer(&self, options: NewVectorWriterOptions) -> Self::VectorWriter {
+        let table_id = options.table_id;
+        MonitoredTableStateStore::new(
+            self.inner.new_vector_writer(options).await,
+            self.storage_metrics.clone(),
+            table_id,
+        )
+    }
 }
 
 impl MonitoredStateStore<HummockStorage> {
@@ -339,8 +368,8 @@ impl MonitoredStateStore<HummockStorage> {
         self.inner.sstable_store()
     }
 
-    pub fn sstable_object_id_manager(&self) -> SstableObjectIdManagerRef {
-        self.inner.sstable_object_id_manager().clone()
+    pub fn object_id_manager(&self) -> ObjectIdManagerRef {
+        self.inner.object_id_manager().clone()
     }
 }
 

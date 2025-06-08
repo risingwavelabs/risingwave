@@ -199,6 +199,7 @@ fn mssql_type_to_rw_type(col_type: &str, col_name: &str) -> ConnectorResult<Data
         "datetimeoffset" => DataType::Timestamptz,
         "char" | "nchar" | "varchar" | "nvarchar" | "text" | "ntext" | "xml"
         | "uniqueidentifier" => DataType::Varchar,
+        "money" => DataType::Decimal,
         mssql_type => {
             return Err(anyhow!(
                 "Unsupported Sql Server data type: {:?}, column name: {}",

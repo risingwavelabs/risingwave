@@ -40,8 +40,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
             return self.gen_simple_scalar(ret);
         }
 
-        let context = SqlGeneratorContext::new();
-        let context = context.set_inside_agg();
+        let context = SqlGeneratorContext::new(true);
         let exprs: Vec<Expr> = func
             .inputs_type
             .iter()
@@ -57,7 +56,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         let distinct = distinct_allowed && self.flip_coin();
 
         let filter = if self.flip_coin() {
-            let context = SqlGeneratorContext::new_with_can_agg(false);
+            let context = SqlGeneratorContext::new(false);
             // ENABLE: https://github.com/risingwavelabs/risingwave/issues/4762
             // Prevent correlated query with `FILTER`
             let old_ctxt = self.new_local_context();

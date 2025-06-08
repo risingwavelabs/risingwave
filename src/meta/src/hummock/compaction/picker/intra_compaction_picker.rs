@@ -284,7 +284,9 @@ impl IntraCompactionPicker {
                 stats,
             ) {
                 let mut overlap = overlap_strategy.create_overlap_info();
-                select_ssts.iter().for_each(|ssts| overlap.update(ssts));
+                select_ssts
+                    .iter()
+                    .for_each(|sst| overlap.update(&sst.key_range));
 
                 assert!(
                     overlap

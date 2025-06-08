@@ -9,17 +9,19 @@ repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
-chrono = "0.4"
+chrono = { workspace = true }
 clap = { workspace = true }
 itertools = { workspace = true }
 rand = { version = "0.9", features = ["small_rng"] }
 rand_chacha = { version = "0.9" }
-regex = "1"
+regex = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_expr = { workspace = true }
 risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }
 risingwave_sqlparser = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
 similar = "2.7.0"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio" }

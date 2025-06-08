@@ -1,0 +1,219 @@
+# Named Window Tests
+# Test the WINDOW clause functionality
+
+# Basic named window tests
+- id: simple named window
+  sql: |
+    create table t(x int, y int);
+    select x, y, sum(x) over w from t window w as (partition by y);
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+
+- id: named window with order by
+  sql: |
+    create table t(x int, y int);
+    select x, y, row_number() over w from t window w as (partition by y order by x);
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+
+- id: named window with frame specification
+  sql: |
+    create table t(x int, y int);
+    select x, y, sum(x) over w from t window w as (partition by y order by x rows between 1 preceding and current row);
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+
+# Multiple named windows
+- id: multiple named windows
+  sql: |
+    create table t(x int, y int, z int);
+    select x, y, z, sum(x) over w1, avg(y) over w2
+    from t
+    window w1 as (partition by y order by x),
+           w2 as (partition by z order by y);
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+
+- id: same window different names
+  sql: |
+    create table t(x int, y int);
+    select x, y, sum(x) over w1, count(*) over w2
+    from t
+    window w1 as (partition by y order by x),
+           w2 as (partition by y order by x);
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+
+# Complex window specifications
+- id: named window with range frame
+  sql: |
+    create table t(x int, y int);
+    select x, y, max(x) over w
+    from t
+    window w as (partition by y order by x range between 100 preceding and current row);
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+
+- id: named window with unbounded frame
+  sql: |
+    create table t(x int, y int);
+    select x, y, first_value(x) over w, last_value(x) over w
+    from t
+    window w as (partition by y order by x rows between unbounded preceding and unbounded following);
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+
+# Window function types with named windows
+- id: aggregate functions with named window
+  sql: |
+    create table t(x int, y int, z int);
+    select x, y, z,
+           sum(x) over w,
+           avg(x) over w,
+           min(x) over w,
+           max(x) over w,
+           count(*) over w
+    from t
+    window w as (partition by y order by z);
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+
+- id: ranking functions with named window
+  sql: |
+    create table t(x int, y int);
+    select x, y,
+           row_number() over w,
+           rank() over w,
+           dense_rank() over w
+    from t
+    window w as (partition by y order by x);
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+
+- id: value functions with named window
+  sql: |
+    create table t(x int, y int);
+    select x, y,
+           lag(x) over w,
+           lead(x) over w,
+           first_value(x) over w,
+           last_value(x) over w
+    from t
+    window w as (partition by y order by x);
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+
+# Error cases
+- id: undefined named window
+  sql: |
+    create table t(x int, y int);
+    select x, y, sum(x) over w from t;
+  expected_outputs:
+    - binder_error
+
+- id: duplicate window names
+  sql: |
+    create table t(x int, y int);
+    select x, y, sum(x) over w1 from t window w1 as (partition by y), w1 as (partition by y order by x);
+  expected_outputs:
+    - binder_error
+
+# Mixed named and inline windows
+- id: mixed named and inline windows
+  sql: |
+    create table t(x int, y int, z int);
+    select x, y, z,
+           sum(x) over w,
+           avg(y) over (partition by z order by x),
+           count(*) over w
+    from t
+    window w as (partition by y order by x);
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+
+# Empty window specification
+- id: empty named window
+  sql: |
+    create table t(x int);
+    select x, lag(x) over w from t window w as ();
+  expected_outputs:
+    - logical_plan
+    - stream_error
+    - batch_error
+
+# Complex expressions in window spec
+- id: expressions in named window spec
+  sql: |
+    create table t(x int, y int, z int);
+    select x, y, z, sum(x * 2) over w
+    from t
+    window w as (partition by y + 1 order by abs(z));
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+
+# TopN pattern with named window
+- id: topn with named window
+  sql: |
+    create table t(x int, y int);
+    select x, y from (
+      select x, y, row_number() over w as rn
+      from t
+      window w as (partition by y order by x)
+    ) where rn <= 3;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+
+# Named window in subquery
+- id: named window in subquery
+  sql: |
+    create table t(x int, y int);
+    select x, y from (
+      select x, y, sum(x) over w as s
+      from t
+      window w as (partition by y)
+    ) where s > 10;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+
+# Named window with CTE
+- id: named window with cte
+  sql: |
+    create table t(x int, y int, z int);
+    with cte as (
+      select x, y, z, row_number() over w as rn
+      from t
+      window w as (partition by y order by x)
+    )
+    select x, z from cte where rn = 1;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan

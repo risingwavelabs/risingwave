@@ -271,7 +271,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::MapLength
             | Type::VnodeUser
             | Type::RwEpochToTs
-            | Type::CheckNotNull =>
+            | Type::CheckNotNull
+            | Type::CompositeCast =>
             // expression output is deterministic(same result for the same input)
             {
                 func_call

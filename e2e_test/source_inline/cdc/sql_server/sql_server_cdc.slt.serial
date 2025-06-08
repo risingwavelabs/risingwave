@@ -9,7 +9,7 @@ system ok
 sqlcmd -C -d master -Q 'create database UpperDB COLLATE SQL_Latin1_General_CP1_CS_AS;' -b
 
 system ok
-sqlcmd -C -i e2e_test/source_legacy/cdc_inline/sql_server_cdc/sql_server_cdc_prepare.sql -b
+sqlcmd -C -i e2e_test/source_inline/cdc/sql_server/sql_server_cdc_prepare.sql -b
 
 system ok
 sqlcmd -C -d UpperDB -Q "CREATE SCHEMA UpperSchema;" -b
@@ -136,6 +136,7 @@ CREATE SOURCE upper_mssql_source WITH (
 
 # ------------ Create source/table/mv stage ------------
 # create a cdc source job, which format fixed to `FORMAT PLAIN ENCODE JSON`
+
 statement ok
 CREATE SOURCE mssql_source WITH (
     connector = 'sqlserver-cdc',
@@ -430,7 +431,7 @@ SELECT id, c_xml from shared_sqlserver_all_data_types order by id;
 
 # ------------ add rows stage ------------
 system ok
-sqlcmd -C -i e2e_test/source_legacy/cdc_inline/sql_server_cdc/sql_server_cdc_insert.sql -b
+sqlcmd -C -i e2e_test/source_inline/cdc/sql_server/sql_server_cdc_insert.sql -b
 
 system ok
 sqlcmd -C -d UpperDB -Q "INSERT INTO UpperSchema.UpperTable VALUES (11, 'Alice');" -b

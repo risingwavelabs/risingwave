@@ -28,6 +28,8 @@ mod cast;
 mod expr;
 pub use expr::print_function_table;
 
+use crate::config::{Configuration, Feature};
+
 mod dml;
 mod functions;
 mod query;
@@ -94,36 +96,12 @@ impl From<ColumnDef> for Column {
 
 #[derive(Copy, Clone)]
 pub(crate) struct SqlGeneratorContext {
-    can_agg: bool, // This is used to disable agg expr totally,
-    // Used in top level, where we want to test queries
-    // without aggregates.
     inside_agg: bool,
 }
 
 impl SqlGeneratorContext {
-    pub fn new() -> Self {
-        SqlGeneratorContext {
-            can_agg: true,
-            inside_agg: false,
-        }
-    }
-
-    pub fn new_with_can_agg(can_agg: bool) -> Self {
-        Self {
-            can_agg,
-            inside_agg: false,
-        }
-    }
-
-    pub fn set_inside_agg(self) -> Self {
-        Self {
-            inside_agg: true,
-            ..self
-        }
-    }
-
-    pub fn can_gen_agg(self) -> bool {
-        self.can_agg && !self.inside_agg
+    pub fn new(inside_agg: bool) -> Self {
+        SqlGeneratorContext { inside_agg }
     }
 
     pub fn is_inside_agg(self) -> bool {
@@ -155,6 +133,9 @@ pub(crate) struct SqlGenerator<'a, R: Rng> {
     is_mview: bool,
 
     recursion_weight: f64,
+
+    /// Configuration to control weight.
+    config: Configuration,
     // /// Count number of subquery.
     // /// We don't want too many per query otherwise it is hard to debug.
     // with_statements: u64,
@@ -162,7 +143,7 @@ pub(crate) struct SqlGenerator<'a, R: Rng> {
 
 /// Generators
 impl<'a, R: Rng> SqlGenerator<'a, R> {
-    pub(crate) fn new(rng: &'a mut R, tables: Vec<Table>) -> Self {
+    pub(crate) fn new(rng: &'a mut R, tables: Vec<Table>, config: Configuration) -> Self {
         SqlGenerator {
             tables,
             rng,
@@ -171,10 +152,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             bound_columns: vec![],
             is_mview: false,
             recursion_weight: 0.3,
+            config,
         }
     }
 
-    pub(crate) fn new_for_mview(rng: &'a mut R, tables: Vec<Table>) -> Self {
+    pub(crate) fn new_for_mview(rng: &'a mut R, tables: Vec<Table>, config: Configuration) -> Self {
         // distinct aggregate is not allowed for MV
         SqlGenerator {
             tables,
@@ -184,6 +166,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             bound_columns: vec![],
             is_mview: true,
             recursion_weight: 0.3,
+            config,
         }
     }
 
@@ -228,5 +211,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             }
         }
         can_recurse
+    }
+
+    /// Decide whether to generate on config.
+    pub(crate) fn should_generate(&mut self, feature: Feature) -> bool {
+        self.config.should_generate(feature, self.rng)
     }
 }

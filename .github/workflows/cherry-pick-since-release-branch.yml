@@ -1,4 +1,4 @@
-name: PR for release branches
+name: Cherry-pick PRs to release branches
 on:
   pull_request:
     branches:
@@ -17,7 +17,7 @@ on:
         type: string
 
 env:
-  GH_TOKEN: ${{ github.token }}
+  GH_TOKEN: ${{ secrets.RISINGWAVE_CI_GITHUB_TOKEN }}
 
 jobs:
   get-target-release-branches:
@@ -119,12 +119,12 @@ jobs:
           pr_labels: "cherry-pick"
           pr_body: "Cherry picking #${{ needs.get-target-release-branches.outputs.pr_number }} onto branch ${{ matrix.branch }}"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RISINGWAVE_CI_GITHUB_TOKEN }}
 
   # This job runs after all cherry-pick attempts and reports the final status
   report_status:
     needs: [get-target-release-branches, release_pull_request]
-    if: needs.get-target-release-branches.outputs.branches != '[]'
+    if: always() && needs.get-target-release-branches.result == 'success' && needs.get-target-release-branches.outputs.branches != '[]'
     runs-on: ubuntu-latest
     steps:
       - name: Report final status

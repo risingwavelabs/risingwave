@@ -20,7 +20,7 @@ use std::sync::{Arc, LazyLock};
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use foyer::CacheHint;
+use foyer::Hint;
 use futures::future::try_join;
 use futures::{FutureExt, StreamExt, stream};
 use itertools::Itertools;
@@ -45,7 +45,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{
     BlockedXor16FilterBuilder, CachePolicy, GetObjectId, HummockError, HummockResult,
-    SstableBuilderOptions, SstableObjectIdManagerRef,
+    ObjectIdManagerRef, SstableBuilderOptions,
 };
 use crate::mem_table::ImmutableMemtable;
 use crate::opts::StorageOpts;
@@ -55,7 +55,7 @@ const GC_DELETE_KEYS_FOR_FLUSH: bool = false;
 /// Flush shared buffer to level0. Resulted SSTs are grouped by compaction group.
 pub async fn compact(
     context: CompactorContext,
-    sstable_object_id_manager: SstableObjectIdManagerRef,
+    object_id_manager: ObjectIdManagerRef,
     payload: Vec<ImmutableMemtable>,
     compaction_catalog_manager_ref: CompactionCatalogManagerRef,
 ) -> HummockResult<UploadTaskOutput> {
@@ -84,7 +84,7 @@ pub async fn compact(
         } else {
             compact_shared_buffer::<true>(
                 context.clone(),
-                sstable_object_id_manager.clone(),
+                object_id_manager.clone(),
                 compaction_catalog_manager_ref.clone(),
                 non_log_store_new_value_payload,
             )
@@ -99,7 +99,7 @@ pub async fn compact(
         } else {
             compact_shared_buffer::<true>(
                 context.clone(),
-                sstable_object_id_manager.clone(),
+                object_id_manager.clone(),
                 compaction_catalog_manager_ref.clone(),
                 log_store_new_value_payload,
             )
@@ -114,7 +114,7 @@ pub async fn compact(
         } else {
             compact_shared_buffer::<false>(
                 context.clone(),
-                sstable_object_id_manager.clone(),
+                object_id_manager.clone(),
                 compaction_catalog_manager_ref.clone(),
                 old_value_payload,
             )
@@ -146,7 +146,7 @@ pub async fn compact(
 /// When `IS_NEW_VALUE` is false, we are compacting with old value, and the payload imms should have `old_values` not `None`
 async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
     context: CompactorContext,
-    sstable_object_id_manager: SstableObjectIdManagerRef,
+    object_id_manager: ObjectIdManagerRef,
     compaction_catalog_manager_ref: CompactionCatalogManagerRef,
     mut payload: Vec<ImmutableMemtable>,
 ) -> HummockResult<Vec<LocalSstableInfo>> {
@@ -195,7 +195,7 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
             sub_compaction_sstable_size as usize,
             table_vnode_partition.clone(),
             use_block_based_filter,
-            Box::new(sstable_object_id_manager.clone()),
+            object_id_manager.clone(),
         );
         let mut forward_iters = Vec::with_capacity(payload.len());
         for imm in &payload {
@@ -555,7 +555,7 @@ impl SharedBufferCompactRunner {
         sub_compaction_sstable_size: usize,
         table_vnode_partition: BTreeMap<u32, u32>,
         use_block_based_filter: bool,
-        object_id_getter: Box<dyn GetObjectId>,
+        object_id_getter: Arc<dyn GetObjectId>,
     ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.capacity = sub_compaction_sstable_size;
@@ -564,7 +564,7 @@ impl SharedBufferCompactRunner {
             options,
             super::TaskConfig {
                 key_range,
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 gc_delete_keys: GC_DELETE_KEYS_FOR_FLUSH,
                 retain_multiple_version: true,
                 stats_target_table_ids: None,

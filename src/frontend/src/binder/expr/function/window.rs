@@ -21,7 +21,7 @@ use risingwave_expr::window_function::{
     RowsFrameBounds, SessionFrameBounds, SessionFrameGap, WindowFuncKind,
 };
 use risingwave_sqlparser::ast::{
-    self, WindowFrameBound, WindowFrameBounds, WindowFrameExclusion, WindowFrameUnits, WindowSpec,
+    self, Window, WindowFrameBound, WindowFrameBounds, WindowFrameExclusion, WindowFrameUnits,
 };
 
 use crate::Binder;
@@ -61,13 +61,27 @@ impl Binder {
         args: Vec<ExprImpl>,
         ignore_nulls: bool,
         filter: Option<Box<ast::Expr>>,
-        WindowSpec {
-            partition_by,
-            order_by,
-            window_frame,
-        }: WindowSpec,
+        window: Window,
     ) -> Result<ExprImpl> {
         self.ensure_window_function_allowed()?;
+
+        // Resolve the window definition to a concrete window specification
+        let window = match window {
+            Window::Spec(spec) => spec,
+            Window::Name(window_name) => {
+                // Look up the named window definition in the bind context
+                let window_name_str = window_name.real_value();
+
+                if let Some(named_window_spec) = self.context.named_windows.get(&window_name_str) {
+                    named_window_spec.clone()
+                } else {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "Window '{}' is not defined. Please ensure the window is defined in the WINDOW clause.",
+                        window_name_str
+                    )).into());
+                }
+            }
+        };
 
         if ignore_nulls {
             match &kind {
@@ -93,17 +107,19 @@ impl Binder {
             bail_not_implemented!("`FILTER` is not supported yet");
         }
 
-        let partition_by = partition_by
+        let partition_by = window
+            .partition_by
             .into_iter()
             .map(|arg| self.bind_expr_inner(arg))
             .try_collect()?;
         let order_by = OrderBy::new(
-            order_by
+            window
+                .order_by
                 .into_iter()
                 .map(|order_by_expr| self.bind_order_by_expr(order_by_expr))
                 .collect::<Result<_>>()?,
         );
-        let frame = if let Some(frame) = window_frame {
+        let frame = if let Some(frame) = window.window_frame {
             let exclusion = if let Some(exclusion) = frame.exclusion {
                 match exclusion {
                     WindowFrameExclusion::CurrentRow => FrameExclusion::CurrentRow,

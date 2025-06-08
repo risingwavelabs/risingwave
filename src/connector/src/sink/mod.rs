@@ -45,13 +45,18 @@ pub mod test_sink;
 pub mod trivial;
 pub mod utils;
 pub mod writer;
+pub mod prelude {
+    pub use crate::sink::{
+        Result, SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION, Sink, SinkError,
+        SinkParam, SinkWriterParam,
+    };
+}
 
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::{Arc, LazyLock};
 
 use ::clickhouse::error::Error as ClickHouseError;
-use ::deltalake::DeltaTableError;
 use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -95,7 +100,7 @@ pub use tracing;
 use self::catalog::{SinkFormatDesc, SinkType};
 use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEnum};
 use crate::WithPropertiesExt;
-use crate::connector_common::IcebergCompactionStat;
+use crate::connector_common::IcebergSinkCompactionUpdate;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
@@ -189,7 +194,8 @@ macro_rules! match_sink_name_str {
 
 pub const CONNECTOR_TYPE_KEY: &str = "connector";
 pub const SINK_TYPE_OPTION: &str = "type";
-pub const SINK_WITHOUT_BACKFILL: &str = "snapshot";
+/// `snapshot = false` corresponds to [`risingwave_pb::stream_plan::StreamScanType::UpstreamOnly`]
+pub const SINK_SNAPSHOT_OPTION: &str = "snapshot";
 pub const SINK_TYPE_APPEND_ONLY: &str = "append-only";
 pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
@@ -682,7 +688,7 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     async fn new_coordinator(
         &self,
         _db: DatabaseConnection,
-        _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergCompactionStat>>,
+        _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
     ) -> Result<Self::Coordinator> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
@@ -1005,8 +1011,9 @@ impl From<ClickHouseError> for SinkError {
     }
 }
 
-impl From<DeltaTableError> for SinkError {
-    fn from(value: DeltaTableError) -> Self {
+#[cfg(feature = "sink-deltalake")]
+impl From<::deltalake::DeltaTableError> for SinkError {
+    fn from(value: ::deltalake::DeltaTableError) -> Self {
         SinkError::DeltaLake(anyhow!(value))
     }
 }
