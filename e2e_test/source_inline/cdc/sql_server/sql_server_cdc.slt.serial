@@ -383,7 +383,7 @@ Caused by these errors (recent errors listed first):
 
 
 
-query error Column 'name' not found in the upstream database
+query error
 CREATE TABLE upper_table (
     "ID" INT,
     name1 VARCHAR,
