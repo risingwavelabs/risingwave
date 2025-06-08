@@ -192,7 +192,7 @@ Caused by these errors (recent errors listed first):
 
 
 # invalid schema name
-statement error Sql Server table 'wrong_dbo'.'orders' doesn't exist
+query error
 CREATE TABLE shared_orders (
     order_id INT,
     order_date BIGINT,
@@ -202,9 +202,17 @@ CREATE TABLE shared_orders (
     order_status SMALLINT,
     PRIMARY KEY (order_id)
 )  from mssql_source table 'mydb.wrong_dbo.orders';
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: connector error
+  2: Sql Server table 'wrong_dbo'.'orders' not found in 'mydb'
+
+
 
 # wrong database name
-statement error The database name `wrong_mydb` in the FROM clause is not the same as the database name `mydb` in source definition
+query error
 CREATE TABLE shared_orders (
     order_id INT,
     order_date BIGINT,
@@ -214,9 +222,17 @@ CREATE TABLE shared_orders (
     order_status SMALLINT,
     PRIMARY KEY (order_id)
 ) from mssql_source table 'wrong_mydb.dbo.orders';
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: connector error
+  2: Sql Server table 'wrong_dbo'.'orders' not found in 'mydb'
+
+
 
 # invalid primary key
-statement error INVALID_ARGUMENT: Primary key mismatch
+query error
 CREATE TABLE shared_orders (
     order_id INT,
     order_date BIGINT,
@@ -226,9 +242,19 @@ CREATE TABLE shared_orders (
     order_status SMALLINT,
     PRIMARY KEY (order_date)
 )  from mssql_source table 'mydb.dbo.orders';
+----
+ERROR:  Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service (call `/ddl_service.DdlService/CreateTable`) failed: Internal error
+  2: source cannot pass validation
+  3: INVALID_ARGUMENT: Primary key mismatch: The primary key list of the source table in SQL Server does not contain 'order_date'.
+Hint: If your primary key contains uppercase letters, please ensure that the primary key in the DML of RisingWave uses the same uppercase format and is wrapped with double quotes ("").
+
+
 
 # column name mismatch
-statement error Column 'wrong_order_date' not found in the upstream database
+query error
 CREATE TABLE shared_orders (
     order_id INT,
     wrong_order_date BIGINT,
@@ -238,9 +264,18 @@ CREATE TABLE shared_orders (
     order_status SMALLINT,
     PRIMARY KEY (order_id)
 )  from mssql_source table 'mydb.dbo.orders';
+----
+ERROR:  Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service (call `/ddl_service.DdlService/CreateTable`) failed: Internal error
+  2: source cannot pass validation
+  3: INVALID_ARGUMENT: Column 'wrong_order_date' not found in the upstream database
+
+
 
 # column data type mismatch
-statement error INVALID_ARGUMENT: Incompatible data type of column order_date
+query error
 CREATE TABLE shared_orders (
     order_id INT,
     order_date VARCHAR,
@@ -250,9 +285,17 @@ CREATE TABLE shared_orders (
     order_status SMALLINT,
     PRIMARY KEY (order_id)
 )  from mssql_source table 'mydb.dbo.orders';
+----
+ERROR:  Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: connector error
+  2: Type mismatch for column 'order_date': upstream data type "bigint" should convert to Int64, but found Varchar
+
+
 
 # table without enabling cdc
-statement error INVALID_ARGUMENT: Table 'dbo.orders_without_cdc' has not enabled CDC.
+query error
 CREATE TABLE shared_orders_without_cdc (
     order_id INT,
     order_date BIGINT,
@@ -262,6 +305,16 @@ CREATE TABLE shared_orders_without_cdc (
     order_status SMALLINT,
     PRIMARY KEY (order_id)
 )  from mssql_source table 'mydb.dbo.orders_without_cdc';
+----
+ERROR:  Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service (call `/ddl_service.DdlService/CreateTable`) failed: Internal error
+  2: source cannot pass validation
+  3: INVALID_ARGUMENT: Table 'dbo.orders_without_cdc' has not enabled CDC.
+Please ensure CDC is enabled.
+
+
 
 # use batch_size = 1 here to ensure not all the data is backfilled in one batch.
 statement ok
