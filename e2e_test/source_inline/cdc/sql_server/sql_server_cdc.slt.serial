@@ -386,14 +386,14 @@ Caused by these errors (recent errors listed first):
 query error
 CREATE TABLE upper_table (
     "ID" INT,
-    name1 VARCHAR,
+    name VARCHAR,
     PRIMARY KEY ("ID")
 )  from upper_mssql_source table 'UpperDB.UpperSchema.UpperTable';
 ----
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: connector error
+  1: gRPC request to meta service (call `/ddl_service.DdlService/CreateTable`) failed: Internal error
   2: source cannot pass validation
   3: INVALID_ARGUMENT: Column 'name' not found in the upstream database
 
