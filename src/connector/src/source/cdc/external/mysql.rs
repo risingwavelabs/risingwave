@@ -711,7 +711,7 @@ mod tests {
             .pass(Some("123456"))
             .ip_or_hostname("mysql")
             .tcp_port(3306)
-            .db_name(Some("mydb"));
+            .db_name(Some("unittest"));
         let pool = mysql_async::Pool::new(opts_builder);
         let mut conn = pool.get_conn().await.unwrap();
         conn.exec_drop("DROP TABLE IF EXISTS test_table", ())
