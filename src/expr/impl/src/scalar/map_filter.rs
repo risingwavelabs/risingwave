@@ -73,9 +73,8 @@ impl Expression for MapFilterExpression {
 
             let mut filtered_entries = Vec::new();
 
-            for idx in 0..kv_count {
+            for (idx, (key, value)) in kv_pairs.iter().enumerate().take(kv_count) {
                 if bool_array.value_at(idx) == Some(true) {
-                    let (key, value) = kv_pairs[idx];
                     filtered_entries.push(StructValue::new(vec![
                         key.to_owned_datum(),
                         value.to_owned_datum(),
@@ -118,7 +117,7 @@ impl Expression for MapFilterExpression {
         let array_impl = list_value.into_array();
         let struct_array = match array_impl {
             ArrayImpl::Struct(arr) => arr,
-            _ => return Err(ExprError::InvalidState("Expected StructArray".to_string())),
+            _ => return Err(ExprError::InvalidState("Expected StructArray".to_owned())),
         };
         let mut key_builder = self.key_type.create_array_builder(struct_array.len());
         let mut value_builder = self.value_type.create_array_builder(struct_array.len());
@@ -161,7 +160,7 @@ impl Expression for MapFilterExpression {
             filtered_entries.iter().map(|s| {
                 let owned_val = s.to_owned();
                 let scalar: ScalarImpl = owned_val.into();
-                Some(scalar) // 
+                Some(scalar)
             }),
         );
         let new_map_value = MapValue::from_entries(new_list_value);

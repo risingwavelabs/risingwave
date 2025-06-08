@@ -1,7 +1,7 @@
 query T
 SELECT map_filter(MAP{'a':1, 'b':2, 'c':3}, |k, v| v > 1);
 ----
-{"b":2,"c":3}
+{b:2,c:3}
 
 statement ok
 DROP TABLE IF EXISTS map_test_table;
@@ -50,16 +50,43 @@ SELECT map_filter(nested_map, |k, v| v['age'] >= 18) FROM map_test_table WHERE i
 NULL
 
 query IT
-SELECT id, map_filter(map_data, |k, v| v > 0 AND k != 'a') 
-FROM map_test_table 
+SELECT id, map_filter(map_data, |k, v| v > 0 AND k != 'a')
+FROM map_test_table
 ORDER BY id;
 ----
 1	{b:2,c:3}
 2	{x:10}
 3	{k:7}
 
-Bind error: Lambda must return Boolean type, got integer
-SELECT map_filter(map_data, |k, v| v + 1) FROM map_test_table WHERE id = 1;
+query error
+SELECT map_filter(MAP{'a':1, 'b':2, 'c':3}, |k, v| v + 1);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: map_filter(MAP {'a': 1, 'b': 2, 'c': 3}, |k, v| v + 1)
+  2: Bind error: Lambda must return Boolean type, got integer
+
+
+query error
+SELECT map_filter(MAP{'a':1, 'b':2, 'c':3}, |v| v > 1);
+----
+db error: ERROR:  Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: map_filter(MAP {'a': 1, 'b': 2, 'c': 3}, |v| v > 1)
+  2: Bind error: Lambda must have exactly two parameters (key, value), got 1
+
+
+query error
+SELECT map_filter(ARRAY[1,2,3], |k, v| v > 1);
+----
+db error: ERROR:  Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: map_filter(ARRAY[1, 2, 3], |k, v| v > 1)
+  2: Bind error: Input must be Map type, got integer[]
+
 
 statement ok
 DROP TABLE map_test_table;
