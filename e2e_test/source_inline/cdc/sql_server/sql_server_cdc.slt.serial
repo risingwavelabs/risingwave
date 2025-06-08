@@ -242,7 +242,7 @@ CREATE TABLE shared_orders (
     PRIMARY KEY (order_date)
 )  from mssql_source table 'mydb.dbo.orders';
 ----
-ERROR:  Failed to run the query
+db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: gRPC request to meta service (call `/ddl_service.DdlService/CreateTable`) failed: Internal error
@@ -264,7 +264,7 @@ CREATE TABLE shared_orders (
     PRIMARY KEY (order_id)
 )  from mssql_source table 'mydb.dbo.orders';
 ----
-ERROR:  Failed to run the query
+db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: gRPC request to meta service (call `/ddl_service.DdlService/CreateTable`) failed: Internal error
@@ -285,7 +285,7 @@ CREATE TABLE shared_orders (
     PRIMARY KEY (order_id)
 )  from mssql_source table 'mydb.dbo.orders';
 ----
-ERROR:  Failed to run the query
+db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: connector error
@@ -305,7 +305,7 @@ CREATE TABLE shared_orders_without_cdc (
     PRIMARY KEY (order_id)
 )  from mssql_source table 'mydb.dbo.orders_without_cdc';
 ----
-ERROR:  Failed to run the query
+db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: gRPC request to meta service (call `/ddl_service.DdlService/CreateTable`) failed: Internal error
