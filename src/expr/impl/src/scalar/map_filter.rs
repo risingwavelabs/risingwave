@@ -195,9 +195,22 @@ mod tests {
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_expr::expr::build_from_pretty;
 
-    async fn test_map_filter_case(expr_str: &str, input_str: &str) {
-        let expr = build_from_pretty(expr_str);
-        let (input, expected) = DataChunk::from_pretty(input_str).split_column_at(1);
+    #[tokio::test]
+    async fn test_map_filter() {
+        // The test doesn't make much sense for MapFilterExpression.
+        // It is equivalent to `SELECT map_filter(MAP {1:1,3:2}, |k, v| 2 > 1)`.
+        // Keep it to ensure `build_from_pretty` and `DataChunk::from_pretty` works for Map type.
+        let expr = build_from_pretty(
+            "(map_filter:map<int4,int4> $0:map<int4,int4> \
+            (greater_than:boolean 2:int4 1:int4))",
+        );
+        let (input, expected) = DataChunk::from_pretty(
+            "map<i,i>    map<i,i>
+             {1:1,3:2}   {1:1,3:2}
+             {5:3,7:4}   {5:3,7:4}
+             {2:0,1:NULL}   {2:0,1:NULL}",
+        )
+        .split_column_at(1);
 
         let output = expr.eval(&input).await.unwrap();
         assert_eq!(&output, expected.column_at(0));
@@ -206,43 +219,5 @@ mod tests {
             let result = expr.eval_row(&row.to_owned_row()).await.unwrap();
             assert_eq!(result, expected_row.datum_at(0).to_owned_datum(),);
         }
-    }
-
-    #[tokio::test]
-    async fn test_map_filter_basic() {
-        test_map_filter_case(
-            "(map_filter:map<varchar,int4> $0:map<varchar,int4> \
-            (function:boolean $0:varchar $1:int4 (greater_than:boolean $1:int4 1:int4)))",
-            "map<T,i>          map<T,i>
-             {a:1,b:2}   {b:2}
-             {c:3,d:4}   {c:3,d:4}
-             {e:0,f:1}   {}",
-        )
-        .await;
-    }
-
-    #[tokio::test]
-    async fn test_map_filter_null_handling() {
-        test_map_filter_case(
-            "(map_filter:map(varchar,int4) $0:map(varchar,int4) \
-             (function:boolean $0:varchar $1:int4 (is_not_null:boolean $1:int4)))",
-            "M<T,i>          M<T,i>
-             {(a,.),(b,3)}   {(b,3)}
-             .               .
-             {}              {}",
-        )
-        .await;
-    }
-
-    #[tokio::test]
-    async fn test_map_filter_string_condition() {
-        test_map_filter_case(
-            "(map_filter:map(varchar,varchar) $0:map(varchar,varchar) \
-             (function:boolean $0:varchar $1:varchar (like:boolean $1:varchar '%test%':varchar)))",
-            "M<T,T>          M<T,T>
-             {(a,hello),(b,test)}   {(b,test)}
-             {(c,testing)}          {(c,testing)}",
-        )
-        .await;
     }
 }

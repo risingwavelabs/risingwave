@@ -1,0 +1,65 @@
+query T
+SELECT map_filter(MAP{'a':1, 'b':2, 'c':3}, |k, v| v > 1);
+----
+{"b":2,"c":3}
+
+statement ok
+DROP TABLE IF EXISTS map_test_table;
+
+statement ok
+CREATE TABLE map_test_table (
+    id INTEGER PRIMARY KEY,
+    map_data MAP(VARCHAR, INTEGER),
+    nested_map MAP(VARCHAR, MAP(VARCHAR, INTEGER))
+);
+
+statement ok
+INSERT INTO map_test_table VALUES
+    (1, MAP{'a':1, 'b':2, 'c':3}, MAP{'user1': MAP{'age':20, 'score':85}}),
+    (2, MAP{'x':10, 'y':-5}, MAP{'user2': MAP{'age':16}}),
+    (3, MAP{'k':7}, NULL);
+
+query T
+SELECT map_filter(map_data, |k, v| v > 1) FROM map_test_table WHERE id = 1;
+----
+{b:2,c:3}
+
+query T
+SELECT map_filter(map_data, |k, v| v > 0) FROM map_test_table WHERE id = 2;
+----
+{x:10}
+
+query T
+SELECT map_filter(map_data, |k, v| v IS NOT NULL) FROM map_test_table WHERE id = 3;
+----
+{k:7}
+
+query T
+SELECT map_filter(nested_map, |k, v| v['age'] >= 18) FROM map_test_table WHERE id = 3;
+----
+NULL
+
+query T
+SELECT map_filter(nested_map, |k, v| v['age'] >= 18) FROM map_test_table WHERE id = 1;
+----
+{user1:{age:20,score:85}}
+
+query T
+SELECT map_filter(nested_map, |k, v| v['age'] >= 18) FROM map_test_table WHERE id = 2;
+----
+NULL
+
+query IT
+SELECT id, map_filter(map_data, |k, v| v > 0 AND k != 'a') 
+FROM map_test_table 
+ORDER BY id;
+----
+1	{b:2,c:3}
+2	{x:10}
+3	{k:7}
+
+Bind error: Lambda must return Boolean type, got integer
+SELECT map_filter(map_data, |k, v| v + 1) FROM map_test_table WHERE id = 1;
+
+statement ok
+DROP TABLE map_test_table;
