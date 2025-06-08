@@ -399,13 +399,20 @@ Caused by these errors (recent errors listed first):
 
 
 
-
-statement error Sql Server table 'upperSchema'.'upperTable' doesn't exist in 'UpperDB'
+query error
 CREATE TABLE upper_table (
     "ID" INT,
     "Name" VARCHAR,
     PRIMARY KEY ("ID")
 )  from upper_mssql_source table 'UpperDB.upperSchema.upperTable';
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: connector error
+  2: Sql Server table 'upperSchema'.'upperTable' not found in 'UpperDB'
+
+
 
 statement ok
 CREATE TABLE upper_table (
