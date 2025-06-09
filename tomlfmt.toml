@@ -1,1 +1,7 @@
+# Configuration file for `cargo-sort`.
+# See https://github.com/DevinR528/cargo-sort.
+
+# Specify an ordering of tables.
+# - All nested tables will be sorted and appear after the specified table.
+# - Any unspecified table will be after specified.
 table_order = ["package", "lib", "features", "dependencies", "dev-dependencies", "build-dependencies"]
