@@ -71,7 +71,7 @@ Caused by these errors (recent errors listed first):
 query error
 SELECT map_filter(MAP{'a':1, 'b':2, 'c':3}, |v| v > 1);
 ----
-db error: ERROR:  Failed to run the query
+db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Failed to bind expression: map_filter(MAP {'a': 1, 'b': 2, 'c': 3}, |v| v > 1)
@@ -81,7 +81,7 @@ Caused by these errors (recent errors listed first):
 query error
 SELECT map_filter(ARRAY[1,2,3], |k, v| v > 1);
 ----
-db error: ERROR:  Failed to run the query
+db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Failed to bind expression: map_filter(ARRAY[1, 2, 3], |k, v| v > 1)
