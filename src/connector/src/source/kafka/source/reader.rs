@@ -23,7 +23,6 @@ use anyhow::Context;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::error::KafkaError;
 use rdkafka::message::OwnedMessage;
@@ -152,16 +151,16 @@ impl SplitReader for KafkaSplitReader {
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        println!("prop {:#?}", properties);
-        println!("source ctx {:#?}", source_ctx);
-        println!("splits {:#?}", splits);
-
         let mut offsets = HashMap::new();
         let mut backfill_info = HashMap::new();
 
         let mut tpl = TopicPartitionList::with_capacity(splits.len());
 
-        let message_reader = if let Some(connection_id) = source_ctx.connection_id {
+        let source_info = &source_ctx.source_info;
+
+        let connection_id = source_info.as_ref().and_then(|s| s.connection_id);
+
+        let message_reader = if let Some(connection_id) = connection_id {
             let reader = KafkaMuxReader::get_or_create(
                 connection_id.to_string(),
                 properties.clone(),
@@ -389,8 +388,30 @@ impl SplitReader for KafkaSplitReader {
                 consumer.assign(&tpl)?;
                 Ok(latest_splits)
             }
-            MessageReader::MuxReader { .. } => {
-                todo!()
+            MessageReader::MuxReader { reader, .. } => {
+                let mut latest_splits: Vec<SplitImpl> = Vec::new();
+                let mut tpl = TopicPartitionList::with_capacity(self.splits.len());
+                for mut split in self.splits.clone() {
+                    // we can't get latest offset if we use Offset::End, so we just fetch watermark here.
+                    let (_low, high) = reader
+                        .fetch_watermarks(
+                            split.topic.as_str(),
+                            split.partition,
+                            self.sync_call_timeout,
+                        )
+                        .await?;
+                    tpl.add_partition_offset(
+                        split.topic.as_str(),
+                        split.partition,
+                        Offset::Offset(high),
+                    )?;
+                    split.start_offset = Some(high - 1);
+                    latest_splits.push(split.into());
+                }
+
+                let _ = reader.seek(tpl, self.sync_call_timeout).await?;
+
+                Ok(latest_splits)
             }
         }
     }

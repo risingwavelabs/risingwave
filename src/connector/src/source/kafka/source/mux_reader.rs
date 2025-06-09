@@ -3,19 +3,20 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use futures::{StreamExt, StreamExt as _};
+use futures::StreamExt;
 use once_cell::sync::OnceCell;
 use rdkafka::consumer::{Consumer, StreamConsumer};
+use rdkafka::error::KafkaResult;
 use rdkafka::message::OwnedMessage;
 use rdkafka::{ClientConfig, Message, TopicPartitionList};
 use tokio::sync::{RwLock, mpsc};
 
 use crate::connector_common::read_kafka_log_level;
 use crate::error::ConnectorResult as Result;
+use crate::source::SourceContextRef;
 use crate::source::kafka::{
     KAFKA_ISOLATION_LEVEL, KafkaContextCommon, KafkaProperties, RwConsumerContext,
 };
-use crate::source::{SourceContext, SourceContextRef};
 
 /// Global key == `connection_id` (already unique in metadata)
 pub type ReaderKey = String;
@@ -43,6 +44,7 @@ impl KafkaMuxReader {
     ) -> Result<Arc<Self>> {
         // fast path – already exists
         if let Some(r) = Self::registry().read().await.get(&connection_id).cloned() {
+            println!("cached!");
             return Ok(r);
         }
 
@@ -109,7 +111,7 @@ impl KafkaMuxReader {
                         let _ = tx.send(owned).await;
                     }
                 }
-                Err(e) => eprintln!("Kafka error: {e}"),
+                Err(e) => tracing::error!("Kafka error: {e}"),
             }
         }
     }
@@ -148,7 +150,10 @@ impl KafkaMuxReader {
         Ok(rx)
     }
 
-    pub async fn unregister_topic_partition_list(&self, tpl: TopicPartitionList) -> anyhow::Result<()> {
+    pub async fn unregister_topic_partition_list(
+        &self,
+        tpl: TopicPartitionList,
+    ) -> anyhow::Result<()> {
         if tpl.count() == 0 {
             return Ok(());
         }
@@ -183,6 +188,16 @@ impl KafkaMuxReader {
     ) -> rdkafka::error::KafkaResult<(i64, i64)> {
         self.consumer
             .fetch_watermarks(topic, partition, timeout)
+            .await
+    }
+
+    pub async fn seek(
+        &self,
+        topic_partition_list: TopicPartitionList,
+        sync_call_timeout: Duration,
+    ) -> KafkaResult<TopicPartitionList> {
+        self.consumer
+            .seek_partitions(topic_partition_list.clone(), sync_call_timeout)
             .await
     }
 }

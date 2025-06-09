@@ -19,28 +19,25 @@ use anyhow::anyhow;
 use either::Either;
 use itertools::Itertools;
 use risingwave_common::array::ArrayRef;
-use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedIntCounter};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
-use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
-    ConnectorState, SourceContext, SourceCtrlOpts, SourceMuxMode, SplitId,
-    SplitImpl, SplitMetaData, StreamChunkWithState, WaitCheckpointTask,
+    ConnectorState, SplitId, SplitImpl, SplitMetaData, StreamChunkWithState, WaitCheckpointTask,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::TryWaitEpochOptions;
 use thiserror_ext::AsReport;
+use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
 use super::{barrier_to_message_stream, get_split_offset_col_idx, prune_additional_cols};
-use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
 use crate::executor::source::reader_stream::StreamReaderBuilder;
@@ -81,7 +78,6 @@ impl<S: StateStore> SourceExecutor<S> {
         rate_limit_rps: Option<u32>,
         is_shared_non_cdc: bool,
     ) -> Self {
-        println!("creating source executor");
         Self {
             actor_ctx,
             stream_source_core,
@@ -131,78 +127,78 @@ impl<S: StateStore> SourceExecutor<S> {
         }))
     }
 
-    /// build the source column ids and the source context which will be used to build the source stream
-    pub fn prepare_source_stream_build(
-        &self,
-        source_desc: &SourceDesc,
-    ) -> (Vec<ColumnId>, SourceContext) {
-        let column_ids = source_desc
-            .columns
-            .iter()
-            .map(|column_desc| column_desc.column_id)
-            .collect_vec();
-
-        let (schema_change_tx, mut schema_change_rx) =
-            mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
-        let schema_change_tx = if self.is_auto_schema_change_enable() {
-            let meta_client = self.actor_ctx.meta_client.clone();
-            // spawn a task to handle schema change event from source parser
-            let _join_handle = tokio::task::spawn(async move {
-                while let Some((schema_change, finish_tx)) = schema_change_rx.recv().await {
-                    let table_ids = schema_change.table_ids();
-                    tracing::info!(
-                        target: "auto_schema_change",
-                        "recv a schema change event for tables: {:?}", table_ids);
-                    // TODO: retry on rpc error
-                    if let Some(ref meta_client) = meta_client {
-                        match meta_client
-                            .auto_schema_change(schema_change.to_protobuf())
-                            .await
-                        {
-                            Ok(_) => {
-                                tracing::info!(
-                                    target: "auto_schema_change",
-                                    "schema change success for tables: {:?}", table_ids);
-                                finish_tx.send(()).unwrap();
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    target: "auto_schema_change",
-                                    error = ?e.as_report(), "schema change error");
-                                finish_tx.send(()).unwrap();
-                            }
-                        }
-                    }
-                }
-            });
-            Some(schema_change_tx)
-        } else {
-            info!("auto schema change is disabled in config");
-            None
-        };
-
-        let source_ctx = SourceContext::new(
-            self.actor_ctx.id,
-            self.stream_source_core.as_ref().unwrap().source_id,
-            self.actor_ctx.fragment_id,
-            self.stream_source_core
-                .as_ref()
-                .unwrap()
-                .source_name
-                .clone(),
-            source_desc.metrics.clone(),
-            SourceCtrlOpts {
-                chunk_size: limited_chunk_size(self.rate_limit_rps),
-                split_txn: self.rate_limit_rps.is_some(), // when rate limiting, we may split txn
-            },
-            source_desc.source.config.clone(),
-            schema_change_tx,
-            SourceMuxMode::Direct,
-            None,
-        );
-
-        (column_ids, source_ctx)
-    }
+    // /// build the source column ids and the source context which will be used to build the source stream
+    // pub fn prepare_source_stream_build2(
+    //     &self,
+    //     source_desc: &SourceDesc,
+    // ) -> (Vec<ColumnId>, SourceContext) {
+    //     let column_ids = source_desc
+    //         .columns
+    //         .iter()
+    //         .map(|column_desc| column_desc.column_id)
+    //         .collect_vec();
+    //
+    //     let (schema_change_tx, mut schema_change_rx) =
+    //         mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
+    //     let schema_change_tx = if self.is_auto_schema_change_enable() {
+    //         let meta_client = self.actor_ctx.meta_client.clone();
+    //         // spawn a task to handle schema change event from source parser
+    //         let _join_handle = tokio::task::spawn(async move {
+    //             while let Some((schema_change, finish_tx)) = schema_change_rx.recv().await {
+    //                 let table_ids = schema_change.table_ids();
+    //                 tracing::info!(
+    //                     target: "auto_schema_change",
+    //                     "recv a schema change event for tables: {:?}", table_ids);
+    //                 // TODO: retry on rpc error
+    //                 if let Some(ref meta_client) = meta_client {
+    //                     match meta_client
+    //                         .auto_schema_change(schema_change.to_protobuf())
+    //                         .await
+    //                     {
+    //                         Ok(_) => {
+    //                             tracing::info!(
+    //                                 target: "auto_schema_change",
+    //                                 "schema change success for tables: {:?}", table_ids);
+    //                             finish_tx.send(()).unwrap();
+    //                         }
+    //                         Err(e) => {
+    //                             tracing::error!(
+    //                                 target: "auto_schema_change",
+    //                                 error = ?e.as_report(), "schema change error");
+    //                             finish_tx.send(()).unwrap();
+    //                         }
+    //                     }
+    //                 }
+    //             }
+    //         });
+    //         Some(schema_change_tx)
+    //     } else {
+    //         info!("auto schema change is disabled in config");
+    //         None
+    //     };
+    //
+    //     let source_ctx = SourceContext::new(
+    //         self.actor_ctx.id,
+    //         self.stream_source_core.as_ref().unwrap().source_id,
+    //         self.actor_ctx.fragment_id,
+    //         self.stream_source_core
+    //             .as_ref()
+    //             .unwrap()
+    //             .source_name
+    //             .clone(),
+    //         source_desc.metrics.clone(),
+    //         SourceCtrlOpts {
+    //             chunk_size: limited_chunk_size(self.rate_limit_rps),
+    //             split_txn: self.rate_limit_rps.is_some(), // when rate limiting, we may split txn
+    //         },
+    //         source_desc.source.config.clone(),
+    //         schema_change_tx,
+    //         SourceMuxMode::Direct,
+    //         None,
+    //     );
+    //
+    //     (column_ids, source_ctx)
+    // }
 
     fn is_auto_schema_change_enable(&self) -> bool {
         self.actor_ctx

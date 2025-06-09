@@ -300,9 +300,7 @@ pub struct SourceContext {
     pub schema_change_tx:
         Option<mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>>,
 
-    pub source_mux_mode: SourceMuxMode,
-
-    pub connection_id: Option<u32>,
+    pub source_info: Option<PbStreamSourceInfo>,
 }
 
 impl SourceContext {
@@ -317,8 +315,7 @@ impl SourceContext {
         schema_change_channel: Option<
             mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>,
         >,
-        source_mux_mode: SourceMuxMode,
-        connection_id: Option<u32>,
+        source_info: Option<PbStreamSourceInfo>,
     ) -> Self {
         Self {
             actor_id,
@@ -329,8 +326,7 @@ impl SourceContext {
             source_ctrl_opts,
             connector_props,
             schema_change_tx: schema_change_channel,
-            source_mux_mode,
-            connection_id,
+            source_info,
         }
     }
 
@@ -349,7 +345,6 @@ impl SourceContext {
             },
             ConnectorProperties::default(),
             None,
-            SourceMuxMode::Direct,
             None,
         )
     }
@@ -675,6 +670,14 @@ impl ConnectorProperties {
             || matches!(self, ConnectorProperties::OpendalS3(_))
             || matches!(self, ConnectorProperties::Gcs(_))
             || matches!(self, ConnectorProperties::Azblob(_))
+    }
+
+    pub fn unique_key_under_connection(&self) -> Option<String> {
+        if let ConnectorProperties::Kafka(k) = self {
+            Some(k.common.topic.clone())
+        } else {
+            None
+        }
     }
 
     pub async fn create_split_enumerator(

@@ -30,7 +30,7 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::types::{JsonbVal, ScalarRef, Serial, ToOwnedDatum};
 use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk};
 use risingwave_connector::source::reader::desc::SourceDesc;
-use risingwave_connector::source::{SourceContext, SourceCtrlOpts, SourceMuxMode};
+use risingwave_connector::source::{SourceContext, SourceCtrlOpts};
 use risingwave_storage::store::PrefetchOptions;
 use thiserror_ext::AsReport;
 
@@ -383,7 +383,6 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
             },
             source_desc.source.config.clone(),
             None,
-            SourceMuxMode::Direct,
             None,
         )
     }

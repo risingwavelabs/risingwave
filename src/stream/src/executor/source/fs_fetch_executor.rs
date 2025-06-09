@@ -28,8 +28,7 @@ use risingwave_connector::source::filesystem::opendal_source::{
 };
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{
-    BoxStreamingFileSourceChunkStream, SourceContext, SourceCtrlOpts, SourceMuxMode, SplitImpl,
-    SplitMetaData,
+    BoxStreamingFileSourceChunkStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
 use risingwave_storage::store::PrefetchOptions;
 use thiserror_ext::AsReport;
@@ -210,7 +209,6 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             },
             source_desc.source.config.clone(),
             None,
-            SourceMuxMode::Direct,
             None,
         )
     }
