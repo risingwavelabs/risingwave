@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+use std::task::Poll;
+
 use anyhow::Context;
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -242,5 +245,112 @@ impl PulsarBrokerReader {
             }
             yield res;
         }
+    }
+
+    async fn to_stream(self) -> PulsarConsumeStream {
+        let max_chunk_size = self.source_ctx.source_ctrl_opts.chunk_size;
+        let x = self.split_id;
+        let (ack_tx, ack_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        PULSAR_ACK_CHANNEL
+            .entry((self.split.topic.to_string(), x))
+            .and_compute_with(|_current| {
+                // insert the ack_tx to the moka cache
+                moka::ops::compute::Op::Put(ack_tx.clone())
+            })
+            .await;
+
+        PulsarConsumeStream {
+            pulsar_reader: self.consumer,
+            ack_rx,
+            topic: self.split.topic.to_string(),
+            max_chunk_size,
+            chunk_cache: vec![],
+        }
+    }
+}
+
+use std::sync::Arc;
+
+use moka::future::Cache as MokaCache;
+
+pub static PULSAR_ACK_CHANNEL: LazyLock<
+    MokaCache<(String, Arc<str>), tokio::sync::mpsc::UnboundedSender<i32>>,
+> = LazyLock::new(|| moka::future::Cache::builder().build()); // mapping:
+
+struct PulsarConsumeStream {
+    pulsar_reader: Consumer<Vec<u8>, TokioExecutor>,
+    ack_rx: tokio::sync::mpsc::UnboundedReceiver<i32>,
+    topic: String,
+    max_chunk_size: usize,
+    chunk_cache: Vec<pulsar::consumer::Message<Vec<u8>>>,
+}
+
+impl PulsarConsumeStream {
+    fn do_ack(&mut self, message_id: MessageIdData) {
+        let topic = self.topic.clone();
+        let _ = tokio::task::block_in_place(move || {
+            tokio::runtime::Handle::current()
+                .block_on(async { self.pulsar_reader.ack_with_id(&topic, message_id).await })
+        })
+        .map_err(|e| {
+            tracing::warn!(
+                error=?e, "meet error when ack message"
+            )
+        });
+    }
+
+    fn do_handle_message(
+        &mut self,
+        maybe_message: Option<Result<pulsar::consumer::Message<Vec<u8>>, pulsar::error::Error>>,
+    ) -> Result<(), pulsar::error::Error> {
+        if let Some(poll_message_result) = maybe_message {
+            match poll_message_result {
+                Err(e) => {
+                    return Err(e);
+                }
+                Ok(one_message) => {
+                    self.chunk_cache.push(one_message);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl futures::Stream for PulsarConsumeStream {
+    type Item = Result<Vec<pulsar::consumer::Message<Vec<u8>>>, pulsar::error::Error>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match (
+            self.ack_rx.poll_recv(cx),
+            self.pulsar_reader.poll_next_unpin(cx),
+        ) {
+            (Poll::Pending, Poll::Pending) => {}
+            (Poll::Ready(_some_ack), Poll::Pending) => {
+                self.do_ack(MessageIdData::default());
+            }
+            (Poll::Pending, Poll::Ready(maybe_message)) => {
+                if let Err(e) = self.do_handle_message(maybe_message) {
+                    return Poll::Ready(Some(Err(e)));
+                }
+            }
+            (Poll::Ready(_some_ack), Poll::Ready(maybe_message)) => {
+                self.do_ack(MessageIdData::default());
+                if let Err(e) = self.do_handle_message(maybe_message) {
+                    return Poll::Ready(Some(Err(e)));
+                }
+            }
+        }
+
+        if self.chunk_cache.len() <= self.max_chunk_size {
+            let ready_chunk = std::mem::take(&mut self.chunk_cache);
+            return Poll::Ready(Some(Ok(ready_chunk)));
+        }
+
+        Poll::Pending
     }
 }
