@@ -86,3 +86,9 @@ CREATE TABLE orders_without_cdc (
   product_id INT,
   order_status SMALLINT
 );
+
+
+CREATE TABLE test_pk_uuid (
+  id UNIQUEIDENTIFIER PRIMARY KEY,
+  NAME NVARCHAR(50),
+);

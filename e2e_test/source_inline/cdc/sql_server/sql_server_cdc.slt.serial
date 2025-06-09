@@ -283,6 +283,12 @@ statement ok
 DROP table shared_sqlserver_all_data_types;
 
 statement ok
+CREATE TABLE test_pk_uuid (
+    "id" CHARACTER VARYING,
+    "NAME" CHARACTER VARYING,
+) from mssql_source table 'mydb.dbo.test_pk_uuid';
+
+statement ok
 CREATE TABLE shared_sqlserver_all_data_types (
     id INT,
     c_bit BOOLEAN,
@@ -358,6 +364,11 @@ query I
 select cnt from shared_orders_cnt;
 ----
 3
+
+query I
+select count(*) from test_pk_uuid;
+----
+2000
 
 query I
 select cnt from shared_single_type_cnt;
