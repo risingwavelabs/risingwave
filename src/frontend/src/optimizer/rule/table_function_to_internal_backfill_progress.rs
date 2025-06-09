@@ -65,6 +65,7 @@ impl TableFunctionToInternalBackfillProgressRule {
                 Field::new("fragment_id", DataType::Int32),
                 Field::new("backfill_state_table_id", DataType::Int32),
                 Field::new("current_row_count", DataType::Int64),
+                Field::new("snapshot_backfill_epoch", DataType::Int64),
             ];
             let plan = LogicalValues::new(vec![], Schema::new(fields), ctx.clone());
             return Ok(plan.into());
@@ -95,32 +96,52 @@ impl TableFunctionToInternalBackfillProgressRule {
     }
 
     fn build_agg(backfill_info: &BackfillInfo, scan: LogicalScan) -> anyhow::Result<PlanRef> {
-        let select_exprs = vec![ExprImpl::AggCall(Box::new(AggCall::new(
+        let epoch_expr = match backfill_info.epoch_column_index() {
+            Some(epoch_column_index) => ExprImpl::InputRef(Box::new(InputRef {
+                index: epoch_column_index,
+                data_type: DataType::Int64,
+            })),
+            None => ExprImpl::Literal(Box::new(Literal::new(None, DataType::Int64))),
+        };
+        let aggregated_min_epoch = ExprImpl::AggCall(Box::new(AggCall::new(
+            AggType::Builtin(PbAggKind::Min),
+            vec![epoch_expr],
+            false,
+            OrderBy::any(),
+            Condition::true_cond(),
+            vec![],
+        )?));
+        let aggregated_current_row_count = ExprImpl::AggCall(Box::new(AggCall::new(
             AggType::Builtin(PbAggKind::Sum),
             vec![ExprImpl::InputRef(Box::new(InputRef {
-                index: backfill_info.row_count_column_index,
+                index: backfill_info.row_count_column_index(),
                 data_type: DataType::Int64,
             }))],
             false,
             OrderBy::any(),
             Condition::true_cond(),
             vec![],
-        )?))];
+        )?));
+        let select_exprs = vec![aggregated_current_row_count, aggregated_min_epoch];
         let group_by = GroupBy::GroupKey(vec![]);
         let (agg, _, _) = LogicalAgg::create(select_exprs, group_by, None, scan.into())?;
         Ok(agg)
     }
 
     fn build_project(backfill_info: &BackfillInfo, agg: PlanRef) -> anyhow::Result<LogicalProject> {
-        let job_id_expr = Self::build_u32_expr(backfill_info.job_id);
-        let fragment_id_expr = Self::build_u32_expr(backfill_info.fragment_id);
-        let table_id_expr = Self::build_u32_expr(backfill_info.table_id);
+        let job_id_expr = Self::build_u32_expr(backfill_info.job_id());
+        let fragment_id_expr = Self::build_u32_expr(backfill_info.fragment_id());
+        let table_id_expr = Self::build_u32_expr(backfill_info.table_id());
 
         let current_count_per_vnode = ExprImpl::InputRef(Box::new(InputRef {
             index: 0,
             data_type: DataType::Decimal,
         }))
         .cast_explicit(DataType::Int64)?;
+        let min_epoch = ExprImpl::InputRef(Box::new(InputRef {
+            index: 1,
+            data_type: DataType::Int64,
+        }));
 
         Ok(LogicalProject::new(
             agg,
@@ -129,6 +150,7 @@ impl TableFunctionToInternalBackfillProgressRule {
                 fragment_id_expr,
                 table_id_expr,
                 current_count_per_vnode,
+                min_epoch,
             ],
         ))
     }
@@ -155,16 +177,29 @@ impl TableFunctionToInternalBackfillProgressRule {
     }
 }
 
-struct BackfillInfo {
+enum BackfillInfo {
+    SnapshotBackfill(SnapshotBackfillInfo),
+    NoShuffleOrArrangementBackfill(NoShuffleOrArrangementBackfillInfo),
+}
+
+struct NoShuffleOrArrangementBackfillInfo {
     job_id: u32,
-    row_count_column_index: usize,
     fragment_id: u32,
     table_id: u32,
+    row_count_column_index: usize,
+}
+
+struct SnapshotBackfillInfo {
+    job_id: u32,
+    fragment_id: u32,
+    table_id: u32,
+    row_count_column_index: usize,
+    epoch_column_index: usize,
 }
 
 impl BackfillInfo {
     fn new(table: &TableCatalog) -> anyhow::Result<Self> {
-        let Some(job_id) = table.job_id else {
+        let Some(job_id) = table.job_id.map(|id| id.table_id) else {
             bail!("`job_id` column not found in backfill table");
         };
         let Some(row_count_column_index) =
@@ -172,13 +207,61 @@ impl BackfillInfo {
         else {
             bail!("`row_count` column not found in backfill table");
         };
+        let epoch_column_index = table.columns.iter().position(|c| c.name() == "epoch");
         let fragment_id = table.fragment_id;
-        let table_id = table.id;
-        Ok(Self {
-            job_id: job_id.table_id,
-            row_count_column_index,
-            fragment_id,
-            table_id: table_id.table_id,
-        })
+        let table_id = table.id.table_id;
+
+        match epoch_column_index {
+            Some(epoch_column_index) => Ok(Self::SnapshotBackfill(SnapshotBackfillInfo {
+                job_id,
+                fragment_id,
+                table_id,
+                row_count_column_index,
+                epoch_column_index,
+            })),
+            None => Ok(Self::NoShuffleOrArrangementBackfill(
+                NoShuffleOrArrangementBackfillInfo {
+                    job_id,
+                    fragment_id,
+                    table_id,
+                    row_count_column_index,
+                },
+            )),
+        }
+    }
+
+    fn row_count_column_index(&self) -> usize {
+        match self {
+            Self::SnapshotBackfill(info) => info.row_count_column_index,
+            Self::NoShuffleOrArrangementBackfill(info) => info.row_count_column_index,
+        }
+    }
+
+    fn epoch_column_index(&self) -> Option<usize> {
+        match self {
+            Self::SnapshotBackfill(info) => Some(info.epoch_column_index),
+            Self::NoShuffleOrArrangementBackfill(_) => None,
+        }
+    }
+
+    fn job_id(&self) -> u32 {
+        match self {
+            Self::SnapshotBackfill(info) => info.job_id,
+            Self::NoShuffleOrArrangementBackfill(info) => info.job_id,
+        }
+    }
+
+    fn fragment_id(&self) -> u32 {
+        match self {
+            Self::SnapshotBackfill(info) => info.fragment_id,
+            Self::NoShuffleOrArrangementBackfill(info) => info.fragment_id,
+        }
+    }
+
+    fn table_id(&self) -> u32 {
+        match self {
+            Self::SnapshotBackfill(info) => info.table_id,
+            Self::NoShuffleOrArrangementBackfill(info) => info.table_id,
+        }
     }
 }
