@@ -40,6 +40,7 @@ macro_rules! define_measure {
     ({
         $(($distance_name:ident, $_distance_type:ty),)+
     }) => {
+        #[derive(Debug, Clone, Copy)]
         pub enum DistanceMeasurement {
             $($distance_name),+
         }

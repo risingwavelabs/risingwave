@@ -191,7 +191,7 @@ pub struct HnswFlatIndex {
 }
 
 impl HnswFlatIndex {
-    fn new(config: &PbHnswFlatIndexConfig) -> HnswFlatIndex {
+    pub fn new(config: &PbHnswFlatIndexConfig) -> HnswFlatIndex {
         HnswFlatIndex {
             config: *config,
             vector_store_info: VectorStoreInfo::empty(),
@@ -199,7 +199,7 @@ impl HnswFlatIndex {
         }
     }
 
-    fn apply_hnsw_flat_index_add(&mut self, add: &HnswFlatIndexAdd) {
+    pub fn apply_hnsw_flat_index_add(&mut self, add: &HnswFlatIndexAdd) {
         self.vector_store_info
             .apply_vector_store_delta(&add.vector_store_info_delta);
         self.graph_file = Some(add.graph_file.clone());
