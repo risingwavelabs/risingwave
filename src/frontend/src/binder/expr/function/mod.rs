@@ -431,9 +431,9 @@ impl Binder {
             func_name
         );
         if func_name == "array_transform" {
-            return self.bind_array_transform(arg_list.args);
+            self.bind_array_transform(arg_list.args)
         } else {
-            return self.bind_map_filter(arg_list.args);
+            self.bind_map_filter(arg_list.args)
         }
     }
 
