@@ -22,12 +22,3 @@ INSERT INTO sqlserver_all_data_types VALUES (12, 'True', 255, -32768, -214748364
 
 INSERT INTO sqlserver_all_data_types VALUES (13, 'True', 127, 32767, 2147483647, 9223372036854775807, -10.0, 9999.999999, 10000.0, 'zzzz', 'zzzz', N'🌹👍', N'🌹👍', 0xffffffff, 0xffffffff, '6F9619FF-8B86-D011-B42D-00C04FC964FF', '2999-12-31', '23:59:59.999', '2099-12-31 23:59:59.999', '2999-12-31 23:59:59.999', '<Name>Jane Doe</Name>')
 
-DECLARE @i INT = 1;
-
-WHILE @i <= 2000
-BEGIN
-    INSERT INTO test_pk_uuid (id, NAME)
-    VALUES (NEWID(), CONCAT('TEST_NAME', @i), 0);
-
-    SET @i = @i + 1;
-END
