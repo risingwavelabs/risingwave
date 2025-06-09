@@ -726,6 +726,8 @@ impl DataChunkTestExt for DataChunk {
                 return DataType::List(Box::new(parse_type(s)));
             }
 
+            // Special logic to support Map type in `DataChunk::from_pretty`.
+            // Please refer to `src/expr/impl/src/scalar/map_filter.rs`.
             if let Some(inner) = s.strip_prefix("map<").and_then(|s| s.strip_suffix('>')) {
                 let mut parts = inner.split(',');
                 let key_type = parts.next().expect("Key type expected");

@@ -310,6 +310,8 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
             Token::Literal(name) => {
                 let mut processed_name = name.replace('_', " ");
 
+                // Special logic to support Map type in `build_from_pretty`.
+                // Please refer to `src/expr/impl/src/scalar/map_filter.rs`.
                 if processed_name.starts_with("map") {
                     processed_name = processed_name.replace('<', "(").replace('>', ")");
                 }

@@ -25,7 +25,9 @@ use risingwave_common::types::{DataType, MapType};
 use risingwave_expr::aggregate::AggType;
 use risingwave_expr::window_function::WindowFuncKind;
 use risingwave_pb::user::grant_privilege::PbObject;
-use risingwave_sqlparser::ast::{self, Function, FunctionArg, FunctionArgExpr, Ident};
+use risingwave_sqlparser::ast::{
+    self, Function, FunctionArg, FunctionArgExpr, FunctionArgList, Ident, OrderByExpr, Window,
+};
 use risingwave_sqlparser::parser::ParserError;
 
 use crate::binder::bind_context::Clause;
@@ -68,6 +70,14 @@ macro_rules! reject_syntax {
     ($pred:expr, $msg:expr) => {
         if $pred {
             return Err(ErrorCode::InvalidInputSyntax($msg.to_string()).into());
+        }
+    };
+
+    ($pred:expr, $fmt:expr, $($arg:tt)*) => {
+        if $pred {
+            return Err(ErrorCode::InvalidInputSyntax(
+                format!($fmt, $($arg)*)
+            ).into());
         }
     };
 }
@@ -127,52 +137,16 @@ impl Binder {
             return Ok(ExprImpl::literal_varchar("".to_owned()));
         }
 
-        // special binding logic for `array_transform`
-        if func_name == "array_transform" {
-            // For type inference, we need to bind the array type first.
-            reject_syntax!(
+        // special binding logic for `array_transform` and `map_filter`
+        if func_name == "array_transform" || func_name == "map_filter" {
+            return self.validate_and_bind_special_function_params(
+                &func_name,
                 scalar_as_agg,
-                "`AGGREGATE:` prefix is not allowed for `array_transform`"
+                arg_list,
+                &within_group,
+                &filter,
+                &over,
             );
-            reject_syntax!(
-                !arg_list.is_args_only(),
-                "keywords like `DISTINCT`, `ORDER BY` are not allowed in `array_transform` argument list"
-            );
-            reject_syntax!(
-                within_group.is_some(),
-                "`WITHIN GROUP` is not allowed in `array_transform` call"
-            );
-            reject_syntax!(
-                filter.is_some(),
-                "`FILTER` is not allowed in `array_transform` call"
-            );
-            reject_syntax!(
-                over.is_some(),
-                "`OVER` is not allowed in `array_transform` call"
-            );
-            return self.bind_array_transform(arg_list.args);
-        }
-
-        if func_name == "map_filter" {
-            // For type inference, we need to bind the map type first.
-            reject_syntax!(
-                scalar_as_agg,
-                "`AGGREGATE:` prefix is not allowed for `map_filter`"
-            );
-            reject_syntax!(
-                !arg_list.is_args_only(),
-                "keywords like `DISTINCT`, `ORDER BY` are not allowed in `map_filter` argument list"
-            );
-            reject_syntax!(
-                within_group.is_some(),
-                "`WITHIN GROUP` is not allowed in `map_filter` call"
-            );
-            reject_syntax!(
-                filter.is_some(),
-                "`FILTER` is not allowed in `map_filter` call"
-            );
-            reject_syntax!(over.is_some(), "`OVER` is not allowed in `map_filter` call");
-            return self.bind_map_filter(arg_list.args);
         }
 
         let mut args: Vec<_> = arg_list
@@ -418,6 +392,49 @@ impl Binder {
         }
 
         self.bind_builtin_scalar_function(&func_name, args, arg_list.variadic)
+    }
+
+    fn validate_and_bind_special_function_params(
+        &mut self,
+        func_name: &str,
+        scalar_as_agg: bool,
+        arg_list: FunctionArgList,
+        within_group: &Option<Box<OrderByExpr>>,
+        filter: &Option<Box<risingwave_sqlparser::ast::Expr>>,
+        over: &Option<Window>,
+    ) -> Result<ExprImpl> {
+        assert!(["array_transform", "map_filter"].contains(&func_name));
+
+        reject_syntax!(
+            scalar_as_agg,
+            "`AGGREGATE:` prefix is not allowed for `{}`",
+            func_name
+        );
+        reject_syntax!(
+            !arg_list.is_args_only(),
+            "keywords like `DISTINCT`, `ORDER BY` are not allowed in `{}` argument list",
+            func_name
+        );
+        reject_syntax!(
+            within_group.is_some(),
+            "`WITHIN GROUP` is not allowed in `{}` call",
+            func_name
+        );
+        reject_syntax!(
+            filter.is_some(),
+            "`FILTER` is not allowed in `{}` call",
+            func_name
+        );
+        reject_syntax!(
+            over.is_some(),
+            "`OVER` is not allowed in `{}` call",
+            func_name
+        );
+        if func_name == "array_transform" {
+            return self.bind_array_transform(arg_list.args);
+        } else {
+            return self.bind_map_filter(arg_list.args);
+        }
     }
 
     fn bind_array_transform(&mut self, args: Vec<FunctionArg>) -> Result<ExprImpl> {

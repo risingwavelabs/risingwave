@@ -147,8 +147,8 @@ impl Expression for MapFilterExpression {
                 let key = struct_ref.field_at(0);
                 let value = struct_ref.field_at(1);
 
-                let key_datum = key.to_owned_datum(); // 获取 key 的 owned 版本
-                let value_datum = value.to_owned_datum(); // 获取 value 的 owned 版本
+                let key_datum = key.to_owned_datum();
+                let value_datum = value.to_owned_datum();
 
                 let fields = vec![key_datum, value_datum];
                 filtered_entries.push(StructValue::new(fields));
