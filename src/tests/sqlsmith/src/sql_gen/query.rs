@@ -23,7 +23,8 @@ use rand::Rng;
 use rand::prelude::{IndexedRandom, SliceRandom};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    Cte, Distinct, Expr, Ident, Query, Select, SelectItem, SetExpr, TableWithJoins, Value, With, SetOperator, Corresponding
+    Corresponding, Cte, Distinct, Expr, Ident, Query, Select, SelectItem, SetExpr, SetOperator,
+    TableWithJoins, Value, With,
 };
 
 use crate::config::Feature;
@@ -157,7 +158,8 @@ impl<R: Rng> SqlGenerator<'_, R> {
             self.restore_context(left_ctxt);
 
             let right_ctxt = self.new_local_context();
-            let (right_expr, right_schema) = self.gen_set_expr(with_tables.clone(), num_select_items);
+            let (right_expr, right_schema) =
+                self.gen_set_expr(with_tables.clone(), num_select_items);
             self.restore_context(right_ctxt);
 
             if !self.schemas_compatible(&left_schema, &right_schema) {
@@ -180,7 +182,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
             )
         } else {
             let (select, schema) = self.gen_select_stmt(with_tables, num_select_items);
-            return (SetExpr::Select(Box::new(select)), schema);
+            (SetExpr::Select(Box::new(select)), schema)
         }
     }
 
@@ -188,7 +190,9 @@ impl<R: Rng> SqlGenerator<'_, R> {
         if left.len() != right.len() {
             return false;
         }
-        left.iter().zip(right.iter()).all(|(l, r)| l.data_type == r.data_type)
+        left.iter()
+            .zip(right.iter())
+            .all(|(l, r)| l.data_type == r.data_type)
     }
 
     fn gen_limit(&mut self, has_order_by: bool) -> Option<Expr> {
