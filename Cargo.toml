@@ -48,6 +48,7 @@ members = [
     "src/storage/compactor",
     "src/storage/hummock_sdk",
     "src/storage/hummock_test",
+    "src/storage/hummock_vector_service",
     "src/stream",
     "src/stream/spill_test",
     "src/test_runner",

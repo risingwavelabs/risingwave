@@ -13,28 +13,42 @@
 // limitations under the License.
 
 mod hnsw;
-
 use std::mem::take;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::FutureExt;
-use risingwave_hummock_sdk::HummockObjectId;
+pub use hnsw::HnswFlatIndexWriter;
 use risingwave_hummock_sdk::vector_index::{
     FlatIndex, FlatIndexAdd, VectorFileInfo, VectorIndex, VectorIndexAdd, VectorIndexImpl,
     VectorStoreDelta,
 };
+use risingwave_hummock_sdk::{HummockObjectId, HummockRawObjectId};
 
 use crate::hummock::vector::file::VectorFileBuilder;
-use crate::hummock::vector::writer::hnsw::HnswFlatIndexWriter;
-use crate::hummock::{HummockResult, ObjectIdManagerRef, SstableStoreRef};
+use crate::hummock::{HummockResult, ObjectIdManager, SstableStoreRef};
 use crate::opts::StorageOpts;
 use crate::vector::{DistanceMeasurement, Vector};
+
+#[async_trait::async_trait]
+pub trait VectorObjectIdManager: Send + Sync {
+    async fn get_new_vector_object_id(&self) -> HummockResult<HummockRawObjectId>;
+}
+
+pub type VectorObjectIdManagerRef = Arc<dyn VectorObjectIdManager>;
+
+#[async_trait::async_trait]
+impl VectorObjectIdManager for ObjectIdManager {
+    async fn get_new_vector_object_id(&self) -> HummockResult<HummockRawObjectId> {
+        self.get_new_object_id().await
+    }
+}
 
 pub(crate) fn new_vector_file_builder(
     dimension: usize,
     next_vector_id: usize,
     sstable_store: SstableStoreRef,
-    object_id_manager: ObjectIdManagerRef,
+    object_id_manager: VectorObjectIdManagerRef,
     storage_opts: &StorageOpts,
 ) -> VectorFileBuilder {
     VectorFileBuilder::new(
@@ -43,7 +57,7 @@ pub(crate) fn new_vector_file_builder(
             let object_id_manager = object_id_manager.clone();
             let sstable_store = sstable_store.clone();
             async move {
-                let object_id = object_id_manager.get_new_object_id().await?;
+                let object_id = object_id_manager.get_new_vector_object_id().await?.into();
                 let path =
                     sstable_store.get_object_data_path(HummockObjectId::VectorFile(object_id));
                 let uploader = sstable_store.create_streaming_uploader(&path).await?;
@@ -65,15 +79,15 @@ impl VectorWriterImpl {
     pub(crate) async fn new(
         index: &VectorIndex,
         sstable_store: SstableStoreRef,
-        object_id_manager: ObjectIdManagerRef,
+        object_id_manager: VectorObjectIdManagerRef,
         storage_opts: &StorageOpts,
     ) -> HummockResult<Self> {
         Ok(match &index.inner {
             VectorIndexImpl::Flat(flat) => VectorWriterImpl::Flat(FlatIndexWriter::new(
                 flat,
                 index.dimension,
-                sstable_store.clone(),
-                object_id_manager.clone(),
+                sstable_store,
+                object_id_manager,
                 storage_opts,
             )),
             VectorIndexImpl::HnswFlat(hnsw_flat) => VectorWriterImpl::HnswFlat(
@@ -81,8 +95,8 @@ impl VectorWriterImpl {
                     hnsw_flat,
                     index.dimension,
                     DistanceMeasurement::from(index.distance_type),
-                    sstable_store.clone(),
-                    object_id_manager.clone(),
+                    sstable_store,
+                    object_id_manager,
                     storage_opts,
                 )
                 .await?,
@@ -100,7 +114,9 @@ impl VectorWriterImpl {
     pub(crate) fn seal_current_epoch(&mut self) -> Option<VectorIndexAdd> {
         match self {
             VectorWriterImpl::Flat(writer) => writer.seal_current_epoch(),
-            VectorWriterImpl::HnswFlat(writer) => writer.seal_current_epoch(),
+            VectorWriterImpl::HnswFlat(writer) => {
+                writer.seal_current_epoch().map(VectorIndexAdd::HnswFlat)
+            }
         }
     }
 
@@ -130,7 +146,7 @@ impl FlatIndexWriter {
         index: &FlatIndex,
         dimension: usize,
         sstable_store: SstableStoreRef,
-        object_id_manager: ObjectIdManagerRef,
+        object_id_manager: VectorObjectIdManagerRef,
         storage_opts: &StorageOpts,
     ) -> Self {
         Self {
