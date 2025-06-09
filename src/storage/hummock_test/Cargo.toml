@@ -11,7 +11,6 @@ repository = { workspace = true }
 failpoints = ["risingwave_storage/failpoints"]
 sync_point = ["sync-point/sync_point", "serial_test"]
 test = []
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 async-trait = "0.1"

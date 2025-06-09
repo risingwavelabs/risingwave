@@ -51,7 +51,6 @@ thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["fs"] }
 tokio-retry = "0.3"
 tracing = "0.1"
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lints]
 workspace = true

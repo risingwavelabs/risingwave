@@ -6,7 +6,6 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 # Ideally we should just skip checking workspace-config for cargo-machete,
 # but it's not supported yet. So we just manually ignore all dependencies.
