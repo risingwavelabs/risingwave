@@ -311,7 +311,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             case "timestamp":
                 return val == Data.DataType.TypeName.TIMESTAMPTZ_VALUE;
             default:
-                return true; // true for other uncovered types
+                return false; // false for other uncovered types
         }
     }
 }

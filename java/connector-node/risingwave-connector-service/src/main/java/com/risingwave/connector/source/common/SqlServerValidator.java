@@ -304,6 +304,8 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
                         && val <= Data.DataType.TypeName.INT64_VALUE;
             case "bigint":
                 return val == Data.DataType.TypeName.INT64_VALUE;
+            case "money":
+                return val == Data.DataType.TypeName.DECIMAL_VALUE;
             case "float":
             case "real":
                 return val == Data.DataType.TypeName.FLOAT_VALUE
@@ -338,7 +340,7 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
             case "datetimeoffset":
                 return val == Data.DataType.TypeName.TIMESTAMPTZ_VALUE;
             default:
-                return true; // true for other uncovered types
+                return false; // false for other uncovered types
         }
     }
 }
