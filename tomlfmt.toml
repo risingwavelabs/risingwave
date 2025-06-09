@@ -1,0 +1,1 @@
+table_order = ["package", "lib", "features", "dependencies", "dev-dependencies", "build-dependencies"]

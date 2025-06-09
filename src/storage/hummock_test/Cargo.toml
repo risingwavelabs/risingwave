@@ -6,6 +6,11 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
+
+[features]
+failpoints = ["risingwave_storage/failpoints"]
+sync_point = ["sync-point/sync_point", "serial_test"]
+test = []
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -46,11 +51,6 @@ futures-async-stream = "0.2.9"
 risingwave_hummock_sdk = { workspace = true }
 risingwave_test_runner = { workspace = true }
 sync-point = { path = "../../utils/sync-point" }
-
-[features]
-failpoints = ["risingwave_storage/failpoints"]
-sync_point = ["sync-point/sync_point", "serial_test"]
-test = []
 
 [[bench]]
 name = "bench_hummock_iter"

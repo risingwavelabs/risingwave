@@ -32,11 +32,11 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tracing = "0.1"
 
-[dev-dependencies]
-risingwave_hummock_sdk = { workspace = true }
-
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
+
+[dev-dependencies]
+risingwave_hummock_sdk = { workspace = true }
 
 [[bin]]
 name = "compaction-test"
