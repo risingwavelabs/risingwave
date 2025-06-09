@@ -14,3 +14,6 @@ config:
   using_join:
     weight: 25
     enabled: true
+  except:
+    weight: 10
+    enabled: true

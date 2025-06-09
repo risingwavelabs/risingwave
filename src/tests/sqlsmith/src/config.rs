@@ -26,6 +26,7 @@ pub enum Feature {
     Join,
     NaturalJoin,
     UsingJoin,
+    Except,
 }
 
 impl fmt::Display for Feature {
@@ -36,6 +37,7 @@ impl fmt::Display for Feature {
             Feature::Join => "join",
             Feature::NaturalJoin => "natural join",
             Feature::UsingJoin => "using join",
+            Feature::Except => "except",
         };
         write!(f, "{}", s)
     }
