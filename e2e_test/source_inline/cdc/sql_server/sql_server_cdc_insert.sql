@@ -28,6 +28,6 @@ WHILE @i <= 2000
 BEGIN
     INSERT INTO test_pk_uuid (id, NAME)
     VALUES (NEWID(), CONCAT('TEST_NAME', @i), 0);
-    
+
     SET @i = @i + 1;
 END
