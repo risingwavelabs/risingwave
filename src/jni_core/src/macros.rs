@@ -412,6 +412,8 @@ macro_rules! for_all_plain_native_methods {
                 static native long iteratorNewStreamChunk(long pointer);
 
                 static native boolean iteratorNext(long pointer);
+                
+                public static native void writeFile();
 
                 static native void iteratorClose(long pointer);
 

@@ -43,6 +43,8 @@ public class Binding {
 
     static native boolean iteratorNext(long pointer);
 
+    public static native void writeFile();
+
     static native void iteratorClose(long pointer);
 
     static native long newStreamChunkFromPayload(byte[] streamChunkPayload);

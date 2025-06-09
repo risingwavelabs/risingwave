@@ -249,6 +249,14 @@ JNIEXPORT jbyteArray JNICALL Java_com_risingwave_java_binding_Binding_recvSinkCo
 
 /*
  * Class:     com_risingwave_java_binding_Binding
+ * Method:    writeFile
+ * Signature: ()V
+ */
+JNIEXPORT void JNICALL Java_com_risingwave_java_binding_Binding_writeFile
+  (JNIEnv *, jclass);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
  * Method:    sendSinkCoordinatorResponseToChannel
  * Signature: (J[B)Z
  */

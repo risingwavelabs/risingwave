@@ -15,7 +15,7 @@
 use std::ffi::c_void;
 use std::path::PathBuf;
 use std::sync::OnceLock;
-
+use crate::opendal_schema_history::Java_com_risingwave_java_binding_Binding_writeFile;
 use anyhow::{Context, bail};
 use fs_err as fs;
 use fs_err::PathExt;

@@ -16,13 +16,13 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use jni::objects::{JString, JObject};
+use jni::{objects::{JObject, JString}, sys::jboolean};
 use jni::sys::{jbyteArray, jint};
 use tracing::Level;
 use opendal::{layers::LoggingLayer, Builder, Operator};
 use opendal::services::S3;
 
-use crate::{execute_and_catch, EnvParam};
+use crate::{execute_and_catch, EnvParam, JAVA_BINDING_ASYNC_RUNTIME};
 
 
 
@@ -35,26 +35,13 @@ impl ObjectStoreEngine {
     pub fn new_minio_engine(
         server: &str,
     ) -> anyhow::Result<Self> {
-        let server = server.strip_prefix("minio://").unwrap();
-        let (access_key_id, rest) = server.split_once(':').unwrap();
-        let (secret_access_key, mut rest) = rest.split_once('@').unwrap();
-
-        let endpoint_prefix = if let Some(rest_stripped) = rest.strip_prefix("https://") {
-            rest = rest_stripped;
-            "https://"
-        } else if let Some(rest_stripped) = rest.strip_prefix("http://") {
-            rest = rest_stripped;
-            "http://"
-        } else {
-            "http://"
-        };
-        let (address, bucket) = rest.split_once('/').unwrap();
+      
         let builder = S3::default()
-            .bucket(bucket)
+            .bucket("hummock001")
             .region("custom")
-            .access_key_id(access_key_id)
-            .secret_access_key(secret_access_key)
-            .endpoint(&format!("{}{}", endpoint_prefix, address))
+            .access_key_id("hummockadmin")
+            .secret_access_key("hummockadmin")
+            .endpoint("http://hummock001.127.0.0.1:9301")
             .disable_config_load();
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
@@ -91,6 +78,7 @@ impl ObjectStoreEngine {
 
 fn get_engine() -> anyhow::Result<ObjectStoreEngine> {
     let bucket = "hummock001".to_string();
+    println!("连接s3");
     
     let engine = ObjectStoreEngine::new_minio_engine(&format!("minio://{}",  bucket))?;
     
@@ -99,15 +87,18 @@ fn get_engine() -> anyhow::Result<ObjectStoreEngine> {
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_yourpackage_binding_Binding_buildOp(
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_writeFile(
     env: EnvParam<'_>,
-    obj: JObject,
-) {
-    let result = execute_and_catch(env, move |_env| {
+)  {
+    execute_and_catch(env, move |_env| {
+        // 使用 block_on 来处理异步的 write 操作
         let engine = get_engine()?;
-        let objects = engine.list("/").await?;
-        Ok(())
-    });
+        let result = JAVA_BINDING_ASYNC_RUNTIME.block_on(async {
+            let path = "hummock_001/file.txt"; 
 
-    
+            engine.op.write(path,  "Hello, World!").await
+        }).unwrap();
+        
+        Ok(result)
+    });
 }
