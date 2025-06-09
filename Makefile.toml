@@ -1107,7 +1107,7 @@ test $? -eq 0 || exit 1
 private = true
 category = "RiseDev - Check"
 description = "Run cargo sort check and attempt to fix"
-install_crate = { min_version = "1.0.9", crate_name = "cargo-sort", binary = "cargo", test_arg = [
+install_crate = { min_version = "2.0.1", crate_name = "cargo-sort", binary = "cargo", test_arg = [
     "sort",
     "--help",
 ], install_command = "binstall" }
