@@ -529,6 +529,7 @@ impl MySqlExternalTableReader {
                 yield row;
             }
         };
+        drop(conn);
     }
 
     // mysql cannot leverage the given key to narrow down the range of scan,
@@ -698,7 +699,7 @@ mod tests {
         }
     }
 
-    /// To run this test:
+    /// To run this test(this test will be executed in `e2e-source-test.sh`):
     ///
     /// ```bash
     /// cargo test --package risingwave_connector --lib -- --ignored test_mysql_async_with_connection_pool
