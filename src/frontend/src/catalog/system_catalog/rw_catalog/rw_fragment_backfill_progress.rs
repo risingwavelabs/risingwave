@@ -24,16 +24,20 @@ view,
   progress.fragment_id,
   concat(job_schemas.name, '.', job_tables.name) as job_name,
   concat(upstream_schemas.name, '.', upstream_tables.name) as upstream_table_name,
-  concat(
-    coalesce(progress.current_row_count::numeric / stats.total_key_count::numeric * 100, 0),
-    '%',
-    ' ',
-    '(',
-    coalesce(progress.current_row_count, 0),
-    '/',
-    stats.total_key_count,
-    ')'
-  ) as progress
+  case when scan_info.is_snapshot_backfill AND progress.min_epoch > scan_info.backfill_epoch
+  then concat('100% (', stats.total_key_count, '/', stats.total_key_count, ')')
+  else
+    concat(
+      coalesce(progress.current_row_count::numeric / stats.total_key_count::numeric * 100, 0),
+      '%',
+      ' ',
+      '(',
+      coalesce(progress.current_row_count, 0),
+      '/',
+      stats.total_key_count,
+      ')'
+    )
+  end as progress
 FROM internal_backfill_progress() progress
 JOIN rw_table_scan scan_info ON progress.job_id = scan_info.job_id AND progress.fragment_id = scan_info.fragment_id
 JOIN rw_table_stats stats ON scan_info.backfill_target_table_id = stats.id
