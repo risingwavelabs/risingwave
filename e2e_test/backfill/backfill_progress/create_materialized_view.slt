@@ -1,0 +1,30 @@
+statement ok
+set backfill_rate_limit=10;
+
+statement ok
+create materialized view m1 as
+  select x.v1, x.v2
+  from
+    t x
+      join t y on x.v1 = y.v1
+      join t2 on x.v1 = t2.v1
+      join t3 on t3.v1 = t2.v1
+
+sleep 5s
+
+query I
+select 
+  regexp_match(progress, '([0-9]+)\.[0-9]+%')[1]::numeric >= (5::numeric * 10::numeric / 10000::numeric) 
+from rw_catalog.rw_fragment_backfill_progress;
+----
+t
+t
+t
+t
+
+
+statement ok
+set streaming_parallelism=default;
+
+statement ok
+drop materialized view m1;
