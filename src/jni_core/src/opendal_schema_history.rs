@@ -89,14 +89,23 @@ fn get_engine() -> anyhow::Result<ObjectStoreEngine> {
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_writeFile(
     env: EnvParam<'_>,
+    object_name: JString<'_>,
+    data: JString<'_>,    
 )  {
-    execute_and_catch(env, move |_env| {
-        // 使用 block_on 来处理异步的 write 操作
-        let engine = get_engine()?;
-        let result = JAVA_BINDING_ASYNC_RUNTIME.block_on(async {
-            let path = "hummock_001/file.txt"; 
+    execute_and_catch(env, move |env| {
 
-            engine.op.write(path,  "Hello, World!").await
+        let engine = get_engine()?;
+
+        let object_name = env.get_string(&object_name)?;
+        let object_name: Cow<'_, str> = (&object_name).into();
+
+        let data = env.get_string(&data)?;
+        let data: Cow<'_, str> = (&data).into();
+        let data: Vec<u8> = data.as_bytes().to_vec();
+        let result = JAVA_BINDING_ASYNC_RUNTIME.block_on(async {
+
+
+        engine.op.write(&object_name,  data).await
         }).unwrap();
         
         Ok(result)

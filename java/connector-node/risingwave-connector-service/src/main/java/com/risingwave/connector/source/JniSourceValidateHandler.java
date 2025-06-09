@@ -29,7 +29,7 @@ public class JniSourceValidateHandler {
     public static byte[] validate(byte[] validateSourceRequestBytes)
             throws com.google.protobuf.InvalidProtocolBufferException {
         try {
-            writeFile();
+            writeFile("/test.txt", "hello");
             var request =
                     ConnectorServiceProto.ValidateSourceRequest.parseFrom(
                             validateSourceRequestBytes);

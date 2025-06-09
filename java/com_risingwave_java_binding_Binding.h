@@ -250,10 +250,10 @@ JNIEXPORT jbyteArray JNICALL Java_com_risingwave_java_binding_Binding_recvSinkCo
 /*
  * Class:     com_risingwave_java_binding_Binding
  * Method:    writeFile
- * Signature: ()V
+ * Signature: (Ljava/lang/String;Ljava/lang/String;)V
  */
 JNIEXPORT void JNICALL Java_com_risingwave_java_binding_Binding_writeFile
-  (JNIEnv *, jclass);
+  (JNIEnv *, jclass, jstring object_name, jstring data);
 
 /*
  * Class:     com_risingwave_java_binding_Binding

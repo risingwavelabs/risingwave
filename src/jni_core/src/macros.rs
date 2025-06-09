@@ -413,7 +413,7 @@ macro_rules! for_all_plain_native_methods {
 
                 static native boolean iteratorNext(long pointer);
                 
-                public static native void writeFile();
+                public static native void writeFile(String objectName, String data);
 
                 static native void iteratorClose(long pointer);
 
