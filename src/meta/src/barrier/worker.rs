@@ -162,9 +162,10 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
 
     pub fn start(self) -> (JoinHandle<()>, Sender<()>) {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
-        let join_handle = tokio::spawn(async move {
-            self.run(shutdown_rx).await;
-        });
+        let fut = (self.env.await_tree_reg())
+            .register_derived_root("Global Barrier Worker")
+            .instrument(self.run(shutdown_rx));
+        let join_handle = tokio::spawn(fut);
 
         (join_handle, shutdown_tx)
     }
@@ -700,7 +701,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             }
             RecoveryReason::Adhoc => "adhoc recovery".to_owned(),
         };
-
         self.context.abort_and_mark_blocked(None, recovery_reason);
 
         self.recovery_inner(is_paused, reason_str).await;
@@ -709,6 +709,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         });
     }
 
+    #[await_tree::instrument("recovery({recovery_reason})")]
     async fn recovery_inner(&mut self, is_paused: bool, recovery_reason: String) {
         let event_log_manager_ref = self.env.event_log_manager_ref();
 

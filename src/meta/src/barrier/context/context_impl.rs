@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use await_tree::InstrumentAwait;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
@@ -35,11 +36,13 @@ use crate::hummock::CommitEpochInfo;
 use crate::stream::SourceChange;
 
 impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
+    #[await_tree::instrument]
     async fn commit_epoch(&self, commit_info: CommitEpochInfo) -> MetaResult<HummockVersionStats> {
         self.hummock_manager.commit_epoch(commit_info).await?;
         Ok(self.hummock_manager.get_version_stats().await)
     }
 
+    #[await_tree::instrument("next_scheduled_barrier")]
     async fn next_scheduled(&self) -> Scheduled {
         self.scheduled_barriers.next_scheduled().await
     }
@@ -67,7 +70,12 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     }
 
     async fn post_collect_command<'a>(&'a self, command: &'a CommandContext) -> MetaResult<()> {
-        command.post_collect(self).await
+        let span = if let Some(command) = &command.command {
+            await_tree::span!("post_collect_command({command})")
+        } else {
+            await_tree::span!("post_collect_command")
+        };
+        command.post_collect(self).instrument_await(span).await
     }
 
     async fn notify_creating_job_failed(&self, database_id: Option<DatabaseId>, err: String) {
@@ -76,10 +84,12 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
             .await
     }
 
+    #[await_tree::instrument]
     async fn finish_creating_job(&self, job: TrackingJob) -> MetaResult<()> {
         job.finish(&self.metadata_manager).await
     }
 
+    #[await_tree::instrument]
     async fn new_control_stream(
         &self,
         node: &WorkerNode,

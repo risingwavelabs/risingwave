@@ -351,6 +351,7 @@ impl PeriodicBarriers {
         }
     }
 
+    #[await_tree::instrument]
     pub(super) async fn next_barrier(
         &mut self,
         context: &impl GlobalBarrierWorkerContext,

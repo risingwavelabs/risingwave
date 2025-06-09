@@ -117,6 +117,7 @@ impl ControlStreamManager {
         self.workers[&worker_id].host.clone().unwrap()
     }
 
+    #[await_tree::instrument("try_reconnect_worker({worker_id})")]
     pub(super) async fn try_reconnect_worker(
         &mut self,
         worker_id: WorkerId,
@@ -336,6 +337,7 @@ impl ControlStreamManager {
         poll_result
     }
 
+    #[await_tree::instrument]
     pub(super) async fn next_response(
         &mut self,
     ) -> (
