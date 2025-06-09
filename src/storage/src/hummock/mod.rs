@@ -55,7 +55,7 @@ pub mod block_stream;
 mod iceberg_compactor_runner;
 mod time_travel_version_cache;
 
-pub(crate) mod vector;
+pub mod vector;
 
 mod object_id_manager;
 pub use error::*;

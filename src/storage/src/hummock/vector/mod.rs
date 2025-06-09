@@ -19,8 +19,8 @@ use crate::hummock::{HummockResult, SstableStoreRef, VectorBlockHolder};
 use crate::vector::VectorRef;
 use crate::vector::hnsw::VectorAccessor;
 
-pub(crate) mod file;
-pub(crate) mod writer;
+pub mod file;
+pub mod writer;
 
 pub struct VectorBlockAccessor {
     block: VectorBlockHolder,
