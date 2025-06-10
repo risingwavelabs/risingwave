@@ -337,6 +337,8 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .initial_split_assignment(self.actor_ctx.id)
             .unwrap_or(&[])
             .to_vec();
+
+        let mut backfill_paused = barrier.is_backfill_pause_on_startup(self.actor_ctx.fragment_id);
         let is_pause_on_startup = barrier.is_pause_on_startup();
         yield Message::Barrier(barrier);
 
@@ -429,9 +431,23 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             };
         }
 
-        // If the first barrier requires us to pause on startup, pause the stream.
+        macro_rules! resume_reader {
+            () => {
+                backfill_stream = select_with_strategy(
+                    input.by_ref().map(Either::Left),
+                    paused_reader
+                        .take()
+                        .expect("should have paused reader to resume"),
+                    select_strategy,
+                )
+            };
+        }
+
+        // If the first barrier requires us to pause, pause the stream.
         if is_pause_on_startup {
             command_paused = true;
+        }
+        if is_pause_on_startup || backfill_paused {
             pause_reader!();
         }
 
@@ -499,15 +515,10 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                 last_barrier_time = Instant::now();
 
                                 if self_paused {
-                                    // command_paused has a higher priority.
-                                    if !command_paused {
-                                        backfill_stream = select_with_strategy(
-                                            input.by_ref().map(Either::Left),
-                                            paused_reader
-                                                .take()
-                                                .expect("no paused reader to resume"),
-                                            select_strategy,
-                                        );
+                                    // If we are not paused due to some barrier command
+                                    // we can resume the backfill stream.
+                                    if !command_paused && !backfill_paused {
+                                        resume_reader!();
                                     }
                                     self_paused = false;
                                 }
@@ -518,25 +529,43 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                         Mutation::Pause => {
                                             // pause_reader should not be invoked consecutively more than once.
                                             if !command_paused {
-                                                pause_reader!();
+                                                if !backfill_paused {
+                                                    pause_reader!();
+                                                }
                                                 command_paused = true;
                                             } else {
-                                                tracing::warn!(command_paused, "unexpected pause");
+                                                tracing::warn!(
+                                                    command_paused,
+                                                    backfill_paused,
+                                                    "unexpected pause"
+                                                );
                                             }
                                         }
                                         Mutation::Resume => {
                                             // pause_reader.take should not be invoked consecutively more than once.
                                             if command_paused {
-                                                backfill_stream = select_with_strategy(
-                                                    input.by_ref().map(Either::Left),
-                                                    paused_reader
-                                                        .take()
-                                                        .expect("no paused reader to resume"),
-                                                    select_strategy,
-                                                );
+                                                if !backfill_paused {
+                                                    resume_reader!();
+                                                }
                                                 command_paused = false;
                                             } else {
                                                 tracing::warn!(command_paused, "unexpected resume");
+                                            }
+                                        }
+                                        Mutation::StartFragmentBackfill { fragment_ids } => {
+                                            if fragment_ids.contains(&self.actor_ctx.fragment_id) {
+                                                if !backfill_paused {
+                                                    backfill_paused = false;
+                                                    if !command_paused {
+                                                        resume_reader!();
+                                                    }
+                                                } else {
+                                                    tracing::warn!(
+                                                        command_paused,
+                                                        backfill_paused,
+                                                        "unexpected resume of already running backfill fragment"
+                                                    );
+                                                }
                                             }
                                         }
                                         Mutation::SourceChangeSplit(actor_splits) => {
