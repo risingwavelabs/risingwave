@@ -1100,7 +1100,7 @@ impl DdlController {
         }
     }
 
-    #[await_tree::instrument]
+    #[await_tree::instrument(boxed)]
     async fn create_streaming_job_inner(
         &self,
         ctx: StreamContext,

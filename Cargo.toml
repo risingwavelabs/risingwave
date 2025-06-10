@@ -111,7 +111,7 @@ apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88
 ] }
 arc-swap = "1"
 auto_enums = { version = "0.8", features = ["futures03", "tokio1"] }
-await-tree = { version = "0.3.2-alpha.1", features = ["serde", "attributes"] }
+await-tree = { version = "0.3.2-alpha.2", features = ["serde", "attributes"] }
 aws-config = { version = "1", default-features = false, features = [
     "behavior-version-latest",
     "rt-tokio",

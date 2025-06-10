@@ -26,7 +26,6 @@ use std::mem::take;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use await_tree::{InstrumentAwait, span};
 use itertools::Itertools;
 use risingwave_common::catalog::{DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS, TableOption};
 use risingwave_common::current_cluster_version;

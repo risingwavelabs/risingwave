@@ -1075,9 +1075,9 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
 name = "await-tree"
-version = "0.3.2-alpha.1"
+version = "0.3.2-alpha.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96da39a34f12729dab6ee3af04769656f67bb9e23487085c23d34fd6ffd78e1a"
+checksum = "d10541d47b12e1441e23da6faf33a6f81950b59a0849b00d62fdd911f0fc1a3c"
 dependencies = [
  "await-tree-attributes",
  "coarsetime",
@@ -1096,9 +1096,9 @@ dependencies = [
 
 [[package]]
 name = "await-tree-attributes"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "829e743ef28c54e9414cb7c1b4e0ce2e1fa0d0d02d369bc766e54cc5c3c0a41b"
+checksum = "8d69350b3e60f7ab6dd1ddc450decb97d5dea7cb2e58ca1fa6d470c533921cda"
 dependencies = [
  "proc-macro2",
  "quote",
