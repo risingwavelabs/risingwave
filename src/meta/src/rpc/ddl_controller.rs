@@ -461,10 +461,18 @@ impl DdlController {
     }
 
     async fn create_database(&self, database: Database) -> MetaResult<NotificationVersion> {
-        self.metadata_manager
+        let (version, updated_db) = self
+            .metadata_manager
             .catalog_controller
             .create_database(database)
-            .await
+            .await?;
+        // If persistent successfully, notify `GlobalBarrierManager` to create database asynchronously.
+        self.barrier_manager.update_database_barrier(
+            updated_db.database_id,
+            updated_db.barrier_interval_ms.map(|v| v as u32),
+            updated_db.checkpoint_frequency.map(|v| v as u64),
+        )?;
+        Ok(version)
     }
 
     #[tracing::instrument(skip(self), level = "debug")]
@@ -607,10 +615,18 @@ impl DdlController {
         database_id: DatabaseId,
         param: AlterDatabaseParam,
     ) -> MetaResult<NotificationVersion> {
-        self.metadata_manager
+        let (version, updated_db) = self
+            .metadata_manager
             .catalog_controller
             .alter_database_param(database_id, param)
-            .await
+            .await?;
+        // If persistent successfully, notify `GlobalBarrierManager` to update param asynchronously.
+        self.barrier_manager.update_database_barrier(
+            database_id,
+            updated_db.barrier_interval_ms.map(|v| v as u32),
+            updated_db.checkpoint_frequency.map(|v| v as u64),
+        )?;
+        Ok(version)
     }
 
     // The 'secret' part of the request we receive from the frontend is in plaintext;

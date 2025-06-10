@@ -133,14 +133,9 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         let control_stream_manager = ControlStreamManager::new(env.clone());
 
         let reader = env.system_params_reader().await;
-        let checkpoint_frequency = reader.checkpoint_frequency() as _;
         let system_enable_per_database_isolation = reader.per_database_isolation();
-        let interval = Duration::from_millis(reader.barrier_interval_ms() as u64);
-        let periodic_barriers = PeriodicBarriers::new(interval, checkpoint_frequency);
-        tracing::info!(
-            "Starting barrier scheduler with: checkpoint_frequency={:?}",
-            checkpoint_frequency,
-        );
+        // Load config will be performed in bootstrap phase.
+        let periodic_barriers = PeriodicBarriers::default();
 
         let checkpoint_control = CheckpointControl::new(env.clone());
         Self {
@@ -290,6 +285,18 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     warn!("failed to notify finish of adhoc recovery");
                                 }
                             }
+                            BarrierManagerRequest::UpdateDatabaseBarrier {
+                                database_id,
+                                barrier_interval_ms,
+                                checkpoint_frequency,
+                            } => {
+                                self.periodic_barriers
+                                    .update_database_barrier(
+                                        database_id,
+                                        barrier_interval_ms,
+                                        checkpoint_frequency,
+                                    );
+                                }
                         }
                     } else {
                         tracing::info!("end of request stream. meta node may be shutting down. Stop global barrier manager");
@@ -314,9 +321,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     let notification = notification.unwrap();
                     if let LocalNotification::SystemParamsChange(p) = notification {
                         {
-                            self.periodic_barriers.set_min_interval(Duration::from_millis(p.barrier_interval_ms() as u64));
+                            self.periodic_barriers.set_sys_barrier_interval(Duration::from_millis(p.barrier_interval_ms() as u64));
                             self.periodic_barriers
-                                .set_checkpoint_frequency(p.checkpoint_frequency() as usize);
+                                .set_sys_checkpoint_frequency(p.checkpoint_frequency());
                             self.system_enable_per_database_isolation = p.per_database_isolation();
                         }
                     }
@@ -448,7 +455,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     if self
                         .checkpoint_control
                         .can_inject_barrier(self.in_flight_barrier_nums) => {
-                    if let Some((_, Command::CreateStreamingJob { info, .. }, _)) = &new_barrier.command {
+                    if let Some((Command::CreateStreamingJob { info, .. }, _)) = &new_barrier.command {
                         let worker_ids: HashSet<_> =
                             info.stream_job_fragments.inner
                             .actors_to_create()
@@ -756,6 +763,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 mut source_splits,
                 mut background_jobs,
                 hummock_version_stats,
+                database_infos,
             } = runtime_info_snapshot;
 
             self.sink_manager.reset().await;
@@ -895,11 +903,22 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     hummock_version_stats,
                     self.env.clone(),
                 );
+
+                let reader = self.env.system_params_reader().await;
+                let checkpoint_frequency = reader.checkpoint_frequency();
+                let barrier_interval = Duration::from_millis(reader.barrier_interval_ms() as u64);
+                let periodic_barriers = PeriodicBarriers::new(
+                    barrier_interval,
+                    checkpoint_frequency,
+                    database_infos,
+                );
+
                 Ok((
                     active_streaming_nodes,
                     control_stream_manager,
                     checkpoint_control,
                     term_id,
+                    periodic_barriers,
                 ))
             }
         }.inspect_err(|err: &MetaError| {
@@ -920,6 +939,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             self.control_stream_manager,
             self.checkpoint_control,
             self.term_id,
+            self.periodic_barriers,
         ) = new_state;
 
         tracing::info!("recovery success");
