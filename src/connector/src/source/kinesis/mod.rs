@@ -68,8 +68,8 @@ mod test {
     use maplit::{btreemap, hashmap};
 
     use super::*;
-    use crate::source::ConnectorProperties;
     use crate::WithOptionsSecResolved;
+    use crate::source::ConnectorProperties;
 
     #[test]
     fn test_parse_kinesis_timestamp_offset() {

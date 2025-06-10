@@ -21,7 +21,7 @@ use anyhow::{Context, anyhow};
 use async_nats::jetstream::consumer::DeliverPolicy;
 use async_nats::jetstream::{self};
 use aws_sdk_kinesis::Client as KinesisClient;
-use aws_sdk_kinesis::config::{AsyncSleep, Sleep, SharedAsyncSleep};
+use aws_sdk_kinesis::config::{AsyncSleep, SharedAsyncSleep, Sleep};
 use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
 use pulsar::{Authentication, Pulsar, TokioExecutor};
 use rdkafka::ClientConfig;
