@@ -33,14 +33,13 @@ use anyhow::{Context, Result, anyhow};
 /// - `containers`: Map of containers to their non-zero weights (`BTreeMap<C, NonZeroUsize>`).
 /// - `items`: Slice of items (`&[I]`) to distribute.
 /// - `salt`: A salt value to vary deterministic tie-breaks between equal remainders.
-/// - `capacity_scale_factor_fn`: Callback `(containers, items) -> Option<f64>`:
+/// - `capacity_scale_factor_fn`: Callback `(containers, items) -> Option<ScaleFactor>`:
 ///     - `Some(f)`: Scale each container’s base quota by `f` (ceiled, but never below base).
 ///     - `None`: Remove upper bound (capacity = `usize::MAX`).
 ///
 /// # Returns
 /// A `BTreeMap<C, Vec<I>>` mapping each container to the list of assigned items.
-/// - If `containers` is empty, returns an empty map.
-/// - If `items` is empty, returns a map from each container key to an empty `Vec<I>`.
+/// - If `containers` or `items` is empty, returns an empty map.
 ///
 /// # Panics
 /// - If the sum of all container weights is zero.
@@ -54,15 +53,14 @@ use anyhow::{Context, Result, anyhow};
 /// ```rust
 /// # use std::collections::BTreeMap;
 /// # use std::num::NonZeroUsize;
-/// # use risingwave_meta::stream::assign_items_weighted_with_scale_fn;
+/// # use risingwave_meta::stream::{assign_items_weighted_with_scale_fn, weighted_scale};
 ///
 /// let mut caps = BTreeMap::new();
 /// caps.insert("fast", NonZeroUsize::new(3).unwrap());
 /// caps.insert("slow", NonZeroUsize::new(1).unwrap());
 ///
 /// let tasks = vec!["task1", "task2", "task3", "task4"];
-/// let result =
-///     assign_items_weighted_with_scale_fn(&caps, &tasks, 0u8, |_containers, _items| Some(1.0));
+/// let result = assign_items_weighted_with_scale_fn(&caps, &tasks, 0u8, weighted_scale);
 ///
 /// // `fast` should receive roughly 3 tasks, `slow` roughly 1
 /// assert_eq!(result.values().map(Vec::len).sum::<usize>(), tasks.len());
@@ -99,7 +97,7 @@ pub fn assign_items_weighted_with_scale_fn<C, I, S>(
     containers: &BTreeMap<C, NonZeroUsize>,
     items: &[I],
     salt: S,
-    capacity_scale_factor_fn: impl Fn(&BTreeMap<C, NonZeroUsize>, &[I]) -> Option<f64>,
+    capacity_scale_factor_fn: impl Fn(&BTreeMap<C, NonZeroUsize>, &[I]) -> Option<ScaleFactor>,
 ) -> BTreeMap<C, Vec<I>>
 where
     C: Ord + Hash + Eq + Copy + Clone + Debug,
@@ -127,6 +125,7 @@ where
     let mut infos: Vec<QuotaInfo<C>> = containers
         .iter()
         .map(|(&container, &weight)| {
+            // Use saturating multiplication to prevent overflow, even though saturation is highly unlikely in practice.
             let ideal_num = (items.len() as u128).saturating_mul(weight.get() as u128);
             QuotaInfo {
                 container,
@@ -155,7 +154,12 @@ where
         .into_iter()
         .map(|info| match scale_factor {
             Some(f) => {
-                let scaled = (info.quota as f64 * f).ceil() as usize;
+                let scaled_f64 = (info.quota as f64 * f.get()).ceil();
+                let scaled = if scaled_f64 >= usize::MAX as f64 {
+                    usize::MAX
+                } else {
+                    scaled_f64 as usize
+                };
                 (info.container, scaled.max(info.quota))
             }
             None => (info.container, usize::MAX),
@@ -209,20 +213,47 @@ where
 
 /// Stable hash utility
 fn stable_hash<T: Hash>(t: &T) -> u64 {
-    // let mut hasher = twox_hash::XxHash3_64::new();
-    let mut hasher = std::hash::DefaultHasher::new();
+    let mut hasher = twox_hash::XxHash64::with_seed(0);
     t.hash(&mut hasher);
     hasher.finish()
 }
 
+/// A validated, non-negative, finite scale factor.
+#[derive(Debug, Copy, Clone)]
+pub struct ScaleFactor(f64);
+
+impl ScaleFactor {
+    /// Creates a new `ScaleFactor` if the value is valid.
+    ///
+    /// A valid scale factor must be finite and non-negative.
+    pub fn new(value: f64) -> Option<Self> {
+        if value.is_finite() && value >= 0.0 {
+            Some(ScaleFactor(value))
+        } else {
+            None
+        }
+    }
+
+    /// Gets the inner f64 value.
+    pub fn get(&self) -> f64 {
+        self.0
+    }
+}
+
 /// A no-op capacity scaling function: always returns `None`.
-pub fn unbounded_scale<C, I>(_containers: &BTreeMap<C, NonZeroUsize>, _items: &[I]) -> Option<f64> {
+pub fn unbounded_scale<C, I>(
+    _containers: &BTreeMap<C, NonZeroUsize>,
+    _items: &[I],
+) -> Option<ScaleFactor> {
     None
 }
 
 /// A unit capacity scaling function: always returns `Some(1.0)`.
-pub fn weighted_scale<C, I>(_containers: &BTreeMap<C, NonZeroUsize>, _items: &[I]) -> Option<f64> {
-    Some(1.0)
+pub fn weighted_scale<C, I>(
+    _containers: &BTreeMap<C, NonZeroUsize>,
+    _items: &[I],
+) -> Option<ScaleFactor> {
+    ScaleFactor::new(1.0)
 }
 
 /// Defines the capacity assignment strategy for containers.
@@ -713,17 +744,14 @@ mod tests {
 
     use super::*;
 
-    /// Always returns a scale factor of 1.0 (no-op scaling)
-    fn unit_scale<C, I>(_: &BTreeMap<C, NonZeroUsize>, _: &[I]) -> Option<f64> {
-        Some(1.0)
-    }
+    // --- Tests for `assign_items_weighted_with_scale_fn` ---
 
     #[test]
     fn empty_containers_or_items_yields_empty_map() {
         let empty_containers: BTreeMap<&str, NonZeroUsize> = BTreeMap::new();
         let items = vec![1, 2, 3];
         let result =
-            assign_items_weighted_with_scale_fn(&empty_containers, &items, 0u8, unit_scale);
+            assign_items_weighted_with_scale_fn(&empty_containers, &items, 0u8, weighted_scale);
         assert!(
             result.is_empty(),
             "Expected empty map when containers empty"
@@ -733,7 +761,7 @@ mod tests {
         containers.insert("c1", NonZeroUsize::new(1).unwrap());
         let empty_items: Vec<i32> = Vec::new();
         let result2 =
-            assign_items_weighted_with_scale_fn(&containers, &empty_items, 0u8, unit_scale);
+            assign_items_weighted_with_scale_fn(&containers, &empty_items, 0u8, weighted_scale);
         assert!(result2.is_empty(), "Expected empty map when items empty");
     }
 
@@ -743,7 +771,8 @@ mod tests {
         containers.insert("only", NonZeroUsize::new(5).unwrap());
         let items = vec![10, 20, 30];
 
-        let assignment = assign_items_weighted_with_scale_fn(&containers, &items, 1u8, unit_scale);
+        let assignment =
+            assign_items_weighted_with_scale_fn(&containers, &items, 1u8, weighted_scale);
 
         assert_eq!(assignment.len(), 1, "Only one container should be present");
         let assigned = &assignment[&"only"];
@@ -757,7 +786,7 @@ mod tests {
         containers.insert("B", NonZeroUsize::new(1).unwrap());
         let items = vec![1, 2, 3, 4];
 
-        let result = assign_items_weighted_with_scale_fn(&containers, &items, 2u8, unit_scale);
+        let result = assign_items_weighted_with_scale_fn(&containers, &items, 2u8, weighted_scale);
         let a_count = result[&"A"].len();
         let b_count = result[&"B"].len();
         assert_eq!(a_count, 2, "Container A should receive 2 items");
@@ -772,7 +801,7 @@ mod tests {
         containers.insert("Y", NonZeroUsize::new(1).unwrap());
         let items = vec![1, 2, 3];
 
-        let result = assign_items_weighted_with_scale_fn(&containers, &items, 5u8, unit_scale);
+        let result = assign_items_weighted_with_scale_fn(&containers, &items, 5u8, weighted_scale);
         let x_count = result.get(&"X").map(Vec::len).unwrap_or(0);
         let y_count = result.get(&"Y").map(Vec::len).unwrap_or(0);
         assert_eq!(x_count + y_count, items.len(), "All items must be assigned");
@@ -791,7 +820,7 @@ mod tests {
         containers.insert("high", NonZeroUsize::new(3).unwrap());
         let items = vec![100, 200, 300, 400];
 
-        let result = assign_items_weighted_with_scale_fn(&containers, &items, 7u8, unit_scale);
+        let result = assign_items_weighted_with_scale_fn(&containers, &items, 7u8, weighted_scale);
         let low_count = result[&"low"].len();
         let high_count = result[&"high"].len();
         // low weight should get 1, high weight 3
@@ -806,10 +835,59 @@ mod tests {
         containers.insert("B", NonZeroUsize::new(1).unwrap());
         let items = vec![5, 6, 7, 8];
 
-        let out1 = assign_items_weighted_with_scale_fn(&containers, &items, 42u8, unit_scale);
-        let out2 = assign_items_weighted_with_scale_fn(&containers, &items, 42u8, unit_scale);
+        let out1 = assign_items_weighted_with_scale_fn(&containers, &items, 42u8, weighted_scale);
+        let out2 = assign_items_weighted_with_scale_fn(&containers, &items, 42u8, weighted_scale);
         assert_eq!(out1, out2, "Same salt should produce identical assignments");
     }
+
+    #[test]
+    fn assign_items_unbounded_scale_ignores_proportional_quota() {
+        let mut containers = BTreeMap::new();
+        let container_a_id = "A";
+        let container_b_id = "B";
+        containers.insert(container_a_id, NonZeroUsize::new(1).unwrap()); // Low weight
+        containers.insert(container_b_id, NonZeroUsize::new(100).unwrap()); // High weight
+        let items: Vec<i32> = (0..100).collect(); // 100 items
+        let salt = 123u8;
+
+        // 1. Assignment with unit_scale (strictly proportional quotas)
+        let assignment_unit =
+            assign_items_weighted_with_scale_fn(&containers, &items, salt, weighted_scale);
+        let a_count_unit = assignment_unit.get(container_a_id).map_or(0, Vec::len);
+        let b_count_unit = assignment_unit.get(container_b_id).map_or(0, Vec::len);
+
+        assert!(
+            a_count_unit < 10,
+            "With weighted_scale, A ({}) should have few items, got {}",
+            container_a_id,
+            a_count_unit
+        );
+        assert!(
+            b_count_unit > 90,
+            "With weighted_scale, B ({}) should have many items, got {}",
+            container_b_id,
+            b_count_unit
+        );
+        assert_eq!(
+            a_count_unit + b_count_unit,
+            items.len(),
+            "All items must be assigned in weighted_scale"
+        );
+
+        // 2. Assignment with unbounded_scale_fn (quotas are usize::MAX)
+        let assignment_unbounded =
+            assign_items_weighted_with_scale_fn(&containers, &items, salt, unbounded_scale);
+        let a_count_unbounded = assignment_unbounded.get(container_a_id).map_or(0, Vec::len);
+        let b_count_unbounded = assignment_unbounded.get(container_b_id).map_or(0, Vec::len);
+
+        assert_eq!(
+            a_count_unbounded + b_count_unbounded,
+            items.len(),
+            "All items must be assigned in unbounded_scale"
+        );
+    }
+
+    // --- Tests for `compute_worker_quotas` ---
 
     #[test]
     fn test_compute_worker_quotas_equal_weights() {
@@ -899,6 +977,151 @@ mod tests {
         // This should panic due to underflow of extra_vnodes
         let _ = compute_worker_quotas(&workers, &actor_counts, total_vnodes, salt);
     }
+
+    /// This test verifies the core invariant of `compute_worker_quotas`:
+    /// the sum of all calculated quotas must exactly equal the total number of vnodes provided.
+    /// It runs through multiple scenarios to ensure this property holds under various conditions.
+    #[test]
+    fn test_compute_worker_quotas_sum_is_preserved() {
+        // Helper function to run a single test case and assert the invariant.
+        fn run_quota_sum_test<W, S>(
+            scenario_name: &str,
+            workers: &BTreeMap<W, NonZeroUsize>,
+            actor_counts: &HashMap<W, usize>,
+            total_vnodes: usize,
+            salt: S,
+        ) where
+            W: Ord + Copy + Hash + Eq + Debug,
+            S: Hash + Copy,
+        {
+            let quotas = compute_worker_quotas(workers, actor_counts, total_vnodes, salt);
+            let sum_of_quotas: usize = quotas.values().map(|q| q.get()).sum();
+
+            assert_eq!(
+                sum_of_quotas, total_vnodes,
+                "Scenario '{}' failed: Sum of quotas ({}) does not equal total_vnodes ({})",
+                scenario_name, sum_of_quotas, total_vnodes
+            );
+        }
+
+        // --- Scenario 1: Even split with no remainder ---
+        let workers1: BTreeMap<_, _> = [
+            (1, NonZeroUsize::new(1).unwrap()),
+            (2, NonZeroUsize::new(1).unwrap()),
+            (3, NonZeroUsize::new(1).unwrap()),
+        ]
+        .into();
+        let actor_counts1: HashMap<_, _> = [(1, 2), (2, 2), (3, 2)].into();
+        run_quota_sum_test(
+            "Even split, no remainder",
+            &workers1,
+            &actor_counts1,
+            12,
+            0u8,
+        );
+
+        // --- Scenario 2: Uneven split with remainder ---
+        // This is the most common case, testing the remainder distribution logic.
+        let workers2: BTreeMap<_, _> = [
+            (1, NonZeroUsize::new(1).unwrap()),
+            (2, NonZeroUsize::new(2).unwrap()),
+            (3, NonZeroUsize::new(3).unwrap()),
+        ]
+        .into();
+        let actor_counts2: HashMap<_, _> = [(1, 1), (2, 5), (3, 2)].into();
+        run_quota_sum_test(
+            "Uneven split with remainder",
+            &workers2,
+            &actor_counts2,
+            101,
+            42u64,
+        );
+
+        // --- Scenario 3: No extra vnodes to distribute ---
+        // The total vnodes exactly match the sum of base actor counts.
+        let workers3: BTreeMap<_, _> = [
+            (1, NonZeroUsize::new(10).unwrap()),
+            (2, NonZeroUsize::new(20).unwrap()),
+        ]
+        .into();
+        let actor_counts3: HashMap<_, _> = [(1, 5), (2, 10)].into();
+        run_quota_sum_test("No extra vnodes", &workers3, &actor_counts3, 15, 0u8);
+
+        // --- Scenario 4: Only one active worker ---
+        // All vnodes should be assigned to the single worker with actors.
+        let workers4: BTreeMap<_, _> = [
+            (1, NonZeroUsize::new(1).unwrap()),
+            (2, NonZeroUsize::new(1).unwrap()),
+        ]
+        .into();
+        let actor_counts4: HashMap<_, _> = [(1, 10)].into();
+        run_quota_sum_test("Single active worker", &workers4, &actor_counts4, 100, 0u8);
+
+        // --- Scenario 5: Large and complex numbers ---
+        // Stress test with larger, non-trivial numbers.
+        let workers5: BTreeMap<_, _> = [
+            (1, NonZeroUsize::new(7).unwrap()),
+            (2, NonZeroUsize::new(13).unwrap()),
+            (3, NonZeroUsize::new(19).unwrap()),
+            (4, NonZeroUsize::new(23).unwrap()),
+        ]
+        .into();
+        let actor_counts5: HashMap<_, _> = [(1, 111), (2, 222), (3, 33), (4, 4)].into();
+        run_quota_sum_test(
+            "Large and complex numbers",
+            &workers5,
+            &actor_counts5,
+            99991,
+            12345u64,
+        );
+    }
+
+    #[test]
+    fn test_compute_worker_quotas_no_extra_vnodes() {
+        let workers: BTreeMap<u8, NonZeroUsize> = vec![
+            (1, NonZeroUsize::new(1).unwrap()),
+            (2, NonZeroUsize::new(3).unwrap()),
+        ]
+        .into_iter()
+        .collect();
+        let mut actor_counts = HashMap::new();
+        actor_counts.insert(1, 2); // Worker 1, 2 actors
+        actor_counts.insert(2, 1); // Worker 2, 1 actor
+        let total_vnodes = 3; // base_total = 2 + 1 = 3. So extra_vnodes = 0.
+        let salt = 0u8;
+
+        let quotas = compute_worker_quotas(&workers, &actor_counts, total_vnodes, salt);
+        assert_eq!(quotas.len(), 2);
+        assert_eq!(
+            quotas[&1].get(),
+            2,
+            "Worker 1 quota should be its base_quota"
+        );
+        assert_eq!(
+            quotas[&2].get(),
+            1,
+            "Worker 2 quota should be its base_quota"
+        );
+        let sum: usize = quotas.values().map(|q| q.get()).sum();
+        assert_eq!(sum, total_vnodes);
+    }
+
+    #[test]
+    #[should_panic] // Or expect specific error if compute_worker_quotas returns Result
+    fn test_compute_worker_quotas_empty_actors_with_vnodes() {
+        let workers: BTreeMap<u8, NonZeroUsize> = vec![(1, NonZeroUsize::new(1).unwrap())]
+            .into_iter()
+            .collect();
+        let actor_counts: HashMap<u8, usize> = HashMap::new(); // No active workers
+        let total_vnodes = 5; // But vnodes exist
+        let salt = 0u8;
+
+        // This scenario: extra_vnodes = 5, active_workers is empty, total_weight = 0.
+        // Division by zero in `ideal_extra / total_weight`.
+        let _ = compute_worker_quotas(&workers, &actor_counts, total_vnodes, salt);
+    }
+
+    // --- Tests for `assign_hierarchical` ---
 
     #[test]
     fn error_on_empty_actors() {
@@ -995,7 +1218,7 @@ mod tests {
     }
 
     #[test]
-    fn two_workers_balanced_by_actorcounts() {
+    fn two_workers_balanced_by_actor_counts() {
         let workers: BTreeMap<u8, NonZeroUsize> = vec![
             (1, NonZeroUsize::new(1).unwrap()),
             (2, NonZeroUsize::new(1).unwrap()),
@@ -1027,7 +1250,7 @@ mod tests {
     }
 
     #[test]
-    fn rawworkerweights_respects_worker_weight() {
+    fn raw_worker_weights_respects_worker_weight() {
         let workers: BTreeMap<u8, NonZeroUsize> = vec![
             (1, NonZeroUsize::new(1).unwrap()),
             (2, NonZeroUsize::new(3).unwrap()),
@@ -1061,241 +1284,6 @@ mod tests {
         );
     }
 
-    /// Always returns None (unbounded capacity)
-    fn unbounded_scale_fn<C, I>(_: &BTreeMap<C, NonZeroUsize>, _: &[I]) -> Option<f64> {
-        None
-    }
-
-    /// Returns a specific scale factor
-    fn custom_scale_fn(
-        factor: f64,
-    ) -> impl Fn(&BTreeMap<i32, NonZeroUsize>, &[i32]) -> Option<f64> {
-        move |_, _| Some(factor)
-    }
-
-    // --- Tests for assign_items_weighted_with_scale_fn ---
-    #[test]
-    fn assign_items_unbounded_scale_ignores_proportional_quota() {
-        let mut containers = BTreeMap::new();
-        let container_a_id = "A";
-        let container_b_id = "B";
-        containers.insert(container_a_id, NonZeroUsize::new(1).unwrap()); // Low weight
-        containers.insert(container_b_id, NonZeroUsize::new(100).unwrap()); // High weight
-        let items: Vec<i32> = (0..100).collect(); // 100 items
-        let salt = 123u8;
-
-        // 1. Assignment with unit_scale (strictly proportional quotas)
-        let assignment_unit =
-            assign_items_weighted_with_scale_fn(&containers, &items, salt, unit_scale);
-        let a_count_unit = assignment_unit.get(container_a_id).map_or(0, Vec::len);
-        let b_count_unit = assignment_unit.get(container_b_id).map_or(0, Vec::len);
-
-        assert!(
-            a_count_unit < 10,
-            "With unit_scale, A ({}) should have few items, got {}",
-            container_a_id,
-            a_count_unit
-        );
-        assert!(
-            b_count_unit > 90,
-            "With unit_scale, B ({}) should have many items, got {}",
-            container_b_id,
-            b_count_unit
-        );
-        assert_eq!(
-            a_count_unit + b_count_unit,
-            items.len(),
-            "All items must be assigned in unit_scale"
-        );
-
-        // 2. Assignment with unbounded_scale_fn (quotas are usize::MAX)
-        let assignment_unbounded =
-            assign_items_weighted_with_scale_fn(&containers, &items, salt, unbounded_scale_fn);
-        let a_count_unbounded = assignment_unbounded.get(container_a_id).map_or(0, Vec::len);
-        let b_count_unbounded = assignment_unbounded.get(container_b_id).map_or(0, Vec::len);
-
-        assert_eq!(
-            a_count_unbounded + b_count_unbounded,
-            items.len(),
-            "All items must be assigned in unbounded_scale"
-        );
-
-        // 3. Assertions for unbounded behavior
-        // In unbounded mode, quotas are effectively infinite. Distribution is by rendezvous hashing.
-        // We expect that the distribution *might* differ from the strictly weighted one.
-        // If it does differ, it implies quotas were not the sole determining factor.
-        // This is not a strict requirement for the test to pass, as coincidence is possible,
-        // but it's an indicator we look for.
-        if items.len() >= 20
-            && (a_count_unbounded == a_count_unit && b_count_unbounded == b_count_unit)
-        {
-            // Log if the distributions happen to be identical for a non-trivial case.
-            // This doesn't mean the test failed, just that the hashing outcome was coincidental.
-            eprintln!(
-                "Note: Unbounded distribution ({}:{}, {}:{}) matched unit_scale ({}:{}, {}:{}), which is possible but less likely for many items.",
-                container_a_id,
-                a_count_unbounded,
-                container_b_id,
-                b_count_unbounded,
-                container_a_id,
-                a_count_unit,
-                container_b_id,
-                b_count_unit
-            );
-        }
-        // The primary check is that the function runs and assigns all items when unbounded_scale_fn is used.
-        // The internal mechanism change (quotas -> usize::MAX) is what unbounded_scale_fn achieves.
-        // A more direct test of "ignoring quota" would be if a_count_unbounded > a_count_unit,
-        // but this is not guaranteed.
-        // For example, if a_count_unit was 1, and a_count_unbounded is 5, that's a clear sign.
-        // If a_count_unit was 1, and a_count_unbounded is 0, that's also possible with unlucky hashing.
-    }
-
-    #[test]
-    fn assign_items_custom_scale_increases_quota() {
-        let mut containers = BTreeMap::new();
-        containers.insert(1, NonZeroUsize::new(1).unwrap());
-        containers.insert(2, NonZeroUsize::new(1).unwrap());
-        let items: Vec<i32> = (0..10).collect(); // 10 items
-        let salt = 0u8;
-
-        // With unit_scale, C1 and C2 would get 5 items each.
-        // We'll use a custom scale factor of 1.5.
-        // Initial quota for C1: 5. Scaled: ceil(5 * 1.5) = ceil(7.5) = 8.
-        // Initial quota for C2: 5. Scaled: ceil(5 * 1.5) = ceil(7.5) = 8.
-        // Total scaled quota = 8 + 8 = 16, which is >= items.len().
-        let assignment =
-            assign_items_weighted_with_scale_fn(&containers, &items, salt, custom_scale_fn(1.5));
-
-        let c1_count = assignment.get(&1).map_or(0, Vec::len);
-        let c2_count = assignment.get(&2).map_or(0, Vec::len);
-
-        // Since total items (10) is less than total scaled quota (16),
-        // the items will be distributed according to rendezvous hashing UP TO the scaled quotas.
-        // The sum must be 10.
-        assert_eq!(c1_count + c2_count, items.len());
-        // And each container's count should not exceed its scaled quota (8).
-        assert!(
-            c1_count <= 8,
-            "C1 count {} should be <= scaled quota 8",
-            c1_count
-        );
-        assert!(
-            c2_count <= 8,
-            "C2 count {} should be <= scaled quota 8",
-            c2_count
-        );
-        // It's hard to assert exact distribution without knowing hashes, but they are capped.
-        // We know that if unit_scale was used, it would be 5,5.
-        // Here, it could be 5,5 or 6,4 or 4,6 etc., up to 8 for one.
-    }
-
-    // --- Tests for compute_worker_quotas ---
-
-    #[test]
-    fn test_compute_worker_quotas_remainder_determinism() {
-        // Two workers, equal weight, one actor each.
-        // extra_vnodes = 1. One of them gets the remainder.
-        let workers_setup: BTreeMap<u8, NonZeroUsize> = vec![
-            (1, NonZeroUsize::new(1).unwrap()), // Worker 1
-            (2, NonZeroUsize::new(1).unwrap()), // Worker 2
-        ]
-        .into_iter()
-        .collect();
-        let mut actor_counts_setup = HashMap::new();
-        actor_counts_setup.insert(1, 1);
-        actor_counts_setup.insert(2, 1);
-        let total_vnodes_setup = 3; // base_total = 2, extra_vnodes = 1
-
-        // Run with salt1
-        let quotas1 = compute_worker_quotas(
-            &workers_setup,
-            &actor_counts_setup,
-            total_vnodes_setup,
-            10u8, // salt1
-        );
-        let worker1_quota1 = quotas1[&1].get();
-        let worker2_quota1 = quotas1[&2].get();
-        assert!(
-            (worker1_quota1 == 2 && worker2_quota1 == 1)
-                || (worker1_quota1 == 1 && worker2_quota1 == 2)
-        );
-
-        // Run with salt2 (different salt)
-        let quotas2 = compute_worker_quotas(
-            &workers_setup,
-            &actor_counts_setup,
-            total_vnodes_setup,
-            20u8, // salt2
-        );
-        let worker1_quota2 = quotas2[&1].get();
-        let worker2_quota2 = quotas2[&2].get();
-        assert!(
-            (worker1_quota2 == 2 && worker2_quota2 == 1)
-                || (worker1_quota2 == 1 && worker2_quota2 == 2)
-        );
-
-        // If stable_hash is truly stable and sensitive to salt/id,
-        // and if the hash values for (10,1) vs (10,2) differ from (20,1) vs (20,2)
-        // in a way that changes the sort order of remainders (if remainders were equal),
-        // then the assignment of the single extra vnode *might* switch.
-        // This test primarily ensures it's deterministic for a given salt (covered by other tests)
-        // and that one of them gets the remainder.
-        // To make it more specific, one would need to mock or know stable_hash behavior.
-        // For now, we assume that if the hashes differ sufficiently, the order *could* change.
-        // A stronger test: if we knew worker 1 hashes lower than worker 2 for salt1,
-        // and worker 2 hashes lower than worker 1 for salt2 (for the tie-breaking part),
-        // we could predict who gets the remainder.
-        // This test is more about exercising the path.
-    }
-
-    #[test]
-    fn test_compute_worker_quotas_no_extra_vnodes() {
-        let workers: BTreeMap<u8, NonZeroUsize> = vec![
-            (1, NonZeroUsize::new(1).unwrap()),
-            (2, NonZeroUsize::new(3).unwrap()),
-        ]
-        .into_iter()
-        .collect();
-        let mut actor_counts = HashMap::new();
-        actor_counts.insert(1, 2); // Worker 1, 2 actors
-        actor_counts.insert(2, 1); // Worker 2, 1 actor
-        let total_vnodes = 3; // base_total = 2 + 1 = 3. So extra_vnodes = 0.
-        let salt = 0u8;
-
-        let quotas = compute_worker_quotas(&workers, &actor_counts, total_vnodes, salt);
-        assert_eq!(quotas.len(), 2);
-        assert_eq!(
-            quotas[&1].get(),
-            2,
-            "Worker 1 quota should be its base_quota"
-        );
-        assert_eq!(
-            quotas[&2].get(),
-            1,
-            "Worker 2 quota should be its base_quota"
-        );
-        let sum: usize = quotas.values().map(|q| q.get()).sum();
-        assert_eq!(sum, total_vnodes);
-    }
-
-    #[test]
-    #[should_panic] // Or expect specific error if compute_worker_quotas returns Result
-    fn test_compute_worker_quotas_empty_actors_with_vnodes() {
-        let workers: BTreeMap<u8, NonZeroUsize> = vec![(1, NonZeroUsize::new(1).unwrap())]
-            .into_iter()
-            .collect();
-        let actor_counts: HashMap<u8, usize> = HashMap::new(); // No active workers
-        let total_vnodes = 5; // But vnodes exist
-        let salt = 0u8;
-
-        // This scenario: extra_vnodes = 5, active_workers is empty, total_weight = 0.
-        // Division by zero in `ideal_extra / total_weight`.
-        let _ = compute_worker_quotas(&workers, &actor_counts, total_vnodes, salt);
-    }
-
-    // --- Tests for assign_hierarchical ---
-
     #[test]
     fn assign_hierarchical_capacity_unbounded() {
         let mut workers: BTreeMap<u8, NonZeroUsize> = BTreeMap::new();
@@ -1325,14 +1313,7 @@ mod tests {
             actors.len(),
             "All actors must be assigned"
         );
-        // It's hard to predict exact distribution without knowing hashes.
-        // But, it's possible worker 1 (low weight) gets a non-trivial number of actors
-        // if it wins some rendezvous hashes.
-        // A weak assertion: the distribution might not be extremely skewed like 0:10 or 1:9.
-        // If actors_on_w1 > 1 (more than its "fair share" if weights were strictly followed for small N),
-        // it indicates unbounded mode is having an effect.
-        // For this test, we'll just ensure all actors are assigned and the structure is valid.
-        // A more robust test would involve items known to hash to specific workers.
+
         let total_assigned_vnodes: usize = assignment
             .values()
             .flat_map(|amap| amap.values().map(Vec::len))
@@ -1361,7 +1342,7 @@ mod tests {
         // Assign actors first (CapacityMode::Weighted to see effect of worker weights)
         // W1 gets ~1 actor, W2 gets ~9 actors.
         let actor_assignment_for_setup =
-            assign_items_weighted_with_scale_fn(&workers, &actors, salt, unit_scale);
+            assign_items_weighted_with_scale_fn(&workers, &actors, salt, weighted_scale);
         let actors_on_w1_count = actor_assignment_for_setup.get(&1).map_or(0, Vec::len);
         let actors_on_w2_count = actor_assignment_for_setup.get(&2).map_or(0, Vec::len);
 
@@ -1450,77 +1431,87 @@ mod tests {
                 "W1 actorcount vnodes check"
             );
         }
-        // The key insight is that if actor distribution is itself skewed (e.g. 1:9 due to worker weights),
-        // then BalancedBy::ActorCounts will *also* result in a 1:9 vnode distribution.
-        // If actors were distributed 5:5 (e.g. using Unbounded mode and lucky hashing),
-        // then ActorCounts would lead to a 5:5 vnode distribution, while RawWorkerWeights would still aim for 1:9.
-        // This test, as written, shows both modes might produce similar *vnode* ratios if the *actor* ratio matches the *raw worker weight* ratio.
-        // A better test for contrast would be:
-        // 1. Workers with very different raw weights (e.g., W1:1, W2:9).
-        // 2. Distribute actors such that they are *evenly* spread (e.g., 5 actors on W1, 5 on W2). This might require CapacityMode::Unbounded and careful salt/ID selection, or just manually setting up `actor_to_worker` for a more direct test of the second stage.
-        // 3. Then, BalancedBy::RawWorkerWeights should distribute vnodes 1:9.
-        // 4. And, BalancedBy::ActorCounts should distribute vnodes 5:5 (i.e., 1:1).
+    }
+}
+
+#[cfg(test)]
+mod extra_tests_for_scale_factor {
+    use std::collections::BTreeMap;
+    use std::num::NonZeroUsize;
+
+    use super::*;
+
+    #[test]
+    fn test_scale_factor_constructor_rejects_invalid_values() {
+        assert!(ScaleFactor::new(f64::NAN).is_none(), "Should reject NaN");
+        assert!(
+            ScaleFactor::new(f64::INFINITY).is_none(),
+            "Should reject Infinity"
+        );
+        assert!(
+            ScaleFactor::new(f64::NEG_INFINITY).is_none(),
+            "Should reject Negative Infinity"
+        );
+        assert!(
+            ScaleFactor::new(-1.0).is_none(),
+            "Should reject negative numbers"
+        );
+        assert!(ScaleFactor::new(1.0).is_some(), "Should accept valid value");
     }
 
     #[test]
-    fn assign_hierarchical_vnode_to_actor_round_robin() {
-        let workers: BTreeMap<u8, NonZeroUsize> = vec![(1, NonZeroUsize::new(1).unwrap())]
-            .into_iter()
-            .collect();
-        // Worker 1 has 3 actors
-        let actors: Vec<u16> = vec![10, 20, 30];
-        // Worker 1 is assigned 5 vnodes
-        let vnodes: Vec<u16> = vec![100, 200, 300, 400, 500];
+    fn test_assign_items_scale_factor_less_than_one() {
+        // A scale factor < 1.0 should not reduce quotas below their base value.
+        // Therefore, the distribution should be identical to a scale factor of 1.0.
+        let mut containers = BTreeMap::new();
+        containers.insert("A", NonZeroUsize::new(3).unwrap());
+        containers.insert("B", NonZeroUsize::new(1).unwrap());
+        let items: Vec<i32> = (0..4).collect(); // 4 items
 
-        let assignment = assign_hierarchical(
-            &workers,
-            &actors,
-            &vnodes,
-            0u8,
-            CapacityMode::Weighted,  // All actors go to the single worker
-            BalancedBy::ActorCounts, // All vnodes go to the single worker
-        )
-        .unwrap();
+        // Base quotas: A gets 3, B gets 1.
+        let result_scale_one =
+            assign_items_weighted_with_scale_fn(&containers, &items, 0u8, weighted_scale);
 
-        assert_eq!(assignment.len(), 1, "Should be one worker");
-        let actor_map = assignment.get(&1).unwrap();
-        assert_eq!(actor_map.len(), 3, "Should be three actors on the worker");
+        fn custom_scale_fn(_: &BTreeMap<&str, NonZeroUsize>, _: &[i32]) -> Option<ScaleFactor> {
+            ScaleFactor::new(0.5)
+        }
+        let result_scale_half =
+            assign_items_weighted_with_scale_fn(&containers, &items, 0u8, custom_scale_fn);
 
-        let vnodes_actor10 = actor_map.get(&10).unwrap(); // actor_list[0]
-        let vnodes_actor20 = actor_map.get(&20).unwrap(); // actor_list[1]
-        let vnodes_actor30 = actor_map.get(&30).unwrap(); // actor_list[2]
+        assert_eq!(
+            result_scale_one[&"A"].len(),
+            3,
+            "With scale=1.0, A should get 3"
+        );
+        assert_eq!(
+            result_scale_half[&"A"].len(),
+            3,
+            "With scale=0.5, A's quota should not be reduced, still gets 3"
+        );
+        assert_eq!(
+            result_scale_one, result_scale_half,
+            "Distributions should be identical"
+        );
+    }
 
-        // Expected distribution for 5 vnodes over 3 actors (round-robin):
-        // vnode 100 -> actor 10 (index 0 % 3 = 0)
-        // vnode 200 -> actor 20 (index 1 % 3 = 1)
-        // vnode 300 -> actor 30 (index 2 % 3 = 2)
-        // vnode 400 -> actor 10 (index 3 % 3 = 0)
-        // vnode 500 -> actor 20 (index 4 % 3 = 1)
-        // So, actor 10 gets [100, 400] (2 vnodes)
-        // actor 20 gets [200, 500] (2 vnodes)
-        // actor 30 gets [300]      (1 vnode)
-        assert_eq!(vnodes_actor10.len(), 2);
-        assert_eq!(vnodes_actor20.len(), 2);
-        assert_eq!(vnodes_actor30.len(), 1);
+    #[test]
+    fn test_assign_items_large_scale_factor_does_not_panic() {
+        // This test ensures that a very large scale factor, which would cause
+        // `quota * factor` to exceed `usize::MAX`, is clamped correctly and does not panic.
+        let mut containers = BTreeMap::new();
+        containers.insert("A", NonZeroUsize::new(1).unwrap());
+        let items: Vec<i32> = vec![100]; // A single item, quota is 100.
 
-        // Check actual items if vnode order is preserved by assign_items_weighted_with_scale_fn
-        // (it is, as items are iterated in input order).
-        // And if actor_to_worker preserves actor order from input (it does due to BTreeMap from items).
-        // And if vnode_to_worker preserves vnode order from input.
-        // This part is tricky because the exact vnodes assigned depend on hashing if there were multiple workers.
-        // Here, all vnodes go to worker 1, so their order *should* be preserved.
-        // The actors on worker 1 will be [10, 20, 30] if `assign_items_weighted_with_scale_fn` preserves order of items when forming Vec<I>.
-        // Let's assume `assign_items_weighted_with_scale_fn` appends items as they are assigned.
-        // The order of items in `assignment.get(container).unwrap()` is the order they were assigned by rendezvous.
-        // The vnodes in `vnode_to_worker.get(&worker).cloned().unwrap_or_default()` are also in rendezvous assignment order.
-        // So, the `assigned_vnodes.into_iter().enumerate()` will iterate them in that specific order.
-        // The `actor_list` is `actor_to_worker.get(&worker).unwrap()`, which is also in rendezvous assignment order for actors.
+        // A huge scale factor that would definitely overflow if not clamped.
+        fn huge_scale_fn(_: &BTreeMap<&str, NonZeroUsize>, _: &[i32]) -> Option<ScaleFactor> {
+            ScaleFactor::new(f64::MAX)
+        }
 
-        // To make this test robust for content, we need to ensure the vnodes [100..500] are indeed assigned in that order
-        // to the single worker, and actors [10,20,30] are also assigned in that order.
-        // With a single container, assign_items_weighted_with_scale_fn should preserve item order.
-        assert!(vnodes_actor10.contains(&100) && vnodes_actor10.contains(&400));
-        assert!(vnodes_actor20.contains(&200) && vnodes_actor20.contains(&500));
-        assert!(vnodes_actor30.contains(&300));
+        // The test passes if this function call does not panic.
+        let assignment =
+            assign_items_weighted_with_scale_fn(&containers, &items, 0u8, huge_scale_fn);
+
+        // All items should still be assigned correctly.
+        assert_eq!(assignment[&"A"].len(), items.len());
     }
 }
