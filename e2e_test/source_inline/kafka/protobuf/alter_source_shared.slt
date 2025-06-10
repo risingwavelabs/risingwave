@@ -9,7 +9,7 @@ python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_S
 
 statement ok
 CREATE SOURCE src_user
-INCLUDE timestamp -- include explicitly here to test a bug found in https://github.com/risingwavelabs/risingwave/pull/17293
+INCLUDE timestamp as timestamp-- include explicitly here to test a bug found in https://github.com/risingwavelabs/risingwave/pull/17293
 WITH (
     ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
     topic = 'pb_alter_source_shared_test',
@@ -23,7 +23,7 @@ FORMAT PLAIN ENCODE PROTOBUF(
 query T
 SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 'src_user';
 ----
-CREATE SOURCE src_user (id INT, name CHARACTER VARYING, address CHARACTER VARYING, city CHARACTER VARYING, gender CHARACTER VARYING, sc STRUCT<file_name CHARACTER VARYING>) INCLUDE timestamp
+CREATE SOURCE src_user (id INT, name CHARACTER VARYING, address CHARACTER VARYING, city CHARACTER VARYING, gender CHARACTER VARYING, sc STRUCT<file_name CHARACTER VARYING>) INCLUDE timestamp AS timestamp
 
 statement ok
 CREATE MATERIALIZED VIEW mv_user AS SELECT * FROM src_user;
@@ -53,16 +53,16 @@ ALTER SOURCE src_user REFRESH SCHEMA;
 query T
 SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 'src_user';
 ----
-CREATE SOURCE src_user (id INT, name CHARACTER VARYING, address CHARACTER VARYING, city CHARACTER VARYING, gender CHARACTER VARYING, sc STRUCT<file_name CHARACTER VARYING>, age INT) INCLUDE timestamp
+CREATE SOURCE src_user (id INT, name CHARACTER VARYING, address CHARACTER VARYING, city CHARACTER VARYING, gender CHARACTER VARYING, sc STRUCT<file_name CHARACTER VARYING>, age INT) INCLUDE timestamp AS timestamp
 
 # Check it should still be shared source <https://github.com/risingwavelabs/risingwave/issues/19799>
 query
 EXPLAIN CREATE MATERIALIZED VIEW mv_user_more AS SELECT * FROM src_user;
 ----
-StreamMaterialize { columns: [id, name, address, city, gender, sc, _rw_kafka_timestamp, age, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
-└─StreamProject { exprs: [id, name, address, city, gender, sc, _rw_kafka_timestamp, age, _row_id] }
+StreamMaterialize { columns: [id, name, address, city, gender, sc, timestamp, age, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
+└─StreamProject { exprs: [id, name, address, city, gender, sc, timestamp, age, _row_id] }
   └─StreamRowIdGen { row_id_index: 9 }
-    └─StreamSourceScan { columns: [id, name, address, city, gender, sc, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id, age] }
+    └─StreamSourceScan { columns: [id, name, address, city, gender, sc, timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id, age] }
 
 
 statement ok

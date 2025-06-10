@@ -21,9 +21,6 @@ CREATE TABLE plain_students (
     height REAL,
     weight REAL,
 )
-INCLUDE KEY
-INCLUDE PARTITION
-INCLUDE TIMESTAMP
 WITH (
 	${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
 	topic = 'test_alter_table_drop_connector')

@@ -2771,7 +2771,7 @@ impl Parser<'_> {
 
             let mut column_alias = None;
             if self.parse_keyword(Keyword::AS) {
-                column_alias = Some(self.parse_identifier()?);
+                column_alias = Some(self.parse_identifier_non_reserved()?);
             }
 
             options.push(IncludeOptionItem {
