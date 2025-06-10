@@ -103,7 +103,7 @@ EXEC sys.sp_cdc_enable_table
 WHILE @i <= 2000
 BEGIN
     INSERT INTO test_pk_uuid (id, NAME)
-    VALUES (NEWID(), CONCAT('TEST_NAME', @i), 0);
+    VALUES (NEWID(), CONCAT('TEST_NAME', @i));
 
     SET @i = @i + 1;
 END
