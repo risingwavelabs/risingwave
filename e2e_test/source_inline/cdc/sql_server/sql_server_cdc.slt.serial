@@ -286,6 +286,7 @@ statement ok
 CREATE TABLE test_pk_uuid (
     "id" CHARACTER VARYING,
     "NAME" CHARACTER VARYING,
+    PRIMARY KEY ("id")
 ) from mssql_source table 'mydb.dbo.test_pk_uuid';
 
 statement ok
