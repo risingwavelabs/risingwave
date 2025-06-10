@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
+use anyhow::anyhow;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId, max_column_id};
 use risingwave_common::types::{DataType, StructType};
@@ -26,7 +27,7 @@ use risingwave_pb::plan_common::{
     AdditionalDatabaseName, AdditionalSchemaName, AdditionalSubject, AdditionalTableName,
 };
 
-use crate::error::ConnectorResult;
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::cdc::MONGODB_CDC_CONNECTOR;
 use crate::source::{
     AZBLOB_CONNECTOR, GCS_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, MQTT_CONNECTOR,
@@ -168,14 +169,12 @@ pub fn build_additional_column_desc(
         );
     }
 
-    let column_name = column_alias.unwrap_or_else(|| {
-        gen_default_addition_col_name(
-            connector_name,
-            additional_col_type,
-            inner_field_name,
-            data_type,
-        )
-    });
+    let Some(column_name) = column_alias else {
+        return Err(ConnectorError::from(anyhow!(
+            "additional column ({}) alias is required, you can use `INCLUDE ... AS <alias>` to specify the alias",
+            additional_col_type
+        )));
+    };
 
     let col_desc = match additional_col_type {
         "key" => ColumnDesc::named_with_additional_column(
