@@ -254,6 +254,7 @@ impl GlobalStreamManager {
     /// 4. Store related meta data.
     ///
     /// This function is a wrapper over [`Self::run_create_streaming_job_command`].
+    #[await_tree::instrument]
     pub async fn create_streaming_job(
         self: &Arc<Self>,
         stream_job_fragments: StreamJobFragmentsToCreate,
@@ -278,7 +279,6 @@ impl GlobalStreamManager {
             let res: MetaResult<_> = try {
                 let (source_change, streaming_job) = stream_manager
                     .run_create_streaming_job_command(stream_job_fragments, ctx)
-                    .instrument_await("run_create_streaming_job_command")
                     .inspect(move |result| {
                         if let Some(tx) = run_command_notifier {
                             let _ = tx.send(match result {
@@ -298,11 +298,9 @@ impl GlobalStreamManager {
                         streaming_job.database_id().into(),
                         streaming_job.id() as _,
                     )
-                    .instrument_await("wait_streaming_job_finished")
                     .await?;
                 stream_manager.source_manager
                     .apply_source_change(source_change)
-                    .instrument_await("apply_source_change")
                     .await;
                 tracing::debug!(?streaming_job, "stream job finish");
                 version
@@ -367,7 +365,6 @@ impl GlobalStreamManager {
                             self.metadata_manager
                                 .catalog_controller
                                 .try_abort_creating_streaming_job(table_id.table_id as _, true)
-                                .instrument_await("try_abort_creating_streaming_job")
                                 .await?;
 
                             self.barrier_scheduler
@@ -396,6 +393,7 @@ impl GlobalStreamManager {
 
     /// The function will only return after backfilling finishes
     /// ([`crate::manager::MetadataManager::wait_streaming_job_finished`]).
+    #[await_tree::instrument]
     async fn run_create_streaming_job_command(
         &self,
         stream_job_fragments: StreamJobFragmentsToCreate,
@@ -426,14 +424,12 @@ impl GlobalStreamManager {
             self.metadata_manager
                 .catalog_controller
                 .prepare_streaming_job(&stream_job_fragments, &streaming_job, true)
-                .instrument_await("prepare_streaming_job_for_replace")
                 .await?;
 
             let tmp_table_id = stream_job_fragments.stream_job_id();
             let init_split_assignment = self
                 .source_manager
                 .allocate_splits(&stream_job_fragments)
-                .instrument_await("allocate_splits_for_replace")
                 .await?;
 
             replace_table_command = Some(ReplaceStreamJobPlan {
@@ -455,7 +451,6 @@ impl GlobalStreamManager {
         let mut init_split_assignment = self
             .source_manager
             .allocate_splits(&stream_job_fragments)
-            .instrument_await("allocate_splits")
             .await?;
         init_split_assignment.extend(
             self.source_manager
@@ -464,7 +459,6 @@ impl GlobalStreamManager {
                     &new_no_shuffle,
                     &upstream_actors,
                 )
-                .instrument_await("allocate_splits_for_backfill")
                 .await?,
         );
 

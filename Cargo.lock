@@ -1075,10 +1075,11 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
 name = "await-tree"
-version = "0.3.1"
+version = "0.3.2-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4aec83d33c078452a764b777d1e8d6c17d8c999213ccfb7914740293f1e0fa9a"
+checksum = "96da39a34f12729dab6ee3af04769656f67bb9e23487085c23d34fd6ffd78e1a"
 dependencies = [
+ "await-tree-attributes",
  "coarsetime",
  "derive_builder",
  "easy-ext",
@@ -1091,6 +1092,17 @@ dependencies = [
  "task-local",
  "tracing",
  "weak-table",
+]
+
+[[package]]
+name = "await-tree-attributes"
+version = "0.1.0-alpha.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "829e743ef28c54e9414cb7c1b4e0ce2e1fa0d0d02d369bc766e54cc5c3c0a41b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.101",
 ]
 
 [[package]]

@@ -186,7 +186,6 @@ impl CatalogController {
         self.env
             .notification_manager()
             .notify_frontend(operation, info)
-            .instrument_await(span!("notify_frontend({operation:?})"))
             .await
     }
 
@@ -198,7 +197,6 @@ impl CatalogController {
         self.env
             .notification_manager()
             .notify_frontend_object_info(operation, relation_info)
-            .instrument_await(span!("notify_frontend_object_info({operation:?})"))
             .await
     }
 

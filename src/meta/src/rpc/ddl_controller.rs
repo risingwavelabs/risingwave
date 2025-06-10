@@ -440,7 +440,7 @@ impl DdlController {
         .in_current_span();
         let fut = (self.env.await_tree_reg())
             .register(await_tree_key, await_tree_span)
-            .instrument(fut);
+            .instrument(Box::pin(fut));
         let notification_version = tokio::spawn(fut).await.map_err(|e| anyhow!(e))??;
         Ok(Some(WaitVersion {
             catalog_version: notification_version,
@@ -712,6 +712,7 @@ impl DdlController {
     }
 
     /// Validates the connect properties in the `cdc_table_desc` stored in the `StreamCdcScan` node
+    #[await_tree::instrument]
     pub(crate) async fn validate_cdc_table(
         table: &Table,
         table_fragments: &StreamJobFragments,
@@ -1011,7 +1012,6 @@ impl DdlController {
                 dependencies,
                 specific_resource_group.clone(),
             )
-            .instrument_await("create_job_catalog")
             .await;
         if let Err(meta_err) = check_ret {
             if !if_not_exists {
@@ -1023,7 +1023,6 @@ impl DdlController {
                     return self
                         .metadata_manager
                         .wait_streaming_job_finished(database_id.into(), *job_id)
-                        .instrument_await("wait_streaming_job_finished")
                         .await;
                 } else {
                     return Ok(IGNORED_NOTIFICATION_VERSION);
@@ -1048,11 +1047,7 @@ impl DdlController {
             .instrument_await("acquire_creating_streaming_job_permit")
             .await
             .unwrap();
-        let _reschedule_job_lock = self
-            .stream_manager
-            .reschedule_lock_read_guard()
-            .instrument_await("acquire_reschedule_lock")
-            .await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
         let name = streaming_job.name();
         let definition = streaming_job.definition();
@@ -1070,7 +1065,6 @@ impl DdlController {
                 affected_table_replace_info,
                 specific_resource_group,
             )
-            .instrument_await("create_streaming_job_inner")
             .await
         {
             Ok(version) => Ok(version),
@@ -1106,6 +1100,7 @@ impl DdlController {
         }
     }
 
+    #[await_tree::instrument]
     async fn create_streaming_job_inner(
         &self,
         ctx: StreamContext,
@@ -1173,23 +1168,17 @@ impl DdlController {
                 affected_table_replace_info,
                 specific_resource_group,
             )
-            .instrument_await("build_stream_job")
             .await?;
 
         let streaming_job = &ctx.streaming_job;
 
         match streaming_job {
             StreamingJob::Table(None, table, TableJobType::SharedCdcSource) => {
-                Self::validate_cdc_table(table, &stream_job_fragments)
-                    .instrument_await("validate_cdc_table")
-                    .await?;
+                Self::validate_cdc_table(table, &stream_job_fragments).await?;
             }
             StreamingJob::Table(Some(source), ..) => {
                 // Register the source on the connector node.
-                self.source_manager
-                    .register_source(source)
-                    .instrument_await("register_source")
-                    .await?;
+                self.source_manager.register_source(source).await?;
                 let connector_name = source
                     .get_with_properties()
                     .get(UPSTREAM_SOURCE_KEY)
@@ -1210,9 +1199,7 @@ impl DdlController {
             }
             StreamingJob::Sink(sink, _) => {
                 // Validate the sink on the connector node.
-                validate_sink(sink)
-                    .instrument_await("validate_sink")
-                    .await?;
+                validate_sink(sink).await?;
                 let connector_name = sink.get_properties().get(UPSTREAM_SOURCE_KEY).cloned();
                 let attr = sink.format_desc.as_ref().map(|sink_info| {
                     jsonbb::json!({
@@ -1230,10 +1217,7 @@ impl DdlController {
             }
             StreamingJob::Source(source) => {
                 // Register the source on the connector node.
-                self.source_manager
-                    .register_source(source)
-                    .instrument_await("register_source")
-                    .await?;
+                self.source_manager.register_source(source).await?;
                 let connector_name = source
                     .get_with_properties()
                     .get(UPSTREAM_SOURCE_KEY)
@@ -1258,7 +1242,6 @@ impl DdlController {
         self.metadata_manager
             .catalog_controller
             .prepare_streaming_job(&stream_job_fragments, streaming_job, false)
-            .instrument_await("prepare_streaming_job")
             .await?;
 
         // create streaming jobs.
@@ -1271,7 +1254,6 @@ impl DdlController {
                 let version = self
                     .stream_manager
                     .create_streaming_job(stream_job_fragments, ctx, None)
-                    .instrument_await("create_streaming_job")
                     .await?;
                 Ok(version)
             }
@@ -1286,7 +1268,6 @@ impl DdlController {
                     let _ = ctrl
                         .stream_manager
                         .create_streaming_job(stream_job_fragments, ctx, Some(tx))
-                        .instrument_await("create_streaming_job")
                         .await
                         .inspect_err(|err| {
                             tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to create background streaming job");
@@ -1729,6 +1710,7 @@ impl DdlController {
     /// - Schedule the fragments based on their distribution
     /// - Expand each fragment into one or several actors
     /// - Construct the fragment level backfill order control.
+    #[await_tree::instrument]
     pub(crate) async fn build_stream_job(
         &self,
         stream_ctx: StreamContext,
