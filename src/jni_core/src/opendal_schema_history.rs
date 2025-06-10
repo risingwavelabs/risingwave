@@ -16,26 +16,21 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use jni::{objects::{JObject, JString}, sys::jboolean};
-use jni::sys::{jbyteArray, jint};
-use tracing::Level;
-use opendal::{layers::LoggingLayer, Builder, Operator};
+use jni::objects::{JByteArray, JObject, JString};
+use jni::sys::{jboolean, jbyteArray, jint};
+use opendal::layers::LoggingLayer;
 use opendal::services::S3;
+use opendal::{Builder, Operator};
+use tracing::Level;
 
-use crate::{execute_and_catch, EnvParam, JAVA_BINDING_ASYNC_RUNTIME};
-
-
+use crate::{EnvParam, JAVA_BINDING_ASYNC_RUNTIME, execute_and_catch};
 
 struct ObjectStoreEngine {
     op: Operator,
-
 }
 
 impl ObjectStoreEngine {
-    pub fn new_minio_engine(
-        server: &str,
-    ) -> anyhow::Result<Self> {
-      
+    pub fn new_minio_engine(server: &str) -> anyhow::Result<Self> {
         let builder = S3::default()
             .bucket("hummock001")
             .region("custom")
@@ -47,24 +42,21 @@ impl ObjectStoreEngine {
             .layer(LoggingLayer::default())
             .finish();
 
-        Ok(Self {
-            op,
-        })
+        Ok(Self { op })
     }
 
     pub async fn upload(&self, path: &str, obj: Bytes) -> anyhow::Result<()> {
-         self.op.write(path, obj).await?;
-            Ok(())
+        self.op.write(path, obj).await?;
+        Ok(())
     }
 
     pub async fn read_object(&self, path: &str) -> anyhow::Result<Bytes> {
-        let data = self.op
-                .read_with(path).await?;
-         Ok(data.to_bytes())
+        let data = self.op.read_with(path).await?;
+        Ok(data.to_bytes())
     }
 
     pub async fn delete_object(&self, path: &str) -> anyhow::Result<()> {
-         self.op.delete(path).await?;
+        self.op.delete(path).await?;
         Ok(())
     }
 
@@ -72,27 +64,23 @@ impl ObjectStoreEngine {
         self.op.list(path).await?;
         Ok(())
     }
-
-
 }
 
 fn get_engine() -> anyhow::Result<ObjectStoreEngine> {
     let bucket = "hummock001".to_string();
-    
-    let engine = ObjectStoreEngine::new_minio_engine(&format!("minio://{}",  bucket))?;
-    
-    
+
+    let engine = ObjectStoreEngine::new_minio_engine(&format!("minio://{}", bucket))?;
+
     Ok(engine)
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_java_binding_Binding_writeFile(
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_putObject(
     env: EnvParam<'_>,
     object_name: JString<'_>,
-    data: JString<'_>,    
-)  {
+    data: JString<'_>,
+) {
     execute_and_catch(env, move |env| {
-
         let engine = get_engine()?;
 
         let object_name = env.get_string(&object_name)?;
@@ -101,35 +89,31 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_writeFile(
         let data = env.get_string(&data)?;
         let data: Cow<'_, str> = (&data).into();
         let data: Vec<u8> = data.as_bytes().to_vec();
-        let result = JAVA_BINDING_ASYNC_RUNTIME.block_on(async {
+        let result = JAVA_BINDING_ASYNC_RUNTIME
+            .block_on(async { engine.op.write(&object_name, data).await })
+            .unwrap();
 
-
-        engine.op.write(&object_name,  data).await
-        }).unwrap();
-        
         Ok(result)
     });
 }
 
-
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_java_binding_Binding_getObject(
-    env: EnvParam<'_>,
-    object_name: JString<'_>,
-)  {
-    execute_and_catch(env, move |env| {
-
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_getObject<'a>(
+    env: EnvParam<'a>,
+    object_name: JString<'a>,
+) -> JByteArray<'a> {
+    execute_and_catch(env, move |env: &mut EnvParam<'_>| {
         let engine = get_engine()?;
 
         let object_name = env.get_string(&object_name)?;
         let object_name: Cow<'_, str> = (&object_name).into();
 
-        let result = JAVA_BINDING_ASYNC_RUNTIME.block_on(async {
-
-
-        let data = engine.read_object(&object_name).await
-        }).unwrap();
-        
-        Ok(result)
-    });
+        let result = JAVA_BINDING_ASYNC_RUNTIME
+            .block_on(async {
+                let data = engine.read_object(&object_name).await.unwrap();
+                data
+            })
+            ;
+         Ok(env.byte_array_from_slice(&result)?)
+    })
 }

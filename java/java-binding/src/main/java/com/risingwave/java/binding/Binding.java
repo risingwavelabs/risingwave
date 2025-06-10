@@ -43,7 +43,9 @@ public class Binding {
 
     static native boolean iteratorNext(long pointer);
 
-    public static native void writeFile();
+    public static native void putObject(String object, String data);
+
+    public static native byte[] getObject(String object);
 
     static native void iteratorClose(long pointer);
 

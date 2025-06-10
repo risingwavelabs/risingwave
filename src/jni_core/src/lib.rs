@@ -19,8 +19,8 @@
 
 pub mod jvm_runtime;
 mod macros;
-mod tracing_slf4j;
 pub mod opendal_schema_history;
+mod tracing_slf4j;
 
 use std::backtrace::Backtrace;
 use std::marker::PhantomData;

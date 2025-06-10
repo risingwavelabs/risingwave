@@ -15,7 +15,7 @@
 use std::ffi::c_void;
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use crate::opendal_schema_history::Java_com_risingwave_java_binding_Binding_writeFile;
+
 use anyhow::{Context, bail};
 use fs_err as fs;
 use fs_err::PathExt;
@@ -24,6 +24,8 @@ use jni::{AttachGuard, InitArgsBuilder, JNIEnv, JNIVersion, JavaVM};
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use thiserror_ext::AsReport;
 use tracing::error;
+
+use crate::opendal_schema_history::Java_com_risingwave_java_binding_Binding_putObject;
 
 use crate::{call_method, call_static_method};
 
