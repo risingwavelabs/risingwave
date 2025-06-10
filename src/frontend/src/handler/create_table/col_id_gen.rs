@@ -157,8 +157,9 @@ impl ColumnIdGenerator {
 
         if let Some((original_column_id, original_data_type)) = self.existing.get(&path) {
             if original_data_type == col.data_type() {
-                // Only update the top-level column ID, without traversing nested fields.
                 col.column_desc.column_id = *original_column_id;
+                // Equality above ignores nested field IDs. We need to clone them below.
+                col.column_desc.data_type = original_data_type.clone();
                 return Ok(());
             } else {
                 // Check if the column can be altered.
