@@ -137,7 +137,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 9
+    timeout_in_minutes: 12
     retry: *auto-retry
 
   - label: "meta backup test"
@@ -501,8 +501,9 @@ steps:
     depends_on: "build-simulation"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 22
+      # Only upload zipped files, otherwise the logs is too much.
+      - ./ci/plugins/upload-failure-logs-zipped
+    timeout_in_minutes: 40
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"
@@ -555,9 +556,7 @@ steps:
     key: "flamegraph-env-build"
     command: "ci/scripts/flamegraph-env-build.sh"
     if: |
-      build.pull_request.labels includes "cpu_flamegraph"
-      || build.pull_request.labels includes "ci/run-cpu-flamegraph"
-      || build.pull_request.labels includes "heap_flamegraph"
+      build.pull_request.labels includes "ci/run-cpu-flamegraph"
       || build.pull_request.labels includes "ci/run-heap-flamegraph"
       || build.env("CI_STEPS") =~ /(^|,)(cpu-flamegraph|heap-flamegraph)(,|$$)/
     plugins:
@@ -570,11 +569,11 @@ steps:
           - GITHUB_TOKEN
     timeout_in_minutes: 20
 
-  # Generates cpu flamegraph if label `cpu_flamegraph` is added to PR.
+  # Generates cpu flamegraph if label `ci/run-cpu-flamegraph` is added to PR.
   - label: "Generate CPU flamegraph"
     command: "PULL_REQUEST=$BUILDKITE_PULL_REQUEST ci/scripts/gen-flamegraph.sh cpu"
     depends_on: "flamegraph-env-build"
-    if: build.pull_request.labels includes "cpu_flamegraph" || build.pull_request.labels includes "ci/run-cpu-flamegraph" || build.env("CI_STEPS") =~ /(^|,)cpu-flamegraph(,|$$)/
+    if: build.pull_request.labels includes "ci/run-cpu-flamegraph" || build.env("CI_STEPS") =~ /(^|,)cpu-flamegraph(,|$$)/
     plugins:
       - seek-oss/aws-sm#v2.3.2:
           env:
@@ -590,12 +589,12 @@ steps:
     # - Building RW artifacts: ~8min
     timeout_in_minutes: 540
 
-  # Generates heap flamegraph if label `heap_flamegraph` is added to PR.
+  # Generates heap flamegraph if label `ci/run-heap-flamegraph` is added to PR.
   - label: "Generate Heap flamegraph"
     command: "PULL_REQUEST=$BUILDKITE_PULL_REQUEST ci/scripts/gen-flamegraph.sh heap"
     depends_on: "flamegraph-env-build"
 
-    if: build.pull_request.labels includes "heap_flamegraph" || build.pull_request.labels includes "ci/run-heap-flamegraph" || build.env("CI_STEPS") =~ /(^|,)heap-flamegraph(,|$$)/
+    if: build.pull_request.labels includes "ci/run-heap-flamegraph" || build.env("CI_STEPS") =~ /(^|,)heap-flamegraph(,|$$)/
 
     plugins:
       - seek-oss/aws-sm#v2.3.2:

@@ -78,7 +78,7 @@ impl CompactorRunner {
         split_index: usize,
         context: CompactorContext,
         task: CompactTask,
-        object_id_getter: Box<dyn GetObjectId>,
+        object_id_getter: Arc<dyn GetObjectId>,
     ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.compression_algorithm = match task.compression_algorithm {
@@ -325,7 +325,7 @@ pub async fn compact_with_agent(
     compactor_context: CompactorContext,
     mut compact_task: CompactTask,
     mut shutdown_rx: Receiver<()>,
-    object_id_getter: Box<dyn GetObjectId>,
+    object_id_getter: Arc<dyn GetObjectId>,
     compaction_catalog_agent_ref: CompactionCatalogAgentRef,
 ) -> (
     (
@@ -583,7 +583,7 @@ pub async fn compact(
     compactor_context: CompactorContext,
     compact_task: CompactTask,
     shutdown_rx: Receiver<()>,
-    object_id_getter: Box<dyn GetObjectId>,
+    object_id_getter: Arc<dyn GetObjectId>,
     compaction_catalog_manager_ref: CompactionCatalogManagerRef,
 ) -> (
     (

@@ -19,7 +19,6 @@ use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{ColumnCatalog, max_column_id};
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::{EncodeType, FormatType};
@@ -78,6 +77,7 @@ fn encode_type_to_encode(from: EncodeType) -> Option<Encode> {
 /// - Hidden columns and `INCLUDE ... AS ...` columns are ignored. Because it's only for the special handling of alter sr.
 ///   For the newly resolved `columns_from_resolve_source` (created by [`bind_columns_from_source`]), it doesn't contain hidden columns (`_row_id`) and `INCLUDE ... AS ...` columns.
 ///   This is fragile and we should really refactor it later.
+/// - Generated columns are ignored when calculating dropped columns, because they are defined in SQL and should be preserved during schema refresh.
 /// - Column with the same name but different data type is considered as a different column, i.e., altering the data type of a column
 ///   will be treated as dropping the old column and adding a new column. Note that we don't reject here like we do in `ALTER TABLE REFRESH SCHEMA`,
 ///   because there's no data persistence (thus compatibility concern) in the source case.
@@ -87,6 +87,7 @@ fn columns_minus(columns_a: &[ColumnCatalog], columns_b: &[ColumnCatalog]) -> Ve
         .filter(|col_a| {
             !col_a.is_hidden()
                 && !col_a.is_connector_additional_column()
+                && !col_a.is_generated()
                 && !columns_b.iter().any(|col_b| {
                     col_a.name() == col_b.name() && col_a.data_type() == col_b.data_type()
                 })
@@ -220,7 +221,6 @@ pub async fn handle_alter_source_with_sr(
     let session = handler_args.session.clone();
     let source = fetch_source_catalog_with_db_schema_id(&session, &name)?;
     let mut source = source.as_ref().clone();
-    let old_columns = source.columns.clone();
 
     if source.associated_table_id.is_some() {
         return Err(ErrorCode::NotSupported(
@@ -282,23 +282,7 @@ pub async fn handle_alter_source_with_sr(
     let catalog_writer = session.catalog_writer()?;
     if source.info.is_shared() {
         let graph = generate_stream_graph_for_source(handler_args, source.clone())?;
-
-        // Calculate the mapping from the original columns to the new columns.
-        let col_index_mapping = ColIndexMapping::new(
-            old_columns
-                .iter()
-                .map(|old_c| {
-                    source
-                        .columns
-                        .iter()
-                        .position(|new_c| new_c.column_id() == old_c.column_id())
-                })
-                .collect(),
-            source.columns.len(),
-        );
-        catalog_writer
-            .replace_source(pb_source, graph, col_index_mapping)
-            .await?
+        catalog_writer.replace_source(pb_source, graph).await?
     } else {
         catalog_writer.alter_source(pb_source).await?;
     }

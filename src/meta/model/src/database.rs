@@ -27,6 +27,8 @@ pub struct Model {
     #[sea_orm(unique)]
     pub name: String,
     pub resource_group: String,
+    pub barrier_interval_ms: Option<i32>,
+    pub checkpoint_frequency: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -55,6 +57,8 @@ impl From<PbDatabase> for ActiveModel {
             database_id: Set(db.id as _),
             name: Set(db.name),
             resource_group: Set(db.resource_group),
+            barrier_interval_ms: Set(db.barrier_interval_ms.map(|v| v as i32)),
+            checkpoint_frequency: Set(db.checkpoint_frequency.map(|v| v as i64)),
         }
     }
 }

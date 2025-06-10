@@ -70,16 +70,8 @@ create source mysql_source with (
  server.id = '5601'
 );
 
-statement error
-create table rw_customers (*) from mysql_source table 'mytest.customers';
-----
-db error: ERROR: Failed to run the query
-
-Caused by:
-  Not supported: feature CdcTableSchemaMap is only available for tier Paid and above, while the current tier is Free
-
-Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
-HINT: Please define the schema manually
+statement ok
+create table rw_customers_free_tier (*) from mysql_source table 'mytest.customers';
 
 
 

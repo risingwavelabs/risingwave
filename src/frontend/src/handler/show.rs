@@ -14,22 +14,27 @@
 
 use std::sync::Arc;
 
+use futures::future::join_all;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_protocol::truncated_fmt;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::pg_server::Session;
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
-use risingwave_common::types::{DataType, Fields, Timestamptz};
+use risingwave_common::types::{DataType, Datum, Fields, Timestamptz, ToOwnedDatum, WithDataType};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
 use risingwave_expr::scalar::like::{i_like_default, like_default};
 use risingwave_pb::catalog::connection;
+use risingwave_pb::frontend_service::GetRunningSqlsRequest;
+use risingwave_rpc_client::FrontendClientPoolRef;
 use risingwave_sqlparser::ast::{
     Ident, ObjectName, ShowCreateType, ShowObject, ShowStatementFilter, display_comma_separated,
 };
+use thiserror_ext::AsReport;
 
 use super::{RwPgResponse, RwPgResponseBuilderExt, fields_to_descriptors};
 use crate::binder::{Binder, Relation};
@@ -40,8 +45,8 @@ use crate::catalog::{CatalogError, IndexCatalog};
 use crate::error::{Result, RwError};
 use crate::handler::HandlerArgs;
 use crate::handler::create_connection::print_connection_params;
-use crate::session::SessionImpl;
 use crate::session::cursor_manager::SubscriptionCursor;
+use crate::session::{SessionImpl, WorkerProcessId};
 use crate::user::has_access_to_object;
 
 pub fn get_columns_from_table(
@@ -159,17 +164,72 @@ struct ShowObjectRow {
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 pub struct ShowColumnRow {
-    pub name: String,
+    pub name: ShowColumnName,
     pub r#type: String,
     pub is_hidden: Option<String>, // XXX: why not bool?
     pub description: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+enum ShowColumnNameSegment {
+    Field(Ident),
+    ListElement,
+}
+
+impl ShowColumnNameSegment {
+    pub fn field(name: &str) -> Self {
+        ShowColumnNameSegment::Field(Ident::from_real_value(name))
+    }
+}
+
+/// The name of a column in the output of `SHOW COLUMNS` or `DESCRIBE`.
+#[derive(Clone, Debug)]
+pub struct ShowColumnName(Vec<ShowColumnNameSegment>);
+
+impl ShowColumnName {
+    /// Create a special column name without quoting. Used only for extra information like `primary key`
+    /// in the output of `DESCRIBE`.
+    pub fn special(name: &str) -> Self {
+        ShowColumnName(vec![ShowColumnNameSegment::Field(Ident::new_unchecked(
+            name,
+        ))])
+    }
+}
+
+impl WithDataType for ShowColumnName {
+    fn default_data_type() -> DataType {
+        DataType::Varchar
+    }
+}
+
+impl ToOwnedDatum for ShowColumnName {
+    fn to_owned_datum(self) -> Datum {
+        use std::fmt::Write;
+
+        let mut s = String::new();
+        for segment in self.0 {
+            match segment {
+                ShowColumnNameSegment::Field(ident) => {
+                    if !s.is_empty() {
+                        // TODO: shall we add parentheses, so that it's valid field access SQL?
+                        s.push('.');
+                    }
+                    write!(s, "{ident}").unwrap();
+                }
+                ShowColumnNameSegment::ListElement => {
+                    s.push_str("[1]");
+                }
+            }
+        }
+        s.to_owned_datum()
+    }
 }
 
 impl ShowColumnRow {
     /// Create a row with the given information. If the data type is a struct or list,
     /// flatten the data type to also generate rows for its fields.
     fn flatten(
-        name: String,
+        name: ShowColumnName,
         data_type: DataType,
         is_hidden: bool,
         description: Option<String>,
@@ -191,22 +251,16 @@ impl ShowColumnRow {
         match data_type {
             DataType::Struct(st) => {
                 rows.extend(st.iter().flat_map(|(field_name, field_data_type)| {
-                    Self::flatten(
-                        format!("{}.{}", name, field_name),
-                        field_data_type.clone(),
-                        is_hidden,
-                        None,
-                    )
+                    let mut name = name.clone();
+                    name.0.push(ShowColumnNameSegment::field(field_name));
+                    Self::flatten(name, field_data_type.clone(), is_hidden, None)
                 }));
             }
 
             DataType::List(inner @ box DataType::Struct(_)) => {
-                rows.extend(Self::flatten(
-                    format!("{}[1]", name),
-                    *inner,
-                    is_hidden,
-                    None,
-                ));
+                let mut name = name.clone();
+                name.0.push(ShowColumnNameSegment::ListElement);
+                rows.extend(Self::flatten(name, *inner, is_hidden, None));
             }
 
             _ => {}
@@ -217,7 +271,7 @@ impl ShowColumnRow {
 
     pub fn from_catalog(col: ColumnCatalog) -> Vec<Self> {
         Self::flatten(
-            col.column_desc.name,
+            ShowColumnName(vec![ShowColumnNameSegment::field(&col.column_desc.name)]),
             col.column_desc.data_type,
             col.is_hidden,
             col.column_desc.description,
@@ -292,6 +346,7 @@ struct ShowJobRow {
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 struct ShowProcessListRow {
+    worker_id: String,
     id: String,
     user: String,
     host: String,
@@ -601,23 +656,11 @@ pub async fn handle_show_object(
                 .into());
         }
         ShowObject::ProcessList => {
-            let sessions_map = session.env().sessions_map().read();
-            let rows = sessions_map.values().map(|s| {
-                ShowProcessListRow {
-                    // Since process id and the secret id in the session id are the same in RisingWave, just display the process id.
-                    id: format!("{}", s.id().0),
-                    user: s.user_name(),
-                    host: format!("{}", s.peer_addr()),
-                    database: s.database(),
-                    time: s
-                        .elapse_since_running_sql()
-                        .map(|mills| format!("{}ms", mills)),
-                    info: s
-                        .running_sql()
-                        .map(|sql| format!("{}", truncated_fmt::TruncatedFmt(&sql, 1024))),
-                }
-            });
-
+            let rows = show_process_list_impl(
+                session.env().frontend_client_pool(),
+                session.env().worker_node_manager_ref(),
+            )
+            .await;
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
                 .rows(rows)
                 .into());
@@ -858,6 +901,63 @@ pub fn handle_show_create_object(
             create_sql: sql,
         }])
         .into())
+}
+
+async fn show_process_list_impl(
+    frontend_client_pool: FrontendClientPoolRef,
+    worker_node_manager: WorkerNodeManagerRef,
+) -> Vec<ShowProcessListRow> {
+    // Create a placeholder row for the worker in case of any errors while fetching its running SQLs.
+    fn on_error(worker_id: u32, err_msg: String) -> Vec<ShowProcessListRow> {
+        vec![ShowProcessListRow {
+            worker_id: format!("{}", worker_id),
+            id: "".to_owned(),
+            user: "".to_owned(),
+            host: "".to_owned(),
+            database: "".to_owned(),
+            time: None,
+            info: Some(format!(
+                "Failed to show process list from worker {worker_id} due to: {err_msg}"
+            )),
+        }]
+    }
+    let futures = worker_node_manager
+        .list_frontend_nodes()
+        .into_iter()
+        .map(|worker| {
+            let frontend_client_pool_ = frontend_client_pool.clone();
+            async move {
+                let client = match frontend_client_pool_.get(&worker).await {
+                    Ok(client) => client,
+                    Err(e) => {
+                        return on_error(worker.id, format!("{}", e.as_report()));
+                    }
+                };
+                let resp = match client.get_running_sqls(GetRunningSqlsRequest {}).await {
+                    Ok(resp) => resp,
+                    Err(e) => {
+                        return on_error(worker.id, format!("{}", e.as_report()));
+                    }
+                };
+                resp.into_inner()
+                    .running_sqls
+                    .into_iter()
+                    .map(|sql| ShowProcessListRow {
+                        worker_id: format!("{}", worker.id),
+                        id: format!("{}", WorkerProcessId::new(worker.id, sql.process_id)),
+                        user: sql.user_name,
+                        host: sql.peer_addr,
+                        database: sql.database,
+                        time: sql.elapsed_millis.map(|mills| format!("{}ms", mills)),
+                        info: sql
+                            .sql
+                            .map(|sql| format!("{}", truncated_fmt::TruncatedFmt(&sql, 1024))),
+                    })
+                    .collect_vec()
+            }
+        })
+        .collect_vec();
+    join_all(futures).await.into_iter().flatten().collect()
 }
 
 #[cfg(test)]

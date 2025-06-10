@@ -308,6 +308,7 @@ impl Strong {
             | ExprType::MapCat
             | ExprType::MapContains
             | ExprType::MapDelete
+            | ExprType::MapFilter
             | ExprType::MapInsert
             | ExprType::MapLength
             | ExprType::Vnode
@@ -337,6 +338,7 @@ impl Strong {
             | ExprType::HasSchemaPrivilege
             | ExprType::InetAton
             | ExprType::InetNtoa
+            | ExprType::CompositeCast
             | ExprType::RwEpochToTs => false,
             ExprType::Unspecified => unreachable!(),
         }

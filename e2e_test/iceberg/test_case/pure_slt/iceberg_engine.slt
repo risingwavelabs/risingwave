@@ -62,15 +62,16 @@ v_array int[],
 v_struct struct<a int,b int>,
 v_json jsonb,
 v_one_layer_struct struct<id bigint, v_small_int smallint, v_int int, v_long bigint, v_float real, v_double double, v_varchar varchar, v_bool boolean, v_date date, v_timestamp timestamptz, v_ts_ntz timestamp, v_decimal decimal, v_json jsonb>,
-v_nested_type struct<a int, b map(int, struct<v_bytea bytea>)>[]
+v_nested_type struct<a int, b map(int, struct<v_bytea bytea>)>[],
+v_interval interval
 ) with(commit_checkpoint_interval = 1) engine = iceberg;
 
 statement ok
 INSERT INTO full_type_t VALUES
-(1, 1, 1, 1000, 1.1, 1.11, '1-1', true, '2022-03-11', '2022-03-11 01:00:00Z'::timestamptz, '2022-03-11 01:00:00',1.11, map {1:100,2:200}, array[1,2,3], row(1,2), '{"a":"foo", "b":"bar"}', row(1, 1, 1, 1000, 1.1, 1.11, '1-1', true, '2022-03-11', '2022-03-11 01:00:00Z'::timestamptz, '2022-03-11 01:00:00',1.11, '{"a":"foo", "b":"bar"}'), array[(1,map {1:row(decode('DEADBEEF', 'hex')),2:row(decode('DEADBEEF', 'hex'))}), row(2,map {3:row(decode('DEADBEEF', 'hex')),4:row(decode('DEADBEEF', 'hex'))})]),
-(2, 2, 2, 2000, 2.2, 2.22, '2-2', false, '2022-03-12', '2022-03-12 02:00:00Z'::timestamptz, '2022-03-12 02:00:00',2.22, map {3:300}, array[1,null,3], row(3,null), '{"k2":[2,true,4]}', row(2, 2, 2, 2000, 2.2, 2.22, '2-2', false, '2022-03-12', '2022-03-12 02:00:00Z'::timestamptz, '2022-03-12 02:00:00',2.22, '{"k2":[2,true,4]}'), array[]::struct<a int, b map (int, struct<v_bytea bytea>)>[]),
-(3, 3, 3, 3000, 3.3, 3.33, '3-3', true, '2022-03-13', '2022-03-13 03:00:00Z'::timestamptz, '2022-03-13 03:00:00','inf', null, null, null, '1', row(3, 3, 3, 3000, 3.3, 3.33, '3-3', true, '2022-03-13', '2022-03-13 03:00:00Z'::timestamptz, '2022-03-13 03:00:00','inf', '1'), array[row(1,map {1:row(decode('DEADBEEF', 'hex')),2:row(decode('DEADBEEF', 'hex'))})]),
-(4, 4, 4, 4000, 4.4, 4.44, '4-4', false, '2022-03-14', '2022-03-14 04:00:00Z'::timestamptz, '2022-03-14 04:00:00','-inf', null, null, null, 'true', row(4, 4, 4, 4000, 4.4, 4.44, '4-4', false, '2022-03-14', '2022-03-14 04:00:00Z'::timestamptz, '2022-03-14 04:00:00','-inf', 'true'), null);
+(1, 1, 1, 1000, 1.1, 1.11, '1-1', true, '2022-03-11', '2022-03-11 01:00:00Z'::timestamptz, '2022-03-11 01:00:00',1.11, map {1:100,2:200}, array[1,2,3], row(1,2), '{"a":"foo", "b":"bar"}', row(1, 1, 1, 1000, 1.1, 1.11, '1-1', true, '2022-03-11', '2022-03-11 01:00:00Z'::timestamptz, '2022-03-11 01:00:00',1.11, '{"a":"foo", "b":"bar"}'), array[(1,map {1:row(decode('DEADBEEF', 'hex')),2:row(decode('DEADBEEF', 'hex'))}), row(2,map {3:row(decode('DEADBEEF', 'hex')),4:row(decode('DEADBEEF', 'hex'))})], interval '2 m'),
+(2, 2, 2, 2000, 2.2, 2.22, '2-2', false, '2022-03-12', '2022-03-12 02:00:00Z'::timestamptz, '2022-03-12 02:00:00',2.22, map {3:300}, array[1,null,3], row(3,null), '{"k2":[2,true,4]}', row(2, 2, 2, 2000, 2.2, 2.22, '2-2', false, '2022-03-12', '2022-03-12 02:00:00Z'::timestamptz, '2022-03-12 02:00:00',2.22, '{"k2":[2,true,4]}'), array[]::struct<a int, b map (int, struct<v_bytea bytea>)>[], interval '3 day'),
+(3, 3, 3, 3000, 3.3, 3.33, '3-3', true, '2022-03-13', '2022-03-13 03:00:00Z'::timestamptz, '2022-03-13 03:00:00','inf', null, null, null, '1', row(3, 3, 3, 3000, 3.3, 3.33, '3-3', true, '2022-03-13', '2022-03-13 03:00:00Z'::timestamptz, '2022-03-13 03:00:00','inf', '1'), array[row(1,map {1:row(decode('DEADBEEF', 'hex')),2:row(decode('DEADBEEF', 'hex'))})], '12:34:56.123'::interval),
+(4, 4, 4, 4000, 4.4, 4.44, '4-4', false, '2022-03-14', '2022-03-14 04:00:00Z'::timestamptz, '2022-03-14 04:00:00','-inf', null, null, null, 'true', row(4, 4, 4, 4000, 4.4, 4.44, '4-4', false, '2022-03-14', '2022-03-14 04:00:00Z'::timestamptz, '2022-03-14 04:00:00','-inf', 'true'), null, null);
 
 statement ok
 FLUSH;
@@ -79,10 +80,10 @@ sleep 5s
 query ????????????????? rowsort
 select * from full_type_t
 ----
-1 1 1 1000 1.1 1.11 1-1 t 2022-03-11 2022-03-11 01:00:00+00:00 2022-03-11 01:00:00 1.1100000000 {1:100,2:200} {1,2,3} (1,2) {"a": "foo", "b": "bar"} (1,1,1,1000,1.1,1.11,1-1,t,2022-03-11,"2022-03-11 01:00:00+00:00","2022-03-11 01:00:00",1.1100000000,"{""a"": ""foo"", ""b"": ""bar""}") {"(1,\"{1:(\"\"\\\\\\\\xdeadbeef\"\"),2:(\"\"\\\\\\\\xdeadbeef\"\")}\")","(2,\"{3:(\"\"\\\\\\\\xdeadbeef\"\"),4:(\"\"\\\\\\\\xdeadbeef\"\")}\")"}
-2 2 2 2000 2.2 2.22 2-2 f 2022-03-12 2022-03-12 02:00:00+00:00 2022-03-12 02:00:00 2.2200000000 {3:300} {1,NULL,3} (3,) {"k2": [2, true, 4]} (2,2,2,2000,2.2,2.22,2-2,f,2022-03-12,"2022-03-12 02:00:00+00:00","2022-03-12 02:00:00",2.2200000000,"{""k2"": [2, true, 4]}") {}
-3 3 3 3000 3.3 3.33 3-3 t 2022-03-13 2022-03-13 03:00:00+00:00 2022-03-13 03:00:00 999999999999999999.9999999999 NULL NULL NULL 1 (3,3,3,3000,3.3,3.33,3-3,t,2022-03-13,"2022-03-13 03:00:00+00:00","2022-03-13 03:00:00",999999999999999999.9999999999,1) {"(1,\"{1:(\"\"\\\\\\\\xdeadbeef\"\"),2:(\"\"\\\\\\\\xdeadbeef\"\")}\")"}
-4 4 4 4000 4.4 4.44 4-4 f 2022-03-14 2022-03-14 04:00:00+00:00 2022-03-14 04:00:00 -999999999999999999.9999999999 NULL NULL NULL true (4,4,4,4000,4.4,4.44,4-4,f,2022-03-14,"2022-03-14 04:00:00+00:00","2022-03-14 04:00:00",-999999999999999999.9999999999,true) NULL
+1 1 1 1000 1.1 1.11 1-1 t 2022-03-11 2022-03-11 01:00:00+00:00 2022-03-11 01:00:00 1.1100000000 {1:100,2:200} {1,2,3} (1,2) {"a": "foo", "b": "bar"} (1,1,1,1000,1.1,1.11,1-1,t,2022-03-11,"2022-03-11 01:00:00+00:00","2022-03-11 01:00:00",1.1100000000,"{""a"": ""foo"", ""b"": ""bar""}") {"(1,\"{1:(\"\"\\\\\\\\xdeadbeef\"\"),2:(\"\"\\\\\\\\xdeadbeef\"\")}\")","(2,\"{3:(\"\"\\\\\\\\xdeadbeef\"\"),4:(\"\"\\\\\\\\xdeadbeef\"\")}\")"} 00:02:00
+2 2 2 2000 2.2 2.22 2-2 f 2022-03-12 2022-03-12 02:00:00+00:00 2022-03-12 02:00:00 2.2200000000 {3:300} {1,NULL,3} (3,) {"k2": [2, true, 4]} (2,2,2,2000,2.2,2.22,2-2,f,2022-03-12,"2022-03-12 02:00:00+00:00","2022-03-12 02:00:00",2.2200000000,"{""k2"": [2, true, 4]}") {} 3 days
+3 3 3 3000 3.3 3.33 3-3 t 2022-03-13 2022-03-13 03:00:00+00:00 2022-03-13 03:00:00 999999999999999999.9999999999 NULL NULL NULL 1 (3,3,3,3000,3.3,3.33,3-3,t,2022-03-13,"2022-03-13 03:00:00+00:00","2022-03-13 03:00:00",999999999999999999.9999999999,1) {"(1,\"{1:(\"\"\\\\\\\\xdeadbeef\"\"),2:(\"\"\\\\\\\\xdeadbeef\"\")}\")"} 12:34:56.123
+4 4 4 4000 4.4 4.44 4-4 f 2022-03-14 2022-03-14 04:00:00+00:00 2022-03-14 04:00:00 -999999999999999999.9999999999 NULL NULL NULL true (4,4,4,4000,4.4,4.44,4-4,f,2022-03-14,"2022-03-14 04:00:00+00:00","2022-03-14 04:00:00",-999999999999999999.9999999999,true) NULL NULL
 
 statement ok
 DROP TABLE full_type_t;
@@ -224,6 +225,17 @@ DROP TABLE price;
 statement ok
 DROP CONNECTION my_conn;
 
+# test iceberg_tables and iceberg_namespace_properties before creating hosted catalog
+query ?
+select count(*) from iceberg_tables;
+----
+0
+
+query ?
+select count(*) from iceberg_namespace_properties;
+----
+0
+
 # test hosted catalog (meta store as jdbc catalog)
 statement ok
 create connection my_hosted_catalog_conn
@@ -256,7 +268,7 @@ select * from t_hosted_catalog;
 1 xxx
 
 query ?
-select count(*) from rw_catalog.iceberg_tables where table_namespace = 'public' and table_name = 't_hosted_catalog';
+select count(*) from rw_catalog.iceberg_tables where catalog_name = 'dev' AND table_namespace = 'public' and table_name = 't_hosted_catalog';
 ----
 1
 
@@ -269,9 +281,37 @@ statement ok
 DROP TABLE t_hosted_catalog;
 
 query ?
-select count(*) from rw_catalog.iceberg_tables;
+select count(*) from rw_catalog.iceberg_tables where catalog_name = 'dev';
 ----
 0
+
+statement ok
+create table t_partition1(id int primary key, name varchar) with(commit_checkpoint_interval = 1, partition_by='id') engine = iceberg;
+
+statement ok
+create table t_partition2(c1 int, c2 int, c3 int, primary key(c1, c2, c3)) with(commit_checkpoint_interval = 1, partition_by='c1,c2') engine = iceberg;
+
+statement ok
+create table t_partition3(c1 int, c2 int, c3 int, primary key(c1, c2, c3)) with(commit_checkpoint_interval = 1, partition_by='bucket(4, c1),c2') engine = iceberg;
+
+statement ok
+create table t_partition4(c1 int, c2 int, c3 int, primary key(c1, c2, c3)) with(commit_checkpoint_interval = 1, partition_by='c1,truncate(8, c2)') engine = iceberg;
+
+# the partition key should be the prefix of the primary key
+statement error
+create table t_partition5(c1 int, c2 int, c3 int, primary key(c1, c2, c3)) with(commit_checkpoint_interval = 1, partition_by='c2,c3') engine = iceberg;
+
+statement ok
+DROP TABLE t_partition1;
+
+statement ok
+DROP TABLE t_partition2;
+
+statement ok
+DROP TABLE t_partition3;
+
+statement ok
+DROP TABLE t_partition4;
 
 statement ok
 DROP CONNECTION public.my_hosted_catalog_conn;

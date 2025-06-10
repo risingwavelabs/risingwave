@@ -86,6 +86,7 @@ pub(super) mod handlers {
             signature_expr,
             secret_ref,
             wait_for_persistence: _,
+            is_batched,
         } = webhook_source_info;
 
         let secret_string = if let Some(secret_ref) = secret_ref {
@@ -115,17 +116,7 @@ pub(super) mod handlers {
             ));
         }
 
-        // Use builder to obtain a single column & single row DataChunk
-        let mut builder = JsonbArrayBuilder::with_type(1, DataType::Jsonb);
-        let json_value = Value::from_text(&body).map_err(|e| {
-            err(
-                anyhow!(e).context("Failed to parse body"),
-                StatusCode::UNPROCESSABLE_ENTITY,
-            )
-        })?;
-        let jsonb_val = JsonbVal::from(json_value);
-        builder.append(Some(jsonb_val.as_scalar_ref()));
-        let data_chunk = DataChunk::new(vec![builder.finish().into_ref()], 1);
+        let data_chunk = generate_data_chunk(is_batched, &body)?;
 
         // fill the data_chunk
         fast_insert_request.data_chunk = Some(data_chunk.to_protobuf());
@@ -138,6 +129,44 @@ pub(super) mod handlers {
             Err(err(
                 anyhow!("Failed to fast insert: {}", res.error_message),
                 StatusCode::INTERNAL_SERVER_ERROR,
+            ))
+        }
+    }
+
+    fn generate_data_chunk(is_batched: bool, body: &Bytes) -> Result<DataChunk> {
+        let mut builder = JsonbArrayBuilder::with_type(1, DataType::Jsonb);
+
+        if !is_batched {
+            // Use builder to obtain a single column & single row DataChunk
+            let json_value = Value::from_text(body).map_err(|e| {
+                err(
+                    anyhow!(e).context("Failed to parse body"),
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                )
+            })?;
+
+            let jsonb_val = JsonbVal::from(json_value);
+            builder.append(Some(jsonb_val.as_scalar_ref()));
+
+            Ok(DataChunk::new(vec![builder.finish().into_ref()], 1))
+        } else {
+            let rows: Vec<_> = body.split(|&b| b == b'\n').collect();
+
+            for row in &rows {
+                let json_value = Value::from_text(row).map_err(|e| {
+                    err(
+                        anyhow!(e).context("Failed to parse body"),
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                    )
+                })?;
+                let jsonb_val = JsonbVal::from(json_value);
+
+                builder.append(Some(jsonb_val.as_scalar_ref()));
+            }
+
+            Ok(DataChunk::new(
+                vec![builder.finish().into_ref()],
+                rows.len(),
             ))
         }
     }

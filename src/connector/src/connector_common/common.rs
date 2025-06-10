@@ -48,8 +48,8 @@ pub const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
 const AWS_MSK_IAM_AUTH: &str = "AWS_MSK_IAM";
 
 /// The environment variable to disable using default credential from environment.
-/// It's recommended to set this variable to `false` in cloud hosting environment.
-const DISABLE_DEFAULT_CREDENTIAL: &str = "DISABLE_DEFAULT_CREDENTIAL";
+/// It's recommended to set this variable to `true` in cloud hosting environment.
+pub const DISABLE_DEFAULT_CREDENTIAL: &str = "DISABLE_DEFAULT_CREDENTIAL";
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AwsPrivateLinkItem {
@@ -595,6 +595,7 @@ impl PulsarCommon {
     }
 }
 
+#[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct KinesisCommon {
     #[serde(rename = "stream", alias = "kinesis.stream.name")]
@@ -626,50 +627,7 @@ pub struct KinesisCommon {
     )]
     pub assume_role_external_id: Option<String>,
 
-    #[serde(flatten)]
-    pub sdk_options: KinesisSdkOptions,
-}
-
-#[derive(Debug)]
-pub struct KinesisAsyncSleepImpl;
-
-impl AsyncSleep for KinesisAsyncSleepImpl {
-    fn sleep(&self, duration: Duration) -> Sleep {
-        Sleep::new(async move { tokio::time::sleep(duration).await })
-    }
-}
-
-const fn kinesis_default_connect_timeout_ms() -> u64 {
-    10000
-}
-
-const fn kinesis_default_read_timeout_ms() -> u64 {
-    10000
-}
-
-const fn kinesis_default_operation_timeout_ms() -> u64 {
-    10000
-}
-
-const fn kinesis_default_operation_attempt_timeout_ms() -> u64 {
-    10000
-}
-
-const fn kinesis_default_init_backoff_ms() -> u64 {
-    1000
-}
-
-const fn kinesis_default_max_backoff_ms() -> u64 {
-    20000
-}
-
-const fn kinesis_default_max_retry_limit() -> u32 {
-    3
-}
-
-#[serde_as]
-#[derive(Clone, Debug, Deserialize, WithOptions)]
-pub struct KinesisSdkOptions {
+    // sdk options
     #[serde(
         rename = "kinesis.sdk.connect_timeout_ms",
         default = "kinesis_default_connect_timeout_ms"
@@ -720,18 +678,41 @@ pub struct KinesisSdkOptions {
     pub sdk_max_backoff_ms: u64,
 }
 
-impl Default for KinesisSdkOptions {
-    fn default() -> Self {
-        Self {
-            sdk_connect_timeout_ms: kinesis_default_connect_timeout_ms(),
-            sdk_read_timeout_ms: kinesis_default_read_timeout_ms(),
-            sdk_operation_timeout_ms: kinesis_default_operation_timeout_ms(),
-            sdk_operation_attempt_timeout_ms: kinesis_default_operation_attempt_timeout_ms(),
-            sdk_max_retry_limit: kinesis_default_max_retry_limit(),
-            sdk_init_backoff_ms: kinesis_default_init_backoff_ms(),
-            sdk_max_backoff_ms: kinesis_default_max_backoff_ms(),
-        }
+#[derive(Debug)]
+pub struct KinesisAsyncSleepImpl;
+
+impl AsyncSleep for KinesisAsyncSleepImpl {
+    fn sleep(&self, duration: Duration) -> Sleep {
+        Sleep::new(async move { tokio::time::sleep(duration).await })
     }
+}
+
+const fn kinesis_default_connect_timeout_ms() -> u64 {
+    10000
+}
+
+const fn kinesis_default_read_timeout_ms() -> u64 {
+    10000
+}
+
+const fn kinesis_default_operation_timeout_ms() -> u64 {
+    10000
+}
+
+const fn kinesis_default_operation_attempt_timeout_ms() -> u64 {
+    10000
+}
+
+const fn kinesis_default_init_backoff_ms() -> u64 {
+    1000
+}
+
+const fn kinesis_default_max_backoff_ms() -> u64 {
+    20000
+}
+
+const fn kinesis_default_max_retry_limit() -> u32 {
+    3
 }
 
 impl EnforceSecret for KinesisCommon {
@@ -762,23 +743,19 @@ impl KinesisCommon {
             let sleep_impl = SharedAsyncSleep::new(KinesisAsyncSleepImpl);
             builder.set_sleep_impl(Some(sleep_impl));
             let timeout_config = aws_smithy_types::timeout::TimeoutConfig::builder()
-                .connect_timeout(Duration::from_millis(
-                    self.sdk_options.sdk_connect_timeout_ms,
-                ))
-                .read_timeout(Duration::from_millis(self.sdk_options.sdk_read_timeout_ms))
-                .operation_timeout(Duration::from_millis(
-                    self.sdk_options.sdk_operation_timeout_ms,
-                ))
+                .connect_timeout(Duration::from_millis(self.sdk_connect_timeout_ms))
+                .read_timeout(Duration::from_millis(self.sdk_read_timeout_ms))
+                .operation_timeout(Duration::from_millis(self.sdk_operation_timeout_ms))
                 .operation_attempt_timeout(Duration::from_millis(
-                    self.sdk_options.sdk_operation_attempt_timeout_ms,
+                    self.sdk_operation_attempt_timeout_ms,
                 ))
                 .build();
             builder.set_timeout_config(Some(timeout_config));
 
             let retry_config = aws_smithy_types::retry::RetryConfig::standard()
-                .with_initial_backoff(Duration::from_millis(self.sdk_options.sdk_init_backoff_ms))
-                .with_max_backoff(Duration::from_millis(self.sdk_options.sdk_max_backoff_ms))
-                .with_max_attempts(self.sdk_options.sdk_max_retry_limit);
+                .with_initial_backoff(Duration::from_millis(self.sdk_init_backoff_ms))
+                .with_max_backoff(Duration::from_millis(self.sdk_max_backoff_ms))
+                .with_max_attempts(self.sdk_max_retry_limit);
             builder.set_retry_config(Some(retry_config));
         }
         if let Some(endpoint) = &config.endpoint {

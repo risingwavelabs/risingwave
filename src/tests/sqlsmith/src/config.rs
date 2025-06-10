@@ -25,6 +25,8 @@ pub enum Feature {
     Agg,
     Join,
     Eowc,
+    NaturalJoin,
+    UsingJoin,
 }
 
 impl fmt::Display for Feature {
@@ -34,6 +36,8 @@ impl fmt::Display for Feature {
             Feature::Agg => "agg",
             Feature::Join => "join",
             Feature::Eowc => "eowc",
+            Feature::NaturalJoin => "natural join",
+            Feature::UsingJoin => "using join",
         };
         write!(f, "{}", s)
     }

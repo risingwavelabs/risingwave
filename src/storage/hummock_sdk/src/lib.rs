@@ -17,6 +17,7 @@
 #![feature(let_chains)]
 #![feature(btree_cursors)]
 #![feature(strict_overflow_ops)]
+#![feature(map_try_insert)]
 
 mod key_cmp;
 
@@ -53,10 +54,12 @@ pub mod time_travel;
 pub mod version;
 pub use frontend_version::{FrontendHummockVersion, FrontendHummockVersionDelta};
 mod frontend_version;
+pub mod vector_index;
 
 pub use compact::*;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::hummock_version_checkpoint::PbStaleObjects;
+use risingwave_pb::hummock::{PbVectorIndexObjectType, VectorIndexObjectType};
 
 use crate::table_watermark::TableWatermarks;
 
@@ -153,10 +156,23 @@ impl<const C: usize, P> TypedPrimitive<C, P> {
 pub type HummockRawObjectId = TypedPrimitive<0, u64>;
 pub type HummockSstableObjectId = TypedPrimitive<1, u64>;
 pub type HummockSstableId = TypedPrimitive<2, u64>;
+pub type HummockVectorFileId = TypedPrimitive<3, u64>;
 
 impl HummockSstableObjectId {
     pub fn as_raw(&self) -> HummockRawObjectId {
         HummockRawObjectId::new(self.0)
+    }
+}
+
+impl HummockVectorFileId {
+    pub fn as_raw(&self) -> HummockRawObjectId {
+        HummockRawObjectId::new(self.0)
+    }
+}
+
+impl From<HummockRawObjectId> for HummockSstableObjectId {
+    fn from(id: HummockRawObjectId) -> Self {
+        Self(id.0)
     }
 }
 
@@ -230,6 +246,7 @@ pub const FIRST_VERSION_ID: HummockVersionId = HummockVersionId(1);
 pub const SPLIT_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 1u64 << 56;
 pub const SINGLE_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 2u64 << 56;
 pub const SST_OBJECT_SUFFIX: &str = "data";
+pub const VECTOR_FILE_OBJECT_SUFFIX: &str = "vector";
 pub const HUMMOCK_SSTABLE_OBJECT_ID_MAX_DECIMAL_LENGTH: usize = 20;
 
 macro_rules! for_all_object_suffix {
@@ -241,17 +258,17 @@ macro_rules! for_all_object_suffix {
             )+
         }
 
-        pub const VALID_OBJECT_ID_SUFFIXES: [&str; 1] = [$(
+        pub const VALID_OBJECT_ID_SUFFIXES: [&str; 2] = [$(
                 $suffix
             ),+];
 
         impl HummockObjectId {
-            fn new(id: u64, suffix: &str) -> Self {
+            fn new(id: u64, suffix: &str) -> Option<Self> {
                 match suffix {
                     $(
-                        suffix if suffix == $suffix => HummockObjectId::$name(<$type_name>::new(id)),
+                        suffix if suffix == $suffix => Some(HummockObjectId::$name(<$type_name>::new(id))),
                     )+
-                    _ => panic!("unknown object id suffix {}", suffix),
+                    _ => None,
                 }
             }
 
@@ -272,10 +289,31 @@ macro_rules! for_all_object_suffix {
                 HummockRawObjectId::new(raw)
             }
         }
+
+        pub fn try_get_object_id_from_path(path: &str) -> Option<HummockObjectId> {
+            let split: Vec<_> = path.split(&['/', '.']).collect();
+            if split.len() <= 2 {
+                return None;
+            }
+            let suffix = split[split.len() - 1];
+            let id_str = split[split.len() - 2];
+            match suffix {
+                $(
+                    suffix if suffix == $suffix => {
+                        let id = id_str
+                            .parse::<u64>()
+                            .unwrap_or_else(|_| panic!("expect valid object id, got {}", id_str));
+                        Some(HummockObjectId::$name(<$type_name>::new(id)))
+                    },
+                )+
+                _ => None,
+            }
+        }
     };
     () => {
         for_all_object_suffix! {
             {Sstable, HummockSstableObjectId, SST_OBJECT_SUFFIX},
+            {VectorFile, HummockVectorFileId, VECTOR_FILE_OBJECT_SUFFIX},
         }
     };
 }
@@ -290,11 +328,22 @@ pub fn get_stale_object_ids(
     // the compiler will warn us if we forget to handle it here.
     match HummockObjectId::Sstable(0.into()) {
         HummockObjectId::Sstable(_) => {}
+        HummockObjectId::VectorFile(_) => {}
     };
     stale_objects
         .id
         .iter()
         .map(|sst_id| HummockObjectId::Sstable((*sst_id).into()))
+        .chain(stale_objects.vector_files.iter().map(
+            |file| match file.get_object_type().unwrap() {
+                PbVectorIndexObjectType::VectorIndexObjectUnspecified => {
+                    unreachable!()
+                }
+                VectorIndexObjectType::VectorIndexObjectVector => {
+                    HummockObjectId::VectorFile(file.id.into())
+                }
+            },
+        ))
 }
 
 #[macro_export]
@@ -433,17 +482,17 @@ impl HummockReadEpoch {
         }
     }
 }
-pub struct SstObjectIdRange {
+pub struct ObjectIdRange {
     // inclusive
-    pub start_id: HummockSstableObjectId,
+    pub start_id: HummockRawObjectId,
     // exclusive
-    pub end_id: HummockSstableObjectId,
+    pub end_id: HummockRawObjectId,
 }
 
-impl SstObjectIdRange {
+impl ObjectIdRange {
     pub fn new(
-        start_id: impl Into<HummockSstableObjectId>,
-        end_id: impl Into<HummockSstableObjectId>,
+        start_id: impl Into<HummockRawObjectId>,
+        end_id: impl Into<HummockRawObjectId>,
     ) -> Self {
         Self {
             start_id: start_id.into(),
@@ -451,7 +500,7 @@ impl SstObjectIdRange {
         }
     }
 
-    pub fn peek_next_sst_object_id(&self) -> Option<HummockSstableObjectId> {
+    fn peek_next_object_id(&self) -> Option<HummockRawObjectId> {
         if self.start_id < self.end_id {
             return Some(self.start_id);
         }
@@ -459,8 +508,8 @@ impl SstObjectIdRange {
     }
 
     /// Pops and returns next SST id.
-    pub fn get_next_sst_object_id(&mut self) -> Option<HummockSstableObjectId> {
-        let next_id = self.peek_next_sst_object_id();
+    pub fn get_next_object_id(&mut self) -> Option<HummockRawObjectId> {
+        let next_id = self.peek_next_object_id();
         self.start_id += 1;
         next_id
     }
@@ -612,6 +661,7 @@ pub fn get_object_id_from_path(path: &str) -> HummockObjectId {
         .parse::<u64>()
         .expect("valid object id");
     HummockObjectId::new(id, suffix)
+        .unwrap_or_else(|| panic!("unknown object id suffix {}", suffix))
 }
 
 #[cfg(test)]

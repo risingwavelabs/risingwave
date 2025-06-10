@@ -16,7 +16,7 @@ use std::cmp;
 use std::collections::HashSet;
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use chrono::DateTime;
 use futures::future::try_join_all;
@@ -339,18 +339,15 @@ impl HummockManager {
         // filter by metadata backup
         let object_ids = object_ids
             .into_iter()
-            .filter(|s| !pinned_by_metadata_backup.contains(s))
+            .filter(|s| !pinned_by_metadata_backup.contains(&s.as_raw()))
             .collect_vec();
         let after_metadata_backup = object_ids.len();
         // filter by time travel archive
+        let filter_by_time_travel_start_time = Instant::now();
         let object_ids = self
-            .filter_out_objects_by_time_travel(
-                object_ids.into_iter(),
-                self.env
-                    .opts
-                    .hummock_time_travel_filter_out_objects_batch_size,
-            )
+            .filter_out_objects_by_time_travel(object_ids.into_iter())
             .await?;
+        tracing::info!(elapsed = ?filter_by_time_travel_start_time.elapsed(), "filter out objects by time travel in full GC");
         let after_time_travel = object_ids.len();
         // filter by object id watermark, i.e. minimum id of uncommitted objects reported by compute nodes.
         let object_ids = object_ids
@@ -528,15 +525,10 @@ impl HummockManager {
         };
         let object_ids = object_ids
             .into_iter()
-            .filter(|s| !version_pinned.contains(s) && !backup_pinned.contains(s));
-        let object_ids = self
-            .filter_out_objects_by_time_travel(
-                object_ids,
-                self.env
-                    .opts
-                    .hummock_time_travel_filter_out_objects_batch_size,
-            )
-            .await?;
+            .filter(|s| !version_pinned.contains(s) && !backup_pinned.contains(&s.as_raw()));
+        let filter_by_time_travel_start_time = Instant::now();
+        let object_ids = self.filter_out_objects_by_time_travel(object_ids).await?;
+        tracing::info!(elapsed = ?filter_by_time_travel_start_time.elapsed(), "filter out objects by time travel in minor GC");
         // Retry is not necessary. Full GC will handle these objects eventually.
         self.delete_objects(object_ids.into_iter().collect())
             .await?;
