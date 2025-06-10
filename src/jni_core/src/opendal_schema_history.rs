@@ -78,7 +78,6 @@ impl ObjectStoreEngine {
 
 fn get_engine() -> anyhow::Result<ObjectStoreEngine> {
     let bucket = "hummock001".to_string();
-    println!("连接s3");
     
     let engine = ObjectStoreEngine::new_minio_engine(&format!("minio://{}",  bucket))?;
     
@@ -106,6 +105,29 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_writeFile(
 
 
         engine.op.write(&object_name,  data).await
+        }).unwrap();
+        
+        Ok(result)
+    });
+}
+
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_getObject(
+    env: EnvParam<'_>,
+    object_name: JString<'_>,
+)  {
+    execute_and_catch(env, move |env| {
+
+        let engine = get_engine()?;
+
+        let object_name = env.get_string(&object_name)?;
+        let object_name: Cow<'_, str> = (&object_name).into();
+
+        let result = JAVA_BINDING_ASYNC_RUNTIME.block_on(async {
+
+
+        let data = engine.read_object(&object_name).await
         }).unwrap();
         
         Ok(result)

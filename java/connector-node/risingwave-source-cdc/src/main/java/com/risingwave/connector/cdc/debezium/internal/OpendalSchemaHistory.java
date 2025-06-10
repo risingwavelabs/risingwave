@@ -18,7 +18,6 @@
 
 package com.risingwave.connector.cdc.debezium.internal;
 
-import com.risingwave.java.binding.Binding;
 import io.debezium.config.Configuration;
 import io.debezium.relational.history.AbstractFileBasedSchemaHistory;
 import io.debezium.relational.history.HistoryRecord;
@@ -78,7 +77,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     @Override
     protected void doStoreRecord(HistoryRecord record) {
         byte[] data = fromHistoryRecord(record);
-        Binding.writeFile(objectName, data); // Use objectName as the filename
+        // Binding.writeFile(objectName, data); // Use objectName as the filename
     }
 
     @Override
