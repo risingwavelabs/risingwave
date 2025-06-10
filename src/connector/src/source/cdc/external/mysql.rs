@@ -376,8 +376,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
     }
 
     async fn disconnect(&self) -> ConnectorResult<()> {
-        self.pool.clone().disconnect().await?;
-        Ok(())
+        self.pool.clone().disconnect().await.map_err(|e| e.into())
     }
 }
 
