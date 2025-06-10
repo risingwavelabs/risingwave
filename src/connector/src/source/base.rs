@@ -280,13 +280,6 @@ pub struct SourceEnumeratorInfo {
     pub source_id: u32,
 }
 
-#[derive(Clone, Debug)]
-pub enum SourceMuxMode {
-    Direct,
-    ConnectionMux(u32),
-    SourceBackfill(u32),
-}
-
 #[derive(Debug, Clone)]
 pub struct SourceContext {
     pub actor_id: u32,
@@ -299,7 +292,6 @@ pub struct SourceContext {
     // source parser put schema change event into this channel
     pub schema_change_tx:
         Option<mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>>,
-
     pub source_info: Option<PbStreamSourceInfo>,
 }
 
@@ -506,25 +498,17 @@ impl ReleaseHandle {
         }
     }
 
-    /// Manually trigger cleanup. Safe to call multiple times.
-    pub async fn release(mut self) {
-        if let Some(fut) = self.task.take() {
-            fut.await;
-        }
-    }
-
     pub(crate) fn into_future(mut self) -> Option<Pin<Box<dyn Future<Output = ()> + Send>>> {
         self.task.take()
     }
 }
-
-impl Drop for ReleaseHandle {
-    fn drop(&mut self) {
-        if let Some(fut) = self.task.take() {
-            tokio::spawn(fut);
-        }
-    }
-}
+// impl Drop for ReleaseHandle {
+//     fn drop(&mut self) {
+//         if let Some(fut) = self.task.take() {
+//             tokio::spawn(fut);
+//         }
+//     }
+// }
 
 /// [`SplitReader`] is a new abstraction of the external connector read interface which is
 /// responsible for parsing, it is used to read messages from the outside and transform them into a

@@ -1,3 +1,17 @@
+// Copyright 2025 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,7 +37,7 @@ pub type ReaderKey = String;
 
 pub struct KafkaMuxReader {
     consumer: StreamConsumer<RwConsumerContext>,
-    /// (topic, partition) -> sender  (each topic unique within this connection)
+    /// (topic, partition) -> sender (each topic unique within this connection)
     senders: RwLock<HashMap<(String, i32), mpsc::Sender<OwnedMessage>>>,
 }
 
@@ -35,8 +49,6 @@ impl KafkaMuxReader {
     }
 
     /// Create or reuse the reader for a given connection.
-    /// `connection_id` : globally unique identifier assigned by metadata.
-    /// `brokers`       : comma‑separated list for this connection.
     pub async fn get_or_create(
         connection_id: ReaderKey,
         properties: KafkaProperties,
@@ -44,7 +56,7 @@ impl KafkaMuxReader {
     ) -> Result<Arc<Self>> {
         // fast path – already exists
         if let Some(r) = Self::registry().read().await.get(&connection_id).cloned() {
-            println!("cached!");
+            tracing::info!("Reusing existing KafkaMuxReader for connection_id: {connection_id}");
             return Ok(r);
         }
 
@@ -62,14 +74,16 @@ impl KafkaMuxReader {
         properties.connection.set_security_properties(&mut config);
         properties.set_client(&mut config);
 
-        config.set("group.id", properties.group_id(source_ctx.fragment_id));
+        let prefix = properties
+            .group_id_prefix
+            .as_deref()
+            .unwrap_or("rw-consumer");
+
+        config.set("group.id", format!("{prefix}-mux-{connection_id}"));
 
         let ctx_common = KafkaContextCommon::new(
             broker_rewrite_map,
-            Some(format!(
-                "fragment-{}-source-{}-actor-{}",
-                source_ctx.fragment_id, source_ctx.source_id, source_ctx.actor_id
-            )),
+            Some(format!("shared-mux-reader-connection-{}", connection_id,)),
             // thread consumer will keep polling in the background, we don't need to call `poll`
             // explicitly
             Some(source_ctx.metrics.rdkafka_native_metric.clone()),
