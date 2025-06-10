@@ -97,6 +97,10 @@ impl CatalogController {
         let mut schema: schema::ActiveModel = schema.into();
         schema.schema_id = Set(schema_obj.oid);
         let schema = schema.insert(&txn).await?;
+
+        let updated_user_info =
+            grant_default_privileges_automatically(&txn, schema_obj.oid).await?;
+
         txn.commit().await?;
 
         let version = self
@@ -105,6 +109,12 @@ impl CatalogController {
                 NotificationInfo::Schema(ObjectModel(schema, schema_obj).into()),
             )
             .await;
+
+        // notify default privileges for schemas
+        if !updated_user_info.is_empty() {
+            self.notify_users_update(updated_user_info).await;
+        }
+
         Ok(version)
     }
 
@@ -193,6 +203,8 @@ impl CatalogController {
             .await?;
         }
 
+        let updated_user_info = grant_default_privileges_automatically(&txn, source_id).await?;
+
         txn.commit().await?;
 
         let version = self
@@ -201,6 +213,12 @@ impl CatalogController {
                 PbObjectInfo::Source(pb_source),
             )
             .await;
+
+        // notify default privileges for schemas
+        if !updated_user_info.is_empty() {
+            self.notify_users_update(updated_user_info).await;
+        }
+
         Ok((source_id, version))
     }
 
@@ -227,6 +245,10 @@ impl CatalogController {
         pb_function.id = function_obj.oid as _;
         let function: function::ActiveModel = pb_function.clone().into();
         Function::insert(function).exec(&txn).await?;
+
+        let updated_user_info =
+            grant_default_privileges_automatically(&txn, function_obj.oid).await?;
+
         txn.commit().await?;
 
         let version = self
@@ -235,6 +257,12 @@ impl CatalogController {
                 NotificationInfo::Function(pb_function),
             )
             .await;
+
+        // notify default privileges for functions
+        if !updated_user_info.is_empty() {
+            self.notify_users_update(updated_user_info).await;
+        }
+
         Ok(version)
     }
 
@@ -282,6 +310,8 @@ impl CatalogController {
             .await?;
         }
 
+        let updated_user_info = grant_default_privileges_automatically(&txn, conn_obj.oid).await?;
+
         txn.commit().await?;
 
         {
@@ -309,6 +339,12 @@ impl CatalogController {
                 NotificationInfo::Connection(pb_connection),
             )
             .await;
+
+        // notify default privileges for connections
+        if !updated_user_info.is_empty() {
+            self.notify_users_update(updated_user_info).await;
+        }
+
         Ok(version)
     }
 
@@ -337,6 +373,9 @@ impl CatalogController {
         let secret: secret::ActiveModel = pb_secret.clone().into();
         Secret::insert(secret).exec(&txn).await?;
 
+        let updated_user_info =
+            grant_default_privileges_automatically(&txn, secret_obj.oid).await?;
+
         txn.commit().await?;
 
         // Notify the compute and frontend node plain secret
@@ -354,6 +393,11 @@ impl CatalogController {
                 NotificationInfo::Secret(secret_plain),
             )
             .await;
+
+        // notify default privileges for secrets
+        if !updated_user_info.is_empty() {
+            self.notify_users_update(updated_user_info).await;
+        }
 
         Ok(version)
     }
@@ -396,12 +440,19 @@ impl CatalogController {
             .exec(&txn)
             .await?;
         }
+        let updated_user_info = grant_default_privileges_automatically(&txn, view_obj.oid).await?;
 
         txn.commit().await?;
 
         let version = self
             .notify_frontend_relation_info(NotificationOperation::Add, PbObjectInfo::View(pb_view))
             .await;
+
+        // notify default privileges for views
+        if !updated_user_info.is_empty() {
+            self.notify_users_update(updated_user_info).await;
+        }
+
         Ok(version)
     }
 

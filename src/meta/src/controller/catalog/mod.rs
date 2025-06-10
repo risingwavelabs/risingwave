@@ -231,6 +231,9 @@ impl CatalogController {
             ..Default::default()
         };
         job.update(&txn).await?;
+
+        let _ = grant_default_privileges_automatically(&txn, job_id).await?;
+
         txn.commit().await?;
 
         Ok(())
@@ -262,6 +265,22 @@ impl CatalogController {
                 }),
             )
             .await;
+
+        // notify default privileges about the new subscription
+        let updated_user_ids: Vec<UserId> = UserPrivilege::find()
+            .select_only()
+            .distinct()
+            .column(user_privilege::Column::UserId)
+            .filter(user_privilege::Column::Oid.eq(subscription_id as ObjectId))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        if !updated_user_ids.is_empty() {
+            let updated_user_infos = list_user_info_by_ids(updated_user_ids, &inner.db).await?;
+            self.notify_users_update(updated_user_infos).await;
+        }
+
         Ok(version)
     }
 

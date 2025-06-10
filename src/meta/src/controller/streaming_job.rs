@@ -62,8 +62,8 @@ use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
 use crate::controller::utils::{
     PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
     check_sink_into_table_cycle, ensure_object_id, ensure_user_id, get_fragment_actor_ids,
-    get_fragment_mappings, get_internal_tables_by_id, insert_fragment_relations,
-    rebuild_fragment_mapping_from_actors,
+    get_fragment_mappings, get_internal_tables_by_id, grant_default_privileges_automatically,
+    insert_fragment_relations, rebuild_fragment_mapping_from_actors,
 };
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
 use crate::model::{
@@ -966,6 +966,8 @@ impl CatalogController {
             None => None,
         };
 
+        let updated_user_info = grant_default_privileges_automatically(&txn, job_id).await?;
+
         txn.commit().await?;
 
         self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
@@ -977,6 +979,11 @@ impl CatalogController {
                 NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
             )
             .await;
+
+        // notify users about the default privileges
+        if !updated_user_info.is_empty() {
+            self.notify_users_update(updated_user_info).await;
+        }
 
         if let Some((objects, fragment_mapping)) = replace_table_mapping_update {
             self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
