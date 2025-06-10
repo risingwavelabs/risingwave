@@ -21,11 +21,13 @@ use itertools::Itertools;
 use risingwave_common::acl::AclMode;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, MapType};
 use risingwave_expr::aggregate::AggType;
 use risingwave_expr::window_function::WindowFuncKind;
 use risingwave_pb::user::grant_privilege::PbObject;
-use risingwave_sqlparser::ast::{self, Function, FunctionArg, FunctionArgExpr, Ident};
+use risingwave_sqlparser::ast::{
+    self, Function, FunctionArg, FunctionArgExpr, FunctionArgList, Ident, OrderByExpr, Window,
+};
 use risingwave_sqlparser::parser::ParserError;
 
 use crate::binder::bind_context::Clause;
@@ -68,6 +70,14 @@ macro_rules! reject_syntax {
     ($pred:expr, $msg:expr) => {
         if $pred {
             return Err(ErrorCode::InvalidInputSyntax($msg.to_string()).into());
+        }
+    };
+
+    ($pred:expr, $fmt:expr, $($arg:tt)*) => {
+        if $pred {
+            return Err(ErrorCode::InvalidInputSyntax(
+                format!($fmt, $($arg)*)
+            ).into());
         }
     };
 }
@@ -127,30 +137,16 @@ impl Binder {
             return Ok(ExprImpl::literal_varchar("".to_owned()));
         }
 
-        // special binding logic for `array_transform`
-        if func_name == "array_transform" {
-            // For type inference, we need to bind the array type first.
-            reject_syntax!(
+        // special binding logic for `array_transform` and `map_filter`
+        if func_name == "array_transform" || func_name == "map_filter" {
+            return self.validate_and_bind_special_function_params(
+                &func_name,
                 scalar_as_agg,
-                "`AGGREGATE:` prefix is not allowed for `array_transform`"
+                arg_list,
+                &within_group,
+                &filter,
+                &over,
             );
-            reject_syntax!(
-                !arg_list.is_args_only(),
-                "keywords like `DISTINCT`, `ORDER BY` are not allowed in `array_transform` argument list"
-            );
-            reject_syntax!(
-                within_group.is_some(),
-                "`WITHIN GROUP` is not allowed in `array_transform` call"
-            );
-            reject_syntax!(
-                filter.is_some(),
-                "`FILTER` is not allowed in `array_transform` call"
-            );
-            reject_syntax!(
-                over.is_some(),
-                "`OVER` is not allowed in `array_transform` call"
-            );
-            return self.bind_array_transform(arg_list.args);
         }
 
         let mut args: Vec<_> = arg_list
@@ -398,6 +394,49 @@ impl Binder {
         self.bind_builtin_scalar_function(&func_name, args, arg_list.variadic)
     }
 
+    fn validate_and_bind_special_function_params(
+        &mut self,
+        func_name: &str,
+        scalar_as_agg: bool,
+        arg_list: FunctionArgList,
+        within_group: &Option<Box<OrderByExpr>>,
+        filter: &Option<Box<risingwave_sqlparser::ast::Expr>>,
+        over: &Option<Window>,
+    ) -> Result<ExprImpl> {
+        assert!(["array_transform", "map_filter"].contains(&func_name));
+
+        reject_syntax!(
+            scalar_as_agg,
+            "`AGGREGATE:` prefix is not allowed for `{}`",
+            func_name
+        );
+        reject_syntax!(
+            !arg_list.is_args_only(),
+            "keywords like `DISTINCT`, `ORDER BY` are not allowed in `{}` argument list",
+            func_name
+        );
+        reject_syntax!(
+            within_group.is_some(),
+            "`WITHIN GROUP` is not allowed in `{}` call",
+            func_name
+        );
+        reject_syntax!(
+            filter.is_some(),
+            "`FILTER` is not allowed in `{}` call",
+            func_name
+        );
+        reject_syntax!(
+            over.is_some(),
+            "`OVER` is not allowed in `{}` call",
+            func_name
+        );
+        if func_name == "array_transform" {
+            self.bind_array_transform(arg_list.args)
+        } else {
+            self.bind_map_filter(arg_list.args)
+        }
+    }
+
     fn bind_array_transform(&mut self, args: Vec<FunctionArg>) -> Result<ExprImpl> {
         let [array, lambda] = <[FunctionArg; 2]>::try_from(args).map_err(|args| -> RwError {
             ErrorCode::BindError(format!(
@@ -469,6 +508,99 @@ impl Binder {
         self.context.lambda_args = orig_lambda_args;
 
         Ok(body)
+    }
+
+    fn bind_map_filter(&mut self, args: Vec<FunctionArg>) -> Result<ExprImpl> {
+        let [input, lambda] = <[FunctionArg; 2]>::try_from(args).map_err(|args| {
+            ErrorCode::BindError(format!(
+                "`map_filter` requires two arguments (input_map and lambda), got {}",
+                args.len()
+            ))
+        })?;
+
+        let bound_input = self.bind_function_arg(input)?;
+        let [bound_input] = <[ExprImpl; 1]>::try_from(bound_input).map_err(|e| {
+            ErrorCode::BindError(format!(
+                "Input argument should resolve to single expression, got {}",
+                e.len()
+            ))
+        })?;
+
+        let (key_type, value_type) = match bound_input.return_type() {
+            DataType::Map(map_type) => (map_type.key().clone(), map_type.value().clone()),
+            t => {
+                return Err(
+                    ErrorCode::BindError(format!("Input must be Map type, got {}", t)).into(),
+                );
+            }
+        };
+
+        let ast::FunctionArgExpr::Expr(ast::Expr::LambdaFunction {
+            args: lambda_args,
+            body: lambda_body,
+        }) = lambda.get_expr()
+        else {
+            return Err(ErrorCode::BindError(
+                "Second argument must be a lambda function".to_owned(),
+            )
+            .into());
+        };
+
+        let [key_arg, value_arg] = <[Ident; 2]>::try_from(lambda_args).map_err(|args| {
+            ErrorCode::BindError(format!(
+                "Lambda must have exactly two parameters (key, value), got {}",
+                args.len()
+            ))
+        })?;
+
+        let bound_lambda = self.bind_binary_lambda_function(
+            key_arg,
+            key_type.clone(),
+            value_arg,
+            value_type.clone(),
+            *lambda_body,
+        )?;
+
+        let lambda_ret_type = bound_lambda.return_type();
+        if lambda_ret_type != DataType::Boolean {
+            return Err(ErrorCode::BindError(format!(
+                "Lambda must return Boolean type, got {}",
+                lambda_ret_type
+            ))
+            .into());
+        }
+
+        let map_type = MapType::from_kv(key_type, value_type);
+        let return_type = DataType::Map(map_type);
+
+        Ok(ExprImpl::FunctionCallWithLambda(Box::new(
+            FunctionCallWithLambda::new_unchecked(
+                ExprType::MapFilter,
+                vec![bound_input],
+                bound_lambda,
+                return_type,
+            ),
+        )))
+    }
+
+    fn bind_binary_lambda_function(
+        &mut self,
+        first_arg: Ident,
+        first_ty: DataType,
+        second_arg: Ident,
+        second_ty: DataType,
+        body: ast::Expr,
+    ) -> Result<ExprImpl> {
+        let lambda_args = HashMap::from([
+            (first_arg.real_value(), (0usize, first_ty)),
+            (second_arg.real_value(), (1usize, second_ty)),
+        ]);
+
+        let orig_ctx = self.context.lambda_args.replace(lambda_args);
+        let bound_body = self.bind_expr_inner(body)?;
+        self.context.lambda_args = orig_ctx;
+
+        Ok(bound_body)
     }
 
     fn ensure_table_function_allowed(&self) -> Result<()> {
