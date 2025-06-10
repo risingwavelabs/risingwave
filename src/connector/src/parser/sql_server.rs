@@ -312,9 +312,10 @@ impl<'a> tiberius::IntoSql<'a> for ScalarImplTiberiusWrapper {
             ScalarImpl::Timestamp(v) => TimestampTiberiusWrapper::from(v).into_sql(),
             ScalarImpl::Timestamptz(v) => TimestamptzTiberiusWrapper::from(v).into_sql(),
             ScalarImpl::Time(v) => TimeTiberiusWrapper::from(v).into_sql(),
+            ScalarImpl::Utf8(v) => String::from(v).into_sql(),
             // ScalarImpl::Bytea(v) => (*v.clone()).into_sql(),
             value => {
-                // Utf8, Serial, Interval, Jsonb, Int256, Struct, List are not supported yet
+                // Serial, Interval, Jsonb, Int256, Struct, List are not supported yet
                 unimplemented!("the sql server decoding for {:?} is unsupported", value);
             }
         }
