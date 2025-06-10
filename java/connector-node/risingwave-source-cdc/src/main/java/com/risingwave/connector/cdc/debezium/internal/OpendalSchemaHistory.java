@@ -25,7 +25,9 @@ import io.debezium.relational.history.HistoryRecord;
 import io.debezium.relational.history.HistoryRecordComparator;
 import io.debezium.relational.history.SchemaHistoryException;
 import io.debezium.relational.history.SchemaHistoryListener;
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,7 +60,8 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     }
 
     private InputStream retrieveObjectFromStorage() {
-        return Binding.getObject(objectName);
+        byte[] byteArray = Binding.getObject(objectName);
+        return new ByteArrayInputStream(byteArray);
     }
 
     @Override
@@ -78,7 +81,8 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     @Override
     protected void doStoreRecord(HistoryRecord record) {
         byte[] data = fromHistoryRecord(record);
-        Binding.putObject(objectName, data); // Use objectName as the filename
+        String dataString = new String(data, StandardCharsets.UTF_8);
+        Binding.putObject(objectName, dataString);
     }
 
     @Override
