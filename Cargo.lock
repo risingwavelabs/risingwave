@@ -12038,6 +12038,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "parse-display",
  "paste",
+ "percent-encoding",
  "petgraph 0.8.1",
  "pgwire",
  "pin-project-lite",
