@@ -852,7 +852,7 @@ impl CatalogController {
         &self,
         database_id: DatabaseId,
         param: AlterDatabaseParam,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<(NotificationVersion, risingwave_meta_model::database::Model)> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -880,9 +880,9 @@ impl CatalogController {
         let version = self
             .notify_frontend(
                 NotificationOperation::Update,
-                NotificationInfo::Database(ObjectModel(database, obj).into()),
+                NotificationInfo::Database(ObjectModel(database.clone(), obj).into()),
             )
             .await;
-        Ok(version)
+        Ok((version, database))
     }
 }
