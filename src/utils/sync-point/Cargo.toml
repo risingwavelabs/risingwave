@@ -2,16 +2,15 @@
 name = "sync-point"
 version = "0.1.0"
 edition = "2021"
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+sync_point = []
 
 [dependencies]
 futures-util = "0.3"
 spin = "0.10"
 thiserror = "2"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["sync", "time"] }
-
-[features]
-sync_point = []
 
 [lints]
 workspace = true

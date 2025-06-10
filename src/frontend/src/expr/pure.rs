@@ -266,6 +266,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::MapCat
             | Type::MapContains
             | Type::MapDelete
+            | Type::MapFilter
             | Type::MapInsert
             | Type::MapLength
             | Type::VnodeUser

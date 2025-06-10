@@ -44,7 +44,7 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
         .run("alter system set per_database_isolation = false")
         .await?;
 
-    let amplification_factor = 40000;
+    let amplification_factor = 60000;
     let dimension_count = 20;
     let result_count = amplification_factor * dimension_count;
 

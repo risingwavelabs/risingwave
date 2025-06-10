@@ -308,6 +308,7 @@ impl Strong {
             | ExprType::MapCat
             | ExprType::MapContains
             | ExprType::MapDelete
+            | ExprType::MapFilter
             | ExprType::MapInsert
             | ExprType::MapLength
             | ExprType::Vnode
