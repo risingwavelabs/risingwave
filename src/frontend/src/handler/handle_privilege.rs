@@ -345,7 +345,7 @@ fn make_prost_privilege(
             }
         }
         o => {
-            return Err(ErrorCode::BindError(format!(
+            return Err(ErrorCode::InvalidInputSyntax(format!(
                 "GRANT statement does not support object type: {:?}",
                 o
             ))
@@ -380,7 +380,10 @@ fn bind_user_from_idents(session: &SessionImpl, names: Vec<Ident>) -> Result<Vec
         if let Some(user) = reader.get_user_by_name(&name.real_value()) {
             users.insert(user.id);
         } else {
-            return Err(ErrorCode::BindError("User does not exist".to_owned()).into());
+            return Err(ErrorCode::InvalidInputSyntax(
+                format!("User \"{name}\" does not exist").to_owned(),
+            )
+            .into());
         }
     }
     Ok(users.into_iter().collect())
@@ -427,7 +430,7 @@ fn make_prost_actions(
                 .collect::<Vec<_>>();
             for action in &actions {
                 if !all_acls.has_mode((*action).into()) {
-                    return Err(ErrorCode::BindError(format!(
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
                         "Invalid privilege type for the given object: {action:?}"
                     ))
                     .into());
@@ -460,7 +463,10 @@ pub async fn handle_grant_privilege(
 
         // We remark that the user name is always case-sensitive.
         if reader.get_user_by_name(&granted_by.real_value()).is_none() {
-            return Err(ErrorCode::BindError("Grantor does not exist".to_owned()).into());
+            return Err(ErrorCode::InvalidInputSyntax(
+                format!("Grantor \"{granted_by}\" does not exist").to_owned(),
+            )
+            .into());
         }
     }
 
@@ -497,7 +503,10 @@ pub async fn handle_revoke_privilege(
         if let Some(user) = reader.get_user_by_name(&granted_by.real_value()) {
             granted_by_id = Some(user.id);
         } else {
-            return Err(ErrorCode::BindError("Grantor does not exist".to_owned()).into());
+            return Err(ErrorCode::InvalidInputSyntax(
+                format!("Grantor \"{granted_by}\" does not exist").to_owned(),
+            )
+            .into());
         }
     }
     let privileges = make_prost_privilege(&session, privileges, objects)?;
@@ -538,14 +547,14 @@ pub async fn handle_alter_default_privileges(
         Some(users) => {
             let users = bind_user_from_idents(&session, users)?;
             if !session.is_super_user() && users.len() > 1 {
-                return Err(ErrorCode::BindError(
+                return Err(ErrorCode::PermissionDenied(
                     "Only superuser can alter default privileges for multiple users".to_owned(),
                 )
                 .into());
             } else if !session.is_super_user()
                 && users.iter().any(|user| *user != session.user_id())
             {
-                return Err(ErrorCode::BindError(
+                return Err(ErrorCode::PermissionDenied(
                     "Only superuser can alter default privileges for other users".to_owned(),
                 )
                 .into());
