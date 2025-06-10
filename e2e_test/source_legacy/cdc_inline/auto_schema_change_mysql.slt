@@ -5,7 +5,7 @@ mysql -e "DROP DATABASE IF EXISTS mytest; CREATE DATABASE mytest;"
 
 system ok
 mysql -e "
-    USE risedev;
+    USE mytest;
     DROP TABLE IF EXISTS customers;
     CREATE TABLE customers(
          id BIGINT PRIMARY KEY,
