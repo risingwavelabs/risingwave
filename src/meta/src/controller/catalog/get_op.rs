@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+
 use super::*;
 use crate::controller::utils::{get_database_resource_group, get_existing_job_resource_group};
 
@@ -401,5 +402,65 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
         Ok(job_id)
+    }
+
+    // Output: Vec<(table id, db name, schema name, table name, resource group)>
+    pub async fn list_table_objects(
+        &self,
+    ) -> MetaResult<Vec<(TableId, String, String, String, String)>> {
+        let inner = self.inner.read().await;
+        Ok(Object::find()
+            .select_only()
+            .join(JoinType::InnerJoin, object::Relation::Table.def())
+            .join(JoinType::InnerJoin, object::Relation::Database2.def())
+            .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+            .column(object::Column::Oid)
+            .column(database::Column::Name)
+            .column(schema::Column::Name)
+            .column(table::Column::Name)
+            .column(database::Column::ResourceGroup)
+            .into_tuple()
+            .all(&inner.db)
+            .await?)
+    }
+
+    // Output: Vec<(source id, db name, schema name, source name, resource group)>
+    pub async fn list_source_objects(
+        &self,
+    ) -> MetaResult<Vec<(TableId, String, String, String, String)>> {
+        let inner = self.inner.read().await;
+        Ok(Object::find()
+            .select_only()
+            .join(JoinType::InnerJoin, object::Relation::Source.def())
+            .join(JoinType::InnerJoin, object::Relation::Database2.def())
+            .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+            .column(object::Column::Oid)
+            .column(database::Column::Name)
+            .column(schema::Column::Name)
+            .column(source::Column::Name)
+            .column(database::Column::ResourceGroup)
+            .into_tuple()
+            .all(&inner.db)
+            .await?)
+    }
+
+    // Output: Vec<(sink id, db name, schema name, sink name, resource group)>
+    pub async fn list_sink_objects(
+        &self,
+    ) -> MetaResult<Vec<(TableId, String, String, String, String)>> {
+        let inner = self.inner.read().await;
+        Ok(Object::find()
+            .select_only()
+            .join(JoinType::InnerJoin, object::Relation::Sink.def())
+            .join(JoinType::InnerJoin, object::Relation::Database2.def())
+            .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+            .column(object::Column::Oid)
+            .column(database::Column::Name)
+            .column(schema::Column::Name)
+            .column(sink::Column::Name)
+            .column(database::Column::ResourceGroup)
+            .into_tuple()
+            .all(&inner.db)
+            .await?)
     }
 }
