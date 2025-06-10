@@ -16,13 +16,14 @@
 //! and the interface for generating
 //! stream (MATERIALIZED VIEW) and batch query statements.
 
-use std::{collections::HashSet, vec};
+use std::collections::HashSet;
+use std::vec;
 
 use rand::Rng;
 use risingwave_common::types::DataType;
 use risingwave_frontend::bind_data_type;
 use risingwave_sqlparser::ast::{
-    ColumnDef, EmitMode, Expr, Ident, ObjectName, SourceWatermark, Statement
+    ColumnDef, EmitMode, Expr, Ident, ObjectName, SourceWatermark, Statement,
 };
 
 mod agg;
@@ -189,10 +190,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         Statement::Query(Box::new(query))
     }
 
-    pub(crate) fn gen_mview_stmt(
-        &mut self,
-        name: &str,
-    ) -> (Statement, Table) {
+    pub(crate) fn gen_mview_stmt(&mut self, name: &str) -> (Statement, Table) {
         let (query, schema) = self.gen_query();
         let query = Box::new(query);
         let table = Table::new(name.to_owned(), schema);
@@ -238,7 +236,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         can_recurse
     }
 
-
     pub(crate) fn get_columns_with_watermark(&mut self, columns: &[Column]) -> Vec<Column> {
         let watermark_names: HashSet<_> = self
             .get_append_only_tables()
@@ -252,7 +249,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .cloned()
             .collect()
     }
-    
+
     pub(crate) fn get_append_only_tables(&mut self) -> Vec<Table> {
         self.tables
             .iter()

@@ -64,7 +64,10 @@ impl<R: Rng> SqlGenerator<'_, R> {
     fn gen_simple_table_factor(&mut self) -> (TableFactor, Table) {
         let alias = self.gen_table_name_with_prefix("t");
         let mut table = if self.should_generate(Feature::Eowc) {
-            self.get_append_only_tables().choose(&mut self.rng).unwrap().clone()
+            self.get_append_only_tables()
+                .choose(&mut self.rng)
+                .unwrap()
+                .clone()
         } else {
             self.tables.choose(&mut self.rng).unwrap().clone()
         };
@@ -97,7 +100,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         if self.can_recurse() {
             choices.push(2); // subquery
         }
-    
+
         match *choices.choose(&mut self.rng).unwrap() {
             0 => self.gen_time_window_func(),
             1 => self.gen_table_func(),
@@ -105,7 +108,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
             3 => self.gen_simple_table_factor(),
             _ => unreachable!(),
         }
-    }    
+    }
 
     fn gen_equi_join_columns(
         &mut self,

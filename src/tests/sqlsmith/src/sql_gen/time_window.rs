@@ -67,7 +67,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         } else {
             self.tables.clone()
         };
-        let tables: Vec<_> = find_tables_with_timestamp_cols(source_tables);        
+        let tables: Vec<_> = find_tables_with_timestamp_cols(source_tables);
         let (source_table_name, time_cols, schema) = tables
             .choose(&mut self.rng)
             .expect("seeded tables all do not have timestamp");
