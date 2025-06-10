@@ -13,8 +13,8 @@ create materialized view m1 as
 sleep 5s
 
 query I
-select 
-  regexp_match(progress, '([0-9]+)\.[0-9]+%')[1]::numeric >= (5::numeric * 10::numeric / 10000::numeric) 
+select
+  regexp_match(progress, '([0-9]+)\.[0-9]+%')[1]::numeric >= (5::numeric * 10::numeric / 10000::numeric)
 from rw_catalog.rw_fragment_backfill_progress;
 ----
 t
