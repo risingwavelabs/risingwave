@@ -364,6 +364,7 @@ impl SourceManager {
     }
 
     /// For replacing job (alter table/source, create sink into table).
+    #[await_tree::instrument]
     pub async fn handle_replace_job(
         &self,
         dropped_job_fragments: &StreamJobFragments,

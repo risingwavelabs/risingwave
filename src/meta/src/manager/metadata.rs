@@ -730,6 +730,7 @@ impl MetadataManager {
             .collect())
     }
 
+    #[await_tree::instrument]
     pub async fn update_actor_splits_by_split_assignment(
         &self,
         split_assignment: &SplitAssignment,

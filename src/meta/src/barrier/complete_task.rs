@@ -200,10 +200,15 @@ impl CompletingTask {
                 {
                     let epochs_to_ack = task.epochs_to_ack();
                     let context = context.clone();
+                    let await_tree_reg = env.await_tree_reg().clone();
                     let env = env.clone();
-                    // TODO: add ID to the task to track it with await-tree
-                    let join_handle =
-                        tokio::spawn(async move { task.complete_barrier(&*context, env).await });
+
+                    let fut = async move { task.complete_barrier(&*context, env).await };
+                    let fut = await_tree_reg
+                        .register_derived_root("Barrier Completion Task")
+                        .instrument(fut);
+                    let join_handle = tokio::spawn(fut);
+
                     *self = CompletingTask::Completing {
                         epochs_to_ack,
                         join_handle,

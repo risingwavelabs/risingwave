@@ -526,6 +526,22 @@ impl std::fmt::Debug for CommandContext {
     }
 }
 
+impl std::fmt::Display for CommandContext {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "prev_epoch={}, curr_epoch={}, kind={}",
+            self.barrier_info.prev_epoch.value().0,
+            self.barrier_info.curr_epoch.value().0,
+            self.barrier_info.kind.as_str_name()
+        )?;
+        if let Some(command) = &self.command {
+            write!(f, ", command={}", command)?;
+        }
+        Ok(())
+    }
+}
+
 impl CommandContext {
     pub(super) fn new(
         barrier_info: BarrierInfo,

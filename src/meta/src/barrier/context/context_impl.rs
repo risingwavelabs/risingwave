@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use await_tree::InstrumentAwait;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
@@ -69,13 +68,9 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         }
     }
 
+    #[await_tree::instrument("post_collect_command({command})")]
     async fn post_collect_command<'a>(&'a self, command: &'a CommandContext) -> MetaResult<()> {
-        let span = if let Some(command) = &command.command {
-            await_tree::span!("post_collect_command({command})")
-        } else {
-            await_tree::span!("post_collect_command")
-        };
-        command.post_collect(self).instrument_await(span).await
+        command.post_collect(self).await
     }
 
     async fn notify_creating_job_failed(&self, database_id: Option<DatabaseId>, err: String) {
@@ -84,12 +79,12 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
             .await
     }
 
-    #[await_tree::instrument]
+    #[await_tree::instrument("finish_creating_job({job})")]
     async fn finish_creating_job(&self, job: TrackingJob) -> MetaResult<()> {
         job.finish(&self.metadata_manager).await
     }
 
-    #[await_tree::instrument]
+    #[await_tree::instrument("new_control_stream({})", node.id)]
     async fn new_control_stream(
         &self,
         node: &WorkerNode,
