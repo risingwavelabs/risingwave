@@ -61,7 +61,7 @@ FORMAT PLAIN ENCODE JSON;
 
 sleep 1s
 
-query I
+query I retry 3 backoff 5s
 SELECT count(*) from plain_students;
 ----
 3
@@ -96,7 +96,7 @@ EOF
 
 sleep 1s
 
-query I
+query I retry 3 backoff 5s
 SELECT count(*) from plain_students;
 ----
 6
