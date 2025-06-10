@@ -9,8 +9,8 @@ config:
     weight: 75
     enabled: true
   eowc:
-    weight: 100
-    enabled: true
+    weight: 25
+    enabled: false
   natural_join:
     weight: 25
     enabled: true
