@@ -164,8 +164,6 @@ where
 
     // Prepare assignment map
     let mut assignment: BTreeMap<C, Vec<I>> = BTreeMap::new();
-    // todo
-    // let mut assignment: BTreeMap<C, Vec<I>> = containers.keys().map(|&c| (c, Vec::new())).collect();
 
     // Assign each item using Weighted Rendezvous
     for &item in items {
