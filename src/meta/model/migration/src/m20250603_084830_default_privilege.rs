@@ -18,11 +18,24 @@ impl MigrationTrait for Migration {
                     .col(integer(UserDefaultPrivilege::DatabaseId))
                     .col(integer_null(UserDefaultPrivilege::SchemaId))
                     .col(string(UserDefaultPrivilege::ObjectType))
+                    .col(boolean_null(UserDefaultPrivilege::ForMaterializedView))
                     .col(integer(UserDefaultPrivilege::UserId))
                     .col(integer(UserDefaultPrivilege::Grantee))
                     .col(integer(UserDefaultPrivilege::GrantedBy))
                     .col(string(UserDefaultPrivilege::Action))
                     .col(boolean(UserDefaultPrivilege::WithGrantOption))
+                    .index(
+                        Index::create()
+                            .name("pk_user_default_privilege")
+                            .col(UserDefaultPrivilege::DatabaseId)
+                            .col(UserDefaultPrivilege::SchemaId)
+                            .col(UserDefaultPrivilege::ObjectType)
+                            .col(UserDefaultPrivilege::ForMaterializedView)
+                            .col(UserDefaultPrivilege::UserId)
+                            .col(UserDefaultPrivilege::Grantee)
+                            .col(UserDefaultPrivilege::Action)
+                            .unique(),
+                    )
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_user_default_privilege_database_id")
@@ -81,6 +94,7 @@ enum UserDefaultPrivilege {
     DatabaseId,
     SchemaId,
     ObjectType,
+    ForMaterializedView,
     UserId,
     Grantee,
     GrantedBy,

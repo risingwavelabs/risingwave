@@ -15,13 +15,13 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::{DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG, SYSTEM_SCHEMAS};
+use risingwave_common::catalog::{DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG};
 use risingwave_meta_model::object::ObjectType;
-use risingwave_meta_model::prelude::{Object, Schema, User, UserDefaultPrivilege, UserPrivilege};
+use risingwave_meta_model::prelude::{Object, User, UserDefaultPrivilege, UserPrivilege};
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::{
-    AuthInfo, DatabaseId, PrivilegeId, SchemaId, UserId, object, schema, user,
-    user_default_privilege, user_privilege,
+    AuthInfo, DatabaseId, PrivilegeId, SchemaId, UserId, object, user, user_default_privilege,
+    user_privilege,
 };
 use risingwave_pb::common::PbObjectType;
 use risingwave_pb::meta::subscribe_response::{
@@ -523,6 +523,16 @@ impl CatalogController {
         grantees: Vec<UserId>,
         with_grant_option: bool,
     ) -> MetaResult<()> {
+        tracing::debug!(
+            ?user_ids,
+            database_id,
+            ?schema_ids,
+            ?actions,
+            ?object_type,
+            ?grantees,
+            with_grant_option,
+            "grant default privileges",
+        );
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         for user_id in &user_ids {
@@ -542,8 +552,11 @@ impl CatalogController {
                 "object type must be Schema when schema_ids is empty"
             );
         }
-        // TODO: add a new column to distinguish the object type between
-        // table and materialized view.
+        let for_mview_obj = match object_type {
+            PbObjectType::Table => Some(false),
+            PbObjectType::Mview => Some(true),
+            _ => None,
+        };
 
         let mut default_privileges = vec![];
         for user_id in user_ids {
@@ -555,6 +568,7 @@ impl CatalogController {
                             database_id: Set(database_id),
                             schema_id: Set(None),
                             object_type: Set(object_type.into()),
+                            for_materialized_view: Set(for_mview_obj),
                             user_id: Set(user_id),
                             grantee: Set(*grantee),
                             granted_by: Set(grantor as _),
@@ -569,6 +583,7 @@ impl CatalogController {
                             database_id: Set(database_id),
                             schema_id: Set(Some(*schema_id)),
                             object_type: Set(object_type.into()),
+                            for_materialized_view: Set(for_mview_obj),
                             user_id: Set(user_id),
                             grantee: Set(*grantee),
                             granted_by: Set(grantor as _),
@@ -585,6 +600,7 @@ impl CatalogController {
             user_default_privilege::Column::DatabaseId,
             user_default_privilege::Column::SchemaId,
             user_default_privilege::Column::ObjectType,
+            user_default_privilege::Column::ForMaterializedView,
             user_default_privilege::Column::Grantee,
             user_default_privilege::Column::Action,
         ]);
@@ -609,7 +625,6 @@ impl CatalogController {
         user_ids: Vec<UserId>,
         database_id: DatabaseId,
         schema_ids: Vec<SchemaId>,
-        grantor: UserId,
         actions: Vec<PbAction>,
         object_type: PbObjectType,
         grantees: Vec<UserId>,
@@ -620,7 +635,50 @@ impl CatalogController {
         for user_id in &user_ids {
             ensure_user_id(*user_id, &txn).await?;
         }
-        todo!("Implement default privileges for users")
+
+        let schema_filter = if schema_ids.is_empty() {
+            user_default_privilege::Column::SchemaId.is_null()
+        } else {
+            user_default_privilege::Column::SchemaId.is_in(schema_ids)
+        };
+        let filter = user_default_privilege::Column::DatabaseId
+            .eq(database_id)
+            .and(schema_filter)
+            .and(user_default_privilege::Column::UserId.is_in(user_ids))
+            .and(user_default_privilege::Column::ObjectType.eq(ObjectType::from(object_type)))
+            .and(user_default_privilege::Column::Grantee.is_in(grantees))
+            .and(
+                user_default_privilege::Column::Action
+                    .is_in(actions.iter().map(|&a| Action::from(a))),
+            );
+
+        if revoke_grant_option {
+            // update the `with_grant_option` field to false
+            let res = UserDefaultPrivilege::update_many()
+                .col_expr(
+                    user_default_privilege::Column::WithGrantOption,
+                    SimpleExpr::Value(Value::Bool(Some(false))),
+                )
+                .filter(filter.and(user_default_privilege::Column::WithGrantOption.eq(true)))
+                .exec(&txn)
+                .await?;
+            tracing::info!(
+                "revoke {count} grant option for default privileges",
+                count = res.rows_affected
+            );
+        } else {
+            let res = UserDefaultPrivilege::delete_many()
+                .filter(filter)
+                .exec(&txn)
+                .await?;
+            tracing::info!(
+                "revoke {count} default privileges",
+                count = res.rows_affected
+            );
+        }
+
+        txn.commit().await?;
+        Ok(())
     }
 }
 

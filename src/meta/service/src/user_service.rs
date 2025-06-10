@@ -185,7 +185,6 @@ impl UserService for UserServiceImpl {
                         user_ids,
                         req.database_id as _,
                         schema_ids,
-                        req.granted_by as _,
                         revoke_privilege.actions().collect(),
                         revoke_privilege.get_object_type()?,
                         revoke_privilege

@@ -118,6 +118,12 @@ impl MigratorTrait for Migrator {
             Box::new(m20250210_170743_function_options::Migration),
             Box::new(m20250319_062702_mysql_utf8mb4::Migration),
             Box::new(m20250325_061743_exactly_once_iceberg_sink_metadata::Migration),
+            Box::new(m20250509_102041_remove_dispatcher::Migration),
+            Box::new(m20250514_114514_dispatcher_type_mapping::Migration),
+            Box::new(m20250522_074525_iceberg_tables::Migration),
+            Box::new(m20250522_074947_iceberg_namespace_properties::Migration),
+            Box::new(m20250528_064717_barrier_interval_per_database::Migration),
+            Box::new(m20250603_084830_default_privilege::Migration),
         ]
     }
 }

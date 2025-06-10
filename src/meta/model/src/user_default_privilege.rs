@@ -26,6 +26,7 @@ pub struct Model {
     pub database_id: DatabaseId,
     pub schema_id: Option<SchemaId>,
     pub object_type: ObjectType,
+    pub for_materialized_view: Option<bool>,
     pub user_id: UserId,
     pub grantee: UserId,
     pub granted_by: UserId,
