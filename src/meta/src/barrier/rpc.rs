@@ -337,7 +337,7 @@ impl ControlStreamManager {
         poll_result
     }
 
-    #[await_tree::instrument]
+    #[await_tree::instrument("control_stream_next_response")]
     pub(super) async fn next_response(
         &mut self,
     ) -> (
