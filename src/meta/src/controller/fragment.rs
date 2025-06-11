@@ -932,7 +932,7 @@ impl CatalogController {
             .column_as(Expr::col(actor::Column::ActorId).count(), "parallelism")
             .join(JoinType::LeftJoin, fragment::Relation::Actor.def())
             .join(JoinType::LeftJoin, fragment::Relation::Object.def())
-            .join(JoinType::LeftJoin, streaming_job::Relation::Object.def())
+            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
             .filter(
                 streaming_job::Column::JobStatus
                     .eq(JobStatus::Initial)
