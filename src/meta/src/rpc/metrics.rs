@@ -187,13 +187,13 @@ pub struct MetaMetrics {
     pub source_enumerator_metrics: Arc<SourceEnumeratorMetrics>,
 
     // ********************************** Fragment ************************************
-    /// A dummpy gauge metrics with its label to be the mapping from actor id to fragment id
+    /// A dummy gauge metrics with its label to be the mapping from actor id to fragment id
     pub actor_info: IntGaugeVec,
-    /// A dummpy gauge metrics with its label to be the mapping from table id to actor id
+    /// A dummy gauge metrics with its label to be the mapping from table id to actor id
     pub table_info: IntGaugeVec,
     /// A dummy gauge metrics with its label to be the mapping from actor id to sink id
     pub sink_info: IntGaugeVec,
-    /// A dummpy gauge metrics with its label to be relation info
+    /// A dummy gauge metrics with its label to be relation info
     pub relation_info: IntGaugeVec,
 
     /// Write throughput of commit epoch for each stable
