@@ -172,10 +172,6 @@ impl HnswFlatIndexWriter {
         })
     }
 
-    pub fn sstable_store(&self) -> &SstableStoreRef {
-        &self.sstable_store
-    }
-
     pub fn insert(&mut self, vec: Vector, info: Bytes) -> HummockResult<()> {
         self.vector_store.building_vectors.add(vec.to_ref(), &info);
         Ok(())

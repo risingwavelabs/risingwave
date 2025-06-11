@@ -17,6 +17,7 @@ use risingwave_pb::hummock::{
     InitIndexRequest, InitIndexResponse, InsertVectorsRequest, InsertVectorsResponse,
     PbDistanceType, QueryVectorsRequest, QueryVectorsResponse,
 };
+use risingwave_storage::dispatch_measurement;
 use risingwave_storage::hummock::vector::FileVectorStore;
 use risingwave_storage::hummock::vector::writer::{HnswFlatIndexWriter, VectorObjectIdManager};
 use risingwave_storage::hummock::{
@@ -24,7 +25,6 @@ use risingwave_storage::hummock::{
 };
 use risingwave_storage::monitor::HummockStateStoreMetrics;
 use risingwave_storage::opts::StorageOpts;
-use risingwave_storage::vector::distance::InnerProductDistance;
 use risingwave_storage::vector::hnsw::nearest;
 use risingwave_storage::vector::{DistanceMeasurement, Vector};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
@@ -73,10 +73,46 @@ impl VectorObjectIdManager for ObjectIdManager {
     }
 }
 
+async fn sstable_store(opts: &Opts) -> SstableStoreRef {
+    let object_store = build_remote_object_store(
+        "memory",
+        Arc::new(ObjectStoreMetrics::unused()),
+        "Hummock",
+        Arc::new(ObjectStoreConfig::default()),
+    )
+    .await;
+    Arc::new(SstableStore::new(SstableStoreConfig {
+        store: Arc::new(object_store),
+        path: "hummock".to_owned(),
+        prefetch_buffer_capacity: 0,
+        max_prefetch_block_number: 0,
+        recent_filter: None,
+        state_store_metrics: Arc::new(HummockStateStoreMetrics::unused()),
+        use_new_object_prefix_strategy: false,
+        meta_cache: HybridCacheBuilder::new()
+            .memory(1 << 20)
+            .with_shards(16)
+            .storage(Engine::Large)
+            .build()
+            .await
+            .unwrap(),
+        block_cache: HybridCacheBuilder::new()
+            .memory(1 << 20)
+            .with_shards(16)
+            .storage(Engine::Large)
+            .build()
+            .await
+            .unwrap(),
+        vector_meta_cache: CacheBuilder::new(opts.meta_cache_capacity_mb * (1 << 20)).build(),
+        vector_block_cache: CacheBuilder::new(opts.block_cache_capacity_mb * (1 << 20)).build(),
+    }))
+}
+
 async fn init(
     rx: &mut UnboundedReceiver<VectorRequest>,
-    opts: Opts,
-) -> (HnswFlatIndexWriter, HnswFlatIndex) {
+    sstable_store: SstableStoreRef,
+    opts: &Opts,
+) -> (HnswFlatIndexWriter, HnswFlatIndex, DistanceMeasurement) {
     let VectorRequest::Init(req, tx) = rx.recv().await.unwrap() else {
         unreachable!()
     };
@@ -85,57 +121,25 @@ async fn init(
         next_object_id: AtomicU64::new(0),
     }) as Arc<dyn VectorObjectIdManager>;
     println!("Initializing index with request: {:?}", req);
-    assert_eq!(
-        PbDistanceType::try_from(req.distance_type).unwrap(),
-        PbDistanceType::InnerProduct
-    );
     tx.send(()).unwrap();
-    let object_store = build_remote_object_store(
-        "memory",
-        Arc::new(ObjectStoreMetrics::unused()),
-        "Hummock",
-        Arc::new(ObjectStoreConfig::default()),
-    )
-    .await;
+
     let storage_opts = StorageOpts {
         vector_file_block_size_kb: opts.block_size_kb,
         ..Default::default()
     };
+    let measurement =
+        DistanceMeasurement::from(PbDistanceType::try_from(req.distance_type).unwrap());
     let writer = HnswFlatIndexWriter::new(
         &index,
         req.dimension as usize,
-        DistanceMeasurement::InnerProduct,
-        Arc::new(SstableStore::new(SstableStoreConfig {
-            store: Arc::new(object_store),
-            path: "hummock".to_owned(),
-            prefetch_buffer_capacity: 0,
-            max_prefetch_block_number: 0,
-            recent_filter: None,
-            state_store_metrics: Arc::new(HummockStateStoreMetrics::unused()),
-            use_new_object_prefix_strategy: false,
-            meta_cache: HybridCacheBuilder::new()
-                .memory(1 << 20)
-                .with_shards(16)
-                .storage(Engine::Large)
-                .build()
-                .await
-                .unwrap(),
-            block_cache: HybridCacheBuilder::new()
-                .memory(1 << 20)
-                .with_shards(16)
-                .storage(Engine::Large)
-                .build()
-                .await
-                .unwrap(),
-            vector_meta_cache: CacheBuilder::new(opts.meta_cache_capacity_mb * (1 << 20)).build(),
-            vector_block_cache: CacheBuilder::new(opts.block_cache_capacity_mb * (1 << 20)).build(),
-        })),
+        measurement,
+        sstable_store,
         object_id_manager,
         &storage_opts,
     )
     .await
     .unwrap();
-    (writer, index)
+    (writer, index, measurement)
 }
 
 async fn train(
@@ -152,7 +156,6 @@ async fn train(
             next_vector_id += 1;
             let info = Bytes::copy_from_slice(&vector_id.to_le_bytes());
             let vec = Vector::new(&vec.values);
-            let vec = vec.normalized();
             writer.insert(vec, info).unwrap();
         }
         println!("Inserted {next_vector_id} vectors");
@@ -170,9 +173,14 @@ async fn query(
     rx: &mut UnboundedReceiver<VectorRequest>,
     sstable_store: SstableStoreRef,
     hnsw_flat: HnswFlatIndex,
+    measurement: DistanceMeasurement,
 ) {
     let graph_file = hnsw_flat.graph_file.as_ref().unwrap();
     let graph = sstable_store.get_hnsw_graph(graph_file).await.unwrap();
+    let vector_store = FileVectorStore::new(
+        hnsw_flat.vector_store.vector_files.clone(),
+        sstable_store.clone(),
+    );
     while let Some(req) = rx.recv().await {
         let VectorRequest::Query(req, tx) = req else {
             unreachable!()
@@ -180,22 +188,19 @@ async fn query(
         let mut results = Vec::with_capacity(req.query_vectors.len());
         for query_vec in req.query_vectors {
             let vec = Vector::new(&query_vec.values);
-            let vec = vec.normalized();
 
-            let vector_store = FileVectorStore::new(
-                hnsw_flat.vector_store.vector_files.clone(),
-                sstable_store.clone(),
-            );
-            let (vector_ids, _stats) = nearest::<_, InnerProductDistance>(
-                &vector_store,
-                &graph,
-                vec.to_ref(),
-                |_, _, info| u64::from_le_bytes(info.try_into().unwrap()),
-                req.ef_search as _,
-                req.top_n as _,
-            )
-            .await
-            .unwrap();
+            let (vector_ids, _stats) = dispatch_measurement!(measurement, M, {
+                nearest::<_, M>(
+                    &vector_store,
+                    &graph,
+                    vec.to_ref(),
+                    |_, _, info| u64::from_le_bytes(info.try_into().unwrap()),
+                    req.ef_search as _,
+                    req.top_n as _,
+                )
+                .await
+                .unwrap()
+            });
             results.push(NearestNeighbors { vector_ids });
         }
         tx.send(QueryVectorsResponse { results }).unwrap();
@@ -203,11 +208,11 @@ async fn query(
 }
 
 async fn worker(mut rx: UnboundedReceiver<VectorRequest>, opts: Opts) {
-    let (writer, mut index) = init(&mut rx, opts.clone()).await;
-    let sstable_store = writer.sstable_store().clone();
+    let sstable_store = sstable_store(&opts).await;
+    let (writer, mut index, measurement) = init(&mut rx, sstable_store.clone(), &opts).await;
     let add = train(&mut rx, writer).await;
     index.apply_hnsw_flat_index_add(&add);
-    query(&mut rx, sstable_store, index).await;
+    query(&mut rx, sstable_store, index, measurement).await;
 }
 
 #[async_trait]
