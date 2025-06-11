@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
+use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common_estimate_size::EstimateSize;
 
@@ -49,7 +49,7 @@ impl<R: Row> JoinRow<R> {
 
     pub fn encode(&self) -> EncodedJoinRow {
         EncodedJoinRow {
-            compacted_row: (&self.row).into(),
+            row: (&self.row).to_owned_row(),
             degree: self.degree,
         }
     }
@@ -63,20 +63,15 @@ fn build_degree_row(order_key: impl Row, degree: DegreeType) -> impl Row {
 
 #[derive(Clone, Debug, EstimateSize)]
 pub struct EncodedJoinRow {
-    pub compacted_row: CompactedRow,
+    pub row: OwnedRow,
     pub degree: DegreeType,
 }
 
 impl EncodedJoinRow {
-    pub fn decode(&self, data_types: &[DataType]) -> StreamExecutorResult<JoinRow<OwnedRow>> {
+    pub fn decode(&self, _data_types: &[DataType]) -> StreamExecutorResult<JoinRow<OwnedRow>> {
         Ok(JoinRow {
-            row: self.decode_row(data_types)?,
+            row: self.row.clone(),
             degree: self.degree,
         })
-    }
-
-    fn decode_row(&self, data_types: &[DataType]) -> StreamExecutorResult<OwnedRow> {
-        let row = self.compacted_row.deserialize(data_types)?;
-        Ok(row)
     }
 }
