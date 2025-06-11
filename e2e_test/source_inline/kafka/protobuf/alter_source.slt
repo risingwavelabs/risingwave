@@ -40,12 +40,12 @@ FORMAT PLAIN ENCODE PROTOBUF(
 query T
 SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 'src_user';
 ----
-CREATE SOURCE src_user (id INT, name CHARACTER VARYING, address CHARACTER VARYING, city CHARACTER VARYING, gender CHARACTER VARYING, sc STRUCT<file_name CHARACTER VARYING>) INCLUDE timestamp
+CREATE SOURCE src_user (id INT, name CHARACTER VARYING, address CHARACTER VARYING, city CHARACTER VARYING, gender CHARACTER VARYING, sc STRUCT<file_name CHARACTER VARYING>) INCLUDE timestamp AS timestamp
 
 query T
 SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 'src_user_gen';
 ----
-CREATE SOURCE src_user_gen (id INT, name CHARACTER VARYING, address CHARACTER VARYING, city CHARACTER VARYING, gender CHARACTER VARYING, sc STRUCT<file_name CHARACTER VARYING>, t INT AS id + 1) INCLUDE timestamp
+CREATE SOURCE src_user_gen (id INT, name CHARACTER VARYING, address CHARACTER VARYING, city CHARACTER VARYING, gender CHARACTER VARYING, sc STRUCT<file_name CHARACTER VARYING>, t INT AS id + 1) INCLUDE timestamp AS timestamp
 
 statement ok
 CREATE MATERIALIZED VIEW mv_user AS SELECT * FROM src_user;
