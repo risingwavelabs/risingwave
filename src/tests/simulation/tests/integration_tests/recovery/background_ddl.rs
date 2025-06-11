@@ -28,6 +28,7 @@ const DROP_TABLE: &str = "DROP TABLE t;";
 const SEED_TABLE_500: &str = "INSERT INTO t SELECT generate_series FROM generate_series(1, 500);";
 const SEED_TABLE_100: &str = "INSERT INTO t SELECT generate_series FROM generate_series(1, 100);";
 const SET_BACKGROUND_DDL: &str = "SET BACKGROUND_DDL=true;";
+const RESET_BACKGROUND_DDL: &str = "SET BACKGROUND_DDL=false;";
 const SET_RATE_LIMIT_2: &str = "SET BACKFILL_RATE_LIMIT=2;";
 const SET_RATE_LIMIT_1: &str = "SET BACKFILL_RATE_LIMIT=1;";
 const RESET_RATE_LIMIT: &str = "SET BACKFILL_RATE_LIMIT=DEFAULT;";
@@ -183,24 +184,24 @@ async fn test_ddl_cancel() -> Result<()> {
 
     // Test cancel after kill cn
     kill_cn_and_wait_recover(&cluster).await;
-
     let ids = cancel_stream_jobs(&mut session).await?;
     assert_eq!(ids.len(), 1);
+    tracing::info!("tested cancel background_ddl after recovery");
 
     sleep(Duration::from_secs(2)).await;
 
     create_mv(&mut session).await?;
 
-    // Test cancel after kill meta
+    // Test cancel after kill random nodes
     kill_random_and_wait_recover(&cluster).await;
-
     let ids = cancel_stream_jobs(&mut session).await?;
     assert_eq!(ids.len(), 1);
+    tracing::info!("tested cancel background_ddl after recovery from random node kill");
 
-    // Test cancel by sigkill
-
+    // Test cancel by sigkill (only works for foreground mv)
     let mut session2 = cluster.start_session();
     tokio::spawn(async move {
+        session2.run(RESET_BACKGROUND_DDL).await.unwrap();
         session2.run(SET_RATE_LIMIT_1).await.unwrap();
         let _ = create_mv(&mut session2).await;
     });
@@ -212,6 +213,7 @@ async fn test_ddl_cancel() -> Result<()> {
             .lines()
             .find(|line| line.to_lowercase().contains("mv1"))
         {
+            tracing::info!("found mv1 process: {}", line);
             let mut splits = line.split_whitespace();
             let _worker_id = splits.next().unwrap();
             let pid = splits.next().unwrap();
@@ -231,7 +233,7 @@ async fn test_ddl_cancel() -> Result<()> {
         let result = create_mv(&mut session).await;
         match result {
             Ok(_) => break,
-            Err(e) if e.to_string().contains("The table is being created") => {
+            Err(e) if e.to_string().contains("under creation") => {
                 tracing::info!("create mv failed, retrying: {}", e);
             }
             Err(e) => {

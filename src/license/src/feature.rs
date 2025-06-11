@@ -52,14 +52,14 @@ macro_rules! for_all_features {
             { BigQuerySink,              Paid,       "Delivering data to BigQuery." },
             { ClickHouseSharedEngine,    Paid,       "Delivering data to Shared tree on clickhouse cloud"},
             { SecretManagement,          Paid,       "Secret management." },
-            { CdcTableSchemaMap,         Paid,       "Automatically map upstream schema to CDC Table."},
             { SqlServerSink,             Paid,       "Sink data from RisingWave to SQL Server." },
             { SqlServerCdcSource,        Paid,       "CDC source connector for Sql Server." },
             { CdcAutoSchemaChange,       Paid,       "Auto replicate upstream DDL to CDC Table." },
             { IcebergSinkWithGlue,       Paid,       "Delivering data to Iceberg with Glue catalog." },
             { ElasticDiskCache,          Paid,       "Disk cache and refilling to boost performance and reduce object store access cost." },
             { ResourceGroup,             Paid,       "Resource group to isolate workload and failure." },
-            { DatabaseFailureIsolation,  Paid,       "Failure isolation between databases" },
+            { DatabaseFailureIsolation,  Paid,       "Failure isolation between databases." },
+            { IcebergCompaction,         Paid,       "Auto iceberg compaction." },
         }
     };
 }

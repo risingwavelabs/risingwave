@@ -7,11 +7,16 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[features]
+test = []
+failpoints = ["fail/failpoints"]
+
 [dependencies]
 anyhow = "1"
 arc-swap = { workspace = true }
 assert_matches = "1"
 async-trait = "0.1"
+await-tree = { workspace = true }
 base64-url = { version = "3.0.0" }
 bytes = { version = "1", features = ["serde"] }
 chrono = { workspace = true }
@@ -97,10 +102,6 @@ risingwave_hummock_sdk = { workspace = true, features = ["test"] }
 risingwave_test_runner = { workspace = true }
 tempfile = "3"
 tracing-subscriber = "0.3"
-
-[features]
-test = []
-failpoints = ["fail/failpoints"]
 
 [lints]
 workspace = true

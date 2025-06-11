@@ -27,7 +27,7 @@ download_and_prepare_rw "$profile" source
 
 prepare_pg() {
   # set up PG sink destination
-  export PGPASSWORD=postgres
+  export PGPASSWORD='post\tgres'
   psql -h db -U postgres -c "CREATE ROLE test LOGIN SUPERUSER PASSWORD 'connector';" || true
   dropdb -h db -U postgres test || true
   createdb -h db -U postgres test
@@ -63,7 +63,7 @@ echo "--- test sink: jdbc:postgres switch to postgres native"
 # check sink destination postgres
 risedev slt './e2e_test/sink/remote/jdbc.load.slt'
 sleep 1
-sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt' --label 'pg-native'
+SLT_PASSWORD=$PGPASSWORD sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt' --label 'pg-native'
 sleep 1
 
 echo "--- killing risingwave cluster: ci-1cn-1fe-switch-to-pg-native"
@@ -75,7 +75,7 @@ echo "--- starting risingwave cluster"
 risedev ci-start ci-inline-source-test
 
 echo "--- check connectivity for postgres"
-PGPASSWORD=postgres psql -h db -U postgres -d postgres -p 5432 -c "SELECT 1;"
+PGPASSWORD='post\tgres' psql -h db -U postgres -d postgres -p 5432 -c "SELECT 1;"
 
 echo "--- dumping risedev-env"
 echo "risedev-env:"
@@ -104,7 +104,7 @@ echo "--- testing remote sinks"
 # check sink destination postgres
 risedev slt './e2e_test/sink/remote/jdbc.load.slt'
 sleep 1
-sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt' --label 'jdbc'
+SLT_PASSWORD=$PGPASSWORD sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt' --label 'jdbc'
 sleep 1
 
 # check sink destination mysql using shell

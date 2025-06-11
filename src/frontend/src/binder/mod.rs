@@ -614,6 +614,7 @@ mod tests {
                                                                 [],
                                                             ),
                                                             having: None,
+                                                            window: {},
                                                             schema: Schema {
                                                                 fields: [
                                                                     a:Int32,
@@ -687,6 +688,7 @@ mod tests {
                                                                                     [],
                                                                                 ),
                                                                                 having: None,
+                                                                                window: {},
                                                                                 schema: Schema {
                                                                                     fields: [
                                                                                         a:Int32,
@@ -729,6 +731,7 @@ mod tests {
                                                                 [],
                                                             ),
                                                             having: None,
+                                                            window: {},
                                                             schema: Schema {
                                                                 fields: [
                                                                     ?column?:Int32,
@@ -752,6 +755,7 @@ mod tests {
                                 [],
                             ),
                             having: None,
+                            window: {},
                             schema: Schema {
                                 fields: [
                                     a:Int32,
@@ -880,6 +884,7 @@ mod tests {
                             selection: None,
                             group_by: [],
                             having: None,
+                            window: [],
                         },
                     ),
                     order_by: [],
@@ -1018,6 +1023,7 @@ mod tests {
                                 [],
                             ),
                             having: None,
+                            window: {},
                             schema: Schema {
                                 fields: [
                                     approx_percentile:Float64,
