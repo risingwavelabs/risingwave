@@ -30,7 +30,7 @@ impl ColumnDescTestExt for ColumnDesc {
             name: name.to_owned(),
             additional_column: Some(AdditionalColumn { column_type: None }),
             version: ColumnDescVersion::LATEST as _,
-            nullable: true,
+            nullable: Some(true),
             ..Default::default()
         }
     }
