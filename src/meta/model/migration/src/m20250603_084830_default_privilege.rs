@@ -18,7 +18,7 @@ impl MigrationTrait for Migration {
                     .col(integer(UserDefaultPrivilege::DatabaseId))
                     .col(integer_null(UserDefaultPrivilege::SchemaId))
                     .col(string(UserDefaultPrivilege::ObjectType))
-                    .col(boolean_null(UserDefaultPrivilege::ForMaterializedView))
+                    .col(boolean(UserDefaultPrivilege::ForMaterializedView))
                     .col(integer(UserDefaultPrivilege::UserId))
                     .col(integer(UserDefaultPrivilege::Grantee))
                     .col(integer(UserDefaultPrivilege::GrantedBy))

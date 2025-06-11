@@ -20,8 +20,8 @@ use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{Object, User, UserDefaultPrivilege, UserPrivilege};
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::{
-    AuthInfo, DatabaseId, PrivilegeId, SchemaId, UserId, object, user, user_default_privilege,
-    user_privilege,
+    AuthInfo, DatabaseId, DefaultPrivilegeId, PrivilegeId, SchemaId, UserId, object, user,
+    user_default_privilege, user_privilege,
 };
 use risingwave_pb::common::PbObjectType;
 use risingwave_pb::meta::subscribe_response::{
@@ -321,7 +321,7 @@ impl CatalogController {
                 user_privilege::Column::GrantedBy,
             ]);
             if *privilege.with_grant_option.as_ref() {
-                on_conflict.update_columns([user_privilege::Column::WithGrantOption]);
+                on_conflict.update_column(user_privilege::Column::WithGrantOption);
             } else {
                 // Workaround to support MYSQL for `DO NOTHING`.
                 on_conflict.update_column(user_privilege::Column::UserId);
@@ -545,76 +545,132 @@ impl CatalogController {
         for grantee in &grantees {
             ensure_user_id(*grantee, &txn).await?;
         }
-        if schema_ids.is_empty() {
-            assert_eq!(
-                object_type,
-                PbObjectType::Schema,
-                "object type must be Schema when schema_ids is empty"
+        if object_type == PbObjectType::Schema {
+            assert!(
+                schema_ids.is_empty(),
+                "schema_ids should be empty when object_type is Schema"
             );
-        }
-        let for_mview_obj = match object_type {
-            PbObjectType::Table => Some(false),
-            PbObjectType::Mview => Some(true),
-            _ => None,
-        };
 
-        let mut default_privileges = vec![];
-        for user_id in user_ids {
-            for grantee in &grantees {
-                for action in &actions {
-                    if schema_ids.is_empty() {
-                        default_privileges.push(user_default_privilege::ActiveModel {
-                            id: Default::default(),
-                            database_id: Set(database_id),
-                            schema_id: Set(None),
-                            object_type: Set(object_type.into()),
-                            for_materialized_view: Set(for_mview_obj),
-                            user_id: Set(user_id),
-                            grantee: Set(*grantee),
-                            granted_by: Set(grantor as _),
-                            action: Set((*action).into()),
-                            with_grant_option: Set(with_grant_option),
-                        });
-                        continue;
-                    }
-                    for schema_id in &schema_ids {
-                        default_privileges.push(user_default_privilege::ActiveModel {
-                            id: Default::default(),
-                            database_id: Set(database_id),
-                            schema_id: Set(Some(*schema_id)),
-                            object_type: Set(object_type.into()),
-                            for_materialized_view: Set(for_mview_obj),
-                            user_id: Set(user_id),
-                            grantee: Set(*grantee),
-                            granted_by: Set(grantor as _),
-                            action: Set((*action).into()),
-                            with_grant_option: Set(with_grant_option),
-                        });
+            // Note that the UNIQUE constraint does not treat NULL values as equal, we cannot rely on conflict check
+            // to update it and have to check existing default privileges manually.
+            let actions = actions.iter().map(|&a| Action::from(a)).collect_vec();
+            let existing_default_privileges: HashMap<_, _> = UserDefaultPrivilege::find()
+                .select_only()
+                .columns([
+                    user_default_privilege::Column::Id,
+                    user_default_privilege::Column::UserId,
+                    user_default_privilege::Column::Grantee,
+                    user_default_privilege::Column::Action,
+                ])
+                .filter(
+                    user_default_privilege::Column::DatabaseId
+                        .eq(database_id)
+                        .and(user_default_privilege::Column::ObjectType.eq(ObjectType::Schema))
+                        .and(user_default_privilege::Column::UserId.is_in(user_ids.clone()))
+                        .and(user_default_privilege::Column::Grantee.is_in(grantees.clone()))
+                        .and(user_default_privilege::Column::Action.is_in(actions.clone())),
+                )
+                .into_tuple::<(DefaultPrivilegeId, UserId, UserId, Action)>()
+                .all(&txn)
+                .await?
+                .into_iter()
+                .map(|(id, user_id, grantee, action)| ((user_id, grantee, action), id))
+                .collect();
+
+            for user_id in user_ids {
+                for grantee in &grantees {
+                    for action in &actions {
+                        if let Some(existing_id) =
+                            existing_default_privileges.get(&(user_id, *grantee, *action))
+                            && with_grant_option
+                        {
+                            // If the default privilege already exists, we should update the grant option.
+                            UserDefaultPrivilege::update(user_default_privilege::ActiveModel {
+                                id: Set(*existing_id),
+                                with_grant_option: Set(true),
+                                granted_by: Set(grantor as _),
+                                ..Default::default()
+                            })
+                            .exec(&txn)
+                            .await?;
+                        } else {
+                            UserDefaultPrivilege::insert(user_default_privilege::ActiveModel {
+                                id: Default::default(),
+                                database_id: Set(database_id),
+                                schema_id: Set(None),
+                                object_type: Set(ObjectType::Schema),
+                                for_materialized_view: Set(false),
+                                user_id: Set(user_id),
+                                grantee: Set(*grantee),
+                                granted_by: Set(grantor as _),
+                                action: Set(*action),
+                                with_grant_option: Set(with_grant_option),
+                            })
+                            .exec(&txn)
+                            .await?;
+                        }
                     }
                 }
             }
-        }
-
-        let mut on_conflict = OnConflict::columns([
-            user_default_privilege::Column::UserId,
-            user_default_privilege::Column::DatabaseId,
-            user_default_privilege::Column::SchemaId,
-            user_default_privilege::Column::ObjectType,
-            user_default_privilege::Column::ForMaterializedView,
-            user_default_privilege::Column::Grantee,
-            user_default_privilege::Column::Action,
-        ]);
-        if with_grant_option {
-            on_conflict.update_column(user_default_privilege::Column::WithGrantOption);
         } else {
-            // Workaround to support MYSQL for `DO NOTHING`.
-            on_conflict.update_column(user_default_privilege::Column::UserId);
+            let mut default_privileges = vec![];
+            for user_id in user_ids {
+                for grantee in &grantees {
+                    for action in &actions {
+                        if schema_ids.is_empty() {
+                            default_privileges.push(user_default_privilege::ActiveModel {
+                                id: Default::default(),
+                                database_id: Set(database_id),
+                                schema_id: Set(None),
+                                object_type: Set(object_type.into()),
+                                for_materialized_view: Set(object_type == PbObjectType::Mview),
+                                user_id: Set(user_id),
+                                grantee: Set(*grantee),
+                                granted_by: Set(grantor as _),
+                                action: Set((*action).into()),
+                                with_grant_option: Set(with_grant_option),
+                            });
+                            continue;
+                        }
+                        for schema_id in &schema_ids {
+                            default_privileges.push(user_default_privilege::ActiveModel {
+                                id: Default::default(),
+                                database_id: Set(database_id),
+                                schema_id: Set(Some(*schema_id)),
+                                object_type: Set(object_type.into()),
+                                for_materialized_view: Set(object_type == PbObjectType::Mview),
+                                user_id: Set(user_id),
+                                grantee: Set(*grantee),
+                                granted_by: Set(grantor as _),
+                                action: Set((*action).into()),
+                                with_grant_option: Set(with_grant_option),
+                            });
+                        }
+                    }
+                }
+            }
+
+            let mut on_conflict = OnConflict::columns([
+                user_default_privilege::Column::UserId,
+                user_default_privilege::Column::DatabaseId,
+                user_default_privilege::Column::SchemaId,
+                user_default_privilege::Column::ObjectType,
+                user_default_privilege::Column::ForMaterializedView,
+                user_default_privilege::Column::Grantee,
+                user_default_privilege::Column::Action,
+            ]);
+            if with_grant_option {
+                on_conflict.update_column(user_default_privilege::Column::WithGrantOption);
+            } else {
+                // Workaround to support MYSQL for `DO NOTHING`.
+                on_conflict.update_column(user_default_privilege::Column::UserId);
+            }
+            UserDefaultPrivilege::insert_many(default_privileges)
+                .on_conflict(on_conflict)
+                .do_nothing()
+                .exec(&txn)
+                .await?;
         }
-        UserDefaultPrivilege::insert_many(default_privileges)
-            .on_conflict(on_conflict)
-            .do_nothing()
-            .exec(&txn)
-            .await?;
 
         txn.commit().await?;
         Ok(())

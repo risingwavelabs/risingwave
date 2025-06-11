@@ -982,7 +982,7 @@ impl CatalogController {
 
         // notify users about the default privileges
         if !updated_user_info.is_empty() {
-            self.notify_users_update(updated_user_info).await;
+            version = self.notify_users_update(updated_user_info).await;
         }
 
         if let Some((objects, fragment_mapping)) = replace_table_mapping_update {

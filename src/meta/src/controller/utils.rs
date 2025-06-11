@@ -956,7 +956,7 @@ where
         user_default_privilege::Column::ForMaterializedView
             .eq(table_type == TableType::MaterializedView)
     } else {
-        user_default_privilege::Column::ForMaterializedView.is_null()
+        user_default_privilege::Column::ForMaterializedView.eq(false)
     };
     let schema_filter = if let Some(schema_id) = &object.schema_id {
         user_default_privilege::Column::SchemaId.eq(*schema_id)

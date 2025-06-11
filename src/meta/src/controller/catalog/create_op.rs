@@ -103,7 +103,7 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        let version = self
+        let mut version = self
             .notify_frontend(
                 NotificationOperation::Add,
                 NotificationInfo::Schema(ObjectModel(schema, schema_obj).into()),
@@ -112,7 +112,7 @@ impl CatalogController {
 
         // notify default privileges for schemas
         if !updated_user_info.is_empty() {
-            self.notify_users_update(updated_user_info).await;
+            version = self.notify_users_update(updated_user_info).await;
         }
 
         Ok(version)
@@ -207,16 +207,16 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        let version = self
+        let mut version = self
             .notify_frontend_relation_info(
                 NotificationOperation::Add,
                 PbObjectInfo::Source(pb_source),
             )
             .await;
 
-        // notify default privileges for schemas
+        // notify default privileges for source
         if !updated_user_info.is_empty() {
-            self.notify_users_update(updated_user_info).await;
+            version = self.notify_users_update(updated_user_info).await;
         }
 
         Ok((source_id, version))
@@ -251,7 +251,7 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        let version = self
+        let mut version = self
             .notify_frontend(
                 NotificationOperation::Add,
                 NotificationInfo::Function(pb_function),
@@ -260,7 +260,7 @@ impl CatalogController {
 
         // notify default privileges for functions
         if !updated_user_info.is_empty() {
-            self.notify_users_update(updated_user_info).await;
+            version = self.notify_users_update(updated_user_info).await;
         }
 
         Ok(version)
@@ -333,7 +333,7 @@ impl CatalogController {
             );
         }
 
-        let version = self
+        let mut version = self
             .notify_frontend(
                 NotificationOperation::Add,
                 NotificationInfo::Connection(pb_connection),
@@ -342,7 +342,7 @@ impl CatalogController {
 
         // notify default privileges for connections
         if !updated_user_info.is_empty() {
-            self.notify_users_update(updated_user_info).await;
+            version = self.notify_users_update(updated_user_info).await;
         }
 
         Ok(version)
@@ -387,7 +387,7 @@ impl CatalogController {
             .notification_manager()
             .notify_compute_without_version(Operation::Add, Info::Secret(secret_plain.clone()));
 
-        let version = self
+        let mut version = self
             .notify_frontend(
                 NotificationOperation::Add,
                 NotificationInfo::Secret(secret_plain),
@@ -396,7 +396,7 @@ impl CatalogController {
 
         // notify default privileges for secrets
         if !updated_user_info.is_empty() {
-            self.notify_users_update(updated_user_info).await;
+            version = self.notify_users_update(updated_user_info).await;
         }
 
         Ok(version)
@@ -444,13 +444,13 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        let version = self
+        let mut version = self
             .notify_frontend_relation_info(NotificationOperation::Add, PbObjectInfo::View(pb_view))
             .await;
 
         // notify default privileges for views
         if !updated_user_info.is_empty() {
-            self.notify_users_update(updated_user_info).await;
+            version = self.notify_users_update(updated_user_info).await;
         }
 
         Ok(version)

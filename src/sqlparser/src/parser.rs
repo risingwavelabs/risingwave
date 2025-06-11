@@ -5587,7 +5587,7 @@ impl Parser<'_> {
             PrivilegeObjectType::Sources
         } else if self.parse_keyword(Keyword::SINKS) {
             PrivilegeObjectType::Sinks
-        } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
+        } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEWS]) {
             PrivilegeObjectType::Mviews
         } else if self.parse_keyword(Keyword::VIEWS) {
             PrivilegeObjectType::Views

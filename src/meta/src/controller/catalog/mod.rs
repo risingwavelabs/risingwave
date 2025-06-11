@@ -252,7 +252,7 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("subscription", job_id))?;
 
-        let version = self
+        let mut version = self
             .notify_frontend(
                 NotificationOperation::Add,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
@@ -278,7 +278,7 @@ impl CatalogController {
 
         if !updated_user_ids.is_empty() {
             let updated_user_infos = list_user_info_by_ids(updated_user_ids, &inner.db).await?;
-            self.notify_users_update(updated_user_infos).await;
+            version = self.notify_users_update(updated_user_infos).await;
         }
 
         Ok(version)
