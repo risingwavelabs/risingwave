@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use super::*;
 use crate::controller::utils::{get_database_resource_group, get_existing_job_resource_group};
 
