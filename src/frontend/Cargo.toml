@@ -102,15 +102,15 @@ tracing = "0.1"
 url = "2.5.0"
 uuid = "1"
 
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../workspace-hack" }
+
 [dev-dependencies]
 assert_matches = "1"
 expect-test = "1"
 risingwave_batch_executors = { workspace = true }
 risingwave_expr_impl = { workspace = true }
 tempfile = "3"
-
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../workspace-hack" }
 
 [lints]
 workspace = true

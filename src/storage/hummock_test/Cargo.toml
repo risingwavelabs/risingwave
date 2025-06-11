@@ -35,6 +35,9 @@ risingwave_storage = { workspace = true, features = ["test"] }
 serial_test = { version = "3.2", optional = true }
 tokio = { version = "0.2", package = "madsim-tokio" }
 
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../../workspace-hack" }
+
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_futures"] }
 expect-test = "1"
@@ -47,9 +50,6 @@ futures-async-stream = "0.2.9"
 risingwave_hummock_sdk = { workspace = true }
 risingwave_test_runner = { workspace = true }
 sync-point = { path = "../../utils/sync-point" }
-
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../../workspace-hack" }
 
 [[bench]]
 name = "bench_hummock_iter"

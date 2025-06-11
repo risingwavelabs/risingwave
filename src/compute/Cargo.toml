@@ -54,6 +54,9 @@ tonic = { workspace = true }
 tower = { version = "0.5", features = ["util", "load-shed"] }
 tracing = "0.1"
 
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../workspace-hack" }
+
 [dev-dependencies]
 futures-async-stream = { workspace = true }
 rand = { workspace = true }
@@ -61,9 +64,6 @@ risingwave_common_rate_limit = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 tempfile = "3"
 tokio-retry = "0.3"
-
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../workspace-hack" }
 
 [lints]
 workspace = true

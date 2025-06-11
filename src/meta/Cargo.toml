@@ -84,15 +84,6 @@ tower = { version = "0.5", features = ["util", "load-shed"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 
-[dev-dependencies]
-assert_matches = "1"
-expect-test = "1.5"
-rand = { workspace = true }
-risingwave_hummock_sdk = { workspace = true, features = ["test"] }
-risingwave_test_runner = { workspace = true }
-tempfile = "3"
-tracing-subscriber = "0.3"
-
 [target.'cfg(not(madsim))'.dependencies]
 axum = { workspace = true }
 tower-http = { version = "0.6", features = [
@@ -102,6 +93,15 @@ tower-http = { version = "0.6", features = [
     "compression-gzip",
 ] }
 workspace-hack = { path = "../workspace-hack" }
+
+[dev-dependencies]
+assert_matches = "1"
+expect-test = "1.5"
+rand = { workspace = true }
+risingwave_hummock_sdk = { workspace = true, features = ["test"] }
+risingwave_test_runner = { workspace = true }
+tempfile = "3"
+tracing-subscriber = "0.3"
 
 [lints]
 workspace = true

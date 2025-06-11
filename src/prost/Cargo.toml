@@ -18,6 +18,9 @@ strum = { version = "0.27", features = ["derive"] }
 thiserror = "2"
 tonic = { workspace = true }
 
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../workspace-hack" }
+
 [dev-dependencies]
 static_assertions = "1"
 
@@ -27,9 +30,6 @@ pbjson-build = "0.7"
 prost-build = { workspace = true }
 tonic-build = { workspace = true }
 walkdir = "2"
-
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../workspace-hack" }
 
 [lints]
 workspace = true

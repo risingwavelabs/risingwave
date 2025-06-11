@@ -121,16 +121,6 @@ twox-hash = "2"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 
-[dev-dependencies]
-coarsetime = "0.1"
-criterion = { workspace = true }
-expect-test = "1"
-more-asserts = "0.3"
-pretty_assertions = "1"
-rand = { workspace = true }
-rusty-fork = "0.3"
-tempfile = "3"
-
 [target.'cfg(not(madsim))'.dependencies]
 http-body = "0.4.5"
 tower-layer = "0.3.3"
@@ -145,6 +135,16 @@ procfs = { version = "0.17", default-features = false }
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
 libc = "0.2"
 mach2 = "0.4"
+
+[dev-dependencies]
+coarsetime = "0.1"
+criterion = { workspace = true }
+expect-test = "1"
+more-asserts = "0.3"
+pretty_assertions = "1"
+rand = { workspace = true }
+rusty-fork = "0.3"
+tempfile = "3"
 
 [[bench]]
 name = "bench_encoding"

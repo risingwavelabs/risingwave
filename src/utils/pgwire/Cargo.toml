@@ -35,12 +35,12 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-openssl = "0.6.3"
 tracing = "0.1"
 
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../../workspace-hack" }
+
 [dev-dependencies]
 tempfile = "3"
 tokio-postgres = "0.7"
-
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../../workspace-hack" }
 
 [lints]
 workspace = true

@@ -77,6 +77,9 @@ tonic = { workspace = true }
 tracing = "0.1"
 url = "2"
 
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../workspace-hack" }
+
 [dev-dependencies]
 assert_matches = "1"
 criterion = { workspace = true, features = ["async_tokio", "async"] }
@@ -90,9 +93,6 @@ risingwave_hummock_test = { path = "../storage/hummock_test", features = [
 serde_yaml = "0.9"
 tracing-subscriber = "0.3.17"
 tracing-test = "0.2"
-
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../workspace-hack" }
 
 [[bench]]
 name = "stream_hash_agg"

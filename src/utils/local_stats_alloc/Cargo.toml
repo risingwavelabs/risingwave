@@ -8,10 +8,10 @@ license = { workspace = true }
 repository = { workspace = true }
 description = "Local allocator with statistics"
 
-[dev-dependencies]
-
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
+
+[dev-dependencies]
 
 [lints]
 workspace = true
