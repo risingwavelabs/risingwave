@@ -357,28 +357,28 @@ impl std::fmt::Display for Command {
             } => {
                 write!(
                     f,
-                    "DropStreamingJobs({})",
+                    "DropStreamingJobs: {}",
                     table_fragments_ids.iter().sorted().join(", ")
                 )
             }
             Command::CreateStreamingJob { info, .. } => {
-                write!(f, "CreateStreamingJob({})", info.streaming_job)
+                write!(f, "CreateStreamingJob: {}", info.streaming_job)
             }
             Command::MergeSnapshotBackfillStreamingJobs(_) => {
                 write!(f, "MergeSnapshotBackfillStreamingJobs")
             }
             Command::RescheduleFragment { .. } => write!(f, "RescheduleFragment"),
             Command::ReplaceStreamJob(plan) => {
-                write!(f, "ReplaceStreamJob({})", plan.streaming_job)
+                write!(f, "ReplaceStreamJob: {}", plan.streaming_job)
             }
             Command::SourceChangeSplit(_) => write!(f, "SourceChangeSplit"),
             Command::Throttle(_) => write!(f, "Throttle"),
             Command::CreateSubscription {
                 subscription_id, ..
-            } => write!(f, "CreateSubscription({subscription_id})"),
+            } => write!(f, "CreateSubscription: {subscription_id}"),
             Command::DropSubscription {
                 subscription_id, ..
-            } => write!(f, "DropSubscription({subscription_id})"),
+            } => write!(f, "DropSubscription: {subscription_id}"),
             Command::ConnectorPropsChange(_) => write!(f, "ConnectorPropsChange"),
             Command::StartFragmentBackfill { .. } => write!(f, "StartFragmentBackfill"),
         }
