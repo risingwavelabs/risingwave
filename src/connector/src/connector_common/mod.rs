@@ -20,7 +20,7 @@ pub use mqtt_common::{MqttCommon, QualityOfService as MqttQualityOfService};
 mod common;
 pub use common::{
     AwsAuthProps, AwsPrivateLinkItem, KafkaCommon, KafkaConnectionProps, KafkaPrivateLinkCommon,
-    KinesisCommon, KinesisSdkOptions, MongodbCommon, NatsCommon, PulsarCommon, PulsarOauthCommon,
+    KinesisCommon, MongodbCommon, NatsCommon, PulsarCommon, PulsarOauthCommon,
     RdKafkaPropertiesCommon, PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY,
 };
 mod connection;

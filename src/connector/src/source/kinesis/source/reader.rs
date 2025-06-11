@@ -346,7 +346,7 @@ mod tests {
     use futures::{pin_mut, StreamExt};
 
     use super::*;
-    use crate::connector_common::{KinesisCommon, KinesisSdkOptions};
+    use crate::connector_common::KinesisCommon;
     use crate::source::kinesis::KinesisReaderConfig;
     use crate::source::SourceContext;
 
@@ -363,7 +363,13 @@ mod tests {
                 endpoint: None,
                 session_token: None,
                 assume_role_external_id: None,
-                sdk_options: KinesisSdkOptions::default(),
+                sdk_connect_timeout_ms: 1000,
+                sdk_read_timeout_ms: 1000,
+                sdk_operation_timeout_ms: 1000,
+                sdk_operation_attempt_timeout_ms: 1000,
+                sdk_max_retry_limit: 3,
+                sdk_init_backoff_ms: 100,
+                sdk_max_backoff_ms: 1000,
             },
             reader_config: KinesisReaderConfig::default(),
             scan_startup_mode: None,
