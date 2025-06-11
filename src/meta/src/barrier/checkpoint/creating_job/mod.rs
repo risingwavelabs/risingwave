@@ -504,7 +504,7 @@ impl CreatingStreamingJobControl {
                 None,
             )?;
         } else {
-            for barrier_to_inject in self.status.on_new_upstream_epoch(barrier_info) {
+            for (barrier_to_inject, mutation) in self.status.on_new_upstream_epoch(barrier_info) {
                 Self::inject_barrier(
                     self.database_id,
                     self.job_id,
@@ -514,7 +514,7 @@ impl CreatingStreamingJobControl {
                     Some(&self.graph_info),
                     barrier_to_inject,
                     None,
-                    None,
+                    mutation,
                 )?;
             }
         }
