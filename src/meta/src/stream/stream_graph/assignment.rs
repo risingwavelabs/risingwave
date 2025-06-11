@@ -1847,8 +1847,11 @@ mod affinity_tests_horizon_scaling {
         let salt = 123u8;
 
         for case in &test_cases {
-            for (cm, bb) in modes {
-                println!("--- Running Test: {} with {:?}/{:?} ---", case.name, cm, bb);
+            for (capacity_mode, balanced_by) in modes {
+                println!(
+                    "--- Running Test: {} with {:?}/{:?} ---",
+                    case.name, capacity_mode, balanced_by
+                );
 
                 let initial_workers: BTreeMap<_, _> = (1..=case.initial_size as u8)
                     .map(|i| (i, NonZeroUsize::new(5).unwrap()))
@@ -1857,12 +1860,26 @@ mod affinity_tests_horizon_scaling {
                     .map(|i| (i, NonZeroUsize::new(5).unwrap()))
                     .collect();
 
-                let initial_assignment =
-                    assign_hierarchical(&initial_workers, &actors, &vnodes, salt, cm, bb).unwrap();
+                let initial_assignment = assign_hierarchical(
+                    &initial_workers,
+                    &actors,
+                    &vnodes,
+                    salt,
+                    capacity_mode,
+                    balanced_by,
+                )
+                .unwrap();
                 let initial_map = get_vnode_to_worker_map(&initial_assignment);
 
-                let new_assignment =
-                    assign_hierarchical(&final_workers, &actors, &vnodes, salt, cm, bb).unwrap();
+                let new_assignment = assign_hierarchical(
+                    &final_workers,
+                    &actors,
+                    &vnodes,
+                    salt,
+                    capacity_mode,
+                    balanced_by,
+                )
+                .unwrap();
                 let new_map = get_vnode_to_worker_map(&new_assignment);
 
                 let analysis = analyze_cluster_change(
