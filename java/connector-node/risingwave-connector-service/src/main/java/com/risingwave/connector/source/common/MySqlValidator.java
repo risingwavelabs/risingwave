@@ -300,6 +300,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 return val == Data.DataType.TypeName.DOUBLE_VALUE;
             case "decimal":
                 return val == Data.DataType.TypeName.DECIMAL_VALUE;
+            case "char":
             case "varchar":
                 return val == Data.DataType.TypeName.VARCHAR_VALUE;
             case "date":
