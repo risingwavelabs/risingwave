@@ -16,6 +16,8 @@ describe('PgwireTest', () => {
           values: ['1'],
         });
         expect(res.rowCount).toBe(1);
+        expect(res.rows.length).toBe(1);
+        expect(res.rows[0].number).toBe(1);
       } finally {
         await conn.release();
       }
@@ -41,6 +43,7 @@ describe('PgwireTest', () => {
         };
         const res = await conn.query(query);
         expect(res.rowCount).toBe(null);
+        expect(res.rows.length).toBe(0);
       } finally {
         await conn.release();
       }

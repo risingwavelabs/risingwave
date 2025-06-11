@@ -219,7 +219,7 @@ impl LocalQueryExecution {
     ///
     /// We remark that the boundary to determine which part should be executed on the frontend and
     /// which part should be executed on the backend is `the first exchange operator` when looking
-    /// from the the root of the plan to the leaves. The first exchange operator contains
+    /// from the root of the plan to the leaves. The first exchange operator contains
     /// the pushed-down plan fragment.
     fn create_plan_fragment(&self) -> SchedulerResult<PlanFragment> {
         let next_executor_id = Arc::new(AtomicU32::new(0));

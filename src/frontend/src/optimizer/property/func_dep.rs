@@ -256,10 +256,10 @@ impl FunctionalDependencySet {
         closure
     }
 
-    /// Return `true` if the dependency determinant -> dependant exists.
+    /// Return `true` if the dependency determinant -> dependent exists.
     /// O(d), where the dominant cost is from `Self::get_closure`, which has O(d) complexity.
-    pub fn is_determined_by(&self, determinant: &FixedBitSet, dependant: &FixedBitSet) -> bool {
-        self.get_closure(determinant).is_superset(dependant)
+    pub fn is_determined_by(&self, determinant: &FixedBitSet, dependent: &FixedBitSet) -> bool {
+        self.get_closure(determinant).is_superset(dependent)
     }
 
     /// This just checks if the columns specified by the `columns` bitset

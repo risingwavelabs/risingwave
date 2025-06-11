@@ -211,7 +211,7 @@ pub struct OpenDalSinkWriter {
     row_encoder: JsonEncoder,
     engine_type: EngineType,
     pub(crate) batching_strategy: BatchingStrategy,
-    current_bached_row_num: usize,
+    current_batched_row_num: usize,
     created_time: SystemTime,
 }
 
@@ -236,7 +236,7 @@ impl OpenDalSinkWriter {
     /// This method writes a chunk.
     pub async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         if self.sink_writer.is_none() {
-            assert_eq!(self.current_bached_row_num, 0);
+            assert_eq!(self.current_batched_row_num, 0);
             self.create_sink_writer().await?;
         };
         self.append_only(chunk).await?;
@@ -265,7 +265,7 @@ impl OpenDalSinkWriter {
                     w.close().await?;
                 }
             };
-            self.current_bached_row_num = 0;
+            self.current_batched_row_num = 0;
             return Ok(true);
         }
         Ok(false)
@@ -285,7 +285,7 @@ impl OpenDalSinkWriter {
     /// Method for judging whether batch condiction is met.
     fn can_commit(&self) -> bool {
         self.duration_seconds_since_writer_created() >= self.batching_strategy.rollover_seconds
-            || self.current_bached_row_num >= self.batching_strategy.max_row_count
+            || self.current_batched_row_num >= self.batching_strategy.max_row_count
     }
 
     fn path_partition_prefix(&self, duration: &Duration) -> String {
@@ -326,7 +326,7 @@ impl OpenDalSinkWriter {
                     IcebergArrowConvert.to_record_batch(self.schema.clone(), chunk.data_chunk())?;
                 let batch_row_nums = batch.num_rows();
                 w.write(&batch).await?;
-                self.current_bached_row_num += batch_row_nums;
+                self.current_batched_row_num += batch_row_nums;
             }
             FileWriterEnum::FileWriter(w) => {
                 let mut chunk_buf = BytesMut::new();
@@ -344,7 +344,7 @@ impl OpenDalSinkWriter {
                     .unwrap(); // write to a `BytesMut` should never fail
                 }
                 w.write(chunk_buf.freeze()).await?;
-                self.current_bached_row_num += batch_row_nums;
+                self.current_batched_row_num += batch_row_nums;
             }
         }
         Ok(())
@@ -383,7 +383,7 @@ impl OpenDalSinkWriter {
             row_encoder,
             engine_type,
             batching_strategy,
-            current_bached_row_num: 0,
+            current_batched_row_num: 0,
             created_time: SystemTime::now(),
         })
     }
@@ -450,7 +450,7 @@ impl OpenDalSinkWriter {
                 self.sink_writer = Some(FileWriterEnum::FileWriter(object_writer));
             }
         }
-        self.current_bached_row_num = 0;
+        self.current_batched_row_num = 0;
 
         self.created_time = SystemTime::now();
 
