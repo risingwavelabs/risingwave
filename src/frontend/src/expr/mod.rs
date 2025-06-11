@@ -402,6 +402,13 @@ impl ExprImpl {
     pub fn fold_const(&self) -> RwResult<Datum> {
         self.try_fold_const().expect("expression is not constant")
     }
+
+    pub fn to_string_value(&self) -> RwResult<String> {
+        let Some(Ok(Some(s))) = self.try_fold_const() else {
+            bail!("exppression is not literal string")
+        };
+        Ok(s.as_utf8().to_string())
+    }
 }
 
 /// Implement helper functions which recursively checks whether an variant is included in the
