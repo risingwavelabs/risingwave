@@ -93,7 +93,7 @@ impl<S: OpendalSinkBackend> FileSink<S> {
         if let Some(assume_role) = config.common.assume_role {
             builder = builder.role_arn(&assume_role);
         }
-        // Default behavior is disable load config from environment.
+        // Default behavior is disable loading config from environment.
         if config.common.disable_config_load.unwrap_or(true) {
             builder = builder.disable_config_load();
         }

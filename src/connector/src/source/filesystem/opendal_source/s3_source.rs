@@ -52,7 +52,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
             builder = builder.role_arn(&assume_role);
         }
 
-        // Default behavior is disable load config from environment.
+        // Default behavior is disable loading config from environment.
         if s3_properties.disable_config_load.unwrap_or(true) {
             builder = builder.disable_config_load();
         }
