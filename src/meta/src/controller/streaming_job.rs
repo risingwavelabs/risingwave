@@ -60,9 +60,7 @@ use thiserror_ext::AsReport;
 use super::rename::IndexItemRewriter;
 use crate::barrier::{ReplaceStreamJobPlan, Reschedule};
 use crate::controller::ObjectModel;
-
 use crate::controller::catalog::{ActorInfo, CatalogController, DropTableConnectorContext};
-
 use crate::controller::utils::{
     PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
     check_sink_into_table_cycle, ensure_object_id, ensure_user_id, get_fragment_actor_ids,
