@@ -10,11 +10,18 @@ create materialized view m1 as
       join t2 on x.v1 = t2.v1
       join t3 on t3.v1 = t2.v1
 
-sleep 5s
 
-query I
+sleep 2s
+
+
+query ? retry 3 backoff 1s
 select
-  regexp_match(progress, '([0-9]+)\.[0-9]+%')[1]::numeric >= (5::numeric * 10::numeric / 10000::numeric)
+  case when regexp_match(progress, '([0-9]+\.[0-9]+)%')[1]::numeric
+    >= (2::numeric * 10::numeric / 1000::numeric)
+  then 't'
+  else
+    progress
+  end
 from rw_catalog.rw_fragment_backfill_progress;
 ----
 t
@@ -28,3 +35,72 @@ set streaming_parallelism=default;
 
 statement ok
 drop materialized view m1;
+
+system ok
+risedev psql -c '
+set streaming_parallelism=1;
+set backfill_rate_limit=10;
+create materialized view m1 as
+  select x.v1, x.v2
+  from
+    t x
+      join t y on x.v1 = y.v1
+      join t2 on x.v1 = t2.v1
+      join t3 on t3.v1 = t2.v1
+' >/dev/null 2>&1 &
+
+
+sleep 2s
+
+
+query ? retry 3 backoff 1s
+select
+  case when regexp_match(progress, '([0-9]+\.[0-9]+)%')[1]::numeric
+    >= (2::numeric * 10::numeric / 1000::numeric)
+  then 't'
+  else
+    progress
+  end
+from rw_catalog.rw_fragment_backfill_progress;
+----
+t
+t
+t
+t
+
+
+# We must let the mv finish, for snapshot backfill
+# seems like the drop to cancel statement doesn't work for it.
+statement ok
+alter materialized view m1 set backfill_rate_limit=default;
+
+
+statement ok
+set background_ddl=false;
+
+statement ok
+drop materialized view if exists m1_validate;
+
+statement ok
+create materialized view m1_validate as
+  select x.v1, x.v2
+  from
+    t x
+      join t y on x.v1 = y.v1
+      join t2 on x.v1 = t2.v1
+      join t3 on t3.v1 = t2.v1
+
+query I retry 3 backoff 2s
+select * from m1_validate except select * from m1
+----
+
+query I retry 3 backoff 2s
+select * from m1 except select * from m1_validate
+----
+
+
+statement ok
+drop materialized view m1;
+
+statement ok
+drop materialized view m1_validate;
