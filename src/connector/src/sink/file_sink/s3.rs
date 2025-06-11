@@ -22,6 +22,7 @@ use serde_with::serde_as;
 use with_options::WithOptions;
 
 use super::opendal_sink::{BatchingStrategy, FileSink};
+use crate::deserialize_optional_bool_from_string;
 use crate::sink::file_sink::opendal_sink::OpendalSinkBackend;
 use crate::sink::{Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError};
 use crate::source::UnknownFields;
@@ -34,8 +35,9 @@ pub struct S3Common {
     /// The directory where the sink file is located.
     #[serde(rename = "s3.path", alias = "snowflake.s3_path", default)]
     pub path: Option<String>,
-    #[serde(rename = "s3.disable.config.load", default)]
-    pub disable_config_load: Option<bool>,
+    /// Enable config load. This parameter set to true will load s3 credentials from the environment. Only allowed to be used in a self-hosted environment.
+    #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
+    pub enable_config_load: Option<bool>,
     #[serde(
         rename = "s3.credentials.access",
         alias = "snowflake.aws_access_key_id",
@@ -94,7 +96,7 @@ impl<S: OpendalSinkBackend> FileSink<S> {
             builder = builder.role_arn(&assume_role);
         }
         // Default behavior is disable loading config from environment.
-        if config.common.disable_config_load.unwrap_or(true) {
+        if !config.common.enable_config_load.unwrap_or(false) {
             builder = builder.disable_config_load();
         }
 

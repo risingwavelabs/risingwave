@@ -957,6 +957,10 @@ OpendalS3Properties:
     field_type: String
     required: false
     default: Default::default
+  - name: enable_config_load
+    field_type: bool
+    required: false
+    default: Default::default
   - name: s3.endpoint_url
     field_type: String
     required: false

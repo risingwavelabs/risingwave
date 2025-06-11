@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 pub mod enumerator;
-
 use phf::{Set, phf_set};
 use serde::Deserialize;
 
+use crate::deserialize_optional_bool_from_string;
 use crate::enforce_secret::EnforceSecret;
 use crate::source::SourceProperties;
 use crate::source::filesystem::file_common::CompressionFormat;
@@ -39,8 +39,8 @@ pub struct S3PropertiesCommon {
     pub access: Option<String>,
     #[serde(rename = "s3.credentials.secret", default)]
     pub secret: Option<String>,
-    #[serde(rename = "s3.disable.config.load", default)]
-    pub disable_config_load: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
+    pub enable_config_load: Option<bool>,
     #[serde(rename = "s3.endpoint_url")]
     pub endpoint_url: Option<String>,
     #[serde(rename = "compression_format", default = "Default::default")]
