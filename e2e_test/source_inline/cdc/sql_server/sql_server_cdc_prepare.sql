@@ -98,20 +98,15 @@ EXEC sys.sp_cdc_enable_table
   @source_name = 'test_pk_uuid',
   @role_name = NULL;
 
-CREATE TABLE test_pk_uuid (
-  id UNIQUEIDENTIFIER PRIMARY KEY,
+CREATE TABLE test_pk_binary (
+  id BINARY(50) PRIMARY KEY,
   NAME NVARCHAR(50),
 );
 
 EXEC sys.sp_cdc_enable_table
   @source_schema = 'dbo',
-  @source_name = 'test_pk_uuid',
+  @source_name = 'test_pk_binary',
   @role_name = NULL;
-
-CREATE TABLE test_pk_binary (
-  id UNIQUEIDENTIFIER PRIMARY KEY,
-  NAME NVARCHAR(50),
-);
 
 EXEC sys.sp_cdc_enable_table
   @source_schema = 'dbo',
