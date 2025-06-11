@@ -63,7 +63,14 @@ impl<R: Rng> SqlGenerator<'_, R> {
 
     fn gen_simple_table_factor(&mut self) -> (TableFactor, Table) {
         let alias = self.gen_table_name_with_prefix("t");
-        let mut table = self.tables.choose(&mut self.rng).unwrap().clone();
+        let mut table = if self.should_generate(Feature::Eowc) {
+            self.get_append_only_tables()
+                .choose(&mut self.rng)
+                .unwrap()
+                .clone()
+        } else {
+            self.tables.choose(&mut self.rng).unwrap().clone()
+        };
         let table_factor = TableFactor::Table {
             name: ObjectName(vec![Ident::new_unchecked(&table.name)]),
             alias: Some(TableAlias {
@@ -86,17 +93,18 @@ impl<R: Rng> SqlGenerator<'_, R> {
     /// Generates a table factor, and provides bound columns.
     /// Generated column names should be qualified by table name.
     fn gen_table_factor_inner(&mut self) -> (TableFactor, Table) {
-        // TODO: TableFactor::Derived, TableFactor::TableFunction, TableFactor::NestedJoin
-        match self.rng.random_range(0..=3) {
+        let mut choices = vec![0, 3]; // time_window, simple_table
+        if !self.should_generate(Feature::Eowc) {
+            choices.push(1); // table_func
+        }
+        if self.can_recurse() {
+            choices.push(2); // subquery
+        }
+
+        match *choices.choose(&mut self.rng).unwrap() {
             0 => self.gen_time_window_func(),
             1 => self.gen_table_func(),
-            2 => {
-                if self.can_recurse() {
-                    self.gen_table_subquery()
-                } else {
-                    self.gen_simple_table_factor()
-                }
-            }
+            2 => self.gen_table_subquery(),
             3 => self.gen_simple_table_factor(),
             _ => unreachable!(),
         }
