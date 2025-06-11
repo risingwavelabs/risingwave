@@ -1816,7 +1816,7 @@ checksum = "3a8241f3ebb85c056b509d4327ad0358fbbba6ffb340bf388f26350aeda225b1"
 [[package]]
 name = "bergloom-codegen"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/BergLoom.git?rev=88cafc208ee7a90d1f0c2a72078de05172801e73#88cafc208ee7a90d1f0c2a72078de05172801e73"
+source = "git+https://github.com/nimtable/BergLoom.git?rev=8b52670a5f78ffe99af7391bc83654b97fa886a0#8b52670a5f78ffe99af7391bc83654b97fa886a0"
 dependencies = [
  "prost 0.13.4",
  "prost-build 0.13.4",
@@ -1827,17 +1827,18 @@ dependencies = [
 [[package]]
 name = "bergloom-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/BergLoom.git?rev=88cafc208ee7a90d1f0c2a72078de05172801e73#88cafc208ee7a90d1f0c2a72078de05172801e73"
+source = "git+https://github.com/nimtable/BergLoom.git?rev=8b52670a5f78ffe99af7391bc83654b97fa886a0#8b52670a5f78ffe99af7391bc83654b97fa886a0"
 dependencies = [
  "async-stream",
  "async-trait",
+ "backon 1.2.0",
  "bergloom-codegen",
  "datafusion 45.0.0",
  "futures",
  "futures-async-stream",
  "iceberg",
- "iceberg-catalog-sql",
  "iceberg-datafusion",
+ "mixtrics",
  "parquet 54.2.0",
  "prost 0.13.4",
  "serde",
@@ -1846,6 +1847,7 @@ dependencies = [
  "sqlx",
  "thiserror 2.0.12",
  "tokio",
+ "tracing",
  "url",
 ]
 
@@ -6748,7 +6750,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e026f860432bbdacfa282b9d72b501230ce5ea22#e026f860432bbdacfa282b9d72b501230ce5ea22"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=9e9fe2645eac71170b18ad9a71c8430d94c2206f#9e9fe2645eac71170b18ad9a71c8430d94c2206f"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0",
@@ -6800,7 +6802,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e026f860432bbdacfa282b9d72b501230ce5ea22#e026f860432bbdacfa282b9d72b501230ce5ea22"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=9e9fe2645eac71170b18ad9a71c8430d94c2206f#9e9fe2645eac71170b18ad9a71c8430d94c2206f"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6817,7 +6819,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e026f860432bbdacfa282b9d72b501230ce5ea22#e026f860432bbdacfa282b9d72b501230ce5ea22"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=9e9fe2645eac71170b18ad9a71c8430d94c2206f#9e9fe2645eac71170b18ad9a71c8430d94c2206f"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6835,22 +6837,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "iceberg-catalog-sql"
-version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e026f860432bbdacfa282b9d72b501230ce5ea22#e026f860432bbdacfa282b9d72b501230ce5ea22"
-dependencies = [
- "async-trait",
- "iceberg",
- "serde_json",
- "sqlx",
- "typed-builder 0.20.1",
- "uuid",
-]
-
-[[package]]
 name = "iceberg-datafusion"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e026f860432bbdacfa282b9d72b501230ce5ea22#e026f860432bbdacfa282b9d72b501230ce5ea22"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=9e9fe2645eac71170b18ad9a71c8430d94c2206f#9e9fe2645eac71170b18ad9a71c8430d94c2206f"
 dependencies = [
  "anyhow",
  "async-trait",
