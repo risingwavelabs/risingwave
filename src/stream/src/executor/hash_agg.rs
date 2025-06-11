@@ -260,6 +260,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         vars: &mut ExecutionVars<K, S>,
         keys: impl IntoIterator<Item = &K>,
     ) -> StreamExecutorResult<()> {
+        let max_io_concurrency = std::env::var("RW_STREAMING_AGG_MAX_IO_CONCURRENCY")
+            .map(|s| s.parse::<usize>().ok())
+            .ok()
+            .flatten()
+            .unwrap_or(10);
         let group_key_types = &this.info.schema.data_types()[..this.group_key_indices.len()];
         let futs = keys
             .into_iter()
@@ -314,7 +319,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         if !futs.is_empty() {
             // If not all the required states/keys are in the cache, it's a chunk-level cache miss.
             vars.stats.chunk_lookup_miss_count += 1;
-            let mut buffered = stream::iter(futs).buffer_unordered(10).fuse();
+            let mut buffered = stream::iter(futs)
+                .buffer_unordered(max_io_concurrency)
+                .fuse();
             while let Some(result) = buffered.next().await {
                 let (key, agg_group) = result?;
                 let none = vars.dirty_groups.insert(key, agg_group);
