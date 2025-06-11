@@ -38,6 +38,7 @@ drop materialized view m1;
 
 system ok
 risedev psql -c '
+set streaming_use_snapshot_backfill=true;
 set streaming_parallelism=1;
 set backfill_rate_limit=100;
 create materialized view m1 as
