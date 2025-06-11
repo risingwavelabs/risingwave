@@ -42,27 +42,21 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
 
         if let Some(access) = s3_properties.access {
             builder = builder.access_key_id(&access);
-        } else {
-            tracing::error!(
-                "access key id of aws s3 is not set, bucket {}",
-                s3_properties.bucket_name
-            );
         }
 
         if let Some(secret) = s3_properties.secret {
             builder = builder.secret_access_key(&secret);
-        } else {
-            tracing::error!(
-                "secret access key of aws s3 is not set, bucket {}",
-                s3_properties.bucket_name
-            );
         }
 
         if let Some(assume_role) = assume_role {
             builder = builder.role_arn(&assume_role);
         }
 
-        builder = builder.disable_config_load();
+        // Default behavior is disable load config from environment.
+        if s3_properties.disable_config_load.unwrap_or(true) {
+            builder = builder.disable_config_load();
+        }
+
         let (prefix, matcher) = if let Some(pattern) = s3_properties.match_pattern.as_ref() {
             let prefix = get_prefix(pattern);
             let matcher = glob::Pattern::new(pattern)

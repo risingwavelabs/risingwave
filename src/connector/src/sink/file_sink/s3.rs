@@ -34,6 +34,8 @@ pub struct S3Common {
     /// The directory where the sink file is located.
     #[serde(rename = "s3.path", alias = "snowflake.s3_path", default)]
     pub path: Option<String>,
+    #[serde(rename = "s3.disable.config.load", default)]
+    pub disable_config_load: Option<bool>,
     #[serde(
         rename = "s3.credentials.access",
         alias = "snowflake.aws_access_key_id",
@@ -82,26 +84,20 @@ impl<S: OpendalSinkBackend> FileSink<S> {
 
         if let Some(access) = config.common.access {
             builder = builder.access_key_id(&access);
-        } else {
-            tracing::error!(
-                "access key id of aws s3 is not set, bucket {}",
-                config.common.bucket_name
-            );
         }
 
         if let Some(secret) = config.common.secret {
             builder = builder.secret_access_key(&secret);
-        } else {
-            tracing::error!(
-                "secret access key of aws s3 is not set, bucket {}",
-                config.common.bucket_name
-            );
         }
 
         if let Some(assume_role) = config.common.assume_role {
             builder = builder.role_arn(&assume_role);
         }
-        builder = builder.disable_config_load();
+        // Default behavior is disable load config from environment.
+        if config.common.disable_config_load.unwrap_or(true) {
+            builder = builder.disable_config_load();
+        }
+
         let operator: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())

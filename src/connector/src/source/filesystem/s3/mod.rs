@@ -39,6 +39,8 @@ pub struct S3PropertiesCommon {
     pub access: Option<String>,
     #[serde(rename = "s3.credentials.secret", default)]
     pub secret: Option<String>,
+    #[serde(rename = "s3.disable.config.load", default)]
+    pub disable_config_load: Option<bool>,
     #[serde(rename = "s3.endpoint_url")]
     pub endpoint_url: Option<String>,
     #[serde(rename = "compression_format", default = "Default::default")]
