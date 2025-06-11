@@ -121,21 +121,6 @@ twox-hash = "2"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../workspace-hack" }
-http-body = "0.4.5"
-tower-layer = "0.3.3"
-tower-service = "0.3.3"
-
-[target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.17", default-features = false }
-libc = "0.2"
-
-[target.'cfg(target_os = "macos")'.dependencies]
-darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
-libc = "0.2"
-mach2 = "0.4"
-
 [dev-dependencies]
 coarsetime = "0.1"
 criterion = { workspace = true }
@@ -145,6 +130,21 @@ pretty_assertions = "1"
 rand = { workspace = true }
 rusty-fork = "0.3"
 tempfile = "3"
+
+[target.'cfg(not(madsim))'.dependencies]
+http-body = "0.4.5"
+tower-layer = "0.3.3"
+tower-service = "0.3.3"
+workspace-hack = { path = "../workspace-hack" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+procfs = { version = "0.17", default-features = false }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
+libc = "0.2"
+mach2 = "0.4"
 
 [[bench]]
 name = "bench_encoding"

@@ -7,6 +7,9 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[lib]
+test = false
+
 [dependencies]
 anyhow = "1"
 expect-test = "1"
@@ -30,15 +33,12 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 walkdir = "2"
 
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../../workspace-hack" }
-
 [dev-dependencies]
 libtest-mimic = "0.8"
 tempfile = "3"
 
-[lib]
-test = false
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../../workspace-hack" }
 
 [[test]]
 name = "planner_test_runner"

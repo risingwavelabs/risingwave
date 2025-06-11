@@ -7,6 +7,9 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[lib]
+test = false
+
 [dependencies]
 anyhow = "1"
 bytes = "1"
@@ -51,14 +54,11 @@ tonic = { workspace = true }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../workspace-hack" }
-
 [dev-dependencies]
 risingwave_hummock_sdk = { workspace = true }
 
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../workspace-hack" }
+
 [lints]
 workspace = true
-
-[lib]
-test = false

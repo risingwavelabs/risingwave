@@ -1075,10 +1075,11 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
 name = "await-tree"
-version = "0.3.0-alpha.3"
+version = "0.3.2-alpha.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd6f3024942b436658bb064b41f05a0732b0ab5850ed6e9857da321aa9f128aa"
+checksum = "d10541d47b12e1441e23da6faf33a6f81950b59a0849b00d62fdd911f0fc1a3c"
 dependencies = [
+ "await-tree-attributes",
  "coarsetime",
  "derive_builder",
  "easy-ext",
@@ -1091,6 +1092,17 @@ dependencies = [
  "task-local",
  "tracing",
  "weak-table",
+]
+
+[[package]]
+name = "await-tree-attributes"
+version = "0.1.0-alpha.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d69350b3e60f7ab6dd1ddc450decb97d5dea7cb2e58ca1fa6d470c533921cda"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.101",
 ]
 
 [[package]]
@@ -12027,6 +12039,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "parse-display",
  "paste",
+ "percent-encoding",
  "petgraph 0.8.1",
  "pgwire",
  "pin-project-lite",
@@ -15195,9 +15208,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.44.0"
+version = "1.44.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9975ea0f48b5aa3972bf2d888c238182458437cc2a19374b81b25cdf1023fb3a"
+checksum = "e6b88822cbe49de4185e3a4cbf8321dd487cf5fe0c5c65695fef6346371e9c48"
 dependencies = [
  "backtrace",
  "bytes",

@@ -7,7 +7,6 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [package.metadata.cargo-machete]
 ignored = ["chrono-tz", "futures-async-stream"]
@@ -67,9 +66,6 @@ tonic = { version = "0.12.3", optional = true }
 tracing = "0.1"
 zstd = { version = "0.13", default-features = false, optional = true }
 
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../../workspace-hack" }
-
 [dev-dependencies]
 criterion = { workspace = true }
 expect-test = "1"
@@ -77,6 +73,9 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "macros",
 ] }
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../../workspace-hack" }
 
 [[bench]]
 name = "expr"

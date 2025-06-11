@@ -6,7 +6,9 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+dhat-heap = ["dhat"]
 
 [dependencies]
 anyhow = "1"
@@ -75,9 +77,6 @@ tonic = { workspace = true }
 tracing = "0.1"
 url = "2"
 
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../workspace-hack" }
-
 [dev-dependencies]
 assert_matches = "1"
 criterion = { workspace = true, features = ["async_tokio", "async"] }
@@ -92,8 +91,8 @@ serde_yaml = "0.9"
 tracing-subscriber = "0.3.17"
 tracing-test = "0.2"
 
-[features]
-dhat-heap = ["dhat"]
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../workspace-hack" }
 
 [[bench]]
 name = "stream_hash_agg"

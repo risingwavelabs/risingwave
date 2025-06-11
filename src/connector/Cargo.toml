@@ -191,14 +191,6 @@ uuid = { version = "1", features = ["v4", "fast-rng"] }
 with_options = { path = "./with_options" }
 yup-oauth2 = "8.3"
 
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../workspace-hack" }
-
-[build-dependencies]
-# Workaround for datafusion. Feel free to remove it if you can.
-# https://gist.github.com/xiangjinwu/65c310adf84c381c17d99cb4439e1908
-chrono-tz = { version = "0.10", features = ["case-insensitive"] }
-
 [dev-dependencies]
 assert_matches = "1"
 criterion = { workspace = true, features = ["async_tokio", "async"] }
@@ -217,6 +209,14 @@ tempfile = "3"
 tracing-subscriber = "0.3"
 tracing-test = "0.2"
 walkdir = "2"
+
+[build-dependencies]
+# Workaround for datafusion. Feel free to remove it if you can.
+# https://gist.github.com/xiangjinwu/65c310adf84c381c17d99cb4439e1908
+chrono-tz = { version = "0.10", features = ["case-insensitive"] }
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../workspace-hack" }
 
 [[bench]]
 name = "debezium_json_parser"

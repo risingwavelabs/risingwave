@@ -7,6 +7,9 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[lib]
+test = false
+
 [dependencies]
 clap = { workspace = true }
 educe = "0.6"
@@ -36,13 +39,10 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tonic = { workspace = true }
 tracing = "0.1"
 
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../../workspace-hack" }
-
 [dev-dependencies]
 
-[lib]
-test = false
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../../workspace-hack" }
 
 [lints]
 workspace = true

@@ -74,7 +74,7 @@ pub fn mview_sql_gen<R: Rng>(
     name: &str,
     config: &Configuration,
 ) -> (String, Table) {
-    let mut r#gen = SqlGenerator::new_for_mview(rng, tables, config.clone());
+    let mut r#gen = SqlGenerator::new_for_mview(rng, tables.clone(), config.clone());
     let (mview, table) = r#gen.gen_mview_stmt(name);
     (mview.to_string(), table)
 }
@@ -85,7 +85,7 @@ pub fn differential_sql_gen<R: Rng>(
     name: &str,
     config: &Configuration,
 ) -> Result<(String, String, Table)> {
-    let mut r#gen = SqlGenerator::new_for_mview(rng, tables, config.clone());
+    let mut r#gen = SqlGenerator::new_for_mview(rng, tables.clone(), config.clone());
     let (stream, table) = r#gen.gen_mview_stmt(name);
     let batch = match stream {
         Statement::CreateView { ref query, .. } => query.to_string(),
@@ -136,6 +136,8 @@ pub fn create_table_statement_to_table(statement: &Statement) -> Table {
             name,
             columns,
             constraints,
+            append_only,
+            source_watermarks,
             ..
         } => {
             let column_name_to_index_mapping: HashMap<_, _> = columns
@@ -172,6 +174,8 @@ pub fn create_table_statement_to_table(statement: &Statement) -> Table {
                 name.0[0].real_value(),
                 columns.iter().map(|c| c.clone().into()).collect(),
                 pk_indices,
+                *append_only,
+                source_watermarks.to_vec(),
             )
         }
         _ => panic!(
@@ -225,6 +229,8 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             ],
                             pk_indices: [],
                             is_base_table: true,
+                            is_append_only: false,
+                            source_watermarks: [],
                         },
                         Table {
                             name: "t2",
@@ -240,6 +246,8 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             ],
                             pk_indices: [],
                             is_base_table: true,
+                            is_append_only: false,
+                            source_watermarks: [],
                         },
                         Table {
                             name: "t3",
@@ -259,6 +267,8 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             ],
                             pk_indices: [],
                             is_base_table: true,
+                            is_append_only: false,
+                            source_watermarks: [],
                         },
                     ],
                     [
@@ -442,6 +452,8 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                                 0,
                             ],
                             is_base_table: true,
+                            is_append_only: false,
+                            source_watermarks: [],
                         },
                         Table {
                             name: "t2",
@@ -459,6 +471,8 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                                 1,
                             ],
                             is_base_table: true,
+                            is_append_only: false,
+                            source_watermarks: [],
                         },
                         Table {
                             name: "t3",
@@ -477,6 +491,8 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                                 1,
                             ],
                             is_base_table: true,
+                            is_append_only: false,
+                            source_watermarks: [],
                         },
                         Table {
                             name: "t4",
@@ -500,6 +516,8 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                                 2,
                             ],
                             is_base_table: true,
+                            is_append_only: false,
+                            source_watermarks: [],
                         },
                     ],
                     [
@@ -755,5 +773,44 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                     ],
                 )"#]],
         );
+    }
+
+    #[test]
+    fn test_parse_create_table_statements_with_append_only_and_watermark() {
+        let test_string = r#"
+    CREATE TABLE t1 (
+        v1 INT,
+        ts TIMESTAMP,
+        WATERMARK FOR ts AS ts - INTERVAL '5' SECOND
+    ) APPEND ONLY;
+
+    CREATE TABLE t2 (
+        v1 INT,
+        ts TIMESTAMP
+    ) APPEND ONLY;
+
+    CREATE TABLE t3 (
+        v1 INT,
+        ts TIMESTAMP
+    );
+    "#;
+
+        let (tables, _) = parse_create_table_statements(test_string);
+
+        // Check t1
+        let t1 = &tables[0];
+        assert!(t1.is_append_only);
+        assert_eq!(t1.source_watermarks.len(), 1);
+        assert_eq!(t1.source_watermarks[0].column.real_value(), "ts");
+
+        // Check t2
+        let t2 = &tables[1];
+        assert!(t2.is_append_only);
+        assert_eq!(t2.source_watermarks.len(), 0);
+
+        // Check t3
+        let t3 = &tables[2];
+        assert!(!t3.is_append_only);
+        assert_eq!(t3.source_watermarks.len(), 0);
     }
 }

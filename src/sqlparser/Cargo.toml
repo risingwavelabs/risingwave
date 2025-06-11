@@ -8,6 +8,12 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 repository = { workspace = true }
 
+[package.metadata.release]
+# Instruct `cargo release` to not run `cargo publish` locally:
+# https://github.com/sunng87/cargo-release/blob/master/docs/reference.md#config-fields
+# See docs/releasing.md for details.
+disable-publish = true
+
 [lib]
 path = "src/lib.rs"
 
@@ -24,9 +30,6 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 winnow = "0.7.3"
 
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../workspace-hack" }
-
 [dev-dependencies]
 anyhow = "1"
 console = "0.15"
@@ -37,11 +40,8 @@ serde_with = "3"
 serde_yaml = "0.9"
 walkdir = "2"
 
-[package.metadata.release]
-# Instruct `cargo release` to not run `cargo publish` locally:
-# https://github.com/sunng87/cargo-release/blob/master/docs/reference.md#config-fields
-# See docs/releasing.md for details.
-disable-publish = true
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../workspace-hack" }
 
 [[bin]]
 name = "sqlparser"

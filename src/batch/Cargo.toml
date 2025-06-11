@@ -54,13 +54,13 @@ tonic = { workspace = true }
 tracing = "0.1"
 twox-hash = "2"
 
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../workspace-hack" }
-
 [dev-dependencies]
 rand = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 tempfile = "3"
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../workspace-hack" }
 
 [lints]
 workspace = true

@@ -7,6 +7,9 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[features]
+enable_sqlsmith_unit_test = []
+
 [dependencies]
 anyhow = "1"
 chrono = { workspace = true }
@@ -29,12 +32,12 @@ tokio-postgres = "0.7"
 tracing = "0.1"
 tracing-subscriber = "0.3.17"
 
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../../workspace-hack" }
-
 [dev-dependencies]
 expect-test = "1"
 libtest-mimic = "0.8"
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../../workspace-hack" }
 
 [[bin]]
 name = "sqlsmith"
@@ -45,9 +48,6 @@ test = false
 name = "sqlsmith-reducer"
 path = "src/bin/reducer.rs"
 test = false
-
-[features]
-enable_sqlsmith_unit_test = []
 
 [[test]]
 name = "test_runner"

@@ -6,7 +6,6 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 anyhow = "1"
@@ -46,6 +45,7 @@ num-integer = "0.1"
 parking_lot = { workspace = true }
 parse-display = "0.10"
 paste = "1"
+percent-encoding = "2.3.1"
 petgraph = "0.8"
 pgwire = { path = "../utils/pgwire" }
 pin-project-lite = { workspace = true }
@@ -102,15 +102,15 @@ tracing = "0.1"
 url = "2.5.0"
 uuid = "1"
 
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../workspace-hack" }
-
 [dev-dependencies]
 assert_matches = "1"
 expect-test = "1"
 risingwave_batch_executors = { workspace = true }
 risingwave_expr_impl = { workspace = true }
 tempfile = "3"
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../workspace-hack" }
 
 [lints]
 workspace = true
