@@ -55,7 +55,10 @@ fn extract_stream_scan(fragment_distribution: &FragmentDistribution) -> Option<R
 
 #[system_catalog(table, "rw_catalog.rw_table_scan")]
 async fn read_rw_table_scan(reader: &SysCatalogReaderImpl) -> Result<Vec<RwTableScans>> {
-    let distributions = reader.meta_client.list_fragment_distribution().await?;
+    let distributions = reader
+        .meta_client
+        .list_creating_stream_scan_fragment_distribution()
+        .await?;
 
     Ok(distributions
         .into_iter()
