@@ -12,7 +12,7 @@ python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_S
 
 statement ok
 CREATE SOURCE src_user
-INCLUDE timestamp -- include explicitly here to test a bug found in https://github.com/risingwavelabs/risingwave/pull/17293
+INCLUDE timestamp as timestamp -- include explicitly here to test a bug found in https://github.com/risingwavelabs/risingwave/pull/17293
 WITH (
     ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
     topic = 'pb_alter_source_test',
@@ -26,7 +26,7 @@ FORMAT PLAIN ENCODE PROTOBUF(
 # Create source with generated column to test ALTER SOURCE REFRESH SCHEMA with generated columns
 statement ok
 CREATE SOURCE src_user_gen (*, t int as id+1)
-INCLUDE timestamp
+INCLUDE timestamp as timestamp
 WITH (
     ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
     topic = 'pb_alter_source_test',
