@@ -347,7 +347,7 @@ profile:
         address: db
         database: metadata
         user: postgres
-        password: postgres
+        password: post\tgres
         user-managed: true
         application: metastore
       - use: meta-node
