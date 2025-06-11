@@ -276,7 +276,7 @@ pub enum CapacityMode {
 ///
 /// - `RawWorkerWeights`: Distribute vnodes across workers using the original worker weight values.
 /// - `ActorCounts`: Distribute vnodes based on the number of actors assigned to each worker.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum BalancedBy {
     /// Use each worker's raw weight when allocating vnodes.
@@ -534,6 +534,14 @@ where
     S: Hash + Copy,
 {
     let base_total: usize = actor_counts.values().sum();
+
+    assert!(
+        base_total <= total_vnodes,
+        "Total vnodes ({}) must be greater than or equal to the sum of actor counts ({})",
+        total_vnodes,
+        base_total
+    );
+
     let extra_vnodes = total_vnodes - base_total;
 
     // Quota calculation is only performed for Workers with actors.
@@ -1513,5 +1521,590 @@ mod extra_tests_for_scale_factor {
 
         // All items should still be assigned correctly.
         assert_eq!(assignment[&"A"].len(), items.len());
+    }
+}
+
+#[cfg(test)]
+mod affinity_tests {
+    use std::collections::{BTreeMap, HashMap};
+    use std::num::NonZeroUsize;
+
+    use super::*;
+
+    // --- Helper function to analyze affinity ---
+
+    /// Flattens the hierarchical assignment into a simple VNode -> Worker map.
+    pub(crate) fn get_vnode_to_worker_map<W, A, V>(
+        assignment: &BTreeMap<W, BTreeMap<A, Vec<V>>>,
+    ) -> HashMap<V, W>
+    where
+        W: Copy + Eq + Hash,
+        A: Copy + Eq + Hash,
+        V: Copy + Eq + Hash,
+    {
+        let mut map = HashMap::new();
+        for (&worker, actor_map) in assignment {
+            for vnode_list in actor_map.values() {
+                for &vnode in vnode_list {
+                    map.insert(vnode, worker);
+                }
+            }
+        }
+        map
+    }
+
+    /// Helper to run the affinity test for worker weight changes.
+    fn run_weight_change_affinity_test(capacity_mode: CapacityMode, balanced_by: BalancedBy) {
+        let initial_workers: BTreeMap<u8, _> = [
+            (1, NonZeroUsize::new(5).unwrap()),
+            (2, NonZeroUsize::new(5).unwrap()),
+        ]
+        .into();
+        let actors: Vec<u16> = (0..100).collect();
+        let vnodes: Vec<u32> = (0..1000).collect();
+        let salt = 123u8;
+
+        let initial_assignment = assign_hierarchical(
+            &initial_workers,
+            &actors,
+            &vnodes,
+            salt,
+            capacity_mode,
+            balanced_by,
+        )
+        .unwrap();
+        let initial_map = get_vnode_to_worker_map(&initial_assignment);
+
+        let mut changed_workers: BTreeMap<u8, _> = BTreeMap::new();
+        changed_workers.insert(1, NonZeroUsize::new(2).unwrap());
+        changed_workers.insert(2, NonZeroUsize::new(8).unwrap());
+
+        let new_assignment = assign_hierarchical(
+            &changed_workers,
+            &actors,
+            &vnodes,
+            salt,
+            capacity_mode,
+            balanced_by,
+        )
+        .unwrap();
+        let new_map = get_vnode_to_worker_map(&new_assignment);
+
+        let stable_vnodes = initial_map
+            .iter()
+            .filter(|(v, w)| new_map.get(v) == Some(w))
+            .count();
+        let stability_percentage = (stable_vnodes as f64 / vnodes.len() as f64) * 100.0;
+
+        println!(
+            "Affinity for {:?}/{:?}: {:.2}% of vnodes remained stable when weights changed from {:?} to {:?}.",
+            capacity_mode, balanced_by, stability_percentage, initial_workers, changed_workers
+        );
+
+        assert!(
+            stability_percentage < 100.0,
+            "Expected some vnodes to move for {:?}/{:?}",
+            capacity_mode,
+            balanced_by
+        );
+        assert!(
+            stability_percentage > 50.0,
+            "Expected a majority of vnodes to have affinity for {:?}/{:?}",
+            capacity_mode,
+            balanced_by
+        );
+    }
+
+    /// Helper to run the affinity test for actor count changes.
+    fn run_actor_count_change_affinity_test(capacity_mode: CapacityMode, balanced_by: BalancedBy) {
+        let workers: BTreeMap<u8, _> = [
+            (1, NonZeroUsize::new(5).unwrap()),
+            (2, NonZeroUsize::new(5).unwrap()),
+        ]
+        .into();
+        let initial_actors: Vec<u16> = (0..100).collect();
+        let vnodes: Vec<u32> = (0..1000).collect();
+        let salt = 123u8;
+
+        let initial_assignment = assign_hierarchical(
+            &workers,
+            &initial_actors,
+            &vnodes,
+            salt,
+            capacity_mode,
+            balanced_by,
+        )
+        .unwrap();
+        let initial_map = get_vnode_to_worker_map(&initial_assignment);
+
+        let changed_actors: Vec<u16> = (0..120).collect();
+        let new_assignment = assign_hierarchical(
+            &workers,
+            &changed_actors,
+            &vnodes,
+            salt,
+            capacity_mode,
+            balanced_by,
+        )
+        .unwrap();
+        let new_map = get_vnode_to_worker_map(&new_assignment);
+
+        let stable_vnodes = initial_map
+            .iter()
+            .filter(|(v, w)| new_map.get(v) == Some(w))
+            .count();
+        let stability_percentage = (stable_vnodes as f64 / vnodes.len() as f64) * 100.0;
+
+        println!(
+            "Affinity for {:?}/{:?}: {:.2}% of vnodes remained stable when actor count changed from {} to {}.",
+            capacity_mode,
+            balanced_by,
+            stability_percentage,
+            initial_actors.len(),
+            changed_actors.len(),
+        );
+
+        // The expected affinity depends heavily on the balancing strategy.
+        match balanced_by {
+            BalancedBy::RawWorkerWeights => {
+                // Actor count change has minimal impact on vnode distribution.
+                assert!(
+                    stability_percentage > 90.0,
+                    "Expected very high affinity for RawWorkerWeights"
+                );
+            }
+            BalancedBy::ActorCounts => {
+                // Actor count change directly impacts vnode distribution weights, causing more churn.
+                assert!(
+                    stability_percentage > 50.0,
+                    "Expected moderate affinity for ActorCounts"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_affinity_when_worker_weights_change_all_modes() {
+        let modes = [
+            (CapacityMode::Weighted, BalancedBy::RawWorkerWeights),
+            (CapacityMode::Weighted, BalancedBy::ActorCounts),
+            (CapacityMode::Unbounded, BalancedBy::RawWorkerWeights),
+            (CapacityMode::Unbounded, BalancedBy::ActorCounts),
+        ];
+        for (capacity_mode, balanced_by) in modes {
+            run_weight_change_affinity_test(capacity_mode, balanced_by);
+        }
+    }
+
+    #[test]
+    fn test_affinity_when_actor_count_changes_all_modes() {
+        let modes = [
+            (CapacityMode::Weighted, BalancedBy::RawWorkerWeights),
+            (CapacityMode::Weighted, BalancedBy::ActorCounts),
+            (CapacityMode::Unbounded, BalancedBy::RawWorkerWeights),
+            (CapacityMode::Unbounded, BalancedBy::ActorCounts),
+        ];
+        for (capacity_mode, balanced_by) in modes {
+            run_actor_count_change_affinity_test(capacity_mode, balanced_by);
+        }
+    }
+}
+
+#[cfg(test)]
+mod affinity_tests_horizon_scaling {
+    use std::cmp::Ordering;
+    use std::collections::{BTreeMap, HashMap, HashSet};
+    use std::num::NonZeroUsize;
+
+    use affinity_tests::get_vnode_to_worker_map;
+
+    use super::*;
+
+    /// A struct to hold the results of a generic affinity analysis.
+    #[derive(Debug)]
+    struct AffinityAnalysis {
+        /// Percentage of vnodes on surviving workers that remained stable.
+        stability_on_survivors_pct: f64,
+        /// Percentage of total vnodes that moved to newly added workers.
+        moved_to_new_workers_pct: f64,
+        /// Percentage of total vnodes that did not change their worker assignment.
+        overall_stability_pct: f64,
+    }
+
+    /// A generic function to analyze affinity between two states.
+    /// It can handle scale-out, scale-in, and no-change scenarios.
+    fn analyze_cluster_change(
+        initial_map: &HashMap<u32, u8>,
+        new_map: &HashMap<u32, u8>,
+        initial_workers: &BTreeMap<u8, NonZeroUsize>,
+        new_workers: &BTreeMap<u8, NonZeroUsize>,
+    ) -> AffinityAnalysis {
+        let initial_keys: HashSet<_> = initial_workers.keys().copied().collect();
+        let new_keys: HashSet<_> = new_workers.keys().copied().collect();
+
+        let surviving_workers: HashSet<_> = initial_keys.intersection(&new_keys).copied().collect();
+        let added_workers: HashSet<_> = new_keys.difference(&initial_keys).copied().collect();
+
+        let total_vnodes = initial_map.len();
+        if total_vnodes == 0 {
+            return AffinityAnalysis {
+                stability_on_survivors_pct: 100.0,
+                moved_to_new_workers_pct: 0.0,
+                overall_stability_pct: 100.0,
+            };
+        }
+
+        let mut stable_vnodes_overall = 0;
+        let mut moved_to_new_worker_count = 0;
+
+        for (vnode, &initial_worker) in initial_map {
+            if let Some(&new_worker) = new_map.get(vnode) {
+                if initial_worker == new_worker {
+                    stable_vnodes_overall += 1;
+                } else if added_workers.contains(&new_worker) {
+                    moved_to_new_worker_count += 1;
+                }
+            }
+        }
+
+        let vnodes_on_survivors_initially = initial_map
+            .values()
+            .filter(|w| surviving_workers.contains(w))
+            .count();
+        let stable_on_survivors = initial_map
+            .iter()
+            .filter(|(_, w)| surviving_workers.contains(w))
+            .filter(|(v, w)| new_map.get(v) == Some(w))
+            .count();
+
+        AffinityAnalysis {
+            stability_on_survivors_pct: if vnodes_on_survivors_initially > 0 {
+                (stable_on_survivors as f64 / vnodes_on_survivors_initially as f64) * 100.0
+            } else {
+                100.0 // No survivors, so stability is vacuously 100%
+            },
+            moved_to_new_workers_pct: (moved_to_new_worker_count as f64 / total_vnodes as f64)
+                * 100.0,
+            overall_stability_pct: (stable_vnodes_overall as f64 / total_vnodes as f64) * 100.0,
+        }
+    }
+
+    #[test]
+    fn test_generic_cluster_resize_affinity_all_modes() {
+        struct TestCase {
+            name: &'static str,
+            initial_size: usize,
+            final_size: usize,
+        }
+
+        let test_cases = [
+            TestCase {
+                name: "Scale In (3 -> 2)",
+                initial_size: 3,
+                final_size: 2,
+            },
+            TestCase {
+                name: "Scale Out (2 -> 3)",
+                initial_size: 2,
+                final_size: 3,
+            },
+            TestCase {
+                name: "Scale In (5 -> 4)",
+                initial_size: 5,
+                final_size: 4,
+            },
+            TestCase {
+                name: "Scale Out (4 -> 5)",
+                initial_size: 4,
+                final_size: 5,
+            },
+            TestCase {
+                name: "No Change (3 -> 3)",
+                initial_size: 3,
+                final_size: 3,
+            },
+            TestCase {
+                name: "Scale Double (4 -> 8)",
+                initial_size: 4,
+                final_size: 8,
+            },
+            TestCase {
+                name: "Scale Half (8 -> 4)",
+                initial_size: 8,
+                final_size: 4,
+            },
+        ];
+
+        let modes = [
+            (CapacityMode::Weighted, BalancedBy::RawWorkerWeights),
+            (CapacityMode::Weighted, BalancedBy::ActorCounts),
+            (CapacityMode::Unbounded, BalancedBy::RawWorkerWeights),
+            (CapacityMode::Unbounded, BalancedBy::ActorCounts),
+        ];
+
+        let actors: Vec<u16> = (0..100).collect();
+        let vnodes: Vec<u32> = (0..1000).collect();
+        let salt = 123u8;
+
+        for case in &test_cases {
+            for (cm, bb) in modes {
+                println!("--- Running Test: {} with {:?}/{:?} ---", case.name, cm, bb);
+
+                let initial_workers: BTreeMap<_, _> = (1..=case.initial_size as u8)
+                    .map(|i| (i, NonZeroUsize::new(5).unwrap()))
+                    .collect();
+                let final_workers: BTreeMap<_, _> = (1..=case.final_size as u8)
+                    .map(|i| (i, NonZeroUsize::new(5).unwrap()))
+                    .collect();
+
+                let initial_assignment =
+                    assign_hierarchical(&initial_workers, &actors, &vnodes, salt, cm, bb).unwrap();
+                let initial_map = get_vnode_to_worker_map(&initial_assignment);
+
+                let new_assignment =
+                    assign_hierarchical(&final_workers, &actors, &vnodes, salt, cm, bb).unwrap();
+                let new_map = get_vnode_to_worker_map(&new_assignment);
+
+                let analysis = analyze_cluster_change(
+                    &initial_map,
+                    &new_map,
+                    &initial_workers,
+                    &final_workers,
+                );
+
+                match case.final_size.cmp(&case.initial_size) {
+                    Ordering::Less => {
+                        // Scale In
+                        println!(
+                            "  Result: Stability on survivors = {:.2}%",
+                            analysis.stability_on_survivors_pct
+                        );
+                        assert!(
+                            analysis.stability_on_survivors_pct > 90.0,
+                            "Expected very high stability on surviving nodes during scale-in"
+                        );
+                    }
+                    Ordering::Equal => {
+                        // No Change
+                        println!(
+                            "  Result: Overall stability = {:.2}%",
+                            analysis.overall_stability_pct
+                        );
+                        assert_eq!(
+                            analysis.overall_stability_pct, 100.0,
+                            "Expected 100% stability when cluster size does not change"
+                        );
+                    }
+                    Ordering::Greater => {
+                        // Scale Out
+                        let expected_move_rate = (case.final_size - case.initial_size) as f64
+                            / case.final_size as f64
+                            * 100.0;
+                        let expected_stability_rate =
+                            case.initial_size as f64 / case.final_size as f64 * 100.0;
+
+                        println!(
+                            "  Result: Overall stability = {:.2}% (Expected ~{:.2}%), Moved to new = {:.2}% (Expected ~{:.2}%)",
+                            analysis.overall_stability_pct,
+                            expected_stability_rate,
+                            analysis.moved_to_new_workers_pct,
+                            expected_move_rate
+                        );
+
+                        // Assert that the actual values are within a reasonable tolerance of the expected values.
+                        assert!(
+                            (analysis.moved_to_new_workers_pct - expected_move_rate).abs() < 10.0,
+                            "Move rate to new nodes is outside expected tolerance"
+                        );
+                        assert!(
+                            (analysis.overall_stability_pct - expected_stability_rate).abs() < 10.0,
+                            "Overall stability is outside expected tolerance"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod affinity_tests_vertical_scaling {
+    use std::collections::BTreeMap;
+    use std::num::NonZeroUsize;
+
+    use affinity_tests::get_vnode_to_worker_map;
+    use risingwave_common::util::iter_util::ZipEqFast;
+
+    use super::*;
+
+    /// A struct to define a test case for worker weight changes.
+    struct WeightChangeTestCase {
+        name: &'static str,
+        initial_weights: Vec<usize>,
+        final_weights: Vec<usize>,
+    }
+
+    /// A generic helper that runs a single weight change test case for a given mode.
+    fn run_weight_change_test_case(
+        case: &WeightChangeTestCase,
+        capacity_mode: CapacityMode,
+        balanced_by: BalancedBy,
+    ) {
+        let actors: Vec<u16> = (0..100).collect();
+        let vnodes: Vec<u32> = (0..1000).collect();
+        let salt = 123u8;
+
+        let initial_workers: BTreeMap<u8, _> = case
+            .initial_weights
+            .iter()
+            .enumerate()
+            .map(|(i, &w)| (i as u8 + 1, NonZeroUsize::new(w).unwrap()))
+            .collect();
+        let final_workers: BTreeMap<u8, _> = case
+            .final_weights
+            .iter()
+            .enumerate()
+            .map(|(i, &w)| (i as u8 + 1, NonZeroUsize::new(w).unwrap()))
+            .collect();
+
+        let initial_assignment = assign_hierarchical(
+            &initial_workers,
+            &actors,
+            &vnodes,
+            salt,
+            capacity_mode,
+            balanced_by,
+        )
+        .unwrap();
+        let initial_map = get_vnode_to_worker_map(&initial_assignment);
+        let new_assignment = assign_hierarchical(
+            &final_workers,
+            &actors,
+            &vnodes,
+            salt,
+            capacity_mode,
+            balanced_by,
+        )
+        .unwrap();
+        let new_map = get_vnode_to_worker_map(&new_assignment);
+
+        let stable_vnodes = initial_map
+            .iter()
+            .filter(|(v, w)| new_map.get(v) == Some(w))
+            .count();
+        let actual_stability_pct = (stable_vnodes as f64 / vnodes.len() as f64) * 100.0;
+
+        println!(
+            "--- Running Test: '{}' with {:?}/{:?} ---",
+            case.name, capacity_mode, balanced_by
+        );
+        println!(
+            "  Result: {:.2}% of vnodes remained stable.",
+            actual_stability_pct
+        );
+
+        // --- Dynamic Assertions ---
+        let expected_stability_pct = match balanced_by {
+            BalancedBy::RawWorkerWeights => {
+                // For RawWorkerWeights, churn is based on the change in worker weight ratios.
+                let initial_total_weight: usize = case.initial_weights.iter().sum();
+                let final_total_weight: usize = case.final_weights.iter().sum();
+                let expected_moved: f64 = case
+                    .initial_weights
+                    .iter()
+                    .zip_eq_fast(case.final_weights.iter())
+                    .map(|(&iw, &fw)| {
+                        let initial_share =
+                            vnodes.len() as f64 * (iw as f64 / initial_total_weight as f64);
+                        let final_share =
+                            vnodes.len() as f64 * (fw as f64 / final_total_weight as f64);
+                        (final_share - initial_share).max(0.0)
+                    })
+                    .sum();
+                (vnodes.len() as f64 - expected_moved) / vnodes.len() as f64 * 100.0
+            }
+            BalancedBy::ActorCounts => {
+                // For ActorCounts, churn is based on the change in actor distribution,
+                // which itself is determined by worker weights (if CapacityMode is Weighted).
+                let initial_actor_dist = AssignerBuilder::new(salt)
+                    .build()
+                    .count_actors_per_worker(&initial_workers, actors.len());
+                let final_actor_dist = AssignerBuilder::new(salt)
+                    .build()
+                    .count_actors_per_worker(&final_workers, actors.len());
+
+                let initial_total_actors: usize = initial_actor_dist.values().sum();
+                let final_total_actors: usize = final_actor_dist.values().sum();
+
+                let expected_moved: f64 = (1..=initial_workers.len() as u8)
+                    .map(|worker_id| {
+                        let initial_actors_on_worker =
+                            *initial_actor_dist.get(&worker_id).unwrap_or(&0);
+                        let final_actors_on_worker =
+                            *final_actor_dist.get(&worker_id).unwrap_or(&0);
+                        let initial_share = vnodes.len() as f64
+                            * (initial_actors_on_worker as f64 / initial_total_actors as f64);
+                        let final_share = vnodes.len() as f64
+                            * (final_actors_on_worker as f64 / final_total_actors as f64);
+                        (final_share - initial_share).max(0.0)
+                    })
+                    .sum();
+                (vnodes.len() as f64 - expected_moved) / vnodes.len() as f64 * 100.0
+            }
+        };
+
+        println!(
+            "  Expectation for this mode: ~{:.2}% stability.",
+            expected_stability_pct
+        );
+
+        assert!(
+            (actual_stability_pct - expected_stability_pct).abs() < 10.0,
+            "Stability is outside the expected tolerance for this mode."
+        );
+    }
+
+    #[test]
+    fn test_generic_weight_change_affinity_all_modes() {
+        let test_cases = [
+            WeightChangeTestCase {
+                name: "Uniform Scaling (No relative change) #1",
+                initial_weights: vec![5, 5],
+                final_weights: vec![10, 10],
+            },
+            WeightChangeTestCase {
+                name: "Uniform Scaling (No relative change) #2",
+                initial_weights: vec![8, 8],
+                final_weights: vec![4, 4],
+            },
+            WeightChangeTestCase {
+                name: "Single Worker Weight Decrease",
+                initial_weights: vec![5, 5, 5],
+                final_weights: vec![2, 5, 5],
+            },
+            WeightChangeTestCase {
+                name: "Single Worker Weight Increase",
+                initial_weights: vec![5, 5, 5],
+                final_weights: vec![8, 5, 5],
+            },
+            WeightChangeTestCase {
+                name: "Complex Rebalance",
+                initial_weights: vec![5, 5],
+                final_weights: vec![2, 8],
+            },
+        ];
+
+        let modes = [
+            (CapacityMode::Weighted, BalancedBy::RawWorkerWeights),
+            (CapacityMode::Weighted, BalancedBy::ActorCounts),
+            (CapacityMode::Unbounded, BalancedBy::RawWorkerWeights),
+            (CapacityMode::Unbounded, BalancedBy::ActorCounts),
+        ];
+
+        for case in &test_cases {
+            for (capacity_mode, balanced_by) in modes {
+                run_weight_change_test_case(case, capacity_mode, balanced_by);
+            }
+        }
     }
 }
