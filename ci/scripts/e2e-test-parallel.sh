@@ -77,3 +77,12 @@ RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=i
 start_cluster
 risedev slt "${host_args[@]}" -d dev './e2e_test/generated/**/*.slt' -j 16 --junit "parallel-generated-${profile}" --label "parallel"
 kill_cluster
+
+echo "--- Generate coverage report"
+cargo llvm-cov report --profile "$profile" --lcov --output-path coverage.lcov
+buildkite-agent artifact upload coverage.lcov
+
+echo "--- Generate coverage report (HTML)"
+cargo llvm-cov report --profile "$profile" --html
+zip -q -r coverage-report.zip target/llvm-cov/html
+buildkite-agent artifact upload coverage-report.zip

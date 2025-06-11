@@ -19,6 +19,10 @@ export RW_SECRET_STORE_PRIVATE_KEY_HEX="0123456789abcdef0123456789abcdef"
 export SLT_FAIL_FAST=true
 export SLT_KEEP_DB_ON_FAILURE=true
 export SLT_SHUTDOWN_TIMEOUT=10
+export LLVM_PROFILE_FILE='/risingwave/target/risingwave-%p-%10m.profraw'
+export CARGO_LLVM_COV=1
+export CARGO_LLVM_COV_SHOW_ENV=1
+export CARGO_LLVM_COV_TARGET_DIR=/risingwave/target
 
 unset LANG
 
