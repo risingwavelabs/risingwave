@@ -15,10 +15,10 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, LazyLock};
 
+use bergloom_core::CompactionConfig;
 use bergloom_core::compaction::{
     Compaction, CompactionType, RewriteDataFilesCommitManagerRetryConfig,
 };
-use bergloom_core::config::CompactionConfigBuilder as IcebergCompactionConfigBuilder;
 use iceberg::{Catalog, TableIdent};
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
@@ -101,16 +101,13 @@ impl IcebergCompactorRunner {
         Ok(all_data_file_size.div_ceil(MAX_SIZE_PER_PARTITION))
     }
 
-    pub async fn compact_iceberg(self, shutdown_rx: Receiver<()>, parallelism: usize) {
+    pub async fn compact_iceberg(
+        self,
+        shutdown_rx: Receiver<()>,
+        compaction_config: Arc<CompactionConfig>,
+    ) {
         // TODO: consider target_file_size
         let compact = async move {
-            let compaction_config = Arc::new(
-                IcebergCompactionConfigBuilder::default()
-                    .batch_parallelism(parallelism as usize)
-                    .target_partitions(parallelism as usize)
-                    .build(),
-            );
-
             let retry_config = RewriteDataFilesCommitManagerRetryConfig::default();
 
             let compaction = Compaction::builder()
