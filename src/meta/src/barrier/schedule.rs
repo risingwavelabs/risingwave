@@ -745,3 +745,290 @@ impl ScheduledBarriers {
         applied
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_database(
+        id: u32,
+        barrier_interval_ms: Option<u32>,
+        checkpoint_frequency: Option<u64>,
+    ) -> Database {
+        Database {
+            id,
+            name: format!("test_db_{}", id),
+            barrier_interval_ms,
+            checkpoint_frequency,
+            ..Default::default()
+        }
+    }
+
+    // Mock context for testing next_barrier
+    struct MockGlobalBarrierWorkerContext {
+        scheduled_rx: tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<Scheduled>>,
+    }
+
+    impl MockGlobalBarrierWorkerContext {
+        fn new() -> (Self, tokio::sync::mpsc::UnboundedSender<Scheduled>) {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            (
+                Self {
+                    scheduled_rx: tokio::sync::Mutex::new(rx),
+                },
+                tx,
+            )
+        }
+    }
+
+    impl GlobalBarrierWorkerContext for MockGlobalBarrierWorkerContext {
+        async fn next_scheduled(&self) -> Scheduled {
+            self.scheduled_rx.lock().await.recv().await.unwrap()
+        }
+
+        async fn commit_epoch(
+            &self,
+            _commit_info: crate::hummock::CommitEpochInfo,
+        ) -> MetaResult<risingwave_pb::hummock::HummockVersionStats> {
+            unimplemented!()
+        }
+
+        fn abort_and_mark_blocked(
+            &self,
+            _database_id: Option<DatabaseId>,
+            _recovery_reason: crate::barrier::RecoveryReason,
+        ) {
+            unimplemented!()
+        }
+
+        fn mark_ready(&self, _options: MarkReadyOptions) {
+            unimplemented!()
+        }
+
+        async fn post_collect_command<'a>(
+            &'a self,
+            _command: &'a crate::barrier::command::CommandContext,
+        ) -> MetaResult<()> {
+            unimplemented!()
+        }
+
+        async fn notify_creating_job_failed(&self, _database_id: Option<DatabaseId>, _err: String) {
+            unimplemented!()
+        }
+
+        async fn finish_creating_job(
+            &self,
+            _job: crate::barrier::progress::TrackingJob,
+        ) -> MetaResult<()> {
+            unimplemented!()
+        }
+
+        async fn new_control_stream(
+            &self,
+            _node: &risingwave_pb::common::WorkerNode,
+            _init_request: &risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest,
+        ) -> MetaResult<risingwave_rpc_client::StreamingControlHandle> {
+            unimplemented!()
+        }
+
+        async fn reload_runtime_info(
+            &self,
+        ) -> MetaResult<crate::barrier::BarrierWorkerRuntimeInfoSnapshot> {
+            unimplemented!()
+        }
+
+        async fn reload_database_runtime_info(
+            &self,
+            _database_id: DatabaseId,
+        ) -> MetaResult<Option<crate::barrier::DatabaseRuntimeInfoSnapshot>> {
+            unimplemented!()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_next_barrier_with_different_intervals() {
+        // Create databases with different intervals
+        let databases = vec![
+            create_test_database(1, Some(50), Some(2)), // 50ms interval, checkpoint every 2
+            create_test_database(2, Some(100), Some(3)), // 100ms interval, checkpoint every 3
+            create_test_database(3, None, Some(5)), /* Use system default (200ms), checkpoint every 5 */
+        ];
+
+        let mut periodic = PeriodicBarriers::new(
+            Duration::from_millis(200), // System default
+            10,                         // System checkpoint frequency
+            databases,
+        );
+
+        let (context, _tx) = MockGlobalBarrierWorkerContext::new();
+
+        // Test that next_barrier returns reasonable results for periodic barriers
+        let start_time = Instant::now();
+
+        // Call next_barrier for each database once, because the first interval is returned immediately
+        for _ in 0..3 {
+            let barrier = periodic.next_barrier(&context).await;
+            let elapsed = start_time.elapsed();
+            assert!(barrier.command.is_none()); // Should be a periodic barrier, not a scheduled command
+            assert!(!barrier.checkpoint); // First barrier shouldn't be a checkpoint
+            assert!(elapsed <= Duration::from_millis(5)); // Should be very quick
+        }
+
+        // Since we have 3 databases with intervals 50ms, 100ms, and 200ms,
+        // the first barrier should come from database 1 (50ms interval)
+        let barrier = periodic.next_barrier(&context).await;
+        let elapsed = start_time.elapsed();
+
+        // Verify the barrier properties
+        assert_eq!(barrier.database_id, DatabaseId::from(1));
+        assert!(barrier.command.is_none()); // Should be a periodic barrier, not a scheduled command
+        assert!(barrier.checkpoint); // Second barrier should be checkpoint for database 1
+        assert!(elapsed >= Duration::from_millis(40) && elapsed <= Duration::from_millis(60)); // Should be around 50ms
+
+        // Verify that the checkpoint frequency works
+        let db1_id = DatabaseId::from(1);
+        let db1_state = periodic.databases.get_mut(&db1_id).unwrap();
+        assert_eq!(db1_state.num_uncheckpointed_barrier, 0); // Should reset after checkpoint
+    }
+
+    #[tokio::test]
+    async fn test_next_barrier_with_scheduled_command() {
+        let databases = vec![
+            create_test_database(1, Some(1000), Some(2)), // Long interval to avoid interference
+        ];
+
+        let mut periodic = PeriodicBarriers::new(Duration::from_millis(1000), 10, databases);
+
+        let (context, tx) = MockGlobalBarrierWorkerContext::new();
+
+        // Skip first 3 barriers to allow time for the scheduled command
+        for _ in 0..3 {
+            periodic.next_barrier(&context).await;
+        }
+
+        // Schedule a command
+        let scheduled_command = Scheduled {
+            database_id: DatabaseId::from(1),
+            command: Command::Flush,
+            notifiers: vec![],
+            span: tracing::Span::none(),
+        };
+
+        // Send scheduled command in background
+        let tx_clone = tx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            tx_clone.send(scheduled_command).unwrap();
+        });
+
+        let start_time = Instant::now();
+        let barrier = periodic.next_barrier(&context).await;
+        let elapsed = start_time.elapsed();
+
+        // Should receive the scheduled command quickly
+        assert!(elapsed <= Duration::from_millis(20));
+        assert!(barrier.command.is_some());
+        assert_eq!(barrier.database_id, DatabaseId::from(1));
+
+        if let Some((command, _)) = barrier.command {
+            assert!(matches!(command, Command::Flush));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_next_barrier_multiple_databases_timing() {
+        let databases = vec![
+            create_test_database(1, Some(30), Some(10)), // Fast interval
+            create_test_database(2, Some(100), Some(10)), // Slower interval
+        ];
+
+        let mut periodic = PeriodicBarriers::new(Duration::from_millis(500), 10, databases);
+
+        let (context, _tx) = MockGlobalBarrierWorkerContext::new();
+
+        let mut barrier_counts = HashMap::new();
+
+        // Collect barriers for a short period
+        let mut barriers = Vec::new();
+        for _ in 0..5 {
+            let barrier = periodic.next_barrier(&context).await;
+            barriers.push(barrier);
+        }
+
+        // Count barriers per database
+        for barrier in barriers {
+            *barrier_counts.entry(barrier.database_id).or_insert(0) += 1;
+        }
+
+        // Database 1 (30ms interval) should have more barriers than database 2 (100ms interval)
+        let db1_count = barrier_counts.get(&DatabaseId::from(1)).unwrap_or(&0);
+        let db2_count = barrier_counts.get(&DatabaseId::from(2)).unwrap_or(&0);
+
+        // Due to timing, db1 should generally have more barriers, but allow for some variance
+        assert!(*db1_count >= *db2_count);
+    }
+
+    #[tokio::test]
+    async fn test_next_barrier_force_checkpoint() {
+        let databases = vec![create_test_database(1, Some(100), Some(10))];
+
+        let mut periodic = PeriodicBarriers::new(Duration::from_millis(100), 10, databases);
+
+        let (context, _tx) = MockGlobalBarrierWorkerContext::new();
+
+        // Force checkpoint for next barrier
+        periodic.force_checkpoint_in_next_barrier();
+
+        let barrier = periodic.next_barrier(&context).await;
+
+        // Should be a checkpoint barrier due to force_checkpoint
+        assert!(barrier.checkpoint);
+        assert_eq!(barrier.database_id, DatabaseId::from(1));
+        assert!(barrier.command.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_next_barrier_checkpoint_frequency() {
+        let databases = vec![create_test_database(1, Some(50), Some(2))]; // Checkpoint every 2 barriers
+
+        let mut periodic = PeriodicBarriers::new(Duration::from_millis(50), 10, databases);
+
+        let (context, _tx) = MockGlobalBarrierWorkerContext::new();
+
+        // First barrier - should not be checkpoint
+        let barrier1 = periodic.next_barrier(&context).await;
+        assert!(!barrier1.checkpoint);
+
+        // Second barrier - should be checkpoint (frequency = 2)
+        let barrier2 = periodic.next_barrier(&context).await;
+        assert!(barrier2.checkpoint);
+
+        // Third barrier - should not be checkpoint (counter reset)
+        let barrier3 = periodic.next_barrier(&context).await;
+        assert!(!barrier3.checkpoint);
+    }
+
+    #[tokio::test]
+    async fn test_update_database_barrier() {
+        let databases = vec![create_test_database(1, Some(1000), Some(10))];
+
+        let mut periodic = PeriodicBarriers::new(Duration::from_millis(500), 20, databases);
+
+        // Update existing database
+        periodic.update_database_barrier(DatabaseId::from(1), Some(2000), Some(15));
+
+        let db_state = periodic.databases.get(&DatabaseId::from(1)).unwrap();
+        assert_eq!(db_state.barrier_interval, Some(Duration::from_millis(2000)));
+        assert_eq!(db_state.checkpoint_frequency, Some(15));
+        assert_eq!(db_state.num_uncheckpointed_barrier, 0);
+        assert!(!db_state.force_checkpoint);
+
+        // Add new database
+        periodic.update_database_barrier(DatabaseId::from(2), None, None);
+
+        assert!(periodic.databases.contains_key(&DatabaseId::from(2)));
+        let db2_state = periodic.databases.get(&DatabaseId::from(2)).unwrap();
+        assert_eq!(db2_state.barrier_interval, None);
+        assert_eq!(db2_state.checkpoint_frequency, None);
+    }
+}
