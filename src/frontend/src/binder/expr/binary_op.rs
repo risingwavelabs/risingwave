@@ -180,14 +180,9 @@ impl Binder {
                     | (None, Some(DataType::Jsonb)) => ExprType::JsonbConcat,
 
                     // bytea (and varbit, tsvector, tsquery)
-                    (Some(t @ DataType::Bytea), Some(DataType::Bytea))
-                    | (Some(t @ DataType::Bytea), None)
-                    | (None, Some(t @ DataType::Bytea)) => {
-                        return Err(ErrorCode::BindError(format!(
-                            "operator not implemented yet: {t} || {t}"
-                        ))
-                        .into());
-                    }
+                    (Some(DataType::Bytea), Some(DataType::Bytea))
+                    | (Some(DataType::Bytea), None)
+                    | (None, Some(DataType::Bytea)) => ExprType::ByteaConcatOp,
 
                     // string concatenation
                     (None, _) | (_, None) => ExprType::ConcatOp,

@@ -15,6 +15,9 @@
 mod compaction_executor;
 mod compaction_filter;
 pub mod compaction_utils;
+use bergloom_core::config::CompactionConfigBuilder as IcebergCompactionConfigBuilder;
+use parquet::basic::Compression;
+use parquet::file::properties::WriterProperties;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ValidationTask};
 use risingwave_pb::compactor::{DispatchCompactionTaskRequest, dispatch_compaction_task_request};
 use risingwave_pb::hummock::PbCompactTask;
@@ -455,13 +458,47 @@ pub fn start_compactor_iceberg(
 
                                 running_task_parallelism
                                     .fetch_add(parallelism, Ordering::SeqCst);
+                                let iceberg_compaction_target_file_size_bytes =
+                                        (compactor_context.storage_opts.iceberg_compaction_target_file_size_mb * 1024 * 1024) as u64;
+                                let iceberg_compaction_enable_validate =
+                                        compactor_context.storage_opts.iceberg_compaction_enable_validate;
+                                let iceberg_compaction_max_record_batch_rows =
+                                        compactor_context.storage_opts.iceberg_compaction_max_record_batch_rows;
+                                let iceberg_compaction_write_parquet_max_row_group_rows =
+                                        compactor_context.storage_opts.iceberg_compaction_write_parquet_max_row_group_rows;
+
                                 executor.spawn(async move {
                                     let (tx, rx) = tokio::sync::oneshot::channel();
                                     shutdown.lock().unwrap().insert(task_id, tx);
 
+                                    let write_parquet_properties = WriterProperties::builder()
+                                        .set_compression(Compression::SNAPPY)
+                                        .set_created_by(concat!(
+                                            "risingwave version ",
+                                            env!("CARGO_PKG_VERSION")
+                                        )
+                                        .to_owned())
+                                        .set_max_row_group_size(
+                                            iceberg_compaction_write_parquet_max_row_group_rows
+                                        )
+                                        .set_compression(Compression::SNAPPY) // TODO: make it configurable
+                                        .build();
+
+                                    let compaction_config = Arc::new(IcebergCompactionConfigBuilder::default()
+                                            .batch_parallelism(parallelism as usize)
+                                            .target_partitions(parallelism as usize)
+                                            .target_file_size(iceberg_compaction_target_file_size_bytes)
+                                            .enable_validate_compaction(iceberg_compaction_enable_validate)
+                                            .max_record_batch_rows(iceberg_compaction_max_record_batch_rows)
+                                            .write_parquet_properties(write_parquet_properties)
+                                            .build().unwrap_or_else(|e| {
+                                                panic!("Failed to build iceberg compaction write props: {:?}", e.as_report());
+                                            })
+                                    );
+
                                     iceberg_runner.compact_iceberg(
                                         rx,
-                                        parallelism as usize,
+                                        compaction_config,
                                     )
                                     .await;
 

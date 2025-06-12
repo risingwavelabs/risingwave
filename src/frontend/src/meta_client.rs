@@ -69,6 +69,10 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>>;
 
+    async fn list_creating_stream_scan_fragment_distribution(
+        &self,
+    ) -> Result<Vec<FragmentDistribution>>;
+
     async fn list_actor_states(&self) -> Result<Vec<ActorState>>;
 
     async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>>;
@@ -188,6 +192,14 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>> {
         self.0.list_fragment_distributions().await
+    }
+
+    async fn list_creating_stream_scan_fragment_distribution(
+        &self,
+    ) -> Result<Vec<FragmentDistribution>> {
+        self.0
+            .list_creating_stream_scan_fragment_distribution()
+            .await
     }
 
     async fn list_actor_states(&self) -> Result<Vec<ActorState>> {
