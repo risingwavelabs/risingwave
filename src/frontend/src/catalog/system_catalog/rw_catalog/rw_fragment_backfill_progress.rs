@@ -45,6 +45,18 @@ JOIN rw_relations job_tables ON scan_info.job_id = job_tables.id
 JOIN rw_schemas job_schemas ON job_tables.schema_id = job_schemas.id
 JOIN rw_relations upstream_tables ON scan_info.backfill_target_table_id = upstream_tables.id
 JOIN rw_schemas upstream_schemas ON upstream_tables.schema_id = upstream_schemas.id
+UNION ALL
+select
+  source_backfill_progress.job_id,
+  source_backfill_progress.fragment_id,
+  concat(job_schemas.name, '.', job_tables.name) as job_name,
+  concat(upstream_schemas.name, '.', upstream_tables.name) as upstream_table_name,
+  concat(source_backfill_progress.current_row_count, '/', source_backfill_progress.total_row_count) as progress
+FROM internal_source_backfill_progress() source_backfill_progress
+JOIN rw_relations job_tables ON source_backfill_progress.job_id = job_tables.id
+JOIN rw_schemas job_schemas ON job_tables.schema_id = job_schemas.id
+JOIN rw_relations upstream_tables ON source_backfill_progress.job_id = upstream_tables.id
+JOIN rw_schemas upstream_schemas ON upstream_tables.schema_id = upstream_schemas.id
 "
 )]
 #[derive(Fields)]

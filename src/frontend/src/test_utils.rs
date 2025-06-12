@@ -1025,9 +1025,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(vec![])
     }
 
-    async fn list_creating_stream_scan_fragment_distribution(
-        &self,
-    ) -> RpcResult<Vec<FragmentDistribution>> {
+    async fn list_creating_fragment_distribution(&self) -> RpcResult<Vec<FragmentDistribution>> {
         Ok(vec![])
     }
 
