@@ -18,7 +18,9 @@
 
 package com.risingwave.connector.cdc.debezium.internal;
 
-import com.risingwave.java.binding.Binding;
+import static com.risingwave.java.binding.Binding.getObject;
+import static com.risingwave.java.binding.Binding.putObject;
+
 import io.debezium.config.Configuration;
 import io.debezium.relational.history.AbstractFileBasedSchemaHistory;
 import io.debezium.relational.history.HistoryRecord;
@@ -48,29 +50,35 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
 
     @Override
     protected void doPreStart() {
+        LOGGER.info("这里doPreStart");
         // No need for pre-start actions
     }
 
     @Override
     protected void doStart() {
+        LOGGER.info("这里doStart");
         InputStream objectInputStream = retrieveObjectFromStorage();
-        if (objectInputStream != null) {
+
+        if (false) {
             toHistoryRecord(objectInputStream);
         }
     }
 
     private InputStream retrieveObjectFromStorage() {
-        byte[] byteArray = Binding.getObject(objectName);
+        LOGGER.info("这里retrieveObjectFromStorage");
+        byte[] byteArray = getObject(objectName);
         return new ByteArrayInputStream(byteArray);
     }
 
     @Override
     public void doStop() {
+        LOGGER.info("这里doStop");
         // Do nothing on stop
     }
 
     @Override
     protected void doPreStoreRecord(HistoryRecord record) {
+        LOGGER.info("这里doPreStoreRecord");
         // Example check, can be removed or modified as needed
         if (false) {
             throw new SchemaHistoryException(
@@ -80,9 +88,10 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
 
     @Override
     protected void doStoreRecord(HistoryRecord record) {
+        LOGGER.info("这里doStoreRecord");
         byte[] data = fromHistoryRecord(record);
         String dataString = new String(data, StandardCharsets.UTF_8);
-        Binding.putObject(objectName, dataString);
+        putObject(objectName, dataString);
     }
 
     @Override
@@ -98,6 +107,6 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
 
     @Override
     public String toString() {
-        return "Opendal"; // More descriptive return value
+        return "s3"; // More descriptive return value
     }
 }

@@ -33,7 +33,7 @@ impl ObjectStoreEngine {
     pub fn new_minio_engine(server: &str) -> anyhow::Result<Self> {
         let builder = S3::default()
             .bucket("hummock001")
-            .region("custom")
+            .region("us-east-1")
             .access_key_id("hummockadmin")
             .secret_access_key("hummockadmin")
             .endpoint("http://hummock001.127.0.0.1:9301")
@@ -85,7 +85,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_putObject(
 
         let object_name = env.get_string(&object_name)?;
         let object_name: Cow<'_, str> = (&object_name).into();
-
+        println!("rust这里写");
         let data = env.get_string(&data)?;
         let data: Cow<'_, str> = (&data).into();
         let data: Vec<u8> = data.as_bytes().to_vec();
@@ -97,6 +97,8 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_putObject(
     });
 }
 
+
+
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_getObject<'a>(
     env: EnvParam<'a>,
@@ -107,13 +109,15 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_getObject<'a>(
 
         let object_name = env.get_string(&object_name)?;
         let object_name: Cow<'_, str> = (&object_name).into();
-
+        println!("rust这里读");
         let result = JAVA_BINDING_ASYNC_RUNTIME
             .block_on(async {
-                let data = engine.read_object(&object_name).await.unwrap();
-                data
-            })
-            ;
-         Ok(env.byte_array_from_slice(&result)?)
+                match engine.read_object(&object_name).await {
+                    Ok(data) => data,
+                    Err(_) =>  Bytes::new(), 
+                }
+            });
+        
+        Ok(env.byte_array_from_slice(&result)?)
     })
 }

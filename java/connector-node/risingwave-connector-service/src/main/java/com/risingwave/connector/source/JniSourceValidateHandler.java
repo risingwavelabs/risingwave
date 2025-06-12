@@ -16,6 +16,7 @@ package com.risingwave.connector.source;
 
 import static com.risingwave.connector.source.SourceValidateHandler.validateResponse;
 import static com.risingwave.connector.source.SourceValidateHandler.validateSource;
+import static com.risingwave.java.binding.Binding.getObject;
 import static com.risingwave.java.binding.Binding.putObject;
 
 import com.risingwave.proto.ConnectorServiceProto;
@@ -30,6 +31,8 @@ public class JniSourceValidateHandler {
             throws com.google.protobuf.InvalidProtocolBufferException {
         try {
             putObject("/test.txt", "hello");
+            byte[] byteArray = getObject("/test.txt");
+            LOG.info("1111");
             var request =
                     ConnectorServiceProto.ValidateSourceRequest.parseFrom(
                             validateSourceRequestBytes);
