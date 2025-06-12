@@ -19,7 +19,7 @@ use risingwave_connector::source::iceberg::{FileScanBackend, extract_bucket_and_
 
 use super::Rule;
 use crate::expr::{Expr, TableFunctionType};
-use crate::optimizer::PlanRef;
+use crate::optimizer::{BoxedRule, PlanRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalFileScan, LogicalTableFunction};
 
@@ -130,5 +130,11 @@ impl Rule for TableFunctionToFileScanRule {
         } else {
             unreachable!("TableFunction return type should be struct")
         }
+    }
+}
+
+impl TableFunctionToFileScanRule {
+    pub fn create() -> BoxedRule {
+        Box::new(TableFunctionToFileScanRule {})
     }
 }

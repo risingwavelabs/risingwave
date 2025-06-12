@@ -149,7 +149,7 @@ static TABLE_FUNCTION_CONVERT: LazyLock<OptimizationStage> = LazyLock::new(|| {
 static TABLE_FUNCTION_TO_FILE_SCAN: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Table Function To FileScan",
-        vec![TableFunctionToInternalBackfillProgressRule::create()],
+        vec![TableFunctionToFileScanRule::create()],
         ApplyOrder::TopDown,
     )
 });
