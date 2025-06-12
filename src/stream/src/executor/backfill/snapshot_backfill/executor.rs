@@ -151,6 +151,8 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
             }
         };
         let first_recv_barrier_epoch = first_recv_barrier.epoch;
+        let backfill_paused =
+            first_recv_barrier.is_backfill_pause_on_startup(self.actor_ctx.fragment_id);
         yield Message::Barrier(first_recv_barrier);
         let mut backfill_state = BackfillState::new(
             self.progress_state_table,
@@ -207,6 +209,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             &mut self.progress,
                             &mut backfill_state,
                             first_recv_barrier_epoch,
+                            backfill_paused,
                         );
 
                         pin_mut!(snapshot_stream);
@@ -825,6 +828,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     progress: &'a mut CreateMviewProgressReporter,
     backfill_state: &'a mut BackfillState<S>,
     first_recv_barrier_epoch: EpochPair,
+    backfill_paused: bool,
 ) {
     let mut barrier_epoch = first_recv_barrier_epoch;
 
@@ -842,12 +846,13 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
         barrier_rx: &mut UnboundedReceiver<Barrier>,
         snapshot_stream: &mut (impl Stream<Item = StreamExecutorResult<StreamChunk>> + Unpin),
         throttle_snapshot_stream: bool,
+        backfill_paused: bool,
     ) -> StreamExecutorResult<Either<Barrier, Option<StreamChunk>>> {
         select!(
             result = receive_next_barrier(barrier_rx) => {
                 Ok(Either::Left(result?))
             },
-            result = snapshot_stream.try_next(), if !throttle_snapshot_stream => {
+            result = snapshot_stream.try_next(), if !throttle_snapshot_stream && !backfill_paused => {
                 Ok(Either::Right(result?))
             }
         )
@@ -861,6 +866,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
             barrier_rx,
             &mut snapshot_stream,
             throttle_snapshot_stream,
+            backfill_paused,
         )
         .await?
         {
