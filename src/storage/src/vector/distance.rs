@@ -174,7 +174,12 @@ impl<'a> MeasureDistance for CosineDistanceMeasure<'a> {
         let len = self.target.0.len();
         assert_eq!(len, other.0.len());
         let magnitude_mul = other.magnitude() * self.magnitude;
-        1.0 - inner_product_faiss(self.target, other) / magnitude_mul
+        if magnitude_mul < f32::MIN_POSITIVE {
+            // If either vector is zero, the distance is the further 1.1
+            return 1.1;
+        }
+        let distance = 1.0 - inner_product_faiss(self.target, other) / magnitude_mul;
+        distance
     }
 }
 
