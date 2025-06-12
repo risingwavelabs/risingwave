@@ -84,10 +84,10 @@ tar --zstd -cvf raw-profiling-data.tar.zst target/risingwave-*.profraw
 buildkite-agent artifact upload raw-profiling-data.tar.zst
 
 echo "--- Generate coverage report"
-cargo llvm-cov report --profile "$profile" --lcov --output-path coverage.lcov
+cargo llvm-cov report --lcov --output-path coverage.lcov
 buildkite-agent artifact upload coverage.lcov
 
 echo "--- Generate coverage report (HTML)"
-cargo llvm-cov report --profile "$profile" --html
+cargo llvm-cov report --html
 tar --zstd -cvf coverage-report.tar.zst target/llvm-cov/html
 buildkite-agent artifact upload coverage-report.tar.zst
