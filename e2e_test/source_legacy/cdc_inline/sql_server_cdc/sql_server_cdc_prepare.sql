@@ -86,3 +86,24 @@ CREATE TABLE orders_without_cdc (
   product_id INT,
   order_status SMALLINT
 );
+
+
+CREATE TABLE test_pk_uuid (
+  id UNIQUEIDENTIFIER PRIMARY KEY,
+  NAME NVARCHAR(50),
+);
+
+EXEC sys.sp_cdc_enable_table
+  @source_schema = 'dbo',
+  @source_name = 'test_pk_uuid',
+  @role_name = NULL;
+
+  DECLARE @i INT = 1;
+
+WHILE @i <= 2000
+BEGIN
+    INSERT INTO test_pk_uuid (id, NAME)
+    VALUES (NEWID(), CONCAT('TEST_NAME', @i));
+
+    SET @i = @i + 1;
+END
