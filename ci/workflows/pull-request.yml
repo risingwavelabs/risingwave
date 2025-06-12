@@ -163,7 +163,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-tests?(,|$$)/
     depends_on:
       - "build"
-      # - "build-other"
+      - "build-other"
       - "docslt"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
