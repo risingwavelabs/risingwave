@@ -46,7 +46,8 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::prelude::{StateTable, StreamExt, try_stream};
 use crate::executor::{
     ActorContextRef, Barrier, BoxedMessageStream, DispatcherBarrier, DispatcherMessage, Execute,
-    MergeExecutorInput, Message, StreamExecutorError, StreamExecutorResult, expect_first_barrier,
+    MergeExecutorInput, Message, Mutation, StreamExecutorError, StreamExecutorResult,
+    expect_first_barrier,
 };
 use crate::task::CreateMviewProgressReporter;
 
@@ -210,6 +211,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             &mut backfill_state,
                             first_recv_barrier_epoch,
                             backfill_paused,
+                            &self.actor_ctx,
                         );
 
                         pin_mut!(snapshot_stream);
@@ -829,6 +831,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     backfill_state: &'a mut BackfillState<S>,
     first_recv_barrier_epoch: EpochPair,
     backfill_paused: bool,
+    actor_ctx: &'a ActorContextRef,
 ) {
     let mut barrier_epoch = first_recv_barrier_epoch;
 
@@ -860,6 +863,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
 
     let mut count = 0;
     let mut epoch_row_count = 0;
+    let mut backfill_paused = backfill_paused;
     loop {
         let throttle_snapshot_stream = epoch_row_count as u64 > rate_limit.to_u64();
         match select_barrier_and_snapshot_stream(
@@ -875,6 +879,18 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
                 barrier_epoch = barrier.epoch;
                 if barrier_epoch.curr >= snapshot_epoch {
                     return Err(anyhow!("should not receive barrier with epoch {barrier_epoch:?} later than snapshot epoch {snapshot_epoch}").into());
+                }
+                if let Some(mutation) = barrier.mutation.as_deref()
+                    && let Mutation::StartFragmentBackfill { fragment_ids } = mutation
+                    && fragment_ids.contains(&actor_ctx.fragment_id)
+                {
+                    if backfill_paused {
+                        backfill_paused = false;
+                    } else {
+                        tracing::error!(
+                            "received start fragment backfill mutation, but backfill is not paused"
+                        );
+                    }
                 }
                 if let Some(chunk) = snapshot_stream.consume_builder() {
                     count += chunk.cardinality();
@@ -904,6 +920,11 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
                 post_commit.post_yield_barrier(None).await?;
             }
             Either::Right(Some(chunk)) => {
+                if backfill_paused {
+                    return Err(
+                        anyhow!("snapshot backfill paused, but received snapshot chunk").into(),
+                    );
+                }
                 count += chunk.cardinality();
                 epoch_row_count += chunk.cardinality();
                 yield Message::Chunk(chunk);
