@@ -65,7 +65,7 @@ impl TableFunctionToInternalBackfillProgressRule {
                 Field::new("fragment_id", DataType::Int32),
                 Field::new("backfill_state_table_id", DataType::Int32),
                 Field::new("current_row_count", DataType::Int64),
-                Field::new("snapshot_backfill_epoch", DataType::Int64),
+                Field::new("min_epoch", DataType::Int64),
             ];
             let plan = LogicalValues::new(vec![], Schema::new(fields), ctx.clone());
             return Ok(plan.into());
