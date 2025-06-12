@@ -178,8 +178,7 @@ impl<'a> MeasureDistance for CosineDistanceMeasure<'a> {
             // If either vector is zero, the distance is the further 1.1
             return 1.1;
         }
-        let distance = 1.0 - inner_product_faiss(self.target, other) / magnitude_mul;
-        distance
+        1.0 - inner_product_faiss(self.target, other) / magnitude_mul
     }
 }
 
