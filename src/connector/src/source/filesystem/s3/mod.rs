@@ -15,15 +15,17 @@ pub mod enumerator;
 use std::collections::HashMap;
 
 pub use enumerator::LegacyS3SplitEnumerator;
+use risingwave_common::util::env_var::env_var_is_true;
 
-use crate::source::filesystem::file_common::CompressionFormat;
+use crate::connector_common::DISABLE_DEFAULT_CREDENTIAL;
+use crate::deserialize_optional_bool_from_string;
+use crate::source::filesystem::LegacyFsSplit;
+use crate::source::{SourceProperties, UnknownFields};
 mod source;
 use serde::Deserialize;
 pub use source::LegacyS3FileReader;
 
 use crate::connector_common::AwsAuthProps;
-use crate::source::filesystem::LegacyFsSplit;
-use crate::source::{SourceProperties, UnknownFields};
 
 pub const LEGACY_S3_CONNECTOR: &str = "s3";
 
@@ -40,10 +42,20 @@ pub struct S3PropertiesCommon {
     pub access: Option<String>,
     #[serde(rename = "s3.credentials.secret", default)]
     pub secret: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
+    pub enable_config_load: Option<bool>,
     #[serde(rename = "s3.endpoint_url")]
     pub endpoint_url: Option<String>,
-    #[serde(rename = "compression_format", default = "Default::default")]
-    pub compression_format: CompressionFormat,
+}
+
+impl S3PropertiesCommon {
+    pub fn enable_config_load(&self) -> bool {
+        // If the env var is set to true, we disable the default config load. (Cloud environment)
+        if env_var_is_true(DISABLE_DEFAULT_CREDENTIAL) {
+            return false;
+        }
+        self.enable_config_load.unwrap_or(false)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
