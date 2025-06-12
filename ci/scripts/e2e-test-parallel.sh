@@ -78,6 +78,10 @@ start_cluster
 risedev slt "${host_args[@]}" -d dev './e2e_test/generated/**/*.slt' -j 16 --junit "parallel-generated-${profile}" --label "parallel"
 kill_cluster
 
+echo "--- Upload raw profiling data"
+zip -q -r raw-profiling-data.zip target/risingwave-*.profraw
+buildkite-agent artifact upload raw-profiling-data.zip
+
 echo "--- Generate coverage report"
 cargo llvm-cov report --profile "$profile" --lcov --output-path coverage.lcov
 buildkite-agent artifact upload coverage.lcov
