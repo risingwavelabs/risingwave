@@ -207,7 +207,7 @@ impl Binder {
                                         true,
                                     );
                                 } else if let Some(table_catalog) =
-                                    schema.get_table_by_name(table_name)
+                                    schema.get_any_table_by_name(table_name)
                                     && (bind_creating_relations
                                         || table_catalog.is_internal_table()
                                         || table_catalog.is_created())
