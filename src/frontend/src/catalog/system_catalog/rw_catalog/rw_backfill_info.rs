@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::types::Fields;
-use risingwave_common::util::stream_graph_visitor::visit_stream_node_stream_scan;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_backfills;
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::meta::FragmentDistribution;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
@@ -44,7 +44,7 @@ fn extract_stream_scan(fragment_distribution: &FragmentDistribution) -> Option<R
         != 0;
 
     let mut scan = None;
-    visit_stream_node_stream_scan(stream_node, |node| {
+    visit_stream_node_backfills(stream_node, |node| {
         scan = Some(RwBackfillInfo {
             job_id: fragment_distribution.table_id as i32,
             fragment_id: fragment_distribution.fragment_id as i32,
