@@ -41,23 +41,22 @@ fn extract_stream_scan(fragment_distribution: &FragmentDistribution) -> Option<R
     }
 
     let stream_node = fragment_distribution.node.as_ref()?;
-    let backfill_type = if fragment_distribution.fragment_type_mask
-        & (FragmentTypeFlag::SourceScan as u32)
-        != 0
-    {
-        CatalogBackfillType::Source
-    } else if fragment_distribution.fragment_type_mask
-        & (FragmentTypeFlag::SnapshotBackfillStreamScan as u32
-            | FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32)
-        != 0
-    {
-        CatalogBackfillType::SnapshotBackfill
-    } else if fragment_distribution.fragment_type_mask & (FragmentTypeFlag::StreamScan as u32) != 0
-    {
-        CatalogBackfillType::ArrangementOrNoShuffle
-    } else {
-        return None;
-    };
+    let backfill_type =
+        if fragment_distribution.fragment_type_mask & (FragmentTypeFlag::SourceScan as u32) != 0 {
+            CatalogBackfillType::Source
+        } else if fragment_distribution.fragment_type_mask
+            & (FragmentTypeFlag::SnapshotBackfillStreamScan as u32
+                | FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32)
+            != 0
+        {
+            CatalogBackfillType::SnapshotBackfill
+        } else if fragment_distribution.fragment_type_mask & (FragmentTypeFlag::StreamScan as u32)
+            != 0
+        {
+            CatalogBackfillType::ArrangementOrNoShuffle
+        } else {
+            return None;
+        };
 
     let mut scan = None;
 
