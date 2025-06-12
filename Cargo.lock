@@ -12706,6 +12706,7 @@ dependencies = [
  "bytes",
  "criterion",
  "darwin-libproc",
+ "derive_builder",
  "dyn-clone",
  "either",
  "enum-as-inner",

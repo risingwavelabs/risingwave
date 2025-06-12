@@ -22,6 +22,7 @@ auto_enums = { workspace = true }
 await-tree = { workspace = true }
 bergloom-core = { git = "https://github.com/nimtable/BergLoom.git", rev = "1c293c099db9a2374018e60146d1472e55342a5e" }
 bytes = { version = "1", features = ["serde"] }
+derive_builder = "0.20"
 dyn-clone = "1.0.14"
 either = "1"
 enum-as-inner = "0.6"
