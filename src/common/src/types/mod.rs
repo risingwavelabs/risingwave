@@ -1025,7 +1025,10 @@ impl ScalarImpl {
                     .ok_or_else(|| "invalid value of Jsonb".to_owned())?,
             ),
             DataType::Int256 => Self::Int256(Int256::from_binary(bytes)?),
-            DataType::Struct(_) | DataType::List(_) | DataType::Map(_) => {
+            DataType::List(_) => {
+                Self::List(ListValue::from_binary(bytes.clone(), data_type).unwrap())
+            }
+            DataType::Struct(_) | DataType::Map(_) => {
                 return Err(format!("unsupported data type: {}", data_type).into());
             }
         };
