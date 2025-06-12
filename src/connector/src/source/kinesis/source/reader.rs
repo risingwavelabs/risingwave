@@ -366,6 +366,13 @@ mod tests {
                 endpoint: None,
                 session_token: None,
                 assume_role_external_id: None,
+                sdk_connect_timeout_ms: 1000,
+                sdk_read_timeout_ms: 1000,
+                sdk_operation_timeout_ms: 1000,
+                sdk_operation_attempt_timeout_ms: 1000,
+                sdk_max_retry_limit: 3,
+                sdk_init_backoff_ms: 100,
+                sdk_max_backoff_ms: 1000,
             },
 
             scan_startup_mode: None,
