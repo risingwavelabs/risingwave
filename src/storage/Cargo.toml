@@ -20,7 +20,7 @@ arc-swap = { workspace = true }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 await-tree = { workspace = true }
-bergloom-core = { git = "https://github.com/nimtable/BergLoom.git", rev = "8b52670a5f78ffe99af7391bc83654b97fa886a0" }
+bergloom-core = { git = "https://github.com/nimtable/BergLoom.git", rev = "1c293c099db9a2374018e60146d1472e55342a5e" }
 bytes = { version = "1", features = ["serde"] }
 dyn-clone = "1.0.14"
 either = "1"
@@ -40,6 +40,7 @@ moka = { version = "0.12.0", features = ["future", "sync"] }
 more-asserts = "0.3"
 num-integer = "0.1"
 parking_lot = { workspace = true }
+parquet = { workspace = true }
 prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true }
 rand = { workspace = true }

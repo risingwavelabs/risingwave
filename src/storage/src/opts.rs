@@ -151,6 +151,7 @@ pub struct StorageOpts {
     pub iceberg_compaction_target_file_size_mb: u32,
     pub iceberg_compaction_enable_validate: bool,
     pub iceberg_compaction_max_record_batch_rows: usize,
+    pub iceberg_compaction_write_parquet_max_row_group_rows: usize,
 }
 
 impl Default for StorageOpts {
@@ -276,6 +277,9 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             iceberg_compaction_max_record_batch_rows: c
                 .storage
                 .iceberg_compaction_max_record_batch_rows,
+            iceberg_compaction_write_parquet_max_row_group_rows: c
+                .storage
+                .iceberg_compaction_write_parquet_max_row_group_rows,
         }
     }
 }
