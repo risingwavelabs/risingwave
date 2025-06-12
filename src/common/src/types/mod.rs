@@ -39,7 +39,9 @@ use crate::array::{
     ArrayBuilderImpl, ArrayError, ArrayResult, NULL_VAL_FOR_HASH, PrimitiveArrayItemType,
 };
 // Complex type's value is based on the array
-pub use crate::array::{ListRef, ListValue, MapRef, MapValue, StructRef, StructValue};
+pub use crate::array::{
+    ListRef, ListValue, MapRef, MapValue, StructRef, StructValue, VectorRef, VectorVal,
+};
 use crate::cast::{str_to_bool, str_to_bytea};
 use crate::catalog::ColumnId;
 use crate::error::BoxedError;
@@ -176,6 +178,9 @@ pub enum DataType {
     #[display("{0}")]
     #[from_str(regex = "(?i)^(?P<0>.+)$")]
     Map(MapType),
+    #[display("vector({0})")]
+    #[from_str(regex = "(?i)^vector\\((?P<0>.+)\\)$")]
+    Vector(usize),
 }
 
 impl !PartialOrd for DataType {}
@@ -213,8 +218,11 @@ impl TryFrom<DataTypeName> for DataType {
             DataTypeName::Time => Ok(DataType::Time),
             DataTypeName::Interval => Ok(DataType::Interval),
             DataTypeName::Jsonb => Ok(DataType::Jsonb),
-            DataTypeName::Struct | DataTypeName::List | DataTypeName::Map => Err(
-                "Functions returning composite types can not be inferred. Please use `FunctionCall::new_unchecked`.",
+            DataTypeName::Struct
+            | DataTypeName::List
+            | DataTypeName::Map
+            | DataTypeName::Vector => Err(
+                "Functions returning parameterized types can not be inferred. Please use `FunctionCall::new_unchecked`.",
             ),
         }
     }
@@ -267,6 +275,7 @@ impl From<&PbDataType> for DataType {
                 let list_entries_type: DataType = (&proto.field_type[0]).into();
                 DataType::Map(MapType::from_entries(list_entries_type))
             }
+            PbTypeName::Vector => todo!("VECTOR_PLACEHOLDER"),
             PbTypeName::Int256 => DataType::Int256,
         }
     }
@@ -301,6 +310,7 @@ impl From<DataTypeName> for PbTypeName {
             DataTypeName::List => PbTypeName::List,
             DataTypeName::Int256 => PbTypeName::Int256,
             DataTypeName::Map => PbTypeName::Map,
+            DataTypeName::Vector => PbTypeName::Vector,
         }
     }
 }
@@ -374,6 +384,7 @@ pub mod data_types {
     fn _simple_composite_data_types_exhausted(dt: DataType) {
         match dt {
             simple!() => {}
+            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
             composite!() => {}
         }
     }
@@ -421,6 +432,7 @@ impl DataType {
                 // Same as List<Struct<K,V>>
                 pb.field_type = vec![datatype.clone().into_struct().to_protobuf()];
             }
+            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
             DataType::Boolean
             | DataType::Int16
             | DataType::Int32
@@ -587,6 +599,7 @@ impl DataType {
     pub fn can_alter(&self) -> Option<bool> {
         match self {
             data_types::simple!() => None,
+            DataType::Vector(_) => None,
 
             DataType::Struct(struct_type) => {
                 // As long as we meet a struct type, we can check its `ids` field to determine if
@@ -1025,6 +1038,7 @@ impl ScalarImpl {
                     .ok_or_else(|| "invalid value of Jsonb".to_owned())?,
             ),
             DataType::Int256 => Self::Int256(Int256::from_binary(bytes)?),
+            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
             DataType::Struct(_) | DataType::List(_) | DataType::Map(_) => {
                 return Err(format!("unsupported data type: {}", data_type).into());
             }
@@ -1058,6 +1072,7 @@ impl ScalarImpl {
             DataType::Struct(st) => StructValue::from_str(s, st)?.into(),
             DataType::Jsonb => JsonbVal::from_str(s)?.into(),
             DataType::Bytea => str_to_bytea(s)?.into(),
+            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
             DataType::Map(_m) => return Err("map from text is not supported".into()),
         })
     }
@@ -1164,6 +1179,7 @@ impl ScalarRefImpl<'_> {
             Self::Struct(v) => v.memcmp_serialize(ser)?,
             Self::List(v) => v.memcmp_serialize(ser)?,
             Self::Map(v) => v.memcmp_serialize(ser)?,
+            Self::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
         };
         Ok(())
     }
@@ -1219,6 +1235,7 @@ impl ScalarImpl {
             Ty::Struct(t) => StructValue::memcmp_deserialize(t.types(), de)?.to_scalar_value(),
             Ty::List(t) => ListValue::memcmp_deserialize(t, de)?.to_scalar_value(),
             Ty::Map(t) => MapValue::memcmp_deserialize(t, de)?.to_scalar_value(),
+            Ty::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
         })
     }
 
@@ -1400,6 +1417,7 @@ mod tests {
                     // map is not hashable
                     continue;
                 }
+                DataTypeName::Vector => continue, // todo!("VECTOR_PLACEHOLDER"),
             };
 
             test(Some(scalar), data_type.clone());
