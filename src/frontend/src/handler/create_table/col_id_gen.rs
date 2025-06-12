@@ -259,7 +259,7 @@ impl ColumnIdGenerator {
                     DataType::Map(MapType::from_kv(new_key, new_value))
                 }
 
-                DataType::Vector(_) => data_type,
+                DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
                 data_types::simple!() => data_type,
             };
 
