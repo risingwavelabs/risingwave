@@ -35,7 +35,7 @@ anchors:
           - with:
               backend: "postgres"
               # PGPASSWORD=postgres psql -h db -p 5432 -U postgres -d rwmeta
-              endpoint: "postgres://postgres:postgres@db:5432/rwmeta"
+              endpoint: "postgres://postgres:post\\tgres@db:5432/rwmeta"
           - with:
               backend: "mysql"
               # mysql -h mysql-meta -P 3306 -u root -p123456 -D rwmeta

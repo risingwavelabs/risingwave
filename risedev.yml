@@ -347,7 +347,7 @@ profile:
         address: db
         database: metadata
         user: postgres
-        password: postgres
+        password: post\tgres
         user-managed: true
         application: metastore
       - use: meta-node
@@ -919,7 +919,7 @@ profile:
         port: 5432
         address: db
         user: postgres
-        password: postgres
+        password: post\tgres
         user-managed: true
 
   ci-redis:

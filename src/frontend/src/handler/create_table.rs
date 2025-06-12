@@ -21,6 +21,7 @@ use clap::ValueEnum;
 use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use percent_encoding::percent_decode_str;
 use pgwire::pg_response::{PgResponse, StatementType};
 use prost::Message as _;
 use risingwave_common::catalog::{
@@ -1477,10 +1478,11 @@ pub async fn create_iceberg_engine_table(
     let meta_store_user = meta_store_endpoint.username().to_owned();
     let meta_store_password = meta_store_endpoint
         .password()
+        .and_then(|p| percent_decode_str(p).decode_utf8().ok())
         .ok_or_else(|| {
             ErrorCode::InternalError("failed to parse password from meta store endpoint".to_owned())
         })?
-        .to_owned();
+        .into_owned();
     let meta_store_host = meta_store_endpoint
         .host_str()
         .ok_or_else(|| {
