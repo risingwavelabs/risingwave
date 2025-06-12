@@ -38,8 +38,7 @@ pub fn generate_internal_table_name_with_type(
 pub fn is_backfill_table(table_name: &str) -> bool {
     let parts: Vec<&str> = table_name.split('_').collect();
     let parts_len = parts.len();
-    parts_len >= 2
-        && (parts[parts_len - 2] == "streamscan" || parts[parts_len - 2] == "sourcebackfill")
+    parts_len >= 2 && parts[parts_len - 2] == "streamscan"
 }
 
 pub fn is_source_backfill_table(table_name: &str) -> bool {
