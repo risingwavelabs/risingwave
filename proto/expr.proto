@@ -386,6 +386,8 @@ message TableFunction {
     MYSQL_QUERY = 21;
     // Internal backfill table function
     INTERNAL_BACKFILL_PROGRESS = 30;
+    // Internal source backfill table function
+    INTERNAL_SOURCE_BACKFILL_PROGRESS = 31;
     // User defined table function
     USER_DEFINED = 100;
   }
