@@ -755,6 +755,9 @@ if [[ -n ${containers} ]]; then
   docker stop ${containers}
 fi
 
+# Wait for a while for all components to stop
+sleep 5
+
 ${TMUX} kill-server
 test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
 '''
