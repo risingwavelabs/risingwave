@@ -1,0 +1,87 @@
+control substitution on
+
+statement ok
+drop materialized view if exists mv1;
+
+statement ok
+drop table if exists t1;
+
+statement ok
+drop table if exists t2;
+
+statement ok
+drop table if exists t3;
+
+statement ok
+create table t1 (a int, b int) append only;
+create table t2 (a int, b int) append only;
+create table t3 (a int, b int) append only;
+
+statement ok
+insert into t1 select i, i from generate_series(1, 10000) as t(i);
+
+statement ok
+insert into t2 select i, i from generate_series(1, 10000) as t(i);
+
+statement ok
+insert into t3 select i, i from generate_series(1, 10000) as t(i);
+
+statement ok
+create sink sink1 from t1
+with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'backfill_progress_source_1',
+)
+format plain encode json;
+
+statement ok
+create sink sink2 from t2
+with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'backfill_progress_source_2',
+)
+format plain encode json;
+
+statement ok
+create sink sink3 from t3
+with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'backfill_progress_source_3',
+)
+format plain encode json;
+
+statement ok
+create source s1(a int, b int) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'backfill_progress_source_1',
+)
+format plain encode json;
+
+statement ok
+create source s2(a int, b int) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'backfill_progress_source_2',
+)
+format plain encode json;
+
+statement ok
+create source s3(a int, b int) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'backfill_progress_source_3',
+)
+format plain encode json;
+
+statement ok
+set background_ddl=true;
+set backfill_rate_limit=10;
+set streaming_use_snapshot_backfill=false;
+
+statement ok
+flush;
+
+statement ok
+create materialized view mv1
+as select s1.a, s2.b, s3.b as c, s1.a as d from s1 join s2 on s1.a = s2.a join s3 on s2.a = s3.a join s1 as t4 on s3.a = t4.a;
+
+statement ok
+show jobs;
