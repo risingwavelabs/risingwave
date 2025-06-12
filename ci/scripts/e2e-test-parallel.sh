@@ -79,8 +79,8 @@ risedev slt "${host_args[@]}" -d dev './e2e_test/generated/**/*.slt' -j 16 --jun
 kill_cluster
 
 echo "--- Upload raw profiling data"
-zip -q -r raw-profiling-data.zip target/risingwave-*.profraw
-buildkite-agent artifact upload raw-profiling-data.zip
+tar --zstd -cvf raw-profiling-data.tar.zst target/risingwave-*.profraw
+buildkite-agent artifact upload raw-profiling-data.tar.zst
 
 echo "--- Generate coverage report"
 cargo llvm-cov report --profile "$profile" --lcov --output-path coverage.lcov
@@ -88,5 +88,5 @@ buildkite-agent artifact upload coverage.lcov
 
 echo "--- Generate coverage report (HTML)"
 cargo llvm-cov report --profile "$profile" --html
-zip -q -r coverage-report.zip target/llvm-cov/html
-buildkite-agent artifact upload coverage-report.zip
+tar --zstd -cvf coverage-report.tar.zst target/llvm-cov/html
+buildkite-agent artifact upload coverage-report.tar.zst
