@@ -17,22 +17,18 @@ use std::sync::Arc;
 
 use anyhow::bail;
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema, is_backfill_table, is_source_backfill_table};
+use risingwave_common::catalog::{Field, Schema, is_source_backfill_table};
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_expr::aggregate::AggType;
-pub use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 
 use super::{ApplyResult, BoxedRule, FallibleRule};
 use crate::TableCatalog;
 use crate::catalog::catalog_service::CatalogReadGuard;
-use crate::catalog::source_catalog::SourceCatalog;
-use crate::expr::{AggCall, ExprImpl, InputRef, Literal, OrderBy, TableFunctionType};
+use crate::expr::{ExprImpl, InputRef, Literal, TableFunctionType};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalProject, LogicalScan, LogicalTableFunction, LogicalUnion, LogicalValues,
+    LogicalProject, LogicalScan, LogicalTableFunction, LogicalUnion, LogicalValues,
 };
 use crate::optimizer::{OptimizerContext, PlanRef};
-use crate::utils::{Condition, GroupBy};
 
 /// Transform the `internal_backfill_progress()` table function
 /// into a plan graph which will scan the state tables of backfill nodes.
