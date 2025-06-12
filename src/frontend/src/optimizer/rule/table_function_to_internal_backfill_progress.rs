@@ -96,7 +96,7 @@ impl TableFunctionToInternalBackfillProgressRule {
     }
 
     fn build_agg(backfill_info: &BackfillInfo, scan: LogicalScan) -> anyhow::Result<PlanRef> {
-        let epoch_expr = match backfill_info.epoch_column_index() {
+        let epoch_expr = match backfill_info.epoch_column_index {
             Some(epoch_column_index) => ExprImpl::InputRef(Box::new(InputRef {
                 index: epoch_column_index,
                 data_type: DataType::Int64,
@@ -114,7 +114,7 @@ impl TableFunctionToInternalBackfillProgressRule {
         let aggregated_current_row_count = ExprImpl::AggCall(Box::new(AggCall::new(
             AggType::Builtin(PbAggKind::Sum),
             vec![ExprImpl::InputRef(Box::new(InputRef {
-                index: backfill_info.row_count_column_index(),
+                index: backfill_info.row_count_column_index,
                 data_type: DataType::Int64,
             }))],
             false,
@@ -129,9 +129,9 @@ impl TableFunctionToInternalBackfillProgressRule {
     }
 
     fn build_project(backfill_info: &BackfillInfo, agg: PlanRef) -> anyhow::Result<LogicalProject> {
-        let job_id_expr = Self::build_u32_expr(backfill_info.job_id());
-        let fragment_id_expr = Self::build_u32_expr(backfill_info.fragment_id());
-        let table_id_expr = Self::build_u32_expr(backfill_info.table_id());
+        let job_id_expr = Self::build_u32_expr(backfill_info.job_id);
+        let fragment_id_expr = Self::build_u32_expr(backfill_info.fragment_id);
+        let table_id_expr = Self::build_u32_expr(backfill_info.table_id);
 
         let current_count_per_vnode = ExprImpl::InputRef(Box::new(InputRef {
             index: 0,
@@ -177,24 +177,12 @@ impl TableFunctionToInternalBackfillProgressRule {
     }
 }
 
-enum BackfillInfo {
-    SnapshotBackfill(SnapshotBackfillInfo),
-    NoShuffleOrArrangementBackfill(NoShuffleOrArrangementBackfillInfo),
-}
-
-struct NoShuffleOrArrangementBackfillInfo {
+struct BackfillInfo {
     job_id: u32,
     fragment_id: u32,
     table_id: u32,
     row_count_column_index: usize,
-}
-
-struct SnapshotBackfillInfo {
-    job_id: u32,
-    fragment_id: u32,
-    table_id: u32,
-    row_count_column_index: usize,
-    epoch_column_index: usize,
+    epoch_column_index: Option<usize>,
 }
 
 impl BackfillInfo {
@@ -211,57 +199,12 @@ impl BackfillInfo {
         let fragment_id = table.fragment_id;
         let table_id = table.id.table_id;
 
-        match epoch_column_index {
-            Some(epoch_column_index) => Ok(Self::SnapshotBackfill(SnapshotBackfillInfo {
-                job_id,
-                fragment_id,
-                table_id,
-                row_count_column_index,
-                epoch_column_index,
-            })),
-            None => Ok(Self::NoShuffleOrArrangementBackfill(
-                NoShuffleOrArrangementBackfillInfo {
-                    job_id,
-                    fragment_id,
-                    table_id,
-                    row_count_column_index,
-                },
-            )),
-        }
-    }
-
-    fn row_count_column_index(&self) -> usize {
-        match self {
-            Self::SnapshotBackfill(info) => info.row_count_column_index,
-            Self::NoShuffleOrArrangementBackfill(info) => info.row_count_column_index,
-        }
-    }
-
-    fn epoch_column_index(&self) -> Option<usize> {
-        match self {
-            Self::SnapshotBackfill(info) => Some(info.epoch_column_index),
-            Self::NoShuffleOrArrangementBackfill(_) => None,
-        }
-    }
-
-    fn job_id(&self) -> u32 {
-        match self {
-            Self::SnapshotBackfill(info) => info.job_id,
-            Self::NoShuffleOrArrangementBackfill(info) => info.job_id,
-        }
-    }
-
-    fn fragment_id(&self) -> u32 {
-        match self {
-            Self::SnapshotBackfill(info) => info.fragment_id,
-            Self::NoShuffleOrArrangementBackfill(info) => info.fragment_id,
-        }
-    }
-
-    fn table_id(&self) -> u32 {
-        match self {
-            Self::SnapshotBackfill(info) => info.table_id,
-            Self::NoShuffleOrArrangementBackfill(info) => info.table_id,
-        }
+        Ok(Self {
+            job_id,
+            fragment_id,
+            table_id,
+            row_count_column_index,
+            epoch_column_index,
+        })
     }
 }
