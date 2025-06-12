@@ -95,7 +95,7 @@ if [[ "$profile" == "ci-release" ]]; then
   # only run in release-mode. It's too slow for dev-mode.
   risedev slt -p 4566 -d dev './e2e_test/backfill/backfill_order_control.slt'
   risedev slt -p 4566 -d dev './e2e_test/backfill/backfill_order_control_recovery.slt'
-  risedev slt -p 4566 -d dev './e2e_test/backfill/backfill_progress.slt'
+  risedev slt -p 4566 -d dev './e2e_test/backfill/backfill_progress/test.slt'
 fi
 
 echo "--- Kill cluster"

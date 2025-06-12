@@ -1,0 +1,98 @@
+statement ok
+set backfill_rate_limit=100;
+
+statement ok
+create materialized view m1 as
+  select x.v1, x.v2
+  from
+    t x
+      join t y on x.v1 = y.v1
+      join t2 on x.v1 = t2.v1
+      join t3 on t3.v1 = t2.v1
+
+query ? retry 3 backoff 1s
+select
+  case when regexp_match(progress, '([0-9]+\.[0-9]+)%')[1]::numeric
+    >= (99::numeric / 1000::numeric)
+  then 't'
+  else
+    progress
+  end
+from rw_catalog.rw_fragment_backfill_progress;
+----
+t
+t
+t
+t
+
+
+statement ok
+set streaming_parallelism=default;
+
+# Make sure its created
+statement ok retry 3 backoff 5s
+select * from m1;
+
+statement ok
+drop materialized view m1;
+
+system ok
+risedev psql -c '
+set streaming_use_snapshot_backfill=true;
+set streaming_parallelism=1;
+set backfill_rate_limit=100;
+create materialized view m1 as
+  select x.v1, x.v2
+  from
+    t x
+      join t y on x.v1 = y.v1
+      join t2 on x.v1 = t2.v1
+      join t3 on t3.v1 = t2.v1
+' >/dev/null 2>&1 &
+
+
+query ? retry 3 backoff 1s
+select
+  case when regexp_match(progress, '([0-9]+\.[0-9]+)%')[1]::numeric
+    >= (2::numeric * 50::numeric / 1000::numeric)
+  then 't'
+  else
+    progress
+  end
+from rw_catalog.rw_fragment_backfill_progress;
+----
+t
+t
+t
+t
+
+
+statement ok
+set background_ddl=false;
+
+statement ok
+drop materialized view if exists m1_validate;
+
+statement ok
+create materialized view m1_validate as
+  select x.v1, x.v2
+  from
+    t x
+      join t y on x.v1 = y.v1
+      join t2 on x.v1 = t2.v1
+      join t3 on t3.v1 = t2.v1
+
+query I retry 3 backoff 5s
+select * from m1_validate except select * from m1
+----
+
+query I retry 3 backoff 5s
+select * from m1 except select * from m1_validate
+----
+
+
+statement ok
+drop materialized view m1;
+
+statement ok
+drop materialized view m1_validate;
