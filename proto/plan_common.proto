@@ -60,7 +60,7 @@ message ColumnDesc {
 
   AdditionalColumn additional_column = 11;
 
-  bool nullable = 12;
+  optional bool nullable = 12;
 }
 
 message ColumnCatalog {
