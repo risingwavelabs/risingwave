@@ -17,7 +17,7 @@ use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, ensure};
 
 /// Assign items to weighted containers with optional capacity scaling and deterministic tie-breaking.
 ///
@@ -39,7 +39,7 @@ use anyhow::{Context, Result, anyhow};
 ///
 /// # Returns
 /// A `BTreeMap<C, Vec<I>>` mapping each container to the list of assigned items.
-/// - If `containers` or `items` is empty, returns an empty map.
+/// - If either `containers` or `items` is empty, return an empty map.
 ///
 /// # Panics
 /// - If the sum of all container weights is zero.
@@ -603,11 +603,42 @@ where
     quotas
 }
 
+/// A lightweight struct to represent a chunk of `VNodes` during assignment.
+/// This is an internal implementation detail.
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
+struct VnodeChunk(u32);
+
+impl From<usize> for VnodeChunk {
+    fn from(id: usize) -> Self {
+        // Assuming VNode IDs do not exceed u32::MAX for simplicity.
+        Self(id as u32)
+    }
+}
+
+impl VnodeChunk {
+    fn id(&self) -> usize {
+        // Convert back to usize for external use.
+        self.0 as usize
+    }
+}
+
+/// Defines the VNode chunking strategy for assignment.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum VnodeChunkingStrategy {
+    /// Each VNode is assigned individually. This is the default.
+    NoChunking,
+
+    /// The chunk size is automatically determined to maximize VNode contiguity,
+    /// ensuring that the number of chunks is at least the number of actors.
+    MaximizeContiguity,
+}
+
 /// Core assigner with configurable strategies.
 pub struct Assigner<S> {
     salt: S,
     actor_capacity: CapacityMode,
     balance_strategy: BalancedBy,
+    vnode_chunking_strategy: VnodeChunkingStrategy,
 }
 
 /// Builder for [`Assigner`].
@@ -616,6 +647,7 @@ pub struct AssignerBuilder<S> {
     salt: S,
     actor_capacity: CapacityMode,
     balance_strategy: BalancedBy,
+    vnode_chunking_strategy: VnodeChunkingStrategy,
 }
 
 impl<S: Hash + Copy> AssignerBuilder<S> {
@@ -625,6 +657,7 @@ impl<S: Hash + Copy> AssignerBuilder<S> {
             salt,
             actor_capacity: CapacityMode::Weighted,
             balance_strategy: BalancedBy::RawWorkerWeights,
+            vnode_chunking_strategy: VnodeChunkingStrategy::NoChunking,
         }
     }
 
@@ -652,12 +685,19 @@ impl<S: Hash + Copy> AssignerBuilder<S> {
         self
     }
 
+    /// Sets the vnode chunking strategy.
+    pub fn with_vnode_chunking_strategy(&mut self, strategy: VnodeChunkingStrategy) -> &mut Self {
+        self.vnode_chunking_strategy = strategy;
+        self
+    }
+
     /// Finalize and build the [`Assigner`].
     pub fn build(&self) -> Assigner<S> {
         Assigner {
             salt: self.salt,
             actor_capacity: self.actor_capacity,
             balance_strategy: self.balance_strategy,
+            vnode_chunking_strategy: self.vnode_chunking_strategy,
         }
     }
 }
@@ -705,15 +745,97 @@ impl<S: Hash + Copy> Assigner<S> {
         A: Ord + Hash + Eq + Copy + Debug,
         V: Hash + Eq + Copy + Debug,
     {
-        assign_hierarchical(
+        ensure!(
+            !workers.is_empty(),
+            "no workers to assign; assignment is meaningless"
+        );
+        ensure!(
+            !actors.is_empty(),
+            "no actors to assign; assignment is meaningless"
+        );
+        ensure!(
+            !vnodes.is_empty(),
+            "no vnodes to assign; assignment is meaningless"
+        );
+        ensure!(
+            vnodes.len() >= actors.len(),
+            "not enough vnodes ({}) for actors ({}); each actor needs at least one vnode",
+            vnodes.len(),
+            actors.len()
+        );
+
+        let chunk_size = match self.vnode_chunking_strategy {
+            VnodeChunkingStrategy::NoChunking => {
+                return assign_hierarchical(
+                    workers,
+                    actors,
+                    vnodes,
+                    self.salt,
+                    self.actor_capacity,
+                    self.balance_strategy,
+                )
+                .context("hierarchical assignment failed");
+            }
+
+            VnodeChunkingStrategy::MaximizeContiguity => {
+                // Automatically calculate chunk size to be as large as possible
+                // while ensuring every actor can receive at least one chunk.
+                // The `.max(1)` ensures the chunk size is at least 1.
+                (vnodes.len() / actors.len()).max(1)
+            }
+        };
+
+        // Calculate the number of chunks using ceiling division.
+        let num_chunks = vnodes.len().div_ceil(chunk_size);
+
+        // The `MaximizeContiguity` strategy inherently ensures `num_chunks >= actors.len()`.
+        // This assertion serves as a sanity check for our logic.
+        debug_assert!(
+            num_chunks >= actors.len(),
+            "Invariant violation: MaximizeContiguity should always produce enough chunks."
+        );
+
+        // Create VNode chunks to be used as the items for assignment.
+        let chunks: Vec<VnodeChunk> = (0..num_chunks).map(VnodeChunk::from).collect();
+
+        // Call the underlying hierarchical assignment function with chunks as items.
+        let chunk_assignment = assign_hierarchical(
             workers,
             actors,
-            vnodes,
+            &chunks,
             self.salt,
             self.actor_capacity,
             self.balance_strategy,
         )
-        .context("hierarchical assignment failed")
+        .context("hierarchical assignment of chunks failed")?;
+
+        // Convert the assignment of `VnodeChunk` back to an assignment of the original `V`.
+        let mut final_assignment = BTreeMap::new();
+        for (worker, actor_map) in chunk_assignment {
+            let mut new_actor_map = BTreeMap::new();
+            for (actor, assigned_chunks) in actor_map {
+                // Expand the list of chunks into a flat list of VNodes.
+                let assigned_vnodes: Vec<V> = assigned_chunks
+                    .into_iter()
+                    .flat_map(|chunk| {
+                        let start_idx = chunk.id() * chunk_size;
+                        // Ensure the end index does not go out of bounds.
+                        let end_idx = (start_idx + chunk_size).min(vnodes.len());
+                        // Get the corresponding VNodes from the original slice.
+                        vnodes[start_idx..end_idx].iter().copied()
+                    })
+                    .collect();
+
+                if !assigned_vnodes.is_empty() {
+                    new_actor_map.insert(actor, assigned_vnodes);
+                }
+            }
+            if !new_actor_map.is_empty() {
+                final_assignment.insert(worker, new_actor_map);
+            }
+        }
+
+        Ok(final_assignment)
     }
 
     /// Hierarchical counts: how many vnodes each actor gets.
@@ -814,8 +936,8 @@ mod tests {
         let y_count = result.get(&"Y").map(Vec::len).unwrap_or(0);
         assert_eq!(x_count + y_count, items.len(), "All items must be assigned");
         assert!(
-            (x_count == 2 && y_count == 1) || (x_count == 1 && y_count == 2),
-            "One container should get 2 items, the other 1, but got {} and {}",
+            x_count == 1 && y_count == 2,
+            "Container X should get 1 items, the other 2, but got {} and {}",
             x_count,
             y_count
         );
@@ -2122,6 +2244,254 @@ mod affinity_tests_vertical_scaling {
             for (capacity_mode, balanced_by) in modes {
                 run_weight_change_test_case(case, capacity_mode, balanced_by);
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod assigner_test {
+    use std::collections::BTreeMap;
+    use std::num::NonZeroUsize;
+
+    use super::*;
+
+    // Helper function to create a BTreeMap of workers
+    fn create_workers(weights: &[(u8, usize)]) -> BTreeMap<u8, NonZeroUsize> {
+        weights
+            .iter()
+            .map(|(id, w)| (*id, NonZeroUsize::new(*w).unwrap()))
+            .collect()
+    }
+
+    #[test]
+    fn test_maximize_contiguity_basic_assignment() {
+        // 2 workers, 4 actors, 100 vnodes.
+        // Expected chunk_size = floor(100 / 4) = 25.
+        // Expected num_chunks = ceil(100 / 25) = 4.
+        let workers = create_workers(&[(1, 1), (2, 1)]);
+        let actors: Vec<u16> = (0..4).collect();
+        let vnodes: Vec<u32> = (0..100).collect();
+
+        let assigner = AssignerBuilder::new(0u8)
+            .with_vnode_chunking_strategy(VnodeChunkingStrategy::MaximizeContiguity)
+            .build();
+
+        let assignment = assigner
+            .assign_hierarchical(&workers, &actors, &vnodes)
+            .unwrap();
+
+        let mut total_vnodes_assigned = 0;
+        let mut all_assigned_vnodes = BTreeMap::new();
+
+        for (_, actor_map) in assignment {
+            for (actor_id, vnodes) in actor_map {
+                total_vnodes_assigned += vnodes.len();
+                // Each actor should receive exactly one chunk of 25 vnodes.
+                assert_eq!(
+                    vnodes.len(),
+                    25,
+                    "Actor {} should get a full chunk",
+                    actor_id
+                );
+                // Verify that the assigned vnodes are contiguous.
+                for i in 0..(vnodes.len() - 1) {
+                    assert_eq!(vnodes[i] + 1, vnodes[i + 1], "VNodes should be contiguous");
+                }
+                all_assigned_vnodes.insert(vnodes[0], vnodes);
+            }
+        }
+
+        assert_eq!(
+            total_vnodes_assigned,
+            vnodes.len(),
+            "All vnodes must be assigned"
+        );
+        // Check if the chunks are correct: 0-24, 25-49, 50-74, 75-99
+        assert!(all_assigned_vnodes.contains_key(&0));
+        assert!(all_assigned_vnodes.contains_key(&25));
+        assert!(all_assigned_vnodes.contains_key(&50));
+        assert!(all_assigned_vnodes.contains_key(&75));
+    }
+
+    #[test]
+    fn test_maximize_contiguity_non_divisible_vnodes() {
+        // 4 actors, 103 vnodes.
+        // Expected chunk_size = floor(103 / 4) = 25.
+        // Expected num_chunks = ceil(103 / 25) = 5.
+        let workers = create_workers(&[(1, 1)]);
+        let actors: Vec<u16> = (0..4).collect();
+        let vnodes: Vec<u32> = (0..103).collect();
+
+        let assigner = AssignerBuilder::new(0u8)
+            .with_vnode_chunking_strategy(VnodeChunkingStrategy::MaximizeContiguity)
+            .build();
+
+        let assignment = assigner
+            .assign_hierarchical(&workers, &actors, &vnodes)
+            .unwrap();
+        let actor_map = assignment.get(&1).unwrap();
+
+        // Collect the number of vnodes assigned to each actor.
+        let vnode_counts: Vec<usize> = actor_map.values().map(Vec::len).collect();
+
+        // 1. Verify the total number of assigned vnodes.
+        let total_assigned: usize = vnode_counts.iter().sum();
+        assert_eq!(total_assigned, vnodes.len(), "All vnodes must be assigned");
+        assert_eq!(
+            vnode_counts.len(),
+            actors.len(),
+            "Each actor must have an entry"
+        );
+
+        // 2. Verify the distribution of vnode counts.
+        // The final counts depend on how the chunks {25, 25, 25, 25, 3} are distributed.
+        // The actor who gets two chunks could get:
+        //   25 + 25 = 50
+        //   25 + 3 = 28
+        // The other actors get one chunk, so their counts will be 25 or 3.
+
+        // We can count how many actors got each possible number of vnodes.
+        let mut counts_distribution = BTreeMap::new();
+        for count in vnode_counts {
+            *counts_distribution.entry(count).or_insert(0) += 1;
+        }
+
+        assert_eq!(
+            counts_distribution,
+            BTreeMap::from([(25, 3), (28, 1)]),
+            "The distribution of vnode counts is unexpected. Got: {:?}",
+            counts_distribution
+        );
+    }
+
+    #[test]
+    fn test_actors_gt_vnodes_fails() {
+        // 10 actors, 5 vnodes. This should fail at the top level.
+        let workers = create_workers(&[(1, 1)]);
+        let actors: Vec<u16> = (0..10).collect();
+        let vnodes: Vec<u32> = (0..5).collect();
+
+        let assigner = AssignerBuilder::new(0u8).build();
+
+        let result = assigner.assign_hierarchical(&workers, &actors, &vnodes);
+        assert!(result.is_err());
+        // The error comes from the inner `assign_hierarchical` call.
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("not enough vnodes (5) for actors (10)")
+        );
+    }
+
+    #[test]
+    fn test_maximize_contiguity_actors_eq_vnodes() {
+        // 10 actors, 10 vnodes.
+        // Expected chunk_size = floor(10 / 10) = 1.
+        // This should behave identically to NoChunking.
+        let workers = create_workers(&[(1, 1), (2, 1)]);
+        let actors: Vec<u16> = (0..10).collect();
+        let vnodes: Vec<u32> = (0..10).collect();
+
+        let assigner_contiguity = AssignerBuilder::new(42u8)
+            .with_vnode_chunking_strategy(VnodeChunkingStrategy::MaximizeContiguity)
+            .build();
+        let assignment_contiguity = assigner_contiguity
+            .assign_hierarchical(&workers, &actors, &vnodes)
+            .unwrap();
+
+        let assigner_no_chunking = AssignerBuilder::new(42u8)
+            .with_vnode_chunking_strategy(VnodeChunkingStrategy::NoChunking)
+            .build();
+        let assignment_no_chunking = assigner_no_chunking
+            .assign_hierarchical(&workers, &actors, &vnodes)
+            .unwrap();
+
+        // With the same salt, the results should be identical.
+        assert_eq!(assignment_contiguity, assignment_no_chunking);
+
+        // Also verify each actor gets exactly one vnode.
+        let total_vnodes: usize = assignment_contiguity
+            .values()
+            .flat_map(|amap| amap.values().map(Vec::len))
+            .sum();
+        assert_eq!(total_vnodes, vnodes.len());
+        assert!(
+            assignment_contiguity
+                .values()
+                .all(|amap| amap.values().all(|v| v.len() == 1))
+        );
+    }
+
+    #[test]
+    fn test_maximize_contiguity_single_actor() {
+        // 1 actor, 1000 vnodes.
+        // Expected chunk_size = floor(1000 / 1) = 1000.
+        // All vnodes should go to the single actor.
+        let workers = create_workers(&[(1, 1)]);
+        let actors: Vec<u16> = vec![100];
+        let vnodes: Vec<u32> = (0..1000).collect();
+
+        let assigner = AssignerBuilder::new(0u8)
+            .with_vnode_chunking_strategy(VnodeChunkingStrategy::MaximizeContiguity)
+            .build();
+
+        let assignment = assigner
+            .assign_hierarchical(&workers, &actors, &vnodes)
+            .unwrap();
+
+        // Check that only one worker has assignments.
+        assert_eq!(assignment.len(), 1);
+        let actor_map = assignment.get(&1).unwrap();
+
+        // Check that only the single actor has assignments.
+        assert_eq!(actor_map.len(), 1);
+        let assigned_vnodes = actor_map.get(&100).unwrap();
+
+        // Check that the actor received all vnodes.
+        assert_eq!(assigned_vnodes.len(), vnodes.len());
+        // Check that they are the correct vnodes.
+        assert_eq!(*assigned_vnodes, vnodes);
+    }
+
+    #[test]
+    fn test_maximize_contiguity_differs_from_no_chunking() {
+        // Use a setup where the difference will be clear.
+        // 2 workers, 2 actors, 4 vnodes.
+        // MaximizeContiguity: chunk_size = floor(4/2) = 2. Two chunks: [0,1], [2,3].
+        // Each actor gets one chunk. Actor 0 might get [0,1] and Actor 1 [2,3].
+        // NoChunking: vnodes 0,1,2,3 are assigned independently. It's highly likely
+        // they will be distributed between the two actors, not in contiguous blocks.
+        let workers = create_workers(&[(1, 1)]);
+        let actors: Vec<u16> = vec![0, 1];
+        let vnodes: Vec<u32> = vec![0, 1, 2, 3];
+        let salt = 123u8; // A fixed salt to make it deterministic.
+
+        let assigner_contiguity = AssignerBuilder::new(salt)
+            .with_vnode_chunking_strategy(VnodeChunkingStrategy::MaximizeContiguity)
+            .build();
+        let assignment_contiguity = assigner_contiguity
+            .assign_hierarchical(&workers, &actors, &vnodes)
+            .unwrap();
+
+        let assigner_no_chunking = AssignerBuilder::new(salt)
+            .with_vnode_chunking_strategy(VnodeChunkingStrategy::NoChunking)
+            .build();
+        let assignment_no_chunking = assigner_no_chunking
+            .assign_hierarchical(&workers, &actors, &vnodes)
+            .unwrap();
+
+        // The assignments should be different.
+        assert_ne!(
+            assignment_contiguity, assignment_no_chunking,
+            "Expected different assignments for the two strategies"
+        );
+
+        // Verify contiguity for the MaximizeContiguity result.
+        let actor_map_contiguity = assignment_contiguity.get(&1).unwrap();
+        for vnodes in actor_map_contiguity.values() {
+            assert_eq!(vnodes.len(), 2, "Each actor should get a chunk of size 2");
+            assert_eq!(vnodes[0] + 1, vnodes[1], "VNodes must be contiguous");
         }
     }
 }
