@@ -984,6 +984,8 @@ pub struct StorageConfig {
     pub iceberg_compaction_target_file_size_mb: u32,
     #[serde(default = "default::storage::iceberg_compaction_enable_validate")]
     pub iceberg_compaction_enable_validate: bool,
+    #[serde(default = "default::storage::iceberg_compaction_max_record_batch_rows")]
+    pub iceberg_compaction_max_record_batch_rows: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
@@ -1994,6 +1996,10 @@ pub mod default {
 
         pub fn iceberg_compaction_enable_validate() -> bool {
             false
+        }
+
+        pub fn iceberg_compaction_max_record_batch_rows() -> usize {
+            1024
         }
     }
 

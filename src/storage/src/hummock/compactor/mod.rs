@@ -457,9 +457,12 @@ pub fn start_compactor_iceberg(
                                 running_task_parallelism
                                     .fetch_add(parallelism, Ordering::SeqCst);
                                 let iceberg_compaction_target_file_size_bytes =
-                                        (compactor_context.storage_opts.iceberg_compaction_target_file_size_mb * 1024 * 1024) as usize;
+                                        (compactor_context.storage_opts.iceberg_compaction_target_file_size_mb * 1024 * 1024) as u64;
                                 let iceberg_compaction_enable_validate =
                                         compactor_context.storage_opts.iceberg_compaction_enable_validate;
+                                let iceberg_compaction_max_record_batch_rows =
+                                        compactor_context.storage_opts.iceberg_compaction_max_record_batch_rows;
+
                                 executor.spawn(async move {
                                     let (tx, rx) = tokio::sync::oneshot::channel();
                                     shutdown.lock().unwrap().insert(task_id, tx);
@@ -468,7 +471,8 @@ pub fn start_compactor_iceberg(
                                             .batch_parallelism(parallelism as usize)
                                             .target_partitions(parallelism as usize)
                                             .target_file_size(iceberg_compaction_target_file_size_bytes)
-                                            .validate_compaction(iceberg_compaction_enable_validate)
+                                            .enable_validate_compaction(iceberg_compaction_enable_validate)
+                                            .max_record_batch_rows(iceberg_compaction_max_record_batch_rows)
                                             .build()
                                     );
 
