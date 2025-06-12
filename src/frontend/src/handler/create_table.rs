@@ -21,6 +21,7 @@ use clap::ValueEnum;
 use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use percent_encoding::percent_decode_str;
 use pgwire::pg_response::{PgResponse, StatementType};
 use prost::Message as _;
 use risingwave_common::catalog::{
@@ -28,7 +29,6 @@ use risingwave_common::catalog::{
     RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, TableId,
 };
 use risingwave_common::config::MetaBackend;
-use risingwave_common::license::Feature;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
@@ -60,7 +60,6 @@ use risingwave_sqlparser::ast::{
     Statement, TableConstraint, WebhookSourceInfo, WithProperties,
 };
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
-use thiserror_ext::AsReport;
 
 use super::create_source::{CreateSourceType, SqlColumnStrategy, bind_columns_from_source};
 use super::{RwPgResponse, alter_streaming_rate_limit, create_sink, create_source};
@@ -1300,14 +1299,6 @@ async fn bind_cdc_table_schema_externally(
     cdc_with_options: WithOptionsSecResolved,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
     // read cdc table schema from external db or parsing the schema from SQL definitions
-    Feature::CdcTableSchemaMap.check_available().map_err(
-        |err: risingwave_common::license::FeatureNotAvailable| {
-            ErrorCode::NotSupported(
-                err.to_report_string(),
-                "Please define the schema manually".to_owned(),
-            )
-        },
-    )?;
     let (options, secret_refs) = cdc_with_options.into_parts();
     let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
         .context("failed to extract external table config")?;
@@ -1482,10 +1473,11 @@ pub async fn create_iceberg_engine_table(
     let meta_store_user = meta_store_endpoint.username().to_owned();
     let meta_store_password = meta_store_endpoint
         .password()
+        .and_then(|p| percent_decode_str(p).decode_utf8().ok())
         .ok_or_else(|| {
             ErrorCode::InternalError("failed to parse password from meta store endpoint".to_owned())
         })?
-        .to_owned();
+        .into_owned();
     let meta_store_host = meta_store_endpoint
         .host_str()
         .ok_or_else(|| {
@@ -1713,6 +1705,101 @@ pub async fn create_iceberg_engine_table(
     sink_with.insert("create_table_if_not_exists".to_owned(), "true".to_owned());
 
     sink_with.insert("is_exactly_once".to_owned(), "true".to_owned());
+
+    const ENABLE_COMPACTION: &str = "enable_compaction";
+    const COMPACTION_INTERVAL_SEC: &str = "compaction_interval_sec";
+    const ENABLE_SNAPSHOT_EXPIRATION: &str = "enable_snapshot_expiration";
+
+    if let Some(enable_compaction) = handler_args.with_options.get(ENABLE_COMPACTION) {
+        match enable_compaction.to_lowercase().as_str() {
+            "true" => {
+                risingwave_common::license::Feature::IcebergCompaction
+                    .check_available()
+                    .map_err(|e| anyhow::anyhow!(e))?;
+
+                sink_with.insert(ENABLE_COMPACTION.to_owned(), "true".to_owned());
+            }
+            "false" => {
+                sink_with.insert(ENABLE_COMPACTION.to_owned(), "false".to_owned());
+            }
+            _ => {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "enable_compaction must be true or false: {}",
+                    enable_compaction
+                ))
+                .into());
+            }
+        }
+
+        // remove enable_compaction from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove("enable_compaction"));
+    } else {
+        sink_with.insert(
+            ENABLE_COMPACTION.to_owned(),
+            risingwave_common::license::Feature::IcebergCompaction
+                .check_available()
+                .is_ok()
+                .to_string(),
+        );
+    }
+
+    if let Some(compaction_interval_sec) = handler_args.with_options.get(COMPACTION_INTERVAL_SEC) {
+        let compaction_interval_sec = compaction_interval_sec.parse::<u64>().map_err(|_| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "compaction_interval_sec must be a positive integer: {}",
+                commit_checkpoint_interval
+            ))
+        })?;
+        if compaction_interval_sec == 0 {
+            bail!("compaction_interval_sec must be a positive integer: 0");
+        }
+        sink_with.insert(
+            "compaction_interval_sec".to_owned(),
+            compaction_interval_sec.to_string(),
+        );
+        // remove compaction_interval_sec from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove("compaction_interval_sec"));
+    }
+
+    if let Some(enable_snapshot_expiration) =
+        handler_args.with_options.get(ENABLE_SNAPSHOT_EXPIRATION)
+    {
+        match enable_snapshot_expiration.to_lowercase().as_str() {
+            "true" => {
+                risingwave_common::license::Feature::IcebergCompaction
+                    .check_available()
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "true".to_owned());
+            }
+            "false" => {
+                sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "false".to_owned());
+            }
+            _ => {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "enable_snapshot_expiration must be true or false: {}",
+                    enable_snapshot_expiration
+                ))
+                .into());
+            }
+        }
+
+        // remove enable_snapshot_expiration from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove(ENABLE_SNAPSHOT_EXPIRATION));
+    } else {
+        sink_with.insert(
+            ENABLE_SNAPSHOT_EXPIRATION.to_owned(),
+            risingwave_common::license::Feature::IcebergCompaction
+                .check_available()
+                .is_ok()
+                .to_string(),
+        );
+    }
 
     let partition_by = handler_args
         .with_options
@@ -2072,6 +2159,7 @@ fn bind_webhook_info(
         secret_ref,
         signature_expr,
         wait_for_persistence,
+        is_batched,
     } = webhook_info;
 
     // validate secret_ref
@@ -2117,6 +2205,7 @@ fn bind_webhook_info(
         secret_ref: pb_secret_ref,
         signature_expr: Some(expr.to_expr_proto()),
         wait_for_persistence,
+        is_batched,
     };
 
     Ok(pb_webhook_info)

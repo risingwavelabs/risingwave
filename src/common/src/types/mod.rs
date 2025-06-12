@@ -112,9 +112,7 @@ pub type F64 = ordered_float::OrderedFloat<f64>;
 ///   but without data fields.
 /// - `FromStr` is only used internally for tests.
 ///   The generated implementation isn't efficient, and doesn't handle whitespaces, etc.
-#[derive(
-    Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumDiscriminants, FromStr,
-)]
+#[derive(Debug, Display, Clone, PartialEq, Eq, Hash, EnumDiscriminants, FromStr)]
 #[strum_discriminants(derive(Hash, Ord, PartialOrd))]
 #[strum_discriminants(name(DataTypeName))]
 #[strum_discriminants(vis(pub))]
@@ -184,6 +182,8 @@ pub enum DataType {
     #[from_str(regex = "(?i)^vector\\((?P<0>.+)\\)$")]
     Vector(usize),
 }
+
+impl !PartialOrd for DataType {}
 
 // For DataType::List
 impl std::str::FromStr for Box<DataType> {
@@ -503,6 +503,13 @@ impl DataType {
     }
 
     pub fn as_struct(&self) -> &StructType {
+        match self {
+            DataType::Struct(t) => t,
+            t => panic!("expect struct type, got {t}"),
+        }
+    }
+
+    pub fn into_struct(self) -> StructType {
         match self {
             DataType::Struct(t) => t,
             t => panic!("expect struct type, got {t}"),

@@ -414,7 +414,7 @@ impl FuncName {
 }
 
 /// An extended data type that can be used to declare a function's argument or result type.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SigDataType {
     /// Exact data type
     Exact(DataType),

@@ -16,12 +16,15 @@
 //! and the interface for generating
 //! stream (MATERIALIZED VIEW) and batch query statements.
 
+use std::collections::HashSet;
 use std::vec;
 
 use rand::Rng;
 use risingwave_common::types::DataType;
 use risingwave_frontend::bind_data_type;
-use risingwave_sqlparser::ast::{ColumnDef, Expr, Ident, ObjectName, Statement};
+use risingwave_sqlparser::ast::{
+    ColumnDef, EmitMode, Expr, Ident, ObjectName, SourceWatermark, Statement,
+};
 
 mod agg;
 mod cast;
@@ -46,6 +49,8 @@ pub struct Table {
     pub columns: Vec<Column>,
     pub pk_indices: Vec<usize>,
     pub is_base_table: bool,
+    pub is_append_only: bool,
+    pub source_watermarks: Vec<SourceWatermark>,
 }
 
 impl Table {
@@ -55,15 +60,25 @@ impl Table {
             columns,
             pk_indices: vec![],
             is_base_table: false,
+            is_append_only: false,
+            source_watermarks: vec![],
         }
     }
 
-    pub fn new_for_base_table(name: String, columns: Vec<Column>, pk_indices: Vec<usize>) -> Self {
+    pub fn new_for_base_table(
+        name: String,
+        columns: Vec<Column>,
+        pk_indices: Vec<usize>,
+        is_append_only: bool,
+        source_watermarks: Vec<SourceWatermark>,
+    ) -> Self {
         Self {
             name,
             columns,
             pk_indices,
             is_base_table: true,
+            is_append_only,
+            source_watermarks,
         }
     }
 
@@ -96,36 +111,12 @@ impl From<ColumnDef> for Column {
 
 #[derive(Copy, Clone)]
 pub(crate) struct SqlGeneratorContext {
-    can_agg: bool, // This is used to disable agg expr totally,
-    // Used in top level, where we want to test queries
-    // without aggregates.
     inside_agg: bool,
 }
 
 impl SqlGeneratorContext {
-    pub fn new() -> Self {
-        SqlGeneratorContext {
-            can_agg: true,
-            inside_agg: false,
-        }
-    }
-
-    pub fn new_with_can_agg(can_agg: bool) -> Self {
-        Self {
-            can_agg,
-            inside_agg: false,
-        }
-    }
-
-    pub fn set_inside_agg(self) -> Self {
-        Self {
-            inside_agg: true,
-            ..self
-        }
-    }
-
-    pub fn can_gen_agg(self) -> bool {
-        self.can_agg && !self.inside_agg
+    pub fn new(inside_agg: bool) -> Self {
+        SqlGeneratorContext { inside_agg }
     }
 
     pub fn is_inside_agg(self) -> bool {
@@ -204,6 +195,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let query = Box::new(query);
         let table = Table::new(name.to_owned(), schema);
         let name = ObjectName(vec![Ident::new_unchecked(name)]);
+
+        // Randomly choose emit mode if allowed
+        let emit_mode = if self.should_generate(Feature::Eowc) {
+            Some(EmitMode::OnWindowClose)
+        } else {
+            None
+        };
+
         let mview = Statement::CreateView {
             or_replace: false,
             materialized: true,
@@ -212,7 +211,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             columns: vec![],
             query,
             with_options: vec![],
-            emit_mode: None,
+            emit_mode,
         };
         (mview, table)
     }
@@ -235,6 +234,28 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             }
         }
         can_recurse
+    }
+
+    pub(crate) fn get_columns_with_watermark(&mut self, columns: &[Column]) -> Vec<Column> {
+        let watermark_names: HashSet<_> = self
+            .get_append_only_tables()
+            .iter()
+            .flat_map(|t| t.source_watermarks.iter().map(|wm| wm.column.real_value()))
+            .collect();
+
+        columns
+            .iter()
+            .filter(|c| watermark_names.contains(&c.name))
+            .cloned()
+            .collect()
+    }
+
+    pub(crate) fn get_append_only_tables(&mut self) -> Vec<Table> {
+        self.tables
+            .iter()
+            .filter(|t| t.is_append_only)
+            .cloned()
+            .collect()
     }
 
     /// Decide whether to generate on config.

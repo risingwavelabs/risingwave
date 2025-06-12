@@ -20,6 +20,7 @@ use opendal::Operator;
 use opendal::services::{Azblob, Gcs, S3};
 use phf::{Set, phf_set};
 use rdkafka::ClientConfig;
+use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use risingwave_common::bail;
 use risingwave_common::secret::LocalSecretManager;
@@ -100,6 +101,21 @@ impl Connection for KafkaConnection {
     }
 }
 
+pub fn read_kafka_log_level() -> Option<RDKafkaLogLevel> {
+    let log_level = std::env::var("RISINGWAVE_KAFKA_LOG_LEVEL").ok()?;
+    match log_level.to_uppercase().as_str() {
+        "DEBUG" => Some(RDKafkaLogLevel::Debug),
+        "INFO" => Some(RDKafkaLogLevel::Info),
+        "WARN" => Some(RDKafkaLogLevel::Warning),
+        "ERROR" => Some(RDKafkaLogLevel::Error),
+        "CRITICAL" => Some(RDKafkaLogLevel::Critical),
+        "EMERG" => Some(RDKafkaLogLevel::Emerg),
+        "ALERT" => Some(RDKafkaLogLevel::Alert),
+        "NOTICE" => Some(RDKafkaLogLevel::Notice),
+        _ => None,
+    }
+}
+
 impl KafkaConnection {
     async fn build_client(&self) -> ConnectorResult<BaseConsumer<RwConsumerContext>> {
         let mut config = ClientConfig::new();
@@ -118,6 +134,10 @@ impl KafkaConnection {
         )
         .await?;
         let client_ctx = RwConsumerContext::new(ctx_common);
+
+        if let Some(log_level) = read_kafka_log_level() {
+            config.set_log_level(log_level);
+        }
         let client: BaseConsumer<RwConsumerContext> =
             config.create_with_context(client_ctx).await?;
         if self.inner.is_aws_msk_iam() {

@@ -211,6 +211,7 @@ impl risingwave_common::opts::Opts for MetaNodeOpts {
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use risingwave_common::config::{MetaBackend, RwConfig, load_config};
 use tracing::info;
@@ -507,6 +508,13 @@ pub fn start(
                 compute_client_config: config.meta.developer.compute_client_config.clone(),
                 stream_client_config: config.meta.developer.stream_client_config.clone(),
                 frontend_client_config: config.meta.developer.frontend_client_config.clone(),
+                redact_sql_option_keywords: Arc::new(
+                    config
+                        .batch
+                        .redact_sql_option_keywords
+                        .into_iter()
+                        .collect(),
+                ),
             },
             config.system.into_init_system_params(),
             Default::default(),

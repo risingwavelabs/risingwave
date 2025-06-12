@@ -152,6 +152,10 @@ pub struct IcebergConfig {
     #[serde(default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub compaction_interval_sec: Option<u64>,
+
+    /// Whether to enable iceberg expired snapshots.
+    #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    pub enable_snapshot_expiration: bool,
 }
 
 impl EnforceSecret for IcebergConfig {
@@ -241,6 +245,15 @@ impl IcebergConfig {
 
     pub fn full_table_name(&self) -> Result<TableIdent> {
         self.common.full_table_name().map_err(Into::into)
+    }
+
+    pub fn catalog_name(&self) -> String {
+        self.common.catalog_name()
+    }
+
+    pub fn compaction_interval_sec(&self) -> u64 {
+        // default to 1 hour
+        self.compaction_interval_sec.unwrap_or(3600)
     }
 }
 
@@ -479,6 +492,7 @@ impl Sink for IcebergSink {
         "commit_checkpoint_interval",
         "enable_compaction",
         "compaction_interval_sec",
+        "enable_snapshot_expiration",
     ];
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
@@ -491,9 +505,10 @@ impl Sink for IcebergSink {
                 .check_available()
                 .map_err(|e| anyhow::anyhow!(e))?;
         }
-
-        if self.config.enable_compaction && self.config.compaction_interval_sec.is_none() {
-            bail!("`compaction_interval_sec` must be set when `enable_compaction` is true");
+        if self.config.enable_compaction {
+            risingwave_common::license::Feature::IcebergCompaction
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
         }
 
         let _ = self.create_and_validate_table().await?;
@@ -1833,7 +1848,7 @@ impl IcebergSinkCommitter {
             && iceberg_compact_stat_sender
                 .send(IcebergSinkCompactionUpdate {
                     sink_id: SinkId::new(self.sink_id),
-                    compaction_interval: self.config.compaction_interval_sec.unwrap(),
+                    compaction_interval: self.config.compaction_interval_sec(),
                 })
                 .is_err()
         {
@@ -2233,6 +2248,7 @@ mod test {
             ("table.name", "demo_table"),
             ("enable_compaction", "true"),
             ("compaction_interval_sec", "1800"),
+            ("enable_snapshot_expiration", "true"),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_owned(), v.to_owned()))
@@ -2282,6 +2298,7 @@ mod test {
             commit_retry_num: 8,
             enable_compaction: true,
             compaction_interval_sec: Some(DEFAULT_ICEBERG_COMPACTION_INTERVAL / 2),
+            enable_snapshot_expiration: true,
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);

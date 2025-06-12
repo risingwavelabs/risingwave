@@ -52,7 +52,7 @@ impl FunctionCallWithLambda {
         lambda_arg: ExprImpl,
         return_type: DataType,
     ) -> Self {
-        assert!([ExprType::ArrayTransform].contains(&func_type));
+        assert!([ExprType::ArrayTransform, ExprType::MapFilter].contains(&func_type));
         Self {
             base: FunctionCall::new_unchecked(func_type, inputs, return_type),
             lambda_arg,

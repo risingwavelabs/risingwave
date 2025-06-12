@@ -7,13 +7,20 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[features]
+# rocksdb-local = ["rocksdb"]
+# tikv = ["tikv-client"]
+test = ["risingwave_hummock_sdk/test"]
+failpoints = ["fail/failpoints"]
+hm-trace = []
+
 [dependencies]
 anyhow = "1"
 arc-swap = { workspace = true }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 await-tree = { workspace = true }
-bergloom-core = { git = "https://github.com/nimtable/BergLoom.git", rev = "88cafc208ee7a90d1f0c2a72078de05172801e73" }
+bergloom-core = { git = "https://github.com/nimtable/BergLoom.git", rev = "8b52670a5f78ffe99af7391bc83654b97fa886a0" }
 bytes = { version = "1", features = ["serde"] }
 dyn-clone = "1.0.14"
 either = "1"
@@ -73,18 +80,18 @@ xorf = "0.11.0"
 xxhash-rust = { version = "0.8.7", features = ["xxh32", "xxh64"] }
 zstd = { version = "0.13", default-features = false }
 
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../workspace-hack" }
+
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.17", default-features = false }
 libc = "0.2"
 nix = { version = "0.30", features = ["fs", "mman"] }
+procfs = { version = "0.17", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
 libc = "0.2.148"
 mach2 = "0.4"
-
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 bincode = "1"
@@ -96,13 +103,6 @@ uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 fiemap = "0.1.1"
-
-[features]
-# rocksdb-local = ["rocksdb"]
-# tikv = ["tikv-client"]
-test = ["risingwave_hummock_sdk/test"]
-failpoints = ["fail/failpoints"]
-hm-trace = []
 
 [[bench]]
 name = "bench_block_iter"

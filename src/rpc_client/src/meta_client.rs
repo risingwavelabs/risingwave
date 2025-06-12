@@ -29,14 +29,15 @@ use list_rate_limits_response::RateLimitInfo;
 use lru::LruCache;
 use replace_job_plan::ReplaceJob;
 use risingwave_common::RW_VERSION;
-use risingwave_common::catalog::{FunctionId, IndexId, ObjectId, SecretId, TableId};
+use risingwave_common::catalog::{
+    AlterDatabaseParam, FunctionId, IndexId, ObjectId, SecretId, TableId,
+};
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, MetaConfig};
 use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::monitor::EndpointExt;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
@@ -56,7 +57,7 @@ use risingwave_pb::catalog::{
 use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
 use risingwave_pb::cloud_service::*;
 use risingwave_pb::common::worker_node::Property;
-use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
+use risingwave_pb::common::{HostAddress, OptionalUint32, OptionalUint64, WorkerNode, WorkerType};
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::create_materialized_view_request::PbBackfillType;
@@ -97,6 +98,9 @@ use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient
 use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::meta::{FragmentDistribution, *};
+use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
+use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
+use risingwave_pb::monitor_service::{StackTraceRequest, StackTraceResponse};
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -558,6 +562,41 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
+    pub async fn alter_database_param(
+        &self,
+        database_id: DatabaseId,
+        param: AlterDatabaseParam,
+    ) -> Result<WaitVersion> {
+        let request = match param {
+            AlterDatabaseParam::BarrierIntervalMs(barrier_interval_ms) => {
+                let barrier_interval_ms = OptionalUint32 {
+                    value: barrier_interval_ms,
+                };
+                AlterDatabaseParamRequest {
+                    database_id,
+                    param: Some(alter_database_param_request::Param::BarrierIntervalMs(
+                        barrier_interval_ms,
+                    )),
+                }
+            }
+            AlterDatabaseParam::CheckpointFrequency(checkpoint_frequency) => {
+                let checkpoint_frequency = OptionalUint64 {
+                    value: checkpoint_frequency,
+                };
+                AlterDatabaseParamRequest {
+                    database_id,
+                    param: Some(alter_database_param_request::Param::CheckpointFrequency(
+                        checkpoint_frequency,
+                    )),
+                }
+            }
+        };
+        let resp = self.inner.alter_database_param(request).await?;
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
+    }
+
     pub async fn alter_set_schema(
         &self,
         object: alter_set_schema_request::Object,
@@ -654,13 +693,11 @@ impl MetaClient {
     pub async fn replace_job(
         &self,
         graph: StreamFragmentGraph,
-        table_col_index_mapping: ColIndexMapping,
         replace_job: ReplaceJob,
     ) -> Result<WaitVersion> {
         let request = ReplaceJobPlanRequest {
             plan: Some(ReplaceJobPlan {
                 fragment_graph: Some(graph),
-                table_col_index_mapping: Some(table_col_index_mapping.to_protobuf()),
                 replace_job: Some(replace_job),
             }),
         };
@@ -1028,6 +1065,18 @@ impl MetaClient {
         let resp = self
             .inner
             .list_fragment_distribution(ListFragmentDistributionRequest {})
+            .await?;
+        Ok(resp.distributions)
+    }
+
+    pub async fn list_creating_stream_scan_fragment_distribution(
+        &self,
+    ) -> Result<Vec<FragmentDistribution>> {
+        let resp = self
+            .inner
+            .list_creating_stream_scan_fragment_distribution(
+                ListCreatingStreamScanFragmentDistributionRequest {},
+            )
             .await?;
         Ok(resp.distributions)
     }
@@ -1611,6 +1660,18 @@ impl MetaClient {
         let resp = self.inner.list_iceberg_tables(request).await?;
         Ok(resp.iceberg_tables)
     }
+
+    /// Get the await tree of all nodes in the cluster.
+    pub async fn get_cluster_stack_trace(
+        &self,
+        actor_traces_format: ActorTracesFormat,
+    ) -> Result<StackTraceResponse> {
+        let request = StackTraceRequest {
+            actor_traces_format: actor_traces_format as i32,
+        };
+        let resp = self.inner.stack_trace(request).await?;
+        Ok(resp)
+    }
 }
 
 #[async_trait]
@@ -1797,6 +1858,7 @@ struct GrpcMetaClientCore {
     event_log_client: EventLogServiceClient<Channel>,
     cluster_limit_client: ClusterLimitServiceClient<Channel>,
     hosted_iceberg_catalog_service_client: HostedIcebergCatalogServiceClient<Channel>,
+    monitor_client: MonitorServiceClient<Channel>,
 }
 
 impl GrpcMetaClientCore {
@@ -1825,7 +1887,9 @@ impl GrpcMetaClientCore {
         let sink_coordinate_client = SinkCoordinationServiceClient::new(channel.clone());
         let event_log_client = EventLogServiceClient::new(channel.clone());
         let cluster_limit_client = ClusterLimitServiceClient::new(channel.clone());
-        let hosted_iceberg_catalog_service_client = HostedIcebergCatalogServiceClient::new(channel);
+        let hosted_iceberg_catalog_service_client =
+            HostedIcebergCatalogServiceClient::new(channel.clone());
+        let monitor_client = MonitorServiceClient::new(channel);
 
         GrpcMetaClientCore {
             cluster_client,
@@ -1847,6 +1911,7 @@ impl GrpcMetaClientCore {
             event_log_client,
             cluster_limit_client,
             hosted_iceberg_catalog_service_client,
+            monitor_client,
         }
     }
 }
@@ -2193,6 +2258,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ stream_client, list_streaming_job_states, ListStreamingJobStatesRequest, ListStreamingJobStatesResponse }
             ,{ stream_client, list_fragment_distribution, ListFragmentDistributionRequest, ListFragmentDistributionResponse }
+            ,{ stream_client, list_creating_stream_scan_fragment_distribution, ListCreatingStreamScanFragmentDistributionRequest, ListCreatingStreamScanFragmentDistributionResponse }
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ stream_client, list_actor_splits, ListActorSplitsRequest, ListActorSplitsResponse }
             ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
@@ -2206,6 +2272,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
             ,{ ddl_client, alter_resource_group, AlterResourceGroupRequest, AlterResourceGroupResponse }
+            ,{ ddl_client, alter_database_param, AlterDatabaseParamRequest, AlterDatabaseParamResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
@@ -2294,6 +2361,7 @@ macro_rules! for_all_meta_rpc {
             ,{ event_log_client, add_event_log, AddEventLogRequest, AddEventLogResponse }
             ,{ cluster_limit_client, get_cluster_limits, GetClusterLimitsRequest, GetClusterLimitsResponse }
             ,{ hosted_iceberg_catalog_service_client, list_iceberg_tables, ListIcebergTablesRequest, ListIcebergTablesResponse }
+            ,{ monitor_client, stack_trace, StackTraceRequest, StackTraceResponse }
         }
     };
 }

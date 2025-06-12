@@ -49,7 +49,7 @@ RisingWave is a stream processing and management platform designed to offer the 
 
 RisingWave can <b>ingest</b> millions of events per second, continuously <b>join and analyze</b> live streams with historical data, <b>serve</b> ad-hoc queries at low latency, and <b>persist</b> fresh, consistent results to Apache Iceberg™ or any other downstream system.
 
-![RisingWave](./docs/dev/src/images/architecture_20250127.png)
+![RisingWave](./docs/dev/src/images/architecture_20250609.jpg)
 
 ## Try it out in 60 seconds
 

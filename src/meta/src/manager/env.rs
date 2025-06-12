@@ -28,6 +28,7 @@ use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{
     FrontendClientPool, FrontendClientPoolRef, StreamClientPool, StreamClientPoolRef,
 };
+use risingwave_sqlparser::ast::RedactSqlOptionKeywordsRef;
 use sea_orm::EntityTrait;
 
 use crate::MetaResult;
@@ -76,6 +77,9 @@ pub struct MetaSrvEnv {
     cluster_id: ClusterId,
 
     pub hummock_seq: Arc<SequenceGenerator>,
+
+    /// The await-tree registry of the current meta node.
+    await_tree_reg: await_tree::Registry,
 
     /// options read by all services
     pub opts: Arc<MetaOpts>,
@@ -267,6 +271,7 @@ pub struct MetaOpts {
     pub compute_client_config: RpcClientConfig,
     pub stream_client_config: RpcClientConfig,
     pub frontend_client_config: RpcClientConfig,
+    pub redact_sql_option_keywords: RedactSqlOptionKeywordsRef,
 }
 
 impl MetaOpts {
@@ -353,6 +358,7 @@ impl MetaOpts {
             compute_client_config: RpcClientConfig::default(),
             stream_client_config: RpcClientConfig::default(),
             frontend_client_config: RpcClientConfig::default(),
+            redact_sql_option_keywords: Arc::new(Default::default()),
         }
     }
 }
@@ -441,6 +447,8 @@ impl MetaSrvEnv {
             cluster_id,
             hummock_seq: Arc::new(SequenceGenerator::new(meta_store_impl.conn.clone())),
             opts: opts.into(),
+            // Await trees on the meta node is lightweight, thus always enabled.
+            await_tree_reg: await_tree::Registry::new(Default::default()),
         })
     }
 
@@ -502,6 +510,10 @@ impl MetaSrvEnv {
 
     pub fn event_log_manager_ref(&self) -> EventLogManagerRef {
         self.event_log_manager.clone()
+    }
+
+    pub fn await_tree_reg(&self) -> &await_tree::Registry {
+        &self.await_tree_reg
     }
 }
 

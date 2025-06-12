@@ -69,6 +69,10 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>>;
 
+    async fn list_creating_stream_scan_fragment_distribution(
+        &self,
+    ) -> Result<Vec<FragmentDistribution>>;
+
     async fn list_actor_states(&self) -> Result<Vec<ActorState>>;
 
     async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>>;
@@ -147,6 +151,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>>;
 
     async fn get_fragment_by_id(&self, fragment_id: u32) -> Result<Option<FragmentDistribution>>;
+
+    fn worker_id(&self) -> u32;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -186,6 +192,14 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>> {
         self.0.list_fragment_distributions().await
+    }
+
+    async fn list_creating_stream_scan_fragment_distribution(
+        &self,
+    ) -> Result<Vec<FragmentDistribution>> {
+        self.0
+            .list_creating_stream_scan_fragment_distribution()
+            .await
     }
 
     async fn list_actor_states(&self) -> Result<Vec<ActorState>> {
@@ -358,5 +372,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn get_fragment_by_id(&self, fragment_id: u32) -> Result<Option<FragmentDistribution>> {
         self.0.get_fragment_by_id(fragment_id).await
+    }
+
+    fn worker_id(&self) -> u32 {
+        self.0.worker_id()
     }
 }

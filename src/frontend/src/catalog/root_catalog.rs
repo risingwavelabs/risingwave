@@ -347,6 +347,8 @@ impl Catalog {
             let database = self.get_database_mut(id).unwrap();
             database.name = name;
             database.owner = proto.owner;
+            database.barrier_interval_ms = proto.barrier_interval_ms;
+            database.checkpoint_frequency = proto.checkpoint_frequency;
         }
     }
 
@@ -690,6 +692,16 @@ impl Catalog {
             }
         }
         Err(CatalogError::NotFound("table id", table_id.to_string()))
+    }
+
+    pub fn iter_tables(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
+        self.table_by_id.values()
+    }
+
+    pub fn iter_backfilling_internal_tables(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
+        self.table_by_id
+            .values()
+            .filter(|t| t.is_internal_table() && !t.is_created())
     }
 
     // Used by test_utils only.

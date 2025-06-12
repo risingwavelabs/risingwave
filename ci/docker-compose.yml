@@ -4,7 +4,9 @@ services:
     image: postgres:15-alpine
     environment:
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      # Test with a password containing special characters #21943, for example 0x5c.
+      # Note that 0x5c 0x74 are TWO characters. It is NOT 0x09.
+      - POSTGRES_PASSWORD=post\tgres
       - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
     ports:
       - 5432
@@ -212,13 +214,16 @@ services:
       - 9200:9200
 
   clickhouse-server:
-    image: clickhouse/clickhouse-server:23.3.8.21-alpine
+    image: clickhouse/clickhouse-server:25.5
     ports:
       - "8123:8123"
       - "9000:9000"
       - "9004:9004"
     expose:
       - 9009
+    environment:
+      CLICKHOUSE_USER: "default"
+      CLICKHOUSE_PASSWORD: "default"
 
   redis-server:
     image: "redis:latest"

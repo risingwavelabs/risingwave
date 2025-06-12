@@ -20,6 +20,7 @@ use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_frontend::expr::cast_sigs;
 use risingwave_sqlparser::ast::{Expr, Ident, OrderByExpr, Value};
 
+use crate::config::Feature;
 use crate::sql_gen::types::data_type_to_ast_data_type;
 use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
 
@@ -90,7 +91,11 @@ impl<R: Rng> SqlGenerator<'_, R> {
         // - `a1 >= a2 IN b`
         // ...
         // We just nest compound expressions to avoid this.
-        let range = if context.can_gen_agg() { 100 } else { 50 };
+        let range = if !context.is_inside_agg() && self.should_generate(Feature::Agg) {
+            100
+        } else {
+            50
+        };
         match self.rng.random_range(0..=range) {
             0..=35 => Expr::Nested(Box::new(self.gen_func(typ, context))),
             36..=40 => self.gen_exists(typ, context),
@@ -218,7 +223,9 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn gen_exists(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
-        if *ret != DataType::Boolean || context.can_gen_agg() {
+        if *ret != DataType::Boolean
+            || (!context.is_inside_agg() && self.should_generate(Feature::Agg))
+        {
             return self.gen_simple_scalar(ret);
         };
         // Generating correlated subquery tends to create queries which cannot be unnested.

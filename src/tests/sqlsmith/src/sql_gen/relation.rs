@@ -63,7 +63,14 @@ impl<R: Rng> SqlGenerator<'_, R> {
 
     fn gen_simple_table_factor(&mut self) -> (TableFactor, Table) {
         let alias = self.gen_table_name_with_prefix("t");
-        let mut table = self.tables.choose(&mut self.rng).unwrap().clone();
+        let mut table = if self.should_generate(Feature::Eowc) {
+            self.get_append_only_tables()
+                .choose(&mut self.rng)
+                .unwrap()
+                .clone()
+        } else {
+            self.tables.choose(&mut self.rng).unwrap().clone()
+        };
         let table_factor = TableFactor::Table {
             name: ObjectName(vec![Ident::new_unchecked(&table.name)]),
             alias: Some(TableAlias {
@@ -86,17 +93,18 @@ impl<R: Rng> SqlGenerator<'_, R> {
     /// Generates a table factor, and provides bound columns.
     /// Generated column names should be qualified by table name.
     fn gen_table_factor_inner(&mut self) -> (TableFactor, Table) {
-        // TODO: TableFactor::Derived, TableFactor::TableFunction, TableFactor::NestedJoin
-        match self.rng.random_range(0..=3) {
+        let mut choices = vec![0, 3]; // time_window, simple_table
+        if !self.should_generate(Feature::Eowc) {
+            choices.push(1); // table_func
+        }
+        if self.can_recurse() {
+            choices.push(2); // subquery
+        }
+
+        match *choices.choose(&mut self.rng).unwrap() {
             0 => self.gen_time_window_func(),
             1 => self.gen_table_func(),
-            2 => {
-                if self.can_recurse() {
-                    self.gen_table_subquery()
-                } else {
-                    self.gen_simple_table_factor()
-                }
-            }
+            2 => self.gen_table_subquery(),
             3 => self.gen_simple_table_factor(),
             _ => unreachable!(),
         }
@@ -121,7 +129,9 @@ impl<R: Rng> SqlGenerator<'_, R> {
     fn gen_bool_with_tables(&mut self, tables: Vec<Table>) -> Expr {
         let old_context = self.new_local_context();
         self.add_relations_to_context(tables);
-        let expr = self.gen_expr(&Boolean, SqlGeneratorContext::new_with_can_agg(false));
+        self.config.set_enabled(Feature::Agg, false);
+        let expr = self.gen_expr(&Boolean, SqlGeneratorContext::new(false));
+        self.config.set_enabled(Feature::Agg, true);
         self.restore_context(old_context);
         expr
     }
@@ -252,6 +262,24 @@ impl<R: Rng> SqlGenerator<'_, R> {
         right_columns: Vec<Column>,
         right_table: Table,
     ) -> Option<JoinConstraint> {
+        let common_columns: Vec<_> = left_columns
+            .iter()
+            .filter_map(|l_col| {
+                right_columns
+                    .iter()
+                    .find(|r_col| r_col.name == l_col.name)?;
+                Some(Ident::new_unchecked(l_col.name.clone()))
+            })
+            .collect();
+
+        if !common_columns.is_empty() && self.should_generate(Feature::NaturalJoin) {
+            return Some(JoinConstraint::Natural);
+        }
+
+        if !common_columns.is_empty() && self.should_generate(Feature::UsingJoin) {
+            return Some(JoinConstraint::Using(common_columns));
+        }
+
         let expr = self.gen_join_on_expr(left_columns, left_table, right_columns, right_table)?;
         Some(JoinConstraint::On(expr))
     }

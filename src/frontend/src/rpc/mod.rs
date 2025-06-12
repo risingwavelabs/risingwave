@@ -17,8 +17,8 @@ use pgwire::pg_server::{BoxedError, Session, SessionManager};
 use risingwave_pb::ddl_service::{ReplaceJobPlan, TableSchemaChange, replace_job_plan};
 use risingwave_pb::frontend_service::frontend_service_server::FrontendService;
 use risingwave_pb::frontend_service::{
-    GetRunningSqlsRequest, GetRunningSqlsResponse, GetTableReplacePlanRequest,
-    GetTableReplacePlanResponse, RunningSql,
+    CancelRunningSqlRequest, CancelRunningSqlResponse, GetRunningSqlsRequest,
+    GetRunningSqlsResponse, GetTableReplacePlanRequest, GetTableReplacePlanResponse, RunningSql,
 };
 use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_sqlparser::ast::ObjectName;
@@ -26,6 +26,7 @@ use tonic::{Request as RpcRequest, Response as RpcResponse, Status};
 
 use crate::error::RwError;
 use crate::handler::create_source::SqlColumnStrategy;
+use crate::handler::kill_process::handle_kill_local;
 use crate::handler::{get_new_table_definition_for_cdc_table, get_replace_table_plan};
 use crate::session::{SESSION_MANAGER, SessionMapRef};
 
@@ -99,6 +100,15 @@ impl FrontendService for FrontendServiceImpl {
             .collect();
         Ok(RpcResponse::new(GetRunningSqlsResponse { running_sqls }))
     }
+
+    async fn cancel_running_sql(
+        &self,
+        request: RpcRequest<CancelRunningSqlRequest>,
+    ) -> Result<RpcResponse<CancelRunningSqlResponse>, Status> {
+        let process_id = request.into_inner().process_id;
+        handle_kill_local(self.session_map.clone(), process_id).await?;
+        Ok(RpcResponse::new(CancelRunningSqlResponse {}))
+    }
 }
 
 /// Get the new table plan for the given table schema change
@@ -127,7 +137,7 @@ async fn get_new_table_plan(
     let (new_table_definition, original_catalog) =
         get_new_table_definition_for_cdc_table(&session, table_name.clone(), &new_version_columns)
             .await?;
-    let (_, table, graph, col_index_mapping, job_type) = get_replace_table_plan(
+    let (_, table, graph, job_type) = get_replace_table_plan(
         &session,
         table_name,
         new_table_definition,
@@ -145,6 +155,5 @@ async fn get_new_table_plan(
             },
         )),
         fragment_graph: Some(graph),
-        table_col_index_mapping: Some(col_index_mapping.to_protobuf()),
     })
 }

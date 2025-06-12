@@ -443,7 +443,10 @@ fn parse_set() {
     one_statement_parses_to("SET SESSION a = b", "SET a = b");
     for (sql, err_msg) in [
         ("SET", "expected identifier, found: EOF"),
-        ("SET a b", "expected equals sign or TO, found: b"),
+        (
+            "SET a b",
+            "expected '=' or 'TO' after config parameter, found: b",
+        ),
         ("SET a =", "expected parameter value"),
     ] {
         let error = parse_sql_statements(sql).unwrap_err().to_string();
@@ -463,11 +466,12 @@ fn parse_show() {
         }
     );
 
+    // XXX: shouldn't ALL be a keyword instead?
     let stmt = verified_stmt("SHOW ALL ALL");
     assert_eq!(
         stmt,
         Statement::ShowVariable {
-            variable: vec!["ALL".into(), "ALL".into()]
+            variable: vec![Ident::new_unchecked("ALL"), Ident::new_unchecked("ALL")]
         }
     )
 }
@@ -483,11 +487,12 @@ fn parse_deallocate() {
         }
     );
 
+    // XXX: shouldn't ALL be a keyword instead?
     let stmt = verified_stmt("DEALLOCATE ALL");
     assert_eq!(
         stmt,
         Statement::Deallocate {
-            name: "ALL".into(),
+            name: Ident::new_unchecked("ALL"),
             prepare: false,
         }
     );
@@ -501,11 +506,12 @@ fn parse_deallocate() {
         }
     );
 
+    // XXX: shouldn't ALL be a keyword instead?
     let stmt = verified_stmt("DEALLOCATE PREPARE ALL");
     assert_eq!(
         stmt,
         Statement::Deallocate {
-            name: "ALL".into(),
+            name: Ident::new_unchecked("ALL"),
             prepare: true,
         }
     );
@@ -766,7 +772,7 @@ fn parse_create_function() {
             ]),
             returns: Some(CreateFunctionReturns::Value(DataType::Int)),
             params: CreateFunctionBody {
-                language: Some("SQL".into()),
+                language: Some(Ident::new_unchecked("SQL")),
                 behavior: Some(FunctionBehavior::Immutable),
                 as_: Some(FunctionDefinition::SingleQuotedDef(
                     "select $1 + $2;".into()
@@ -791,7 +797,7 @@ fn parse_create_function() {
             ]),
             returns: Some(CreateFunctionReturns::Value(DataType::Int)),
             params: CreateFunctionBody {
-                language: Some("SQL".into()),
+                language: Some(Ident::new_unchecked("SQL")),
                 as_: Some(FunctionDefinition::DoubleDollarDef(
                     "select $1 - $2;".into()
                 )),
@@ -816,7 +822,7 @@ fn parse_create_function() {
             ]),
             returns: Some(CreateFunctionReturns::Value(DataType::Int)),
             params: CreateFunctionBody {
-                language: Some("SQL".into()),
+                language: Some(Ident::new_unchecked("SQL")),
                 return_: Some(Expr::BinaryOp {
                     left: Box::new(Expr::Parameter { index: 1 }),
                     op: BinaryOperator::Plus,
@@ -847,7 +853,7 @@ fn parse_create_function() {
             ]),
             returns: Some(CreateFunctionReturns::Value(DataType::Int)),
             params: CreateFunctionBody {
-                language: Some("SQL".into()),
+                language: Some(Ident::new_unchecked("SQL")),
                 behavior: Some(FunctionBehavior::Immutable),
                 return_: Some(Expr::BinaryOp {
                     left: Box::new(Expr::Identifier("a".into())),
@@ -878,7 +884,7 @@ fn parse_create_function() {
                 data_type: DataType::Int,
             }])),
             params: CreateFunctionBody {
-                language: Some("SQL".into()),
+                language: Some(Ident::new_unchecked("SQL")),
                 return_: Some(Expr::Identifier("a".into())),
                 ..Default::default()
             },
@@ -900,7 +906,7 @@ fn parse_create_function() {
             ]),
             returns: Some(CreateFunctionReturns::Value(DataType::Int)),
             params: CreateFunctionBody {
-                language: Some("SQL".into()),
+                language: Some(Ident::new_unchecked("SQL")),
                 behavior: Some(FunctionBehavior::Immutable),
                 as_: Some(FunctionDefinition::SingleQuotedDef(
                     "select $1 + $2;".into()
@@ -1057,7 +1063,8 @@ fn parse_array() {
                 lateral_views: vec![],
                 selection: None,
                 group_by: vec![],
-                having: None
+                having: None,
+                window: vec![],
             })),
             order_by: vec![],
             limit: None,
@@ -1096,7 +1103,8 @@ fn parse_array() {
                 lateral_views: vec![],
                 selection: None,
                 group_by: vec![],
-                having: None
+                having: None,
+                window: vec![],
             })),
             order_by: vec![],
             limit: None,
@@ -1141,7 +1149,8 @@ fn parse_array() {
                 lateral_views: vec![],
                 selection: None,
                 group_by: vec![],
-                having: None
+                having: None,
+                window: vec![],
             })),
             order_by: vec![],
             limit: None,
