@@ -17,11 +17,13 @@ use anyhow::anyhow;
 use opendal::Operator;
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::S3;
+use risingwave_common::util::env_var::env_var_is_true;
 use serde::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
 use super::opendal_sink::{BatchingStrategy, FileSink};
+use crate::connector_common::DISABLE_DEFAULT_CREDENTIAL;
 use crate::deserialize_optional_bool_from_string;
 use crate::sink::file_sink::opendal_sink::OpendalSinkBackend;
 use crate::sink::{Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError};
@@ -56,6 +58,16 @@ pub struct S3Common {
     pub assume_role: Option<String>,
 }
 
+impl S3Common {
+    pub fn enable_config_load(&self) -> bool {
+        // If the env var is set to true, we disable the default config load. (Cloud environment)
+        if env_var_is_true(DISABLE_DEFAULT_CREDENTIAL) {
+            return false;
+        }
+        self.enable_config_load.unwrap_or(false)
+    }
+}
+
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct S3Config {
@@ -74,29 +86,29 @@ pub struct S3Config {
 pub const S3_SINK: &str = "s3";
 
 impl<S: OpendalSinkBackend> FileSink<S> {
-    pub fn new_s3_sink(config: S3Config) -> Result<Operator> {
+    pub fn new_s3_sink(config: &S3Config) -> Result<Operator> {
         // Create s3 builder.
         let mut builder = S3::default()
             .bucket(&config.common.bucket_name)
             .region(&config.common.region_name);
 
-        if let Some(endpoint_url) = config.common.endpoint_url {
-            builder = builder.endpoint(&endpoint_url);
+        if let Some(endpoint_url) = &config.common.endpoint_url {
+            builder = builder.endpoint(endpoint_url);
         }
 
-        if let Some(access) = config.common.access {
-            builder = builder.access_key_id(&access);
+        if let Some(access) = &config.common.access {
+            builder = builder.access_key_id(access);
         }
 
-        if let Some(secret) = config.common.secret {
-            builder = builder.secret_access_key(&secret);
+        if let Some(secret) = &config.common.secret {
+            builder = builder.secret_access_key(secret);
         }
 
-        if let Some(assume_role) = config.common.assume_role {
-            builder = builder.role_arn(&assume_role);
+        if let Some(assume_role) = &config.common.assume_role {
+            builder = builder.role_arn(assume_role);
         }
         // Default behavior is disable loading config from environment.
-        if !config.common.enable_config_load.unwrap_or(false) {
+        if !config.common.enable_config_load() {
             builder = builder.disable_config_load();
         }
 
@@ -138,7 +150,7 @@ impl OpendalSinkBackend for S3Sink {
     }
 
     fn new_operator(properties: S3Config) -> Result<Operator> {
-        FileSink::<S3Sink>::new_s3_sink(properties)
+        FileSink::<S3Sink>::new_s3_sink(&properties)
     }
 
     fn get_path(properties: Self::Properties) -> String {
@@ -183,7 +195,7 @@ impl OpendalSinkBackend for SnowflakeSink {
     }
 
     fn new_operator(properties: S3Config) -> Result<Operator> {
-        FileSink::<SnowflakeSink>::new_s3_sink(properties)
+        FileSink::<SnowflakeSink>::new_s3_sink(&properties)
     }
 
     fn get_path(properties: Self::Properties) -> String {
