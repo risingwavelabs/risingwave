@@ -36,11 +36,6 @@ struct RwBackfillInfo {
 }
 
 fn extract_stream_scan(fragment_distribution: &FragmentDistribution) -> Option<RwBackfillInfo> {
-    if fragment_distribution.fragment_type_mask & (FragmentTypeFlag::StreamScan as u32) == 0 {
-        return None;
-    }
-
-    let stream_node = fragment_distribution.node.as_ref()?;
     let backfill_type =
         if fragment_distribution.fragment_type_mask & (FragmentTypeFlag::SourceScan as u32) != 0 {
             CatalogBackfillType::Source
@@ -58,8 +53,9 @@ fn extract_stream_scan(fragment_distribution: &FragmentDistribution) -> Option<R
             return None;
         };
 
-    let mut scan = None;
+    let stream_node = fragment_distribution.node.as_ref()?;
 
+    let mut scan = None;
     match backfill_type {
         CatalogBackfillType::Source => {
             visit_stream_node_source_backfill(stream_node, |node| {
