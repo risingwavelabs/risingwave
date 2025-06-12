@@ -22,7 +22,7 @@ use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
 
 #[derive(Fields)]
-struct RwTableScans {
+struct RwBackfillInfo {
     job_id: i32,
     #[primary_key]
     fragment_id: i32,
@@ -32,7 +32,7 @@ struct RwTableScans {
     backfill_epoch: i64,
 }
 
-fn extract_stream_scan(fragment_distribution: &FragmentDistribution) -> Option<RwTableScans> {
+fn extract_stream_scan(fragment_distribution: &FragmentDistribution) -> Option<RwBackfillInfo> {
     if fragment_distribution.fragment_type_mask & (FragmentTypeFlag::StreamScan as u32) == 0 {
         return None;
     }
@@ -45,7 +45,7 @@ fn extract_stream_scan(fragment_distribution: &FragmentDistribution) -> Option<R
 
     let mut scan = None;
     visit_stream_node_stream_scan(stream_node, |node| {
-        scan = Some(RwTableScans {
+        scan = Some(RwBackfillInfo {
             job_id: fragment_distribution.table_id as i32,
             fragment_id: fragment_distribution.fragment_id as i32,
             backfill_state_table_id: node
@@ -61,11 +61,11 @@ fn extract_stream_scan(fragment_distribution: &FragmentDistribution) -> Option<R
     scan
 }
 
-#[system_catalog(table, "rw_catalog.rw_table_scan")]
-async fn read_rw_table_scan(reader: &SysCatalogReaderImpl) -> Result<Vec<RwTableScans>> {
+#[system_catalog(table, "rw_catalog.rw_backfill_info")]
+async fn read_rw_backfill_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwBackfillInfo>> {
     let distributions = reader
         .meta_client
-        .list_creating_stream_scan_fragment_distribution()
+        .list_creating_fragment_distribution()
         .await?;
 
     Ok(distributions
