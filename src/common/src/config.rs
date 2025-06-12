@@ -978,6 +978,17 @@ pub struct StorageConfig {
 
     #[serde(default = "default::storage::time_travel_version_cache_capacity")]
     pub time_travel_version_cache_capacity: u64,
+
+    // iceberg compaction
+    #[serde(default = "default::storage::iceberg_compaction_target_file_size_mb")]
+    pub iceberg_compaction_target_file_size_mb: u32,
+    #[serde(default = "default::storage::iceberg_compaction_enable_validate")]
+    pub iceberg_compaction_enable_validate: bool,
+    #[serde(default = "default::storage::iceberg_compaction_max_record_batch_rows")]
+    pub iceberg_compaction_max_record_batch_rows: usize,
+
+    #[serde(default = "default::storage::iceberg_compaction_write_parquet_max_row_group_rows")]
+    pub iceberg_compaction_write_parquet_max_row_group_rows: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
@@ -1980,6 +1991,22 @@ pub mod default {
 
         pub fn time_travel_version_cache_capacity() -> u64 {
             10
+        }
+
+        pub fn iceberg_compaction_target_file_size_mb() -> u32 {
+            1024
+        }
+
+        pub fn iceberg_compaction_enable_validate() -> bool {
+            false
+        }
+
+        pub fn iceberg_compaction_max_record_batch_rows() -> usize {
+            1024
+        }
+
+        pub fn iceberg_compaction_write_parquet_max_row_group_rows() -> usize {
+            1024 * 100 // 100k
         }
     }
 

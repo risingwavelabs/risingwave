@@ -1816,7 +1816,7 @@ checksum = "3a8241f3ebb85c056b509d4327ad0358fbbba6ffb340bf388f26350aeda225b1"
 [[package]]
 name = "bergloom-codegen"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/BergLoom.git?rev=8b52670a5f78ffe99af7391bc83654b97fa886a0#8b52670a5f78ffe99af7391bc83654b97fa886a0"
+source = "git+https://github.com/nimtable/BergLoom.git?rev=1c293c099db9a2374018e60146d1472e55342a5e#1c293c099db9a2374018e60146d1472e55342a5e"
 dependencies = [
  "prost 0.13.4",
  "prost-build 0.13.4",
@@ -1827,13 +1827,14 @@ dependencies = [
 [[package]]
 name = "bergloom-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/BergLoom.git?rev=8b52670a5f78ffe99af7391bc83654b97fa886a0#8b52670a5f78ffe99af7391bc83654b97fa886a0"
+source = "git+https://github.com/nimtable/BergLoom.git?rev=1c293c099db9a2374018e60146d1472e55342a5e#1c293c099db9a2374018e60146d1472e55342a5e"
 dependencies = [
  "async-stream",
  "async-trait",
  "backon 1.2.0",
  "bergloom-codegen",
  "datafusion 45.0.0",
+ "derive_builder",
  "futures",
  "futures-async-stream",
  "iceberg",
@@ -12729,6 +12730,7 @@ dependencies = [
  "nix 0.30.1",
  "num-integer",
  "parking_lot 0.12.1",
+ "parquet 54.2.0",
  "procfs",
  "prometheus",
  "prost 0.13.4",

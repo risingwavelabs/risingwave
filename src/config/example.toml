@@ -231,6 +231,10 @@ mem_table_spill_threshold = 4194304
 compactor_max_overlap_sst_count = 64
 compactor_max_preload_meta_file_count = 32
 time_travel_version_cache_capacity = 10
+iceberg_compaction_target_file_size_mb = 1024
+iceberg_compaction_enable_validate = false
+iceberg_compaction_max_record_batch_rows = 1024
+iceberg_compaction_write_parquet_max_row_group_rows = 102400
 
 [storage.cache.block_cache_eviction]
 algorithm = "Lru"
