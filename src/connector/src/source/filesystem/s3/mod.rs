@@ -20,7 +20,6 @@ use crate::connector_common::DISABLE_DEFAULT_CREDENTIAL;
 use crate::deserialize_optional_bool_from_string;
 use crate::enforce_secret::EnforceSecret;
 use crate::source::SourceProperties;
-use crate::source::filesystem::file_common::CompressionFormat;
 use crate::source::util::dummy::{
     DummyProperties, DummySourceReader, DummySplit, DummySplitEnumerator,
 };
@@ -45,8 +44,6 @@ pub struct S3PropertiesCommon {
     pub enable_config_load: Option<bool>,
     #[serde(rename = "s3.endpoint_url")]
     pub endpoint_url: Option<String>,
-    #[serde(rename = "compression_format", default = "Default::default")]
-    pub compression_format: CompressionFormat,
 }
 
 impl S3PropertiesCommon {
