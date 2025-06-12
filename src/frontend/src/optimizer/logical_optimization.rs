@@ -133,6 +133,8 @@ static TABLE_FUNCTION_CONVERT: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Table Function Convert",
         vec![
+            // Apply file scan rule first
+            TableFunctionToFileScanRule::create(),
             // Apply internal backfill progress rule first
             TableFunctionToInternalBackfillProgressRule::create(),
             // Apply postgres query rule next
