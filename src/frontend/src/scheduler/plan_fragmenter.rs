@@ -343,8 +343,11 @@ impl SourceScanInfo {
                 Ok(SourceScanInfo::Complete(split_info))
             }
             (ConnectorProperties::OpendalS3(prop), SourceFetchParameters::Empty) => {
-                let lister: OpendalEnumerator<OpendalS3> =
-                    OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
+                let lister: OpendalEnumerator<OpendalS3> = OpendalEnumerator::new_s3_source(
+                    &prop.s3_properties,
+                    prop.assume_role,
+                    prop.fs_common.compression_format,
+                )?;
                 let stream = build_opendal_fs_list_for_batch(lister);
 
                 let batch_res: Vec<_> = stream.try_collect().await?;

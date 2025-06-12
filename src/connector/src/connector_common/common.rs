@@ -46,7 +46,7 @@ const AWS_MSK_IAM_AUTH: &str = "AWS_MSK_IAM";
 
 /// The environment variable to disable using default credential from environment.
 /// It's recommended to set this variable to `false` in cloud hosting environment.
-const DISABLE_DEFAULT_CREDENTIAL: &str = "DISABLE_DEFAULT_CREDENTIAL";
+pub const DISABLE_DEFAULT_CREDENTIAL: &str = "DISABLE_DEFAULT_CREDENTIAL";
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AwsPrivateLinkItem {
