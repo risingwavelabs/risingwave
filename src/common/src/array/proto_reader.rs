@@ -43,6 +43,7 @@ impl ArrayImpl {
             PbArrayType::List => ListArray::from_protobuf(array)?,
             PbArrayType::Bytea => read_string_array::<BytesValueReader>(array, cardinality)?,
             PbArrayType::Int256 => Int256Array::from_protobuf(array, cardinality)?,
+            PbArrayType::Uint256 => UInt256Array::from_protobuf(array, cardinality)?,
             PbArrayType::Map => MapArray::from_protobuf(array)?,
         };
         Ok(array)
