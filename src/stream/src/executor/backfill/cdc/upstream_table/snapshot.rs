@@ -44,7 +44,7 @@ pub trait UpstreamTableRead {
         &self,
     ) -> impl Future<Output = StreamExecutorResult<Option<CdcOffset>>> + Send + '_;
 
-    async fn disconnect(&self) -> StreamExecutorResult<()>;
+    async fn disconnect(self) -> StreamExecutorResult<()>;
 }
 
 #[derive(Debug, Clone)]
@@ -244,7 +244,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
         Ok(Some(binlog))
     }
 
-    async fn disconnect(&self) -> StreamExecutorResult<()> {
+    async fn disconnect(self) -> StreamExecutorResult<()> {
         self.reader.disconnect().await?;
         Ok(())
     }

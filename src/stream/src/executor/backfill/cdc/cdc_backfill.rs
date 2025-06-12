@@ -705,8 +705,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         }
 
         upstream_table_reader.disconnect().await?;
-        // drop reader to release db connection
-        drop(upstream_table_reader);
 
         tracing::info!(
             table_id,
