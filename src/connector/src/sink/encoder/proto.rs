@@ -458,6 +458,10 @@ fn on_field<D: MaybeData>(
                 return no_match_err();
             }
         }
+        // Should we handle this as String?
+        DataType::Uuid => {
+            return no_match_err();
+        }
     };
 
     Ok(value)

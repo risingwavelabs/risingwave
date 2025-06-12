@@ -307,6 +307,10 @@ message ExprNode {
     MAP_DELETE = 710;
     MAP_FILTER = 711;
 
+    //UUID functions
+    GEN_RANDOM_UUID = 750;
+    GEN_UUID_FROM_BYTEA = 751;
+    
     // Internal function for schema change
     COMPOSITE_CAST = 800;
 

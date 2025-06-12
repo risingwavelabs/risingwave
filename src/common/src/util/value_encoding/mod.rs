@@ -230,6 +230,7 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
         ScalarRefImpl::Struct(s) => serialize_struct(s, buf),
         ScalarRefImpl::List(v) => serialize_list(v, buf),
         ScalarRefImpl::Map(m) => serialize_list(m.into_inner(), buf),
+        ScalarRefImpl::Uuid(v) => buf.put_slice(&v.to_be_bytes()),
     }
 }
 
@@ -256,6 +257,7 @@ fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
         ScalarRefImpl::Struct(s) => estimate_serialize_struct_size(s),
         ScalarRefImpl::List(v) => estimate_serialize_list_size(v),
         ScalarRefImpl::Map(v) => estimate_serialize_list_size(v.into_inner()),
+        ScalarRefImpl::Uuid(_) => 16,
     }
 }
 
@@ -359,6 +361,7 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         DataType::Struct(struct_def) => deserialize_struct(struct_def, data)?,
         DataType::Bytea => ScalarImpl::Bytea(deserialize_bytea(data).into()),
         DataType::List(item_type) => deserialize_list(item_type, data)?,
+        DataType::Uuid => ScalarImpl::Uuid(deserialize_uuid(data)),
         DataType::Map(map_type) => {
             // FIXME: clone type everytime here is inefficient
             let list = deserialize_list(&map_type.clone().into_struct(), data)?.into_list();
@@ -445,6 +448,13 @@ fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {
     let mut bytes = [0; 16];
     data.copy_to_slice(&mut bytes);
     Ok(Decimal::unordered_deserialize(bytes))
+}
+
+// Add a function to deserialize UUID:
+fn deserialize_uuid(data: &mut impl Buf) -> Uuid {
+    let mut bytes = [0; 16];
+    data.copy_to_slice(&mut bytes);
+    Uuid::from_bytes(bytes)
 }
 
 #[cfg(test)]

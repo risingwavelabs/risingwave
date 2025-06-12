@@ -583,6 +583,14 @@ fn on_field<D: MaybeData>(
             }
             _ => return no_match_err(),
         },
+        DataType::Uuid => match inner {
+            AvroSchema::Uuid => maybe.on_base(|s| {
+                // Convert UUID to string (RFC-4122 format)
+                let uuid_string = s.into_uuid().to_string();
+                Ok(Value::String(uuid_string))
+            })?,
+            _ => return no_match_err(),
+        },
         // Group D: unsupported
         DataType::Int256 => {
             return no_match_err();
@@ -604,7 +612,7 @@ mod tests {
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{
         Date, Datum, Interval, JsonbVal, ListValue, MapType, MapValue, Scalar, ScalarImpl,
-        StructValue, Time, Timestamptz, ToDatumRef,
+        StructValue, Time, Timestamptz, ToDatumRef, Uuid,
     };
 
     use super::*;
@@ -832,6 +840,20 @@ mod tests {
             Value::String(r#"{"a": 1}"#.into()),
         );
 
+        test_ok(
+            &DataType::Uuid,
+            Some(ScalarImpl::Uuid(
+                Uuid::from_str("01234567-89ab-cdef-fedc-ba9876543210").unwrap(),
+            )),
+            r#"{"type": "string", "logicalType": "uuid"}"#,
+            Value::String("01234567-89ab-cdef-fedc-ba9876543210".to_owned()),
+        );
+        test_ok(
+            &DataType::Uuid,
+            None,
+            r#"["null", {"type": "string", "logicalType": "uuid"}]"#,
+            Value::Union(0, Value::Null.into()),
+        );
         test_ok(
             &DataType::Interval,
             Some(ScalarImpl::Interval(Interval::from_month_day_usec(
@@ -1311,5 +1333,78 @@ mod tests {
                 ])
             );
         }
+    }
+    #[test]
+    fn test_encode_avro_uuid_in_record() {
+        let avro_schema = AvroSchema::parse_str(
+            r#"{
+            "type": "record",
+            "name": "UserRecord",
+            "fields": [
+                {"name": "id", "type": {"type": "string", "logicalType": "uuid"}},
+                {"name": "name", "type": "string"},
+                {"name": "backup_id", "type": ["null", {"type": "string", "logicalType": "uuid"}]}
+            ]
+        }"#,
+        )
+        .unwrap();
+        let avro_schema = Arc::new(avro_schema);
+        let header = AvroHeader::None;
+
+        let schema = Schema::new(vec![
+            Field::with_name(DataType::Uuid, "id"),
+            Field::with_name(DataType::Varchar, "name"),
+            Field::with_name(DataType::Uuid, "backup_id"),
+        ]);
+        let row = OwnedRow::new(vec![
+            Some(ScalarImpl::Uuid(
+                Uuid::from_str("01234567-89ab-cdef-fedc-ba9876543210").unwrap(),
+            )),
+            Some(ScalarImpl::Utf8("John Doe".into())),
+            Some(ScalarImpl::Uuid(
+                Uuid::from_str("550e8400-e29b-41d4-a716-446655440000").unwrap(),
+            )),
+        ]);
+        let encoder = AvroEncoder::new(schema, None, avro_schema.clone(), header).unwrap();
+        let actual = encoder.encode(row).unwrap();
+
+        assert_eq!(
+            actual.value,
+            Value::Record(vec![
+                (
+                    "id".into(),
+                    Value::String("01234567-89ab-cdef-fedc-ba9876543210".to_owned())
+                ),
+                ("name".into(), Value::String("John Doe".into())),
+                (
+                    "backup_id".into(),
+                    Value::Union(
+                        1,
+                        Value::String("550e8400-e29b-41d4-a716-446655440000".to_owned()).into()
+                    )
+                ),
+            ])
+        );
+
+        // Test with null backup_id
+        let row_null_backup = OwnedRow::new(vec![
+            Some(ScalarImpl::Uuid(
+                Uuid::from_str("01234567-89ab-cdef-fedc-ba9876543210").unwrap(),
+            )),
+            Some(ScalarImpl::Utf8("Jane Doe".into())),
+            None, // null backup_id
+        ]);
+        let actual_null = encoder.encode(row_null_backup).unwrap();
+        assert_eq!(
+            actual_null.value,
+            Value::Record(vec![
+                (
+                    "id".into(),
+                    Value::String("01234567-89ab-cdef-fedc-ba9876543210".to_owned())
+                ),
+                ("name".into(), Value::String("Jane Doe".into())),
+                ("backup_id".into(), Value::Union(0, Value::Null.into())),
+            ])
+        );
     }
 }

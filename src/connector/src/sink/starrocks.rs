@@ -269,6 +269,9 @@ impl StarrocksSink {
             risingwave_common::types::DataType::Map(_) => Err(SinkError::Starrocks(
                 "MAP is not supported for Starrocks sink.".to_owned(),
             )),
+            risingwave_common::types::DataType::Uuid => Err(SinkError::Starrocks(
+                "UUID is not supported for Starrocks sink.".to_owned(),
+            )),
         }
     }
 }

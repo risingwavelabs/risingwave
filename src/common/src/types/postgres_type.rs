@@ -46,6 +46,7 @@ macro_rules! for_all_base_types {
             { Interval    | 1186 |     1187 | interval    | interval_in    |     16 }
             { Decimal     | 1700 |     1231 | numeric     | numeric_in     |     -1 }
             { Jsonb       | 3802 |     3807 | jsonb       | jsonb_in       |     -1 }
+            { Uuid        | 2951 |     2950 | uuid        | uuid_in        |     16 }
         }
     };
 }

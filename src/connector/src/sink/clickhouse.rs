@@ -515,6 +515,9 @@ impl ClickHouseSink {
             risingwave_common::types::DataType::Map(_) => Err(SinkError::ClickHouse(
                 "clickhouse can not support Map".to_owned(),
             )),
+            risingwave_common::types::DataType::Uuid => Err(SinkError::ClickHouse(
+                "clickhouse can not support Uuid".to_owned(),
+            )),
         };
         if !is_match? {
             return Err(SinkError::ClickHouse(format!(
@@ -1044,6 +1047,11 @@ impl ClickHouseFieldWithNull {
             ScalarRefImpl::Map(_) => {
                 return Err(SinkError::ClickHouse(
                     "clickhouse can not support Map".to_owned(),
+                ));
+            }
+            ScalarRefImpl::Uuid(_) => {
+                return Err(SinkError::ClickHouse(
+                    "clickhouse can not support Uuid".to_owned(),
                 ));
             }
         };
