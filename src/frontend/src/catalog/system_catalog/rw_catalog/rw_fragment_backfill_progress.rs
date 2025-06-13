@@ -16,15 +16,17 @@ use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
 /// Provides fragment level backfill progress.
+// source backfill progress has the following schema:
+// `{"num_consumed_rows": 530, "state": {"Backfilling": "529"}, "target_offset": "9999"}`
 #[system_catalog(
 view,
 "rw_catalog.rw_fragment_backfill_progress",
-"select
+"with
+table_backfill_progress as (select
   progress.job_id,
   progress.fragment_id,
-  concat(job_schemas.name, '.', job_tables.name) as job_name,
-  concat(upstream_schemas.name, '.', upstream_tables.name) as upstream_table_name,
-  case when scan_info.is_snapshot_backfill AND progress.min_epoch > scan_info.backfill_epoch
+  scan_info.backfill_target_relation_id,
+  case when scan_info.backfill_type = 'SNAPSHOT_BACKFILL' AND progress.min_epoch > scan_info.backfill_epoch
   then concat('100% (', stats.total_key_count, '/', stats.total_key_count, ')')
   else
     concat(
@@ -39,12 +41,47 @@ view,
     )
   end as progress
 FROM internal_backfill_progress() progress
-JOIN rw_table_scan scan_info ON progress.job_id = scan_info.job_id AND progress.fragment_id = scan_info.fragment_id
-JOIN rw_table_stats stats ON scan_info.backfill_target_table_id = stats.id
-JOIN rw_relations job_tables ON scan_info.job_id = job_tables.id
-JOIN rw_schemas job_schemas ON job_tables.schema_id = job_schemas.id
-JOIN rw_relations upstream_tables ON scan_info.backfill_target_table_id = upstream_tables.id
-JOIN rw_schemas upstream_schemas ON upstream_tables.schema_id = upstream_schemas.id
+JOIN rw_backfill_info scan_info ON progress.job_id = scan_info.job_id AND progress.fragment_id = scan_info.fragment_id
+JOIN rw_table_stats stats ON scan_info.backfill_target_relation_id = stats.id
+),
+aggregated_source_backfill_progress as (
+  select
+    source_backfill_progress.job_id,
+    source_backfill_progress.fragment_id,
+    sum((backfill_progress -> 'num_consumed_rows')::int) as backfill_progress
+  from
+    internal_source_backfill_progress() source_backfill_progress
+  group by
+    source_backfill_progress.job_id,
+    source_backfill_progress.fragment_id
+),
+source_backfill_progress as (select
+  aggregated_source_backfill_progress.job_id,
+  aggregated_source_backfill_progress.fragment_id,
+  scan_info.backfill_target_relation_id,
+  concat(aggregated_source_backfill_progress.backfill_progress, ' consumed rows') as progress
+FROM aggregated_source_backfill_progress
+JOIN rw_backfill_info scan_info ON
+  aggregated_source_backfill_progress.job_id = scan_info.job_id
+    AND aggregated_source_backfill_progress.fragment_id = scan_info.fragment_id
+),
+backfill_progress as (
+  select * from table_backfill_progress
+  UNION ALL
+  select * from source_backfill_progress
+)
+select
+  backfill_progress.job_id,
+  backfill_progress.fragment_id,
+  concat(job_schemas.name, '.', job_tables.name) as job_name,
+  concat(upstream_schemas.name, '.', upstream_tables.name) as upstream_table_name,
+  backfill_progress.progress
+FROM
+  backfill_progress
+  join rw_relations job_tables on backfill_progress.job_id = job_tables.id
+  join rw_schemas job_schemas on job_tables.schema_id = job_schemas.id
+  join rw_relations upstream_tables on backfill_progress.backfill_target_relation_id = upstream_tables.id
+  join rw_schemas upstream_schemas on upstream_tables.schema_id = upstream_schemas.id
 "
 )]
 #[derive(Fields)]

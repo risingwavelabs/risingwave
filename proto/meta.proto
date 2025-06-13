@@ -267,11 +267,11 @@ message ListFragmentDistributionResponse {
 
 // List fragments containing stream scans, and corresponding
 // to a streaming job in creation.
-message ListCreatingStreamScanFragmentDistributionRequest {}
+message ListCreatingFragmentDistributionRequest {}
 
 // List fragments containing stream scans, and corresponding
 // to a streaming job in creation.
-message ListCreatingStreamScanFragmentDistributionResponse {
+message ListCreatingFragmentDistributionResponse {
   repeated FragmentDistribution distributions = 1;
 }
 
@@ -368,7 +368,7 @@ service StreamManagerService {
   rpc ListTableFragments(ListTableFragmentsRequest) returns (ListTableFragmentsResponse);
   rpc ListStreamingJobStates(ListStreamingJobStatesRequest) returns (ListStreamingJobStatesResponse);
   rpc ListFragmentDistribution(ListFragmentDistributionRequest) returns (ListFragmentDistributionResponse);
-  rpc ListCreatingStreamScanFragmentDistribution(ListCreatingStreamScanFragmentDistributionRequest) returns (ListCreatingStreamScanFragmentDistributionResponse);
+  rpc ListCreatingFragmentDistribution(ListCreatingFragmentDistributionRequest) returns (ListCreatingFragmentDistributionResponse);
   rpc ListActorStates(ListActorStatesRequest) returns (ListActorStatesResponse);
   rpc ListActorSplits(ListActorSplitsRequest) returns (ListActorSplitsResponse);
   rpc ListObjectDependencies(ListObjectDependenciesRequest) returns (ListObjectDependenciesResponse);
