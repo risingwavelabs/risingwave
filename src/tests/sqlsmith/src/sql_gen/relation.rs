@@ -268,7 +268,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
                 right_columns
                     .iter()
                     .find(|r_col| r_col.name == l_col.name)?;
-                Some(l_col.name.0[0].clone())
+                Some(l_col.base_name())
             })
             .collect();
 

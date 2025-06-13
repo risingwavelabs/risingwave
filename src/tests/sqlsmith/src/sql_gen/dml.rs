@@ -147,7 +147,7 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
             .iter()
             .copied()
             .map(|i| {
-                let id = table.columns[i].name.0.clone();
+                let id = vec![table.columns[i].base_name()];
                 let value = AssignmentValue::Expr(row[i].clone());
                 Assignment { id, value }
             })

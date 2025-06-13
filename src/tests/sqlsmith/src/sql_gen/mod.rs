@@ -121,6 +121,10 @@ impl Column {
             Expr::CompoundIdentifier(self.name.0.clone())
         }
     }
+
+    pub fn base_name(&self) -> Ident {
+        self.name.0.last().unwrap().clone()
+    }
 }
 
 #[derive(Copy, Clone)]
