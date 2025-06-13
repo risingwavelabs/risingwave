@@ -64,16 +64,16 @@ Run a benchmark using either:
 
 ```bash
 # Against a local RisingWave instance
-python main.py run <benchmark_name>
+risedev sql-bench run <benchmark_name>
 
 # Against a specific PostgreSQL URL
-python main.py run <benchmark_name> -u <postgres_url>
+risedev sql-bench run <benchmark_name> -u <postgres_url>
 
 # Show detailed output
-python main.py run <benchmark_name> -d
+risedev sql-bench run <benchmark_name> -d
 
 # Use a specific RisingWave profile
-python main.py run <benchmark_name> -p <profile>
+risedev sql-bench run <benchmark_name> -p <profile>
 ```
 
 ## Debugging
