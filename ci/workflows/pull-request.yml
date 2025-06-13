@@ -760,8 +760,8 @@ steps:
 
   - wait: ~
 
-  - label: "merge coverage reports"
-    command: "ci/scripts/merge-coverage.sh"
+  - label: "upload coverage reports"
+    command: "ci/scripts/upload-coverage.sh"
     # TODO: skip this if `run-selected` or `CI_STEPS` is specified.
     plugins:
       - seek-oss/aws-sm#v2.3.2:
@@ -769,6 +769,8 @@ steps:
             CODECOV_TOKEN: my-codecov-token
       - docker-compose#v5.5.0:
           <<: *docker-compose
+          environment:
+          - CODECOV_TOKEN
     timeout_in_minutes: 10
     retry: *auto-retry
     soft_fail: true

@@ -4,6 +4,8 @@
 set -euo pipefail
 
 source ci/scripts/common.sh
+# Unset trap on exit set in `common.sh` (diagnose and coverage reporting).
+trap - EXIT
 
 echo "--- Download all coverage reports"
 
@@ -47,5 +49,5 @@ echo "Installing codecov CLI..."
 curl -Os https://uploader.codecov.io/latest/linux/codecov && chmod +x codecov
 
 # Upload merged coverage to codecov
-echo "Uploading merged coverage to codecov..."
+echo "Uploading coverage reports to codecov..."
 ./codecov -t "$CODECOV_TOKEN" -s . -F ci
