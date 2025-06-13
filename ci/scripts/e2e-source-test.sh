@@ -53,6 +53,12 @@ if [ "$profile" == "ci-dev" ]; then
 fi
 risedev slt './e2e_test/source_inline/**/*.slt' -j4
 risedev slt './e2e_test/source_inline/**/*.slt.serial'
+
+if [ "$profile" == "ci-release" ]; then
+    echo "--- Run release mode only tests"
+    risedev slt './e2e_test/backfill/backfill_progress/create_materialized_view_mix_source_and_normal.slt'
+fi
+
 echo "--- Kill cluster"
 risedev ci-kill
 
