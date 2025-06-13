@@ -45,6 +45,9 @@ statement ok
 wait;
 
 statement ok
+set background_ddl=false;
+
+statement ok
 create materialized view m2
  as select v1 from t1
 union
