@@ -45,7 +45,28 @@ statement ok
 wait;
 
 statement ok
-drop materialized view m1 cascade;
+create materialized view m2
+ as select v1 from t1
+union
+select v1 from t2
+union
+select v1 from t3;
+
+query I
+select * from m1 except select * from m2;
+----
+
+
+query I
+select * from m2 except select * from m1;
+----
+
+
+statement ok
+drop materialized view m1;
+
+statement ok
+drop materialized view m2;
 
 statement ok
 drop table if exists t1 cascade;
