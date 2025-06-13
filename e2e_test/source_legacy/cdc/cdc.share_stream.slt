@@ -122,7 +122,7 @@ mysql --protocol=tcp -u root mytest -e "INSERT INTO products VALUES (default,'Mi
 query TT
 select distribution_type,flags from rw_fragments order by fragment_id;
 ----
-SINGLE {SOURCE}
+SINGLE {SOURCE, SHARED_CDC_SOURCE}
 HASH {MVIEW}
 SINGLE {STREAM_SCAN}
 SINGLE {CDC_FILTER}
