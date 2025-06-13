@@ -500,6 +500,15 @@ pub fn start_iceberg_compactor(
                                         running_task_tracker_guard.1.insert(task_unique_ident.clone());
                                     }
 
+                                    let _release_guard = scopeguard::guard(
+                                        iceberg_running_task_tracker.clone(),
+                                        move |tracker| {
+                                            let mut running_task_tracker_guard = tracker.lock().unwrap();
+                                            running_task_tracker_guard.0.remove(&task_id);
+                                            running_task_tracker_guard.1.remove(&task_unique_ident);
+                                        },
+                                    );
+
                                     if let Err(e) = iceberg_runner.compact(
                                         RunnerContext::new(
                                             max_task_parallelism,
@@ -509,13 +518,6 @@ pub fn start_iceberg_compactor(
                                     )
                                     .await {
                                         tracing::warn!(error = %e.as_report(), "Failed to compact iceberg runner {}", task_id);
-                                    }
-
-                                    {
-                                        let mut running_task_tracker_guard =
-                                            iceberg_running_task_tracker.lock().unwrap();
-                                        running_task_tracker_guard.0.remove(&task_id);
-                                        running_task_tracker_guard.1.remove(&task_unique_ident);
                                     }
                                 });
                             },

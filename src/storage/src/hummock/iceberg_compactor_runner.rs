@@ -302,6 +302,16 @@ impl IcebergCompactorRunner {
                     }),
             );
 
+            tracing::info!(
+                task_id = task_id,
+                table = ?self.table_ident,
+                input_parallelism,
+                output_parallelism,
+                statistics = ?statistics,
+                compaction_config = ?compaction_config,
+                "Iceberg compaction task started",
+            );
+
             let compaction = Compaction::builder()
                 .with_catalog(self.catalog.clone())
                 .with_catalog_name(self.iceberg_config.catalog_name())
@@ -330,17 +340,6 @@ impl IcebergCompactorRunner {
                 },
             );
 
-            tracing::info!(
-                "Iceberg compaction task {} {:?} started with input parallelism {} and output parallelism {}",
-                task_id,
-                format!(
-                    "{:?}-{:?}",
-                    self.iceberg_config.catalog_name(),
-                    self.table_ident
-                ),
-                input_parallelism,
-                output_parallelism
-            );
             compaction
                 .compact()
                 .await
@@ -350,23 +349,23 @@ impl IcebergCompactorRunner {
 
         tokio::select! {
             _ = shutdown_rx => {
-                tracing::info!("Iceberg compaction task {} cancelled", task_id);
+                tracing::info!(task_id = task_id, "Iceberg compaction task cancelled");
             }
             result = compact => {
                 if let Err(e) = result {
                     tracing::warn!(
                         error = %e.as_report(),
-                        "Compaction task {} failed with error",
-                        task_id,
+                        task_id = task_id,
+                        "Iceberg compaction task failed with error",
                     );
                 }
             }
         }
 
         tracing::info!(
-            "Iceberg compaction task {} finished cost {} ms",
-            task_id,
-            now.elapsed().as_millis()
+            task_id = task_id,
+            elapsed_millis = now.elapsed().as_millis(),
+            "Iceberg compaction task finished",
         );
 
         Ok(())
