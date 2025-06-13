@@ -986,6 +986,10 @@ pub struct StorageConfig {
     pub iceberg_compaction_enable_validate: bool,
     #[serde(default = "default::storage::iceberg_compaction_max_record_batch_rows")]
     pub iceberg_compaction_max_record_batch_rows: usize,
+    #[serde(default = "default::storage::iceberg_compaction_min_size_per_partition_mb")]
+    pub iceberg_compaction_min_size_per_partition_mb: u32,
+    #[serde(default = "default::storage::iceberg_compaction_max_file_count_per_partition")]
+    pub iceberg_compaction_max_file_count_per_partition: u32,
 
     #[serde(default = "default::storage::iceberg_compaction_write_parquet_max_row_group_rows")]
     pub iceberg_compaction_write_parquet_max_row_group_rows: usize,
@@ -2007,6 +2011,14 @@ pub mod default {
 
         pub fn iceberg_compaction_write_parquet_max_row_group_rows() -> usize {
             1024 * 100 // 100k
+        }
+
+        pub fn iceberg_compaction_min_size_per_partition_mb() -> u32 {
+            1024
+        }
+
+        pub fn iceberg_compaction_max_file_count_per_partition() -> u32 {
+            32
         }
     }
 
