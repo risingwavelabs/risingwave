@@ -47,7 +47,6 @@ impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
         }
 
         let reader = plan.ctx().session_ctx().env().catalog_reader().read_guard();
-        // TODO(kwannoel): Make sure it reads from source tables as well.
         let backfilling_tables = get_backfilling_tables(reader);
         let plan = Self::build_plan(plan.ctx(), backfilling_tables)?;
         ApplyResult::Ok(plan)
