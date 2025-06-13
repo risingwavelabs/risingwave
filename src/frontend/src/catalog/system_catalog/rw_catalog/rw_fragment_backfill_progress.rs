@@ -16,10 +16,12 @@ use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
 /// Provides fragment level backfill progress.
+// source backfill progress has the following schema:
+// `{"num_consumed_rows": 530, "state": {"Backfilling": "529"}, "target_offset": "9999"}`
 #[system_catalog(
 view,
 "rw_catalog.rw_fragment_backfill_progress",
-"with 
+"with
 table_backfill_progress as (select
   progress.job_id,
   progress.fragment_id,
@@ -42,13 +44,26 @@ FROM internal_backfill_progress() progress
 JOIN rw_backfill_info scan_info ON progress.job_id = scan_info.job_id AND progress.fragment_id = scan_info.fragment_id
 JOIN rw_table_stats stats ON scan_info.backfill_target_relation_id = stats.id
 ),
+aggregated_source_backfill_progress as (
+  select
+    source_backfill_progress.job_id,
+    source_backfill_progress.fragment_id,
+    sum((backfill_progress -> 'num_consumed_rows')::int) as backfill_progress
+  from
+    internal_source_backfill_progress() source_backfill_progress
+  group by
+    source_backfill_progress.job_id,
+    source_backfill_progress.fragment_id
+),
 source_backfill_progress as (select
-  source_backfill_progress.job_id,
-  source_backfill_progress.fragment_id,
+  aggregated_source_backfill_progress.job_id,
+  aggregated_source_backfill_progress.fragment_id,
   scan_info.backfill_target_relation_id,
-  source_backfill_progress.backfill_progress::varchar as progress
-FROM internal_source_backfill_progress() source_backfill_progress
-JOIN rw_backfill_info scan_info ON source_backfill_progress.job_id = scan_info.job_id AND source_backfill_progress.fragment_id = scan_info.fragment_id
+  concat(aggregated_source_backfill_progress.backfill_progress, ' consumed rows') as progress
+FROM aggregated_source_backfill_progress
+JOIN rw_backfill_info scan_info ON
+  aggregated_source_backfill_progress.job_id = scan_info.job_id
+    AND aggregated_source_backfill_progress.fragment_id = scan_info.fragment_id
 ),
 backfill_progress as (
   select * from table_backfill_progress
