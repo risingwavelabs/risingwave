@@ -12,6 +12,7 @@ ignored = ["rw-tokio"]
 
 [dependencies]
 await-tree = { workspace = true }
+backtrace-on-stack-overflow = "0.3"
 console = "0.15"
 console-subscriber = "0.4"
 either = "1"
