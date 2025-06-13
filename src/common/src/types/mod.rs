@@ -275,7 +275,7 @@ impl From<&PbDataType> for DataType {
                 let list_entries_type: DataType = (&proto.field_type[0]).into();
                 DataType::Map(MapType::from_entries(list_entries_type))
             }
-            PbTypeName::Vector => todo!("VECTOR_PLACEHOLDER"),
+            PbTypeName::Vector => DataType::Vector(proto.precision as _),
             PbTypeName::Int256 => DataType::Int256,
         }
     }
@@ -432,7 +432,9 @@ impl DataType {
                 // Same as List<Struct<K,V>>
                 pb.field_type = vec![datatype.clone().into_struct().to_protobuf()];
             }
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::Vector(size) => {
+                pb.precision = *size as _;
+            }
             DataType::Boolean
             | DataType::Int16
             | DataType::Int32
@@ -1072,7 +1074,7 @@ impl ScalarImpl {
             DataType::Struct(st) => StructValue::from_str(s, st)?.into(),
             DataType::Jsonb => JsonbVal::from_str(s)?.into(),
             DataType::Bytea => str_to_bytea(s)?.into(),
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::Vector(size) => VectorVal::from_text(s, *size)?.into(),
             DataType::Map(_m) => return Err("map from text is not supported".into()),
         })
     }

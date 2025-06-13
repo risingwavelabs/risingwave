@@ -88,6 +88,9 @@ message ListArrayData {
   repeated uint32 offsets = 1;
   Array value = 2;
   DataType value_type = 3;
+  // See `DataType::precision`
+  // Shall we embed `DataType` in `Array` directly?
+  optional uint32 elem_size = 4;
 }
 
 enum ArrayType {
