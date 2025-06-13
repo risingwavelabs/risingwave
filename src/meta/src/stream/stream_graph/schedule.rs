@@ -37,7 +37,7 @@ use risingwave_pb::stream_plan::DispatcherType::{self, *};
 
 use crate::MetaResult;
 use crate::model::{ActorId, Fragment};
-use crate::stream::schedule_units_for_slots;
+use crate::stream::AssignerBuilder;
 use crate::stream::stream_graph::fragment::CompleteStreamFragmentGraph;
 use crate::stream::stream_graph::id::GlobalFragmentId as Id;
 
@@ -217,23 +217,30 @@ impl Scheduler {
     ) -> MetaResult<Self> {
         // Group worker slots with worker node.
 
-        let slots = workers
-            .iter()
-            .map(|(worker_id, worker)| (*worker_id as WorkerId, worker.compute_node_parallelism()))
-            .collect();
-
         let parallelism = default_parallelism.get();
         assert!(
             parallelism <= expected_vnode_count,
             "parallelism should be limited by vnode count in previous steps"
         );
 
-        let scheduled = schedule_units_for_slots(&slots, parallelism, streaming_job_id)?;
+        let assigner = AssignerBuilder::new(streaming_job_id).build();
 
-        let scheduled_worker_slots = scheduled
+        let worker_weights = workers
+            .iter()
+            .map(|(worker_id, worker)| {
+                (
+                    *worker_id as WorkerId,
+                    NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
+                )
+            })
+            .collect();
+
+        let assignment = assigner.count_actors_per_worker(&worker_weights, parallelism);
+
+        let scheduled_worker_slots = assignment
             .into_iter()
-            .flat_map(|(worker_id, size)| {
-                (0..size).map(move |slot| WorkerSlotId::new(worker_id as _, slot))
+            .flat_map(|(worker_id, units)| {
+                (0..units).map(move |slot| WorkerSlotId::new(worker_id as _, slot))
             })
             .collect_vec();
 
@@ -243,8 +250,9 @@ impl Scheduler {
         let default_hash_mapping =
             WorkerSlotMapping::build_from_ids(&scheduled_worker_slots, expected_vnode_count);
 
-        let single_scheduled = schedule_units_for_slots(&slots, 1, streaming_job_id)?;
-        let default_single_worker_id = single_scheduled.keys().exactly_one().cloned().unwrap();
+        let single_assignment = assigner.count_actors_per_worker(&worker_weights, 1);
+
+        let default_single_worker_id = single_assignment.keys().exactly_one().cloned().unwrap();
         let default_singleton_worker_slot = WorkerSlotId::new(default_single_worker_id as _, 0);
 
         Ok(Self {
