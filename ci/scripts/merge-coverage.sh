@@ -13,7 +13,7 @@ cd coverage-reports
 
 # Download all coverage files from all CI steps
 echo "Downloading coverage files..."
-buildkite-agent artifact download "coverage-*.lcov"
+buildkite-agent artifact download "coverage-*.lcov" .
 
 # List downloaded files for debugging
 echo "Downloaded coverage files:"
@@ -48,4 +48,4 @@ curl -Os https://uploader.codecov.io/latest/linux/codecov && chmod +x codecov
 
 # Upload merged coverage to codecov
 echo "Uploading merged coverage to codecov..."
-./codecov -t "$CODECOV_TOKEN" -s . -F ci-merged
+./codecov -t "$CODECOV_TOKEN" -s . -F ci

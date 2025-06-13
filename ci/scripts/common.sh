@@ -34,6 +34,9 @@ function generate_and_upload_coverage_report() {
 
   # Only generate coverage if we have profraw files.
   if [ -n "$(find target -name '*.profraw' 2>/dev/null | head -1)" ]; then
+    len=$(find target -name '*.profraw' 2>/dev/null | wc -l)
+    echo "Found ${len} profraw files. Generating coverage report."
+
     cargo llvm-cov report --lcov --output-path "$coverage_filename" || {
       echo "Warning: Failed to generate coverage report"
     }
@@ -42,10 +45,9 @@ function generate_and_upload_coverage_report() {
       buildkite-agent artifact upload "$coverage_filename" || {
         echo "Warning: Failed to upload coverage report"
       }
-      echo "Coverage report uploaded as $coverage_filename"
     fi
   else
-    echo "Skipping coverage generation (no profraw files)"
+    echo "No profraw files found. Skipping coverage generation."
   fi
 }
 
