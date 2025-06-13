@@ -170,11 +170,11 @@ impl IcebergCompactorRunner {
             .div_ceil(min_size_per_partition)
             .max(1) as u32; // Ensure at least one partition.
 
-        let total_files_for_count_partitioning = task_statistics.total_data_file_count
+        let total_files_count_for_partitioning = task_statistics.total_data_file_count
             + task_statistics.total_pos_del_file_count
             + task_statistics.total_eq_del_file_count;
 
-        let partition_by_count = total_files_for_count_partitioning
+        let partition_by_count = total_files_count_for_partitioning
             .div_ceil(max_file_count_per_partition)
             .max(1); // Ensure at least one partition.
 
@@ -613,7 +613,7 @@ mod tests {
         };
         // total_file_size_for_partitioning = 310MB
         // partition_by_size = 310MB / 100MB = 4 (div_ceil)
-        // total_files_for_count_partitioning = 5 + 2 = 7
+        // total_files_count_for_partitioning = 5 + 2 = 7
         // partition_by_count = 7 / 10 = 1
         // initial_input = max(4,1) = 4
         // input = min(4, 4_max_p) = 4
@@ -706,7 +706,7 @@ mod tests {
             total_eq_del_file_size: 0,
             total_eq_del_file_count: 0,
         };
-        // total_files_for_count_partitioning = 2
+        // total_files_count_for_partitioning = 2
         // total_file_size_for_partitioning = 20MB
         // partition_by_size = 20MB / 100MB = 1
         // partition_by_count = 2 / 10 = 1
@@ -742,7 +742,7 @@ mod tests {
         };
         // total_file_size_for_partitioning = 200MB
         // partition_by_size = (200MB / 100MB).ceil().max(1) = 2
-        // total_files_for_count_partitioning = 0
+        // total_files_count_for_partitioning = 0
         // partition_by_count = (0 / 10).ceil().max(1) = 1
         // input_parallelism = max(2, 1).min(4) = 2
         // output_parallelism = partition_by_size.min(input_parallelism).min(max_parallelism) = 2.min(2).min(4) = 2
