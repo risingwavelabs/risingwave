@@ -103,11 +103,19 @@ impl DropMode {
     }
 }
 
+#[derive(strum::AsRefStr)]
 pub enum StreamingJobId {
     MaterializedView(TableId),
     Sink(SinkId),
     Table(Option<SourceId>, TableId),
     Index(IndexId),
+}
+
+impl std::fmt::Display for StreamingJobId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_ref())?;
+        write!(f, "({})", self.id())
+    }
 }
 
 impl StreamingJobId {
@@ -991,6 +999,7 @@ impl DdlController {
 
     /// For [`CreateType::Foreground`], the function will only return after backfilling finishes
     /// ([`crate::manager::MetadataManager::wait_streaming_job_finished`]).
+    #[await_tree::instrument(boxed, "create_streaming_job({streaming_job})")]
     pub async fn create_streaming_job(
         &self,
         mut streaming_job: StreamingJob,
@@ -1469,6 +1478,7 @@ impl DdlController {
     }
 
     /// This is used for `ALTER TABLE ADD/DROP COLUMN` / `ALTER SOURCE ADD COLUMN`.
+    #[await_tree::instrument(boxed, "replace_streaming_job({streaming_job})")]
     pub async fn replace_job(
         &self,
         mut streaming_job: StreamingJob,
@@ -1611,6 +1621,7 @@ impl DdlController {
         }
     }
 
+    #[await_tree::instrument(boxed, "drop_streaming_job{}({job_id})", if let DropMode::Cascade = drop_mode { "_cascade" } else { "" })]
     async fn drop_streaming_job(
         &self,
         job_id: StreamingJobId,

@@ -1572,6 +1572,7 @@ impl ScaleController {
         Ok(())
     }
 
+    #[await_tree::instrument]
     pub async fn post_apply_reschedule(
         &self,
         reschedules: &HashMap<FragmentId, Reschedule>,
