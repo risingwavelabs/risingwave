@@ -21,6 +21,7 @@ use bergloom_core::compaction::{
     Compaction, CompactionType, RewriteDataFilesCommitManagerRetryConfig,
 };
 use bergloom_core::config::CompactionConfigBuilder;
+use bergloom_core::executor::RewriteFilesStat;
 use derive_builder::Builder;
 use iceberg::{Catalog, TableIdent};
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
@@ -340,33 +341,38 @@ impl IcebergCompactorRunner {
                 },
             );
 
-            compaction
+            let stat = compaction
                 .compact()
                 .await
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-            Ok::<(), HummockError>(())
+            Ok::<RewriteFilesStat, HummockError>(stat)
         };
 
         tokio::select! {
             _ = shutdown_rx => {
                 tracing::info!(task_id = task_id, "Iceberg compaction task cancelled");
             }
-            result = compact => {
-                if let Err(e) = result {
-                    tracing::warn!(
-                        error = %e.as_report(),
-                        task_id = task_id,
-                        "Iceberg compaction task failed with error",
-                    );
+            stat = compact => {
+                match stat {
+                    Ok(stat) => {
+                        tracing::info!(
+                            task_id = task_id,
+                            elapsed_millis = now.elapsed().as_millis(),
+                            stat = ?stat,
+                            "Iceberg compaction task finished",
+                        );
+                    }
+
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e.as_report(),
+                            task_id = task_id,
+                            "Iceberg compaction task failed with error",
+                        );
+                    }
                 }
             }
         }
-
-        tracing::info!(
-            task_id = task_id,
-            elapsed_millis = now.elapsed().as_millis(),
-            "Iceberg compaction task finished",
-        );
 
         Ok(())
     }
