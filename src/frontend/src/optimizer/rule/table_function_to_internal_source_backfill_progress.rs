@@ -30,9 +30,10 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::{OptimizerContext, PlanRef};
 
-/// Transform the `internal_backfill_progress()` table function
-/// into a plan graph which will scan the state tables of backfill nodes.
-/// It will return the progress of the backfills, partitioned by the backfill node's fragment id.
+/// Transform the `internal_source_backfill_progress()` table function
+/// into a plan graph which will scan the state tables of source backfill nodes.
+/// It will return the progress of the source backfills,
+/// partitioned by the backfill node's fragment id and partition id.
 pub struct TableFunctionToInternalSourceBackfillProgressRule {}
 impl FallibleRule for TableFunctionToInternalSourceBackfillProgressRule {
     fn apply(&self, plan: PlanRef) -> ApplyResult {
