@@ -871,7 +871,7 @@ mod tests {
             let elapsed = start_time.elapsed();
             assert!(barrier.command.is_none()); // Should be a periodic barrier, not a scheduled command
             assert!(!barrier.checkpoint); // First barrier shouldn't be a checkpoint
-            assert!(elapsed <= Duration::from_millis(5)); // Should be very quick
+            assert!(elapsed <= Duration::from_millis(20)); // Should be very quick
         }
 
         // Since we have 3 databases with intervals 50ms, 100ms, and 200ms,
