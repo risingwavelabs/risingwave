@@ -89,11 +89,11 @@ statement ok
 create materialized view mv1
 with (backfill_order = FIXED(s1->s2, s2->s3, s3->t1, t1->t3))
 as select s1.a, s2.b, s3.b as c, s1.a as d, t5.a as e
-  from 
+  from
     s1
       join s2 on s1.a = s2.a
-        join s3 on s2.a = s3.a 
-          join s1 as t4 on s3.a = t4.a 
+        join s3 on s2.a = s3.a
+          join s1 as t4 on s3.a = t4.a
             join t3 as t5 on t4.a = t5.a
               join t1 as t6 on t5.a = t6.a;
 
@@ -105,7 +105,7 @@ query I retry 16 backoff 1s
 select
   job_name,
   upstream_table_name,
-  case 
+  case
   when regexp_match(progress, '([0-9]+?\.?[0-9]+)%')[1]::numeric > 0.0
     then 'table backfill started'
   when regexp_match(progress, '([0-9]+) consumed rows')[1]::numeric > 0.0
@@ -130,7 +130,7 @@ query I retry 16 backoff 1s
 select
   job_name,
   upstream_table_name,
-  case 
+  case
   when regexp_match(progress, '([0-9]+?\.?[0-9]+)%')[1]::numeric > 0.0
     then 'table backfill started'
   when regexp_match(progress, '([0-9]+) consumed rows')[1]::numeric > 0.0
@@ -155,7 +155,7 @@ query I retry 16 backoff 1s
 select
   job_name,
   upstream_table_name,
-  case 
+  case
   when regexp_match(progress, '([0-9]+?\.?[0-9]+)%')[1]::numeric > 0.0
     then 'table backfill started'
   when regexp_match(progress, '([0-9]+) consumed rows')[1]::numeric > 0.0
@@ -180,7 +180,7 @@ query I retry 20 backoff 1s
 select
   job_name,
   upstream_table_name,
-  case 
+  case
   when regexp_match(progress, '([0-9]+?\.?[0-9]+)%')[1]::numeric > 0.0
     then 'table backfill started'
   when regexp_match(progress, '([0-9]+) consumed rows')[1]::numeric > 0.0
@@ -205,7 +205,7 @@ query I retry 20 backoff 1s
 select
   job_name,
   upstream_table_name,
-  case 
+  case
   when regexp_match(progress, '([0-9]+?\.?[0-9]+)%')[1]::numeric > 0.0
     then 'table backfill started'
   when regexp_match(progress, '([0-9]+) consumed rows')[1]::numeric > 0.0
@@ -250,11 +250,11 @@ statement ok
 create materialized view mv2
 with (backfill_order = FIXED(s1->s2, s2->s3, s3->t1, t1->t3))
 as select s1.a, s2.b, s3.b as c, s1.a as d, t5.a as e
-  from 
+  from
     s1
       join s2 on s1.a = s2.a
-        join s3 on s2.a = s3.a 
-          join s1 as t4 on s3.a = t4.a 
+        join s3 on s2.a = s3.a
+          join s1 as t4 on s3.a = t4.a
             join t3 as t5 on t4.a = t5.a
               join t1 as t6 on t5.a = t6.a;
 
