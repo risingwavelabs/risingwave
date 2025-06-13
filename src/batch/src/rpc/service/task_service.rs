@@ -14,12 +14,13 @@
 
 use std::sync::Arc;
 
+use risingwave_batch::rpc::service::exchange::ExchangeWriter;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::task_service::task_service_server::TaskService;
 use risingwave_pb::task_service::{
     CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest, FastInsertRequest,
-    FastInsertResponse, GetDataResponse, TaskInfoResponse, fast_insert_response,
+    FastInsertResponse, GetDataResponse, PbTaskStats, TaskInfoResponse, fast_insert_response,
 };
 use risingwave_storage::dispatch_state_store;
 use thiserror_ext::AsReport;
@@ -30,8 +31,8 @@ use crate::error::BatchError;
 use crate::executor::FastInsertExecutor;
 use crate::rpc::service::exchange::GrpcExchangeWriter;
 use crate::task::{
-    BatchEnvironment, BatchManager, BatchTaskExecution, ComputeNodeContext, StateReporter,
-    TASK_STATUS_BUFFER_SIZE,
+    BatchEnvironment, BatchManager, BatchTaskContextImpl, BatchTaskExecution, ComputeNodeContext,
+    StateReporter, TASK_STATUS_BUFFER_SIZE,
 };
 
 #[derive(Clone)]
@@ -69,13 +70,14 @@ impl TaskService for BatchServiceImpl {
 
         let (state_tx, state_rx) = tokio::sync::mpsc::channel(TASK_STATUS_BUFFER_SIZE);
         let state_reporter = StateReporter::new_with_dist_sender(state_tx);
+        let context = BatchTaskContextImpl::create(ComputeNodeContext::create(self.env.clone()));
         let res = self
             .mgr
             .fire_task(
                 task_id.as_ref().expect("no task id found"),
                 plan.expect("no plan found").clone(),
                 epoch.expect("no epoch found"),
-                ComputeNodeContext::create(self.env.clone()),
+                context,
                 state_reporter,
                 TracingContext::from_protobuf(&tracing_context),
                 expr_context.expect("no expression context found"),
@@ -166,11 +168,12 @@ impl BatchServiceImpl {
         let tracing_context = TracingContext::from_protobuf(&tracing_context);
         let expr_context = expr_context.expect("no expression context found");
 
-        let context = ComputeNodeContext::create(env.clone());
+        let context = BatchTaskContextImpl::create(ComputeNodeContext::create(env.clone()));
         trace!(
             "local execute request: plan:{:?} with task id:{:?}",
             plan, task_id
         );
+        let task_stats = context.task_stats().clone();
         let task = BatchTaskExecution::new(&task_id, plan, context, epoch, mgr.runtime())?;
         let task = Arc::new(task);
         let (tx, rx) = tokio::sync::mpsc::channel(mgr.config().developer.local_execute_buffer_size);
@@ -204,7 +207,19 @@ impl BatchServiceImpl {
         // Always spawn a task and do not block current function.
         mgr.runtime().spawn(async move {
             match output.take_data(&mut writer).await {
-                Ok(_) => Ok(()),
+                Ok(_) => {
+                    // Send task stats to frontend for local mode query.
+                    if let Err(e) = writer
+                        .write(Ok(GetDataResponse {
+                            record_batch: None,
+                            task_stats: task_stats.map(|t| PbTaskStats::from(t.as_ref())),
+                        }))
+                        .await
+                    {
+                        return tx.send(Err(e.into())).await;
+                    }
+                    Ok(())
+                }
                 Err(e) => tx.send(Err(e.into())).await,
             }
         });
