@@ -554,11 +554,11 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                         }
                                         Mutation::StartFragmentBackfill { fragment_ids } => {
                                             if fragment_ids.contains(&self.actor_ctx.fragment_id) {
-                                                if !backfill_paused {
-                                                    backfill_paused = false;
+                                                if backfill_paused {
                                                     if !command_paused {
                                                         resume_reader!();
                                                     }
+                                                    backfill_paused = false;
                                                 } else {
                                                     tracing::warn!(
                                                         command_paused,
