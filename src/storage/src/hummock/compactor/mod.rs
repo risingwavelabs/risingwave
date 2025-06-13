@@ -484,8 +484,9 @@ pub fn start_iceberg_compactor(
 
                                     if running_task_tracker_guard.1.contains(&task_unique_ident) {
                                         tracing::warn!(
-                                            "Iceberg compaction task {} already running, skip",
-                                            task_id
+                                            task_id = %task_id,
+                                            task_unique_ident = %task_unique_ident,
+                                            "Iceberg compaction task already running, skip",
                                         );
                                         continue 'consume_stream;
                                     }
