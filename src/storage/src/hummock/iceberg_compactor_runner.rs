@@ -134,36 +134,119 @@ impl IcebergCompactorRunner {
         })
     }
 
-    pub fn calculate_task_parallelism(
-        &self,
+    pub fn calculate_task_parallelism_impl(
+        task_id_for_logging: u64,
+        table_ident_for_logging: &TableIdent,
         task_statistics: &IcebergCompactionTaskStatistics,
         max_parallelism: u32,
         min_size_per_partition: u64,
         max_file_count_per_partition: u32,
+        target_file_size_bytes: u64,
     ) -> HummockResult<(u32, u32)> {
-        let partition_by_size = task_statistics
-            .total_data_file_size
-            .div_ceil(min_size_per_partition) as u32;
-        let partition_by_count = if task_statistics.total_data_file_count > 0 {
-            (task_statistics.total_data_file_count
-                + task_statistics.total_pos_del_file_count
-                + task_statistics.total_eq_del_file_count)
-                / max_file_count_per_partition
-        } else {
-            1 // At least one partition
-        };
+        if max_parallelism == 0 {
+            return Err(HummockError::compaction_executor(
+                "Max parallelism cannot be 0".to_owned(),
+            ));
+        }
+
+        let total_file_size_for_partitioning = task_statistics.total_data_file_size
+            + task_statistics.total_pos_del_file_size
+            + task_statistics.total_eq_del_file_size;
+        if total_file_size_for_partitioning == 0 {
+            // If the total data file size is 0, we cannot partition by size.
+            // This means there are no data files to compact.
+            tracing::warn!(
+                task_id = task_id_for_logging,
+                table = ?table_ident_for_logging,
+                "Total data file size is 0, setting partition_by_size to 0."
+            );
+
+            return Err(HummockError::compaction_executor(
+                "No files to calculate_task_parallelism".to_owned(),
+            )); // No files, so no partitions.
+        }
+
+        let partition_by_size = total_file_size_for_partitioning
+            .div_ceil(min_size_per_partition)
+            .max(1) as u32; // Ensure at least one partition.
+
+        let total_files_for_count_partitioning = task_statistics.total_data_file_count
+            + task_statistics.total_pos_del_file_count
+            + task_statistics.total_eq_del_file_count;
+
+        let partition_by_count = total_files_for_count_partitioning
+            .div_ceil(max_file_count_per_partition)
+            .max(1); // Ensure at least one partition.
 
         let input_parallelism = partition_by_size
             .max(partition_by_count)
             .min(max_parallelism);
 
         // `output_parallelism` should not exceed `input_parallelism`
-        // and should also not exceed max_parallelism
-        let output_parallelism = partition_by_size
+        // and should also not exceed max_parallelism.
+        // It's primarily driven by size to avoid small output files.
+        let mut output_parallelism = partition_by_size
             .min(input_parallelism)
             .min(max_parallelism);
 
+        // Heuristic: If the total task data size is very small (less than target_file_size_bytes),
+        // force output_parallelism to 1 to encourage merging into a single, larger output file.
+        if task_statistics.total_data_file_size > 0 // Only apply if there's data
+            && task_statistics.total_data_file_size < target_file_size_bytes
+            && output_parallelism > 1
+        {
+            tracing::debug!(
+                task_id = task_id_for_logging,
+                table = ?table_ident_for_logging,
+                total_data_file_size = task_statistics.total_data_file_size,
+                target_file_size_bytes = target_file_size_bytes,
+                original_output_parallelism = output_parallelism,
+                "Total data size is less than target file size, forcing output_parallelism to 1."
+            );
+            output_parallelism = 1;
+        }
+
+        tracing::debug!(
+            task_id = task_id_for_logging,
+            table = ?table_ident_for_logging,
+            stats = ?task_statistics,
+            config_max_parallelism = max_parallelism,
+            config_min_size_per_partition = min_size_per_partition,
+            config_max_file_count_per_partition = max_file_count_per_partition,
+            config_target_file_size_bytes = target_file_size_bytes,
+            calculated_partition_by_size = partition_by_size,
+            calculated_partition_by_count = partition_by_count,
+            final_input_parallelism = input_parallelism,
+            final_output_parallelism = output_parallelism,
+            "Calculated task parallelism"
+        );
+
         Ok((input_parallelism, output_parallelism))
+    }
+
+    fn calculate_task_parallelism(
+        &self,
+        task_statistics: &IcebergCompactionTaskStatistics,
+        max_parallelism: u32,
+        min_size_per_partition: u64,
+        max_file_count_per_partition: u32,
+        target_file_size_bytes: u64,
+    ) -> HummockResult<(u32, u32)> {
+        if max_parallelism == 0 {
+            return Err(HummockError::compaction_executor(
+                "Max parallelism cannot be 0".to_owned(),
+            ));
+        }
+
+        Self::calculate_task_parallelism_impl(
+            self.task_id,
+            &self.table_ident,
+            task_statistics,
+            max_parallelism,
+            min_size_per_partition,
+            max_file_count_per_partition,
+            target_file_size_bytes,
+        )
     }
 
     pub async fn compact(
@@ -187,6 +270,7 @@ impl IcebergCompactorRunner {
                     self.config.max_parallelism,
                     self.config.min_size_per_partition,
                     self.config.max_file_count_per_partition,
+                    self.config.target_file_size_bytes,
                 )
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
@@ -363,5 +447,317 @@ impl Debug for IcebergCompactionTaskStatistics {
             .field("total_eq_del_file_size", &self.total_eq_del_file_size)
             .field("total_eq_del_file_count", &self.total_eq_del_file_count)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use iceberg::TableIdent;
+
+    use super::*;
+
+    fn default_test_config_params() -> IcebergCompactorRunnerConfig {
+        IcebergCompactorRunnerConfigBuilder::default()
+            .max_parallelism(4)
+            .min_size_per_partition(1024 * 1024 * 100) // 100MB
+            .max_file_count_per_partition(10)
+            .target_file_size_bytes(1024 * 1024 * 128) // 128MB
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn test_calculate_parallelism_no_files() {
+        let config = default_test_config_params();
+        let dummy_table_ident = TableIdent::from_strs(["db", "schema", "table"]).unwrap();
+        let stats = IcebergCompactionTaskStatistics {
+            total_data_file_size: 0,
+            total_data_file_count: 0,
+            total_pos_del_file_size: 0,
+            total_pos_del_file_count: 0,
+            total_eq_del_file_size: 0,
+            total_eq_del_file_count: 0,
+        };
+        let result = IcebergCompactorRunner::calculate_task_parallelism_impl(
+            1,
+            &dummy_table_ident,
+            &stats,
+            config.max_parallelism,
+            config.min_size_per_partition,
+            config.max_file_count_per_partition,
+            config.target_file_size_bytes,
+        );
+
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert!(
+                e.to_string()
+                    .contains("No files to calculate_task_parallelism")
+            );
+        }
+    }
+
+    #[test]
+    fn test_calculate_parallelism_size_dominant() {
+        let config = default_test_config_params();
+        let dummy_table_ident = TableIdent::from_strs(["db", "schema", "table"]).unwrap();
+        let stats = IcebergCompactionTaskStatistics {
+            total_data_file_size: 1024 * 1024 * 500, // 500MB
+            total_data_file_count: 5,                // Low count
+            total_pos_del_file_size: 0,
+            total_pos_del_file_count: 0,
+            total_eq_del_file_size: 0,
+            total_eq_del_file_count: 0,
+        };
+        // partition_by_size = 500MB / 100MB = 5
+        // partition_by_count = 5 / 10 = 1 (div_ceil)
+        // initial_input = max(5,1) = 5
+        // input = min(5, 4_max_p) = 4
+        // output = min(partition_by_size=5, input=4, max_p=4) = 4
+        let (input_p, output_p) = IcebergCompactorRunner::calculate_task_parallelism_impl(
+            1,
+            &dummy_table_ident,
+            &stats,
+            config.max_parallelism,
+            config.min_size_per_partition,
+            config.max_file_count_per_partition,
+            config.target_file_size_bytes,
+        )
+        .unwrap();
+        assert_eq!(input_p, 4);
+        assert_eq!(output_p, 4);
+    }
+
+    #[test]
+    fn test_calculate_parallelism_count_dominant() {
+        let config = default_test_config_params();
+        let dummy_table_ident = TableIdent::from_strs(["db", "schema", "table"]).unwrap();
+        let stats = IcebergCompactionTaskStatistics {
+            total_data_file_size: 1024 * 1024 * 50, // 50MB (low size)
+            total_data_file_count: 35,              // High count
+            total_pos_del_file_size: 0,
+            total_pos_del_file_count: 0,
+            total_eq_del_file_size: 0,
+            total_eq_del_file_count: 0,
+        };
+        // partition_by_size = 50MB / 100MB = 1 (div_ceil)
+        // partition_by_count = 35 / 10 = 4 (div_ceil)
+        // initial_input = max(1,4) = 4
+        // input = min(4, 4_max_p) = 4
+        // output = min(partition_by_size=1, input=4, max_p=4) = 1
+        let (input_p, output_p) = IcebergCompactorRunner::calculate_task_parallelism_impl(
+            1,
+            &dummy_table_ident,
+            &stats,
+            config.max_parallelism,
+            config.min_size_per_partition,
+            config.max_file_count_per_partition,
+            config.target_file_size_bytes,
+        )
+        .unwrap();
+        assert_eq!(input_p, 4);
+        assert_eq!(output_p, 1);
+    }
+
+    #[test]
+    fn test_calculate_parallelism_max_parallelism_cap() {
+        let mut config = default_test_config_params();
+        config.max_parallelism = 2; // Lower max_parallelism
+        let dummy_table_ident = TableIdent::from_strs(["db", "schema", "table"]).unwrap();
+        let stats = IcebergCompactionTaskStatistics {
+            total_data_file_size: 1024 * 1024 * 500, // 500MB
+            total_data_file_count: 35,               // High count
+            total_pos_del_file_size: 0,
+            total_pos_del_file_count: 0,
+            total_eq_del_file_size: 0,
+            total_eq_del_file_count: 0,
+        };
+        // partition_by_size = 500MB / 100MB = 5
+        // partition_by_count = 35 / 10 = 4
+        // initial_input = max(5,4) = 5
+        // input = min(5, 2_max_p) = 2
+        // output = min(partition_by_size=5, input=2, max_p=2) = 2
+        let (input_p, output_p) = IcebergCompactorRunner::calculate_task_parallelism_impl(
+            1,
+            &dummy_table_ident,
+            &stats,
+            config.max_parallelism,
+            config.min_size_per_partition,
+            config.max_file_count_per_partition,
+            config.target_file_size_bytes,
+        )
+        .unwrap();
+        assert_eq!(input_p, 2);
+        assert_eq!(output_p, 2);
+    }
+
+    #[test]
+    fn test_calculate_parallelism_small_data_heuristic() {
+        let config = default_test_config_params(); // target_file_size_bytes = 128MB
+        let dummy_table_ident = TableIdent::from_strs(["db", "schema", "table"]).unwrap();
+        // partition_by_size = 60MB / 100MB = 1
+        // partition_by_count = 15 / 10 = 2
+        // initial_input = max(1,2) = 2
+        // input = min(2, 4_max_p) = 2
+        // initial_output = min(partition_by_size=1, input=2, max_p=4) = 1
+        // Heuristic: total_data_file_size (60MB) < target_file_size_bytes (128MB)
+        // Since initial_output was 1, it remains 1.
+        // Let's make partition_by_size larger to test heuristic properly
+        let stats_for_heuristic = IcebergCompactionTaskStatistics {
+            total_data_file_size: 1024 * 1024 * 60,     // 60MB
+            total_data_file_count: 5,                   // Low count, so size dominates for input
+            total_pos_del_file_size: 1024 * 1024 * 250, // Makes total size 310MB
+            total_pos_del_file_count: 2,
+            total_eq_del_file_size: 0,
+            total_eq_del_file_count: 0,
+        };
+        // total_file_size_for_partitioning = 310MB
+        // partition_by_size = 310MB / 100MB = 4 (div_ceil)
+        // total_files_for_count_partitioning = 5 + 2 = 7
+        // partition_by_count = 7 / 10 = 1
+        // initial_input = max(4,1) = 4
+        // input = min(4, 4_max_p) = 4
+        // initial_output = min(partition_by_size=4, input=4, max_p=4) = 4
+        // Heuristic: total_data_file_size (60MB) < target_file_size_bytes (128MB)
+        // AND initial_output (4) > 1. So output becomes 1.
+        let (input_p, output_p) = IcebergCompactorRunner::calculate_task_parallelism_impl(
+            1,
+            &dummy_table_ident,
+            &stats_for_heuristic,
+            config.max_parallelism,
+            config.min_size_per_partition,
+            config.max_file_count_per_partition,
+            config.target_file_size_bytes,
+        )
+        .unwrap();
+        assert_eq!(input_p, 4);
+        assert_eq!(output_p, 1);
+    }
+
+    #[test]
+    fn test_calculate_parallelism_all_empty_files() {
+        let config = default_test_config_params();
+        let dummy_table_ident = TableIdent::from_strs(["db", "schema", "table"]).unwrap();
+        let stats = IcebergCompactionTaskStatistics {
+            total_data_file_size: 0,
+            total_data_file_count: 5, // 5 empty data files
+            total_pos_del_file_size: 0,
+            total_pos_del_file_count: 0,
+            total_eq_del_file_size: 0,
+            total_eq_del_file_count: 0,
+        };
+        // total_file_size_for_partitioning = 0, should return Err.
+        let result = IcebergCompactorRunner::calculate_task_parallelism_impl(
+            1,
+            &dummy_table_ident,
+            &stats,
+            config.max_parallelism,
+            config.min_size_per_partition,
+            config.max_file_count_per_partition,
+            config.target_file_size_bytes,
+        );
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert!(
+                e.to_string()
+                    .contains("No files to calculate_task_parallelism")
+            );
+        }
+    }
+
+    #[test]
+    fn test_calculate_parallelism_max_parallelism_zero() {
+        let mut config = default_test_config_params();
+        config.max_parallelism = 0; // max_parallelism is 0
+        let dummy_table_ident = TableIdent::from_strs(["db", "schema", "table"]).unwrap();
+        let stats = IcebergCompactionTaskStatistics {
+            total_data_file_size: 1024 * 1024 * 50, // 50MB
+            total_data_file_count: 5,
+            total_pos_del_file_size: 0,
+            total_pos_del_file_count: 0,
+            total_eq_del_file_size: 0,
+            total_eq_del_file_count: 0,
+        };
+        // max_parallelism = 0, should return Err.
+        let result = IcebergCompactorRunner::calculate_task_parallelism_impl(
+            1,
+            &dummy_table_ident,
+            &stats,
+            config.max_parallelism,
+            config.min_size_per_partition,
+            config.max_file_count_per_partition,
+            config.target_file_size_bytes,
+        );
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert!(e.to_string().contains("Max parallelism cannot be 0"));
+        }
+    }
+
+    #[test]
+    fn test_calculate_parallelism_only_delete_files() {
+        let config = default_test_config_params();
+        let dummy_table_ident = TableIdent::from_strs(["db", "schema", "table"]).unwrap();
+        let stats = IcebergCompactionTaskStatistics {
+            total_data_file_size: 0,
+            total_data_file_count: 0,
+            total_pos_del_file_size: 1024 * 1024 * 20, // 20MB of pos-delete files
+            total_pos_del_file_count: 2,
+            total_eq_del_file_size: 0,
+            total_eq_del_file_count: 0,
+        };
+        // total_files_for_count_partitioning = 2
+        // total_file_size_for_partitioning = 20MB
+        // partition_by_size = 20MB / 100MB = 1
+        // partition_by_count = 2 / 10 = 1
+        // initial_input = max(1,1) = 1
+        // input = min(1, 4_max_p) = 1
+        // initial_output = min(partition_by_size=1, input=1, max_p=4) = 1
+        // Heuristic: total_data_file_size (0) is not > 0.
+        let (input_p, output_p) = IcebergCompactorRunner::calculate_task_parallelism_impl(
+            1,
+            &dummy_table_ident,
+            &stats,
+            config.max_parallelism,
+            config.min_size_per_partition,
+            config.max_file_count_per_partition,
+            config.target_file_size_bytes,
+        )
+        .unwrap();
+        assert_eq!(input_p, 1);
+        assert_eq!(output_p, 1);
+    }
+
+    #[test]
+    fn test_calculate_parallelism_zero_file_count_non_zero_size() {
+        let config = default_test_config_params();
+        let dummy_table_ident = TableIdent::from_strs(["db", "schema", "table"]).unwrap();
+        let stats = IcebergCompactionTaskStatistics {
+            total_data_file_size: 1024 * 1024 * 200, // 200MB
+            total_data_file_count: 0,                // No data files by count
+            total_pos_del_file_size: 0,
+            total_pos_del_file_count: 0,
+            total_eq_del_file_size: 0,
+            total_eq_del_file_count: 0,
+        };
+        // total_file_size_for_partitioning = 200MB
+        // partition_by_size = (200MB / 100MB).ceil().max(1) = 2
+        // total_files_for_count_partitioning = 0
+        // partition_by_count = (0 / 10).ceil().max(1) = 1
+        // input_parallelism = max(2, 1).min(4) = 2
+        // output_parallelism = partition_by_size.min(input_parallelism).min(max_parallelism) = 2.min(2).min(4) = 2
+        // Heuristic: total_data_file_size (200MB) not < target_file_size_bytes (128MB)
+        let (input_p, output_p) = IcebergCompactorRunner::calculate_task_parallelism_impl(
+            1,
+            &dummy_table_ident,
+            &stats,
+            config.max_parallelism,
+            config.min_size_per_partition,
+            config.max_file_count_per_partition,
+            config.target_file_size_bytes,
+        )
+        .unwrap();
+        assert_eq!(input_p, 2);
+        assert_eq!(output_p, 2);
     }
 }
