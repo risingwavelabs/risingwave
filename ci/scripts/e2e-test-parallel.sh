@@ -78,16 +78,9 @@ start_cluster
 risedev slt "${host_args[@]}" -d dev './e2e_test/generated/**/*.slt' -j 16 --junit "parallel-generated-${profile}" --label "parallel"
 kill_cluster
 
-echo "--- Upload raw profiling data"
-ls target/
-tar --zstd -cvf raw-profiling-data.tar.zst target/risingwave-*.profraw
-buildkite-agent artifact upload raw-profiling-data.tar.zst
+# echo "--- Upload raw profiling data"
+# ls target/
+# tar --zstd -cvf raw-profiling-data.tar.zst target/risingwave-*.profraw
+# buildkite-agent artifact upload raw-profiling-data.tar.zst
 
-echo "--- Generate coverage report"
-cargo llvm-cov report --lcov --output-path coverage.lcov
-buildkite-agent artifact upload coverage.lcov
-
-echo "--- Generate coverage report (HTML)"
-cargo llvm-cov report --html
-tar --zstd -cvf coverage-report.tar.zst target/llvm-cov/html
-buildkite-agent artifact upload coverage-report.tar.zst
+# Coverage generation is now handled automatically by common.sh exit trap

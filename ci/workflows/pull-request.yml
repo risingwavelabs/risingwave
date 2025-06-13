@@ -446,13 +446,8 @@ steps:
     plugins:
       - *cargo-cache
       - ./ci/plugins/swapfile
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            CODECOV_TOKEN: my-codecov-token
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          environment:
-          - CODECOV_TOKEN
     timeout_in_minutes: 22
     retry: *auto-retry
 
@@ -762,3 +757,18 @@ steps:
           - BUILDKITE_TOKEN
           - GITHUB_TOKEN
     timeout_in_minutes: 5
+
+  - wait: ~
+
+  - label: "merge coverage reports"
+    command: "ci/scripts/merge-coverage.sh"
+    # TODO: skip this if `run-selected` or `CI_STEPS` is specified.
+    plugins:
+      - seek-oss/aws-sm#v2.3.2:
+          env:
+            CODECOV_TOKEN: my-codecov-token
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+    timeout_in_minutes: 10
+    retry: *auto-retry
+    soft_fail: true

@@ -26,9 +26,36 @@ export CARGO_LLVM_COV_TARGET_DIR=/risingwave/target
 
 unset LANG
 
-function dump_diagnose_info() {
+function generate_and_upload_coverage_report() {
+  echo "--- Generate coverage report"
+
+  # Generate unique coverage filename with job id.
+  coverage_filename="coverage-${BUILDKITE_JOB_ID}.lcov"
+
+  # Only generate coverage if we have profraw files.
+  if [ -n "$(find target -name '*.profraw' 2>/dev/null | head -1)" ]; then
+    cargo llvm-cov report --lcov --output-path "$coverage_filename" || {
+      echo "Warning: Failed to generate coverage report"
+    }
+
+    if [ -f "$coverage_filename" ]; then
+      buildkite-agent artifact upload "$coverage_filename" || {
+        echo "Warning: Failed to upload coverage report"
+      }
+      echo "Coverage report uploaded as $coverage_filename"
+    fi
+  else
+    echo "Skipping coverage generation (no profraw files)"
+  fi
+}
+
+
+function exit_hook() {
   ret=$?
+
+  # Generate and upload coverage report on successful completion
   if [ $ret -eq 0 ]; then
+    generate_and_upload_coverage_report
     exit 0
   fi
 
@@ -38,7 +65,7 @@ function dump_diagnose_info() {
     ./risedev diagnose || true
   fi
 }
-trap dump_diagnose_info EXIT
+trap exit_hook EXIT
 
 if [ -n "${BUILDKITE_COMMIT:-}" ]; then
   export GIT_SHA=$BUILDKITE_COMMIT
