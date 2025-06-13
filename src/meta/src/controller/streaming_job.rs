@@ -54,7 +54,7 @@ use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
 use risingwave_pb::stream_plan::{
     PbDispatcher, PbDispatcherType, PbFragmentTypeFlag, PbStreamActor,
 };
-use sea_orm::sea_query::{BinOper, Expr, Query, SimpleExpr};
+use sea_orm::sea_query::{BinOper, Expr, OnConflict, Query, SimpleExpr};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveEnum, ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel,
@@ -72,6 +72,7 @@ use crate::controller::utils::{
     get_internal_tables_by_id, rebuild_fragment_mapping_from_actors, PartialObject,
 };
 use crate::controller::ObjectModel;
+use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
 use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
 use crate::stream::SplitAssignment;
@@ -1565,6 +1566,39 @@ impl CatalogController {
             TableParallelism,
         >,
     ) -> MetaResult<()> {
+        let insert_actor_batch_size: usize = std::env::var("RW_RESCHEDULE_INSERT_ACTOR_BATCH_SIZE")
+            .map(|s| s.parse::<usize>().ok())
+            .ok()
+            .flatten()
+            .unwrap_or(100);
+        let update_actor_batch_size: usize = std::env::var("RW_RESCHEDULE_UPDATE_ACTOR_BATCH_SIZE")
+            .map(|s| s.parse::<usize>().ok())
+            .ok()
+            .flatten()
+            .unwrap_or(100);
+        let read_actor_batch_size: usize = std::env::var("RW_RESCHEDULE_READ_ACTOR_BATCH_SIZE")
+            .map(|s| s.parse::<usize>().ok())
+            .ok()
+            .flatten()
+            .unwrap_or(1000);
+        let insert_actor_dispatcher_batch_size: usize =
+            std::env::var("RW_RESCHEDULE_INSERT_ACTOR_DISPATCHER_BATCH_SIZE")
+                .map(|s| s.parse::<usize>().ok())
+                .ok()
+                .flatten()
+                .unwrap_or(100);
+        let update_actor_dispatcher_batch_size: usize =
+            std::env::var("RW_RESCHEDULE_UPDATE_ACTOR_DISPATCHER_BATCH_SIZE")
+                .map(|s| s.parse::<usize>().ok())
+                .ok()
+                .flatten()
+                .unwrap_or(100);
+        let update_job_parallelism_batch_size: usize =
+            std::env::var("RW_RESCHEDULE_UPDATE_JOB_PARALLELISM_BATCH_SIZE")
+                .map(|s| s.parse::<usize>().ok())
+                .ok()
+                .flatten()
+                .unwrap_or(1000);
         fn update_actors(
             actors: &mut Vec<ActorId>,
             to_remove: &HashSet<ActorId>,
@@ -1602,6 +1636,11 @@ impl CatalogController {
         // for assert only
         let mut assert_dispatcher_update_checker = HashSet::new();
 
+        let mut insert_actor_batch = vec![];
+        let mut insert_actor_dispatcher_batch = vec![];
+        let mut update_actor_batch = vec![];
+        let mut update_actor_dispatcher_batch = vec![];
+        let mut update_job_parallelism_batch = vec![];
         for (
             fragment_id,
             Reschedule {
@@ -1626,6 +1665,7 @@ impl CatalogController {
                 .await?;
 
             // add new actors
+            let mut to_insert_dispatchers = vec![];
             for (
                 PbStreamActor {
                     actor_id,
@@ -1641,7 +1681,6 @@ impl CatalogController {
             ) in newly_created_actors
             {
                 let mut actor_upstreams = BTreeMap::<FragmentId, BTreeSet<ActorId>>::new();
-                let mut new_actor_dispatchers = vec![];
 
                 if let Some(nodes) = &mut nodes {
                     visit_stream_node(nodes, |node| {
@@ -1679,7 +1718,7 @@ impl CatalogController {
                     .get(&actor_id)
                     .map(|splits| splits.iter().map(PbConnectorSplit::from).collect_vec());
 
-                Actor::insert(actor::ActiveModel {
+                insert_actor_batch.push(actor::ActiveModel {
                     actor_id: Set(actor_id as _),
                     fragment_id: Set(fragment_id as _),
                     status: Set(ActorStatus::Running),
@@ -1688,10 +1727,15 @@ impl CatalogController {
                     upstream_actor_ids: Set(actor_upstreams),
                     vnode_bitmap: Set(vnode_bitmap.as_ref().map(|bitmap| bitmap.into())),
                     expr_context: Set(expr_context.as_ref().unwrap().into()),
-                })
-                .exec(&txn)
-                .await?;
+                });
+                may_insert_batch(&txn, &mut insert_actor_batch, insert_actor_batch_size).await?;
+                to_insert_dispatchers.push((actor_id, dispatcher));
+            }
+            // Flush to meta store.
+            may_insert_batch(&txn, &mut insert_actor_batch, 1).await?;
 
+            // Insert dispatchers after inserting actors to meet foreign key constraints.
+            for (actor_id, dispatcher) in to_insert_dispatchers {
                 for PbDispatcher {
                     r#type: dispatcher_type,
                     dist_key_indices,
@@ -1701,7 +1745,7 @@ impl CatalogController {
                     downstream_actor_id,
                 } in dispatcher
                 {
-                    new_actor_dispatchers.push(actor_dispatcher::ActiveModel {
+                    insert_actor_dispatcher_batch.push(actor_dispatcher::ActiveModel {
                         id: Default::default(),
                         actor_id: Set(actor_id as _),
                         dispatcher_type: Set(PbDispatcherType::try_from(dispatcher_type)
@@ -1712,43 +1756,96 @@ impl CatalogController {
                         hash_mapping: Set(hash_mapping.as_ref().map(|mapping| mapping.into())),
                         dispatcher_id: Set(dispatcher_id as _),
                         downstream_actor_ids: Set(downstream_actor_id.into()),
-                    })
-                }
-                if !new_actor_dispatchers.is_empty() {
-                    ActorDispatcher::insert_many(new_actor_dispatchers)
-                        .exec(&txn)
-                        .await?;
+                    });
+                    may_insert_batch(
+                        &txn,
+                        &mut insert_actor_dispatcher_batch,
+                        insert_actor_dispatcher_batch_size,
+                    )
+                    .await?;
                 }
             }
+            // Flush to meta store.
+            may_insert_batch(&txn, &mut insert_actor_dispatcher_batch, 1).await?;
 
             // actor update
-            for (actor_id, bitmap) in vnode_bitmap_updates {
-                let actor = Actor::find_by_id(actor_id as ActorId)
-                    .one(&txn)
+            let mut vnode_bitmap_updates: Vec<_> = vnode_bitmap_updates.into_iter().collect();
+            while !vnode_bitmap_updates.is_empty() {
+                let vnode_bitmap_updates_batch = vnode_bitmap_updates
+                    .drain(0..std::cmp::min(vnode_bitmap_updates.len(), read_actor_batch_size))
+                    .collect_vec();
+                let mut actor_cache: HashMap<ActorId, actor::ActiveModel> = Actor::find()
+                    .filter(
+                        actor::Column::ActorId.is_in(
+                            vnode_bitmap_updates_batch
+                                .iter()
+                                .map(|(id, _)| *id as ActorId)
+                                .collect_vec(),
+                        ),
+                    )
+                    .all(&txn)
                     .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("actor", actor_id))?;
-
-                let mut actor = actor.into_active_model();
-                actor.vnode_bitmap = Set(Some((&bitmap.to_protobuf()).into()));
-                actor.update(&txn).await?;
+                    .into_iter()
+                    .map(|actor| (actor.actor_id, actor.into_active_model()))
+                    .collect();
+                for (actor_id, bitmap) in vnode_bitmap_updates_batch {
+                    let mut actor = actor_cache
+                        .remove(&actor_id.try_into().unwrap())
+                        .ok_or_else(|| MetaError::catalog_id_not_found("actor", actor_id))?;
+                    actor.vnode_bitmap = Set(Some((&bitmap.to_protobuf()).into()));
+                    update_actor_batch.push(actor);
+                    may_update_actor_batch_partial_columns(
+                        &txn,
+                        &mut update_actor_batch,
+                        update_actor_batch_size,
+                    )
+                    .await?;
+                }
             }
+            // Flush to meta store.
+            may_update_actor_batch_partial_columns(&txn, &mut update_actor_batch, 1).await?;
 
             // Update actor_splits for existing actors
-            for (actor_id, splits) in actor_splits {
-                if new_created_actors.contains(&(actor_id as ActorId)) {
-                    continue;
-                }
-
-                let actor = Actor::find_by_id(actor_id as ActorId)
-                    .one(&txn)
+            let mut actor_splits: Vec<_> = actor_splits.into_iter().collect();
+            while !actor_splits.is_empty() {
+                let actor_splits_batch: Vec<_> = actor_splits
+                    .drain(0..std::cmp::min(actor_splits.len(), read_actor_batch_size))
+                    .collect();
+                let mut actor_cache: HashMap<ActorId, actor::ActiveModel> = Actor::find()
+                    .filter(
+                        actor::Column::ActorId.is_in(
+                            actor_splits_batch
+                                .iter()
+                                .map(|(id, _)| *id as ActorId)
+                                .collect_vec(),
+                        ),
+                    )
+                    .all(&txn)
                     .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("actor", actor_id))?;
-
-                let mut actor = actor.into_active_model();
-                let splits = splits.iter().map(PbConnectorSplit::from).collect_vec();
-                actor.splits = Set(Some((&PbConnectorSplits { splits }).into()));
-                actor.update(&txn).await?;
+                    .into_iter()
+                    .map(|actor| (actor.actor_id, actor.into_active_model()))
+                    .collect();
+                for (actor_id, splits) in actor_splits_batch {
+                    if new_created_actors.contains(&(actor_id as ActorId)) {
+                        continue;
+                    }
+                    let actor = actor_cache
+                        .remove(&actor_id.try_into().unwrap())
+                        .ok_or_else(|| MetaError::catalog_id_not_found("actor", actor_id))?;
+                    let mut actor = actor.into_active_model();
+                    let splits = splits.iter().map(PbConnectorSplit::from).collect_vec();
+                    actor.splits = Set(Some((&PbConnectorSplits { splits }).into()));
+                    update_actor_batch.push(actor);
+                    may_update_actor_batch_partial_columns(
+                        &txn,
+                        &mut update_actor_batch,
+                        update_actor_batch_size,
+                    )
+                    .await?;
+                }
             }
+            // Flush to meta store.
+            may_update_actor_batch_partial_columns(&txn, &mut update_actor_batch, 1).await?;
 
             // fragment update
             let fragment = Fragment::find_by_id(fragment_id)
@@ -1826,8 +1923,21 @@ impl CatalogController {
                     );
 
                     dispatcher.downstream_actor_ids = Set(new_downstream_actor_ids.into());
-                    dispatcher.update(&txn).await?;
+                    update_actor_dispatcher_batch.push(dispatcher);
+                    may_update_actor_dispatcher_batch_partial_columns(
+                        &txn,
+                        &mut update_actor_dispatcher_batch,
+                        update_actor_dispatcher_batch_size,
+                    )
+                    .await?;
                 }
+                // Flush inside the loop conservatively.
+                may_update_actor_dispatcher_batch_partial_columns(
+                    &txn,
+                    &mut update_actor_dispatcher_batch,
+                    1,
+                )
+                .await?;
             }
 
             // second step, downstream fragment
@@ -1854,27 +1964,59 @@ impl CatalogController {
                     );
 
                     actor.upstream_actor_ids = Set(new_upstream_actor_ids.into());
-
-                    actor.update(&txn).await?;
+                    update_actor_batch.push(actor);
+                    may_update_actor_batch_partial_columns(
+                        &txn,
+                        &mut update_actor_batch,
+                        update_actor_batch_size,
+                    )
+                    .await?;
                 }
+                // Flush inside the loop conservatively.
+                may_update_actor_batch_partial_columns(&txn, &mut update_actor_batch, 1).await?;
             }
         }
 
-        for (table_id, parallelism) in table_parallelism_assignment {
-            let mut streaming_job = StreamingJobModel::find_by_id(table_id.table_id() as ObjectId)
-                .one(&txn)
+        // Since streaming job model is small,caching all models in memory is fine.
+        let mut streaming_job_cache: HashMap<ObjectId, streaming_job::ActiveModel> =
+            StreamingJobModel::find()
+                .filter(
+                    streaming_job::Column::JobId.is_in(
+                        table_parallelism_assignment
+                            .keys()
+                            .map(|t| t.table_id().try_into().unwrap())
+                            .collect::<Vec<ObjectId>>(),
+                    ),
+                )
+                .all(&txn)
                 .await?
-                .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?
-                .into_active_model();
-
+                .into_iter()
+                .map(|job| (job.job_id, job.into_active_model()))
+                .collect();
+        for (table_id, parallelism) in table_parallelism_assignment {
+            let mut streaming_job = streaming_job_cache
+                .remove(&table_id.table_id().try_into().unwrap())
+                .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?;
             streaming_job.parallelism = Set(match parallelism {
                 TableParallelism::Adaptive => StreamingParallelism::Adaptive,
                 TableParallelism::Fixed(n) => StreamingParallelism::Fixed(n as _),
                 TableParallelism::Custom => StreamingParallelism::Custom,
             });
-
-            streaming_job.update(&txn).await?;
+            update_job_parallelism_batch.push(streaming_job);
+            may_update_job_parallelism_batch_partial_columns(
+                &txn,
+                &mut update_job_parallelism_batch,
+                update_job_parallelism_batch_size,
+            )
+            .await?;
         }
+        // Flush to meta store.
+        may_update_job_parallelism_batch_partial_columns(
+            &txn,
+            &mut update_job_parallelism_batch,
+            1,
+        )
+        .await?;
 
         txn.commit().await?;
         self.notify_fragment_mapping(Operation::Update, fragment_mapping_to_notify)
@@ -1995,4 +2137,163 @@ pub struct SinkIntoTableContext {
     /// For alter table (e.g., add column), this is the list of existing sink ids
     /// otherwise empty.
     pub updated_sink_catalogs: Vec<SinkId>,
+}
+
+async fn may_insert_batch<A, E>(
+    txn: &DatabaseTransaction,
+    batch: &mut Vec<A>,
+    batch_size: usize,
+) -> MetaResult<()>
+where
+    A: ActiveModelTrait<Entity = E>,
+    E: EntityTrait,
+{
+    if batch.len() < batch_size {
+        return Ok(());
+    }
+    let mut to_insert = std::mem::take(batch);
+    while !to_insert.is_empty() {
+        let insert_batch = to_insert.drain(0..std::cmp::min(to_insert.len(), batch_size));
+        E::insert_many(insert_batch).exec(txn).await?;
+    }
+    Ok(())
+}
+
+/// Only partial columns of the model are updated. See `on_conflict`.
+async fn may_update_actor_batch_partial_columns(
+    txn: &DatabaseTransaction,
+    batch: &mut Vec<actor::ActiveModel>,
+    batch_size: usize,
+) -> MetaResult<()> {
+    if batch.len() < batch_size {
+        return Ok(());
+    }
+    let mut to_update = std::mem::take(batch);
+    while !to_update.is_empty() {
+        let update_batch = to_update
+            .drain(0..std::cmp::min(to_update.len(), batch_size))
+            .collect_vec();
+        {
+            // Additional check because insert_many is used later to implement update_many.
+            let count = Actor::find()
+                .filter(
+                    actor::Column::ActorId.is_in(
+                        update_batch
+                            .iter()
+                            .map(|actor| *actor.actor_id.as_ref())
+                            .collect_vec(),
+                    ),
+                )
+                .count(txn)
+                .await?;
+            if count as usize != update_batch.len() {
+                tracing::error!(count, ?update_batch, "Inconsistent metadata.");
+                return Err(MetaErrorInner::IntegrityCheckFailed.into());
+            }
+        }
+        Actor::insert_many(update_batch)
+            .on_conflict(
+                OnConflict::column(actor::Column::ActorId)
+                    .update_columns([
+                        actor::Column::VnodeBitmap,
+                        actor::Column::UpstreamActorIds,
+                        actor::Column::Splits,
+                    ])
+                    .to_owned(),
+            )
+            .exec(txn)
+            .await?;
+    }
+    Ok(())
+}
+
+/// Only partial columns of the model are updated. See `on_conflict`.
+async fn may_update_actor_dispatcher_batch_partial_columns(
+    txn: &DatabaseTransaction,
+    batch: &mut Vec<actor_dispatcher::ActiveModel>,
+    batch_size: usize,
+) -> MetaResult<()> {
+    if batch.len() < batch_size {
+        return Ok(());
+    }
+    let mut to_update = std::mem::take(batch);
+    while !to_update.is_empty() {
+        let update_batch = to_update
+            .drain(0..std::cmp::min(to_update.len(), batch_size))
+            .collect_vec();
+        {
+            // Additional check because insert_many is used later to implement update_many.
+            let count = ActorDispatcher::find()
+                .filter(
+                    actor_dispatcher::Column::Id.is_in(
+                        update_batch
+                            .iter()
+                            .map(|dispatcher| *dispatcher.id.as_ref())
+                            .collect_vec(),
+                    ),
+                )
+                .count(txn)
+                .await?;
+            if count as usize != update_batch.len() {
+                tracing::error!(count, ?update_batch, "Inconsistent metadata.");
+                return Err(MetaErrorInner::IntegrityCheckFailed.into());
+            }
+        }
+        ActorDispatcher::insert_many(update_batch)
+            .on_conflict(
+                OnConflict::column(actor_dispatcher::Column::Id)
+                    .update_columns([
+                        actor_dispatcher::Column::DownstreamActorIds,
+                        actor_dispatcher::Column::HashMapping,
+                    ])
+                    .to_owned(),
+            )
+            .exec(txn)
+            .await?;
+    }
+    Ok(())
+}
+
+/// Only partial columns of the model are updated. See `on_conflict`.
+async fn may_update_job_parallelism_batch_partial_columns(
+    txn: &DatabaseTransaction,
+    batch: &mut Vec<streaming_job::ActiveModel>,
+    batch_size: usize,
+) -> MetaResult<()> {
+    if batch.len() < batch_size {
+        return Ok(());
+    }
+    let mut to_update = std::mem::take(batch);
+    while !to_update.is_empty() {
+        let update_batch = to_update
+            .drain(0..std::cmp::min(to_update.len(), batch_size))
+            .collect_vec();
+        {
+            // Additional check because insert_many is used later to implement update_many.
+            let count = StreamingJobModel::find()
+                .filter(
+                    streaming_job::Column::JobId.is_in(
+                        update_batch
+                            .iter()
+                            .map(|job| *job.job_id.as_ref())
+                            .collect_vec(),
+                    ),
+                )
+                .count(txn)
+                .await?;
+            if count as usize != update_batch.len() {
+                tracing::error!(count, ?update_batch, "Inconsistent metadata.");
+                return Err(MetaErrorInner::IntegrityCheckFailed.into());
+            }
+        }
+        StreamingJobModel::insert_many(update_batch)
+            .on_conflict(
+                OnConflict::column(streaming_job::Column::JobId)
+                    .update_columns([streaming_job::Column::Parallelism])
+                    .to_owned(),
+            )
+            .exec(txn)
+            .await?;
+    }
+    Ok(())
 }

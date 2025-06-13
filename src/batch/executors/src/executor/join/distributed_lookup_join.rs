@@ -199,7 +199,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
         dispatch_state_store!(source.context().state_store(), state_store, {
             let table = StorageTable::new_partial(state_store, column_ids, vnodes, table_desc);
             let enable_lookup_join_prefetch =
-                source.context.get_config().enable_lookup_join_prefetch;
+                source.context().get_config().enable_lookup_join_prefetch;
             let inner_side_builder = InnerSideExecutorBuilder::new(
                 outer_side_key_types,
                 inner_side_key_types.clone(),
