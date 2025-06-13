@@ -16,7 +16,8 @@ use std::collections::HashSet;
 
 use risingwave_common::session_config::SearchPath;
 use risingwave_expr::{ExprError, Result, capture_context, function};
-use risingwave_pb::user::grant_privilege::{Action, Object};
+use risingwave_pb::user::Action;
+use risingwave_pb::user::grant_privilege::Object;
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 

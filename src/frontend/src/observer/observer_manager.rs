@@ -37,15 +37,14 @@ use tokio::sync::watch::Sender;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{FragmentId, SecretId};
 use crate::scheduler::HummockSnapshotManagerRef;
-use crate::user::UserInfoVersion;
 use crate::user::user_manager::UserInfoManager;
 
 pub struct FrontendObserverNode {
     worker_node_manager: WorkerNodeManagerRef,
-    catalog: Arc<RwLock<Catalog>>,
+    version: CatalogVersion,
     catalog_updated_tx: Sender<CatalogVersion>,
+    catalog: Arc<RwLock<Catalog>>,
     user_info_manager: Arc<RwLock<UserInfoManager>>,
-    user_info_updated_tx: Sender<UserInfoVersion>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     system_params_manager: LocalSystemParamsManagerRef,
     session_params: Arc<RwLock<SessionConfig>>,
@@ -202,12 +201,8 @@ impl ObserverState for FrontendObserverNode {
             ));
 
         let snapshot_version = version.unwrap();
-        catalog_guard.set_version(snapshot_version.catalog_version);
+        self.version = snapshot_version.catalog_version;
         self.catalog_updated_tx
-            .send(snapshot_version.catalog_version)
-            .unwrap();
-        user_guard.set_version(snapshot_version.catalog_version);
-        self.user_info_updated_tx
             .send(snapshot_version.catalog_version)
             .unwrap();
         *self.session_params.write() =
@@ -223,18 +218,17 @@ impl FrontendObserverNode {
         catalog: Arc<RwLock<Catalog>>,
         catalog_updated_tx: Sender<CatalogVersion>,
         user_info_manager: Arc<RwLock<UserInfoManager>>,
-        user_info_updated_tx: Sender<UserInfoVersion>,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
         system_params_manager: LocalSystemParamsManagerRef,
         session_params: Arc<RwLock<SessionConfig>>,
         compute_client_pool: ComputeClientPoolRef,
     ) -> Self {
         Self {
+            version: 0,
             worker_node_manager,
             catalog,
             catalog_updated_tx,
             user_info_manager,
-            user_info_updated_tx,
             hummock_snapshot_manager,
             system_params_manager,
             session_params,
@@ -432,12 +426,12 @@ impl FrontendObserverNode {
             _ => unreachable!(),
         }
         assert!(
-            resp.version > catalog_guard.version(),
+            resp.version > self.version,
             "resp version={:?}, current version={:?}",
             resp.version,
-            catalog_guard.version()
+            self.version
         );
-        catalog_guard.set_version(resp.version);
+        self.version = resp.version;
         self.catalog_updated_tx.send(resp.version).unwrap();
     }
 
@@ -457,13 +451,13 @@ impl FrontendObserverNode {
             _ => unreachable!(),
         }
         assert!(
-            resp.version > user_guard.version(),
+            resp.version > self.version,
             "resp version={:?}, current version={:?}",
             resp.version,
-            user_guard.version()
+            self.version
         );
-        user_guard.set_version(resp.version);
-        self.user_info_updated_tx.send(resp.version).unwrap();
+        self.version = resp.version;
+        self.catalog_updated_tx.send(resp.version).unwrap();
     }
 
     fn handle_fragment_mapping_notification(&mut self, resp: SubscribeResponse) {

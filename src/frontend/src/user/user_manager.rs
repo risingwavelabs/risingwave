@@ -18,11 +18,10 @@ use itertools::Itertools;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 
 use crate::user::user_catalog::UserCatalog;
-use crate::user::{UserId, UserInfoVersion};
+use crate::user::UserId;
 
 /// `UserInfoManager` is responsible for managing users.
 pub struct UserInfoManager {
-    version: UserInfoVersion,
     user_by_name: HashMap<String, UserCatalog>,
     user_name_by_id: HashMap<UserId, String>,
 }
@@ -31,7 +30,6 @@ pub struct UserInfoManager {
 impl Default for UserInfoManager {
     fn default() -> Self {
         UserInfoManager {
-            version: 0,
             user_by_name: HashMap::new(),
             user_name_by_id: HashMap::new(),
         }
@@ -99,15 +97,5 @@ impl UserInfoManager {
     pub fn clear(&mut self) {
         self.user_by_name.clear();
         self.user_name_by_id.clear();
-    }
-
-    /// Get the user info cache's version.
-    pub fn version(&self) -> u64 {
-        self.version
-    }
-
-    /// Set the user info cache's version.
-    pub fn set_version(&mut self, version: UserInfoVersion) {
-        self.version = version;
     }
 }

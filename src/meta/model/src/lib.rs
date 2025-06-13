@@ -62,6 +62,7 @@ pub mod subscription;
 pub mod system_parameter;
 pub mod table;
 pub mod user;
+pub mod user_default_privilege;
 pub mod user_privilege;
 pub mod view;
 pub mod worker;
@@ -85,6 +86,7 @@ pub type ConnectionId = ObjectId;
 pub type SecretId = ObjectId;
 pub type UserId = i32;
 pub type PrivilegeId = i32;
+pub type DefaultPrivilegeId = i32;
 
 pub type HummockVersionId = i64;
 pub type Epoch = i64;

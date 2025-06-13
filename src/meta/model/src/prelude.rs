@@ -43,6 +43,7 @@ pub use super::subscription::Entity as Subscription;
 pub use super::system_parameter::Entity as SystemParameter;
 pub use super::table::Entity as Table;
 pub use super::user::Entity as User;
+pub use super::user_default_privilege::Entity as UserDefaultPrivilege;
 pub use super::user_privilege::Entity as UserPrivilege;
 pub use super::view::Entity as View;
 pub use super::worker::Entity as Worker;

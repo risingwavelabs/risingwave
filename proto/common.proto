@@ -159,3 +159,18 @@ message OptionalUint32 {
 message OptionalUint64 {
   optional uint64 value = 1;
 }
+
+enum ObjectType {
+  DATABASE = 0;
+  SCHEMA = 1;
+  TABLE = 2;
+  MVIEW = 3;
+  SOURCE = 4;
+  SINK = 5;
+  VIEW = 6;
+  INDEX = 7;
+  FUNCTION = 8;
+  CONNECTION = 9;
+  SUBSCRIPTION = 10;
+  SECRET = 11;
+}
