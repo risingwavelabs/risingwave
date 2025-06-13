@@ -1,0 +1,304 @@
+statement ok
+set streaming_parallelism=2;
+
+statement ok
+drop materialized view if exists mv1;
+
+statement ok
+drop table if exists t1;
+
+statement ok
+drop table if exists t2;
+
+statement ok
+drop table if exists t3;
+
+statement ok
+create table t1 (a int, b int) append only;
+create table t2 (a int, b int) append only;
+create table t3 (a int, b int) append only;
+
+statement ok
+insert into t1 select i, i from generate_series(1, 10000) as t(i);
+
+statement ok
+insert into t2 select i, i from generate_series(1, 10000) as t(i);
+
+statement ok
+insert into t3 select i, i from generate_series(1, 10000) as t(i);
+
+control substitution on
+
+statement ok
+create sink sink1 from t1
+with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'backfill_progress_source_1',
+)
+format plain encode json;
+
+statement ok
+create sink sink2 from t2
+with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'backfill_progress_source_2',
+)
+format plain encode json;
+
+statement ok
+create sink sink3 from t3
+with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'backfill_progress_source_3',
+)
+format plain encode json;
+
+statement ok retry 3 backoff 3s
+create source s1(a int, b int) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'backfill_progress_source_1',
+)
+format plain encode json;
+
+statement ok retry 3 backoff 3s
+create source s2(a int, b int) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'backfill_progress_source_2',
+)
+format plain encode json;
+
+statement ok retry 3 backoff 3s
+create source s3(a int, b int) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'backfill_progress_source_3',
+)
+format plain encode json;
+
+control substitution off
+
+statement ok
+set background_ddl=true;
+
+statement ok
+set backfill_rate_limit=2500;
+
+statement ok
+flush;
+
+statement ok
+create materialized view mv1
+with (backfill_order = FIXED(s1->s2, s2->s3, s3->t1, t1->t3))
+as select s1.a, s2.b, s3.b as c, s1.a as d, t5.a as e
+  from 
+    s1
+      join s2 on s1.a = s2.a
+        join s3 on s2.a = s3.a 
+          join s1 as t4 on s3.a = t4.a 
+            join t3 as t5 on t4.a = t5.a
+              join t1 as t6 on t5.a = t6.a;
+
+
+################### s1 start
+
+
+query I retry 16 backoff 1s
+select
+  job_name,
+  upstream_table_name,
+  case 
+  when regexp_match(progress, '([0-9]+?\.?[0-9]+)%')[1]::numeric > 0.0
+    then 'table backfill started'
+  when regexp_match(progress, '([0-9]+) consumed rows')[1]::numeric > 0.0
+    then 'source backfill started'
+  else
+    'paused'
+  end
+from rw_catalog.rw_fragment_backfill_progress
+ORDER BY job_name, upstream_table_name;
+----
+public.mv1	public.s1	source backfill started
+public.mv1	public.s2	paused
+public.mv1	public.s3	paused
+public.mv1	public.t1	paused
+public.mv1	public.t3	paused
+
+
+################### s2 start
+
+
+query I retry 16 backoff 1s
+select
+  job_name,
+  upstream_table_name,
+  case 
+  when regexp_match(progress, '([0-9]+?\.?[0-9]+)%')[1]::numeric > 0.0
+    then 'table backfill started'
+  when regexp_match(progress, '([0-9]+) consumed rows')[1]::numeric > 0.0
+    then 'source backfill started'
+  else
+    'paused'
+  end
+from rw_catalog.rw_fragment_backfill_progress
+ORDER BY job_name, upstream_table_name;
+----
+public.mv1	public.s1	source backfill started
+public.mv1	public.s2	source backfill started
+public.mv1	public.s3	paused
+public.mv1	public.t1	paused
+public.mv1	public.t3	paused
+
+
+################### s3 start
+
+
+query I retry 16 backoff 1s
+select
+  job_name,
+  upstream_table_name,
+  case 
+  when regexp_match(progress, '([0-9]+?\.?[0-9]+)%')[1]::numeric > 0.0
+    then 'table backfill started'
+  when regexp_match(progress, '([0-9]+) consumed rows')[1]::numeric > 0.0
+    then 'source backfill started'
+  else
+    'paused'
+  end
+from rw_catalog.rw_fragment_backfill_progress
+ORDER BY job_name, upstream_table_name;
+----
+public.mv1	public.s1	source backfill started
+public.mv1	public.s2	source backfill started
+public.mv1	public.s3	source backfill started
+public.mv1	public.t1	paused
+public.mv1	public.t3	paused
+
+
+################### t1 start
+
+
+query I retry 20 backoff 1s
+select
+  job_name,
+  upstream_table_name,
+  case 
+  when regexp_match(progress, '([0-9]+?\.?[0-9]+)%')[1]::numeric > 0.0
+    then 'table backfill started'
+  when regexp_match(progress, '([0-9]+) consumed rows')[1]::numeric > 0.0
+    then 'source backfill started'
+  else
+    'paused'
+  end
+from rw_catalog.rw_fragment_backfill_progress
+ORDER BY job_name, upstream_table_name;
+----
+public.mv1	public.s1	source backfill started
+public.mv1	public.s2	source backfill started
+public.mv1	public.s3	source backfill started
+public.mv1	public.t1	table backfill started
+public.mv1	public.t3	paused
+
+
+################### t3 start
+
+
+query I retry 20 backoff 1s
+select
+  job_name,
+  upstream_table_name,
+  case 
+  when regexp_match(progress, '([0-9]+?\.?[0-9]+)%')[1]::numeric > 0.0
+    then 'table backfill started'
+  when regexp_match(progress, '([0-9]+) consumed rows')[1]::numeric > 0.0
+    then 'source backfill started'
+  else
+    'paused'
+  end
+from rw_catalog.rw_fragment_backfill_progress
+ORDER BY job_name, upstream_table_name;
+----
+public.mv1	public.s1	source backfill started
+public.mv1	public.s2	source backfill started
+public.mv1	public.s3	source backfill started
+public.mv1	public.t1	table backfill started
+public.mv1	public.t3	table backfill started
+
+
+################### Wait backfill finished
+
+
+statement ok
+alter materialized view mv1 set backfill_rate_limit=default;
+
+
+query I retry 20 backoff 1s
+select * from rw_catalog.rw_fragment_backfill_progress;
+----
+
+
+################### Check result
+
+statement ok
+set streaming_parallelism=default;
+
+statement ok
+set background_ddl=false;
+
+statement ok
+set backfill_rate_limit=default;
+
+statement ok
+create materialized view mv2
+with (backfill_order = FIXED(s1->s2, s2->s3, s3->t1, t1->t3))
+as select s1.a, s2.b, s3.b as c, s1.a as d, t5.a as e
+  from 
+    s1
+      join s2 on s1.a = s2.a
+        join s3 on s2.a = s3.a 
+          join s1 as t4 on s3.a = t4.a 
+            join t3 as t5 on t4.a = t5.a
+              join t1 as t6 on t5.a = t6.a;
+
+
+query I
+select * from mv1 except select * from mv2;
+----
+
+
+query I
+select * from mv2 except select * from mv1;
+----
+
+
+statement ok
+drop materialized view mv1;
+
+
+statement ok
+drop materialized view mv2;
+
+statement ok
+drop sink sink1;
+
+statement ok
+drop sink sink2;
+
+statement ok
+drop sink sink3;
+
+statement ok
+drop source s1;
+
+statement ok
+drop source s2;
+
+statement ok
+drop source s3;
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;
+
+statement ok
+drop table t3;
