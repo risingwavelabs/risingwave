@@ -34,8 +34,8 @@ use risingwave_pb::stream_service::BarrierCompleteResponse;
 use status::CreatingStreamingJobStatus;
 use tracing::{debug, info};
 
-use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::MetaResult;
+use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::checkpoint::creating_job::status::CreateMviewLogStoreProgressTracker;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
@@ -82,7 +82,10 @@ impl CreatingStreamingJobControl {
             "new creating job"
         );
         let snapshot_backfill_actors = info.stream_job_fragments.snapshot_backfill_actor_ids();
-        let backfill_nodes_to_pause = get_nodes_with_backfill_dependencies(&info.fragment_backfill_ordering).into_iter().collect();
+        let backfill_nodes_to_pause =
+            get_nodes_with_backfill_dependencies(&info.fragment_backfill_ordering)
+                .into_iter()
+                .collect();
         let backfill_order_state = BackfillOrderState::new(
             info.fragment_backfill_ordering.clone(),
             &info.stream_job_fragments,
