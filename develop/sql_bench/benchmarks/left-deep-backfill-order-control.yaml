@@ -3,6 +3,13 @@ benchmark_name: left-deep-backfill-order-control
 
 # SQL to set up the initial schema and data (run once)
 setup_sql: |
+  DROP MATERIALIZED VIEW IF EXISTS m1;
+  DROP TABLE IF EXISTS car_info;
+  DROP TABLE IF EXISTS car_regions;
+  DROP TABLE IF EXISTS car_colors;
+  DROP TABLE IF EXISTS car_types;
+  DROP TABLE IF EXISTS car_sales;
+
   SET RW_IMPLICIT_FLUSH=true;
   CREATE TABLE car_info (
     id INTEGER,
