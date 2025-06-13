@@ -20,7 +20,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
 
-                panels.timeseries_count(
+                panels.timeseries_bytes(
                     "Iceberg Compaction Rewritten Bytes",
                     "",
                     [

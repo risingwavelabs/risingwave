@@ -40,7 +40,7 @@ mod iterator;
 mod shared_buffer_compact;
 pub(super) mod task_progress;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -288,11 +288,10 @@ impl Compactor {
 /// manager and runs compaction tasks.
 #[cfg_attr(coverage, coverage(off))]
 #[must_use]
-pub fn start_compactor_iceberg(
+pub fn start_iceberg_compactor(
     compactor_context: CompactorContext,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 ) -> (JoinHandle<()>, Sender<()>) {
-    type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let stream_retry_interval = Duration::from_secs(30);
     let periodic_event_update_interval = Duration::from_millis(1000);
@@ -312,7 +311,9 @@ pub fn start_compactor_iceberg(
     );
 
     let join_handle = tokio::spawn(async move {
-        let shutdown_map = CompactionShutdownMap::default();
+        // TODO: It's a workaround to use HashSet for filtering out duplicate tasks.
+        let iceberg_compaction_running_task_tracker =
+            Arc::new(Mutex::new((HashMap::new(), HashSet::new())));
         let mut min_interval = tokio::time::interval(stream_retry_interval);
         let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
 
@@ -423,8 +424,9 @@ pub fn start_compactor_iceberg(
                             Some(event) => event,
                             None => continue 'consume_stream,
                         };
-                        // todo!: add metrics
-                        let shutdown = shutdown_map.clone();
+
+                        let iceberg_running_task_tracker =
+                            iceberg_compaction_running_task_tracker.clone();
                         match event {
                             risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::CompactTask(iceberg_compaction_task) => {
                                 let task_id = iceberg_compaction_task.task_id;
@@ -469,9 +471,44 @@ pub fn start_compactor_iceberg(
                                     }
                                 };
 
+                                let task_unique_ident = format!(
+                                    "{}-{:?}",
+                                    iceberg_runner.iceberg_config.catalog_name(),
+                                    iceberg_runner.table_ident
+                                );
+
+                                {
+                                    let running_task_tracker_guard = iceberg_compaction_running_task_tracker
+                                        .lock()
+                                        .unwrap();
+
+                                    if running_task_tracker_guard.1.contains(&task_unique_ident) {
+                                        tracing::warn!(
+                                            task_id = %task_id,
+                                            task_unique_ident = %task_unique_ident,
+                                            "Iceberg compaction task already running, skip",
+                                        );
+                                        continue 'consume_stream;
+                                    }
+                                }
+
                                 executor.spawn(async move {
                                     let (tx, rx) = tokio::sync::oneshot::channel();
-                                    shutdown.lock().unwrap().insert(task_id, tx);
+                                    {
+                                        let mut running_task_tracker_guard =
+                                            iceberg_running_task_tracker.lock().unwrap();
+                                        running_task_tracker_guard.0.insert(task_id, tx);
+                                        running_task_tracker_guard.1.insert(task_unique_ident.clone());
+                                    }
+
+                                    let _release_guard = scopeguard::guard(
+                                        iceberg_running_task_tracker.clone(),
+                                        move |tracker| {
+                                            let mut running_task_tracker_guard = tracker.lock().unwrap();
+                                            running_task_tracker_guard.0.remove(&task_id);
+                                            running_task_tracker_guard.1.remove(&task_unique_ident);
+                                        },
+                                    );
 
                                     if let Err(e) = iceberg_runner.compact(
                                         RunnerContext::new(
@@ -483,8 +520,6 @@ pub fn start_compactor_iceberg(
                                     .await {
                                         tracing::warn!(error = %e.as_report(), "Failed to compact iceberg runner {}", task_id);
                                     }
-
-                                    shutdown.lock().unwrap().remove(&task_id);
                                 });
                             },
                             risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::PullTaskAck(_) => {
