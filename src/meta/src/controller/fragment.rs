@@ -1374,6 +1374,7 @@ impl CatalogController {
         Ok(())
     }
 
+    #[await_tree::instrument]
     pub async fn fill_snapshot_backfill_epoch(
         &self,
         fragment_ids: impl Iterator<Item = FragmentId>,
