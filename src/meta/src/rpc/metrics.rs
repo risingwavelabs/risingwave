@@ -187,12 +187,14 @@ pub struct MetaMetrics {
     pub source_enumerator_metrics: Arc<SourceEnumeratorMetrics>,
 
     // ********************************** Fragment ************************************
-    /// A dummpy gauge metrics with its label to be the mapping from actor id to fragment id
+    /// A dummy gauge metrics with its label to be the mapping from actor id to fragment id
     pub actor_info: IntGaugeVec,
-    /// A dummpy gauge metrics with its label to be the mapping from table id to actor id
+    /// A dummy gauge metrics with its label to be the mapping from table id to actor id
     pub table_info: IntGaugeVec,
     /// A dummy gauge metrics with its label to be the mapping from actor id to sink id
     pub sink_info: IntGaugeVec,
+    /// A dummy gauge metrics with its label to be relation info
+    pub relation_info: IntGaugeVec,
 
     /// Write throughput of commit epoch for each stable
     pub table_write_throughput: IntCounterVec,
@@ -672,6 +674,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let relation_info = register_int_gauge_vec_with_registry!(
+            "relation_info",
+            "Information of the database relation (table/source/sink)",
+            &["id", "database", "schema", "name", "resource_group", "type"],
+            registry
+        )
+        .unwrap();
+
         let l0_compact_level_count = register_histogram_vec_with_registry!(
             "storage_l0_compact_level_count",
             "level_count of l0 compact task",
@@ -867,6 +877,7 @@ impl MetaMetrics {
             actor_info,
             table_info,
             sink_info,
+            relation_info,
             l0_compact_level_count,
             compact_task_size,
             compact_task_file_count,
@@ -1078,6 +1089,79 @@ pub async fn refresh_fragment_info_metrics(
     }
 }
 
+pub async fn refresh_relation_info_metrics(
+    catalog_controller: &CatalogControllerRef,
+    meta_metrics: Arc<MetaMetrics>,
+) {
+    let table_objects = match catalog_controller.list_table_objects().await {
+        Ok(table_objects) => table_objects,
+        Err(err) => {
+            tracing::warn!(error=%err.as_report(), "fail to get table objects");
+            return;
+        }
+    };
+
+    let source_objects = match catalog_controller.list_source_objects().await {
+        Ok(source_objects) => source_objects,
+        Err(err) => {
+            tracing::warn!(error=%err.as_report(), "fail to get source objects");
+            return;
+        }
+    };
+
+    let sink_objects = match catalog_controller.list_sink_objects().await {
+        Ok(sink_objects) => sink_objects,
+        Err(err) => {
+            tracing::warn!(error=%err.as_report(), "fail to get sink objects");
+            return;
+        }
+    };
+
+    meta_metrics.relation_info.reset();
+
+    for (id, db, schema, name, resource_group) in table_objects {
+        meta_metrics
+            .relation_info
+            .with_label_values(&[
+                &id.to_string(),
+                &db,
+                &schema,
+                &name,
+                &resource_group,
+                &"table".to_owned(),
+            ])
+            .set(1);
+    }
+
+    for (id, db, schema, name, resource_group) in source_objects {
+        meta_metrics
+            .relation_info
+            .with_label_values(&[
+                &id.to_string(),
+                &db,
+                &schema,
+                &name,
+                &resource_group,
+                &"source".to_owned(),
+            ])
+            .set(1);
+    }
+
+    for (id, db, schema, name, resource_group) in sink_objects {
+        meta_metrics
+            .relation_info
+            .with_label_values(&[
+                &id.to_string(),
+                &db,
+                &schema,
+                &name,
+                &resource_group,
+                &"sink".to_owned(),
+            ])
+            .set(1);
+    }
+}
+
 pub fn start_fragment_info_monitor(
     metadata_manager: MetadataManager,
     hummock_manager: HummockManagerRef,
@@ -1105,6 +1189,12 @@ pub fn start_fragment_info_monitor(
                 &metadata_manager.catalog_controller,
                 &metadata_manager.cluster_controller,
                 &hummock_manager,
+                meta_metrics.clone(),
+            )
+            .await;
+
+            refresh_relation_info_metrics(
+                &metadata_manager.catalog_controller,
                 meta_metrics.clone(),
             )
             .await;

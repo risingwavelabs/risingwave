@@ -137,6 +137,14 @@ pub enum Relation {
     UserPrivilege,
     #[sea_orm(has_many = "super::view::Entity")]
     View,
+    #[sea_orm(
+        belongs_to = "super::schema::Entity",
+        from = "Column::SchemaId",
+        to = "super::schema::Column::SchemaId",
+        on_update = "NoAction",
+        on_delete = "NoAction"
+    )]
+    Schema2,
 }
 
 impl Related<super::connection::Entity> for Entity {

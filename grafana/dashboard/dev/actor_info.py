@@ -37,6 +37,16 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.table_info(
+                    "Relation Info",
+                    "Information about relations",
+                    [
+                        panels.table_target(
+                            f"group({metric('relation_info')}) by (id, database, schema, name, resource_group, type)"
+                        )
+                    ],
+                    ["id", "database", "schema", "name", "resource_group", "type"],
+                ),
+                panels.table_info(
                     "Actor Count (Group By Compute Node)",
                     "Actor count per compute node",
                     [
