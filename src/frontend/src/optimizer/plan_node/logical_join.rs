@@ -29,7 +29,7 @@ use super::generic::{
 use super::utils::{Distill, childless_record};
 use super::{
     ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown,
-    StreamHashJoin, StreamProject, ToBatch, ToStream, generic,
+    StreamExchange, StreamHashJoin, StreamProject, ToBatch, ToStream, generic,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
@@ -878,6 +878,16 @@ impl LogicalJoin {
         ctx: &mut ToStreamContext,
     ) -> Result<(PlanRef, PlanRef)> {
         use super::stream::prelude::*;
+        tracing::info!("get_stream_input_for_hash_join");
+
+        // let required_dist =
+        //     RequiredDist::shard_by_key(self.right().schema().len(), &predicate.right_eq_indexes());
+        // let right = self.right().to_stream(ctx)?;
+        // let mut right = if !right.distribution().satisfies(&required_dist) {
+        //     required_dist.enforce(right, &Order::any())
+        // } else {
+        //     StreamExchange::new_no_shuffle(right).into()
+        // };
 
         let mut right = self.right().to_stream_with_dist_required(
             &RequiredDist::shard_by_key(self.right().schema().len(), &predicate.right_eq_indexes()),
@@ -888,30 +898,71 @@ impl LogicalJoin {
         let r2l = predicate.r2l_eq_columns_mapping(left.schema().len(), right.schema().len());
         let l2r = predicate.l2r_eq_columns_mapping(left.schema().len(), right.schema().len());
 
+        let separate_consecutive_join = self
+            .ctx()
+            .session_ctx()
+            .config()
+            .separate_consecutive_join();
+
         let right_dist = right.distribution();
         match right_dist {
             Distribution::HashShard(_) => {
+                tracing::info!("right_dist is HashShard.");
                 let left_dist = r2l
                     .rewrite_required_distribution(&RequiredDist::PhysicalDist(right_dist.clone()));
-                left = left.to_stream_with_dist_required(&left_dist, ctx)?;
+                if separate_consecutive_join && let Some(_) = left.as_logical_join() {
+                    left = left.to_stream(ctx)?;
+                    tracing::info!(
+                        "left is logical join:{:?} with required left distribution:{:?}.",
+                        left,
+                        left_dist
+                    );
+                    left = if !left.distribution().satisfies(&left_dist) {
+                        tracing::info!("left distribution not satisfied.");
+                        left_dist.enforce(left, &Order::any())
+                    } else {
+                        tracing::info!("left distribution satisfied.");
+                        StreamExchange::new_no_shuffle(left).into()
+                    };
+                } else {
+                    left = left.to_stream_with_dist_required(&left_dist, ctx)?;
+                }
             }
             Distribution::UpstreamHashShard(_, _) => {
-                left = left.to_stream_with_dist_required(
-                    &RequiredDist::shard_by_key(
+                tracing::info!("right_dist is UpstreamHashShard.");
+                if separate_consecutive_join && let Some(_) = left.as_logical_join() {
+                    tracing::info!("left is logical join.");
+                    left = left.to_stream(ctx)?;
+                    let left_required_dist = RequiredDist::shard_by_key(
                         self.left().schema().len(),
                         &predicate.left_eq_indexes(),
-                    ),
-                    ctx,
-                )?;
+                    );
+                    left = if !left.distribution().satisfies(&left_required_dist) {
+                        left_required_dist.enforce(left, &Order::any())
+                    } else {
+                        StreamExchange::new_no_shuffle(left).into()
+                    };
+                } else {
+                    tracing::info!("left is not logical join.");
+                    left = left.to_stream_with_dist_required(
+                        &RequiredDist::shard_by_key(
+                            self.left().schema().len(),
+                            &predicate.left_eq_indexes(),
+                        ),
+                        ctx,
+                    )?;
+                }
                 let left_dist = left.distribution();
                 match left_dist {
                     Distribution::HashShard(_) => {
+                        tracing::info!("left_dist is HashShard.");
                         let right_dist = l2r.rewrite_required_distribution(
                             &RequiredDist::PhysicalDist(left_dist.clone()),
                         );
                         right = right_dist.enforce_if_not_satisfies(right, &Order::any())?
                     }
                     Distribution::UpstreamHashShard(_, _) => {
+                        tracing::info!("left_dist is UpstreamHashShard.");
                         left = RequiredDist::hash_shard(&predicate.left_eq_indexes())
                             .enforce_if_not_satisfies(left, &Order::any())?;
                         right = RequiredDist::hash_shard(&predicate.right_eq_indexes())

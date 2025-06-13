@@ -223,6 +223,9 @@ pub struct SessionConfig {
     #[parameter(default = true, alias = "rw_enable_join_ordering")]
     enable_join_ordering: bool,
 
+    #[parameter(default = true, alias = "rw_separate_consecutive_join")]
+    separate_consecutive_join: bool,
+
     /// Enable two phase agg optimization. Defaults to true.
     /// Setting this to true will always set `FORCE_TWO_PHASE_AGG` to false.
     #[parameter(default = true, flags = "SETTER", alias = "rw_enable_two_phase_agg")]
