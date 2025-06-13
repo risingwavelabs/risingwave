@@ -37,7 +37,10 @@ impl CatalogController {
         Ok(active_db.insert(txn).await?)
     }
 
-    pub async fn create_database(&self, db: PbDatabase) -> MetaResult<NotificationVersion> {
+    pub async fn create_database(
+        &self,
+        db: PbDatabase,
+    ) -> MetaResult<(NotificationVersion, risingwave_meta_model::database::Model)> {
         let inner = self.inner.write().await;
         let owner_id = db.owner as _;
         let txn = inner.db.begin().await?;
@@ -66,7 +69,7 @@ impl CatalogController {
         let mut version = self
             .notify_frontend(
                 NotificationOperation::Add,
-                NotificationInfo::Database(ObjectModel(db, db_obj).into()),
+                NotificationInfo::Database(ObjectModel(db.clone(), db_obj).into()),
             )
             .await;
         for schema in schemas {
@@ -75,7 +78,7 @@ impl CatalogController {
                 .await;
         }
 
-        Ok(version)
+        Ok((version, db))
     }
 
     pub async fn create_schema(&self, schema: PbSchema) -> MetaResult<NotificationVersion> {
