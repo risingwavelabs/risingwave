@@ -28,6 +28,8 @@ struct RwTableScans {
     fragment_id: i32,
     backfill_state_table_id: i32,
     backfill_target_table_id: i32,
+    is_snapshot_backfill: bool,
+    backfill_epoch: i64,
 }
 
 fn extract_stream_scan(fragment_distribution: &FragmentDistribution) -> Option<RwTableScans> {
@@ -36,6 +38,10 @@ fn extract_stream_scan(fragment_distribution: &FragmentDistribution) -> Option<R
     }
 
     let stream_node = fragment_distribution.node.as_ref()?;
+    let is_snapshot_backfill = fragment_distribution.fragment_type_mask
+        & (FragmentTypeFlag::SnapshotBackfillStreamScan as u32
+            | FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32)
+        != 0;
 
     let mut scan = None;
     visit_stream_node_stream_scan(stream_node, |node| {
@@ -48,6 +54,8 @@ fn extract_stream_scan(fragment_distribution: &FragmentDistribution) -> Option<R
                 .map(|table| table.id as i32)
                 .unwrap_or(0),
             backfill_target_table_id: node.table_id as i32,
+            is_snapshot_backfill,
+            backfill_epoch: node.snapshot_backfill_epoch() as _,
         });
     });
     scan

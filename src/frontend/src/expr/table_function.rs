@@ -593,6 +593,7 @@ impl TableFunction {
                 ("fragment_id".to_owned(), DataType::Int32),
                 ("backfill_state_table_id".to_owned(), DataType::Int32),
                 ("current_row_count".to_owned(), DataType::Int64),
+                ("min_epoch".to_owned(), DataType::Int64),
             ])),
             function_type: TableFunctionType::InternalBackfillProgress,
             user_defined: None,
