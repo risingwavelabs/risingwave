@@ -362,13 +362,13 @@ debug = "line-tables-only"
 split-debuginfo = "off"
 debug-assertions = true
 overflow-checks = true
-rustflags = ["-C", "instrument-coverage"]
+rustflags = ["-C", "instrument-coverage", "--cfg", "coverage"]
 
 [profile.ci-dev]
 inherits = "dev"
 incremental = false
 debug = "line-tables-only"
-rustflags = ["-C", "instrument-coverage"]
+rustflags = ["-C", "instrument-coverage", "--cfg", "coverage"]
 [profile.ci-dev.package."*"] # external dependencies
 opt-level = 1
 [profile.ci-dev.package."tokio"]
@@ -383,7 +383,7 @@ inherits = "dev"
 incremental = false
 debug = "line-tables-only"
 opt-level = 2
-rustflags = ["-C", "instrument-coverage"]
+rustflags = ["-C", "instrument-coverage", "--cfg", "coverage"]
 
 [patch.crates-io]
 # Patch third-party crates for deterministic simulation.

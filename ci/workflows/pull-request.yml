@@ -762,7 +762,7 @@ steps:
 
   - label: "upload coverage reports"
     command: "ci/scripts/upload-coverage.sh"
-    # TODO: skip this if `run-selected` or `CI_STEPS` is specified.
+    # TODO: shall we skip this if `run-selected` or `CI_STEPS` is specified.
     plugins:
       - seek-oss/aws-sm#v2.3.2:
           env:
