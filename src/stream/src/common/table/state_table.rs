@@ -22,7 +22,7 @@ use either::Either;
 use foyer::Hint;
 use futures::{Stream, StreamExt, TryStreamExt, pin_mut};
 use futures_async_stream::for_await;
-use itertools::{Itertools, izip};
+use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{ArrayImplBuilder, ArrayRef, DataChunk, Op, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
@@ -933,63 +933,33 @@ where
         } else {
             chunk.serialize_with(&*self.row_serde)
         };
-
-        // TODO(kwannoel): Seems like we are doing vis check twice here.
-        // Once below, when using vis, and once here,
-        // when using vis to set rows empty or not.
-        // If we are to use the vis optimization, we should skip this.
+        
         let key_chunk = chunk.project(self.pk_indices());
-        let vnode_and_pks = key_chunk
-            .rows_with_holes()
-            .zip_eq_fast(vnodes.iter())
-            .map(|(r, vnode)| {
-                let mut buffer = BytesMut::new();
-                buffer.put_slice(&vnode.to_be_bytes()[..]);
-                if let Some(r) = r {
-                    self.pk_serde.serialize(r, &mut buffer);
-                }
-                (r, buffer.freeze())
-            })
-            .collect_vec();
+        let mut buffer = BytesMut::new();
+        for idx in key_chunk.visibility().iter_ones() {
+            let key = key_chunk.row_at_unchecked_vis(idx);
+            buffer.put_slice(&vnodes[idx].to_be_bytes()[..]);
+            self.pk_serde.serialize(key, &mut buffer);
 
-        if !key_chunk.is_compacted() {
-            for ((op, (key, key_bytes), value), vis) in
-                izip!(op.iter(), vnode_and_pks, values).zip_eq_debug(key_chunk.visibility().iter())
-            {
-                if vis {
-                    match op {
-                        Op::Insert | Op::UpdateInsert => {
-                            if USE_WATERMARK_CACHE && let Some(ref pk) = key {
-                                self.watermark_cache.insert(pk);
-                            }
-                            self.insert_inner(TableKey(key_bytes), value);
-                        }
-                        Op::Delete | Op::UpdateDelete => {
-                            if USE_WATERMARK_CACHE && let Some(ref pk) = key {
-                                self.watermark_cache.delete(pk);
-                            }
-                            self.delete_inner(TableKey(key_bytes), value);
-                        }
+            let operation = &op[idx];
+            let value = &values[idx];
+
+            match operation {
+                Op::Insert | Op::UpdateInsert => {
+                    if USE_WATERMARK_CACHE {
+                        self.watermark_cache.insert(&key);
                     }
+                    self.insert_inner(TableKey(buffer.clone().freeze()), value.clone());
+                }
+                Op::Delete | Op::UpdateDelete => {
+                    if USE_WATERMARK_CACHE {
+                        self.watermark_cache.delete(&key);
+                    }
+                    self.delete_inner(TableKey(buffer.clone().freeze()), value.clone());
                 }
             }
-        } else {
-            for (op, (key, key_bytes), value) in izip!(op.iter(), vnode_and_pks, values) {
-                match op {
-                    Op::Insert | Op::UpdateInsert => {
-                        if USE_WATERMARK_CACHE && let Some(ref pk) = key {
-                            self.watermark_cache.insert(pk);
-                        }
-                        self.insert_inner(TableKey(key_bytes), value);
-                    }
-                    Op::Delete | Op::UpdateDelete => {
-                        if USE_WATERMARK_CACHE && let Some(ref pk) = key {
-                            self.watermark_cache.delete(pk);
-                        }
-                        self.delete_inner(TableKey(key_bytes), value);
-                    }
-                }
-            }
+
+            buffer.clear();
         }
     }
 
