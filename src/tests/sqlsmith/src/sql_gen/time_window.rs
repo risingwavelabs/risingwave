@@ -157,7 +157,7 @@ fn find_tables_with_timestamp_cols(tables: Vec<Table>) -> Vec<(String, Vec<Colum
                 return None;
             }
             let name = table.name.clone();
-            let columns = table.get_qualified_columns();
+            let columns = table.columns.clone();
             let mut timestamp_cols = vec![];
             for col in columns {
                 let col_name = col.name.clone();
