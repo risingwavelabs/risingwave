@@ -81,6 +81,14 @@ pub fn handle_addition_columns(
                 ErrorCode::BindError(format!("invalid additional column data type: {dt}")).into(),
             );
         }
+
+        if item.column_alias.is_none() {
+            // still need column_alias be an Option because we still need derive column for kafka timestamp and offset
+            return Err(RwError::from(ProtocolError(
+                "additional column alias is required, you can use `INCLUDE ... AS <alias>` to specify an alias".to_owned(),
+            )));
+        }
+
         let col = build_additional_column_desc(
             ColumnId::placeholder(),
             connector_name.as_str(),
