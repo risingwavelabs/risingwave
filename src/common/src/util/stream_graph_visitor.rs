@@ -47,9 +47,16 @@ where
 }
 
 /// A utility for visiting the [`NodeBody`] of the [`StreamNode`]s recursively.
-pub fn visit_stream_node(stream_node: &StreamNode, mut f: impl FnMut(&NodeBody)) {
+pub fn visit_stream_node_body(stream_node: &StreamNode, mut f: impl FnMut(&NodeBody)) {
     visit_stream_node_cont(stream_node, |stream_node| {
         f(stream_node.node_body.as_ref().unwrap());
+        true
+    })
+}
+
+pub fn visit_stream_node(stream_node: &StreamNode, mut f: impl FnMut(&StreamNode)) {
+    visit_stream_node_cont(stream_node, |stream_node| {
+        f(stream_node);
         true
     })
 }
@@ -83,7 +90,7 @@ pub fn visit_fragment_mut(fragment: &mut StreamFragment, f: impl FnMut(&mut Node
 /// A utility for visiting the [`NodeBody`] of the [`StreamNode`]s in a
 /// [`StreamFragment`] recursively.
 pub fn visit_fragment(fragment: &StreamFragment, f: impl FnMut(&NodeBody)) {
-    visit_stream_node(fragment.node.as_ref().unwrap(), f)
+    visit_stream_node_body(fragment.node.as_ref().unwrap(), f)
 }
 
 /// Visit the tables of a [`StreamNode`].
@@ -299,7 +306,7 @@ pub fn visit_stream_node_tables_inner<F>(
 }
 
 pub fn visit_stream_node_stream_scan(stream_node: &StreamNode, mut f: impl FnMut(&StreamScanNode)) {
-    visit_stream_node(stream_node, |body| {
+    visit_stream_node_body(stream_node, |body| {
         if let NodeBody::StreamScan(node) = body {
             f(node)
         }
