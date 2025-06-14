@@ -166,7 +166,7 @@ impl LocalSecretManager {
             RefAsType::File => {
                 let path_str =
                     self.get_or_init_secret_file(secret_id, secret_value_bytes.clone())?;
-                Ok(format!("file://{}", path_str))
+                Ok(path_str)
             }
             RefAsType::Unspecified => Err(SecretError::UnspecifiedRefType(secret_id)),
         }
