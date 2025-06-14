@@ -331,7 +331,7 @@ impl IcebergSink {
             }
             namespace
         } else {
-            bail!("database name must be set if you want to create table")
+            bail!("database name must be set to create table")
         };
 
         let table_id = self
