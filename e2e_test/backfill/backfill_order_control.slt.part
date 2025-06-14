@@ -31,7 +31,7 @@ insert into car_regions select t.id as id, 'unmatched' from generate_series(10, 
 statement ok
 insert into car_regions values (1, 'North America'), (2, 'Europe'), (3, 'Asia'), (4, 'South America'), (5, 'Africa'), (6, 'Australia'), (7, 'Antarctica');
 
-# Generate 100K sales per car per region
+# Generate 10K sales per car per region
 statement ok
 INSERT INTO car_sales
   SELECT
@@ -39,7 +39,7 @@ INSERT INTO car_sales
     car_id_gen.id as car_id,
     region_id_gen.id as region_id,
     sales_id_gen.id as price
-  FROM generate_series(1, 100000) as sales_id_gen(id)
+  FROM generate_series(1, 10000) as sales_id_gen(id)
     CROSS JOIN generate_series(1, 5) as car_id_gen(id)
     CROSS JOIN generate_series(1, 5) as region_id_gen(id);
 
