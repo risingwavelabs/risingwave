@@ -1112,7 +1112,7 @@ impl CompleteStreamFragmentGraph {
                 let output_columns = {
                     let mut res = None;
 
-                    stream_graph_visitor::visit_stream_node(&fragment.nodes, |node_body| {
+                    stream_graph_visitor::visit_stream_node_body(&fragment.nodes, |node_body| {
                         let columns = match node_body {
                             NodeBody::StreamScan(stream_scan) => stream_scan.upstream_columns(),
                             NodeBody::SourceBackfill(source_backfill) => {
