@@ -35,12 +35,15 @@ use status::CreatingStreamingJobStatus;
 use tracing::{debug, info};
 
 use crate::MetaResult;
+use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::checkpoint::creating_job::status::CreateMviewLogStoreProgressTracker;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
-use crate::barrier::{BarrierKind, Command, CreateStreamingJobCommandInfo, TracedEpoch};
+use crate::barrier::{
+    BackfillOrderState, BarrierKind, Command, CreateStreamingJobCommandInfo, TracedEpoch,
+};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::{StreamJobActorsToCreate, StreamJobFragments};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
@@ -79,11 +82,22 @@ impl CreatingStreamingJobControl {
             "new creating job"
         );
         let snapshot_backfill_actors = info.stream_job_fragments.snapshot_backfill_actor_ids();
-        // FIXME(kwannoel): support backfill order control for snapshot backfill
+        let backfill_nodes_to_pause =
+            get_nodes_with_backfill_dependencies(&info.fragment_backfill_ordering)
+                .into_iter()
+                .collect();
+        let backfill_order_state = BackfillOrderState::new(
+            info.fragment_backfill_ordering.clone(),
+            &info.stream_job_fragments,
+        );
         let create_mview_tracker = CreateMviewProgressTracker::recover(
             [(
                 job_id,
-                (info.definition.clone(), &*info.stream_job_fragments),
+                (
+                    info.definition.clone(),
+                    &*info.stream_job_fragments,
+                    backfill_order_state,
+                ),
             )],
             version_stat,
         );
@@ -124,7 +138,7 @@ impl CreatingStreamingJobControl {
             // we assume that when handling snapshot backfill, the cluster must not be paused
             pause: false,
             subscriptions_to_add: Default::default(),
-            backfill_nodes_to_pause: Default::default(),
+            backfill_nodes_to_pause,
         });
 
         control_stream_manager.add_partial_graph(database_id, Some(job_id));
@@ -228,7 +242,14 @@ impl CreatingStreamingJobControl {
         let mut prev_epoch_fake_physical_time = Epoch(committed_epoch).physical_time();
         let mut pending_non_checkpoint_barriers = vec![];
         let create_mview_tracker = CreateMviewProgressTracker::recover(
-            [(job_id, (definition.clone(), &stream_job_fragments))],
+            [(
+                job_id,
+                (
+                    definition.clone(),
+                    &stream_job_fragments,
+                    Default::default(),
+                ),
+            )],
             version_stat,
         );
         let barrier_info = CreatingStreamingJobStatus::new_fake_barrier(
@@ -504,7 +525,7 @@ impl CreatingStreamingJobControl {
                 None,
             )?;
         } else {
-            for barrier_to_inject in self.status.on_new_upstream_epoch(barrier_info) {
+            for (barrier_to_inject, mutation) in self.status.on_new_upstream_epoch(barrier_info) {
                 Self::inject_barrier(
                     self.database_id,
                     self.job_id,
@@ -514,7 +535,7 @@ impl CreatingStreamingJobControl {
                     Some(&self.graph_info),
                     barrier_to_inject,
                     None,
-                    None,
+                    mutation,
                 )?;
             }
         }
