@@ -29,7 +29,7 @@ use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::{
-    visit_stream_node_body, visit_stream_node, visit_stream_node_cont_mut,
+    visit_stream_node, visit_stream_node_body, visit_stream_node_cont_mut,
 };
 use risingwave_common::{bail, bail_not_implemented, must_match};
 use risingwave_connector::WithOptionsSecResolved;

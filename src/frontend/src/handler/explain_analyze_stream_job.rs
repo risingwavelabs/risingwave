@@ -512,7 +512,12 @@ mod graph {
             node: &PbStreamNode,
             actor_id: u32,
         ) {
-            tracing::info!(actor_id, fragment_id, node.operator_id, "extracting stream node info");
+            tracing::info!(
+                actor_id,
+                fragment_id,
+                node.operator_id,
+                "extracting stream node info"
+            );
             let re = Regex::new(r"[a-zA-Z]+").expect("should be able to compile regex");
             let result = re.find(&node.identity).unwrap().unwrap();
             let identity = result.as_str().to_owned();
@@ -526,10 +531,13 @@ mod graph {
                 fragment_id_to_merge_operator_id.insert(*upstream_fragment_id, operator_id);
             }
             let dependencies = &node.input;
-            let dependency_infos = dependencies.iter().map(|input| {
-                let operator_id = unique_operator_id(fragment_id, input.operator_id);
-                (operator_id, input.operator_id)
-            }).collect::<HashMap<_, _>>();
+            let dependency_infos = dependencies
+                .iter()
+                .map(|input| {
+                    let operator_id = unique_operator_id(fragment_id, input.operator_id);
+                    (operator_id, input.operator_id)
+                })
+                .collect::<HashMap<_, _>>();
             tracing::info!(?dependency_infos, "dependency infos");
             let entry = operator_id_to_stream_node
                 .entry(operator_id)
@@ -593,11 +601,13 @@ mod graph {
                         .insert(operator_id_for_dispatch as _, dispatcher)
                         .is_none()
                 );
-                assert!(operator_id_to_stream_node
-                    .get_mut(merge_operator_id)
-                    .unwrap()
-                    .dependencies
-                    .insert(operator_id_for_dispatch as _));
+                assert!(
+                    operator_id_to_stream_node
+                        .get_mut(merge_operator_id)
+                        .unwrap()
+                        .dependencies
+                        .insert(operator_id_for_dispatch as _)
+                );
             } else {
                 root_node = Some(operator_id);
             }
@@ -620,14 +630,21 @@ mod graph {
             let operator_id = node.operator_id;
             let operator_name = node.identity.clone();
             for actor_id in &node.actor_ids {
-                tracing::info!(?operator_name, ?operator_id, ?actor_id, "extracting executor info");
+                tracing::info!(
+                    ?operator_name,
+                    ?operator_id,
+                    ?actor_id,
+                    "extracting executor info"
+                );
                 let executor_id =
                     unique_executor_id_from_unique_operator_id(*actor_id, operator_id);
                 assert!(executor_ids.insert(executor_id));
-                assert!(operator_to_executor
-                    .entry(operator_id)
-                    .or_insert_with(HashSet::new)
-                    .insert(executor_id));
+                assert!(
+                    operator_to_executor
+                        .entry(operator_id)
+                        .or_insert_with(HashSet::new)
+                        .insert(executor_id)
+                );
             }
         }
         (executor_ids, operator_to_executor)

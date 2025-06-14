@@ -22,7 +22,9 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat, WorkerSlotId};
-use risingwave_common::util::stream_graph_visitor::{visit_stream_node_body, visit_stream_node_mut};
+use risingwave_common::util::stream_graph_visitor::{
+    visit_stream_node_body, visit_stream_node_mut,
+};
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
