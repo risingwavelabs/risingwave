@@ -144,6 +144,8 @@ mod bind {
 
 /// Utilities for fetching stats from CN
 mod net {
+    use std::collections::HashSet;
+
     use risingwave_pb::common::WorkerNode;
     use risingwave_pb::meta::list_table_fragments_response::FragmentInfo;
     use risingwave_pb::monitor_service::GetProfileStatsRequest;
@@ -185,7 +187,7 @@ mod net {
     pub(super) async fn get_executor_stats(
         handler_args: &HandlerArgs,
         worker_nodes: &[WorkerNode],
-        executor_ids: &[ExecutorId],
+        executor_ids: &HashSet<ExecutorId>,
         dispatcher_fragment_ids: &[u32],
         profiling_duration: Duration,
     ) -> Result<ExecutorStats> {
@@ -195,7 +197,7 @@ mod net {
             let stats = compute_client
                 .monitor_client
                 .get_profile_stats(GetProfileStatsRequest {
-                    executor_ids: executor_ids.into(),
+                    executor_ids: executor_ids.iter().copied().collect(),
                     dispatcher_fragment_ids: dispatcher_fragment_ids.into(),
                 })
                 .await
@@ -214,7 +216,7 @@ mod net {
             let stats = compute_client
                 .monitor_client
                 .get_profile_stats(GetProfileStatsRequest {
-                    executor_ids: executor_ids.into(),
+                    executor_ids: executor_ids.iter().copied().collect(),
                     dispatcher_fragment_ids: dispatcher_fragment_ids.into(),
                 })
                 .await
@@ -235,7 +237,7 @@ mod net {
 /// 1. Collect the stream node metrics at the **Executor** level.
 /// 2. Merge the stream node metrics into **Operator** level, avg, max, min, etc...
 mod metrics {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     use risingwave_pb::monitor_service::GetProfileStatsResponse;
 
@@ -279,12 +281,12 @@ mod metrics {
         /// Establish metrics baseline for profiling
         pub(super) fn start_record<'a>(
             &mut self,
-            executor_ids: &'a [ExecutorId],
+            executor_ids: &'a HashSet<ExecutorId>,
             dispatch_fragment_ids: &'a [FragmentId],
             metrics: &'a GetProfileStatsResponse,
         ) {
             for executor_id in executor_ids {
-                let stats = self.executor_stats.entry(*executor_id).or_default();
+                let mut stats: ExecutorMetrics = Default::default();
                 stats.executor_id = *executor_id;
                 stats.epoch = 0;
                 stats.total_output_throughput += metrics
@@ -297,10 +299,11 @@ mod metrics {
                     .get(executor_id)
                     .cloned()
                     .unwrap_or(0);
+                assert!(self.executor_stats.insert(*executor_id, stats).is_none());
             }
 
             for fragment_id in dispatch_fragment_ids {
-                let stats = self.dispatch_stats.entry(*fragment_id).or_default();
+                let mut stats: DispatchMetrics = Default::default();
                 stats.fragment_id = *fragment_id;
                 stats.epoch = 0;
                 stats.total_output_throughput += metrics
@@ -313,52 +316,53 @@ mod metrics {
                     .get(fragment_id)
                     .cloned()
                     .unwrap_or(0);
+                assert!(self.dispatch_stats.insert(*fragment_id, stats).is_none());
             }
         }
 
         /// Compute the deltas for reporting
         pub(super) fn finish_record<'a>(
             &mut self,
-            executor_ids: &'a [ExecutorId],
+            executor_ids: &'a HashSet<ExecutorId>,
             dispatch_fragment_ids: &'a [FragmentId],
             metrics: &'a GetProfileStatsResponse,
         ) {
             for executor_id in executor_ids {
-                if let Some(stats) = self.executor_stats.get_mut(executor_id) {
-                    stats.total_output_throughput = metrics
-                        .stream_node_output_row_count
-                        .get(executor_id)
-                        .cloned()
-                        .unwrap_or(0)
-                        - stats.total_output_throughput;
-                    stats.total_output_pending_ns = metrics
-                        .stream_node_output_blocking_duration_ns
-                        .get(executor_id)
-                        .cloned()
-                        .unwrap_or(0)
-                        - stats.total_output_pending_ns;
-                } else {
-                    // TODO: warn missing metrics!
-                }
+                let Some(stats) = self.executor_stats.get_mut(executor_id) else {
+                    tracing::warn!("missing executor stats for {}", executor_id);
+                    continue;
+                };
+                stats.total_output_throughput = metrics
+                    .stream_node_output_row_count
+                    .get(executor_id)
+                    .cloned()
+                    .unwrap_or(0)
+                    - stats.total_output_throughput;
+                stats.total_output_pending_ns = metrics
+                    .stream_node_output_blocking_duration_ns
+                    .get(executor_id)
+                    .cloned()
+                    .unwrap_or(0)
+                    - stats.total_output_pending_ns;
             }
 
             for fragment_id in dispatch_fragment_ids {
-                if let Some(stats) = self.dispatch_stats.get_mut(fragment_id) {
-                    stats.total_output_throughput = metrics
-                        .dispatch_fragment_output_row_count
-                        .get(fragment_id)
-                        .cloned()
-                        .unwrap_or(0)
-                        - stats.total_output_throughput;
-                    stats.total_output_pending_ns = metrics
-                        .dispatch_fragment_output_blocking_duration_ns
-                        .get(fragment_id)
-                        .cloned()
-                        .unwrap_or(0)
-                        - stats.total_output_pending_ns;
-                } else {
-                    // TODO: warn missing metrics!
-                }
+                let Some(stats) = self.dispatch_stats.get_mut(fragment_id) else {
+                    tracing::warn!("missing dispatch stats for {}", fragment_id);
+                    continue;
+                };
+                stats.total_output_throughput = metrics
+                    .dispatch_fragment_output_row_count
+                    .get(fragment_id)
+                    .cloned()
+                    .unwrap_or(0)
+                    - stats.total_output_throughput;
+                stats.total_output_pending_ns = metrics
+                    .dispatch_fragment_output_blocking_duration_ns
+                    .get(fragment_id)
+                    .cloned()
+                    .unwrap_or(0)
+                    - stats.total_output_pending_ns;
             }
         }
     }
@@ -380,7 +384,7 @@ mod metrics {
     impl OperatorStats {
         /// Aggregates executor-level stats into operator-level stats
         pub(super) fn aggregate(
-            operator_map: HashMap<OperatorId, Vec<ExecutorId>>,
+            operator_map: HashMap<OperatorId, HashSet<ExecutorId>>,
             executor_stats: &ExecutorStats,
             fragment_parallelisms: &HashMap<FragmentId, usize>,
         ) -> Self {
@@ -447,6 +451,7 @@ mod graph {
     use std::collections::{HashMap, HashSet};
     use std::time::Duration;
 
+    use fancy_regex::Regex;
     use risingwave_common::operator::{
         unique_executor_id_from_unique_operator_id, unique_operator_id,
     };
@@ -466,18 +471,18 @@ mod graph {
         operator_id: OperatorId,
         fragment_id: u32,
         identity: String,
-        actor_ids: Vec<u32>,
-        dependencies: Vec<u64>,
+        actor_ids: HashSet<u32>,
+        dependencies: HashSet<u64>,
     }
 
     impl StreamNode {
-        fn new_for_dispatcher(fragment_id: u32) -> Self {
+        fn new_for_dispatcher(operator_id: u64) -> Self {
             StreamNode {
-                operator_id: fragment_id as u64,
-                fragment_id,
+                operator_id,
+                fragment_id: 0,
                 identity: "Dispatcher".to_owned(),
-                actor_ids: vec![],
-                dependencies: vec![],
+                actor_ids: Default::default(),
+                dependencies: Default::default(),
             }
         }
     }
@@ -507,12 +512,15 @@ mod graph {
             node: &PbStreamNode,
             actor_id: u32,
         ) {
-            let identity = node
-                .identity
-                .split_ascii_whitespace()
-                .next()
-                .unwrap()
-                .to_owned();
+            tracing::info!(
+                actor_id,
+                fragment_id,
+                node.operator_id,
+                "extracting stream node info"
+            );
+            let re = Regex::new(r"[a-zA-Z]+").expect("should be able to compile regex");
+            let result = re.find(&node.identity).unwrap().unwrap();
+            let identity = result.as_str().to_owned();
             let operator_id = unique_operator_id(fragment_id, node.operator_id);
             if let Some(merge_node) = node.node_body.as_ref()
                 && let NodeBody::Merge(box MergeNode {
@@ -523,6 +531,14 @@ mod graph {
                 fragment_id_to_merge_operator_id.insert(*upstream_fragment_id, operator_id);
             }
             let dependencies = &node.input;
+            let dependency_infos = dependencies
+                .iter()
+                .map(|input| {
+                    let operator_id = unique_operator_id(fragment_id, input.operator_id);
+                    (operator_id, input.operator_id)
+                })
+                .collect::<HashMap<_, _>>();
+            tracing::info!(?dependency_infos, "dependency infos");
             let entry = operator_id_to_stream_node
                 .entry(operator_id)
                 .or_insert_with(|| {
@@ -534,11 +550,11 @@ mod graph {
                         operator_id,
                         fragment_id,
                         identity,
-                        actor_ids: vec![],
+                        actor_ids: Default::default(),
                         dependencies,
                     }
                 });
-            entry.actor_ids.push(actor_id);
+            assert!(entry.actor_ids.insert(actor_id));
             for dependency in dependencies {
                 extract_stream_node_info(
                     fragment_id,
@@ -555,6 +571,7 @@ mod graph {
         let mut operator_id_to_stream_node = HashMap::new();
         let mut fragment_id_to_merge_operator_id = HashMap::new();
         for fragment in fragments {
+            tracing::info!(fragment.id, "top-level extracting stream node info");
             let actors = fragment.actors;
             for actor in actors {
                 let actor_id = actor.id;
@@ -576,18 +593,21 @@ mod graph {
             let node = operator_id_to_stream_node.get_mut(&operator_id).unwrap();
             let fragment_id = node.fragment_id;
             if let Some(merge_operator_id) = fragment_id_to_merge_operator_id.get(&fragment_id) {
-                let mut dispatcher = StreamNode::new_for_dispatcher(fragment_id);
-                dispatcher.dependencies.push(operator_id);
+                let operator_id_for_dispatch = operator_id_for_dispatch(fragment_id);
+                let mut dispatcher = StreamNode::new_for_dispatcher(operator_id_for_dispatch);
+                assert!(dispatcher.dependencies.insert(operator_id));
                 assert!(
                     operator_id_to_stream_node
-                        .insert(fragment_id as _, dispatcher)
+                        .insert(operator_id_for_dispatch as _, dispatcher)
                         .is_none()
                 );
-                operator_id_to_stream_node
-                    .get_mut(merge_operator_id)
-                    .unwrap()
-                    .dependencies
-                    .push(fragment_id as _);
+                assert!(
+                    operator_id_to_stream_node
+                        .get_mut(merge_operator_id)
+                        .unwrap()
+                        .dependencies
+                        .insert(operator_id_for_dispatch as _)
+                );
             } else {
                 root_node = Some(operator_id);
             }
@@ -596,21 +616,35 @@ mod graph {
         (root_node.unwrap(), operator_id_to_stream_node)
     }
 
+    fn operator_id_for_dispatch(fragment_id: u32) -> OperatorId {
+        unique_operator_id(fragment_id, u32::MAX as u64)
+    }
+
     pub(super) fn extract_executor_infos(
-        adjacency_list: &HashMap<u64, StreamNode>,
-    ) -> (Vec<u64>, HashMap<u64, Vec<u64>>) {
-        let mut executor_ids: Vec<_> = Default::default();
+        adjacency_list: &HashMap<OperatorId, StreamNode>,
+    ) -> (HashSet<u64>, HashMap<u64, HashSet<u64>>) {
+        let mut executor_ids: HashSet<_> = Default::default();
         let mut operator_to_executor: HashMap<_, _> = Default::default();
-        for node in adjacency_list.values() {
+        for (operator_id, node) in adjacency_list.iter() {
+            assert_eq!(*operator_id, node.operator_id);
             let operator_id = node.operator_id;
+            let operator_name = node.identity.clone();
             for actor_id in &node.actor_ids {
+                tracing::info!(
+                    ?operator_name,
+                    ?operator_id,
+                    ?actor_id,
+                    "extracting executor info"
+                );
                 let executor_id =
                     unique_executor_id_from_unique_operator_id(*actor_id, operator_id);
-                executor_ids.push(executor_id);
-                operator_to_executor
-                    .entry(operator_id)
-                    .or_insert_with(Vec::new)
-                    .push(executor_id);
+                assert!(executor_ids.insert(executor_id));
+                assert!(
+                    operator_to_executor
+                        .entry(operator_id)
+                        .or_insert_with(HashSet::new)
+                        .insert(executor_id)
+                );
             }
         }
         (executor_ids, operator_to_executor)
