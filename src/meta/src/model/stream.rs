@@ -21,7 +21,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{
     IsSingleton, VirtualNode, VnodeCount, VnodeCountCompat, WorkerSlotId,
 };
-use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node};
+use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node_body};
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::{DispatcherType, SourceId, StreamingParallelism, WorkerId};
 use risingwave_pb::catalog::Table;
@@ -610,7 +610,7 @@ impl StreamJobFragments {
         for (fragment_id, fragment) in &self.fragments {
             {
                 {
-                    visit_stream_node(&fragment.nodes, |body| {
+                    visit_stream_node_body(&fragment.nodes, |body| {
                         if let NodeBody::Union(_) = body {
                             if let Some(union_fragment_id) = union_fragment_id.as_mut() {
                                 // The union fragment should be unique.
