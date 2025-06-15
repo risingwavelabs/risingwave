@@ -506,7 +506,7 @@ mod graph {
         fragment_id: u32,
         identity: NodeBodyDiscriminants,
         actor_ids: HashSet<u32>,
-        dependencies: HashSet<u64>,
+        dependencies: Vec<u64>,
     }
 
     impl StreamNode {
@@ -544,7 +544,7 @@ mod graph {
             fragment_id_to_merge_operator_id: &mut HashMap<u32, OperatorId>,
             operator_id_to_stream_node: &mut HashMap<OperatorId, StreamNode>,
             node: &PbStreamNode,
-            actor_id: u32,
+            actor_ids: &HashSet<u32>,
         ) {
             let identity = node
                 .node_body
@@ -561,29 +561,22 @@ mod graph {
                 fragment_id_to_merge_operator_id.insert(*upstream_fragment_id, operator_id);
             }
             let dependencies = &node.input;
-            let entry = operator_id_to_stream_node
-                .entry(operator_id)
-                .or_insert_with(|| {
-                    let dependencies = dependencies
-                        .iter()
-                        .map(|input| unique_operator_id(fragment_id, input.operator_id))
-                        .collect();
-                    StreamNode {
-                        operator_id,
-                        fragment_id,
-                        identity,
-                        actor_ids: Default::default(),
-                        dependencies,
-                    }
+            let dependency_ids = dependencies.iter().map(|input| unique_operator_id(fragment_id, input.operator_id)).collect::<Vec<_>>();
+            operator_id_to_stream_node
+                .insert(operator_id, StreamNode {
+                    operator_id,
+                    fragment_id,
+                    identity,
+                    actor_ids: actor_ids.clone(),
+                    dependencies: dependency_ids,
                 });
-            assert!(entry.actor_ids.insert(actor_id));
             for dependency in dependencies {
                 extract_stream_node_info(
                     fragment_id,
                     fragment_id_to_merge_operator_id,
                     operator_id_to_stream_node,
                     dependency,
-                    actor_id,
+                    actor_ids,
                 );
             }
         }
@@ -594,17 +587,16 @@ mod graph {
         let mut fragment_id_to_merge_operator_id = HashMap::new();
         for fragment in fragments {
             let actors = fragment.actors;
-            for actor in actors {
-                let actor_id = actor.id;
-                let node = actor.node.unwrap();
-                extract_stream_node_info(
-                    fragment.id,
-                    &mut fragment_id_to_merge_operator_id,
-                    &mut operator_id_to_stream_node,
-                    &node,
-                    actor_id,
-                );
-            }
+            assert!(!actors.is_empty(), "fragment {} should have at least one actor", fragment.id);
+            let actor_ids = actors.iter().map(|actor| actor.id).collect::<HashSet<_>>();
+            let node = actors[0].node.as_ref().expect("should have stream node");
+            extract_stream_node_info(
+                fragment.id,
+                &mut fragment_id_to_merge_operator_id,
+                &mut operator_id_to_stream_node,
+                &node,
+                &actor_ids,
+            );
         }
 
         // find root node, and fill in dispatcher edges + nodes.
@@ -616,19 +608,17 @@ mod graph {
             if let Some(merge_operator_id) = fragment_id_to_merge_operator_id.get(&fragment_id) {
                 let operator_id_for_dispatch = operator_id_for_dispatch(fragment_id);
                 let mut dispatcher = StreamNode::new_for_dispatcher(operator_id_for_dispatch);
-                assert!(dispatcher.dependencies.insert(operator_id));
+                dispatcher.dependencies.push(operator_id);
                 assert!(
                     operator_id_to_stream_node
                         .insert(operator_id_for_dispatch as _, dispatcher)
                         .is_none()
                 );
-                assert!(
-                    operator_id_to_stream_node
-                        .get_mut(merge_operator_id)
-                        .unwrap()
-                        .dependencies
-                        .insert(operator_id_for_dispatch as _)
-                );
+                operator_id_to_stream_node
+                    .get_mut(merge_operator_id)
+                    .unwrap()
+                    .dependencies
+                    .push(operator_id_for_dispatch as _)
             } else {
                 root_node = Some(operator_id);
             }
@@ -645,7 +635,6 @@ mod graph {
         for (operator_id, node) in adjacency_list {
             assert_eq!(*operator_id, node.operator_id);
             let operator_id = node.operator_id;
-            let operator_name = node.identity;
             for actor_id in &node.actor_ids {
                 let executor_id =
                     unique_executor_id_from_unique_operator_id(*actor_id, operator_id);
