@@ -561,15 +561,20 @@ mod graph {
                 fragment_id_to_merge_operator_id.insert(*upstream_fragment_id, operator_id);
             }
             let dependencies = &node.input;
-            let dependency_ids = dependencies.iter().map(|input| unique_operator_id(fragment_id, input.operator_id)).collect::<Vec<_>>();
-            operator_id_to_stream_node
-                .insert(operator_id, StreamNode {
+            let dependency_ids = dependencies
+                .iter()
+                .map(|input| unique_operator_id(fragment_id, input.operator_id))
+                .collect::<Vec<_>>();
+            operator_id_to_stream_node.insert(
+                operator_id,
+                StreamNode {
                     operator_id,
                     fragment_id,
                     identity,
                     actor_ids: actor_ids.clone(),
                     dependencies: dependency_ids,
-                });
+                },
+            );
             for dependency in dependencies {
                 extract_stream_node_info(
                     fragment_id,
@@ -587,14 +592,18 @@ mod graph {
         let mut fragment_id_to_merge_operator_id = HashMap::new();
         for fragment in fragments {
             let actors = fragment.actors;
-            assert!(!actors.is_empty(), "fragment {} should have at least one actor", fragment.id);
+            assert!(
+                !actors.is_empty(),
+                "fragment {} should have at least one actor",
+                fragment.id
+            );
             let actor_ids = actors.iter().map(|actor| actor.id).collect::<HashSet<_>>();
             let node = actors[0].node.as_ref().expect("should have stream node");
             extract_stream_node_info(
                 fragment.id,
                 &mut fragment_id_to_merge_operator_id,
                 &mut operator_id_to_stream_node,
-                &node,
+                node,
                 &actor_ids,
             );
         }
