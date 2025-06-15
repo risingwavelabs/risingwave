@@ -111,16 +111,26 @@ impl From<ColumnDef> for Column {
 
 #[derive(Copy, Clone)]
 pub(crate) struct SqlGeneratorContext {
+    can_agg: bool, // This is used to disable agg expr totally,
+    // Used in top level, where we want to test queries
+    // without aggregates.
     inside_agg: bool,
 }
 
 impl SqlGeneratorContext {
-    pub fn new(inside_agg: bool) -> Self {
-        SqlGeneratorContext { inside_agg }
+    pub fn new(can_agg: bool, inside_agg: bool) -> Self {
+        SqlGeneratorContext {
+            can_agg,
+            inside_agg,
+        }
     }
 
     pub fn is_inside_agg(self) -> bool {
         self.inside_agg
+    }
+
+    pub fn can_gen_agg(self) -> bool {
+        self.can_agg && !self.inside_agg
     }
 }
 

@@ -91,7 +91,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         // - `a1 >= a2 IN b`
         // ...
         // We just nest compound expressions to avoid this.
-        let range = if !context.is_inside_agg() && self.should_generate(Syntax::Agg) {
+        let range = if context.can_gen_agg() {
             100
         } else {
             50
@@ -224,7 +224,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
 
     fn gen_exists(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
         if *ret != DataType::Boolean
-            || (!context.is_inside_agg() && self.should_generate(Syntax::Agg))
+            || context.can_gen_agg()
         {
             return self.gen_simple_scalar(ret);
         };

@@ -129,9 +129,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     fn gen_bool_with_tables(&mut self, tables: Vec<Table>) -> Expr {
         let old_context = self.new_local_context();
         self.add_relations_to_context(tables);
-        self.config.set_enabled(Feature::Agg, false);
-        let expr = self.gen_expr(&Boolean, SqlGeneratorContext::new(false));
-        self.config.set_enabled(Feature::Agg, true);
+        let expr = self.gen_expr(&Boolean, SqlGeneratorContext::new(false, false));
         self.restore_context(old_context);
         expr
     }
