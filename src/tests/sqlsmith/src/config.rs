@@ -56,19 +56,15 @@ impl fmt::Display for Feature {
     }
 }
 
-pub trait Generatable {
-    fn as_generate_item(&self) -> GenerateItem;
-}
-
-impl Generatable for Syntax {
-    fn as_generate_item(&self) -> GenerateItem {
-        GenerateItem::Syntax(*self)
+impl From<Syntax> for GenerateItem {
+    fn from(s: Syntax) -> Self {
+        GenerateItem::Syntax(s)
     }
 }
 
-impl Generatable for Feature {
-    fn as_generate_item(&self) -> GenerateItem {
-        GenerateItem::Feature(*self)
+impl From<Feature> for GenerateItem {
+    fn from(f: Feature) -> Self {
+        GenerateItem::Feature(f)
     }
 }
 
@@ -111,8 +107,12 @@ impl Configuration {
     }
 
     /// Decide whether to generate a syntax or enable a feature.
-    pub fn should_generate<T: Generatable, R: Rng>(&self, item: T, rng: &mut R) -> bool {
-        match item.as_generate_item() {
+    pub fn should_generate<R, T>(&self, item: T, rng: &mut R) -> bool
+    where
+        R: Rng,
+        T: Into<GenerateItem>,
+    {
+        match item.into() {
             GenerateItem::Syntax(syntax) => {
                 let weight = self.weight.get(&syntax).cloned().unwrap_or(50);
                 rng.random_range(0..100) < weight
