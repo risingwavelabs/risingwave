@@ -289,16 +289,21 @@ mod metrics {
                 let mut stats: ExecutorMetrics = Default::default();
                 stats.executor_id = *executor_id;
                 stats.epoch = 0;
-                stats.total_output_throughput += metrics
-                    .stream_node_output_row_count
-                    .get(executor_id)
-                    .cloned()
-                    .unwrap_or(0);
-                stats.total_output_pending_ns += metrics
+                if let Some(total_output_throughput) =
+                    metrics.stream_node_output_row_count.get(executor_id)
+                {
+                    stats.total_output_throughput += *total_output_throughput;
+                } else {
+                    tracing::warn!("missing executor stats for {}", executor_id);
+                }
+                if let Some(total_output_pending_ns) = metrics
                     .stream_node_output_blocking_duration_ns
                     .get(executor_id)
-                    .cloned()
-                    .unwrap_or(0);
+                {
+                    stats.total_output_pending_ns += *total_output_pending_ns;
+                } else {
+                    tracing::warn!("missing executor stats for {}", executor_id);
+                }
                 assert!(self.executor_stats.insert(*executor_id, stats).is_none());
             }
 
@@ -306,16 +311,27 @@ mod metrics {
                 let mut stats: DispatchMetrics = Default::default();
                 stats.fragment_id = *fragment_id;
                 stats.epoch = 0;
-                stats.total_output_throughput += metrics
-                    .dispatch_fragment_output_row_count
-                    .get(fragment_id)
-                    .cloned()
-                    .unwrap_or(0);
-                stats.total_output_pending_ns += metrics
+                if let Some(total_output_throughput) =
+                    metrics.dispatch_fragment_output_row_count.get(fragment_id)
+                {
+                    stats.total_output_throughput += *total_output_throughput;
+                } else {
+                    tracing::warn!(
+                        "missing dispatch total_output_throughput stats for {}",
+                        fragment_id
+                    );
+                }
+                if let Some(total_output_pending_ns) = metrics
                     .dispatch_fragment_output_blocking_duration_ns
                     .get(fragment_id)
-                    .cloned()
-                    .unwrap_or(0);
+                {
+                    stats.total_output_pending_ns += *total_output_pending_ns;
+                } else {
+                    tracing::warn!(
+                        "missing dispatch total_output_pending_ns stats for {}",
+                        fragment_id
+                    );
+                }
                 assert!(self.dispatch_stats.insert(*fragment_id, stats).is_none());
             }
         }
@@ -332,18 +348,49 @@ mod metrics {
                     tracing::warn!("missing executor stats for {}", executor_id);
                     continue;
                 };
-                stats.total_output_throughput = metrics
-                    .stream_node_output_row_count
-                    .get(executor_id)
-                    .cloned()
-                    .unwrap_or(0)
-                    - stats.total_output_throughput;
-                stats.total_output_pending_ns = metrics
+                if let Some(total_output_throughput) =
+                    metrics.stream_node_output_row_count.get(executor_id)
+                {
+                    let Some(delta) =
+                        total_output_throughput.checked_sub(stats.total_output_throughput)
+                    else {
+                        tracing::warn!(
+                            new_throughput = total_output_throughput,
+                            old_throughput = stats.total_output_throughput,
+                            "total_output_throughput overflow for {}",
+                            executor_id
+                        );
+                        continue;
+                    };
+                    stats.total_output_throughput = delta;
+                } else {
+                    tracing::warn!(
+                        "missing executor total_output_throughput stats for {}",
+                        executor_id
+                    );
+                }
+                if let Some(total_output_pending_ns) = metrics
                     .stream_node_output_blocking_duration_ns
                     .get(executor_id)
-                    .cloned()
-                    .unwrap_or(0)
-                    - stats.total_output_pending_ns;
+                {
+                    let Some(delta) =
+                        total_output_pending_ns.checked_sub(stats.total_output_pending_ns)
+                    else {
+                        tracing::warn!(
+                            new_pending_ns = total_output_pending_ns,
+                            old_pending_ns = stats.total_output_pending_ns,
+                            "total_output_pending_ns overflow for {}",
+                            executor_id
+                        );
+                        continue;
+                    };
+                    stats.total_output_pending_ns = delta;
+                } else {
+                    tracing::warn!(
+                        "missing executor total_output_pending_ns stats for {}",
+                        executor_id
+                    );
+                }
             }
 
             for fragment_id in dispatch_fragment_ids {
@@ -351,18 +398,49 @@ mod metrics {
                     tracing::warn!("missing dispatch stats for {}", fragment_id);
                     continue;
                 };
-                stats.total_output_throughput = metrics
-                    .dispatch_fragment_output_row_count
-                    .get(fragment_id)
-                    .cloned()
-                    .unwrap_or(0)
-                    - stats.total_output_throughput;
-                stats.total_output_pending_ns = metrics
+                if let Some(total_output_throughput) =
+                    metrics.dispatch_fragment_output_row_count.get(fragment_id)
+                {
+                    let Some(delta) =
+                        total_output_throughput.checked_sub(stats.total_output_throughput)
+                    else {
+                        tracing::warn!(
+                            new_throughput = total_output_throughput,
+                            old_throughput = stats.total_output_throughput,
+                            "total_output_throughput overflow for {}",
+                            fragment_id
+                        );
+                        continue;
+                    };
+                    stats.total_output_throughput = delta;
+                } else {
+                    tracing::warn!(
+                        "missing dispatch total_output_throughput stats for {}",
+                        fragment_id
+                    );
+                }
+                if let Some(total_output_pending_ns) = metrics
                     .dispatch_fragment_output_blocking_duration_ns
                     .get(fragment_id)
-                    .cloned()
-                    .unwrap_or(0)
-                    - stats.total_output_pending_ns;
+                {
+                    let Some(delta) =
+                        total_output_pending_ns.checked_sub(stats.total_output_pending_ns)
+                    else {
+                        tracing::warn!(
+                            new_pending_ns = total_output_pending_ns,
+                            old_pending_ns = stats.total_output_pending_ns,
+                            "total_output_pending_ns overflow for {}",
+                            fragment_id
+                        );
+                        continue;
+                    };
+                    stats.total_output_pending_ns = delta;
+                } else {
+                    tracing::warn!(
+                        "missing dispatch total_output_pending_ns stats for {}",
+                        fragment_id
+                    );
+                }
             }
         }
     }
