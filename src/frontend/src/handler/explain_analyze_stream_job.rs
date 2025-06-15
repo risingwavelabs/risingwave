@@ -510,10 +510,10 @@ mod graph {
     }
 
     impl StreamNode {
-        fn new_for_dispatcher(operator_id: u64) -> Self {
+        fn new_for_dispatcher(fragment_id: u32) -> Self {
             StreamNode {
-                operator_id,
-                fragment_id: 0,
+                operator_id: operator_id_for_dispatch(fragment_id),
+                fragment_id,
                 identity: NodeBodyDiscriminants::Exchange,
                 actor_ids: Default::default(),
                 dependencies: Default::default(),
@@ -615,8 +615,8 @@ mod graph {
             let node = operator_id_to_stream_node.get_mut(&operator_id).unwrap();
             let fragment_id = node.fragment_id;
             if let Some(merge_operator_id) = fragment_id_to_merge_operator_id.get(&fragment_id) {
-                let operator_id_for_dispatch = operator_id_for_dispatch(fragment_id);
-                let mut dispatcher = StreamNode::new_for_dispatcher(operator_id_for_dispatch);
+                let mut dispatcher = StreamNode::new_for_dispatcher(fragment_id);
+                let operator_id_for_dispatch = dispatcher.operator_id;
                 dispatcher.dependencies.push(operator_id);
                 assert!(
                     operator_id_to_stream_node
