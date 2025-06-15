@@ -245,6 +245,7 @@ mod metrics {
     use crate::handler::explain_analyze_stream_job::graph::{ExecutorId, OperatorId};
     use crate::handler::explain_analyze_stream_job::utils::operator_id_for_dispatch;
 
+    #[expect(dead_code)]
     #[derive(Default, Debug)]
     pub(super) struct ExecutorMetrics {
         pub executor_id: ExecutorId,
@@ -253,6 +254,7 @@ mod metrics {
         pub total_output_pending_ns: u64,
     }
 
+    #[expect(dead_code)]
     #[derive(Default, Debug)]
     pub(super) struct DispatchMetrics {
         pub fragment_id: FragmentId,
@@ -298,11 +300,12 @@ mod metrics {
                 else {
                     continue;
                 };
-                let mut stats: ExecutorMetrics = Default::default();
-                stats.executor_id = *executor_id;
-                stats.epoch = 0;
-                stats.total_output_throughput = *total_output_throughput;
-                stats.total_output_pending_ns = *total_output_pending_ns;
+                let stats = ExecutorMetrics {
+                    executor_id: *executor_id,
+                    epoch: 0,
+                    total_output_throughput: *total_output_throughput,
+                    total_output_pending_ns: *total_output_pending_ns,
+                };
                 assert!(self.executor_stats.insert(*executor_id, stats).is_none());
             }
 
@@ -318,11 +321,12 @@ mod metrics {
                 else {
                     continue;
                 };
-                let mut stats: DispatchMetrics = Default::default();
-                stats.fragment_id = *fragment_id;
-                stats.epoch = 0;
-                stats.total_output_throughput = *total_output_throughput;
-                stats.total_output_pending_ns = *total_output_pending_ns;
+                let stats = DispatchMetrics {
+                    fragment_id: *fragment_id,
+                    epoch: 0,
+                    total_output_throughput: *total_output_throughput,
+                    total_output_pending_ns: *total_output_pending_ns,
+                };
                 assert!(self.dispatch_stats.insert(*fragment_id, stats).is_none());
             }
         }
@@ -651,12 +655,12 @@ mod graph {
     pub(super) fn extract_executor_infos(
         adjacency_list: &HashMap<OperatorId, StreamNode>,
     ) -> (HashSet<u64>, HashMap<u64, HashSet<u64>>) {
-        let mut executor_ids: HashSet<_> = Default::default();
-        let mut operator_to_executor: HashMap<_, _> = Default::default();
-        for (operator_id, node) in adjacency_list.iter() {
+        let mut executor_ids = HashSet::new();
+        let mut operator_to_executor = HashMap::new();
+        for (operator_id, node) in adjacency_list {
             assert_eq!(*operator_id, node.operator_id);
             let operator_id = node.operator_id;
-            let operator_name = node.identity.clone();
+            let operator_name = node.identity;
             for actor_id in &node.actor_ids {
                 tracing::info!(
                     ?operator_name,
