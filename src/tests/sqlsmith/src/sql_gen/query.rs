@@ -309,7 +309,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn gen_random_bound_columns(&mut self) -> Vec<Column> {
-        let mut available = if self.should_generate(Feature::EOWC) {
+        let mut available = if self.should_generate(Feature::Eowc) {
             self.get_columns_with_watermark(&self.bound_columns.clone())
         } else {
             self.bound_columns.clone()

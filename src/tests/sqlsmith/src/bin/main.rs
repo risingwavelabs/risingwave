@@ -120,7 +120,7 @@ async fn main() {
     let mut config = Configuration::new(&opt.weight_config_path);
     for feat in &opt.enabled_features {
         match feat.as_str() {
-            "eowc" => config.set_enabled(Feature::EOWC, true),
+            "eowc" => config.set_enabled(Feature::Eowc, true),
             _ => panic!("Unknown feature: {}", feat),
         }
     }

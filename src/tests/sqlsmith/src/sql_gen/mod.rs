@@ -207,7 +207,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let name = ObjectName(vec![Ident::new_unchecked(name)]);
 
         // Randomly choose emit mode if allowed
-        let emit_mode = if self.should_generate(Feature::EOWC) {
+        let emit_mode = if self.should_generate(Feature::Eowc) {
             Some(EmitMode::OnWindowClose)
         } else {
             None

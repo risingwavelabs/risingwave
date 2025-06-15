@@ -26,7 +26,7 @@ impl fmt::Display for Syntax {
 #[derive(Debug, Clone, Copy, Ord, PartialOrd, PartialEq, Eq, Hash, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Feature {
-    EOWC,
+    Eowc,
     NaturalJoin,
     UsingJoin,
 }
@@ -34,7 +34,7 @@ pub enum Feature {
 impl fmt::Display for Feature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            Feature::EOWC => "eowc",
+            Feature::Eowc => "eowc",
             Feature::NaturalJoin => "natural join",
             Feature::UsingJoin => "using join",
         };
