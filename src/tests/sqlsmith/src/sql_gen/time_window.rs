@@ -35,7 +35,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     /// Generates `TUMBLE`.
     /// TUMBLE(data: TABLE, timecol: COLUMN, size: INTERVAL, offset?: INTERVAL)
     fn gen_tumble(&mut self) -> (TableFactor, Table) {
-        let source_tables = if self.should_generate(Feature::Eowc) {
+        let source_tables = if self.should_generate(Feature::EOWC) {
             self.get_append_only_tables()
         } else {
             self.tables.clone()
@@ -62,7 +62,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     /// Generates `HOP`.
     /// HOP(data: TABLE, timecol: COLUMN, slide: INTERVAL, size: INTERVAL, offset?: INTERVAL)
     fn gen_hop(&mut self) -> (TableFactor, Table) {
-        let source_tables = if self.should_generate(Feature::Eowc) {
+        let source_tables = if self.should_generate(Feature::EOWC) {
             self.get_append_only_tables()
         } else {
             self.tables.clone()

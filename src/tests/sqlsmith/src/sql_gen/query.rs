@@ -26,7 +26,7 @@ use risingwave_sqlparser::ast::{
     Cte, Distinct, Expr, Ident, Query, Select, SelectItem, SetExpr, TableWithJoins, Value, With,
 };
 
-use crate::config::Feature;
+use crate::config::{Feature, Syntax};
 use crate::sql_gen::utils::create_table_with_joins_from_table;
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext, Table};
 
@@ -250,7 +250,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn gen_where(&mut self) -> Option<Expr> {
-        if self.should_generate(Feature::Where) {
+        if self.should_generate(Syntax::Where) {
             self.config.set_enabled(Feature::Agg, false);
             let context = SqlGeneratorContext::new(false);
             let where_expr = Some(self.gen_expr(&DataType::Boolean, context));
@@ -312,7 +312,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn gen_random_bound_columns(&mut self) -> Vec<Column> {
-        let mut available = if self.should_generate(Feature::Eowc) {
+        let mut available = if self.should_generate(Feature::EOWC) {
             self.get_columns_with_watermark(&self.bound_columns.clone())
         } else {
             self.bound_columns.clone()
