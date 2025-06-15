@@ -254,7 +254,6 @@ mod metrics {
         pub total_output_pending_ns: u64,
     }
 
-    #[expect(dead_code)]
     #[derive(Default, Debug)]
     pub(super) struct DispatchMetrics {
         pub fragment_id: FragmentId,
@@ -306,6 +305,8 @@ mod metrics {
                     total_output_throughput: *total_output_throughput,
                     total_output_pending_ns: *total_output_pending_ns,
                 };
+                // An executor should be scheduled on a single worker node,
+                // it should not be inserted multiple times.
                 assert!(self.executor_stats.insert(*executor_id, stats).is_none());
             }
 
@@ -321,13 +322,14 @@ mod metrics {
                 else {
                     continue;
                 };
-                let stats = DispatchMetrics {
-                    fragment_id: *fragment_id,
-                    epoch: 0,
-                    total_output_throughput: *total_output_throughput,
-                    total_output_pending_ns: *total_output_pending_ns,
-                };
-                assert!(self.dispatch_stats.insert(*fragment_id, stats).is_none());
+                let stats = self.dispatch_stats.entry(*fragment_id).or_default();
+                stats.fragment_id = *fragment_id;
+                stats.epoch = 0;
+                // do a sum rather than insert
+                // because dispatchers are
+                // distributed across worker nodes.
+                stats.total_output_throughput += *total_output_throughput;
+                stats.total_output_pending_ns += *total_output_pending_ns;
             }
         }
 
