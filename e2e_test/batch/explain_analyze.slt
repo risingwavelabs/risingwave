@@ -58,11 +58,9 @@ explain analyze (duration_secs 0) table explain_analyze_test.t1;
 statement ok
 explain analyze (duration_secs 1) table explain_analyze_test.t1;
 
-skipif serial
 statement ok
 explain analyze (duration_secs 0) table explain_analyze_test.t2;
 
-skipif serial
 statement ok
 explain analyze (duration_secs 1) table explain_analyze_test.t2;
 
