@@ -2174,6 +2174,7 @@ fn bind_webhook_info(
                 ref_as: match secret_ref.ref_as {
                     SecretRefAsType::Text => PbRefAsType::Text,
                     SecretRefAsType::File => PbRefAsType::File,
+                    SecretRefAsType::FileUri => PbRefAsType::FileUri,
                 }
                 .into(),
             }),

@@ -210,3 +210,7 @@
     sql parser error: Unterminated string literal at line 1, column 76
     LINE 1: CREATE SECRET IF NOT EXISTS secret2 WITH (backend = 'meta') AS 'demo-secret
                                                                                        ^
+- input: CREATE SOURCE IF NOT EXISTS src WITH (kafka.topic = 'abc', kafka.brokers = 'localhost:1001', properties.ssl.key.location = SECRET secret_1 AS FILE) FORMAT PLAIN ENCODE JSON
+  formatted_sql: CREATE SOURCE IF NOT EXISTS src WITH (kafka.topic = 'abc', kafka.brokers = 'localhost:1001', properties.ssl.key.location = secret secret_1 AS FILE) FORMAT PLAIN ENCODE JSON
+- input: CREATE SOURCE IF NOT EXISTS src WITH (kafka.topic = 'abc', kafka.brokers = 'localhost:1001', properties.ssl.key.location = SECRET secret_1 AS FILE URI) FORMAT PLAIN ENCODE JSON
+  formatted_sql: CREATE SOURCE IF NOT EXISTS src WITH (kafka.topic = 'abc', kafka.brokers = 'localhost:1001', properties.ssl.key.location = secret secret_1 AS FILE URI) FORMAT PLAIN ENCODE JSON

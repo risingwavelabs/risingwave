@@ -3959,7 +3959,9 @@ impl Parser<'_> {
 
     fn parse_secret_ref(&mut self) -> ModalResult<SecretRefValue> {
         let secret_name = self.parse_object_name()?;
-        let ref_as = if self.parse_keywords(&[Keyword::AS, Keyword::FILE]) {
+        let ref_as = if self.parse_keywords(&[Keyword::AS, Keyword::FILE, Keyword::URI]) {
+            SecretRefAsType::FileUri
+        } else if self.parse_keywords(&[Keyword::AS, Keyword::FILE]) {
             SecretRefAsType::File
         } else {
             SecretRefAsType::Text

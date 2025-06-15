@@ -559,6 +559,7 @@ define_keywords!(
     UNNEST,
     UPDATE,
     UPPER,
+    URI,
     USAGE,
     USE,
     USER,

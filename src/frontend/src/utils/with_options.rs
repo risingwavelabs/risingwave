@@ -360,6 +360,7 @@ fn resolve_secret_refs_inner(
         let ref_as = match secret_ref.ref_as {
             SecretRefAsType::Text => PbRefAsType::Text,
             SecretRefAsType::File => PbRefAsType::File,
+            SecretRefAsType::FileUri => PbRefAsType::FileUri,
         };
         let pb_secret_ref = PbSecretRef {
             secret_id: secret_catalog.id.secret_id(),
