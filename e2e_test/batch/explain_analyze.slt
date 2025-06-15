@@ -55,30 +55,35 @@ drop materialized view explain_analyze_test.background_mv;
 statement ok
 explain analyze (duration_secs 0) table explain_analyze_test.t1;
 
+onlyif serial
 statement ok
 explain analyze (duration_secs 1) table explain_analyze_test.t1;
 
 statement ok
 explain analyze (duration_secs 0) table explain_analyze_test.t2;
 
+onlyif serial
 statement ok
 explain analyze (duration_secs 1) table explain_analyze_test.t2;
 
 statement ok
 explain analyze (duration_secs 0) materialized view explain_analyze_test.m1;
 
+onlyif serial
 statement ok
 explain analyze (duration_secs 1) materialized view explain_analyze_test.m1;
 
 statement ok
 explain analyze (duration_secs 0) materialized view explain_analyze_test.m2;
 
+onlyif serial
 statement ok
 explain analyze (duration_secs 1) materialized view explain_analyze_test.m2;
 
 statement ok
 explain analyze (duration_secs 0) sink explain_analyze_test.s1;
 
+onlyif serial
 statement ok
 explain analyze (duration_secs 1) sink explain_analyze_test.s1;
 
