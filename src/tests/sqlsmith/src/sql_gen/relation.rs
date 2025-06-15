@@ -63,7 +63,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
 
     fn gen_simple_table_factor(&mut self) -> (TableFactor, Table) {
         let alias = self.gen_table_name_with_prefix("t");
-        let mut table = if self.should_generate(Feature::EOWC) {
+        let mut table = if self.should_generate(Feature::Eowc) {
             self.get_append_only_tables()
                 .choose(&mut self.rng)
                 .unwrap()
@@ -94,7 +94,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     /// Generated column names should be qualified by table name.
     fn gen_table_factor_inner(&mut self) -> (TableFactor, Table) {
         let mut choices = vec![0, 3]; // time_window, simple_table
-        if !self.should_generate(Feature::EOWC) {
+        if !self.should_generate(Feature::Eowc) {
             choices.push(1); // table_func
         }
         if self.can_recurse() {
