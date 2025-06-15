@@ -247,6 +247,7 @@ impl fmt::Display for SecretRefValue {
         match self.ref_as {
             SecretRefAsType::Text => write!(f, "{}", self.secret_name),
             SecretRefAsType::File => write!(f, "{} AS FILE", self.secret_name),
+            SecretRefAsType::FileUri => write!(f, "{} AS FILE URI", self.secret_name),
         }
     }
 }
@@ -256,6 +257,7 @@ impl fmt::Display for SecretRefValue {
 pub enum SecretRefAsType {
     Text,
     File,
+    FileUri,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
