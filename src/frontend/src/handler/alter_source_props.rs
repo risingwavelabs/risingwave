@@ -161,7 +161,7 @@ pub(crate) fn ensure_alter_props_not_set_by_connection(
                     || params.secret_refs.contains_key(&prop_key)
                 {
                     return Err(ErrorCode::InvalidInputSyntax(
-                        "Cannot alter connector properties that are set by CONNECTION. Use `ALTER CONNECTION` to alter them.".to_owned(),
+                        "Cannot alter connector properties that are set by CONNECTION..".to_owned(),
                     )
                     .into());
                 }

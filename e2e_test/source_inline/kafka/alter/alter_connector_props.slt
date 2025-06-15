@@ -39,7 +39,7 @@ WITH (
 )
 FORMAT PLAIN ENCODE JSON;
 
-statement error Invalid input syntax: Cannot alter connector properties that are set by CONNECTION. Use `ALTER CONNECTION` to alter them.
+statement error Invalid input syntax: Cannot alter connector properties that are set by CONNECTION.
 alter table plain_students_1 connector with ( properties.security.protocol = 'sasl_ssl' ) ;
 
 

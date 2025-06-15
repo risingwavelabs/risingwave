@@ -262,15 +262,12 @@ impl WithOptionsSecResolved {
 
         // remove legacy key if it's set in both plaintext and secret
         for k in update_alter_props.keys() {
-            if self.secret_ref.contains_key(k) {
-                let to_remove_sink = self.secret_ref.remove(k).unwrap();
-                to_remove_secret_dep.push(to_remove_sink.secret_id);
+            if let Some(removed_secret) = self.secret_ref.remove(k) {
+                to_remove_secret_dep.push(removed_secret.secret_id);
             }
         }
         for (k, v) in &update_alter_secret_refs {
-            if self.inner.contains_key(k) {
-                self.inner.remove(k);
-            }
+            self.inner.remove(k);
 
             if let Some(old_secret_ref) = self.secret_ref.get(k) {
                 // no need to remove, do extend later

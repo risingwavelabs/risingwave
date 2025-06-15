@@ -111,7 +111,7 @@ impl SourceManagerCore {
         let mut fragment_replacements = Default::default();
         let mut dropped_source_fragments = Default::default();
         let mut dropped_source_ids = Default::default();
-        let mut reccreate_source_id_map_new_props: Vec<(u32, HashMap<String, String>)> =
+        let mut recreate_source_id_map_new_props: Vec<(u32, HashMap<String, String>)> =
             Default::default();
 
         match source_change {
@@ -168,7 +168,7 @@ impl SourceManagerCore {
                 source_id_map_new_props,
             } => {
                 for (source_id, new_props) in source_id_map_new_props {
-                    reccreate_source_id_map_new_props.push((source_id, new_props));
+                    recreate_source_id_map_new_props.push((source_id, new_props));
                 }
             }
         }
@@ -248,7 +248,7 @@ impl SourceManagerCore {
             }
         }
 
-        for (source_id, new_props) in reccreate_source_id_map_new_props {
+        for (source_id, new_props) in recreate_source_id_map_new_props {
             tracing::info!("recreate source {source_id} in source manager");
             if let Some(handle) = self.managed_sources.get_mut(&(source_id as _)) {
                 // the update here should not involve fragments change and split change

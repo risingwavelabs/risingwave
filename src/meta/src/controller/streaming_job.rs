@@ -1684,8 +1684,8 @@ impl CatalogController {
         let (to_add_secret_dep, to_remove_secret_dep) =
             options_with_secret.handle_update(alter_props, alter_secret_refs)?;
 
-        tracing::debug!(
-            "update_source_props_by_source_id: source_id={}, options_with_secret={:?}",
+        tracing::info!(
+            "applying new properties to source: source_id={}, options_with_secret={:?}",
             source_id,
             options_with_secret
         );
