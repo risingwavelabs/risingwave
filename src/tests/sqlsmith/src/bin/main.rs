@@ -20,7 +20,7 @@ use core::panic;
 use std::time::Duration;
 
 use clap::Parser as ClapParser;
-use risingwave_sqlsmith::config::Configuration;
+use risingwave_sqlsmith::config::{Configuration, Feature};
 use risingwave_sqlsmith::print_function_table;
 use risingwave_sqlsmith::test_runners::{generate, run, run_differential_testing};
 use tokio_postgres::NoTls;
@@ -74,6 +74,9 @@ struct TestOptions {
     /// Path to weight configuration file.
     #[clap(long, default_value = "src/tests/sqlsmith/config.yml")]
     weight_config_path: String,
+
+    #[clap(long = "enable", action = clap::ArgAction::Append)]
+    enabled_features: Vec<String>,
 }
 
 #[derive(clap::Subcommand, Clone, Debug)]
@@ -114,7 +117,13 @@ async fn main() {
             tracing::error!("Postgres connection error: {:?}", e);
         }
     });
-    let config = Configuration::new(&opt.weight_config_path);
+    let mut config = Configuration::new(&opt.weight_config_path);
+    for feat in &opt.enabled_features {
+        match feat.as_str() {
+            "eowc" => config.set_enabled(Feature::EOWC, true),
+            _ => panic!("Unknown feature: {}", feat),
+        }
+    }
     if opt.differential_testing {
         return run_differential_testing(&client, &opt.testdata, opt.count, &config, None)
             .await

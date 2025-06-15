@@ -1,17 +1,3 @@
-// Copyright 2025 RisingWave Labs
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -20,11 +6,27 @@ use serde::Deserialize;
 
 #[derive(Debug, Clone, Copy, Ord, PartialOrd, PartialEq, Eq, Hash, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Feature {
+pub enum Syntax {
     Where,
     Agg,
     Join,
-    Eowc,
+}
+
+impl fmt::Display for Syntax {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Syntax::Where => "where",
+            Syntax::Agg => "agg",
+            Syntax::Join => "join",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Ord, PartialOrd, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Feature {
+    EOWC,
     NaturalJoin,
     UsingJoin,
 }
@@ -32,10 +34,7 @@ pub enum Feature {
 impl fmt::Display for Feature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            Feature::Where => "where",
-            Feature::Agg => "agg",
-            Feature::Join => "join",
-            Feature::Eowc => "eowc",
+            Feature::EOWC => "eowc",
             Feature::NaturalJoin => "natural join",
             Feature::UsingJoin => "using join",
         };
@@ -43,20 +42,35 @@ impl fmt::Display for Feature {
     }
 }
 
+pub trait Generatable {
+    fn as_generate_item(self) -> GenerateItem;
+}
+
+impl Generatable for Syntax {
+    fn as_generate_item(self) -> GenerateItem {
+        GenerateItem::Syntax(self)
+    }
+}
+
+impl Generatable for Feature {
+    fn as_generate_item(self) -> GenerateItem {
+        GenerateItem::Feature(self)
+    }
+}
+
+/// Unified abstraction for syntax and feature
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GenerateItem {
+    Syntax(Syntax),
+    Feature(Feature),
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct Configuration {
-    pub config: BTreeMap<Feature, Status>,
-}
+    pub weight: BTreeMap<Syntax, u8>,
 
-#[derive(Clone, Debug, Deserialize)]
-pub struct Status {
-    pub weight: u8,
-    #[serde(default = "default_enabled")]
-    pub enabled: bool,
-}
-
-fn default_enabled() -> bool {
-    true
+    #[serde(default)]
+    pub feature: BTreeMap<Feature, bool>,
 }
 
 impl Default for Configuration {
@@ -70,11 +84,11 @@ impl Configuration {
         let data = std::fs::read_to_string(path).unwrap();
         let config: Configuration = serde_yaml::from_str(&data).unwrap();
 
-        for (feature, status) in &config.config {
-            if status.weight > 100 {
+        for (syntax, weight) in &config.weight {
+            if *weight > 100 {
                 panic!(
-                    "Invalid weight {} for feature '{}': weight must be in [0, 100]",
-                    status.weight, feature
+                    "Invalid weight {} for syntax '{}': must be in [0, 100]",
+                    weight, syntax
                 );
             }
         }
@@ -82,33 +96,28 @@ impl Configuration {
         config
     }
 
-    /// Returns true if the feature is enabled and passes the random check.
-    /// If the feature is not configured, defaults to 50% chance.
-    pub fn should_generate<R: Rng>(&self, feature: Feature, rng: &mut R) -> bool {
-        match self.config.get(&feature) {
-            Some(status) if status.enabled => rng.random_range(0..100) < status.weight,
-            Some(_) => false,
-            None => rng.random_bool(0.5),
+    /// Decide whether to generate a syntax or enable a feature.
+    pub fn should_generate<T: Generatable, R: Rng>(&self, item: T, rng: &mut R) -> bool {
+        match item.as_generate_item() {
+            GenerateItem::Syntax(syntax) => {
+                let weight = self.weight.get(&syntax).cloned().unwrap_or(50);
+                rng.random_range(0..100) < weight
+            }
+            GenerateItem::Feature(feature) => *self.feature.get(&feature).unwrap_or(&false),
         }
     }
 
-    pub fn set_weight(&mut self, feature: Feature, weight: u8) {
-        self.config
-            .entry(feature)
-            .or_insert_with(|| Status {
-                weight: 0,
-                enabled: true,
-            })
-            .weight = weight;
+    /// Dynamically update syntax weight.
+    pub fn set_weight(&mut self, syntax: Syntax, weight: u8) {
+        if weight > 100 {
+            panic!("Invalid weight {}: must be in [0, 100]", weight);
+        }
+
+        self.weight.insert(syntax, weight);
     }
 
+    /// Dynamically enable/disable a feature.
     pub fn set_enabled(&mut self, feature: Feature, enabled: bool) {
-        self.config
-            .entry(feature)
-            .or_insert_with(|| Status {
-                weight: 0,
-                enabled: true,
-            })
-            .enabled = enabled;
+        self.feature.insert(feature, enabled);
     }
 }
