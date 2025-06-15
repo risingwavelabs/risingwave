@@ -43,18 +43,18 @@ impl fmt::Display for Feature {
 }
 
 pub trait Generatable {
-    fn as_generate_item(self) -> GenerateItem;
+    fn as_generate_item(&self) -> GenerateItem;
 }
 
 impl Generatable for Syntax {
-    fn as_generate_item(self) -> GenerateItem {
-        GenerateItem::Syntax(self)
+    fn as_generate_item(&self) -> GenerateItem {
+        GenerateItem::Syntax(*self)
     }
 }
 
 impl Generatable for Feature {
-    fn as_generate_item(self) -> GenerateItem {
-        GenerateItem::Feature(self)
+    fn as_generate_item(&self) -> GenerateItem {
+        GenerateItem::Feature(*self)
     }
 }
 
