@@ -29,8 +29,8 @@ use crate::handler::{HandlerArgs, RwPgResponse, RwPgResponseBuilder, RwPgRespons
 struct ExplainAnalyzeStreamJobOutput {
     identity: String,
     actor_ids: String,
-    output_rows_per_second: String,
-    downstream_backpressure_ratio: String,
+    output_rows_per_second: Option<String>,
+    downstream_backpressure_ratio: Option<String>,
 }
 
 pub async fn handle_explain_analyze_stream_job(
@@ -243,6 +243,7 @@ mod metrics {
 
     use crate::catalog::FragmentId;
     use crate::handler::explain_analyze_stream_job::graph::{ExecutorId, OperatorId};
+    use crate::handler::explain_analyze_stream_job::utils::operator_id_for_dispatch;
 
     #[derive(Default, Debug)]
     pub(super) struct ExecutorMetrics {
@@ -286,52 +287,42 @@ mod metrics {
             metrics: &'a GetProfileStatsResponse,
         ) {
             for executor_id in executor_ids {
+                let Some(total_output_throughput) =
+                    metrics.stream_node_output_row_count.get(executor_id)
+                else {
+                    continue;
+                };
+                let Some(total_output_pending_ns) = metrics
+                    .stream_node_output_blocking_duration_ns
+                    .get(executor_id)
+                else {
+                    continue;
+                };
                 let mut stats: ExecutorMetrics = Default::default();
                 stats.executor_id = *executor_id;
                 stats.epoch = 0;
-                if let Some(total_output_throughput) =
-                    metrics.stream_node_output_row_count.get(executor_id)
-                {
-                    stats.total_output_throughput += *total_output_throughput;
-                } else {
-                    tracing::warn!("missing executor stats for {}", executor_id);
-                }
-                if let Some(total_output_pending_ns) = metrics
-                    .stream_node_output_blocking_duration_ns
-                    .get(executor_id)
-                {
-                    stats.total_output_pending_ns += *total_output_pending_ns;
-                } else {
-                    tracing::warn!("missing executor stats for {}", executor_id);
-                }
+                stats.total_output_throughput = *total_output_throughput;
+                stats.total_output_pending_ns = *total_output_pending_ns;
                 assert!(self.executor_stats.insert(*executor_id, stats).is_none());
             }
 
             for fragment_id in dispatch_fragment_ids {
+                let Some(total_output_throughput) =
+                    metrics.dispatch_fragment_output_row_count.get(fragment_id)
+                else {
+                    continue;
+                };
+                let Some(total_output_pending_ns) = metrics
+                    .dispatch_fragment_output_blocking_duration_ns
+                    .get(fragment_id)
+                else {
+                    continue;
+                };
                 let mut stats: DispatchMetrics = Default::default();
                 stats.fragment_id = *fragment_id;
                 stats.epoch = 0;
-                if let Some(total_output_throughput) =
-                    metrics.dispatch_fragment_output_row_count.get(fragment_id)
-                {
-                    stats.total_output_throughput += *total_output_throughput;
-                } else {
-                    tracing::warn!(
-                        "missing dispatch total_output_throughput stats for {}",
-                        fragment_id
-                    );
-                }
-                if let Some(total_output_pending_ns) = metrics
-                    .dispatch_fragment_output_blocking_duration_ns
-                    .get(fragment_id)
-                {
-                    stats.total_output_pending_ns += *total_output_pending_ns;
-                } else {
-                    tracing::warn!(
-                        "missing dispatch total_output_pending_ns stats for {}",
-                        fragment_id
-                    );
-                }
+                stats.total_output_throughput = *total_output_throughput;
+                stats.total_output_pending_ns = *total_output_pending_ns;
                 assert!(self.dispatch_stats.insert(*fragment_id, stats).is_none());
             }
         }
@@ -345,102 +336,60 @@ mod metrics {
         ) {
             for executor_id in executor_ids {
                 let Some(stats) = self.executor_stats.get_mut(executor_id) else {
-                    tracing::warn!("missing executor stats for {}", executor_id);
                     continue;
                 };
-                if let Some(total_output_throughput) =
+                let Some(total_output_throughput) =
                     metrics.stream_node_output_row_count.get(executor_id)
-                {
-                    let Some(delta) =
-                        total_output_throughput.checked_sub(stats.total_output_throughput)
-                    else {
-                        tracing::warn!(
-                            new_throughput = total_output_throughput,
-                            old_throughput = stats.total_output_throughput,
-                            "total_output_throughput overflow for {}",
-                            executor_id
-                        );
-                        continue;
-                    };
-                    stats.total_output_throughput = delta;
-                } else {
-                    tracing::warn!(
-                        "missing executor total_output_throughput stats for {}",
-                        executor_id
-                    );
-                }
-                if let Some(total_output_pending_ns) = metrics
+                else {
+                    continue;
+                };
+                let Some(total_output_pending_ns) = metrics
                     .stream_node_output_blocking_duration_ns
                     .get(executor_id)
-                {
-                    let Some(delta) =
-                        total_output_pending_ns.checked_sub(stats.total_output_pending_ns)
-                    else {
-                        tracing::warn!(
-                            new_pending_ns = total_output_pending_ns,
-                            old_pending_ns = stats.total_output_pending_ns,
-                            "total_output_pending_ns overflow for {}",
-                            executor_id
-                        );
-                        continue;
-                    };
-                    stats.total_output_pending_ns = delta;
-                } else {
-                    tracing::warn!(
-                        "missing executor total_output_pending_ns stats for {}",
-                        executor_id
-                    );
-                }
+                else {
+                    continue;
+                };
+                let Some(throughput_delta) =
+                    total_output_throughput.checked_sub(stats.total_output_throughput)
+                else {
+                    continue;
+                };
+                let Some(output_ns_delta) =
+                    total_output_pending_ns.checked_sub(stats.total_output_pending_ns)
+                else {
+                    continue;
+                };
+                stats.total_output_throughput = throughput_delta;
+                stats.total_output_pending_ns = output_ns_delta;
             }
 
             for fragment_id in dispatch_fragment_ids {
                 let Some(stats) = self.dispatch_stats.get_mut(fragment_id) else {
-                    tracing::warn!("missing dispatch stats for {}", fragment_id);
                     continue;
                 };
-                if let Some(total_output_throughput) =
+                let Some(total_output_throughput) =
                     metrics.dispatch_fragment_output_row_count.get(fragment_id)
-                {
-                    let Some(delta) =
-                        total_output_throughput.checked_sub(stats.total_output_throughput)
-                    else {
-                        tracing::warn!(
-                            new_throughput = total_output_throughput,
-                            old_throughput = stats.total_output_throughput,
-                            "total_output_throughput overflow for {}",
-                            fragment_id
-                        );
-                        continue;
-                    };
-                    stats.total_output_throughput = delta;
-                } else {
-                    tracing::warn!(
-                        "missing dispatch total_output_throughput stats for {}",
-                        fragment_id
-                    );
-                }
-                if let Some(total_output_pending_ns) = metrics
+                else {
+                    continue;
+                };
+                let Some(total_output_pending_ns) = metrics
                     .dispatch_fragment_output_blocking_duration_ns
                     .get(fragment_id)
-                {
-                    let Some(delta) =
-                        total_output_pending_ns.checked_sub(stats.total_output_pending_ns)
-                    else {
-                        tracing::warn!(
-                            new_pending_ns = total_output_pending_ns,
-                            old_pending_ns = stats.total_output_pending_ns,
-                            "total_output_pending_ns overflow for {}",
-                            fragment_id
-                        );
-                        continue;
-                    };
-                    stats.total_output_pending_ns = delta;
-                } else {
-                    tracing::warn!(
-                        "missing dispatch total_output_pending_ns stats for {}",
-                        fragment_id
-                    );
-                }
+                else {
+                    continue;
+                };
+                let Some(throughput_delta) =
+                    total_output_throughput.checked_sub(stats.total_output_throughput)
+                else {
+                    continue;
+                };
+                let Some(output_ns_delta) =
+                    total_output_pending_ns.checked_sub(stats.total_output_pending_ns)
+                else {
+                    continue;
+                };
+                stats.total_output_throughput = throughput_delta;
+                stats.total_output_pending_ns = output_ns_delta;
             }
         }
     }
@@ -467,7 +416,7 @@ mod metrics {
             fragment_parallelisms: &HashMap<FragmentId, usize>,
         ) -> Self {
             let mut operator_stats = HashMap::new();
-            for (operator_id, executor_ids) in operator_map {
+            'operator_loop: for (operator_id, executor_ids) in operator_map {
                 let num_executors = executor_ids.len() as u64;
                 let mut total_output_throughput = 0;
                 let mut total_output_pending_ns = 0;
@@ -475,6 +424,9 @@ mod metrics {
                     if let Some(stats) = executor_stats.get(&executor_id) {
                         total_output_throughput += stats.total_output_throughput;
                         total_output_pending_ns += stats.total_output_pending_ns;
+                    } else {
+                        // skip this operator if it doesn't have executor stats for any of its executors
+                        continue 'operator_loop;
                     }
                 }
                 let total_output_throughput = total_output_throughput;
@@ -492,7 +444,7 @@ mod metrics {
             }
 
             for (fragment_id, dispatch_metrics) in &executor_stats.dispatch_stats {
-                let operator_id = *fragment_id as OperatorId;
+                let operator_id = operator_id_for_dispatch(*fragment_id);
                 let total_output_throughput = dispatch_metrics.total_output_throughput;
                 let fragment_parallelism = fragment_parallelisms
                     .get(fragment_id)
@@ -529,6 +481,7 @@ mod graph {
     use std::collections::{HashMap, HashSet};
     use std::time::Duration;
 
+    use itertools::Itertools;
     use risingwave_common::operator::{
         unique_executor_id_from_unique_operator_id, unique_operator_id,
     };
@@ -538,6 +491,7 @@ mod graph {
 
     use crate::handler::explain_analyze_stream_job::ExplainAnalyzeStreamJobOutput;
     use crate::handler::explain_analyze_stream_job::metrics::OperatorStats;
+    use crate::handler::explain_analyze_stream_job::utils::operator_id_for_dispatch;
     pub(super) type OperatorId = u64;
     pub(super) type ExecutorId = u64;
 
@@ -694,10 +648,6 @@ mod graph {
         (root_node.unwrap(), operator_id_to_stream_node)
     }
 
-    fn operator_id_for_dispatch(fragment_id: u32) -> OperatorId {
-        unique_operator_id(fragment_id, u32::MAX as u64)
-    }
-
     pub(super) fn extract_executor_infos(
         adjacency_list: &HashMap<OperatorId, StreamNode>,
     ) -> (HashSet<u64>, HashMap<u64, HashSet<u64>>) {
@@ -764,23 +714,32 @@ mod graph {
             let child_prefix = format!("{}{}", prefix, child_prefix);
 
             let stats = stats.get(&node_id);
-            let (output_throughput, output_latency) = stats
-                .map(|stats| (stats.total_output_throughput, stats.total_output_pending_ns))
-                .unwrap_or((0, 0));
+            let (output_rows_per_second, downstream_backpressure_ratio) = match stats {
+                Some(stats) => (
+                    Some(
+                        (stats.total_output_throughput as f64 / profiling_duration_secs)
+                            .to_string(),
+                    ),
+                    Some(
+                        (Duration::from_nanos(stats.total_output_pending_ns).as_secs_f64()
+                            / usize::max(node.actor_ids.len(), 1) as f64
+                            / profiling_duration_secs)
+                            .to_string(),
+                    ),
+                ),
+                None => (None, None),
+            };
             let row = ExplainAnalyzeStreamJobOutput {
                 identity: identity_rendered,
                 actor_ids: node
                     .actor_ids
                     .iter()
+                    .sorted()
                     .map(|id| id.to_string())
                     .collect::<Vec<_>>()
                     .join(","),
-                output_rows_per_second: (output_throughput as f64 / profiling_duration_secs)
-                    .to_string(),
-                downstream_backpressure_ratio: (Duration::from_nanos(output_latency).as_secs_f64()
-                    / usize::max(node.actor_ids.len(), 1) as f64
-                    / profiling_duration_secs)
-                    .to_string(),
+                output_rows_per_second,
+                downstream_backpressure_ratio,
             };
             rows.push(row);
             for (position, dependency) in node.dependencies.iter().enumerate() {
@@ -788,5 +747,15 @@ mod graph {
             }
         }
         rows
+    }
+}
+
+mod utils {
+    use risingwave_common::operator::unique_operator_id;
+
+    use crate::handler::explain_analyze_stream_job::graph::OperatorId;
+
+    pub(super) fn operator_id_for_dispatch(fragment_id: u32) -> OperatorId {
+        unique_operator_id(fragment_id, u32::MAX as u64)
     }
 }
