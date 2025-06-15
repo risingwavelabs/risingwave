@@ -1,0 +1,91 @@
+statement ok
+drop schema if exists explain_analyze_test cascade;
+
+statement ok
+create schema explain_analyze_test;
+
+statement ok
+create table explain_analyze_test.t1(v1 int primary key)
+with (connector='datagen', datagen.rows.per.second='1', fields.id.kind = 'sequence', fields.v1.start = '1', fields.v2.end = '1000000');
+
+statement ok
+create materialized view explain_analyze_test.m1 as select * from explain_analyze_test.t1;
+
+statement ok
+create materialized view explain_analyze_test.m2 as select t1.v1 from explain_analyze_test.m1 join explain_analyze_test.t1 using(v1);
+
+statement ok
+create table explain_analyze_test.t2(v1 int primary key);
+
+statement ok
+create sink explain_analyze_test.s1 into explain_analyze_test.t2 from explain_analyze_test.t1;
+
+onlyif serial
+statement ok
+set background_ddl=true;
+
+onlyif serial
+statement ok
+set backfill_rate_limit=0;
+
+onlyif serial
+statement ok
+create materialized view explain_analyze_test.background_mv as select * from explain_analyze_test.t1;
+
+onlyif serial
+statement ok
+set background_ddl=default;
+
+onlyif serial
+statement ok
+set backfill_rate_limit=default;
+
+onlyif serial
+statement ok
+explain analyze (duration_secs 0) materialized view explain_analyze_test.background_mv;
+
+onlyif serial
+statement ok
+explain analyze (duration_secs 1) materialized view explain_analyze_test.background_mv;
+
+onlyif serial
+statement ok
+drop materialized view explain_analyze_test.background_mv;
+
+statement ok
+explain analyze (duration_secs 0) table explain_analyze_test.t1;
+
+onlyif serial
+statement ok
+explain analyze (duration_secs 1) table explain_analyze_test.t1;
+
+statement ok
+explain analyze (duration_secs 0) table explain_analyze_test.t2;
+
+onlyif serial
+statement ok
+explain analyze (duration_secs 1) table explain_analyze_test.t2;
+
+statement ok
+explain analyze (duration_secs 0) materialized view explain_analyze_test.m1;
+
+onlyif serial
+statement ok
+explain analyze (duration_secs 1) materialized view explain_analyze_test.m1;
+
+statement ok
+explain analyze (duration_secs 0) materialized view explain_analyze_test.m2;
+
+onlyif serial
+statement ok
+explain analyze (duration_secs 1) materialized view explain_analyze_test.m2;
+
+statement ok
+explain analyze (duration_secs 0) sink explain_analyze_test.s1;
+
+onlyif serial
+statement ok
+explain analyze (duration_secs 1) sink explain_analyze_test.s1;
+
+statement ok
+drop schema explain_analyze_test cascade;
