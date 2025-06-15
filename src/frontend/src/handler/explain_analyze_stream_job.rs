@@ -546,12 +546,6 @@ mod graph {
             node: &PbStreamNode,
             actor_id: u32,
         ) {
-            tracing::info!(
-                actor_id,
-                fragment_id,
-                node.operator_id,
-                "extracting stream node info"
-            );
             let identity = node
                 .node_body
                 .as_ref()
@@ -567,14 +561,6 @@ mod graph {
                 fragment_id_to_merge_operator_id.insert(*upstream_fragment_id, operator_id);
             }
             let dependencies = &node.input;
-            let dependency_infos = dependencies
-                .iter()
-                .map(|input| {
-                    let operator_id = unique_operator_id(fragment_id, input.operator_id);
-                    (operator_id, input.operator_id)
-                })
-                .collect::<HashMap<_, _>>();
-            tracing::info!(?dependency_infos, "dependency infos");
             let entry = operator_id_to_stream_node
                 .entry(operator_id)
                 .or_insert_with(|| {
@@ -607,7 +593,6 @@ mod graph {
         let mut operator_id_to_stream_node = HashMap::new();
         let mut fragment_id_to_merge_operator_id = HashMap::new();
         for fragment in fragments {
-            tracing::info!(fragment.id, "top-level extracting stream node info");
             let actors = fragment.actors;
             for actor in actors {
                 let actor_id = actor.id;
@@ -662,12 +647,6 @@ mod graph {
             let operator_id = node.operator_id;
             let operator_name = node.identity;
             for actor_id in &node.actor_ids {
-                tracing::info!(
-                    ?operator_name,
-                    ?operator_id,
-                    ?actor_id,
-                    "extracting executor info"
-                );
                 let executor_id =
                     unique_executor_id_from_unique_operator_id(*actor_id, operator_id);
                 assert!(executor_ids.insert(executor_id));
