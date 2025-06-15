@@ -625,8 +625,8 @@ pub async fn handle(
                 let x = variable::set_var_to_param_str(&value);
                 let res = use_db::handle_use_db(
                     handler_args,
-                    ObjectName::from(vec![Ident::new_unchecked(
-                        x.unwrap_or("default".to_owned()),
+                    ObjectName::from(vec![Ident::from_real_value(
+                        x.as_deref().unwrap_or("default"),
                     )]),
                 )?;
                 let mut builder = RwPgResponse::builder(StatementType::SET_VARIABLE);

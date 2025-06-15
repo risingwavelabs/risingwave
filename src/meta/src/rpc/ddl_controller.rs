@@ -16,9 +16,12 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
+use await_tree::{InstrumentAwait, span};
+use either::Either;
 use itertools::Itertools;
 use risingwave_common::catalog::AlterDatabaseParam;
 use risingwave_common::config::DefaultParallelism;
@@ -56,6 +59,7 @@ use risingwave_pb::stream_plan::{
 };
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use strum::Display;
 use thiserror_ext::AsReport;
 use tokio::sync::{Semaphore, oneshot};
 use tokio::time::sleep;
@@ -99,11 +103,19 @@ impl DropMode {
     }
 }
 
+#[derive(strum::AsRefStr)]
 pub enum StreamingJobId {
     MaterializedView(TableId),
     Sink(SinkId),
     Table(Option<SourceId>, TableId),
     Index(IndexId),
+}
+
+impl std::fmt::Display for StreamingJobId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_ref())?;
+        write!(f, "({})", self.id())
+    }
 }
 
 impl StreamingJobId {
@@ -125,6 +137,7 @@ pub struct ReplaceStreamJobInfo {
     pub fragment_graph: StreamFragmentGraphProto,
 }
 
+#[derive(Display)]
 pub enum DdlCommand {
     CreateDatabase(Database),
     DropDatabase(DatabaseId),
@@ -168,6 +181,40 @@ pub enum DdlCommand {
 }
 
 impl DdlCommand {
+    /// Returns the name or ID of the object that this command operates on, for observability and debugging.
+    fn object(&self) -> Either<String, ObjectId> {
+        use Either::*;
+        match self {
+            DdlCommand::CreateDatabase(database) => Left(database.name.clone()),
+            DdlCommand::DropDatabase(id) => Right(*id),
+            DdlCommand::CreateSchema(schema) => Left(schema.name.clone()),
+            DdlCommand::DropSchema(id, _) => Right(*id),
+            DdlCommand::CreateNonSharedSource(source) => Left(source.name.clone()),
+            DdlCommand::DropSource(id, _) => Right(*id),
+            DdlCommand::CreateFunction(function) => Left(function.name.clone()),
+            DdlCommand::DropFunction(id) => Right(*id),
+            DdlCommand::CreateView(view) => Left(view.name.clone()),
+            DdlCommand::DropView(id, _) => Right(*id),
+            DdlCommand::CreateStreamingJob { stream_job, .. } => Left(stream_job.name()),
+            DdlCommand::DropStreamingJob { job_id, .. } => Right(job_id.id()),
+            DdlCommand::AlterName(object, _) => Left(format!("{object:?}")),
+            DdlCommand::AlterSwapRename(object) => Left(format!("{object:?}")),
+            DdlCommand::ReplaceStreamJob(info) => Left(info.streaming_job.name()),
+            DdlCommand::AlterNonSharedSource(source) => Left(source.name.clone()),
+            DdlCommand::AlterObjectOwner(object, _) => Left(format!("{object:?}")),
+            DdlCommand::AlterSetSchema(object, _) => Left(format!("{object:?}")),
+            DdlCommand::CreateConnection(connection) => Left(connection.name.clone()),
+            DdlCommand::DropConnection(id) => Right(*id),
+            DdlCommand::CreateSecret(secret) => Left(secret.name.clone()),
+            DdlCommand::AlterSecret(secret) => Left(secret.name.clone()),
+            DdlCommand::DropSecret(id) => Right(*id),
+            DdlCommand::CommentOn(comment) => Right(comment.table_id as _),
+            DdlCommand::CreateSubscription(subscription) => Left(subscription.name.clone()),
+            DdlCommand::DropSubscription(id, _) => Right(*id),
+            DdlCommand::AlterDatabaseParam(id, _) => Right(*id),
+        }
+    }
+
     fn allow_in_recovery(&self) -> bool {
         match self {
             DdlCommand::DropDatabase(_)
@@ -212,6 +259,9 @@ pub struct DdlController {
 
     // The semaphore is used to limit the number of concurrent streaming job creation.
     pub(crate) creating_streaming_job_permits: Arc<CreatingStreamingJobPermit>,
+
+    /// Sequence number for DDL commands, used for observability and debugging.
+    seq: Arc<AtomicU64>,
 }
 
 #[derive(Clone)]
@@ -288,7 +338,13 @@ impl DdlController {
             source_manager,
             barrier_manager,
             creating_streaming_job_permits,
+            seq: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// Obtains the next sequence number for DDL commands, for observability and debugging purposes.
+    pub fn next_seq(&self) -> u64 {
+        self.seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }
 
     /// `run_command` spawns a tokio coroutine to execute the target ddl command. When the client
@@ -301,6 +357,10 @@ impl DdlController {
         if !command.allow_in_recovery() {
             self.barrier_manager.check_status_running()?;
         }
+
+        let await_tree_key = format!("DDL Command {}", self.next_seq());
+        let await_tree_span = await_tree::span!("{command}({})", command.object());
+
         let ctrl = self.clone();
         let fut = async move {
             match command {
@@ -386,6 +446,9 @@ impl DdlController {
             }
         }
         .in_current_span();
+        let fut = (self.env.await_tree_reg())
+            .register(await_tree_key, await_tree_span)
+            .instrument(Box::pin(fut));
         let notification_version = tokio::spawn(fut).await.map_err(|e| anyhow!(e))??;
         Ok(Some(WaitVersion {
             catalog_version: notification_version,
@@ -657,6 +720,7 @@ impl DdlController {
     }
 
     /// Validates the connect properties in the `cdc_table_desc` stored in the `StreamCdcScan` node
+    #[await_tree::instrument]
     pub(crate) async fn validate_cdc_table(
         table: &Table,
         table_fragments: &StreamJobFragments,
@@ -935,6 +999,7 @@ impl DdlController {
 
     /// For [`CreateType::Foreground`], the function will only return after backfilling finishes
     /// ([`crate::manager::MetadataManager::wait_streaming_job_finished`]).
+    #[await_tree::instrument(boxed, "create_streaming_job({streaming_job})")]
     pub async fn create_streaming_job(
         &self,
         mut streaming_job: StreamingJob,
@@ -988,6 +1053,7 @@ impl DdlController {
             .creating_streaming_job_permits
             .semaphore
             .acquire()
+            .instrument_await("acquire_creating_streaming_job_permit")
             .await
             .unwrap();
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
@@ -1043,6 +1109,7 @@ impl DdlController {
         }
     }
 
+    #[await_tree::instrument(boxed)]
     async fn create_streaming_job_inner(
         &self,
         ctx: StreamContext,
@@ -1189,28 +1256,46 @@ impl DdlController {
         // create streaming jobs.
         let stream_job_id = streaming_job.id();
         match (streaming_job.create_type(), &streaming_job) {
+            // FIXME(kwannoel): Unify background stream's creation path with MV below.
             (CreateType::Unspecified, _)
             | (CreateType::Foreground, _)
-            // FIXME(kwannoel): Unify background stream's creation path with MV below.
             | (CreateType::Background, StreamingJob::Sink(_, _)) => {
-                let version = self.stream_manager
+                let version = self
+                    .stream_manager
                     .create_streaming_job(stream_job_fragments, ctx, None)
                     .await?;
                 Ok(version)
             }
             (CreateType::Background, _) => {
+                let await_tree_key = format!("Background DDL Worker ({})", streaming_job.id());
+                let await_tree_span =
+                    span!("{:?}({})", streaming_job.job_type(), streaming_job.name());
+
                 let ctrl = self.clone();
                 let (tx, rx) = oneshot::channel();
                 let fut = async move {
                     let _ = ctrl
                         .stream_manager
                         .create_streaming_job(stream_job_fragments, ctx, Some(tx))
-                        .await.inspect_err(|err| {
-                        tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to create background streaming job");
-                    });
+                        .await
+                        .inspect_err(|err| {
+                            tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to create background streaming job");
+                        });
                 };
+
+                let fut = (self.env.await_tree_reg())
+                    .register(await_tree_key, await_tree_span)
+                    .instrument(fut);
                 tokio::spawn(fut);
-                rx.await.map_err(|_| anyhow!("failed to receive create streaming job result of job: {}", stream_job_id))??;
+
+                rx.instrument_await("wait_background_streaming_job_creation_started")
+                    .await
+                    .map_err(|_| {
+                        anyhow!(
+                            "failed to receive create streaming job result of job: {}",
+                            stream_job_id
+                        )
+                    })??;
                 Ok(IGNORED_NOTIFICATION_VERSION)
             }
         }
@@ -1393,6 +1478,7 @@ impl DdlController {
     }
 
     /// This is used for `ALTER TABLE ADD/DROP COLUMN` / `ALTER SOURCE ADD COLUMN`.
+    #[await_tree::instrument(boxed, "replace_streaming_job({streaming_job})")]
     pub async fn replace_job(
         &self,
         mut streaming_job: StreamingJob,
@@ -1535,6 +1621,7 @@ impl DdlController {
         }
     }
 
+    #[await_tree::instrument(boxed, "drop_streaming_job{}({job_id})", if let DropMode::Cascade = drop_mode { "_cascade" } else { "" })]
     async fn drop_streaming_job(
         &self,
         job_id: StreamingJobId,
@@ -1634,6 +1721,7 @@ impl DdlController {
     /// - Schedule the fragments based on their distribution
     /// - Expand each fragment into one or several actors
     /// - Construct the fragment level backfill order control.
+    #[await_tree::instrument]
     pub(crate) async fn build_stream_job(
         &self,
         stream_ctx: StreamContext,

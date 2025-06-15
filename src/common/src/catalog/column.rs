@@ -204,7 +204,7 @@ impl ColumnDesc {
             additional_column_type: 0, // deprecated
             additional_column: Some(self.additional_column.clone()),
             version: self.version as i32,
-            nullable: self.nullable,
+            nullable: Some(self.nullable),
         }
     }
 
@@ -241,7 +241,7 @@ impl From<PbColumnDesc> for ColumnDesc {
             additional_column,
             version,
             system_column: None,
-            nullable: prost.nullable,
+            nullable: prost.nullable.unwrap_or(true),
         }
     }
 }
