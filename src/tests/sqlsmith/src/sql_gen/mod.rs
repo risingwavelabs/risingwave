@@ -31,7 +31,7 @@ mod cast;
 mod expr;
 pub use expr::print_function_table;
 
-use crate::config::{Configuration, Feature};
+use crate::config::{Configuration, Feature, Generatable};
 
 mod dml;
 mod functions;
@@ -215,7 +215,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let name = ObjectName(vec![Ident::new_unchecked(name)]);
 
         // Randomly choose emit mode if allowed
-        let emit_mode = if self.should_generate(Feature::Eowc) {
+        let emit_mode = if self.should_generate(Feature::EOWC) {
             Some(EmitMode::OnWindowClose)
         } else {
             None
@@ -277,7 +277,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     /// Decide whether to generate on config.
-    pub(crate) fn should_generate(&mut self, feature: Feature) -> bool {
-        self.config.should_generate(feature, self.rng)
+    pub(crate) fn should_generate<T: Generatable>(&mut self, item: T) -> bool {
+        self.config.should_generate(item, self.rng)
     }
 }

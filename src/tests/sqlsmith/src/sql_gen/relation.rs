@@ -19,7 +19,7 @@ use risingwave_sqlparser::ast::{
     Ident, ObjectName, TableAlias, TableFactor, TableWithJoins, Value,
 };
 
-use crate::config::Feature;
+use crate::config::{Feature, Syntax};
 use crate::sql_gen::types::BINARY_INEQUALITY_OP_TABLE;
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext};
 use crate::{BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Table};
@@ -37,7 +37,7 @@ fn create_equi_expr(left: &Column, right: &Column) -> Expr {
 impl<R: Rng> SqlGenerator<'_, R> {
     /// A relation specified in the FROM clause.
     pub(crate) fn gen_from_relation(&mut self) -> (TableWithJoins, Vec<Table>) {
-        if !self.should_generate(Feature::Join) {
+        if !self.should_generate(Syntax::Join) {
             return self.gen_no_join();
         }
         match self.rng.random_range(1..=3) {
@@ -63,7 +63,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
 
     fn gen_simple_table_factor(&mut self) -> (TableFactor, Table) {
         let alias = self.gen_table_name_with_prefix("t");
-        let mut table = if self.should_generate(Feature::Eowc) {
+        let mut table = if self.should_generate(Feature::EOWC) {
             self.get_append_only_tables()
                 .choose(&mut self.rng)
                 .unwrap()
@@ -94,7 +94,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     /// Generated column names should be qualified by table name.
     fn gen_table_factor_inner(&mut self) -> (TableFactor, Table) {
         let mut choices = vec![0, 3]; // time_window, simple_table
-        if !self.should_generate(Feature::Eowc) {
+        if !self.should_generate(Feature::EOWC) {
             choices.push(1); // table_func
         }
         if self.can_recurse() {
