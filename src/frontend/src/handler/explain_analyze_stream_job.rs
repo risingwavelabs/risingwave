@@ -533,12 +533,11 @@ mod graph {
         unique_executor_id_from_unique_operator_id, unique_operator_id,
     };
     use risingwave_pb::meta::list_table_fragments_response::FragmentInfo;
-    use risingwave_pb::stream_plan::stream_node::NodeBody;
+    use risingwave_pb::stream_plan::stream_node::{NodeBody, NodeBodyDiscriminants};
     use risingwave_pb::stream_plan::{MergeNode, StreamNode as PbStreamNode};
 
     use crate::handler::explain_analyze_stream_job::ExplainAnalyzeStreamJobOutput;
     use crate::handler::explain_analyze_stream_job::metrics::OperatorStats;
-
     pub(super) type OperatorId = u64;
     pub(super) type ExecutorId = u64;
 
@@ -547,7 +546,7 @@ mod graph {
     pub(super) struct StreamNode {
         operator_id: OperatorId,
         fragment_id: u32,
-        identity: String,
+        identity: NodeBodyDiscriminants,
         actor_ids: HashSet<u32>,
         dependencies: HashSet<u64>,
     }
@@ -557,7 +556,7 @@ mod graph {
             StreamNode {
                 operator_id,
                 fragment_id: 0,
-                identity: "Dispatcher".to_owned(),
+                identity: NodeBodyDiscriminants::Exchange,
                 actor_ids: Default::default(),
                 dependencies: Default::default(),
             }
@@ -595,7 +594,11 @@ mod graph {
                 node.operator_id,
                 "extracting stream node info"
             );
-            let identity = node.node_body.as_ref().expect("should have node body").to_string();
+            let identity = node
+                .node_body
+                .as_ref()
+                .expect("should have node body")
+                .into();
             let operator_id = unique_operator_id(fragment_id, node.operator_id);
             if let Some(merge_node) = node.node_body.as_ref()
                 && let NodeBody::Merge(box MergeNode {
@@ -745,7 +748,7 @@ mod graph {
             let is_root = node_id == root_node;
 
             let identity_rendered = if is_root {
-                node.identity.clone()
+                node.identity.to_string()
             } else {
                 let connector = if last_child { "└─ " } else { "├─ " };
                 format!("{}{}{}", prefix, connector, node.identity)
