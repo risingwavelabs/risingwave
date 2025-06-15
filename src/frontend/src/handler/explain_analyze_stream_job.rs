@@ -529,7 +529,6 @@ mod graph {
     use std::collections::{HashMap, HashSet};
     use std::time::Duration;
 
-    use fancy_regex::Regex;
     use risingwave_common::operator::{
         unique_executor_id_from_unique_operator_id, unique_operator_id,
     };
@@ -596,9 +595,7 @@ mod graph {
                 node.operator_id,
                 "extracting stream node info"
             );
-            let re = Regex::new(r"[a-zA-Z]+").expect("should be able to compile regex");
-            let result = re.find(&node.identity).unwrap().unwrap();
-            let identity = result.as_str().to_owned();
+            let identity = node.node_body.as_ref().expect("should have node body").to_string();
             let operator_id = unique_operator_id(fragment_id, node.operator_id);
             if let Some(merge_node) = node.node_body.as_ref()
                 && let NodeBody::Merge(box MergeNode {
