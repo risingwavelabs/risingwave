@@ -40,7 +40,7 @@ onlyif serial
 statement ok
 set backfill_rate_limit=default;
 
-onlyif serial 
+onlyif serial
 statement ok
 explain analyze (duration_secs 0) materialized view explain_analyze_test.background_mv;
 
@@ -52,7 +52,6 @@ onlyif serial
 statement ok
 drop materialized view explain_analyze_test.background_mv;
 
-skipif serial
 statement ok
 explain analyze (duration_secs 0) table explain_analyze_test.t1;
 
