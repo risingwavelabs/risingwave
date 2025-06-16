@@ -444,7 +444,14 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             name: "t",
                             columns: [
                                 Column {
-                                    name: "v1",
+                                    name: ObjectName(
+                                        [
+                                            Ident {
+                                                value: "v1",
+                                                quote_style: None,
+                                            },
+                                        ],
+                                    ),
                                     data_type: Int32,
                                 },
                             ],
@@ -459,11 +466,25 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             name: "t2",
                             columns: [
                                 Column {
-                                    name: "v1",
+                                    name: ObjectName(
+                                        [
+                                            Ident {
+                                                value: "v1",
+                                                quote_style: None,
+                                            },
+                                        ],
+                                    ),
                                     data_type: Int32,
                                 },
                                 Column {
-                                    name: "v2",
+                                    name: ObjectName(
+                                        [
+                                            Ident {
+                                                value: "v2",
+                                                quote_style: None,
+                                            },
+                                        ],
+                                    ),
                                     data_type: Int16,
                                 },
                             ],
@@ -478,11 +499,25 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             name: "t3",
                             columns: [
                                 Column {
-                                    name: "v1",
+                                    name: ObjectName(
+                                        [
+                                            Ident {
+                                                value: "v1",
+                                                quote_style: None,
+                                            },
+                                        ],
+                                    ),
                                     data_type: Int32,
                                 },
                                 Column {
-                                    name: "v2",
+                                    name: ObjectName(
+                                        [
+                                            Ident {
+                                                value: "v2",
+                                                quote_style: None,
+                                            },
+                                        ],
+                                    ),
                                     data_type: Int16,
                                 },
                             ],
@@ -498,15 +533,36 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             name: "t4",
                             columns: [
                                 Column {
-                                    name: "v1",
+                                    name: ObjectName(
+                                        [
+                                            Ident {
+                                                value: "v1",
+                                                quote_style: None,
+                                            },
+                                        ],
+                                    ),
                                     data_type: Int32,
                                 },
                                 Column {
-                                    name: "v2",
+                                    name: ObjectName(
+                                        [
+                                            Ident {
+                                                value: "v2",
+                                                quote_style: None,
+                                            },
+                                        ],
+                                    ),
                                     data_type: Int16,
                                 },
                                 Column {
-                                    name: "v3",
+                                    name: ObjectName(
+                                        [
+                                            Ident {
+                                                value: "v3",
+                                                quote_style: None,
+                                            },
+                                        ],
+                                    ),
                                     data_type: Boolean,
                                 },
                             ],
