@@ -260,7 +260,7 @@ pub fn weighted_scale<C, I>(
 ///
 /// - `Weighted`: Distribute items proportionally to container weights, applying any configured scale factor.
 /// - `Unbounded`: No capacity limit; containers can receive any number of items.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum CapacityMode {
     /// Use each container’s weight to bound how many items it can receive.
@@ -2492,6 +2492,350 @@ mod assigner_test {
         for vnodes in actor_map_contiguity.values() {
             assert_eq!(vnodes.len(), 2, "Each actor should get a chunk of size 2");
             assert_eq!(vnodes[0] + 1, vnodes[1], "VNodes must be contiguous");
+        }
+    }
+}
+
+#[cfg(test)]
+mod multi_group_cluster_simulation_tests {
+    use std::collections::BTreeMap;
+    use std::num::NonZeroUsize;
+
+    use super::affinity_tests::get_vnode_to_worker_map;
+    use super::*;
+
+    const VNODE_COUNT: usize = 256;
+    const ACTOR_COUNT: usize = 32;
+
+    #[test]
+    fn test_multi_group_balance() {
+        let actors: Vec<u16> = (0..ACTOR_COUNT as u16).collect();
+        let vnodes: Vec<u32> = (0..VNODE_COUNT as u32).collect();
+
+        let modes = [
+            (CapacityMode::Weighted, BalancedBy::RawWorkerWeights),
+            (CapacityMode::Weighted, BalancedBy::ActorCounts),
+            (CapacityMode::Unbounded, BalancedBy::RawWorkerWeights),
+            (CapacityMode::Unbounded, BalancedBy::ActorCounts),
+        ];
+
+        for num_groups in [1, 5, 10, 20, 50, 100, 500] {
+            for worker_count in [3, 4, 5] {
+                println!(
+                    "\n--- Testing with {} Groups {} Workers ---\n",
+                    num_groups, worker_count
+                );
+                for &(capacity_mode, balanced_by) in &modes {
+                    println!(
+                        "\n--- Testing Mode: Capacity={:?}, BalancedBy={:?} ---\n",
+                        capacity_mode, balanced_by
+                    );
+
+                    run_uniformity_check(
+                        capacity_mode,
+                        balanced_by,
+                        &actors,
+                        &vnodes,
+                        worker_count,
+                        num_groups,
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_multi_group_affinity() {
+        let actors: Vec<u16> = (0..ACTOR_COUNT as u16).collect();
+        let vnodes: Vec<u32> = (0..VNODE_COUNT as u32).collect();
+
+        let modes = [
+            (CapacityMode::Weighted, BalancedBy::RawWorkerWeights),
+            (CapacityMode::Weighted, BalancedBy::ActorCounts),
+            (CapacityMode::Unbounded, BalancedBy::RawWorkerWeights),
+            (CapacityMode::Unbounded, BalancedBy::ActorCounts),
+        ];
+
+        for worker_count in [1, 2, 3, 4] {
+            for &(capacity_mode, balanced_by) in &modes {
+                println!(
+                    "\n--- Testing Mode: Capacity={:?}, BalancedBy={:?} ---\n",
+                    capacity_mode, balanced_by
+                );
+                run_affinity_check(
+                    capacity_mode,
+                    balanced_by,
+                    &actors,
+                    &vnodes,
+                    (worker_count, worker_count + 1),
+                );
+                run_affinity_check(
+                    capacity_mode,
+                    balanced_by,
+                    &actors,
+                    &vnodes,
+                    (worker_count, worker_count * 2),
+                );
+            }
+        }
+    }
+
+    /// Helper function to check the overall VNode distribution uniformity over multiple groups.
+    fn run_uniformity_check(
+        capacity_mode: CapacityMode,
+        balanced_by: BalancedBy,
+        actors: &[u16],
+        vnodes: &[u32],
+        worker_count: u8,
+        num_groups: usize,
+    ) {
+        let initial_workers = create_workers(worker_count);
+        let mut total_vnode_distribution: BTreeMap<u8, usize> = BTreeMap::new();
+
+        for group_id in 0..num_groups {
+            let salt = group_id as u64;
+            let assigner =
+                AssignerBuilder::new(salt).build_with_strategies(capacity_mode, balanced_by);
+
+            let assignment = assigner
+                .assign_hierarchical(&initial_workers, actors, vnodes)
+                .unwrap();
+
+            for (worker_id, actor_map) in assignment {
+                let vnodes_on_worker: usize = actor_map.values().map(Vec::len).sum();
+                *total_vnode_distribution.entry(worker_id).or_insert(0) += vnodes_on_worker;
+            }
+        }
+
+        let total_vnodes_assigned: usize = total_vnode_distribution.values().sum();
+        let expected_total_vnodes = vnodes.len() * num_groups;
+        assert_eq!(
+            total_vnodes_assigned, expected_total_vnodes,
+            "All vnodes from all groups must be assigned"
+        );
+
+        let worker_count = initial_workers.len();
+        let expected_vnodes_per_worker = (expected_total_vnodes as f64) / worker_count as f64;
+        println!(
+            "[Uniformity] Overall VNode Distribution: {:?}",
+            total_vnode_distribution
+        );
+        println!(
+            "[Uniformity] Expected per worker: {:.2}",
+            expected_vnodes_per_worker
+        );
+
+        match (capacity_mode, balanced_by) {
+            (CapacityMode::Unbounded, BalancedBy::ActorCounts) => {
+                println!("[Uniformity] Skipping uniformity check for Unbounded/ActorCounts.");
+            }
+            _ => {
+                println!("[Uniformity] Applying STATISTICAL uniformity check.");
+                let n = expected_total_vnodes as f64;
+                let p = 1.0 / worker_count as f64;
+                let mu = n * p;
+                let sigma = (n * p * (1.0 - p)).sqrt();
+                const K_SIGMA_TOLERANCE: f64 = 2.0;
+                let max_allowed_deviation_abs = K_SIGMA_TOLERANCE * sigma;
+                let dynamic_deviation_threshold = max_allowed_deviation_abs / mu;
+
+                println!(
+                    "[Uniformity] Dynamic Threshold: {:.2}% (based on {} sigma)",
+                    dynamic_deviation_threshold * 100.0,
+                    K_SIGMA_TOLERANCE
+                );
+
+                for (worker_id, v_count) in &total_vnode_distribution {
+                    let deviation = (*v_count as f64 - mu).abs() / mu;
+                    println!(
+                        " Worker #{} VNode Count: {}, Deviation: {:.2}%",
+                        worker_id, v_count, deviation
+                    );
+                    assert!(
+                        deviation < dynamic_deviation_threshold,
+                        "[Uniformity] VNode distribution on worker {} is not uniform for {:?}/{:?}. Deviation: {:.2}%, Allowed: {:.2}%",
+                        worker_id,
+                        capacity_mode,
+                        balanced_by,
+                        deviation * 100.0,
+                        dynamic_deviation_threshold * 100.0
+                    );
+                }
+            }
+        }
+
+        println!("[Uniformity] Test passed.");
+    }
+
+    /// Helper function to check VNode affinity during cluster scaling.
+    fn run_affinity_check(
+        capacity_mode: CapacityMode,
+        balanced_by: BalancedBy,
+        actors: &[u16],
+        vnodes: &[u32],
+        (initial_worker_count, scaled_worker_count): (u8, u8),
+    ) {
+        let salt_for_affinity_test = 0u64;
+
+        let (expected_ceiling_out, expected_ceiling_in) = calculate_ideal_affinity_thresholds(
+            salt_for_affinity_test,
+            initial_worker_count,
+            scaled_worker_count,
+            vnodes,
+        );
+
+        println!(
+            "[Affinity] Calculated ideal benchmarks -> Scale-Out: {:.2}%, Scale-In: {:.2}%",
+            expected_ceiling_out, expected_ceiling_in
+        );
+
+        let assigner = AssignerBuilder::new(salt_for_affinity_test)
+            .build_with_strategies(capacity_mode, balanced_by);
+
+        let initial_workers = create_workers(initial_worker_count);
+        let scaled_workers = create_workers(scaled_worker_count);
+
+        let initial_map = get_vnode_to_worker_map(
+            &assigner
+                .assign_hierarchical(&initial_workers, actors, vnodes)
+                .unwrap(),
+        );
+        let scaled_map = get_vnode_to_worker_map(
+            &assigner
+                .assign_hierarchical(&scaled_workers, actors, vnodes)
+                .unwrap(),
+        );
+
+        let stable_on_scale_out = initial_map
+            .iter()
+            .filter(|(v, w)| scaled_map.get(v) == Some(w))
+            .count();
+        let stability_pct_out = (stable_on_scale_out as f64 / vnodes.len() as f64) * 100.0;
+
+        let vnodes_on_survivors_before = scaled_map
+            .values()
+            .filter(|w| initial_workers.contains_key(w))
+            .count();
+        let stable_on_scale_in = scaled_map
+            .iter()
+            .filter(|(v, w)| initial_workers.contains_key(w) && initial_map.get(v) == Some(w))
+            .count();
+        let stability_pct_in = if vnodes_on_survivors_before > 0 {
+            (stable_on_scale_in as f64 / vnodes_on_survivors_before as f64) * 100.0
+        } else {
+            100.0 // If no survivors, vacuously stable.
+        };
+
+        println!(
+            "[Affinity] Actual Measured Result ({}->{}) -> Scale-Out: {:.2}%, Scale-In: {:.2}%",
+            initial_worker_count, scaled_worker_count, stability_pct_out, stability_pct_in
+        );
+
+        if capacity_mode == CapacityMode::Unbounded && balanced_by == BalancedBy::ActorCounts {
+            // skip this mode, as it has no affinity guarantees.
+        } else {
+            println!("[Affinity] Expecting HIGH VNode affinity for this mode.");
+            // Assert that the stability is very close to the theoretical ceiling.
+            assert!(
+                (stability_pct_out - expected_ceiling_out).abs() < 20f64,
+                "Expected stability on scale-out, close to {:.2}%, but got {:.2}%",
+                expected_ceiling_out,
+                stability_pct_out
+            );
+            assert!(
+                (stability_pct_in - expected_ceiling_in).abs() < 20f64,
+                "Expected stability on scale-in, close to {:.2}%, but got {:.2}%",
+                expected_ceiling_in,
+                stability_pct_in
+            );
+        }
+        println!("[Affinity] Test passed.");
+    }
+
+    /// A helper function to calculate the precise, ideal affinity thresholds by
+    /// simulating a direct, single-layer assignment.
+    fn calculate_ideal_affinity_thresholds(
+        salt: u64,
+        initial_worker_count: u8,
+        scaled_worker_count: u8,
+        vnodes: &[u32],
+    ) -> (f64, f64) {
+        let initial_workers = create_workers(initial_worker_count);
+        let scaled_workers = create_workers(scaled_worker_count);
+
+        // Simulate direct VNode->Worker assignment to get the "ideal" maps.
+        // This uses the core assignment function, which correctly handles remainders.
+        let ideal_map_before =
+            assign_items_weighted_with_scale_fn(&initial_workers, vnodes, salt, unbounded_scale);
+        let ideal_map_after =
+            assign_items_weighted_with_scale_fn(&scaled_workers, vnodes, salt, unbounded_scale);
+
+        // Flatten the maps for easy comparison.
+        let initial_flat_map: HashMap<u32, u8> = ideal_map_before
+            .into_iter()
+            .flat_map(|(k, vs)| vs.into_iter().map(move |v| (v, k)))
+            .collect();
+        let scaled_flat_map: HashMap<u32, u8> = ideal_map_after
+            .into_iter()
+            .flat_map(|(k, vs)| vs.into_iter().map(move |v| (v, k)))
+            .collect();
+
+        // Calculate ideal scale-out stability
+        let stable_on_scale_out = initial_flat_map
+            .iter()
+            .filter(|(v, w)| scaled_flat_map.get(v) == Some(w))
+            .count();
+        let ideal_stability_out = (stable_on_scale_out as f64 / vnodes.len() as f64) * 100.0;
+
+        // Calculate ideal scale-in stability
+        let vnodes_on_survivors_before = scaled_flat_map
+            .values()
+            .filter(|w| initial_workers.contains_key(w))
+            .count();
+        let stable_on_scale_in = scaled_flat_map
+            .iter()
+            .filter(|(v, w)| initial_workers.contains_key(w) && initial_flat_map.get(v) == Some(w))
+            .count();
+        let ideal_stability_in = if vnodes_on_survivors_before > 0 {
+            (stable_on_scale_in as f64 / vnodes_on_survivors_before as f64) * 100.0
+        } else {
+            100.0
+        };
+
+        (ideal_stability_out, ideal_stability_in)
+    }
+
+    /// Helper function to create a `BTreeMap` of workers with equal weights.
+    fn create_workers(count: u8) -> BTreeMap<u8, NonZeroUsize> {
+        (1..=count)
+            .map(|i| (i, NonZeroUsize::new(1).unwrap()))
+            .collect()
+    }
+
+    /// Helper extension trait to make builder setup cleaner in the test
+    trait AssignerBuilderExt<S: Hash + Copy> {
+        fn build_with_strategies(
+            &mut self,
+            capacity: CapacityMode,
+            balance: BalancedBy,
+        ) -> Assigner<S>;
+    }
+
+    impl<S: Hash + Copy> AssignerBuilderExt<S> for AssignerBuilder<S> {
+        fn build_with_strategies(
+            &mut self,
+            capacity: CapacityMode,
+            balance: BalancedBy,
+        ) -> Assigner<S> {
+            match capacity {
+                CapacityMode::Weighted => self.with_capacity_weighted(),
+                CapacityMode::Unbounded => self.with_capacity_unbounded(),
+            };
+            match balance {
+                BalancedBy::RawWorkerWeights => self.with_worker_oriented_balancing(),
+                BalancedBy::ActorCounts => self.with_actor_oriented_balancing(),
+            };
+            self.build()
         }
     }
 }
