@@ -889,7 +889,11 @@ mod tests {
         assert_eq!(barrier.database_id, DatabaseId::from(1));
         assert!(barrier.command.is_none()); // Should be a periodic barrier, not a scheduled command
         assert!(barrier.checkpoint); // Second barrier should be checkpoint for database 1
-        assert!(elapsed <= Duration::from_millis(100)); // Should be around 50ms
+        assert!(
+            elapsed <= Duration::from_millis(100),
+            "Elapsed time exceeded: {:?}",
+            elapsed
+        ); // Should be around 50ms
 
         // Verify that the checkpoint frequency works
         let db1_id = DatabaseId::from(1);
