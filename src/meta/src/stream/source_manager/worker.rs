@@ -20,7 +20,6 @@ use risingwave_connector::source::AnySplitEnumerator;
 use super::*;
 
 const MAX_FAIL_CNT: u32 = 10;
-const DEFAULT_SOURCE_TICK_TIMEOUT: Duration = Duration::from_secs(10);
 
 // The key used to load `SplitImpl` directly from source properties.
 // When this key is present, the enumerator will only return the given ones

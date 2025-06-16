@@ -55,6 +55,8 @@ pub type ThrottleConfig = HashMap<FragmentId, HashMap<ActorId, Option<u32>>>;
 // ALTER CONNECTOR parameters, specifying the new parameters to be set for each job_id (source_id/sink_id)
 pub type ConnectorPropsChange = HashMap<u32, HashMap<String, String>>;
 
+const DEFAULT_SOURCE_TICK_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// `SourceManager` keeps fetching the latest split metadata from the external source services ([`worker::ConnectorSourceWorker::tick`]),
 /// and sends a split assignment command if split changes detected ([`Self::tick`]).
 pub struct SourceManager {
@@ -382,6 +384,29 @@ impl SourceManager {
             paused: Mutex::new(()),
             metrics,
         })
+    }
+
+    pub async fn validate_source_once(
+        &self,
+        source_id: u32,
+        new_source_props: WithOptionsSecResolved,
+    ) -> MetaResult<()> {
+        let props = ConnectorProperties::extract(new_source_props, false).unwrap();
+
+        {
+            let mut enumerator = props
+                .create_split_enumerator(Arc::new(SourceEnumeratorContext {
+                    metrics: self.metrics.source_enumerator_metrics.clone(),
+                    info: SourceEnumeratorInfo { source_id },
+                }))
+                .await
+                .context("failed to create SplitEnumerator")?;
+
+            let _ = tokio::time::timeout(DEFAULT_SOURCE_TICK_TIMEOUT, enumerator.list_splits())
+                .await
+                .context("failed to list splits")??;
+        }
+        Ok(())
     }
 
     /// For replacing job (alter table/source, create sink into table).
