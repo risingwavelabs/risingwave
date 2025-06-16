@@ -17,6 +17,7 @@
 use cfg_or_panic::cfg_or_panic;
 use clap::Parser;
 use risingwave_simulation::slt::slt_env::Opts;
+use risingwave_sqlsmith::config::Feature;
 
 /// Deterministic simulation end-to-end test runner.
 ///
@@ -123,6 +124,10 @@ pub struct Args {
     #[clap(long, default_value = "src/tests/sqlsmith/config.yml")]
     weight_config_path: String,
 
+    /// Features to enable (e.g. eowc).
+    #[clap(long = "enable", action = clap::ArgAction::Append)]
+    enabled_features: Vec<String>,
+
     /// Run sqlsmith for differential testing
     #[clap(long)]
     run_differential_tests: bool,
@@ -195,7 +200,14 @@ async fn main() {
     }
 
     let seed = sqlsmith_seed();
-    let weight_config = risingwave_sqlsmith::config::Configuration::new(&args.weight_config_path);
+    let mut sqlsmith_config =
+        risingwave_sqlsmith::config::Configuration::new(&args.weight_config_path);
+    for feat in &args.enabled_features {
+        match feat.as_str() {
+            "eowc" => sqlsmith_config.set_enabled(Feature::Eowc, true),
+            _ => panic!("Unknown feature: {}", feat),
+        }
+    }
     if let Some(count) = args.sqlsmith {
         cluster
             .run_on_client(async move {
@@ -208,7 +220,7 @@ async fn main() {
                         &args.files,
                         count,
                         &outdir,
-                        &weight_config,
+                        &sqlsmith_config,
                         Some(seed),
                     )
                     .await;
@@ -219,7 +231,7 @@ async fn main() {
                         rw.pg_client(),
                         &args.files,
                         count,
-                        &weight_config,
+                        &sqlsmith_config,
                         Some(seed),
                     )
                     .await
@@ -231,7 +243,7 @@ async fn main() {
                     rw.pg_client(),
                     &args.files,
                     count,
-                    &weight_config,
+                    &sqlsmith_config,
                     Some(seed),
                 )
                 .await;

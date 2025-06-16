@@ -75,6 +75,7 @@ struct TestOptions {
     #[clap(long, default_value = "src/tests/sqlsmith/config.yml")]
     weight_config_path: String,
 
+    /// Features to enable (e.g. eowc).
     #[clap(long = "enable", action = clap::ArgAction::Append)]
     enabled_features: Vec<String>,
 }
