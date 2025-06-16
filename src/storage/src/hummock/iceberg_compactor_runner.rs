@@ -21,6 +21,7 @@ use bergloom_core::compaction::{
     Compaction, CompactionType, RewriteDataFilesCommitManagerRetryConfig,
 };
 use bergloom_core::config::CompactionConfigBuilder;
+use bergloom_core::executor::RewriteFilesStat;
 use derive_builder::Builder;
 use iceberg::{Catalog, TableIdent};
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
@@ -302,6 +303,16 @@ impl IcebergCompactorRunner {
                     }),
             );
 
+            tracing::info!(
+                task_id = task_id,
+                table = ?self.table_ident,
+                input_parallelism,
+                output_parallelism,
+                statistics = ?statistics,
+                compaction_config = ?compaction_config,
+                "Iceberg compaction task started",
+            );
+
             let compaction = Compaction::builder()
                 .with_catalog(self.catalog.clone())
                 .with_catalog_name(self.iceberg_config.catalog_name())
@@ -330,44 +341,38 @@ impl IcebergCompactorRunner {
                 },
             );
 
-            tracing::info!(
-                "Iceberg compaction task {} {:?} started with input parallelism {} and output parallelism {}",
-                task_id,
-                format!(
-                    "{:?}-{:?}",
-                    self.iceberg_config.catalog_name(),
-                    self.table_ident
-                ),
-                input_parallelism,
-                output_parallelism
-            );
-            compaction
+            let stat = compaction
                 .compact()
                 .await
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-            Ok::<(), HummockError>(())
+            Ok::<RewriteFilesStat, HummockError>(stat)
         };
 
         tokio::select! {
             _ = shutdown_rx => {
-                tracing::info!("Iceberg compaction task {} cancelled", task_id);
+                tracing::info!(task_id = task_id, "Iceberg compaction task cancelled");
             }
-            result = compact => {
-                if let Err(e) = result {
-                    tracing::warn!(
-                        error = %e.as_report(),
-                        "Compaction task {} failed with error",
-                        task_id,
-                    );
+            stat = compact => {
+                match stat {
+                    Ok(stat) => {
+                        tracing::info!(
+                            task_id = task_id,
+                            elapsed_millis = now.elapsed().as_millis(),
+                            stat = ?stat,
+                            "Iceberg compaction task finished",
+                        );
+                    }
+
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e.as_report(),
+                            task_id = task_id,
+                            "Iceberg compaction task failed with error",
+                        );
+                    }
                 }
             }
         }
-
-        tracing::info!(
-            "Iceberg compaction task {} finished cost {} ms",
-            task_id,
-            now.elapsed().as_millis()
-        );
 
         Ok(())
     }
