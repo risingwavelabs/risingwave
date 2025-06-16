@@ -12,7 +12,7 @@ create materialized view m1 as
 
 query ? retry 3 backoff 1s
 select
-  case when regexp_match(progress, '([0-9]+\.[0-9]+)%')[1]::numeric
+  case when regexp_match(progress, '([0-9]+?\.?[0-9]+)%')[1]::numeric
     >= (99::numeric / 1000::numeric)
   then 't'
   else
@@ -53,7 +53,7 @@ create materialized view m1 as
 
 query ? retry 3 backoff 1s
 select
-  case when regexp_match(progress, '([0-9]+\.[0-9]+)%')[1]::numeric
+  case when regexp_match(progress, '([0-9]+?\.?[0-9]+)%')[1]::numeric
     >= (2::numeric * 50::numeric / 1000::numeric)
   then 't'
   else
