@@ -48,6 +48,9 @@ statement ok
 set background_ddl=false;
 
 statement ok
+set backfill_rate_limit=default;
+
+statement ok
 create materialized view m2
  as select v1 from t1
 union
