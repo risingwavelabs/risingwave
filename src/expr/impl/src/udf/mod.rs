@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![allow(dead_code, unused_imports)]
+#![cfg_attr(coverage, coverage(off))]
 
 // common imports for submodules
 use anyhow::{Context as _, Result};
