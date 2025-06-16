@@ -134,4 +134,17 @@ impl Configuration {
     pub fn set_enabled(&mut self, feature: Feature, enabled: bool) {
         self.feature.insert(feature, enabled);
     }
+
+    /// Enable features from command-line `--enable` arguments
+    pub fn enable_features_from_args(&mut self, features: &[String]) {
+        for feat in features {
+            let parsed = match feat.as_str() {
+                "eowc" => Feature::Eowc,
+                "natural_join" => Feature::NaturalJoin,
+                "using_join" => Feature::UsingJoin,
+                _ => panic!("Unknown feature: {}", feat),
+            };
+            self.set_enabled(parsed, true);
+        }
+    }
 }

@@ -125,7 +125,7 @@ pub struct Args {
     weight_config_path: String,
 
     /// Features to enable (e.g. eowc).
-    #[clap(long = "enable", action = clap::ArgAction::Append)]
+    #[clap(long = "enable", value_delimiter = ',', action = clap::ArgAction::Append)]
     enabled_features: Vec<String>,
 
     /// Run sqlsmith for differential testing
@@ -202,12 +202,7 @@ async fn main() {
     let seed = sqlsmith_seed();
     let mut sqlsmith_config =
         risingwave_sqlsmith::config::Configuration::new(&args.weight_config_path);
-    for feat in &args.enabled_features {
-        match feat.as_str() {
-            "eowc" => sqlsmith_config.set_enabled(Feature::Eowc, true),
-            _ => panic!("Unknown feature: {}", feat),
-        }
-    }
+    sqlsmith_config.enable_features_from_args(&args.enabled_features);
     if let Some(count) = args.sqlsmith {
         cluster
             .run_on_client(async move {

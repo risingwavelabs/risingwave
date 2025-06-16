@@ -76,7 +76,7 @@ struct TestOptions {
     weight_config_path: String,
 
     /// Features to enable (e.g. eowc).
-    #[clap(long = "enable", action = clap::ArgAction::Append)]
+    #[clap(long = "enable", value_delimiter = ',', action = clap::ArgAction::Append)]
     enabled_features: Vec<String>,
 }
 
@@ -119,12 +119,7 @@ async fn main() {
         }
     });
     let mut config = Configuration::new(&opt.weight_config_path);
-    for feat in &opt.enabled_features {
-        match feat.as_str() {
-            "eowc" => config.set_enabled(Feature::Eowc, true),
-            _ => panic!("Unknown feature: {}", feat),
-        }
-    }
+    config.enable_features_from_args(&opt.enabled_features);
     if opt.differential_testing {
         return run_differential_testing(&client, &opt.testdata, opt.count, &config, None)
             .await
