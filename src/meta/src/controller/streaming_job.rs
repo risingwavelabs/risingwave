@@ -641,6 +641,7 @@ impl CatalogController {
         Ok((true, Some(database_id)))
     }
 
+    #[await_tree::instrument]
     pub async fn post_collect_job_fragments(
         &self,
         job_id: ObjectId,

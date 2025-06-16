@@ -364,6 +364,7 @@ impl SourceManager {
     }
 
     /// For replacing job (alter table/source, create sink into table).
+    #[await_tree::instrument]
     pub async fn handle_replace_job(
         &self,
         dropped_job_fragments: &StreamJobFragments,
@@ -395,14 +396,14 @@ impl SourceManager {
 
     /// Updates states after all kinds of source change.
     /// e.g., split change (`post_collect` barrier) or scaling (`post_apply_reschedule`).
-    #[await_tree::instrument]
+    #[await_tree::instrument("apply_source_change({source_change})")]
     pub async fn apply_source_change(&self, source_change: SourceChange) {
         let mut core = self.core.lock().await;
         core.apply_source_change(source_change);
     }
 
     /// create and register connector worker for source.
-    #[await_tree::instrument]
+    #[await_tree::instrument("register_source({})", source.name)]
     pub async fn register_source(&self, source: &Source) -> MetaResult<()> {
         tracing::debug!("register_source: {}", source.get_id());
         let mut core = self.core.lock().await;
@@ -494,6 +495,7 @@ impl SourceManager {
     }
 }
 
+#[derive(strum::Display)]
 pub enum SourceChange {
     /// `CREATE SOURCE` (shared), or `CREATE MV`.
     /// This is applied after the job is successfully created (`post_collect` barrier).

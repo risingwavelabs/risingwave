@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 pub mod enumerator;
-
 use phf::{Set, phf_set};
+use risingwave_common::util::env_var::env_var_is_true;
 use serde::Deserialize;
 
+use crate::connector_common::DISABLE_DEFAULT_CREDENTIAL;
+use crate::deserialize_optional_bool_from_string;
 use crate::enforce_secret::EnforceSecret;
 use crate::source::SourceProperties;
-use crate::source::filesystem::file_common::CompressionFormat;
 use crate::source::util::dummy::{
     DummyProperties, DummySourceReader, DummySplit, DummySplitEnumerator,
 };
@@ -39,10 +40,20 @@ pub struct S3PropertiesCommon {
     pub access: Option<String>,
     #[serde(rename = "s3.credentials.secret", default)]
     pub secret: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
+    pub enable_config_load: Option<bool>,
     #[serde(rename = "s3.endpoint_url")]
     pub endpoint_url: Option<String>,
-    #[serde(rename = "compression_format", default = "Default::default")]
-    pub compression_format: CompressionFormat,
+}
+
+impl S3PropertiesCommon {
+    pub fn enable_config_load(&self) -> bool {
+        // If the env var is set to true, we disable the default config load. (Cloud environment)
+        if env_var_is_true(DISABLE_DEFAULT_CREDENTIAL) {
+            return false;
+        }
+        self.enable_config_load.unwrap_or(false)
+    }
 }
 
 impl EnforceSecret for S3PropertiesCommon {

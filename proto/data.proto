@@ -53,9 +53,10 @@ message DataType {
     SERIAL = 19;
     INT256 = 20;
     MAP = 21;
+    VECTOR = 22;
   }
   TypeName type_name = 1;
-  // Data length for char.
+  // Data length for vector.
   // Max data length for varchar.
   // Precision for time, decimal.
   uint32 precision = 2;
@@ -111,6 +112,7 @@ enum ArrayType {
   SERIAL = 17;
   INT256 = 18;
   MAP = 20;
+  VECTOR = 21;
 }
 
 message Array {
