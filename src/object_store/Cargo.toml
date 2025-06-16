@@ -48,7 +48,7 @@ opendal = { workspace = true, features = [
 prometheus = { version = "0.14", features = ["process"] }
 reqwest = "0.12.2" # required by opendal
 risingwave_common = { workspace = true }
-risingwave_jni_core = { workspace = true, optional = true }
+# risingwave_jni_core = { workspace = true, optional = true }
 spin = "0.10"
 thiserror = "1"
 thiserror-ext = { workspace = true }

@@ -29,15 +29,12 @@ import io.debezium.relational.history.SchemaHistoryException;
 import io.debezium.relational.history.SchemaHistoryListener;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     private static final Logger LOGGER = LoggerFactory.getLogger(OpendalSchemaHistory.class);
-    private String bucket = "hummock001";
     private String objectName = "SchemaHistory.dat";
-    private String endpoint = "http://127.0.0.1:9301";
 
     @Override
     public void configure(
@@ -110,10 +107,10 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
             // String dataString = new String(newData, StandardCharsets.UTF_8).trim();
 
             // if (dataString.startsWith("\n")) {
-            //     dataString = dataString.substring(1); 
+            //     dataString = dataString.substring(1);
             // }
             // if (!dataString.endsWith("\n")) {
-            //     dataString += "\n"; 
+            //     dataString += "\n";
             // }
 
             putObject(objectName, newData);
@@ -122,7 +119,6 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
             throw new SchemaHistoryException("Can not store record to object storage", e);
         }
     }
-
 
     @Override
     public boolean storageExists() {

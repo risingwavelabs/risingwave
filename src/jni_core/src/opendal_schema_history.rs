@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
+use std::{borrow::Cow, env};
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -21,6 +21,8 @@ use jni::sys::{jboolean, jbyteArray, jint};
 use opendal::layers::LoggingLayer;
 use opendal::services::{Fs, S3};
 use opendal::{Builder, Operator};
+use risingwave_common::config::ObjectStoreConfig;
+use risingwave_object_store::object::{build_remote_object_store, object_metrics::ObjectStoreMetrics, ObjectStoreImpl};
 use tracing::Level;
 
 use crate::{EnvParam, JAVA_BINDING_ASYNC_RUNTIME, execute_and_catch, to_guarded_slice};
@@ -29,6 +31,34 @@ struct ObjectStoreEngine {
     op: Operator,
 }
 
+pub struct HummockObjectStore {
+    object_store: Arc<ObjectStoreImpl>,
+}
+impl HummockObjectStore {
+    
+    pub fn new(object_store: Arc<ObjectStoreImpl>) -> Self {
+
+        Self { object_store }
+    }
+
+    pub async fn upload(&self, path: &str, obj: Bytes) -> anyhow::Result<()> {
+        self.object_store.upload(path, obj).await?;
+        Ok(())
+    }
+    
+}
+
+pub async fn new_object_store() -> ObjectStoreImpl {
+        let hummock_url = "hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001";
+        let object_store = build_remote_object_store(
+            hummock_url.strip_prefix("hummock+").unwrap(),
+            Arc::new(ObjectStoreMetrics::unused()),
+            "Hummock",
+            Arc::new(ObjectStoreConfig::default()),
+        )
+        .await;
+        object_store 
+    }
 impl ObjectStoreEngine {
     pub fn new_minio_engine(server: &str) -> anyhow::Result<Self> {
         let builder = Fs::default().root("/Users/wangcongyi/singularity/risingwave/");
@@ -49,24 +79,17 @@ impl ObjectStoreEngine {
         Ok(data.to_bytes())
     }
 
-    pub async fn delete_object(&self, path: &str) -> anyhow::Result<()> {
-        self.op.delete(path).await?;
-        Ok(())
-    }
-
-    pub async fn list(&self, path: &str) -> anyhow::Result<()> {
-        self.op.list(path).await?;
-        Ok(())
-    }
 }
 
-fn get_engine() -> anyhow::Result<ObjectStoreEngine> {
-    let bucket = "hummock001".to_string();
+// fn get_engine() -> anyhow::Result<ObjectStoreEngine> {
+//     let bucket = "hummock001".to_string();
 
-    let engine = ObjectStoreEngine::new_minio_engine(&format!("minio://{}", bucket))?;
+//     let engine = ObjectStoreEngine::new_minio_engine(&format!("minio://{}", bucket))?;
 
-    Ok(engine)
-}
+//     Ok(engine)
+// }
+
+
 
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_putObject(
@@ -75,7 +98,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_putObject(
     data: JByteArray<'_>,
 ) {
     execute_and_catch(env, move |env| {
-        let engine = get_engine()?;
+        // let engine = get_engine()?;
 
         let object_name = env.get_string(&object_name)?;
         let object_name: Cow<'_, str> = (&object_name).into();
@@ -84,10 +107,14 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_putObject(
         let data: Vec<u8> = data_guard.slice.to_vec();
         let result = JAVA_BINDING_ASYNC_RUNTIME
             .block_on(async {
-                engine
-                    .op
-                    .write_with(&object_name, data)
-                    .content_type("text/plain")
+                let object_store = new_object_store().await;
+                // engine
+                //     .op
+                //     .write_with(&object_name, data)
+                //     .content_type("text/plain")
+                //     .await
+
+                object_store.upload(&object_name, data.clone().into())
                     .await
             })
             .unwrap();
@@ -102,12 +129,13 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_getObject<'a>(
     object_name: JString<'a>,
 ) -> JByteArray<'a> {
     execute_and_catch(env, move |env: &mut EnvParam<'_>| {
-        let engine = get_engine()?;
-
+        // let engine = get_engine()?;
+        
         let object_name = env.get_string(&object_name)?;
         let object_name: Cow<'_, str> = (&object_name).into();
         let result = JAVA_BINDING_ASYNC_RUNTIME.block_on(async {
-            match engine.read_object(&object_name).await {
+            let object_store = new_object_store().await;
+            match object_store.read(&object_name, ..).await {
                 Ok(data) => data,
                 Err(_) => Bytes::new(),
             }
