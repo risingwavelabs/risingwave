@@ -13,7 +13,7 @@ shift  # Remove the first argument (rustc path) from $@
 
 # Only add coverage flags if RW_INSTRUMENT_COVERAGE is set
 if [[ "${RW_INSTRUMENT_COVERAGE:-}" == "1" ]]; then
-    exec "$ACTUAL_RUSTC" "$@" -C instrument-coverage --cfg coverage
+    exec -- "$ACTUAL_RUSTC" "$@" -C instrument-coverage --cfg coverage
 else
-    exec "$ACTUAL_RUSTC" "$@"
+    exec -- "$ACTUAL_RUSTC" "$@"
 fi
