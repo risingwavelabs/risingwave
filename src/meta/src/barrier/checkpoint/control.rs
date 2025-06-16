@@ -168,7 +168,7 @@ impl CheckpointControl {
         &mut self,
         new_barrier: NewBarrier,
         control_stream_manager: &mut ControlStreamManager,
-    ) -> Option<HashMap<DatabaseId, MetaError>> {
+    ) -> MetaResult<()> {
         let NewBarrier {
             database_id,
             command,
@@ -211,7 +211,7 @@ impl CheckpointControl {
                             notifier.notify_start_failed(err.clone());
                         }
 
-                        return None;
+                        return Ok(());
                     }
                 }
             }
@@ -237,7 +237,7 @@ impl CheckpointControl {
                             notifier.notify_collected();
                         }
                         warn!(?command, "skip command for empty database");
-                        return None;
+                        return Ok(());
                     }
                     _ => {
                         panic!(
@@ -248,69 +248,33 @@ impl CheckpointControl {
                 },
             };
 
-            let mut failed_databases: Option<HashMap<_, _>> = None;
-
-            if let Err(e) = database.handle_new_barrier(
+            database.handle_new_barrier(
                 Some((command, notifiers)),
                 checkpoint,
                 span.clone(),
                 control_stream_manager,
                 &self.hummock_version_stats,
-            ) {
-                failed_databases
-                    .get_or_insert_default()
-                    .try_insert(database_id, e)
-                    .expect("non-duplicate");
-            }
-            for database in self.databases.values_mut() {
-                let Some(database) = database.running_state_mut() else {
-                    continue;
-                };
-                if database.database_id == database_id {
-                    continue;
-                }
-                if let Err(e) = database.handle_new_barrier(
-                    None,
-                    checkpoint,
-                    span.clone(),
-                    control_stream_manager,
-                    &self.hummock_version_stats,
-                ) {
-                    failed_databases
-                        .get_or_insert_default()
-                        .try_insert(database.database_id, e)
-                        .expect("non-duplicate");
-                }
-            }
-            failed_databases
+            )
         } else {
-            let mut failed_databases: Option<HashMap<_, _>> = None;
             let database = match self.databases.entry(database_id) {
                 Entry::Occupied(entry) => entry.into_mut(),
                 Entry::Vacant(_) => {
                     // If it does not exist in the HashMap yet, it means that the first streaming
                     // job has not been created, and we do not need to send a barrier.
-                    return None;
+                    return Ok(());
                 }
             };
             let Some(database) = database.running_state_mut() else {
                 // Skip new barrier for database which is not running.
-                return None;
+                return Ok(());
             };
-            if let Err(e) = database.handle_new_barrier(
+            database.handle_new_barrier(
                 None,
                 checkpoint,
                 span.clone(),
                 control_stream_manager,
                 &self.hummock_version_stats,
-            ) {
-                failed_databases
-                    .get_or_insert_default()
-                    .try_insert(database.database_id, e)
-                    .expect("non-duplicate");
-            }
-
-            failed_databases
+            )
         }
     }
 
