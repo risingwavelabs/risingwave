@@ -87,16 +87,15 @@ pub async fn prepare_start_parameters(
         * config.storage.compactor_memory_available_proportion)
         as usize;
     let meta_cache_capacity_bytes = compactor_opts.compactor_meta_cache_memory_bytes;
-    let compactor_memory_limit_bytes = match config.storage.compactor_memory_limit_mb {
+    let mut compactor_memory_limit_bytes = match config.storage.compactor_memory_limit_mb {
         Some(compactor_memory_limit_mb) => compactor_memory_limit_mb * (1 << 20),
-        None => {
-            non_reserved_memory_bytes
-        }
-    }
-    .checked_sub(compactor_opts.compactor_meta_cache_memory_bytes).unwrap_or_else(|| {
+        None => non_reserved_memory_bytes,
+    };
+
+    compactor_memory_limit_bytes = compactor_memory_limit_bytes.checked_sub(compactor_opts.compactor_meta_cache_memory_bytes).unwrap_or_else(|| {
         panic!(
-            "compactor_total_memory_bytes {} is too small to hold compactor_meta_cache_memory_bytes {}",
-            meta_cache_capacity_bytes,
+            "compactor_memory_limit_bytes{} is too small to hold compactor_meta_cache_memory_bytes {}",
+            compactor_memory_limit_bytes,
             meta_cache_capacity_bytes
         );
     });

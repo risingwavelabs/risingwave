@@ -337,6 +337,28 @@ impl StreamManagerService for StreamServiceImpl {
     }
 
     #[cfg_attr(coverage, coverage(off))]
+    async fn list_creating_stream_scan_fragment_distribution(
+        &self,
+        _request: Request<ListCreatingStreamScanFragmentDistributionRequest>,
+    ) -> Result<Response<ListCreatingStreamScanFragmentDistributionResponse>, Status> {
+        let fragment_descs = self
+            .metadata_manager
+            .catalog_controller
+            .list_rw_table_scan_fragments()
+            .await?;
+        let distributions = fragment_descs
+            .into_iter()
+            .map(|(fragment_desc, upstreams)| {
+                fragment_desc_to_distribution(fragment_desc, upstreams)
+            })
+            .collect_vec();
+
+        Ok(Response::new(
+            ListCreatingStreamScanFragmentDistributionResponse { distributions },
+        ))
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
     async fn get_fragment_by_id(
         &self,
         request: Request<GetFragmentByIdRequest>,

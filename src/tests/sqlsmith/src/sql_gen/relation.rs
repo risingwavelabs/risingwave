@@ -24,13 +24,13 @@ use crate::sql_gen::types::BINARY_INEQUALITY_OP_TABLE;
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext};
 use crate::{BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Table};
 
-fn create_binary_expr(op: BinaryOperator, left: String, right: String) -> Expr {
-    let left = Box::new(Expr::Identifier(Ident::new_unchecked(left)));
-    let right = Box::new(Expr::Identifier(Ident::new_unchecked(right)));
+fn create_binary_expr(op: BinaryOperator, left: &Column, right: &Column) -> Expr {
+    let left = Box::new(left.name_expr());
+    let right = Box::new(right.name_expr());
     Expr::BinaryOp { left, op, right }
 }
 
-fn create_equi_expr(left: String, right: String) -> Expr {
+fn create_equi_expr(left: &Column, right: &Column) -> Expr {
     create_binary_expr(BinaryOperator::Eq, left, right)
 }
 
@@ -63,7 +63,14 @@ impl<R: Rng> SqlGenerator<'_, R> {
 
     fn gen_simple_table_factor(&mut self) -> (TableFactor, Table) {
         let alias = self.gen_table_name_with_prefix("t");
-        let mut table = self.tables.choose(&mut self.rng).unwrap().clone();
+        let mut table = if self.should_generate(Feature::Eowc) {
+            self.get_append_only_tables()
+                .choose(&mut self.rng)
+                .unwrap()
+                .clone()
+        } else {
+            self.tables.choose(&mut self.rng).unwrap().clone()
+        };
         let table_factor = TableFactor::Table {
             name: ObjectName(vec![Ident::new_unchecked(&table.name)]),
             alias: Some(TableAlias {
@@ -86,17 +93,18 @@ impl<R: Rng> SqlGenerator<'_, R> {
     /// Generates a table factor, and provides bound columns.
     /// Generated column names should be qualified by table name.
     fn gen_table_factor_inner(&mut self) -> (TableFactor, Table) {
-        // TODO: TableFactor::Derived, TableFactor::TableFunction, TableFactor::NestedJoin
-        match self.rng.random_range(0..=3) {
+        let mut choices = vec![0, 3]; // time_window, simple_table
+        if !self.should_generate(Feature::Eowc) {
+            choices.push(1); // table_func
+        }
+        if self.can_recurse() {
+            choices.push(2); // subquery
+        }
+
+        match *choices.choose(&mut self.rng).unwrap() {
             0 => self.gen_time_window_func(),
             1 => self.gen_table_func(),
-            2 => {
-                if self.can_recurse() {
-                    self.gen_table_subquery()
-                } else {
-                    self.gen_simple_table_factor()
-                }
-            }
+            2 => self.gen_table_subquery(),
             3 => self.gen_simple_table_factor(),
             _ => unreachable!(),
         }
@@ -140,7 +148,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         available_join_on_columns.shuffle(&mut self.rng);
         let remaining_columns = available_join_on_columns.split_off(1);
         let (left_column, right_column) = available_join_on_columns.drain(..).next().unwrap();
-        let join_on_expr = create_equi_expr(left_column.name, right_column.name);
+        let join_on_expr = create_equi_expr(&left_column, &right_column);
         Some((join_on_expr, remaining_columns))
     }
 
@@ -156,12 +164,12 @@ impl<R: Rng> SqlGenerator<'_, R> {
                 break;
             }
             let Some(inequality_ops) =
-                BINARY_INEQUALITY_OP_TABLE.get(&(l_col.data_type, r_col.data_type))
+                BINARY_INEQUALITY_OP_TABLE.get(&(l_col.data_type.clone(), r_col.data_type.clone()))
             else {
                 continue;
             };
             let inequality_op = inequality_ops.choose(&mut self.rng).unwrap();
-            let _non_equi_expr = create_binary_expr(inequality_op.clone(), l_col.name, r_col.name);
+            let _non_equi_expr = create_binary_expr(inequality_op.clone(), &l_col, &r_col);
             count += 1;
         }
         expr
@@ -187,7 +195,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         };
 
         for (l_col, r_col) in available_join_on_columns.drain(0..n) {
-            let equi_expr = create_equi_expr(l_col.name, r_col.name);
+            let equi_expr = create_equi_expr(&l_col, &r_col);
             expr = Expr::BinaryOp {
                 left: Box::new(expr),
                 op: BinaryOperator::And,
@@ -260,7 +268,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
                 right_columns
                     .iter()
                     .find(|r_col| r_col.name == l_col.name)?;
-                Some(Ident::new_unchecked(l_col.name.clone()))
+                Some(l_col.base_name())
             })
             .collect();
 

@@ -22,7 +22,7 @@ use risingwave_common::catalog::{Field, debug_assert_column_ids_distinct, is_sys
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::user::grant_privilege::PbObject;
-use risingwave_sqlparser::ast::{AsOf, Statement, TableAlias};
+use risingwave_sqlparser::ast::{AsOf, ObjectName, Statement, TableAlias};
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 
@@ -70,14 +70,32 @@ impl BoundSource {
 }
 
 impl Binder {
+    pub fn bind_catalog_relation_by_object_name(
+        &mut self,
+        object_name: ObjectName,
+        bind_creating_relations: bool,
+    ) -> Result<Relation> {
+        let (schema_name, table_name) =
+            Binder::resolve_schema_qualified_name(&self.db_name, object_name)?;
+        self.bind_catalog_relation_by_name(
+            None,
+            schema_name.as_deref(),
+            &table_name,
+            None,
+            None,
+            bind_creating_relations,
+        )
+    }
+
     /// Binds table or source, or logical view according to what we get from the catalog.
-    pub fn bind_relation_by_name_inner(
+    pub fn bind_catalog_relation_by_name(
         &mut self,
         db_name: Option<&str>,
         schema_name: Option<&str>,
         table_name: &str,
         alias: Option<TableAlias>,
         as_of: Option<AsOf>,
+        bind_creating_relations: bool,
     ) -> Result<Relation> {
         // define some helper functions converting catalog to bound relation
         let resolve_sys_table_relation = |sys_table_catalog: &Arc<SystemTableCatalog>| {
@@ -137,7 +155,8 @@ impl Binder {
                         self.resolve_source_relation(&source_catalog.clone(), as_of, true)?
                     } else if let Ok((table_catalog, schema_name)) = self
                         .catalog
-                        .get_created_table_by_name(db_name, schema_path, table_name)
+                        .get_any_table_by_name(db_name, schema_path, table_name)
+                        && (bind_creating_relations || table_catalog.is_created())
                     {
                         self.resolve_table_relation(table_catalog.clone(), schema_name, as_of)?
                     } else if let Ok((source_catalog, _)) =
@@ -187,8 +206,11 @@ impl Binder {
                                         as_of,
                                         true,
                                     );
-                                } else if let Some(table_catalog) = schema
-                                    .get_created_table_or_any_internal_table_by_name(table_name)
+                                } else if let Some(table_catalog) =
+                                    schema.get_any_table_by_name(table_name)
+                                    && (bind_creating_relations
+                                        || table_catalog.is_internal_table()
+                                        || table_catalog.is_created())
                                 {
                                     return self.resolve_table_relation(
                                         table_catalog.clone(),
