@@ -983,9 +983,9 @@ pub async fn handle(
         }
 
         Statement::AlterSink { name, operation } => match operation {
-            AlterSinkOperation::SetSinkProps { changed_props } => {
-                alter_sink_props::handle_alter_sink_props(handler_args, name, changed_props).await
-            }
+            AlterSinkOperation::AlterConnectorProps {
+                alter_props: changed_props,
+            } => alter_sink_props::handle_alter_sink_props(handler_args, name, changed_props).await,
             AlterSinkOperation::RenameSink { sink_name } => {
                 alter_rename::handle_rename_sink(handler_args, name, sink_name).await
             }
