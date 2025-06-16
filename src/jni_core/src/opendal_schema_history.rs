@@ -19,11 +19,11 @@ use bytes::Bytes;
 use jni::objects::{JByteArray, JObject, JString};
 use jni::sys::{jboolean, jbyteArray, jint};
 use opendal::layers::LoggingLayer;
-use opendal::services::S3;
+use opendal::services::{Fs, S3};
 use opendal::{Builder, Operator};
 use tracing::Level;
 
-use crate::{EnvParam, JAVA_BINDING_ASYNC_RUNTIME, execute_and_catch};
+use crate::{EnvParam, JAVA_BINDING_ASYNC_RUNTIME, execute_and_catch, to_guarded_slice};
 
 struct ObjectStoreEngine {
     op: Operator,
@@ -31,13 +31,7 @@ struct ObjectStoreEngine {
 
 impl ObjectStoreEngine {
     pub fn new_minio_engine(server: &str) -> anyhow::Result<Self> {
-        let builder = S3::default()
-            .bucket("hummock001")
-            .region("us-east-1")
-            .access_key_id("hummockadmin")
-            .secret_access_key("hummockadmin")
-            .endpoint("http://hummock001.127.0.0.1:9301")
-            .disable_config_load();
+        let builder = Fs::default().root("/Users/wangcongyi/singularity/risingwave/");
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .finish();
@@ -78,26 +72,29 @@ fn get_engine() -> anyhow::Result<ObjectStoreEngine> {
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_putObject(
     env: EnvParam<'_>,
     object_name: JString<'_>,
-    data: JString<'_>,
+    data: JByteArray<'_>,
 ) {
     execute_and_catch(env, move |env| {
         let engine = get_engine()?;
 
         let object_name = env.get_string(&object_name)?;
         let object_name: Cow<'_, str> = (&object_name).into();
-        println!("rust这里写");
-        let data = env.get_string(&data)?;
-        let data: Cow<'_, str> = (&data).into();
-        let data: Vec<u8> = data.as_bytes().to_vec();
+
+        let data_guard = to_guarded_slice(&data, env)?;
+        let data: Vec<u8> = data_guard.slice.to_vec();
         let result = JAVA_BINDING_ASYNC_RUNTIME
-            .block_on(async { engine.op.write(&object_name, data).await })
+            .block_on(async {
+                engine
+                    .op
+                    .write_with(&object_name, data)
+                    .content_type("text/plain")
+                    .await
+            })
             .unwrap();
 
         Ok(result)
     });
 }
-
-
 
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_getObject<'a>(
@@ -109,15 +106,13 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_getObject<'a>(
 
         let object_name = env.get_string(&object_name)?;
         let object_name: Cow<'_, str> = (&object_name).into();
-        println!("rust这里读");
-        let result = JAVA_BINDING_ASYNC_RUNTIME
-            .block_on(async {
-                match engine.read_object(&object_name).await {
-                    Ok(data) => data,
-                    Err(_) =>  Bytes::new(), 
-                }
-            });
-        
+        let result = JAVA_BINDING_ASYNC_RUNTIME.block_on(async {
+            match engine.read_object(&object_name).await {
+                Ok(data) => data,
+                Err(_) => Bytes::new(),
+            }
+        });
+
         Ok(env.byte_array_from_slice(&result)?)
     })
 }

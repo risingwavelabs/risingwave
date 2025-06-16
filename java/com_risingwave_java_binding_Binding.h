@@ -253,14 +253,14 @@ JNIEXPORT jbyteArray JNICALL Java_com_risingwave_java_binding_Binding_recvSinkCo
  * Signature: (Ljava/lang/String;Ljava/lang/String;)V
  */
 JNIEXPORT void JNICALL Java_com_risingwave_java_binding_Binding_putObject
-  (JNIEnv *, jclass, jstring object_name, jstring data);
+  (JNIEnv *, jclass, jstring object_name, jbyteArray data);
 
 /*
  * Class:     com_risingwave_java_binding_Binding
  * Method:    getObject
  * Signature: (Ljava/lang/String;Ljava/lang/String;)V
  */
-JNIEXPORT jobject JNICALL Java_com_risingwave_java_binding_Binding_getObject
+JNIEXPORT jbyteArray JNICALL Java_com_risingwave_java_binding_Binding_getObject
   (JNIEnv *, jclass, jstring object_name);
 
 /*

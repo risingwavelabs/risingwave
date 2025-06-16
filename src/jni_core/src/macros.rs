@@ -413,7 +413,7 @@ macro_rules! for_all_plain_native_methods {
 
                 static native boolean iteratorNext(long pointer);
 
-                public static native void putObject(String objectName, String data);
+                public static native void putObject(String objectName, byte[] data);
 
                 public static native byte[] getObject(String objectName);
 

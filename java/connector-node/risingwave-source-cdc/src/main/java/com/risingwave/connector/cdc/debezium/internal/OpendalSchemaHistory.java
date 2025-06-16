@@ -45,40 +45,55 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
             HistoryRecordComparator comparator,
             SchemaHistoryListener listener,
             boolean useCatalogBeforeSchema) {
+        super.configure(config, comparator, listener, useCatalogBeforeSchema);
+        // if (!config.validateAndRecord(ALL_FIELDS, LOGGER::error)) {
+        //     throw new DebeziumException(
+        //             "Error configuring an instance of "
+        //                     + getClass().getSimpleName()
+        //                     + "; check the logs for details");
+        // }
         LOGGER.info("Database history will be stored in bucket");
     }
 
     @Override
     protected void doPreStart() {
-        LOGGER.info("这里doPreStart");
         // No need for pre-start actions
     }
 
     @Override
     protected void doStart() {
-        LOGGER.info("这里doStart");
-        InputStream objectInputStream = retrieveObjectFromStorage();
+        InputStream objectInputStream = null;
+        try {
+            objectInputStream = retrieveObjectFromStorage();
+        } catch (Exception e) {
+            throw new SchemaHistoryException("111Can't retrieve file with schema history", e);
+        }
 
-        if (false) {
-            toHistoryRecord(objectInputStream);
+        if (objectInputStream != null) {
+            LOGGER.info("这里toHistoryRecord");
+            try {
+                toHistoryRecord(objectInputStream);
+            } catch (Exception e) {
+                throw new SchemaHistoryException("222Can't retrieve file with schema history", e);
+            }
         }
     }
 
     private InputStream retrieveObjectFromStorage() {
-        LOGGER.info("这里retrieveObjectFromStorage");
+        LOGGER.info("retrieveObjectFromStorage");
         byte[] byteArray = getObject(objectName);
+
         return new ByteArrayInputStream(byteArray);
     }
 
     @Override
     public void doStop() {
-        LOGGER.info("这里doStop");
-        // Do nothing on stop
+        LOGGER.info("doStop");
     }
 
     @Override
     protected void doPreStoreRecord(HistoryRecord record) {
-        LOGGER.info("这里doPreStoreRecord");
+        LOGGER.info("doPreStoreRecord");
         // Example check, can be removed or modified as needed
         if (false) {
             throw new SchemaHistoryException(
@@ -88,15 +103,30 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
 
     @Override
     protected void doStoreRecord(HistoryRecord record) {
-        LOGGER.info("这里doStoreRecord");
-        byte[] data = fromHistoryRecord(record);
-        String dataString = new String(data, StandardCharsets.UTF_8);
-        putObject(objectName, dataString);
+        LOGGER.info("doStoreRecord");
+        try {
+            // 调试输出，确认数据内容
+            byte[] newData = fromHistoryRecord(record);
+            // String dataString = new String(newData, StandardCharsets.UTF_8).trim();
+
+            // if (dataString.startsWith("\n")) {
+            //     dataString = dataString.substring(1); 
+            // }
+            // if (!dataString.endsWith("\n")) {
+            //     dataString += "\n"; 
+            // }
+
+            putObject(objectName, newData);
+        } catch (Exception e) {
+            LOGGER.error("Error storing record to object storage", e);
+            throw new SchemaHistoryException("Can not store record to object storage", e);
+        }
     }
+
 
     @Override
     public boolean storageExists() {
-        // Hummock bucket always exists
+        // Hummock bucket always exists.
         return true;
     }
 
@@ -107,6 +137,6 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
 
     @Override
     public String toString() {
-        return "s3"; // More descriptive return value
+        return "Opendal-S3"; // More descriptive return value
     }
 }

@@ -25,8 +25,10 @@ use risingwave_common::util::resource_util::memory::system_memory_available_byte
 use thiserror_ext::AsReport;
 use tracing::error;
 
-use crate::opendal_schema_history::Java_com_risingwave_java_binding_Binding_putObject;
-use crate::opendal_schema_history::Java_com_risingwave_java_binding_Binding_getObject;
+use crate::opendal_schema_history::{
+    Java_com_risingwave_java_binding_Binding_getObject,
+    Java_com_risingwave_java_binding_Binding_putObject,
+};
 use crate::{call_method, call_static_method};
 
 /// Use 10% of compute total memory by default. Compute node uses 0.7 * system memory by default.
