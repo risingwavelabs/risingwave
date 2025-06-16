@@ -119,6 +119,7 @@ mod integration_tests;
 mod sync_kv_log_store;
 pub mod test_utils;
 mod utils;
+mod vector_index;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
@@ -169,6 +170,7 @@ pub use union::UnionExecutor;
 pub use upstream_sink_union::UpstreamSinkUnionExecutor;
 pub use utils::DummyExecutor;
 pub use values::ValuesExecutor;
+pub use vector_index::VectorIndexWriteExecutor;
 pub use watermark_filter::WatermarkFilterExecutor;
 pub use wrapper::WrapperExecutor;
 
