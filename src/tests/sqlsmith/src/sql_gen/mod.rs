@@ -273,7 +273,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         columns
             .iter()
-            .filter(|c| watermark_names.contains(&c.name.real_value()))
+            .filter(|c| watermark_names.contains(&c.name.base_name()))
             .cloned()
             .collect()
     }
