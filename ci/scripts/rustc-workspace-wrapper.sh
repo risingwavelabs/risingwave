@@ -4,6 +4,8 @@
 # for workspace members only when RW_INSTRUMENT_COVERAGE is set.
 # External dependencies won't get coverage flags because
 # RUSTC_WORKSPACE_WRAPPER only applies to workspace members.
+#
+# Reference: https://github.com/rust-lang/cargo/issues/13040
 
 # The first argument is the rustc executable path, respect it
 ACTUAL_RUSTC="$1"
