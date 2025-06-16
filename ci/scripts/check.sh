@@ -16,6 +16,7 @@ for script in ci/**/*.sh; do
 done
 
 source ci/scripts/common.sh
+unset LLVM_PROFILE_FILE
 
 echo "--- Set openssl static link env vars"
 configure_static_openssl
