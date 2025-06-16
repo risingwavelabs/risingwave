@@ -85,9 +85,13 @@ impl Table {
     pub fn get_qualified_columns(&self) -> Vec<Column> {
         self.columns
             .iter()
-            .map(|c| Column {
-                name: format!("{}.{}", self.name, c.name),
-                data_type: c.data_type.clone(),
+            .map(|c| {
+                let mut name = c.name.clone();
+                name.0.insert(0, Ident::new_unchecked(&self.name));
+                Column {
+                    name,
+                    data_type: c.data_type.clone(),
+                }
             })
             .collect()
     }
@@ -96,16 +100,30 @@ impl Table {
 /// Sqlsmith Column definition
 #[derive(Clone, Debug)]
 pub struct Column {
-    pub(crate) name: String,
+    pub(crate) name: ObjectName,
     pub(crate) data_type: DataType,
 }
 
 impl From<ColumnDef> for Column {
     fn from(c: ColumnDef) -> Self {
         Self {
-            name: c.name.real_value(),
+            name: ObjectName(vec![c.name]),
             data_type: bind_data_type(&c.data_type.expect("data type should not be none")).unwrap(),
         }
+    }
+}
+
+impl Column {
+    pub fn name_expr(&self) -> Expr {
+        if self.name.0.len() == 1 {
+            Expr::Identifier(self.name.0[0].clone())
+        } else {
+            Expr::CompoundIdentifier(self.name.0.clone())
+        }
+    }
+
+    pub fn base_name(&self) -> Ident {
+        self.name.0.last().unwrap().clone()
     }
 }
 
@@ -255,7 +273,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         columns
             .iter()
-            .filter(|c| watermark_names.contains(&c.name))
+            .filter(|c| watermark_names.contains(&c.name.real_value()))
             .cloned()
             .collect()
     }
