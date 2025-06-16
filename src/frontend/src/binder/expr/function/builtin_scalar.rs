@@ -724,6 +724,9 @@ impl Binder {
                 ("date", guard_by_len(1, raw(|_binder, inputs| {
                     inputs[0].clone().cast_explicit(DataType::Date).map_err(Into::into)
                 }))),
+
+                // AI model functions
+                ("openai_embedding", raw_call(ExprType::OpenaiEmbedding)),
             ]
                 .into_iter()
                 .collect()
