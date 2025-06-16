@@ -15,6 +15,7 @@
 use std::collections::BTreeMap;
 use std::hash::Hash;
 use std::io::Write;
+use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
@@ -546,25 +547,54 @@ impl PulsarCommon {
         let mut pulsar_builder = Pulsar::builder(&self.service_url, TokioExecutor);
         let mut temp_file = None;
         if let Some(oauth) = oauth.as_ref() {
-            let url = Url::parse(&oauth.credentials_url)?;
-            match url.scheme() {
-                "s3" => {
-                    let credentials = load_file_descriptor_from_s3(&url, aws_auth_props).await?;
-                    temp_file = Some(
-                        create_credential_temp_file(&credentials)
-                            .context("failed to create temp file for pulsar credentials")?,
-                    );
+            // Try to parse as URL first, then handle as absolute path if parsing fails
+            match Url::parse(&oauth.credentials_url) {
+                Ok(url) => {
+                    // Handle as URL (existing behavior)
+                    match url.scheme() {
+                        "s3" => {
+                            let credentials =
+                                load_file_descriptor_from_s3(&url, aws_auth_props).await?;
+                            temp_file = Some(
+                                create_credential_temp_file(&credentials)
+                                    .context("failed to create temp file for pulsar credentials")?,
+                            );
+                        }
+                        "file" => {}
+                        _ => {
+                            bail!(
+                                "invalid credentials_url, only file url, s3 url, and absolute file paths are supported"
+                            );
+                        }
+                    }
                 }
-                "file" => {}
-                _ => {
-                    bail!("invalid credentials_url, only file url and s3 url are supported",);
+                Err(_) => {
+                    // If URL parsing fails, check if it's an absolute path
+                    let path = Path::new(&oauth.credentials_url);
+                    if path.is_absolute() {
+                        if !path.exists() {
+                            bail!("credentials file does not exist: {}", oauth.credentials_url);
+                        }
+                        // For absolute paths, we don't need to do anything special
+                        // The OAuth2Params will receive the path prefixed with "file://" below
+                    } else {
+                        bail!(
+                            "credentials_url must be a valid URL (s3://, file://) or an absolute file path"
+                        );
+                    }
                 }
             }
 
             let auth_params = OAuth2Params {
                 issuer_url: oauth.issuer_url.clone(),
                 credentials_url: if temp_file.is_none() {
-                    oauth.credentials_url.clone()
+                    // For file:// URLs or absolute paths, ensure we have a proper file:// URL
+                    if oauth.credentials_url.starts_with("file://") {
+                        oauth.credentials_url.clone()
+                    } else {
+                        // This is an absolute path, prefix with file://
+                        format!("file://{}", oauth.credentials_url)
+                    }
                 } else {
                     let mut raw_path = temp_file
                         .as_ref()
@@ -1023,5 +1053,81 @@ impl MongodbCommon {
         let client = mongodb::Client::with_uri_str(&self.connect_uri).await?;
 
         Ok(client)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use tempfile::NamedTempFile;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_pulsar_oauth_absolute_path_handling() {
+        // Create a temporary credentials file
+        let mut temp_file = NamedTempFile::new().unwrap();
+        write!(
+            temp_file,
+            r##"{{"client_id": "test", "client_secret": "secret"}}"##
+        )
+        .unwrap();
+        let temp_path = temp_file.path().to_str().unwrap().to_string();
+
+        let oauth_config = PulsarOauthCommon {
+            issuer_url: "https://oauth.example.com".to_string(),
+            credentials_url: temp_path.clone(),
+            audience: "test-audience".to_string(),
+            scope: Some("test-scope".to_string()),
+        };
+
+        let pulsar_common = PulsarCommon {
+            topic: "test-topic".to_string(),
+            service_url: "pulsar://localhost:6650".to_string(),
+            auth_token: None,
+        };
+
+        let aws_auth_props = AwsAuthProps {
+            region: Some("us-east-1".to_string()),
+            endpoint: None,
+            access_key: None,
+            secret_key: None,
+            session_token: None,
+            arn: None,
+            external_id: None,
+            profile: None,
+            msk_signer_timeout_sec: None,
+        };
+
+        // This test only verifies the URL processing logic doesn't panic
+        // We can't actually test the full client building without a real Pulsar service
+        // but we can check that the credentials_url processing works correctly
+
+        // Test that absolute path is detected correctly
+        assert!(Path::new(&temp_path).is_absolute());
+        assert!(Url::parse(&temp_path).is_err());
+
+        // Test non-existent absolute path
+        let non_existent_path = "/tmp/non_existent_credentials.json";
+        let oauth_bad = PulsarOauthCommon {
+            issuer_url: "https://oauth.example.com".to_string(),
+            credentials_url: non_existent_path.to_string(),
+            audience: "test-audience".to_string(),
+            scope: Some("test-scope".to_string()),
+        };
+
+        // This should fail because the file doesn't exist
+        let result = pulsar_common
+            .build_client(&Some(oauth_bad), &aws_auth_props)
+            .await;
+        assert!(result.is_err());
+        match result {
+            Ok(_) => panic!("Expected error for non-existent file"),
+            Err(err) => {
+                let error_msg = err.to_string();
+                assert!(error_msg.contains("credentials file does not exist"));
+            }
+        }
     }
 }
