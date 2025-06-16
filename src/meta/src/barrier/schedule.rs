@@ -27,6 +27,7 @@ use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::metrics::LabelGuardedHistogram;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::catalog::Database;
+use rw_futures_util::pending_on_none;
 use tokio::select;
 use tokio::sync::{oneshot, watch};
 use tokio_stream::wrappers::IntervalStream;
@@ -379,9 +380,8 @@ impl PeriodicBarriers {
                 sys_barrier_interval
             };
             // Create an `IntervalStream` for the database with the specified interval.
-            let mut interval = tokio::time::interval(duration);
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            timer_streams.insert(database_id, IntervalStream::new(interval));
+            let interval_stream = Self::new_interval_stream(duration);
+            timer_streams.insert(database_id, interval_stream);
         });
         Self {
             sys_barrier_interval,
@@ -389,6 +389,13 @@ impl PeriodicBarriers {
             databases,
             timer_streams,
         }
+    }
+
+    // Create a new interval stream with the specified duration.
+    fn new_interval_stream(duration: Duration) -> IntervalStream {
+        let mut interval = tokio::time::interval(duration);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        IntervalStream::new(interval)
     }
 
     /// Update the system barrier interval.
@@ -400,10 +407,8 @@ impl PeriodicBarriers {
         // Reset the `IntervalStream` for all databases that use default param.
         for (db_id, db_state) in &mut self.databases {
             if db_state.barrier_interval.is_none() {
-                let mut interval = tokio::time::interval(duration);
-                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                self.timer_streams
-                    .insert(*db_id, IntervalStream::new(interval));
+                let interval_stream = Self::new_interval_stream(duration);
+                self.timer_streams.insert(*db_id, interval_stream);
             }
         }
     }
@@ -453,16 +458,19 @@ impl PeriodicBarriers {
         } else {
             self.sys_barrier_interval
         };
-        self.timer_streams.insert(
-            database_id,
-            IntervalStream::new(tokio::time::interval(duration)),
-        );
+        let interval_stream = Self::new_interval_stream(duration);
+        self.timer_streams.insert(database_id, interval_stream);
     }
 
     /// Make the `checkpoint` of the next barrier must be true.
-    pub fn force_checkpoint_in_next_barrier(&mut self) {
-        for db_state in self.databases.values_mut() {
+    pub fn force_checkpoint_in_next_barrier(&mut self, database_id: DatabaseId) {
+        if let Some(db_state) = self.databases.get_mut(&database_id) {
             db_state.force_checkpoint = true;
+        } else {
+            warn!(
+                ?database_id,
+                "force checkpoint in next barrier for non-existing database"
+            );
         }
     }
 
@@ -491,9 +499,9 @@ impl PeriodicBarriers {
                 }
             },
             // If there is no database, we won't wait for `Interval`, but only wait for command.
-            // Normally it-branch will not be true because there is always at least one database.
-            next_timer = self.timer_streams.next(), if !self.timer_streams.is_empty() => {
-                let (database_id, _instant) = next_timer.unwrap();
+            // Normally it will not return None, because there is always at least one database.
+            next_timer = pending_on_none(self.timer_streams.next()) => {
+                let (database_id, _instant) = next_timer;
                 let checkpoint = self.try_get_checkpoint(database_id);
                 NewBarrier {
                     database_id,
@@ -977,7 +985,7 @@ mod tests {
         let (context, _tx) = MockGlobalBarrierWorkerContext::new();
 
         // Force checkpoint for next barrier
-        periodic.force_checkpoint_in_next_barrier();
+        periodic.force_checkpoint_in_next_barrier(DatabaseId::from(1));
 
         let barrier = periodic.next_barrier(&context).await;
 

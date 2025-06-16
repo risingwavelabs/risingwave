@@ -104,6 +104,7 @@ pub(crate) enum BarrierManagerRequest {
         database_id: DatabaseId,
         barrier_interval_ms: Option<u32>,
         checkpoint_frequency: Option<u64>,
+        sender: Sender<()>,
     },
 }
 

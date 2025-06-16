@@ -344,6 +344,7 @@ impl DdlController {
 
     /// Obtains the next sequence number for DDL commands, for observability and debugging purposes.
     pub fn next_seq(&self) -> u64 {
+        // This is a simple atomic increment operation.
         self.seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }
 
@@ -467,11 +468,13 @@ impl DdlController {
             .create_database(database)
             .await?;
         // If persistent successfully, notify `GlobalBarrierManager` to create database asynchronously.
-        self.barrier_manager.update_database_barrier(
-            updated_db.database_id,
-            updated_db.barrier_interval_ms.map(|v| v as u32),
-            updated_db.checkpoint_frequency.map(|v| v as u64),
-        )?;
+        self.barrier_manager
+            .update_database_barrier(
+                updated_db.database_id,
+                updated_db.barrier_interval_ms.map(|v| v as u32),
+                updated_db.checkpoint_frequency.map(|v| v as u64),
+            )
+            .await?;
         Ok(version)
     }
 
@@ -621,11 +624,13 @@ impl DdlController {
             .alter_database_param(database_id, param)
             .await?;
         // If persistent successfully, notify `GlobalBarrierManager` to update param asynchronously.
-        self.barrier_manager.update_database_barrier(
-            database_id,
-            updated_db.barrier_interval_ms.map(|v| v as u32),
-            updated_db.checkpoint_frequency.map(|v| v as u64),
-        )?;
+        self.barrier_manager
+            .update_database_barrier(
+                database_id,
+                updated_db.barrier_interval_ms.map(|v| v as u32),
+                updated_db.checkpoint_frequency.map(|v| v as u64),
+            )
+            .await?;
         Ok(version)
     }
 

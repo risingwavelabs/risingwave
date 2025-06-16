@@ -87,19 +87,22 @@ impl GlobalBarrierManager {
         Ok(())
     }
 
-    pub fn update_database_barrier(
+    pub async fn update_database_barrier(
         &self,
         database_id: DatabaseId,
         barrier_interval_ms: Option<u32>,
         checkpoint_frequency: Option<u64>,
     ) -> MetaResult<()> {
+        let (tx, rx) = oneshot::channel();
         self.request_tx
             .send(BarrierManagerRequest::UpdateDatabaseBarrier {
                 database_id: (database_id as u32).into(),
                 barrier_interval_ms,
                 checkpoint_frequency,
+                sender: tx,
             })
             .context("failed to send update database barrier request")?;
+        rx.await.context("failed to wait update database barrier")?;
         Ok(())
     }
 

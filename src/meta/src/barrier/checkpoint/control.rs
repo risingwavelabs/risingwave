@@ -733,7 +733,7 @@ impl DatabaseCheckpointControl {
                     .expect("should exist")
                     .collect(resp);
                 if should_merge_to_upstream {
-                    periodic_barriers.force_checkpoint_in_next_barrier();
+                    periodic_barriers.force_checkpoint_in_next_barrier(self.database_id);
                 }
             }
         }
@@ -869,7 +869,7 @@ impl DatabaseCheckpointControl {
                             .values()
                             .all(|node| !node.command_ctx.barrier_info.kind.is_checkpoint())
                     {
-                        periodic_barriers.force_checkpoint_in_next_barrier();
+                        periodic_barriers.force_checkpoint_in_next_barrier(self.database_id);
                     }
                     continue;
                 }

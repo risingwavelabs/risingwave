@@ -289,6 +289,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 database_id,
                                 barrier_interval_ms,
                                 checkpoint_frequency,
+                                sender,
                             } => {
                                 self.periodic_barriers
                                     .update_database_barrier(
@@ -296,7 +297,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                         barrier_interval_ms,
                                         checkpoint_frequency,
                                     );
+                                if sender.send(()).is_err() {
+                                    warn!("failed to notify finish of update database barrier");
                                 }
+                            }
                         }
                     } else {
                         tracing::info!("end of request stream. meta node may be shutting down. Stop global barrier manager");
