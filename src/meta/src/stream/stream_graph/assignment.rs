@@ -25,7 +25,7 @@ use anyhow::{Context, Result, anyhow, ensure};
 /// using a three-phase algorithm:
 ///
 /// # Type Parameters
-/// - `C`: Container identifier. Must implement `Ord + Hash + Eq + Copy + Debug`.
+/// - `C`: Container identifier. Must implement `Ord + Hash + Eq + Clone + Debug`.
 /// - `I`: Item type. Must implement `Hash + Eq + Copy + Debug`.
 /// - `S`: Salt type for tie-breaking. Must implement `Hash + Copy`.
 ///
@@ -100,7 +100,7 @@ pub fn assign_items_weighted_with_scale_fn<C, I, S>(
     capacity_scale_factor_fn: impl Fn(&BTreeMap<C, NonZeroUsize>, &[I]) -> Option<ScaleFactor>,
 ) -> BTreeMap<C, Vec<I>>
 where
-    C: Ord + Hash + Eq + Copy + Clone + Debug,
+    C: Ord + Hash + Eq + Clone + Debug,
     I: Hash + Eq + Copy + Clone + Debug,
     S: Hash + Copy,
 {
@@ -116,15 +116,15 @@ where
         "Sum of container weights must be non-zero"
     );
 
-    struct QuotaInfo<C> {
-        container: C,
+    struct QuotaInfo<'a, C> {
+        container: &'a C,
         quota: usize,
         rem_part: u128,
     }
 
-    let mut infos: Vec<QuotaInfo<C>> = containers
+    let mut infos: Vec<QuotaInfo<'_, C>> = containers
         .iter()
-        .map(|(&container, &weight)| {
+        .map(|(container, &weight)| {
             // Use saturating multiplication to prevent overflow, even though saturation is highly unlikely in practice.
             let ideal_num = (items.len() as u128).saturating_mul(weight.get() as u128);
             QuotaInfo {
@@ -150,7 +150,7 @@ where
 
     // Apply capacity scaling
     let scale_factor = capacity_scale_factor_fn(containers, items);
-    let quotas: HashMap<C, usize> = infos
+    let quotas: HashMap<&C, usize> = infos
         .into_iter()
         .map(|info| match scale_factor {
             Some(f) => {
@@ -171,12 +171,12 @@ where
 
     // Assign each item using Weighted Rendezvous
     for &item in items {
-        let mut best: Option<(C, f64)> = None;
-        for (&container, &weight) in containers {
-            let assigned = assignment.get(&container).map(Vec::len).unwrap_or(0);
+        let mut best: Option<(&C, f64)> = None;
+        for (container, &weight) in containers {
+            let assigned = assignment.get(container).map(Vec::len).unwrap_or(0);
 
-            debug_assert!(quotas.contains_key(&container));
-            let quota = quotas.get(&container).copied().unwrap_or(0);
+            debug_assert!(quotas.contains_key(container));
+            let quota = quotas.get(container).copied().unwrap_or(0);
             if assigned >= quota {
                 continue;
             }
@@ -203,7 +203,7 @@ where
         // quotas sum (possibly scaled) always >= items.len(), so best is always Some
         let (winner, _) = best.expect("Invariant violation: no eligible container");
         assignment
-            .entry(winner)
+            .entry(winner.clone())
             .and_modify(|v| v.push(item))
             .or_insert_with(|| vec![item]);
     }
@@ -294,7 +294,7 @@ pub enum BalancedBy {
 /// round-robin fashion.
 ///
 /// # Type Parameters
-/// - `W`: Worker identifier. Must implement `Ord + Hash + Eq + Copy + Clone + Debug`.
+/// - `W`: Worker identifier. Must implement `Ord + Hash + Eq + Clone + Debug`.
 /// - `A`: Actor identifier. Must implement `Ord + Hash + Eq + Copy + Clone + Debug`.
 /// - `V`: Virtual node type. Must implement `Hash + Eq + Copy + Clone + Debug`.
 /// - `S`: Salt type for deterministic tie-breaking. Must implement `Hash + Copy`.
@@ -388,7 +388,7 @@ pub fn assign_hierarchical<W, A, V, S>(
     balanced_by: BalancedBy,
 ) -> anyhow::Result<BTreeMap<W, BTreeMap<A, Vec<V>>>>
 where
-    W: Ord + Hash + Eq + Copy + Clone + Debug,
+    W: Ord + Hash + Eq + Clone + Debug,
     A: Ord + Hash + Eq + Copy + Clone + Debug,
     V: Hash + Eq + Copy + Clone + Debug,
     S: Hash + Copy,
@@ -425,11 +425,11 @@ where
     match balanced_by {
         BalancedBy::RawWorkerWeights => {
             // Worker oriented: balanced by raw worker weights
-            let mut actor_counts: HashMap<W, usize> = HashMap::new();
-            for (&worker, actor_list) in &actor_to_worker {
+            let mut actor_counts: HashMap<&W, usize> = HashMap::new();
+            for (worker, actor_list) in &actor_to_worker {
                 if !actor_list.is_empty() {
-                    let worker_weight = workers.get(&worker).expect("Worker should exist");
-                    active_worker_weights.insert(worker, *worker_weight);
+                    let worker_weight = workers.get(worker).expect("Worker should exist");
+                    active_worker_weights.insert(worker.clone(), *worker_weight);
                     actor_counts.insert(worker, actor_list.len());
                 }
             }
@@ -444,10 +444,10 @@ where
         }
         BalancedBy::ActorCounts => {
             // Actor oriented: balanced by actor counts
-            for (&worker, actor_list) in &actor_to_worker {
+            for (worker, actor_list) in &actor_to_worker {
                 debug_assert!(!actor_list.is_empty());
                 if let Some(actor_count) = NonZeroUsize::new(actor_list.len()) {
-                    active_worker_weights.insert(worker, actor_count);
+                    active_worker_weights.insert(worker.clone(), actor_count);
                 }
             }
         }
@@ -498,7 +498,7 @@ where
 /// - Deterministic tie-breaking on equal remainders uses a hash of (`salt`, `worker_id`).
 ///
 /// # Type Parameters
-/// - `W`: Worker identifier type. Must implement `Ord`, `Copy`, `Hash`, `Eq`, and `Debug`.
+/// - `W`: Worker identifier type. Must implement `Ord`, `Clone`, `Hash`, `Eq`, and `Debug`.
 /// - `S`: Salt type. Used for deterministic hashing. Must implement `Hash` and `Copy`.
 ///
 /// # Parameters
@@ -525,12 +525,12 @@ where
 /// 6. Final quota for each worker is `base_quota + extra_floor`.
 fn compute_worker_quotas<W, S>(
     workers: &BTreeMap<W, NonZeroUsize>,
-    actor_counts: &HashMap<W, usize>,
+    actor_counts: &HashMap<&W, usize>,
     total_vnodes: usize,
     salt: S,
 ) -> BTreeMap<W, NonZeroUsize>
 where
-    W: Ord + Copy + Hash + Eq + Debug,
+    W: Ord + Clone + Hash + Eq + Debug,
     S: Hash + Copy,
 {
     let base_total: usize = actor_counts.values().sum();
@@ -545,10 +545,10 @@ where
     let extra_vnodes = total_vnodes - base_total;
 
     // Quota calculation is only performed for Workers with actors.
-    let active_workers: Vec<W> = actor_counts.keys().copied().collect();
+    let active_workers: Vec<&W> = actor_counts.keys().cloned().collect();
     let total_weight: u128 = active_workers
         .iter()
-        .map(|&worker_id| workers[&worker_id].get() as u128)
+        .map(|worker_id| workers[worker_id].get() as u128)
         .sum();
 
     assert!(total_weight > 0, "Sum of worker weights must be non-zero");
@@ -563,11 +563,11 @@ where
     }
 
     // Preliminary calculation of floor and remainder
-    let mut quota_list: Vec<QuotaInfo<W>> = active_workers
+    let mut quota_list: Vec<QuotaInfo<&W>> = active_workers
         .into_iter()
         .map(|worker_id| {
-            let base_quota = actor_counts[&worker_id];
-            let weight = workers[&worker_id].get() as u128;
+            let base_quota = actor_counts[worker_id];
+            let weight = workers[worker_id].get() as u128;
             let ideal_extra = extra_vnodes as u128 * weight;
             let extra_floor = (ideal_extra / total_weight) as usize;
             let extra_remainder = ideal_extra % total_weight;
@@ -598,7 +598,7 @@ where
     let mut quotas = BTreeMap::new();
     for info in quota_list {
         let total = info.base_quota + info.extra_floor;
-        quotas.insert(info.worker_id, NonZeroUsize::new(total).unwrap());
+        quotas.insert(info.worker_id.clone(), NonZeroUsize::new(total).unwrap());
     }
     quotas
 }
@@ -710,7 +710,7 @@ impl<S: Hash + Copy> Assigner<S> {
         actors: &[I],
     ) -> BTreeMap<C, Vec<I>>
     where
-        C: Ord + Hash + Eq + Copy + Debug,
+        C: Ord + Hash + Eq + Clone + Debug,
         I: Hash + Eq + Copy + Debug,
     {
         let scale_fn = match self.actor_capacity {
@@ -727,7 +727,7 @@ impl<S: Hash + Copy> Assigner<S> {
         actor_count: usize,
     ) -> BTreeMap<C, usize>
     where
-        C: Ord + Hash + Eq + Copy + Debug,
+        C: Ord + Hash + Eq + Clone + Debug,
     {
         let synthetic = (0..actor_count).collect::<Vec<_>>();
         vec_len_map(self.assign_actors(workers, &synthetic))
@@ -741,7 +741,7 @@ impl<S: Hash + Copy> Assigner<S> {
         vnodes: &[V],
     ) -> Result<BTreeMap<W, BTreeMap<A, Vec<V>>>>
     where
-        W: Ord + Hash + Eq + Copy + Debug,
+        W: Ord + Hash + Eq + Clone + Debug,
         A: Ord + Hash + Eq + Copy + Debug,
         V: Hash + Eq + Copy + Debug,
     {
@@ -846,7 +846,7 @@ impl<S: Hash + Copy> Assigner<S> {
         vnode_count: usize,
     ) -> Result<BTreeMap<W, BTreeMap<A, usize>>>
     where
-        W: Ord + Hash + Eq + Copy + Debug,
+        W: Ord + Hash + Eq + Clone + Debug,
         A: Ord + Hash + Eq + Copy + Debug + From<usize>,
     {
         let actors = (0..actor_count).map(A::from).collect::<Vec<_>>();
@@ -1030,9 +1030,9 @@ mod tests {
         .into_iter()
         .collect();
         let mut actor_counts = HashMap::new();
-        actor_counts.insert(1, 1);
-        actor_counts.insert(2, 1);
-        actor_counts.insert(3, 1);
+        actor_counts.insert(&1, 1);
+        actor_counts.insert(&2, 1);
+        actor_counts.insert(&3, 1);
         let total_vnodes = 6;
         let salt = 42u64;
 
@@ -1056,8 +1056,8 @@ mod tests {
         .into_iter()
         .collect();
         let mut actor_counts = HashMap::new();
-        actor_counts.insert(1, 1);
-        actor_counts.insert(2, 1);
+        actor_counts.insert(&1, 1);
+        actor_counts.insert(&2, 1);
         let total_vnodes = 6;
         let salt = 100u64;
 
@@ -1080,7 +1080,7 @@ mod tests {
         .into_iter()
         .collect();
         let mut actor_counts = HashMap::new();
-        actor_counts.insert(1, 2);
+        actor_counts.insert(&1, 2);
         // worker 2 has zero actors
         let total_vnodes = 5;
         let salt = 7u8;
@@ -1100,7 +1100,7 @@ mod tests {
             .into_iter()
             .collect();
         let mut actor_counts = HashMap::new();
-        actor_counts.insert(1, 3);
+        actor_counts.insert(&1, 3);
         let total_vnodes = 2; // less than base_total = 3
         let salt = 0u16;
 
@@ -1117,11 +1117,11 @@ mod tests {
         fn run_quota_sum_test<W, S>(
             scenario_name: &str,
             workers: &BTreeMap<W, NonZeroUsize>,
-            actor_counts: &HashMap<W, usize>,
+            actor_counts: &HashMap<&W, usize>,
             total_vnodes: usize,
             salt: S,
         ) where
-            W: Ord + Copy + Hash + Eq + Debug,
+            W: Ord + Clone + Hash + Eq + Debug,
             S: Hash + Copy,
         {
             let quotas = compute_worker_quotas(workers, actor_counts, total_vnodes, salt);
@@ -1141,7 +1141,7 @@ mod tests {
             (3, NonZeroUsize::new(1).unwrap()),
         ]
         .into();
-        let actor_counts1: HashMap<_, _> = [(1, 2), (2, 2), (3, 2)].into();
+        let actor_counts1: HashMap<_, _> = [(&1, 2), (&2, 2), (&3, 2)].into();
         run_quota_sum_test(
             "Even split, no remainder",
             &workers1,
@@ -1158,7 +1158,7 @@ mod tests {
             (3, NonZeroUsize::new(3).unwrap()),
         ]
         .into();
-        let actor_counts2: HashMap<_, _> = [(1, 1), (2, 5), (3, 2)].into();
+        let actor_counts2: HashMap<_, _> = [(&1, 1), (&2, 5), (&3, 2)].into();
         run_quota_sum_test(
             "Uneven split with remainder",
             &workers2,
@@ -1174,7 +1174,7 @@ mod tests {
             (2, NonZeroUsize::new(20).unwrap()),
         ]
         .into();
-        let actor_counts3: HashMap<_, _> = [(1, 5), (2, 10)].into();
+        let actor_counts3: HashMap<_, _> = [(&1, 5), (&2, 10)].into();
         run_quota_sum_test("No extra vnodes", &workers3, &actor_counts3, 15, 0u8);
 
         // --- Scenario 4: Only one active worker ---
@@ -1184,7 +1184,7 @@ mod tests {
             (2, NonZeroUsize::new(1).unwrap()),
         ]
         .into();
-        let actor_counts4: HashMap<_, _> = [(1, 10)].into();
+        let actor_counts4: HashMap<_, _> = [(&1, 10)].into();
         run_quota_sum_test("Single active worker", &workers4, &actor_counts4, 100, 0u8);
 
         // --- Scenario 5: Large and complex numbers ---
@@ -1196,7 +1196,7 @@ mod tests {
             (4, NonZeroUsize::new(23).unwrap()),
         ]
         .into();
-        let actor_counts5: HashMap<_, _> = [(1, 111), (2, 222), (3, 33), (4, 4)].into();
+        let actor_counts5: HashMap<_, _> = [(&1, 111), (&2, 222), (&3, 33), (&4, 4)].into();
         run_quota_sum_test(
             "Large and complex numbers",
             &workers5,
@@ -1215,8 +1215,8 @@ mod tests {
         .into_iter()
         .collect();
         let mut actor_counts = HashMap::new();
-        actor_counts.insert(1, 2); // Worker 1, 2 actors
-        actor_counts.insert(2, 1); // Worker 2, 1 actor
+        actor_counts.insert(&1, 2); // Worker 1, 2 actors
+        actor_counts.insert(&2, 1); // Worker 2, 1 actor
         let total_vnodes = 3; // base_total = 2 + 1 = 3. So extra_vnodes = 0.
         let salt = 0u8;
 
@@ -1242,7 +1242,7 @@ mod tests {
         let workers: BTreeMap<u8, NonZeroUsize> = vec![(1, NonZeroUsize::new(1).unwrap())]
             .into_iter()
             .collect();
-        let actor_counts: HashMap<u8, usize> = HashMap::new(); // No active workers
+        let actor_counts: HashMap<&u8, usize> = HashMap::new(); // No active workers
         let total_vnodes = 5; // But vnodes exist
         let salt = 0u8;
 
