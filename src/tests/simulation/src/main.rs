@@ -17,7 +17,6 @@
 use cfg_or_panic::cfg_or_panic;
 use clap::Parser;
 use risingwave_simulation::slt::slt_env::Opts;
-use risingwave_sqlsmith::config::Feature;
 
 /// Deterministic simulation end-to-end test runner.
 ///
