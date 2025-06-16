@@ -542,6 +542,7 @@ impl StreamManagerService for StreamServiceImpl {
                     .await?
             }
             AlterConnectorPropsObject::Source => {
+                // alter source and table's associated source
                 if request.connector_conn_ref.is_some() {
                     return Err(Status::invalid_argument(
                         "alter connector_conn_ref is not supported",
@@ -556,6 +557,12 @@ impl StreamManagerService for StreamServiceImpl {
                         request.changed_secret_refs.clone().into_iter().collect(),
                     )
                     .await?;
+
+                self.stream_manager
+                    .source_manager
+                    .validate_source_once(request.object_id, options_with_secret.clone())
+                    .await?;
+
                 let (options, secret_refs) = options_with_secret.into_parts();
                 secret_manager
                     .fill_secrets(options, secret_refs)
