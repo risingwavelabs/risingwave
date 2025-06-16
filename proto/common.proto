@@ -161,16 +161,17 @@ message OptionalUint64 {
 }
 
 enum ObjectType {
-  DATABASE = 0;
-  SCHEMA = 1;
-  TABLE = 2;
-  MVIEW = 3;
-  SOURCE = 4;
-  SINK = 5;
-  VIEW = 6;
-  INDEX = 7;
-  FUNCTION = 8;
-  CONNECTION = 9;
-  SUBSCRIPTION = 10;
-  SECRET = 11;
+  UNSPECIFIED = 0;
+  DATABASE = 1;
+  SCHEMA = 2;
+  TABLE = 3;
+  MVIEW = 4;
+  SOURCE = 5;
+  SINK = 6;
+  VIEW = 7;
+  INDEX = 8;
+  FUNCTION = 9;
+  CONNECTION = 10;
+  SUBSCRIPTION = 11;
+  SECRET = 12;
 }

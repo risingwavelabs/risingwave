@@ -77,6 +77,9 @@ impl From<PbObjectType> for ObjectType {
             PbObjectType::Connection => ObjectType::Connection,
             PbObjectType::Subscription => ObjectType::Subscription,
             PbObjectType::Secret => ObjectType::Secret,
+            PbObjectType::Unspecified => {
+                unreachable!("Unspecified object type")
+            }
         }
     }
 }

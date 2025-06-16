@@ -17,8 +17,8 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 
-use crate::user::user_catalog::UserCatalog;
 use crate::user::UserId;
+use crate::user::user_catalog::UserCatalog;
 
 /// `UserInfoManager` is responsible for managing users.
 pub struct UserInfoManager {
