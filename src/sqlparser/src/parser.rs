@@ -3638,7 +3638,9 @@ impl Parser<'_> {
             AlterSinkOperation::SwapRenameSink { target_sink }
         } else if self.parse_keyword(Keyword::CONNECTOR) {
             let changed_props = self.parse_with_properties()?;
-            AlterSinkOperation::SetSinkProps { changed_props }
+            AlterSinkOperation::AlterConnectorProps {
+                alter_props: changed_props,
+            }
         } else {
             return self.expected("RENAME or OWNER TO or SET or CONNECTOR WITH after ALTER SINK");
         };
