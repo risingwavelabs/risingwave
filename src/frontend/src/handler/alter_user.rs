@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pgwire::pg_response::{PgResponse, StatementType};
+use pgwire::pg_response::StatementType;
 use risingwave_pb::user::UserInfo;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_sqlparser::ast::{AlterUserStatement, ObjectName, UserOption, UserOptions};
@@ -23,16 +23,18 @@ use crate::catalog::CatalogError;
 use crate::error::ErrorCode::{self, InternalError, PermissionDenied};
 use crate::error::Result;
 use crate::handler::HandlerArgs;
+use crate::session::SessionImpl;
 use crate::user::user_authentication::{
     OAUTH_ISSUER_KEY, OAUTH_JWKS_URL_KEY, build_oauth_info, encrypted_password,
 };
 use crate::user::user_catalog::UserCatalog;
 
 fn alter_prost_user_info(
+    session: &SessionImpl,
     mut user_info: UserInfo,
     options: &UserOptions,
     session_user: &UserCatalog,
-) -> Result<(UserInfo, Vec<UpdateField>)> {
+) -> Result<(UserInfo, Vec<UpdateField>, Option<String>)> {
     if !session_user.is_super {
         let require_super = user_info.is_super
             || options
@@ -59,6 +61,7 @@ fn alter_prost_user_info(
     }
 
     let mut update_fields = Vec::new();
+    let mut notice = None;
     for option in &options.0 {
         match option {
             UserOption::SuperUser => {
@@ -94,38 +97,48 @@ fn alter_prost_user_info(
                 update_fields.push(UpdateField::Login);
             }
             UserOption::EncryptedPassword(p) => {
-                // TODO: Behaviour of PostgreSQL: Notice when password is empty string.
                 if !p.0.is_empty() {
                     user_info.auth_info = encrypted_password(&user_info.name, &p.0);
                 } else {
                     user_info.auth_info = None;
+                    notice =
+                        Some("empty string is not a valid password, clearing password".to_owned());
                 };
                 update_fields.push(UpdateField::AuthInfo);
             }
             UserOption::Password(opt) => {
-                // TODO: Behaviour of PostgreSQL: Notice when password is empty string.
                 if let Some(password) = opt
                     && !password.0.is_empty()
                 {
                     user_info.auth_info = encrypted_password(&user_info.name, &password.0);
                 } else {
                     user_info.auth_info = None;
+                    notice =
+                        Some("empty string is not a valid password, clearing password".to_owned());
                 }
                 update_fields.push(UpdateField::AuthInfo);
             }
             UserOption::OAuth(options) => {
-                let auth_info = build_oauth_info(options).ok_or_else(|| {
-                    ErrorCode::InvalidParameterValue(format!(
+                if let Some(auth_info) = build_oauth_info(&options) {
+                    user_info.auth_info = Some(auth_info);
+                } else if let Some(auth_info) = session.get_default_oauth_info() {
+                    user_info.auth_info = Some(auth_info);
+                    notice = Some(format!(
+                        "{} and {} are not provided, using system parameters instead",
+                        OAUTH_JWKS_URL_KEY, OAUTH_ISSUER_KEY
+                    ));
+                } else {
+                    return Err(ErrorCode::InvalidParameterValue(format!(
                         "{} and {} must be provided",
                         OAUTH_JWKS_URL_KEY, OAUTH_ISSUER_KEY
                     ))
-                })?;
-                user_info.auth_info = Some(auth_info);
+                    .into());
+                }
                 update_fields.push(UpdateField::AuthInfo)
             }
         }
     }
-    Ok((user_info, update_fields))
+    Ok((user_info, update_fields, notice))
 }
 
 fn alter_rename_prost_user_info(
@@ -161,7 +174,7 @@ pub async fn handle_alter_user(
     stmt: AlterUserStatement,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let (user_info, update_fields) = {
+    let (user_info, update_fields, notice) = {
         let user_name = Binder::resolve_user_name(stmt.user_name.clone())?;
         let user_reader = session.env().user_info_reader().read_guard();
 
@@ -176,10 +189,12 @@ pub async fn handle_alter_user(
 
         match stmt.mode {
             risingwave_sqlparser::ast::AlterUserMode::Options(options) => {
-                alter_prost_user_info(old_info, &options, session_user)?
+                alter_prost_user_info(&session, old_info, &options, session_user)?
             }
             risingwave_sqlparser::ast::AlterUserMode::Rename(new_name) => {
-                alter_rename_prost_user_info(old_info, new_name, session_user)?
+                let (user_info, fields) =
+                    alter_rename_prost_user_info(old_info, new_name, session_user)?;
+                (user_info, fields, None)
             }
         }
     };
@@ -188,7 +203,12 @@ pub async fn handle_alter_user(
     user_info_writer
         .update_user(user_info, update_fields)
         .await?;
-    Ok(PgResponse::empty_result(StatementType::UPDATE_USER))
+    let response_builder = RwPgResponse::builder(StatementType::UPDATE_USER);
+    if let Some(notice) = notice {
+        Ok(response_builder.notice(notice).into())
+    } else {
+        Ok(response_builder.into())
+    }
 }
 
 #[cfg(test)]

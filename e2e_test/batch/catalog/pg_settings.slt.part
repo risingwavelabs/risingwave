@@ -17,6 +17,8 @@ postmaster enable_tracing
 postmaster enforce_secret
 postmaster license_key
 postmaster max_concurrent_creating_streaming_jobs
+postmaster oauth_issuer
+postmaster oauth_jwks_url
 postmaster pause_on_next_bootstrap
 postmaster per_database_isolation
 postmaster time_travel_retention_ms

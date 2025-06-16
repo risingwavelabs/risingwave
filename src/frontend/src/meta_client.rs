@@ -81,8 +81,6 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>>;
 
-    async fn get_system_params(&self) -> Result<SystemParamsReader>;
-
     async fn set_system_param(
         &self,
         param: String,
@@ -217,10 +215,6 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>> {
         let manifest = self.0.get_meta_snapshot_manifest().await?;
         Ok(manifest.snapshot_metadata)
-    }
-
-    async fn get_system_params(&self) -> Result<SystemParamsReader> {
-        self.0.get_system_params().await
     }
 
     async fn set_system_param(

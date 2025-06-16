@@ -136,9 +136,9 @@ async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<RwPgResp
     let params = handler_args
         .session
         .env()
-        .meta_client()
-        .get_system_params()
-        .await?;
+        .system_params_manager()
+        .get_params()
+        .load();
     let rows = params
         .get_all()
         .into_iter()

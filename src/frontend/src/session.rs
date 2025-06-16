@@ -56,6 +56,7 @@ use risingwave_common::session_config::{ConfigReporter, SessionConfig, Visibilit
 use risingwave_common::system_param::local_manager::{
     LocalSystemParamsManager, LocalSystemParamsManagerRef,
 };
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
@@ -73,7 +74,8 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::Property as AddWorkerNodeProperty;
 use risingwave_pb::frontend_service::frontend_service_server::FrontendServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
-use risingwave_pb::user::auth_info::EncryptionType;
+use risingwave_pb::user::PbAuthInfo;
+use risingwave_pb::user::auth_info::{EncryptionType, PbEncryptionType};
 use risingwave_pb::user::grant_privilege::Object;
 use risingwave_rpc_client::{
     ComputeClientPool, ComputeClientPoolRef, FrontendClientPool, FrontendClientPoolRef, MetaClient,
@@ -122,7 +124,7 @@ use crate::scheduler::{
 };
 use crate::telemetry::FrontendTelemetryCreator;
 use crate::user::UserId;
-use crate::user::user_authentication::md5_hash_with_salt;
+use crate::user::user_authentication::{OAUTH_ISSUER_KEY, OAUTH_JWKS_URL_KEY, md5_hash_with_salt};
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::{FrontendOpts, PgResponseStream, TableCatalog};
@@ -1365,6 +1367,28 @@ DETAILS:
         }
         Ok(())
     }
+
+    pub fn get_default_oauth_info(&self) -> Option<PbAuthInfo> {
+        let reader = self.env.system_params_manager().get_params().load();
+        if !reader.oauth_jwks_url().is_empty() && !reader.oauth_issuer().is_empty() {
+            Some(PbAuthInfo {
+                encryption_type: PbEncryptionType::Oauth as i32,
+                encrypted_value: Vec::new(),
+                metadata: HashMap::from([
+                    (
+                        OAUTH_JWKS_URL_KEY.to_string(),
+                        reader.oauth_jwks_url().to_string(),
+                    ),
+                    (
+                        OAUTH_ISSUER_KEY.to_string(),
+                        reader.oauth_issuer().to_string(),
+                    ),
+                ]),
+            })
+        } else {
+            None
+        }
+    }
 }
 
 pub static SESSION_MANAGER: std::sync::OnceLock<Arc<SessionManagerImpl>> =
@@ -1565,6 +1589,9 @@ impl SessionManagerImpl {
 
             Ok(session_impl)
         } else {
+            // TODO: if oauth enable for the cluster, automatically auth with the given name and create a user.
+            // Note that: Since the password was received later, it is necessary to initialize session_impl
+            // first and update the user id in the auth context later.
             Err(Box::new(Error::new(
                 ErrorKind::InvalidInput,
                 format!("Role {} does not exist", user_name),
