@@ -4,7 +4,6 @@
 set -euo pipefail
 
 source ci/scripts/common.sh
-unset RW_BUILD_INSTRUMENT_COVERAGE # disable profiling for wasm udf
 
 echo "--- Build Rust UDF"
 cd e2e_test/udf/embedded_wasm

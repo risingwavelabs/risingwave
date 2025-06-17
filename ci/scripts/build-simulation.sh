@@ -4,7 +4,7 @@
 set -euo pipefail
 
 source ci/scripts/common.sh
-unset RW_BUILD_INSTRUMENT_COVERAGE
+# TODO: set `RW_BUILD_INSTRUMENT_COVERAGE=1` after addressing performance issue under madsim
 
 echo "--- Generate RiseDev CI config"
 cp ci/risedev-components.ci.env risedev-components.user.env
