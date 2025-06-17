@@ -97,8 +97,11 @@ impl SourceReader {
             }
             ConnectorProperties::OpendalS3(prop) => {
                 list_interval_sec = get_list_interval_sec(prop.fs_common.refresh_interval_sec);
-                let lister: OpendalEnumerator<OpendalS3> =
-                    OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
+                let lister: OpendalEnumerator<OpendalS3> = OpendalEnumerator::new_s3_source(
+                    &prop.s3_properties,
+                    prop.assume_role,
+                    prop.fs_common.compression_format,
+                )?;
                 Ok(build_opendal_fs_list_stream(lister, list_interval_sec))
             }
             ConnectorProperties::Azblob(prop) => {
