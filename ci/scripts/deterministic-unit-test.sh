@@ -4,6 +4,7 @@
 set -euo pipefail
 
 source ci/scripts/common.sh
+unset RW_BUILD_INSTRUMENT_COVERAGE # TODO: should use llvm-cov's nextest wrapper
 
 echo "--- Generate RiseDev CI config"
 cp ci/risedev-components.ci.env risedev-components.user.env

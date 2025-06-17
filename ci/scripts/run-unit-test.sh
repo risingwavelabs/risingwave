@@ -6,8 +6,7 @@ set -euo pipefail
 REPO_ROOT=${PWD}
 
 source ci/scripts/common.sh
-# Set the LLVM_PROFILE_FILE to avoid generate too many coverage data by not interpolating process id.
-export LLVM_PROFILE_FILE='/risingwave/target/risingwave-unit-test-%8m.profraw'
+unset RW_BUILD_INSTRUMENT_COVERAGE # TODO: should use llvm-cov's nextest wrapper
 
 echo "+++ Run unit tests"
 # use tee to disable progress bar
