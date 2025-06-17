@@ -14,11 +14,13 @@
 
 #[cfg(test)]
 mod tests {
-    use url::Url;
-    use crate::connector_common::common::*;
     use std::io::Write;
+
     use tempfile::NamedTempFile;
     use tokio;
+    use url::Url;
+
+    use crate::connector_common::common::*;
 
     fn create_test_pulsar_common() -> PulsarCommon {
         PulsarCommon {
@@ -158,7 +160,9 @@ mod tests {
 
         assert!(result.is_err());
         let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("credentials_url must be a valid URL (s3://, file://) or an absolute file path"));
+        assert!(error_msg.contains(
+            "credentials_url must be a valid URL (s3://, file://) or an absolute file path"
+        ));
     }
 
     #[tokio::test]
@@ -214,7 +218,9 @@ mod tests {
 
         assert!(result.is_err());
         let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("credentials_url must be a valid URL (s3://, file://) or an absolute file path"));
+        assert!(error_msg.contains(
+            "credentials_url must be a valid URL (s3://, file://) or an absolute file path"
+        ));
     }
 
     #[tokio::test]
