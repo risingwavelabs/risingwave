@@ -638,7 +638,7 @@ where
             UserAuthenticator::None => {
                 self.stream.write_no_flush(&BeMessage::AuthenticationOk)?;
 
-                // Cancel request need this for identify and verification. According to postgres
+                // Cancel request need this for identification and verification. According to postgres
                 // doc, it should be written to buffer after receive AuthenticationOk.
                 self.stream
                     .write_no_flush(&BeMessage::BackendKeyData(session.id()))?;
@@ -649,7 +649,9 @@ where
                     })?;
                 self.ready_for_query()?;
             }
-            UserAuthenticator::ClearText(_) | UserAuthenticator::OAuth(_) => {
+            UserAuthenticator::ClearText(_)
+            | UserAuthenticator::OAuth(_)
+            | UserAuthenticator::OAuthWithCreate(..) => {
                 self.stream
                     .write_no_flush(&BeMessage::AuthenticationCleartextPassword)?;
             }
@@ -667,6 +669,11 @@ where
     async fn process_password_msg(&mut self, msg: FePasswordMessage) -> PsqlResult<()> {
         let authenticator = self.session.as_ref().unwrap().user_authenticator();
         authenticator.authenticate(&msg.password).await?;
+        if let UserAuthenticator::OAuthWithCreate(username, _) = authenticator {
+            // If the user is authenticated with OAuth and the user does not exist, we create it.
+            let session = self.session.clone().unwrap();
+            session.rebind_oauth_user(username).await?;
+        }
         self.stream.write_no_flush(&BeMessage::AuthenticationOk)?;
         self.stream
             .write_parameter_status_msg_no_flush(&ParameterStatus::default())?;

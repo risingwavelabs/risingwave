@@ -715,6 +715,8 @@ message SystemParams {
   optional string adaptive_parallelism_strategy = 19;
   optional bool per_database_isolation = 20;
   optional bool enforce_secret = 21;
+  optional string oauth_jwks_url = 22;
+  optional string oauth_issuer = 23;
 }
 
 message GetSystemParamsRequest {}

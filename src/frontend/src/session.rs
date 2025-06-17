@@ -43,10 +43,9 @@ use risingwave_batch::worker_manager::worker_node_manager::{
     WorkerNodeManager, WorkerNodeManagerRef,
 };
 use risingwave_common::acl::AclMode;
+use risingwave_common::catalog::DEFAULT_SUPER_USER_ID;
 #[cfg(test)]
-use risingwave_common::catalog::{
-    DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
-};
+use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER};
 use risingwave_common::config::{
     BatchConfig, FrontendConfig, MetaConfig, MetricLevel, StreamingConfig, UdfConfig, load_config,
 };
@@ -56,6 +55,7 @@ use risingwave_common::session_config::{ConfigReporter, SessionConfig, Visibilit
 use risingwave_common::system_param::local_manager::{
     LocalSystemParamsManager, LocalSystemParamsManagerRef,
 };
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
@@ -73,8 +73,9 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::Property as AddWorkerNodeProperty;
 use risingwave_pb::frontend_service::frontend_service_server::FrontendServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
-use risingwave_pb::user::auth_info::EncryptionType;
-use risingwave_pb::user::grant_privilege::Object;
+use risingwave_pb::user::auth_info::{EncryptionType, PbEncryptionType};
+use risingwave_pb::user::grant_privilege::{Object, PbAction, PbActionWithGrantOption};
+use risingwave_pb::user::{PbAuthInfo, PbGrantPrivilege, PbUserInfo};
 use risingwave_rpc_client::{
     ComputeClientPool, ComputeClientPoolRef, FrontendClientPool, FrontendClientPoolRef, MetaClient,
 };
@@ -122,7 +123,7 @@ use crate::scheduler::{
 };
 use crate::telemetry::FrontendTelemetryCreator;
 use crate::user::UserId;
-use crate::user::user_authentication::md5_hash_with_salt;
+use crate::user::user_authentication::{OAUTH_ISSUER_KEY, OAUTH_JWKS_URL_KEY, md5_hash_with_salt};
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::{FrontendOpts, PgResponseStream, TableCatalog};
@@ -1365,6 +1366,28 @@ DETAILS:
         }
         Ok(())
     }
+
+    pub fn get_default_oauth_info(&self) -> Option<PbAuthInfo> {
+        let reader = self.env.system_params_manager().get_params().load();
+        if !reader.oauth_jwks_url().is_empty() && !reader.oauth_issuer().is_empty() {
+            Some(PbAuthInfo {
+                encryption_type: PbEncryptionType::Oauth as i32,
+                encrypted_value: Vec::new(),
+                metadata: HashMap::from([
+                    (
+                        OAUTH_JWKS_URL_KEY.to_string(),
+                        reader.oauth_jwks_url().to_string(),
+                    ),
+                    (
+                        OAUTH_ISSUER_KEY.to_string(),
+                        reader.oauth_issuer().to_string(),
+                    ),
+                ]),
+            })
+        } else {
+            None
+        }
+    }
 }
 
 pub static SESSION_MANAGER: std::sync::OnceLock<Arc<SessionManagerImpl>> =
@@ -1565,10 +1588,51 @@ impl SessionManagerImpl {
 
             Ok(session_impl)
         } else {
-            Err(Box::new(Error::new(
-                ErrorKind::InvalidInput,
-                format!("Role {} does not exist", user_name),
-            )))
+            let reader = self.env.system_params_manager().get_params().load();
+            if !reader.oauth_jwks_url().is_empty() && !reader.oauth_issuer().is_empty() {
+                let user_authenticator = UserAuthenticator::OAuthWithCreate(
+                    user_name.to_owned(),
+                    HashMap::from_iter([
+                        (
+                            OAUTH_JWKS_URL_KEY.to_string(),
+                            reader.oauth_jwks_url().to_string(),
+                        ),
+                        (
+                            OAUTH_ISSUER_KEY.to_string(),
+                            reader.oauth_issuer().to_string(),
+                        ),
+                    ]),
+                );
+
+                // Note that: Since the password was received later, it is necessary to initialize session_impl
+                // first and update the user id in the auth context later.
+                let auth_context =
+                    AuthContext::new(database_name.to_owned(), user_name.to_owned(), 0);
+
+                // Assign a session id and insert into sessions map (for cancel request).
+                let secret_key = self.number.fetch_add(1, Ordering::Relaxed);
+                // Use a trivial strategy: process_id and secret_key are equal.
+                let id = (secret_key, secret_key);
+                // Read session params snapshot from frontend env.
+                let session_config = self.env.session_params_snapshot();
+                let session_impl: Arc<SessionImpl> = SessionImpl::new(
+                    self.env.clone(),
+                    auth_context,
+                    user_authenticator,
+                    id,
+                    peer_addr,
+                    session_config,
+                )
+                .into();
+                self.insert_session(session_impl.clone());
+
+                Ok(session_impl)
+            } else {
+                Err(Box::new(Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("Role {} does not exist", user_name),
+                )))
+            }
         }
     }
 }
@@ -1731,6 +1795,42 @@ impl Session for SessionImpl {
                 }
             }
         }
+        Ok(())
+    }
+
+    async fn rebind_oauth_user(&self, user_name: &str) -> std::result::Result<(), BoxedError> {
+        {
+            let user_info_writer = self.user_info_writer()?;
+            assert_eq!(self.auth_context.read().user_id, 0);
+            user_info_writer
+                .create_user(PbUserInfo {
+                    name: user_name.to_owned(),
+                    can_login: true,
+                    grant_privileges: vec![PbGrantPrivilege {
+                        action_with_opts: vec![PbActionWithGrantOption {
+                            action: PbAction::Connect as i32,
+                            with_grant_option: true,
+                            granted_by: DEFAULT_SUPER_USER_ID,
+                        }],
+                        object: Some(Object::DatabaseId(self.database_id())),
+                    }],
+                    auth_info: Some(self.get_default_oauth_info().unwrap()),
+                    ..Default::default()
+                })
+                .await?;
+        }
+        // Update the user id in the auth context.
+        let user_info_reader = self.env.user_info_reader().read_guard();
+        let user = user_info_reader
+            .get_user_by_name(user_name)
+            .ok_or_else(|| {
+                Box::new(Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("Role {} does not exist", user_name),
+                ))
+            })?;
+        self.auth_context.write().user_id = user.id;
+
         Ok(())
     }
 }

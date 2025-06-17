@@ -233,4 +233,12 @@ where
             .per_database_isolation
             .unwrap_or_else(default::per_database_isolation)
     }
+
+    fn oauth_jwks_url(&self) -> &str {
+        self.inner().oauth_jwks_url.as_deref().unwrap()
+    }
+
+    fn oauth_issuer(&self) -> &str {
+        self.inner().oauth_issuer.as_deref().unwrap()
+    }
 }
