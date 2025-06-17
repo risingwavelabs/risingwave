@@ -1535,7 +1535,7 @@ where
         })
         .collect();
 
-    #[cfg(debug_assertions)]
+    // #[cfg(debug_assertions)]
     {
         let fragment_actors_from_db: Vec<(FragmentId, ActorId)> = Actor::find()
             .select_only()
