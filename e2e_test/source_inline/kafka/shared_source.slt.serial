@@ -27,7 +27,7 @@ sleep 2s
 statement ok
 set STREAMING_USE_SNAPSHOT_BACKFILL TO true;
 
-statement error error place holder
+statement error Not supported: Snapshot backfill with shared source backfill is not supported
 create materialized view mv_snapshot_backfill_shared_source as (select * from mv_before_produce) union (select * from s_before_produce);
 
 statement ok
