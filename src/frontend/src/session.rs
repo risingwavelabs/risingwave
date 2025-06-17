@@ -1173,7 +1173,7 @@ impl SessionImpl {
         self.check_privileges(&[ObjectCheckItem::new(
             table.owner(),
             AclMode::Select,
-            table_name.to_string(),
+            table_name.to_owned(),
             Object::TableId(table.id.table_id()),
         )])?;
 
