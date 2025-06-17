@@ -218,7 +218,6 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 20
     parallelism: 2
-    cancel_on_build_failing: true
     retry: *auto-retry
 
   - label: "connector node integration test Java {{matrix.java_version}}"
@@ -484,7 +483,6 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 12
-    cancel_on_build_failing: true
     retry: *auto-retry
 
   - label: "integration test (deterministic simulation)"
@@ -519,7 +517,6 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 35
     parallelism: 4
-    cancel_on_build_failing: true
     retry: *auto-retry
 
   - label: "recovery test (deterministic simulation)"
@@ -541,7 +538,6 @@ steps:
       #     format: "junit"
     timeout_in_minutes: 40
     parallelism: 4
-    cancel_on_build_failing: true
     retry: *auto-retry
 
   # The following jobs are triggered only when PR has corresponding labels.
