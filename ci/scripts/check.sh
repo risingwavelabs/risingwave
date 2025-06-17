@@ -16,7 +16,7 @@ for script in ci/**/*.sh; do
 done
 
 source ci/scripts/common.sh
-unset RW_INSTRUMENT_COVERAGE
+unset RW_BUILD_INSTRUMENT_COVERAGE
 
 echo "--- Set openssl static link env vars"
 configure_static_openssl

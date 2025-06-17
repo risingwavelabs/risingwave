@@ -8,6 +8,7 @@ fi
 set -euo pipefail
 
 source ci/scripts/common.sh
+unset RW_BUILD_INSTRUMENT_COVERAGE # we will call `cargo build` during creating Rust UDF
 
 while getopts 'p:' opt; do
     case ${opt} in

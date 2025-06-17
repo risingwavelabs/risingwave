@@ -4,7 +4,7 @@
 set -euo pipefail
 
 # RUSTC_WORKSPACE_WRAPPER script that adds coverage-related rustflags
-# for workspace members only when RW_INSTRUMENT_COVERAGE is set.
+# for workspace members only when RW_BUILD_INSTRUMENT_COVERAGE is set.
 # External dependencies won't get coverage flags because
 # RUSTC_WORKSPACE_WRAPPER only applies to workspace members.
 #
@@ -14,8 +14,8 @@ set -euo pipefail
 ACTUAL_RUSTC="$1"
 shift  # Remove the first argument (rustc path) from $@
 
-# Only add coverage flags if RW_INSTRUMENT_COVERAGE is set
-if [[ "${RW_INSTRUMENT_COVERAGE:-}" == "1" ]]; then
+# Only add coverage flags if RW_BUILD_INSTRUMENT_COVERAGE is set
+if [[ "${RW_BUILD_INSTRUMENT_COVERAGE:-}" == "1" ]]; then
     exec -- "$ACTUAL_RUSTC" "$@" -C instrument-coverage --cfg coverage
 else
     exec -- "$ACTUAL_RUSTC" "$@"

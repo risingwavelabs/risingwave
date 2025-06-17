@@ -4,7 +4,7 @@
 set -euo pipefail
 
 source ci/scripts/common.sh
-unset RW_INSTRUMENT_COVERAGE
+unset RW_BUILD_INSTRUMENT_COVERAGE
 
 echo "--- Generate RiseDev CI config"
 cp ci/risedev-components.ci.env risedev-components.user.env
