@@ -4,6 +4,7 @@
 set -euo pipefail
 
 source ci/scripts/common.sh
+unset RW_INSTRUMENT_COVERAGE
 
 export RUST_LOG="info,risingwave_simulation=debug"
 export LOGDIR=.risingwave/log

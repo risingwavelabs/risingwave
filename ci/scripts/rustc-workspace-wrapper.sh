@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Exits as soon as any line fails.
+set -euo pipefail
+
 # RUSTC_WORKSPACE_WRAPPER script that adds coverage-related rustflags
 # for workspace members only when RW_INSTRUMENT_COVERAGE is set.
 # External dependencies won't get coverage flags because

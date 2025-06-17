@@ -6,6 +6,7 @@ set -euo pipefail
 REPO_ROOT=${PWD}
 
 source ci/scripts/common.sh
+unset RW_INSTRUMENT_COVERAGE # TODO: this generates too much coverage data, temporarily disable it
 
 echo "+++ Run unit tests"
 # use tee to disable progress bar
