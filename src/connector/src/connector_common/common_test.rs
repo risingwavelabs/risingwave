@@ -24,15 +24,15 @@ mod tests {
 
     fn create_test_pulsar_common() -> PulsarCommon {
         PulsarCommon {
-            topic: "test-topic".to_string(),
-            service_url: "pulsar://localhost:6650".to_string(),
+            topic: "test-topic".to_owned(),
+            service_url: "pulsar://localhost:6650".to_owned(),
             auth_token: None,
         }
     }
 
     fn create_test_aws_auth_props() -> AwsAuthProps {
         AwsAuthProps {
-            region: Some("us-east-1".to_string()),
+            region: Some("us-east-1".to_owned()),
             endpoint: None,
             access_key: None,
             secret_key: None,
@@ -55,9 +55,9 @@ mod tests {
         let temp_path = temp_file.path().to_str().unwrap();
 
         let oauth = PulsarOauthCommon {
-            issuer_url: "https://example.com".to_string(),
+            issuer_url: "https://example.com".to_owned(),
             credentials_url: format!("file://{}", temp_path),
-            audience: "test-audience".to_string(),
+            audience: "test-audience".to_owned(),
             scope: None,
         };
 
@@ -77,9 +77,9 @@ mod tests {
         let aws_auth_props = create_test_aws_auth_props();
 
         let oauth = PulsarOauthCommon {
-            issuer_url: "https://example.com".to_string(),
-            credentials_url: "http://example.com/credentials".to_string(),
-            audience: "test-audience".to_string(),
+            issuer_url: "https://example.com".to_owned(),
+            credentials_url: "http://example.com/credentials".to_owned(),
+            audience: "test-audience".to_owned(),
             scope: None,
         };
 
@@ -100,12 +100,12 @@ mod tests {
         // Create a temporary file for testing
         let mut temp_file = NamedTempFile::new().unwrap();
         temp_file.write_all(b"test credentials").unwrap();
-        let temp_path = temp_file.path().to_str().unwrap().to_string();
+        let temp_path = temp_file.path().to_str().unwrap().to_owned();
 
         let oauth = PulsarOauthCommon {
-            issuer_url: "https://example.com".to_string(),
+            issuer_url: "https://example.com".to_owned(),
             credentials_url: temp_path.clone(),
-            audience: "test-audience".to_string(),
+            audience: "test-audience".to_owned(),
             scope: None,
         };
 
@@ -127,9 +127,9 @@ mod tests {
         let nonexistent_path = "/tmp/nonexistent_credentials_file";
 
         let oauth = PulsarOauthCommon {
-            issuer_url: "https://example.com".to_string(),
-            credentials_url: nonexistent_path.to_string(),
-            audience: "test-audience".to_string(),
+            issuer_url: "https://example.com".to_owned(),
+            credentials_url: nonexistent_path.to_owned(),
+            audience: "test-audience".to_owned(),
             scope: None,
         };
 
@@ -148,9 +148,9 @@ mod tests {
         let aws_auth_props = create_test_aws_auth_props();
 
         let oauth = PulsarOauthCommon {
-            issuer_url: "https://example.com".to_string(),
-            credentials_url: "relative/path/to/credentials".to_string(),
-            audience: "test-audience".to_string(),
+            issuer_url: "https://example.com".to_owned(),
+            credentials_url: "relative/path/to/credentials".to_owned(),
+            audience: "test-audience".to_owned(),
             scope: None,
         };
 
@@ -206,9 +206,9 @@ mod tests {
         let aws_auth_props = create_test_aws_auth_props();
 
         let oauth = PulsarOauthCommon {
-            issuer_url: "https://example.com".to_string(),
-            credentials_url: "".to_string(),
-            audience: "test-audience".to_string(),
+            issuer_url: "https://example.com".to_owned(),
+            credentials_url: "".to_owned(),
+            audience: "test-audience".to_owned(),
             scope: None,
         };
 
@@ -231,9 +231,9 @@ mod tests {
 
         // On Unix systems, this will be treated as relative, so it should fail
         let oauth = PulsarOauthCommon {
-            issuer_url: "https://example.com".to_string(),
-            credentials_url: "C:\\credentials\\file.json".to_string(),
-            audience: "test-audience".to_string(),
+            issuer_url: "https://example.com".to_owned(),
+            credentials_url: "C:\\credentials\\file.json".to_owned(),
+            audience: "test-audience".to_owned(),
             scope: None,
         };
 
