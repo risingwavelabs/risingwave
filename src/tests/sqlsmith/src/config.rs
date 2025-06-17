@@ -43,6 +43,7 @@ pub enum Feature {
     Eowc,
     NaturalJoin,
     UsingJoin,
+    Except,
 }
 
 impl fmt::Display for Feature {
@@ -51,6 +52,7 @@ impl fmt::Display for Feature {
             Feature::Eowc => "eowc",
             Feature::NaturalJoin => "natural join",
             Feature::UsingJoin => "using join",
+            Feature::Except => "except",
         };
         write!(f, "{}", s)
     }
@@ -142,6 +144,7 @@ impl Configuration {
                 "eowc" => Feature::Eowc,
                 "natural_join" => Feature::NaturalJoin,
                 "using_join" => Feature::UsingJoin,
+                "except" => Feature::Except,
                 _ => panic!("Unknown feature: {}", feat),
             };
             self.set_enabled(parsed, true);
