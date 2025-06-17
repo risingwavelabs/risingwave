@@ -91,6 +91,17 @@ pub struct MessageMeta<'a> {
 }
 
 impl<'a> MessageMeta<'a> {
+    pub fn new(
+        source_meta: &'a SourceMeta,
+        split_id: &'a str,
+        offset: &'a str,
+    ) -> Self {
+        Self {
+            source_meta,
+            split_id,
+            offset,
+        }
+    }
     /// Extract the value for the given column.
     ///
     /// Returns `None` if the column is not a meta column.
@@ -139,6 +150,9 @@ pub enum TransactionControl {
 pub enum ParseResult {
     /// Some rows are parsed and written to the [`SourceStreamChunkRowWriter`].
     Rows,
+    /// An UPDATE event is parsed. A delete and a insert row are written to the [`SourceStreamChunkRowWriter`].
+    /// This is currently used for CDC ETL source.
+    DeleteInsertRows,
     /// A transaction control message is parsed.
     TransactionControl(TransactionControl),
 
@@ -393,7 +407,10 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                             }
                         }
                     }
-                }
+                },
+                Ok(ParseResult::DeleteInsertRows) => {
+                    unreachable!("unexpected delete insert rows. Only ETL CDC will return this parse result. Should only occur in CdcBackfillExecutor");
+                },
             }
         }
 

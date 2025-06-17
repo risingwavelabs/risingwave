@@ -23,8 +23,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_connector::parser::{
-    ByteStreamSourceParser, DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties,
-    ProtocolProperties, SourceStreamChunkBuilder, SpecificParserConfig,
+    ByteStreamSourceParser, DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties, ParseResult, ProtocolProperties, SourceStreamChunkBuilder, SpecificParserConfig
 };
 use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReaderImpl};
 use risingwave_connector::source::{SourceColumnDesc, SourceContext, SourceCtrlOpts};
@@ -78,6 +77,10 @@ pub struct CdcBackfillExecutor<S: StateStore> {
     rate_limit_rps: Option<u32>,
 
     options: CdcScanOptions,
+
+    /// Whether the backfill is for an ETL source.
+    /// This is used to determine which debezium parser to use.
+    is_for_etl: bool,
 }
 
 impl<S: StateStore> CdcBackfillExecutor<S> {
@@ -93,6 +96,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         state_table: StateTable<S>,
         rate_limit_rps: Option<u32>,
         options: CdcScanOptions,
+        is_for_etl: bool,
     ) -> Self {
         let pk_indices = external_table.pk_indices();
         let upstream_table_id = external_table.table_id().table_id;
@@ -115,6 +119,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             metrics,
             rate_limit_rps,
             options,
+            is_for_etl,
         }
     }
 
@@ -203,7 +208,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         });
 
         // Make sure to use mapping_message after transform_upstream.
-        let mut upstream = transform_upstream(upstream, self.output_columns.clone()).boxed();
+        let mut upstream =
+            transform_upstream(upstream, self.output_columns.clone(), self.is_for_etl).boxed();
         loop {
             if let Some(msg) =
                 build_reader_and_poll_upstream(&mut upstream, &mut table_reader, &mut future)
@@ -786,14 +792,23 @@ async fn build_reader_and_poll_upstream(
 }
 
 #[try_stream(ok = Message, error = StreamExecutorError)]
-pub async fn transform_upstream(upstream: BoxedMessageStream, output_columns: Vec<ColumnDesc>) {
+pub async fn transform_upstream(
+    upstream: BoxedMessageStream,
+    output_columns: Vec<ColumnDesc>,
+    is_for_etl: bool,
+) {
+    let debezium_props = if is_for_etl {
+        DebeziumProps::cdc_etl()
+    } else {
+        DebeziumProps::default()
+    };
     let props = SpecificParserConfig {
         encoding_config: EncodingProperties::Json(JsonProperties {
             use_schema_registry: false,
             timestamptz_handling: None,
         }),
         // the cdc message is generated internally so the key must exist.
-        protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
+        protocol_config: ProtocolProperties::Debezium(debezium_props),
     };
 
     // convert to source column desc to feed into parser
@@ -815,7 +830,7 @@ pub async fn transform_upstream(upstream: BoxedMessageStream, output_columns: Ve
     for msg in upstream {
         let mut msg = msg?;
         if let Message::Chunk(chunk) = &mut msg {
-            let parsed_chunk = parse_debezium_chunk(&mut parser, chunk).await?;
+            let parsed_chunk = parse_debezium_chunk(&mut parser, chunk, is_for_etl).await?;
             let _ = std::mem::replace(chunk, parsed_chunk);
         }
         yield msg;
@@ -825,17 +840,24 @@ pub async fn transform_upstream(upstream: BoxedMessageStream, output_columns: Ve
 async fn parse_debezium_chunk(
     parser: &mut DebeziumParser,
     chunk: &StreamChunk,
+    is_for_etl: bool,
 ) -> StreamExecutorResult<StreamChunk> {
     // here we transform the input chunk in `(payload varchar, _rw_offset varchar, _rw_table_name varchar)` schema
     // to chunk with downstream table schema `info.schema` of MergeNode contains the schema of the
     // table job with `_rw_offset` in the end
     // see `gen_create_table_plan_for_cdc_source` for details
 
+    let builder_chunk_size = if is_for_etl {
+        chunk.capacity() * 2
+    } else {
+        chunk.capacity()
+    };
+
     // use `SourceStreamChunkBuilder` for convenience
     let mut builder = SourceStreamChunkBuilder::new(
         parser.columns().to_vec(),
         SourceCtrlOpts {
-            chunk_size: chunk.capacity(),
+            chunk_size: builder_chunk_size,
             split_txn: false,
         },
     );
@@ -846,40 +868,92 @@ async fn parse_debezium_chunk(
     let payloads = chunk.data_chunk().project(&[0]);
     let offsets = chunk.data_chunk().project(&[1]).compact();
 
-    // TODO: preserve the transaction semantics
-    for payload in payloads.rows() {
-        let ScalarRefImpl::Jsonb(jsonb_ref) = payload.datum_at(0).expect("payload must exist")
-        else {
-            panic!("payload must be jsonb");
+    if is_for_etl {
+        use risingwave_common::array::{ArrayBuilder, StreamChunk, Utf8ArrayBuilder};
+        let mut offset_builder = Utf8ArrayBuilder::new(builder_chunk_size);
+
+        for (payload_row, offset_row) in payloads.rows().zip(offsets.rows()) {
+            let ScalarRefImpl::Jsonb(jsonb_ref) = payload_row.datum_at(0).expect("payload must exist")
+            else {
+                panic!("payload must be jsonb");
+            };
+            let offset_datum = offset_row.datum_at(0);
+
+            let parse_result = parser
+                .parse_inner(
+                    None,
+                    Some(jsonb_ref.to_string().as_bytes().to_vec()),
+                    builder.row_writer(),
+                )
+                .await
+                .unwrap();
+            let new_rows_cnt = match parse_result {
+                ParseResult::Rows => 1,
+                ParseResult::DeleteInsertRows => 2,
+                ParseResult::SchemaChange(_) | ParseResult::TransactionControl(_) => 0,
+            };
+            dbg!(&new_rows_cnt);
+
+            for _ in 0..new_rows_cnt {
+                offset_builder.append(offset_datum.map(|scalar| scalar.into_utf8()));
+            }
+        }
+        let new_offsets = offset_builder.finish();
+
+        builder.finish_current_chunk();
+        let parsed_chunk = {
+            let mut iter = builder.consume_ready_chunks();
+            assert_eq!(1, iter.len());
+            iter.next().unwrap()
         };
 
-        parser
-            .parse_inner(
-                None,
-                Some(jsonb_ref.to_string().as_bytes().to_vec()),
-                builder.row_writer(),
-            )
-            .await
-            .unwrap();
+        let (ops, mut columns, vis) = parsed_chunk.into_inner();
+        dbg!(&new_offsets);
+        dbg!(&columns);
+        columns.push(Arc::new(new_offsets.into()));
+        Ok(StreamChunk::from_parts(
+            ops,
+            DataChunk::from_parts(columns.into(), vis),
+        ))
+    } else {
+        // TODO: preserve the transaction semantics
+        for payload in payloads.rows() {
+            let ScalarRefImpl::Jsonb(jsonb_ref) = payload.datum_at(0).expect("payload must exist")
+            else {
+                panic!("payload must be jsonb");
+            };
+
+            parser
+                .parse_inner(
+                    None,
+                    Some(jsonb_ref.to_string().as_bytes().to_vec()),
+                    builder.row_writer(),
+                )
+                .await
+                .unwrap();
+        }
+        builder.finish_current_chunk();
+
+        let parsed_chunk = {
+            let mut iter = builder.consume_ready_chunks();
+            assert_eq!(1, iter.len());
+            iter.next().unwrap()
+        };
+
+        let parsed_capacity = parsed_chunk.capacity();
+        let (ops, mut columns, vis) = parsed_chunk.into_inner();
+        // note that `vis` is not necessarily the same as the original chunk's visibilities
+        assert_eq!(
+            parsed_capacity,
+            chunk.capacity(),
+            "capacity should not change for non-ETL sources"
+        );
+        columns.extend(offsets.into_parts().0);
+        Ok(StreamChunk::from_parts(
+            ops,
+            DataChunk::from_parts(columns.into(), vis),
+        ))
     }
-    builder.finish_current_chunk();
-
-    let parsed_chunk = {
-        let mut iter = builder.consume_ready_chunks();
-        assert_eq!(1, iter.len());
-        iter.next().unwrap()
-    };
-    assert_eq!(parsed_chunk.capacity(), chunk.capacity()); // each payload is expected to generate one row
-    let (ops, mut columns, vis) = parsed_chunk.into_inner();
-    // note that `vis` is not necessarily the same as the original chunk's visibilities
-
-    // concat the rows in the parsed chunk with the `_rw_offset` column
-    columns.extend(offsets.into_parts().0);
-
-    Ok(StreamChunk::from_parts(
-        ops,
-        DataChunk::from_parts(columns.into(), vis),
-    ))
 }
 
 impl<S: StateStore> Execute for CdcBackfillExecutor<S> {
@@ -919,7 +993,6 @@ mod tests {
         let pk_indices = vec![1];
         let (mut tx, source) = MockSource::channel();
         let source = source.into_executor(schema.clone(), pk_indices.clone());
-        // let payload = r#"{"before": null,"after":{"O_ORDERKEY": 5, "O_CUSTKEY": 44485, "O_ORDERSTATUS": "F", "O_TOTALPRICE": "144659.20", "O_ORDERDATE": "1994-07-30" },"source":{"version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002", "ts_ms": 1695277757000, "snapshot": "last", "db": "mydb", "sequence": null, "table": "orders_new", "server_id": 0, "gtid": null, "file": "binlog.000008", "pos": 3693, "row": 0, "thread": null, "query": null},"op":"r","ts_ms":1695277757017,"transaction":null}"#.to_string();
         let payload = r#"{ "payload": { "before": null, "after": { "O_ORDERKEY": 5, "O_CUSTKEY": 44485, "O_ORDERSTATUS": "F", "O_TOTALPRICE": "144659.20", "O_ORDERDATE": "1994-07-30" }, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002", "ts_ms": 1695277757000, "snapshot": "last", "db": "mydb", "sequence": null, "table": "orders_new", "server_id": 0, "gtid": null, "file": "binlog.000008", "pos": 3693, "row": 0, "thread": null, "query": null }, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#;
 
         let datums: Vec<Datum> = vec![
@@ -955,11 +1028,66 @@ mod tests {
             ColumnDesc::named("commit_ts", ColumnId::new(6), DataType::Timestamptz),
         ];
 
-        let parsed_stream = transform_upstream(upstream, columns);
+        let parsed_stream = transform_upstream(upstream, columns, false);
         pin_mut!(parsed_stream);
         // the output chunk must contain the offset column
         if let Some(message) = parsed_stream.next().await {
             println!("chunk: {:#?}", message.unwrap());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_transform_upstream_chunk_etl_update() {
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Jsonb),   // debezium json payload
+            Field::unnamed(DataType::Varchar), // _rw_offset
+            Field::unnamed(DataType::Varchar), // _rw_table_name
+        ]);
+        let pk_indices = vec![1];
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema.clone(), pk_indices.clone());
+        let payload = r#"{ "payload": { "before": { "O_ORDERKEY": 5, "O_CUSTKEY": 44485, "O_ORDERSTATUS": "F", "O_TOTALPRICE": "144659.20", "O_ORDERDATE": "1994-07-30" }, "after": { "O_ORDERKEY": 5, "O_CUSTKEY": 44485, "O_ORDERSTATUS": "O", "O_TOTALPRICE": "144659.20", "O_ORDERDATE": "1994-07-30" }, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002", "ts_ms": 1695277757000, "snapshot": "last", "db": "mydb", "sequence": null, "table": "orders_new", "server_id": 0, "gtid": null, "file": "binlog.000008", "pos": 3693, "row": 0, "thread": null, "query": null }, "op": "u", "ts_ms": 1695277757017, "transaction": null } }"#;
+
+        let datums: Vec<Datum> = vec![
+            Some(JsonbVal::from_str(payload).unwrap().into()),
+            Some("file: 1.binlog, pos: 100".to_owned().into()),
+            Some("mydb.orders".to_owned().into()),
+        ];
+
+        let mut builders = schema.create_array_builders(8);
+        for (builder, datum) in builders.iter_mut().zip_eq_fast(datums.iter()) {
+            builder.append(datum.clone());
+        }
+        let columns = builders
+            .into_iter()
+            .map(|builder| builder.finish().into())
+            .collect();
+
+        // one row chunk
+        let chunk = StreamChunk::from_parts(vec![Op::Insert], DataChunk::new(columns, 1));
+
+        tx.push_chunk(chunk);
+        let upstream = Box::new(source).execute();
+
+        // schema to the debezium parser
+        let columns = vec![
+            ColumnDesc::named("O_ORDERKEY", ColumnId::new(1), DataType::Int64),
+            ColumnDesc::named("O_CUSTKEY", ColumnId::new(2), DataType::Int64),
+            ColumnDesc::named("O_ORDERSTATUS", ColumnId::new(3), DataType::Varchar),
+            ColumnDesc::named("O_TOTALPRICE", ColumnId::new(4), DataType::Decimal),
+            ColumnDesc::named("O_ORDERDATE", ColumnId::new(5), DataType::Date),
+            ColumnDesc::named("commit_ts", ColumnId::new(6), DataType::Timestamptz),
+        ];
+
+        // is_for_etl = true
+        let parsed_stream = transform_upstream(upstream, columns, true);
+        pin_mut!(parsed_stream);
+
+        if let Some(Ok(Message::Chunk(chunk))) = parsed_stream.next().await {
+            let expected = expect_test::expect!("");
+            expected.assert_eq(&chunk.to_pretty().to_string());
+        } else {
+            panic!("expected a chunk from parsed stream");
         }
     }
 
@@ -1004,6 +1132,7 @@ mod tests {
                 disable_backfill: true,
                 ..CdcScanOptions::default()
             },
+            false,
         );
         // cdc.state_impl.init_epoch(EpochPair::new(test_epoch(4), test_epoch(3))).await.unwrap();
         // cdc.state_impl.mutate_state(None, None, 0, true).await.unwrap();

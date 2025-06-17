@@ -26,6 +26,7 @@ use super::{ExprRewritable, PlanBase, PlanRef, StreamNode, generic};
 use crate::catalog::ColumnId;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::scheduler::SchedulerResult;
@@ -250,6 +251,7 @@ impl StreamCdcTableScan {
             rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
             disable_backfill: options.disable_backfill,
             options: Some(options),
+            is_for_etl: matches!(self.core.kind, SourceNodeKind::CreateMViewOrBatch),
         }));
 
         // plan: merge -> filter -> exchange(simple) -> stream_scan

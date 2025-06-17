@@ -124,6 +124,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             state_table,
             node.rate_limit,
             scan_options,
+            node.is_for_etl,
         );
         Ok((params.info, exec).into())
     }

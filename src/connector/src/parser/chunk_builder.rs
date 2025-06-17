@@ -191,7 +191,7 @@ impl SourceStreamChunkBuilder {
         self.ready_chunks.drain(..)
     }
 
-    fn current_chunk_len(&self) -> usize {
+    pub fn current_chunk_len(&self) -> usize {
         self.op_builder.len()
     }
 

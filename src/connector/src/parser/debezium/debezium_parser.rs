@@ -45,6 +45,8 @@ pub struct DebeziumProps {
     // Ignore the key part of the message.
     // If enabled, we don't take the key part into message accessor.
     pub ignore_key: bool,
+    // If enabled, we will treat the update event as a delete and an insert.
+    pub handle_update_as_delete_insert: bool,
 }
 
 impl DebeziumProps {
@@ -53,7 +55,20 @@ impl DebeziumProps {
             .get(DEBEZIUM_IGNORE_KEY)
             .map(|v| v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
-        Self { ignore_key }
+
+        Self {
+            ignore_key,
+            handle_update_as_delete_insert: false,
+        }
+    }
+
+    pub fn cdc_etl() -> Self {
+        // cdc-etl job will always handle update as delete-insert
+        // and `ignore_key` will not take effect.
+        Self {
+            ignore_key: false,
+            handle_update_as_delete_insert: true,
+        }
     }
 }
 
@@ -138,8 +153,18 @@ impl DebeziumParser {
         };
         let row_op = DebeziumChangeEvent::new(key_accessor, payload_accessor);
 
-        match apply_row_operation_on_stream_chunk_writer(&row_op, &mut writer) {
-            Ok(_) => Ok(ParseResult::Rows),
+        let res: Result<_, crate::parser::AccessError> = (|| {
+            if self.props.handle_update_as_delete_insert && row_op.is_update()? {
+                writer.do_delete(|column| row_op.access_before_field(column))?;
+                writer.do_insert(|column| row_op.access_after_field(column))?;
+            } else {
+                apply_row_operation_on_stream_chunk_writer(&row_op, &mut writer)?;
+            }
+            Ok(ParseResult::DeleteInsertRows)
+        })();
+
+        match res {
+            Ok(r) => Ok(r),
             Err(err) => {
                 // Only try to access transaction control message if the row operation access failed
                 // to make it a fast path.
@@ -148,7 +173,7 @@ impl DebeziumParser {
                 {
                     Ok(ParseResult::TransactionControl(transaction_control))
                 } else {
-                    Err(err)?
+                    Err(err.into())
                 }
             }
         }
@@ -328,5 +353,61 @@ mod tests {
         let columns = ColumnCatalog::debezium_cdc_source_cols();
         // make sure it doesn't broken by future PRs
         assert_eq!(CDC_SOURCE_COLUMN_NUM, columns.len() as u32);
+    }
+
+    #[tokio::test]
+    async fn test_debezium_update_as_delete_insert() {
+        let columns = vec![
+            ColumnDesc::named("O_ORDERKEY", ColumnId::new(1), DataType::Int64),
+            ColumnDesc::named("O_CUSTKEY", ColumnId::new(2), DataType::Int64),
+            ColumnDesc::named("O_ORDERSTATUS", ColumnId::new(3), DataType::Varchar),
+            ColumnDesc::named("O_TOTALPRICE", ColumnId::new(4), DataType::Decimal),
+            ColumnDesc::named("O_ORDERDATE", ColumnId::new(5), DataType::Date),
+        ];
+
+        let columns: Vec<SourceColumnDesc> = columns.iter().map(SourceColumnDesc::from).collect();
+
+        let props = SpecificParserConfig {
+            encoding_config: EncodingProperties::Json(JsonProperties {
+                use_schema_registry: false,
+                timestamptz_handling: None,
+            }),
+            protocol_config: ProtocolProperties::Debezium(DebeziumProps {
+                ignore_key: false,
+                handle_update_as_delete_insert: true,
+            }),
+        };
+        let source_ctx = SourceContext {
+            connector_props: ConnectorProperties::PostgresCdc(Box::default()),
+            ..SourceContext::dummy()
+        };
+        let mut parser = DebeziumParser::new(props, columns.clone(), Arc::new(source_ctx))
+            .await
+            .unwrap();
+        let mut builder = SourceStreamChunkBuilder::new(columns, SourceCtrlOpts::for_test());
+
+        let payload = r#"{ "payload": { "before": { "O_ORDERKEY": 5, "O_CUSTKEY": 44485, "O_ORDERSTATUS": "F", "O_TOTALPRICE": "144659.20", "O_ORDERDATE": "1994-07-30" }, "after": { "O_ORDERKEY": 5, "O_CUSTKEY": 44485, "O_ORDERSTATUS": "O", "O_TOTALPRICE": "144659.20", "O_ORDERDATE": "1994-07-30" }, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002", "ts_ms": 1695277757000, "snapshot": "last", "db": "mydb", "sequence": null, "table": "orders_new", "server_id": 0, "gtid": null, "file": "binlog.000008", "pos": 3693, "row": 0, "thread": null, "query": null }, "op": "u", "ts_ms": 1695277757017, "transaction": null } }"#;
+
+        let res = parser
+            .parse_one_with_txn(
+                None,
+                Some(payload.as_bytes().to_vec()),
+                builder.row_writer(),
+            )
+            .await;
+
+        assert!(matches!(res, Ok(ParseResult::Rows)));
+
+        builder.finish_current_chunk();
+        let chunk = builder.consume_ready_chunks().next().unwrap();
+        let mut rows = chunk.rows();
+
+        let (op, row) = rows.next().unwrap();
+        assert_eq!(op, risingwave_common::array::Op::Delete);
+        assert_eq!(row.datum_at(2).unwrap().into_utf8(), "F");
+
+        let (op, row) = rows.next().unwrap();
+        assert_eq!(op, risingwave_common::array::Op::Insert);
+        assert_eq!(row.datum_at(2).unwrap().into_utf8(), "O");
     }
 }

@@ -699,6 +699,9 @@ message StreamCdcScanNode {
   bool disable_backfill = 7;
 
   StreamCdcScanOptions options = 8;
+
+  // Whether the backfill is for an ETL source.
+  bool is_for_etl = 9;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.

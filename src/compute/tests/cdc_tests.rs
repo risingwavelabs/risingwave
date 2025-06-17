@@ -132,8 +132,12 @@ impl Execute for MockOffsetGenExecutor {
     }
 }
 
-#[tokio::test]
-async fn test_cdc_backfill() -> StreamResult<()> {
+async fn run_cdc_backfill_test_case(
+    is_for_etl: bool,
+    chunk1_payload: Vec<&str>,
+    chunk2_payload: Vec<&str>,
+    expected_datachunk_str: &str,
+) -> StreamResult<()> {
     use risingwave_common::types::DataType;
     let memory_state_store = MemoryStateStore::new();
 
@@ -241,9 +245,16 @@ async fn test_cdc_backfill() -> StreamResult<()> {
                 snapshot_interval: 1,
                 snapshot_batch_size: 4,
             },
+            is_for_etl,
         )
         .boxed(),
     );
+
+    let conflict_behavior = if is_for_etl {
+        ConflictBehavior::IgnoreConflict
+    } else {
+        ConflictBehavior::Overwrite
+    };
 
     // Create a `MaterializeExecutor` to write the changes to storage.
     let materialize_table_id = TableId::new(5678);
@@ -254,29 +265,11 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         vec![ColumnOrder::new(0, OrderType::ascending())],
         vec![0.into(), 1.into()],
         Arc::new(AtomicU64::new(0)),
-        ConflictBehavior::Overwrite,
+        conflict_behavior,
     )
     .await
     .boxed()
     .execute();
-
-    // construct upstream chunks
-    let chunk1_payload = vec![
-        r#"{ "payload": { "before": null, "after": { "id": 1, "price": 10.01}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
-        r#"{ "payload": { "before": null, "after": { "id": 2, "price": 22.22}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
-        r#"{ "payload": { "before": null, "after": { "id": 3, "price": 3.03}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
-        r#"{ "payload": { "before": null, "after": { "id": 4, "price": 4.04}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
-        r#"{ "payload": { "before": null, "after": { "id": 5, "price": 5.05}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
-        r#"{ "payload": { "before": null, "after": { "id": 6, "price": 6.06}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
-    ];
-
-    let chunk2_payload = vec![
-        r#"{ "payload": { "before": null, "after": { "id": 1, "price": 11.11}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
-        r#"{ "payload": { "before": null, "after": { "id": 6, "price": 10.08}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
-        r#"{ "payload": { "before": null, "after": { "id": 199, "price": 40.5}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
-        r#"{ "payload": { "before": null, "after": { "id": 978, "price": 72.6}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
-        r#"{ "payload": { "before": null, "after": { "id": 134, "price": 41.7}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
-    ];
 
     let chunk1_datums: Vec<Datum> = chunk1_payload
         .into_iter()
@@ -387,8 +380,36 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     let mut stream = scan.execute();
     while let Some(message) = stream.next().await {
         let chunk = message.expect("scan a chunk");
-        let expect = DataChunk::from_pretty(
-            "I F
+        let expect = DataChunk::from_pretty(expected_datachunk_str);
+        assert_eq!(expect, chunk);
+    }
+
+    mview_handle.await.unwrap()?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_cdc_backfill() -> StreamResult<()> {
+    // construct upstream chunks
+    let chunk1_payload = vec![
+        r#"{ "payload": { "before": null, "after": { "id": 1, "price": 10.01}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": null, "after": { "id": 2, "price": 22.22}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": null, "after": { "id": 3, "price": 3.03}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": null, "after": { "id": 4, "price": 4.04}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": null, "after": { "id": 5, "price": 5.05}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": null, "after": { "id": 6, "price": 6.06}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+    ];
+
+    let chunk2_payload = vec![
+        r#"{ "payload": { "before": null, "after": { "id": 1, "price": 11.11}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": null, "after": { "id": 6, "price": 10.08}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": null, "after": { "id": 199, "price": 40.5}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": null, "after": { "id": 978, "price": 72.6}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": null, "after": { "id": 134, "price": 41.7}, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+    ];
+
+    let expected_datachunk_str = "I F
                 1 11.11
                 2 22.22
                 3 3.03
@@ -398,14 +419,47 @@ async fn test_cdc_backfill() -> StreamResult<()> {
                 8 1.0008
                 134 41.7
                 199 40.5
-                978 72.6",
-        );
-        assert_eq!(expect, chunk);
-    }
+            978 72.6";
 
-    mview_handle.await.unwrap()?;
+    run_cdc_backfill_test_case(false, chunk1_payload, chunk2_payload, expected_datachunk_str).await
+}
 
-    Ok(())
+#[tokio::test]
+async fn test_cdc_backfill_for_etl() -> StreamResult<()> {
+    // construct upstream chunks
+    let etl_chunk1_payload = vec![
+        r#"{ "payload": { "before": null, "after": { "id": 2, "price": 2.0002 }, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "c", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": { "id": 2, "price": 2.0002 }, "after": { "id": 2, "price": 22.0 }, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "u", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": { "id": 5, "price": 5.0005 }, "after": null, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "d", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": null, "after": { "id": 11, "price": 110.0 }, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "c", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": null, "after": { "id": 3, "price": 3.0003 }, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "c", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": null, "after": { "id": 4, "price": 4.0004 }, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "c", "ts_ms": 1695277757017, "transaction": null } }"#,
+    ];
+
+    let etl_chunk2_payload = vec![
+        r#"{ "payload": { "before": { "id": 2, "price": 22.0 }, "after": { "id": 2, "price": 22.22 }, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "u", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": null, "after": { "id": 12, "price": 120.0 }, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "c", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": { "id": 1, "price": 1.0001 }, "after": null, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "d", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": { "id": 3, "price": 3.0003 }, "after": null, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "d", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": { "id": 4, "price": 4.0004 }, "after": { "id": 4, "price": 44.44 }, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "u", "ts_ms": 1695277757017, "transaction": null } }"#,
+        r#"{ "payload": { "before": null, "after": { "id": 7, "price": 777.0 }, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+    ];
+
+    let expected_datachunk_str = "I F
+2 22.22
+3 3.0003
+4 44.44
+7 7.0007
+11 110.0
+12 120.0";
+
+    run_cdc_backfill_test_case(
+        true,
+        etl_chunk1_payload,
+        etl_chunk2_payload,
+        expected_datachunk_str,
+    )
+    .await
 }
 
 fn create_stream_chunk(datums: Vec<Datum>, schema: &Schema) -> StreamChunk {
