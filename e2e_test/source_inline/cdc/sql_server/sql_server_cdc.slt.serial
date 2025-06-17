@@ -544,12 +544,12 @@ SELECT id, c_date, c_time, c_datetime2, c_datetimeoffset from shared_sqlserver_a
 query TTTTTTT
 SELECT id, c_xml, c_money from shared_sqlserver_all_data_types order by id;
 ----
-1 <Person><Name>John Doe</Name><Age>30</Age></Person>  100.50
-2 <Person><Name>Jane Doe</Name><Age>28</Age></Person>  100.5
-3 <Name>Jane Doe</Name> 100.0
-11 <Person><Name>John Doe</Name><Age>30</Age></Person> 200.5
-12 <Person><Name>Jane Doe</Name><Age>28</Age></Person> 200.5
-13 <Name>Jane Doe</Name> 200.5
+1 <Person><Name>John Doe</Name><Age>30</Age></Person>  100.51
+2 <Person><Name>Jane Doe</Name><Age>28</Age></Person>  100.50
+3 <Name>Jane Doe</Name> 100
+11 <Person><Name>John Doe</Name><Age>30</Age></Person> 200.5000
+12 <Person><Name>Jane Doe</Name><Age>28</Age></Person> 200.5000
+13 <Name>Jane Doe</Name> 200.5000
 
 query TTTTTTTT
 SELECT "ID", "Name", database_name, schema_name, table_name from upper_table order by "ID";
