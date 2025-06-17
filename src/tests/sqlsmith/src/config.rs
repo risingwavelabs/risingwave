@@ -144,6 +144,7 @@ impl Configuration {
                 "eowc" => Feature::Eowc,
                 "natural_join" => Feature::NaturalJoin,
                 "using_join" => Feature::UsingJoin,
+                "except" => Feature::Except,
                 _ => panic!("Unknown feature: {}", feat),
             };
             self.set_enabled(parsed, true);
