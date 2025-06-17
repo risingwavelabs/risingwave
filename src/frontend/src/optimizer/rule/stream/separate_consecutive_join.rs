@@ -27,13 +27,13 @@ impl Rule for SeparateConsecutiveJoinRule {
         let left_input = join.left();
         let right_input = join.right();
 
-        let new_left = if let Some(_) = left_input.as_stream_hash_join() {
+        let new_left = if left_input.as_stream_hash_join().is_some() {
             StreamExchange::new_no_shuffle(left_input).into()
         } else {
             left_input
         };
 
-        let new_right = if let Some(_) = right_input.as_stream_hash_join() {
+        let new_right = if right_input.as_stream_hash_join().is_some() {
             StreamExchange::new_no_shuffle(right_input).into()
         } else {
             right_input
