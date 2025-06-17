@@ -16,8 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::env;
-use risingwave_jni_core::opendal_schema_history::HummockObjectStore;
+
 use anyhow::anyhow;
 use bytes::Bytes;
 use itertools::Itertools;
@@ -254,7 +253,7 @@ impl HummockManager {
                 Arc::new(object_store_config),
             )
             .await,
-        );        
+        );
         // Make sure data dir is not used by another cluster.
         // Skip this check in e2e compaction test, which needs to start a secondary cluster with
         // same bucket

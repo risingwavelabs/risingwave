@@ -67,7 +67,6 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
         }
 
         if (objectInputStream != null) {
-            LOGGER.info("这里toHistoryRecord");
             try {
                 toHistoryRecord(objectInputStream);
             } catch (Exception e) {
@@ -91,7 +90,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     @Override
     protected void doPreStoreRecord(HistoryRecord record) {
         LOGGER.info("doPreStoreRecord");
-        // Example check, can be removed or modified as needed
+        // Todo: can do some check, can be removed or modified as needed
         if (false) {
             throw new SchemaHistoryException(
                     "No S3 client is available. Ensure that 'start()' is called before storing database history records.");
@@ -102,16 +101,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     protected void doStoreRecord(HistoryRecord record) {
         LOGGER.info("doStoreRecord");
         try {
-            // 调试输出，确认数据内容
             byte[] newData = fromHistoryRecord(record);
-            // String dataString = new String(newData, StandardCharsets.UTF_8).trim();
-
-            // if (dataString.startsWith("\n")) {
-            //     dataString = dataString.substring(1);
-            // }
-            // if (!dataString.endsWith("\n")) {
-            //     dataString += "\n";
-            // }
 
             putObject(objectName, newData);
         } catch (Exception e) {
