@@ -54,7 +54,7 @@ fn alter_prost_user_info(
                 UserOption::EncryptedPassword(_) | UserOption::Password(_)
             );
         if !session_user.can_create_user && !change_self_password {
-            return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
+            return Err(PermissionDenied("permission denied to alter user".to_owned()).into());
         }
     }
 
@@ -141,17 +141,7 @@ fn alter_rename_prost_user_info(
     }
 
     if !session_user.is_super {
-        if user_info.is_super {
-            return Err(
-                PermissionDenied("must be superuser to rename superusers".to_owned()).into(),
-            );
-        }
-
-        if !session_user.can_create_user {
-            return Err(
-                PermissionDenied("Do not have the privilege to rename user".to_owned()).into(),
-            );
-        }
+        return Err(PermissionDenied("must be superuser to rename users".to_owned()).into());
     }
 
     user_info.name = Binder::resolve_user_name(new_name)?;
