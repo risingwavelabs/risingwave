@@ -49,6 +49,8 @@ pub struct StreamSourceScan {
 impl_plan_tree_node_for_leaf! { StreamSourceScan }
 
 impl StreamSourceScan {
+    pub const BACKFILL_PROGRESS_COLUMN_NAME: &str = "backfill_progress";
+
     pub fn new(core: generic::Source) -> Self {
         let base = PlanBase::new_stream_with_core(
             &core,
@@ -88,7 +90,7 @@ impl StreamSourceScan {
         };
         let value = Field {
             data_type: DataType::Jsonb,
-            name: "backfill_progress".to_owned(),
+            name: Self::BACKFILL_PROGRESS_COLUMN_NAME.to_owned(),
         };
 
         let ordered_col_idx = builder.add_column(&key);

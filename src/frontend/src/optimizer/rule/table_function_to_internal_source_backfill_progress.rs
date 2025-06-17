@@ -27,6 +27,7 @@ use crate::expr::{ExprImpl, InputRef, Literal, TableFunctionType};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     LogicalProject, LogicalScan, LogicalTableFunction, LogicalUnion, LogicalValues,
+    StreamSourceScan,
 };
 use crate::optimizer::{OptimizerContext, PlanRef};
 
@@ -151,9 +152,12 @@ impl SourceBackfillInfo {
         let Some(backfill_progress_column_index) = table
             .columns
             .iter()
-            .position(|c| c.name() == "backfill_progress")
+            .position(|c| c.name() == StreamSourceScan::BACKFILL_PROGRESS_COLUMN_NAME)
         else {
-            bail!("`backfill_progress` column not found in source backfill state table schema");
+            bail!(
+                "`{}` column not found in source backfill state table schema",
+                StreamSourceScan::BACKFILL_PROGRESS_COLUMN_NAME
+            );
         };
         let fragment_id = table.fragment_id;
         let table_id = table.id.table_id;
