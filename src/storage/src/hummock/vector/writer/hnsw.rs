@@ -20,16 +20,15 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 use risingwave_hummock_sdk::HummockObjectId;
 use risingwave_hummock_sdk::vector_index::{
-    HnswFlatIndex, HnswFlatIndexAdd, HnswGraphFileInfo, VectorFileInfo, VectorIndexAdd,
-    VectorStoreDelta,
+    HnswFlatIndex, HnswFlatIndexAdd, HnswGraphFileInfo, VectorFileInfo, VectorStoreDelta,
 };
 use risingwave_pb::hummock::PbHnswGraph;
 
 use crate::dispatch_measurement;
 use crate::hummock::vector::file::VectorFileBuilder;
-use crate::hummock::vector::writer::new_vector_file_builder;
-use crate::hummock::vector::{EnumVectorAccessor, get_vector_block};
-use crate::hummock::{HummockError, HummockResult, ObjectIdManagerRef, SstableStoreRef};
+use crate::hummock::vector::writer::{VectorObjectIdManagerRef, new_vector_file_builder};
+use crate::hummock::vector::{EnumVectorAccessor, VectorFileBlockStore};
+use crate::hummock::{HummockResult, SstableStoreRef};
 use crate::opts::StorageOpts;
 use crate::store::Vector;
 use crate::vector::DistanceMeasurement;
@@ -40,30 +39,27 @@ use crate::vector::hnsw::{
 struct HnswVectorStore {
     sstable_store: SstableStoreRef,
 
-    committed_vector_files: Vec<VectorFileInfo>,
-    committed_next_vector_id: usize,
-    sealed_vector_files: Vec<VectorFileInfo>,
-    sealed_next_vector_id: usize,
+    flushed_block: VectorFileBlockStore,
     flushed_vector_files: Vec<VectorFileInfo>,
     flushed_next_vector_id: usize,
     building_vectors: VectorFileBuilder,
 }
 
 impl HnswVectorStore {
-    fn new(
+    async fn new(
         index: &HnswFlatIndex,
         dimension: usize,
         sstable_store: SstableStoreRef,
-        object_id_manager: ObjectIdManagerRef,
+        object_id_manager: VectorObjectIdManagerRef,
         storage_opts: &StorageOpts,
-    ) -> Self {
+    ) -> HummockResult<Self> {
         let next_vector_id = index.vector_store.next_vector_id;
-        Self {
+        let flushed_block =
+            VectorFileBlockStore::new(sstable_store.clone(), &index.vector_store.vector_files)
+                .await?;
+        Ok(Self {
             sstable_store: sstable_store.clone(),
-            committed_vector_files: index.vector_store.vector_files.clone(),
-            committed_next_vector_id: next_vector_id,
-            sealed_vector_files: vec![],
-            sealed_next_vector_id: next_vector_id,
+            flushed_block,
             flushed_vector_files: vec![],
             flushed_next_vector_id: next_vector_id,
             building_vectors: new_vector_file_builder(
@@ -73,7 +69,7 @@ impl HnswVectorStore {
                 object_id_manager,
                 storage_opts,
             ),
-        }
+        })
     }
 
     async fn flush(&mut self) -> HummockResult<usize> {
@@ -81,6 +77,7 @@ impl HnswVectorStore {
             self.sstable_store
                 .insert_vector_cache(vector_file.object_id, meta, blocks);
             let file_size = vector_file.file_size as usize;
+            self.flushed_block.add(&vector_file).await?;
             self.flushed_vector_files.push(vector_file);
             self.flushed_next_vector_id = self.building_vectors.next_vector_id();
             Ok(file_size)
@@ -96,36 +93,20 @@ impl VectorStore for HnswVectorStore {
     where
         Self: 'a;
 
-    async fn get_vector(&self, idx: usize) -> HummockResult<Self::Accessor<'_>> {
-        if idx < self.committed_next_vector_id {
-            Ok(EnumVectorAccessor::BloclHolder(
-                get_vector_block(&self.sstable_store, &self.committed_vector_files, idx).await?,
-            ))
-        } else if idx < self.sealed_next_vector_id {
-            Ok(EnumVectorAccessor::BloclHolder(
-                get_vector_block(&self.sstable_store, &self.sealed_vector_files, idx).await?,
-            ))
-        } else if idx < self.flushed_next_vector_id {
-            Ok(EnumVectorAccessor::BloclHolder(
-                get_vector_block(&self.sstable_store, &self.flushed_vector_files, idx).await?,
-            ))
-        } else if idx < self.building_vectors.next_vector_id() {
-            self.building_vectors.get_vector(idx)
+    fn get_vector(&self, idx: usize) -> Self::Accessor<'_> {
+        if idx < self.flushed_next_vector_id {
+            EnumVectorAccessor::BloclHolder(self.flushed_block.get_vector_block(idx))
         } else {
-            Err(HummockError::other(format!(
-                "Index {} out of bounds for all vector {}",
-                idx,
-                self.building_vectors.next_vector_id()
-            )))
+            self.building_vectors.get_vector(idx)
         }
     }
 }
 
-pub(crate) struct HnswFlatIndexWriter {
+pub struct HnswFlatIndexWriter {
     measure: DistanceMeasurement,
     options: HnswBuilderOptions,
     sstable_store: SstableStoreRef,
-    object_id_manager: ObjectIdManagerRef,
+    object_id_manager: VectorObjectIdManagerRef,
 
     vector_store: HnswVectorStore,
     next_pending_vector_id: usize,
@@ -135,12 +116,12 @@ pub(crate) struct HnswFlatIndexWriter {
 }
 
 impl HnswFlatIndexWriter {
-    pub(crate) async fn new(
+    pub async fn new(
         index: &HnswFlatIndex,
         dimension: usize,
         measure: DistanceMeasurement,
         sstable_store: SstableStoreRef,
-        object_id_manager: ObjectIdManagerRef,
+        object_id_manager: VectorObjectIdManagerRef,
         storage_opts: &StorageOpts,
     ) -> HummockResult<Self> {
         let graph_builder = if let Some(graph_file) = &index.graph_file {
@@ -163,7 +144,8 @@ impl HnswFlatIndexWriter {
                 sstable_store.clone(),
                 object_id_manager.clone(),
                 storage_opts,
-            ),
+            )
+            .await?,
             sstable_store,
             object_id_manager,
             graph_builder,
@@ -173,37 +155,33 @@ impl HnswFlatIndexWriter {
         })
     }
 
-    pub(crate) fn insert(&mut self, vec: Vector, info: Bytes) -> HummockResult<()> {
+    pub fn insert(&mut self, vec: Vector, info: Bytes) -> HummockResult<()> {
         self.vector_store.building_vectors.add(vec.to_ref(), &info);
         Ok(())
     }
 
-    pub(crate) fn seal_current_epoch(&mut self) -> Option<VectorIndexAdd> {
+    pub fn seal_current_epoch(&mut self) -> Option<HnswFlatIndexAdd> {
         assert!(self.vector_store.building_vectors.is_empty());
         if self.vector_store.flushed_vector_files.is_empty() {
             assert_eq!(self.flushed_graph_file, None);
             return None;
         }
         let flushed_vector_files = take(&mut self.vector_store.flushed_vector_files);
-        self.vector_store.sealed_next_vector_id = self.vector_store.flushed_next_vector_id;
-        self.vector_store
-            .sealed_vector_files
-            .extend(flushed_vector_files.iter().cloned());
         let new_graph_info = self
             .flushed_graph_file
             .take()
             .expect("should have new graph info when having new data");
-        Some(VectorIndexAdd::HnswFlat(HnswFlatIndexAdd {
+        Some(HnswFlatIndexAdd {
             vector_store_delta: VectorStoreDelta {
                 next_vector_id: self.vector_store.building_vectors.next_vector_id(),
                 added_vector_files: flushed_vector_files,
             },
             graph_file: new_graph_info,
-        }))
+        })
     }
 
-    pub(crate) async fn flush(&mut self) -> HummockResult<usize> {
-        self.add_pending_vectors_to_graph().await?;
+    pub async fn flush(&mut self) -> HummockResult<usize> {
+        self.add_pending_vectors_to_graph();
         let size = self.vector_store.flush().await?;
         if !self.vector_store.flushed_vector_files.is_empty() {
             let graph_builder = self
@@ -215,7 +193,11 @@ impl HnswFlatIndexWriter {
             PbHnswGraph::encode(&pb_graph, &mut buffer).unwrap();
             let encoded_graph = buffer.freeze();
             let size = encoded_graph.len();
-            let object_id = self.object_id_manager.get_new_object_id().await?;
+            let object_id = self
+                .object_id_manager
+                .get_new_vector_object_id()
+                .await?
+                .into();
             let path = self
                 .sstable_store
                 .get_object_data_path(HummockObjectId::HnswGraphFile(object_id));
@@ -231,12 +213,13 @@ impl HnswFlatIndexWriter {
         Ok(size)
     }
 
-    pub(crate) async fn try_flush(&mut self) -> HummockResult<()> {
+    pub async fn try_flush(&mut self) -> HummockResult<()> {
         self.vector_store.building_vectors.try_flush().await?;
-        self.add_pending_vectors_to_graph().await
+        self.add_pending_vectors_to_graph();
+        Ok(())
     }
 
-    async fn add_pending_vectors_to_graph(&mut self) -> HummockResult<()> {
+    fn add_pending_vectors_to_graph(&mut self) {
         for i in self.next_pending_vector_id..self.vector_store.building_vectors.next_vector_id() {
             let node = new_node(&self.options, &mut self.rng);
             if let Some(graph_builder) = &mut self.graph_builder {
@@ -245,16 +228,14 @@ impl HnswFlatIndexWriter {
                         &self.vector_store,
                         graph_builder,
                         node,
-                        self.vector_store.building_vectors.get_vector(i)?.vec_ref(),
+                        self.vector_store.building_vectors.get_vector(i).vec_ref(),
                         self.options.ef_construction,
-                    )
-                    .await?;
+                    );
                 });
             } else {
                 self.graph_builder = Some(HnswGraphBuilder::first(node));
             }
         }
         self.next_pending_vector_id = self.vector_store.building_vectors.next_vector_id();
-        Ok(())
     }
 }
