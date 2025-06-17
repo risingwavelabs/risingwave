@@ -76,6 +76,8 @@ pub struct IcebergCompactorRunnerConfig {
     pub max_record_batch_rows: usize,
     #[builder(default = "default_writer_properties()")]
     pub write_parquet_properties: WriterProperties,
+    #[builder(default = "16")]
+    pub file_scan_concurrency: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -294,6 +296,7 @@ impl IcebergCompactorRunner {
                     .enable_validate_compaction(self.config.enable_validate_compaction)
                     .max_record_batch_rows(self.config.max_record_batch_rows)
                     .write_parquet_properties(self.config.write_parquet_properties.clone())
+                    .file_scan_concurrency(self.config.file_scan_concurrency)
                     .build()
                     .unwrap_or_else(|e| {
                         panic!(

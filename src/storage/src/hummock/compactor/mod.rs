@@ -450,6 +450,7 @@ pub fn start_iceberg_compactor(
                                     .enable_validate_compaction(compactor_context.storage_opts.iceberg_compaction_enable_validate)
                                     .max_record_batch_rows(compactor_context.storage_opts.iceberg_compaction_max_record_batch_rows)
                                     .write_parquet_properties(write_parquet_properties)
+                                    .file_scan_concurrency(max_task_parallelism as usize)
                                     .build() {
                                     Ok(config) => config,
                                     Err(e) => {
