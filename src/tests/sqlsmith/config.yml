@@ -1,22 +1,5 @@
-config:
-  where:
-    weight: 50
-    enabled: true
-  agg:
-    weight: 50
-    enabled: true
-  join:
-    weight: 75
-    enabled: true
-  eowc:
-    weight: 25
-    enabled: false
-  natural_join:
-    weight: 25
-    enabled: true
-  using_join:
-    weight: 25
-    enabled: true
-  except:
-    weight: 10
-    enabled: true
+weight:
+  where: 50
+  agg: 50
+  join: 75
+  
