@@ -75,7 +75,7 @@ ENV ENABLE_BUILD_DASHBOARD=1
 ENV OPENSSL_STATIC=1
 
 RUN cargo fetch && \
-  cargo build -p risingwave_cmd_all --profile ${CARGO_PROFILE} --features "rw-static-link" --features udf && \
+  cargo build -p risingwave_cmd_all --profile ${CARGO_PROFILE} --features "fips" --features "rw-static-link" --features udf && \
   mkdir -p /risingwave/bin && \
   mv /risingwave/target/${CARGO_PROFILE}/risingwave /risingwave/bin/ && \
   mv /risingwave/target/${CARGO_PROFILE}/risingwave.dwp /risingwave/bin/ && \
