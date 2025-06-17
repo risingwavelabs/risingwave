@@ -12,12 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use async_openai::Client;
 use async_openai::config::OpenAIConfig;
-use async_openai::types::{CreateEmbeddingRequestArgs, EmbeddingInput};
-use risingwave_common::array::{F32Array, ListValue};
-use risingwave_common::types::F32;
-use risingwave_expr::{ExprError, Result, function};
+use async_openai::types::{CreateEmbeddingRequestArgs, Embedding, EmbeddingInput};
+use risingwave_common::array::{
+    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, F32Array, ListArrayBuilder, ListValue,
+};
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::{DataType, Datum, F32, ScalarImpl};
+use risingwave_expr::expr::{BoxedExpression, Expression};
+use risingwave_expr::{ExprError, Result, build_function};
 use thiserror_ext::AsReport;
 
 /// `OpenAI` embedding context that holds the client and model configuration
@@ -39,52 +45,183 @@ impl OpenAiEmbeddingContext {
     }
 }
 
-/// `OpenAI` embedding function with prebuild optimization for constant `api_key` and `model`
-#[function(
-    "openai_embedding(varchar, varchar, varchar) -> float4[]",
-    prebuild = "OpenAiEmbeddingContext::from_config($0, $1)?"
-)]
-async fn openai_embedding(
-    text: &str,
-    context: &OpenAiEmbeddingContext,
-) -> Result<Option<ListValue>> {
-    if text.is_empty() {
-        return Ok(None);
+#[derive(Debug)]
+struct OpenAiEmbedding {
+    text_expr: BoxedExpression,
+    context: OpenAiEmbeddingContext,
+}
+
+impl OpenAiEmbedding {
+    async fn get_embeddings(&self, input: EmbeddingInput) -> Result<Vec<Embedding>> {
+        let request = CreateEmbeddingRequestArgs::default()
+            .model(&self.context.model)
+            .input(input)
+            .build()
+            .map_err(|e| {
+                tracing::error!(error = %e.as_report(), "Failed to build OpenAI embedding request");
+                ExprError::Custom("failed to build OpenAI embedding request".into())
+            })?;
+
+        let response = self
+            .context
+            .client
+            .embeddings()
+            .create(request)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e.as_report(), "Failed to get embedding from OpenAI");
+                ExprError::Custom("failed to get embedding from OpenAI".into())
+            })?;
+
+        if response.data.is_empty() {
+            return Err(ExprError::Custom(
+                "no embedding data returned from OpenAI".into(),
+            ));
+        }
+
+        Ok(response.data)
+    }
+}
+
+#[async_trait::async_trait]
+impl Expression for OpenAiEmbedding {
+    fn return_type(&self) -> DataType {
+        DataType::List(Box::new(DataType::Float32))
     }
 
-    // Call the OpenAI API for embedding
-    let embedding_request = CreateEmbeddingRequestArgs::default()
-        .model(&context.model)
-        .input(EmbeddingInput::String(text.to_owned()))
-        .build()
-        .map_err(|e| ExprError::InvalidParam {
-            name: "openai_embedding",
-            reason: format!("failed to build embedding request: {}", e.as_report()).into(),
-        })?;
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let text_array = self.text_expr.eval(input).await?;
+        let text_array = text_array.as_utf8();
 
-    let response = context
-        .client
-        .embeddings()
-        .create(embedding_request)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e.as_report(), "Failed to get embedding from OpenAI");
-            ExprError::InvalidParam {
-                name: "openai_embedding",
-                reason: "failed to get embedding from OpenAI".into(),
+        // Collect non-null and non-empty texts
+        let mut texts_to_embed = Vec::new();
+
+        for i in 0..input.capacity() {
+            if let Some(text) = text_array.value_at(i) {
+                if !text.is_empty() {
+                    texts_to_embed.push(text.to_owned());
+                }
             }
-        })?;
+        }
+        let n_texts_to_embed = texts_to_embed.len();
 
-    if response.data.is_empty() {
+        // Get embeddings in batch
+        let embeddings = if texts_to_embed.is_empty() {
+            Vec::new()
+        } else {
+            self.get_embeddings(EmbeddingInput::StringArray(texts_to_embed))
+                .await?
+        };
+        if embeddings.len() != n_texts_to_embed {
+            return Err(ExprError::Custom(
+                "number of embeddings returned from OpenAI does not match the number of texts"
+                    .into(),
+            ));
+        }
+
+        // Map results back to original positions
+        let mut builder = ListArrayBuilder::with_type(
+            input.capacity(),
+            DataType::List(Box::new(DataType::Float32)),
+        );
+        let mut embedding_idx = 0;
+
+        for i in 0..input.capacity() {
+            if let Some(text) = text_array.value_at(i) {
+                if !text.is_empty() {
+                    // Non-empty text, use the embedding result
+                    if embedding_idx < embeddings.len() {
+                        let embedding = &embeddings[embedding_idx].embedding;
+                        let float_array =
+                            F32Array::from_iter(embedding.iter().map(|&v| Some(F32::from(v))));
+                        let list_value = ListValue::new(float_array.into());
+                        builder.append_owned(Some(list_value));
+                        embedding_idx += 1;
+                    } else {
+                        builder.append(None);
+                    }
+                } else {
+                    // Empty text returns NULL
+                    builder.append(None);
+                }
+            } else {
+                // Null text returns NULL
+                builder.append(None);
+            }
+        }
+
+        Ok(Arc::new(ArrayImpl::List(builder.finish())))
+    }
+
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        let text_datum = self.text_expr.eval_row(input).await?;
+
+        if let Some(ScalarImpl::Utf8(text)) = text_datum.as_ref() {
+            if text.is_empty() {
+                return Ok(None);
+            }
+
+            let embeddings = self
+                .get_embeddings(EmbeddingInput::String(text.to_owned().into_string()))
+                .await?;
+            let embedding = &embeddings[0].embedding;
+            let float_array = F32Array::from_iter(embedding.iter().map(|&v| Some(F32::from(v))));
+            Ok(Some(ListValue::new(float_array.into()).into()))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+#[build_function("openai_embedding(varchar, varchar, varchar) -> float4[]")]
+fn build_openai_embedding_expr(
+    _: DataType,
+    mut children: Vec<BoxedExpression>,
+) -> Result<BoxedExpression> {
+    if children.len() != 3 {
         return Err(ExprError::InvalidParam {
             name: "openai_embedding",
-            reason: "no embedding data returned from OpenAI".into(),
+            reason: "expected 3 arguments".into(),
         });
     }
 
-    let embedding_values = &response.data[0].embedding;
-    let float_array = F32Array::from_iter(embedding_values.iter().map(|&v| Some(F32::from(v))));
+    // Check if the first two parameters are constants
+    let api_key = if let Ok(Some(api_key_scalar)) = children[0].eval_const() {
+        if let ScalarImpl::Utf8(api_key_str) = api_key_scalar {
+            api_key_str.to_string()
+        } else {
+            return Err(ExprError::InvalidParam {
+                name: "openai_embedding",
+                reason: "`api_key` must be a string constant".into(),
+            });
+        }
+    } else {
+        return Err(ExprError::InvalidParam {
+            name: "openai_embedding",
+            reason: "`api_key` must be a constant".into(),
+        });
+    };
 
-    let list_value = ListValue::new(float_array.into());
-    Ok(Some(list_value))
+    let model = if let Ok(Some(model_scalar)) = children[1].eval_const() {
+        if let ScalarImpl::Utf8(model_str) = model_scalar {
+            model_str.to_string()
+        } else {
+            return Err(ExprError::InvalidParam {
+                name: "openai_embedding",
+                reason: "`model` must be a string constant".into(),
+            });
+        }
+    } else {
+        return Err(ExprError::InvalidParam {
+            name: "openai_embedding",
+            reason: "`model` must be a constant".into(),
+        });
+    };
+
+    let context = OpenAiEmbeddingContext::from_config(&api_key, &model)?;
+
+    Ok(Box::new(OpenAiEmbedding {
+        text_expr: children.pop().unwrap(), // Take the third expression
+        context,
+    }))
 }
