@@ -51,10 +51,14 @@ impl ArrayBuilder for VectorArrayBuilder {
     }
 
     fn append_n(&mut self, n: usize, value: Option<VectorRef<'_>>) {
+        if let Some(value) = value {
+            assert_eq!(self.elem_size, value.inner.len());
+        }
         self.inner.append_n(n, value.map(|v| v.inner))
     }
 
     fn append_array(&mut self, other: &VectorArray) {
+        assert_eq!(self.elem_size, other.elem_size);
         self.inner.append_array(&other.inner)
     }
 
