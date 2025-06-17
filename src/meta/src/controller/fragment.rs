@@ -913,6 +913,48 @@ impl CatalogController {
         Ok(source_actors)
     }
 
+    pub async fn list_rw_table_scan_fragments(
+        &self,
+    ) -> MetaResult<Vec<(FragmentDesc, Vec<FragmentId>)>> {
+        let inner = self.inner.read().await;
+        let mut result = Vec::new();
+        let fragments = FragmentModel::find()
+            .select_only()
+            .columns([
+                fragment::Column::FragmentId,
+                fragment::Column::JobId,
+                fragment::Column::FragmentTypeMask,
+                fragment::Column::DistributionType,
+                fragment::Column::StateTableIds,
+                fragment::Column::VnodeCount,
+                fragment::Column::StreamNode,
+            ])
+            .column_as(Expr::col(actor::Column::ActorId).count(), "parallelism")
+            .join(JoinType::LeftJoin, fragment::Relation::Actor.def())
+            .join(JoinType::LeftJoin, fragment::Relation::Object.def())
+            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
+            .filter(
+                streaming_job::Column::JobStatus
+                    .eq(JobStatus::Initial)
+                    .or(streaming_job::Column::JobStatus.eq(JobStatus::Creating)),
+            )
+            .group_by(fragment::Column::FragmentId)
+            .into_model::<FragmentDesc>()
+            .all(&inner.db)
+            .await?;
+        for fragment in fragments {
+            let upstreams: Vec<FragmentId> = FragmentRelation::find()
+                .select_only()
+                .column(fragment_relation::Column::SourceFragmentId)
+                .filter(fragment_relation::Column::TargetFragmentId.eq(fragment.fragment_id))
+                .into_tuple()
+                .all(&inner.db)
+                .await?;
+            result.push((fragment, upstreams));
+        }
+        Ok(result)
+    }
+
     pub async fn list_fragment_descs(&self) -> MetaResult<Vec<(FragmentDesc, Vec<FragmentId>)>> {
         let inner = self.inner.read().await;
         let mut result = Vec::new();
@@ -1332,6 +1374,7 @@ impl CatalogController {
         Ok(())
     }
 
+    #[await_tree::instrument]
     pub async fn fill_snapshot_backfill_epoch(
         &self,
         fragment_ids: impl Iterator<Item = FragmentId>,

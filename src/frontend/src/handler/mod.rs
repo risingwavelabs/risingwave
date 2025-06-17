@@ -624,8 +624,8 @@ pub async fn handle(
                 let x = variable::set_var_to_param_str(&value);
                 let res = use_db::handle_use_db(
                     handler_args,
-                    ObjectName::from(vec![Ident::new_unchecked(
-                        x.unwrap_or("default".to_owned()),
+                    ObjectName::from(vec![Ident::from_real_value(
+                        x.as_deref().unwrap_or("default"),
                     )]),
                 )?;
                 let mut builder = RwPgResponse::builder(StatementType::SET_VARIABLE);
@@ -983,9 +983,9 @@ pub async fn handle(
         }
 
         Statement::AlterSink { name, operation } => match operation {
-            AlterSinkOperation::SetSinkProps { changed_props } => {
-                alter_sink_props::handle_alter_sink_props(handler_args, name, changed_props).await
-            }
+            AlterSinkOperation::AlterConnectorProps {
+                alter_props: changed_props,
+            } => alter_sink_props::handle_alter_sink_props(handler_args, name, changed_props).await,
             AlterSinkOperation::RenameSink { sink_name } => {
                 alter_rename::handle_rename_sink(handler_args, name, sink_name).await
             }

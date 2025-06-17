@@ -16,6 +16,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Formatter;
 
+use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
@@ -242,7 +243,8 @@ pub enum CreateStreamingJobType {
 /// [`Command`] is the input of [`crate::barrier::worker::GlobalBarrierWorker`]. For different commands,
 /// it will [build different barriers to send](Self::to_mutation),
 /// and may [do different stuffs after the barrier is collected](CommandContext::post_collect).
-#[derive(Debug, strum::Display)]
+// FIXME: this enum is significantly large on stack, box it
+#[derive(Debug)]
 pub enum Command {
     /// `Flush` command will generate a checkpoint barrier. After the barrier is collected and committed
     /// all messages before the checkpoint barrier should have been committed.
@@ -340,6 +342,47 @@ pub enum Command {
     StartFragmentBackfill {
         fragment_ids: Vec<FragmentId>,
     },
+}
+
+// For debugging and observability purposes. Can add more details later if needed.
+impl std::fmt::Display for Command {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Command::Flush => write!(f, "Flush"),
+            Command::Pause => write!(f, "Pause"),
+            Command::Resume => write!(f, "Resume"),
+            Command::DropStreamingJobs {
+                table_fragments_ids,
+                ..
+            } => {
+                write!(
+                    f,
+                    "DropStreamingJobs: {}",
+                    table_fragments_ids.iter().sorted().join(", ")
+                )
+            }
+            Command::CreateStreamingJob { info, .. } => {
+                write!(f, "CreateStreamingJob: {}", info.streaming_job)
+            }
+            Command::MergeSnapshotBackfillStreamingJobs(_) => {
+                write!(f, "MergeSnapshotBackfillStreamingJobs")
+            }
+            Command::RescheduleFragment { .. } => write!(f, "RescheduleFragment"),
+            Command::ReplaceStreamJob(plan) => {
+                write!(f, "ReplaceStreamJob: {}", plan.streaming_job)
+            }
+            Command::SourceChangeSplit(_) => write!(f, "SourceChangeSplit"),
+            Command::Throttle(_) => write!(f, "Throttle"),
+            Command::CreateSubscription {
+                subscription_id, ..
+            } => write!(f, "CreateSubscription: {subscription_id}"),
+            Command::DropSubscription {
+                subscription_id, ..
+            } => write!(f, "DropSubscription: {subscription_id}"),
+            Command::ConnectorPropsChange(_) => write!(f, "ConnectorPropsChange"),
+            Command::StartFragmentBackfill { .. } => write!(f, "StartFragmentBackfill"),
+        }
+    }
 }
 
 impl Command {
@@ -523,6 +566,22 @@ impl std::fmt::Debug for CommandContext {
             .field("barrier_info", &self.barrier_info)
             .field("command", &self.command)
             .finish()
+    }
+}
+
+impl std::fmt::Display for CommandContext {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "prev_epoch={}, curr_epoch={}, kind={}",
+            self.barrier_info.prev_epoch.value().0,
+            self.barrier_info.curr_epoch.value().0,
+            self.barrier_info.kind.as_str_name()
+        )?;
+        if let Some(command) = &self.command {
+            write!(f, ", command={}", command)?;
+        }
+        Ok(())
     }
 }
 

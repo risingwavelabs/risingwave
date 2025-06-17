@@ -426,6 +426,12 @@ impl GlobalBarrierWorkerContextImpl {
                         background_jobs
                     };
 
+                    let database_infos = self
+                        .metadata_manager
+                        .catalog_controller
+                        .list_databases()
+                        .await?;
+
                     // get split assignments for all actors
                     let source_splits = self.source_manager.list_assignments().await;
                     Ok(BarrierWorkerRuntimeInfoSnapshot {
@@ -439,6 +445,7 @@ impl GlobalBarrierWorkerContextImpl {
                         source_splits,
                         background_jobs,
                         hummock_version_stats: self.hummock_manager.get_version_stats().await,
+                        database_infos,
                     })
                 }
             }

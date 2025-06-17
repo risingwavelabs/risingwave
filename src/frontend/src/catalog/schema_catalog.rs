@@ -732,25 +732,22 @@ impl SchemaCatalog {
         self.system_table_by_name.values()
     }
 
-    pub fn get_table_by_name(&self, table_name: &str) -> Option<&Arc<TableCatalog>> {
-        self.table_by_name.get(table_name)
+    pub fn get_table_by_name(
+        &self,
+        table_name: &str,
+        bind_creating_relations: bool,
+    ) -> Option<&Arc<TableCatalog>> {
+        self.table_by_name
+            .get(table_name)
+            .filter(|&table| bind_creating_relations || table.is_created())
+    }
+
+    pub fn get_any_table_by_name(&self, table_name: &str) -> Option<&Arc<TableCatalog>> {
+        self.get_table_by_name(table_name, true)
     }
 
     pub fn get_created_table_by_name(&self, table_name: &str) -> Option<&Arc<TableCatalog>> {
-        self.table_by_name
-            .get(table_name)
-            .filter(|&table| table.stream_job_status == StreamJobStatus::Created)
-    }
-
-    /// Get a table by name, if it's a created table,
-    /// or if it's an internal table (whether created or not).
-    pub fn get_created_table_or_any_internal_table_by_name(
-        &self,
-        table_name: &str,
-    ) -> Option<&Arc<TableCatalog>> {
-        self.table_by_name.get(table_name).filter(|&table| {
-            table.stream_job_status == StreamJobStatus::Created || table.is_internal_table()
-        })
+        self.get_table_by_name(table_name, false)
     }
 
     pub fn get_table_by_id(&self, table_id: &TableId) -> Option<&Arc<TableCatalog>> {

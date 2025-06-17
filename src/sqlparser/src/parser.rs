@@ -43,6 +43,7 @@ pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 pub(crate) const WEBHOOK_CONNECTOR: &str = "webhook";
 
 const WEBHOOK_WAIT_FOR_PERSISTENCE: &str = "webhook.wait_for_persistence";
+const WEBHOOK_IS_BATCHED: &str = "is_batched";
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParserError {
@@ -2679,10 +2680,17 @@ impl Parser<'_> {
             self.expect_keyword(Keyword::AS)?;
             let signature_expr = self.parse_function()?;
 
+            let is_batched = with_options
+                .iter()
+                .find(|&opt| opt.name.real_value() == WEBHOOK_IS_BATCHED)
+                .map(|opt| opt.value.to_string().eq_ignore_ascii_case("true"))
+                .unwrap_or(false);
+
             Some(WebhookSourceInfo {
                 secret_ref,
                 signature_expr,
                 wait_for_persistence,
+                is_batched,
             })
         } else {
             None
@@ -3630,7 +3638,9 @@ impl Parser<'_> {
             AlterSinkOperation::SwapRenameSink { target_sink }
         } else if self.parse_keyword(Keyword::CONNECTOR) {
             let changed_props = self.parse_with_properties()?;
-            AlterSinkOperation::SetSinkProps { changed_props }
+            AlterSinkOperation::AlterConnectorProps {
+                alter_props: changed_props,
+            }
         } else {
             return self.expected("RENAME or OWNER TO or SET or CONNECTOR WITH after ALTER SINK");
         };

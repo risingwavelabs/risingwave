@@ -730,6 +730,7 @@ impl MetadataManager {
             .collect())
     }
 
+    #[await_tree::instrument]
     pub async fn update_actor_splits_by_split_assignment(
         &self,
         split_assignment: &SplitAssignment,
@@ -819,6 +820,7 @@ impl MetadataManager {
 impl MetadataManager {
     /// Wait for job finishing notification in `TrackingJob::finish`.
     /// The progress is updated per barrier.
+    #[await_tree::instrument]
     pub(crate) async fn wait_streaming_job_finished(
         &self,
         database_id: DatabaseId,

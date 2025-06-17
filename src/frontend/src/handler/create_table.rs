@@ -21,6 +21,7 @@ use clap::ValueEnum;
 use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use percent_encoding::percent_decode_str;
 use pgwire::pg_response::{PgResponse, StatementType};
 use prost::Message as _;
 use risingwave_common::catalog::{
@@ -28,7 +29,6 @@ use risingwave_common::catalog::{
     RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, TableId,
 };
 use risingwave_common::config::MetaBackend;
-use risingwave_common::license::Feature;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
@@ -60,7 +60,6 @@ use risingwave_sqlparser::ast::{
     Statement, TableConstraint, WebhookSourceInfo, WithProperties,
 };
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
-use thiserror_ext::AsReport;
 
 use super::create_source::{CreateSourceType, SqlColumnStrategy, bind_columns_from_source};
 use super::{RwPgResponse, alter_streaming_rate_limit, create_sink, create_source};
@@ -1300,14 +1299,6 @@ async fn bind_cdc_table_schema_externally(
     cdc_with_options: WithOptionsSecResolved,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
     // read cdc table schema from external db or parsing the schema from SQL definitions
-    Feature::CdcTableSchemaMap.check_available().map_err(
-        |err: risingwave_common::license::FeatureNotAvailable| {
-            ErrorCode::NotSupported(
-                err.to_report_string(),
-                "Please define the schema manually".to_owned(),
-            )
-        },
-    )?;
     let (options, secret_refs) = cdc_with_options.into_parts();
     let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
         .context("failed to extract external table config")?;
@@ -1482,10 +1473,11 @@ pub async fn create_iceberg_engine_table(
     let meta_store_user = meta_store_endpoint.username().to_owned();
     let meta_store_password = meta_store_endpoint
         .password()
+        .and_then(|p| percent_decode_str(p).decode_utf8().ok())
         .ok_or_else(|| {
             ErrorCode::InternalError("failed to parse password from meta store endpoint".to_owned())
         })?
-        .to_owned();
+        .into_owned();
     let meta_store_host = meta_store_endpoint
         .host_str()
         .ok_or_else(|| {
@@ -2167,6 +2159,7 @@ fn bind_webhook_info(
         secret_ref,
         signature_expr,
         wait_for_persistence,
+        is_batched,
     } = webhook_info;
 
     // validate secret_ref
@@ -2212,6 +2205,7 @@ fn bind_webhook_info(
         secret_ref: pb_secret_ref,
         signature_expr: Some(expr.to_expr_proto()),
         wait_for_persistence,
+        is_batched,
     };
 
     Ok(pb_webhook_info)

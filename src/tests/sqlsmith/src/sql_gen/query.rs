@@ -23,8 +23,8 @@ use rand::Rng;
 use rand::prelude::{IndexedRandom, SliceRandom};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    Corresponding, Cte, Distinct, Expr, Ident, Query, Select, SelectItem, SetExpr, SetOperator,
-    TableWithJoins, Value, With,
+    Corresponding, Cte, Distinct, Expr, Ident, ObjectName, Query, Select, SelectItem, SetExpr,
+    SetOperator, TableWithJoins, Value, With,
 };
 
 use crate::config::Feature;
@@ -247,7 +247,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
                 alias: Ident::new_unchecked(alias.clone()),
             },
             Column {
-                name: alias,
+                name: ObjectName::from_test_str(&alias),
                 data_type: ret_type,
             },
         )
@@ -305,7 +305,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
                 self.bound_columns.clone_from(&group_by_cols);
                 group_by_cols
                     .into_iter()
-                    .map(|c| Expr::Identifier(Ident::new_unchecked(c.name)))
+                    .map(|c| c.name_expr())
                     .collect_vec()
             }
             9 => self.gen_grouping_sets(),
@@ -321,12 +321,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         let mut new_bound_columns = vec![];
         for _i in 0..grouping_num {
             let group_by_cols = self.gen_random_bound_columns();
-            grouping_sets.push(
-                group_by_cols
-                    .iter()
-                    .map(|c| Expr::Identifier(Ident::new_unchecked(c.name.clone())))
-                    .collect_vec(),
-            );
+            grouping_sets.push(group_by_cols.iter().map(|c| c.name_expr()).collect_vec());
             new_bound_columns.extend(group_by_cols);
         }
         if grouping_sets.is_empty() {
@@ -336,8 +331,8 @@ impl<R: Rng> SqlGenerator<'_, R> {
             let grouping_sets = Expr::GroupingSets(grouping_sets);
             self.bound_columns = new_bound_columns
                 .into_iter()
-                .sorted_by(|a, b| Ord::cmp(&a.name, &b.name))
-                .dedup_by(|a, b| a.name == b.name)
+                .unique_by(|c| c.name.real_value())
+                .sorted_by_key(|c| c.name.real_value())
                 .collect();
 
             // Currently, grouping sets only support one set.
@@ -346,7 +341,11 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn gen_random_bound_columns(&mut self) -> Vec<Column> {
-        let mut available = self.bound_columns.clone();
+        let mut available = if self.should_generate(Feature::Eowc) {
+            self.get_columns_with_watermark(&self.bound_columns.clone())
+        } else {
+            self.bound_columns.clone()
+        };
         if !available.is_empty() {
             available.shuffle(self.rng);
             let upper_bound = available.len().div_ceil(2);

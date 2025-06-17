@@ -195,8 +195,8 @@ pub enum AlterSinkOperation {
     SetSinkRateLimit {
         rate_limit: i32,
     },
-    SetSinkProps {
-        changed_props: Vec<SqlOption>,
+    AlterConnectorProps {
+        alter_props: Vec<SqlOption>,
     },
 }
 
@@ -481,7 +481,9 @@ impl fmt::Display for AlterSinkOperation {
             AlterSinkOperation::SetSinkRateLimit { rate_limit } => {
                 write!(f, "SET SINK_RATE_LIMIT TO {}", rate_limit)
             }
-            AlterSinkOperation::SetSinkProps { changed_props } => {
+            AlterSinkOperation::AlterConnectorProps {
+                alter_props: changed_props,
+            } => {
                 write!(
                     f,
                     "CONNECTOR WITH ({})",
@@ -944,4 +946,5 @@ pub struct WebhookSourceInfo {
     pub secret_ref: Option<SecretRefValue>,
     pub signature_expr: Expr,
     pub wait_for_persistence: bool,
+    pub is_batched: bool,
 }
