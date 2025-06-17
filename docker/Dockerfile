@@ -7,7 +7,7 @@ RUN apt-get update \
 
 FROM base AS rust-base
 
-RUN apt-get update && apt-get -y install make cmake protobuf-compiler bash lld unzip rsync
+RUN apt-get update && apt-get -y install make cmake protobuf-compiler bash lld unzip rsync golang
 
 # Install Node.js as dependency for building the dashboard.
 # Bump version together with `dashboard/.node-version`.
