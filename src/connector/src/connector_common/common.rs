@@ -574,7 +574,7 @@ impl PulsarCommon {
         Ok(res)
     }
 
-    async fn resolve_pulsar_credentials_url(
+    pub(crate) async fn resolve_pulsar_credentials_url(
         &self,
         oauth: &PulsarOauthCommon,
         aws_auth_props: &AwsAuthProps,
@@ -604,7 +604,7 @@ impl PulsarCommon {
         Ok((format!("file://{}", oauth.credentials_url), None))
     }
 
-    async fn handle_pulsar_credentials_url(
+    pub(crate) async fn handle_pulsar_credentials_url(
         &self,
         url: &Url,
         aws_auth_props: &AwsAuthProps,
