@@ -4,7 +4,7 @@ requests
 confluent_kafka==2.6.2
 # confluent_kafka doesn't list dependencies, so we need to install them manually
 # https://github.com/confluentinc/confluent-kafka-python/issues/1712
-protobuf==5.28.0
+protobuf==5.29.5
 fastavro==1.9.4
 httpx==0.27.2
 attrs
