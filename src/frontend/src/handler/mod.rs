@@ -639,7 +639,7 @@ pub async fn handle(
         Statement::SetTimeZone { local: _, value } => {
             variable::handle_set_time_zone(handler_args, value)
         }
-        Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable).await,
+        Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable),
         Statement::CreateIndex {
             name,
             table_name,

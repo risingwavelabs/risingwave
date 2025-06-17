@@ -1342,12 +1342,6 @@ impl MetaClient {
         Ok(resp)
     }
 
-    pub async fn get_system_params(&self) -> Result<SystemParamsReader> {
-        let req = GetSystemParamsRequest {};
-        let resp = self.inner.get_system_params(req).await?;
-        Ok(resp.params.unwrap().into())
-    }
-
     pub async fn get_meta_store_endpoint(&self) -> Result<String> {
         let req = GetMetaStoreInfoRequest {};
         let resp = self.inner.get_meta_store_info(req).await?;
