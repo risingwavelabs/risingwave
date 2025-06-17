@@ -133,6 +133,11 @@ pub trait Session: Send + Sync {
     fn init_exec_context(&self, sql: Arc<str>) -> ExecContextGuard;
 
     fn check_idle_in_transaction_timeout(&self) -> PsqlResult<()>;
+
+    fn rebind_oauth_user(
+        &self,
+        user_name: &str,
+    ) -> impl Future<Output = Result<(), BoxedError>> + Send;
 }
 
 /// Each session could run different SQLs multiple times.
@@ -173,6 +178,7 @@ pub enum UserAuthenticator {
         salt: [u8; 4],
     },
     OAuth(HashMap<String, String>),
+    OAuthWithCreate(String, HashMap<String, String>),
 }
 
 /// A JWK Set is a JSON object that represents a set of JWKs.
@@ -239,7 +245,8 @@ impl UserAuthenticator {
             UserAuthenticator::Md5WithSalt {
                 encrypted_password, ..
             } => encrypted_password == password,
-            UserAuthenticator::OAuth(metadata) => {
+            UserAuthenticator::OAuth(metadata)
+            | UserAuthenticator::OAuthWithCreate(_, metadata) => {
                 let mut metadata = metadata.clone();
                 let jwks_url = metadata.remove("jwks_url").unwrap();
                 let issuer = metadata.remove("issuer").unwrap();
@@ -502,6 +509,10 @@ mod tests {
         }
 
         fn check_idle_in_transaction_timeout(&self) -> PsqlResult<()> {
+            Ok(())
+        }
+
+        async fn rebind_oauth_user(&self, user_name: &str) -> Result<(), BoxedError> {
             Ok(())
         }
     }
