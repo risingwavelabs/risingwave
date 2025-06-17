@@ -66,11 +66,7 @@ use tracing::debug;
 use crate::barrier::SnapshotBackfillInfo;
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::scale::resolve_streaming_job_definition;
-use crate::controller::utils::{
-    FragmentDesc, PartialActorLocation, PartialFragmentStateTables, get_fragment_actor_dispatchers,
-    get_fragment_mappings, rebuild_fragment_mapping_from_actors,
-    resolve_no_shuffle_actor_dispatcher,
-};
+use crate::controller::utils::{FragmentDesc, PartialActorLocation, PartialFragmentStateTables, get_fragment_actor_dispatchers, get_fragment_mappings, rebuild_fragment_mapping_from_actors, resolve_no_shuffle_actor_dispatcher, get_fragment_mappings_txn};
 use crate::manager::LocalNotification;
 use crate::model::{
     DownstreamFragmentRelation, Fragment, FragmentActorDispatchers, FragmentDownstreamRelation,
@@ -131,7 +127,7 @@ impl CatalogControllerInner {
 
         let mut result = vec![];
         for job_id in job_ids {
-            let mappings = get_fragment_mappings(&txn, &self.actors, job_id).await?;
+            let mappings = get_fragment_mappings_txn(&txn, &self.actors, job_id).await?;
 
             result.extend(mappings.into_iter());
         }

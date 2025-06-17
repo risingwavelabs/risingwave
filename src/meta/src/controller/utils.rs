@@ -1399,6 +1399,45 @@ where
     Ok(rebuild_fragment_mapping_from_actors(job_actors))
 }
 
+/// `get_fragment_mappings_txn` returns the fragment vnode mappings of the given job.
+pub async fn get_fragment_mappings_txn<C>(
+    db: &C,
+    actor_cache: &ActorInfo,
+    job_id: ObjectId,
+) -> MetaResult<Vec<PbFragmentWorkerSlotMapping>>
+where
+    C: ConnectionTrait,
+{
+    let job_actors_from_db: Vec<(
+        FragmentId,
+        DistributionType,
+        ActorId,
+        Option<VnodeBitmap>,
+        WorkerId,
+        ActorStatus,
+    )> = Actor::find()
+        .select_only()
+        .columns([
+            fragment::Column::FragmentId,
+            fragment::Column::DistributionType,
+        ])
+        .columns([
+            actor::Column::ActorId,
+            actor::Column::VnodeBitmap,
+            actor::Column::WorkerId,
+            actor::Column::Status,
+        ])
+        .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
+        .filter(fragment::Column::JobId.eq(job_id))
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    let job_actors = job_actors_from_db;
+
+    Ok(rebuild_fragment_mapping_from_actors(job_actors))
+}
+
 pub fn rebuild_fragment_mapping_from_actors(
     job_actors: Vec<(
         FragmentId,

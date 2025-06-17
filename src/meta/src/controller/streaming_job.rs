@@ -61,12 +61,7 @@ use super::rename::IndexItemRewriter;
 use crate::barrier::{ReplaceStreamJobPlan, Reschedule};
 use crate::controller::ObjectModel;
 use crate::controller::catalog::{ActorInfo, CatalogController, DropTableConnectorContext};
-use crate::controller::utils::{
-    PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
-    check_sink_into_table_cycle, ensure_object_id, ensure_user_id, get_fragment_actor_ids,
-    get_fragment_mappings, get_internal_tables_by_id, insert_fragment_relations,
-    rebuild_fragment_mapping_from_actors,
-};
+use crate::controller::utils::{PartialObject, build_object_group_for_delete, check_relation_name_duplicate, check_sink_into_table_cycle, ensure_object_id, ensure_user_id, get_fragment_actor_ids, get_fragment_mappings, get_internal_tables_by_id, insert_fragment_relations, rebuild_fragment_mapping_from_actors, get_fragment_mappings_txn};
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
 use crate::model::{
     FragmentDownstreamRelation, FragmentReplaceUpstream, StreamActor, StreamContext,
@@ -720,7 +715,7 @@ impl CatalogController {
         .await?;
 
         let fragment_mapping = if is_mv {
-            get_fragment_mappings(&txn, &inner.actors, job_id as _).await?
+            get_fragment_mappings_txn(&txn, &inner.actors, job_id as _).await?
         } else {
             vec![]
         };
@@ -969,7 +964,7 @@ impl CatalogController {
             _ => unreachable!("invalid job type: {:?}", job_type),
         }
 
-        let fragment_mapping = get_fragment_mappings(&txn, &inner.actors, job_id).await?;
+        let fragment_mapping = get_fragment_mappings_txn(&txn, &inner.actors, job_id).await?;
 
         let replace_table_mapping_update = match replace_stream_job_info {
             Some(ReplaceStreamJobPlan {
@@ -1316,7 +1311,7 @@ impl CatalogController {
         }
 
         let fragment_mapping: Vec<_> =
-            get_fragment_mappings(txn, actor_cache, original_job_id as _).await?;
+            get_fragment_mappings_txn(txn, actor_cache, original_job_id as _).await?;
 
         let mut notification_objs: Option<(Vec<PbUserInfo>, Vec<PartialObject>)> = None;
         if let Some(drop_table_connector_ctx) = drop_table_connector_ctx {
