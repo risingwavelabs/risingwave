@@ -68,7 +68,7 @@ use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::scale::resolve_streaming_job_definition;
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, get_fragment_actor_dispatchers,
-    get_fragment_mappings, get_fragment_mappings_txn, rebuild_fragment_mapping_from_actors,
+    get_fragment_mappings_txn, rebuild_fragment_mapping_from_actors,
     resolve_no_shuffle_actor_dispatcher,
 };
 use crate::manager::LocalNotification;

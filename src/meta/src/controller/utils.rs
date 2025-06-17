@@ -1402,7 +1402,7 @@ where
 /// `get_fragment_mappings_txn` returns the fragment vnode mappings of the given job.
 pub async fn get_fragment_mappings_txn<C>(
     db: &C,
-    actor_cache: &ActorInfo,
+    _actor_cache: &ActorInfo,
     job_id: ObjectId,
 ) -> MetaResult<Vec<PbFragmentWorkerSlotMapping>>
 where

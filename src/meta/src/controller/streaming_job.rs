@@ -61,7 +61,12 @@ use super::rename::IndexItemRewriter;
 use crate::barrier::{ReplaceStreamJobPlan, Reschedule};
 use crate::controller::ObjectModel;
 use crate::controller::catalog::{ActorInfo, CatalogController, DropTableConnectorContext};
-use crate::controller::utils::{PartialObject, build_object_group_for_delete, check_relation_name_duplicate, check_sink_into_table_cycle, ensure_object_id, ensure_user_id, get_fragment_actor_ids, get_fragment_mappings, get_internal_tables_by_id, insert_fragment_relations, rebuild_fragment_mapping_from_actors, get_fragment_mappings_txn};
+use crate::controller::utils::{
+    PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
+    check_sink_into_table_cycle, ensure_object_id, ensure_user_id, get_fragment_actor_ids,
+    get_fragment_mappings_txn, get_internal_tables_by_id, insert_fragment_relations,
+    rebuild_fragment_mapping_from_actors,
+};
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
 use crate::model::{
     FragmentDownstreamRelation, FragmentReplaceUpstream, StreamActor, StreamContext,
