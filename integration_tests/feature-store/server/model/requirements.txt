@@ -1,6 +1,6 @@
 grpcio==1.53.2
 numpy==1.24
-protobuf==4.21.6
+protobuf==4.25.8
 psycopg==3.0.16
 scikit-learn==1.3.0
 pandas==2.0
