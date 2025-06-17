@@ -18,7 +18,7 @@ use risingwave_pb::hummock::{
     PbDistanceType, QueryVectorsRequest, QueryVectorsResponse,
 };
 use risingwave_storage::dispatch_measurement;
-use risingwave_storage::hummock::vector::FileVectorStore;
+use risingwave_storage::hummock::vector::VectorFileBlockStore;
 use risingwave_storage::hummock::vector::writer::{HnswFlatIndexWriter, VectorObjectIdManager};
 use risingwave_storage::hummock::{
     HummockResult, SstableStore, SstableStoreConfig, SstableStoreRef,
@@ -177,10 +177,10 @@ async fn query(
 ) {
     let graph_file = hnsw_flat.graph_file.as_ref().unwrap();
     let graph = sstable_store.get_hnsw_graph(graph_file).await.unwrap();
-    let vector_store = FileVectorStore::new(
-        hnsw_flat.vector_store.vector_files.clone(),
-        sstable_store.clone(),
-    );
+    let vector_store =
+        VectorFileBlockStore::new(sstable_store.clone(), &hnsw_flat.vector_store.vector_files)
+            .await
+            .unwrap();
     while let Some(req) = rx.recv().await {
         let VectorRequest::Query(req, tx) = req else {
             unreachable!()
@@ -198,8 +198,6 @@ async fn query(
                     req.ef_search as _,
                     req.top_n as _,
                 )
-                .await
-                .unwrap()
             });
             results.push(NearestNeighbors { vector_ids });
         }
