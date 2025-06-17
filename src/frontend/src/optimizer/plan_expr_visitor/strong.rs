@@ -340,7 +340,8 @@ impl Strong {
             | ExprType::InetAton
             | ExprType::InetNtoa
             | ExprType::CompositeCast
-            | ExprType::RwEpochToTs => false,
+            | ExprType::RwEpochToTs
+            | ExprType::OpenaiEmbedding => false,
             ExprType::Unspecified => unreachable!(),
         }
     }
