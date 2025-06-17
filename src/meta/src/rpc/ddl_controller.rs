@@ -1499,6 +1499,11 @@ impl DdlController {
             })
             .await;
 
+        self.metadata_manager
+            .catalog_controller
+            .drop_actors_in_cache(removed_actors.iter().map(|id| *id as _).collect())
+            .await?;
+
         // remove secrets.
         for secret in secret_ids {
             LocalSecretManager::global().remove_secret(secret as _);

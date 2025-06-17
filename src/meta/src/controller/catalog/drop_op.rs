@@ -18,6 +18,17 @@ use sea_orm::{ColumnTrait, DatabaseTransaction, EntityTrait, QueryFilter};
 
 use super::*;
 impl CatalogController {
+    pub async fn drop_actors_in_cache(&self, actor_ids: Vec<ActorId>) -> MetaResult<()> {
+        let mut inner = self.inner.write().await;
+
+        // Remove actors from cache.
+        for actor_id in &actor_ids {
+            inner.actors.drop_actor(*actor_id);
+        }
+
+        Ok(())
+    }
+
     // Drop all kinds of objects including databases,
     // schemas, relations, connections, functions, etc.
     pub async fn drop_object(

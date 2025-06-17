@@ -66,7 +66,11 @@ use tracing::debug;
 use crate::barrier::SnapshotBackfillInfo;
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::scale::resolve_streaming_job_definition;
-use crate::controller::utils::{FragmentDesc, PartialActorLocation, PartialFragmentStateTables, get_fragment_actor_dispatchers, get_fragment_mappings, rebuild_fragment_mapping_from_actors, resolve_no_shuffle_actor_dispatcher, get_fragment_mappings_txn};
+use crate::controller::utils::{
+    FragmentDesc, PartialActorLocation, PartialFragmentStateTables, get_fragment_actor_dispatchers,
+    get_fragment_mappings, get_fragment_mappings_txn, rebuild_fragment_mapping_from_actors,
+    resolve_no_shuffle_actor_dispatcher,
+};
 use crate::manager::LocalNotification;
 use crate::model::{
     DownstreamFragmentRelation, Fragment, FragmentActorDispatchers, FragmentDownstreamRelation,
@@ -1270,7 +1274,7 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let mut result = Vec::new();
 
-        let mut fragments: Vec<_> = FragmentModel::find()
+        let query_results: Vec<(_, _, _, _, _, _, _)> = FragmentModel::find()
             .select_only()
             .columns([
                 fragment::Column::FragmentId,
@@ -1281,18 +1285,34 @@ impl CatalogController {
                 fragment::Column::VnodeCount,
                 fragment::Column::StreamNode,
             ])
-            .into_model::<FragmentDesc>()
+            .into_tuple()
             .all(&inner.db)
             .await?;
 
-        for fragment in &mut fragments {
-            fragment.parallelism = inner
-                .actors
-                .actors_by_fragment_id
-                .get(&fragment.fragment_id)
-                .map(Vec::len)
-                .unwrap_or(0) as i64;
-        }
+        let fragments: Vec<FragmentDesc> = query_results
+            .into_iter()
+            .map(|fragment_tuple| {
+                let fragment_id = fragment_tuple.0;
+
+                let parallelism = inner
+                    .actors
+                    .actors_by_fragment_id
+                    .get(&fragment_id)
+                    .map(Vec::len)
+                    .unwrap_or(0) as i64;
+
+                FragmentDesc {
+                    fragment_id,
+                    job_id: fragment_tuple.1,
+                    fragment_type_mask: fragment_tuple.2,
+                    distribution_type: fragment_tuple.3,
+                    state_table_ids: fragment_tuple.4,
+                    vnode_count: fragment_tuple.5,
+                    stream_node: fragment_tuple.6,
+                    parallelism,
+                }
+            })
+            .collect();
 
         #[cfg(debug_assertions)]
         {
