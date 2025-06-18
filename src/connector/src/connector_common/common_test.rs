@@ -92,6 +92,7 @@ mod tests {
         assert!(error_msg.contains("invalid credentials_url scheme 'http'"));
     }
 
+    #[cfg(not(madsim))]
     #[tokio::test]
     async fn test_resolve_pulsar_credentials_url_with_absolute_path_existing_file() {
         let pulsar_common = create_test_pulsar_common();
@@ -119,6 +120,7 @@ mod tests {
         assert!(temp_file_opt.is_none());
     }
 
+    #[cfg(not(madsim))]
     #[tokio::test]
     async fn test_resolve_pulsar_credentials_url_with_absolute_path_nonexistent_file() {
         let pulsar_common = create_test_pulsar_common();
