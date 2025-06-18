@@ -9,7 +9,7 @@ on:
         type: string
         default: 'unlabeled'
       fast:
-        description: 'It will build an Arm64 image quickly, in parallel with the normal build'
+        description: 'Enable fast build for Arm64 image, in parallel with the normal build'
         required: false
         type: boolean
         default: false
