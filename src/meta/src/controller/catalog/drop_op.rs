@@ -18,6 +18,17 @@ use sea_orm::{ColumnTrait, DatabaseTransaction, EntityTrait, QueryFilter};
 
 use super::*;
 impl CatalogController {
+    pub async fn drop_actors_in_cache(&self, actor_ids: Vec<ActorId>) -> MetaResult<()> {
+        let mut inner = self.inner.write().await;
+
+        // Remove actors from cache.
+        for actor_id in &actor_ids {
+            inner.actors.drop_actor(*actor_id);
+        }
+
+        Ok(())
+    }
+
     // Drop all kinds of objects including databases,
     // schemas, relations, connections, functions, etc.
     pub async fn drop_object(
@@ -255,7 +266,7 @@ impl CatalogController {
         }
 
         let (removed_source_fragments, removed_actors, removed_fragments) =
-            get_fragments_for_jobs(&txn, removed_streaming_job_ids.clone()).await?;
+            get_fragments_for_jobs(&txn, &inner.actors, removed_streaming_job_ids.clone()).await?;
 
         // Find affect users with privileges on all this objects.
         let updated_user_ids: Vec<UserId> = UserPrivilege::find()

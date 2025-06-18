@@ -1338,6 +1338,7 @@ impl ScaleController {
                             let bitmap = vnode_bitmap_updates.get(actor_id).unwrap();
 
                             if let Some(prev_bitmap) = actor.vnode_bitmap.as_ref() {
+                                // todo: heavy
                                 if prev_bitmap.eq(bitmap) {
                                     vnode_bitmap_updates.remove(actor_id);
                                 }
