@@ -735,7 +735,7 @@ where
                         .join(JoinType::InnerJoin, object::Relation::Schema2.def())
                         .select_only()
                         .column(schema::Column::Name)
-                        .column(view::Column::Name)
+                        .column(source::Column::Name)
                         .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
                         .into_tuple()
                         .all(db)
@@ -744,7 +744,23 @@ where
                         format!("source {}.{} depends on it", schema_name, view_name)
                     }));
                 }
-                // only the table, source, sink, subscription, view and index will depend on other objects.
+                ObjectType::Connection => {
+                    let connections: Vec<(String, String)> = Object::find()
+                        .join(JoinType::InnerJoin, object::Relation::Connection.def())
+                        .join(JoinType::InnerJoin, object::Relation::Database2.def())
+                        .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                        .select_only()
+                        .column(schema::Column::Name)
+                        .column(connection::Column::Name)
+                        .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                        .into_tuple()
+                        .all(db)
+                        .await?;
+                    details.extend(connections.into_iter().map(|(schema_name, view_name)| {
+                        format!("connection {}.{} depends on it", schema_name, view_name)
+                    }));
+                }
+                // only the table, source, sink, subscription, view, connection and index will depend on other objects.
                 _ => bail!("unexpected referring object type: {}", obj_type.as_str()),
             }
         }
