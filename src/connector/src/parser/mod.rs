@@ -91,17 +91,14 @@ pub struct MessageMeta<'a> {
 }
 
 impl<'a> MessageMeta<'a> {
-    pub fn new(
-        source_meta: &'a SourceMeta,
-        split_id: &'a str,
-        offset: &'a str,
-    ) -> Self {
+    pub fn new(source_meta: &'a SourceMeta, split_id: &'a str, offset: &'a str) -> Self {
         Self {
             source_meta,
             split_id,
             offset,
         }
     }
+
     /// Extract the value for the given column.
     ///
     /// Returns `None` if the column is not a meta column.
@@ -407,10 +404,12 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                             }
                         }
                     }
-                },
+                }
                 Ok(ParseResult::DeleteInsertRows) => {
-                    unreachable!("unexpected delete insert rows. Only ETL CDC will return this parse result. Should only occur in CdcBackfillExecutor");
-                },
+                    unreachable!(
+                        "unexpected delete insert rows. Only ETL CDC will return this parse result. Should only occur in CdcBackfillExecutor"
+                    );
+                }
             }
         }
 

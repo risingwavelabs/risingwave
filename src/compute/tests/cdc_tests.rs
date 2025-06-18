@@ -421,7 +421,13 @@ async fn test_cdc_backfill() -> StreamResult<()> {
                 199 40.5
             978 72.6";
 
-    run_cdc_backfill_test_case(false, chunk1_payload, chunk2_payload, expected_datachunk_str).await
+    run_cdc_backfill_test_case(
+        false,
+        chunk1_payload,
+        chunk2_payload,
+        expected_datachunk_str,
+    )
+    .await
 }
 
 #[tokio::test]

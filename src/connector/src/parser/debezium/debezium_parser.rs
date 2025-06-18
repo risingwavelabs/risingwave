@@ -157,10 +157,11 @@ impl DebeziumParser {
             if self.props.handle_update_as_delete_insert && row_op.is_update()? {
                 writer.do_delete(|column| row_op.access_before_field(column))?;
                 writer.do_insert(|column| row_op.access_after_field(column))?;
+                Ok(ParseResult::DeleteInsertRows)
             } else {
                 apply_row_operation_on_stream_chunk_writer(&row_op, &mut writer)?;
+                Ok(ParseResult::Rows)
             }
-            Ok(ParseResult::DeleteInsertRows)
         })();
 
         match res {
@@ -396,7 +397,7 @@ mod tests {
             )
             .await;
 
-        assert!(matches!(res, Ok(ParseResult::Rows)));
+        assert!(matches!(res, Ok(ParseResult::DeleteInsertRows)));
 
         builder.finish_current_chunk();
         let chunk = builder.consume_ready_chunks().next().unwrap();

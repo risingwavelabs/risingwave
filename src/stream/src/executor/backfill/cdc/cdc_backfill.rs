@@ -23,7 +23,8 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_connector::parser::{
-    ByteStreamSourceParser, DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties, ParseResult, ProtocolProperties, SourceStreamChunkBuilder, SpecificParserConfig
+    ByteStreamSourceParser, DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties,
+    ParseResult, ProtocolProperties, SourceStreamChunkBuilder, SpecificParserConfig,
 };
 use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReaderImpl};
 use risingwave_connector::source::{SourceColumnDesc, SourceContext, SourceCtrlOpts};
@@ -873,7 +874,8 @@ async fn parse_debezium_chunk(
         let mut offset_builder = Utf8ArrayBuilder::new(builder_chunk_size);
 
         for (payload_row, offset_row) in payloads.rows().zip(offsets.rows()) {
-            let ScalarRefImpl::Jsonb(jsonb_ref) = payload_row.datum_at(0).expect("payload must exist")
+            let ScalarRefImpl::Jsonb(jsonb_ref) =
+                payload_row.datum_at(0).expect("payload must exist")
             else {
                 panic!("payload must be jsonb");
             };
@@ -1084,7 +1086,11 @@ mod tests {
         pin_mut!(parsed_stream);
 
         if let Some(Ok(Message::Chunk(chunk))) = parsed_stream.next().await {
-            let expected = expect_test::expect!("");
+            let expected = expect_test::expect!([r#"
+                +---+---+-------+---+-----------+------------+---+--------------------------+
+                | - | 5 | 44485 | F | 144659.20 | 1994-07-30 |   | file: 1.binlog, pos: 100 |
+                | + | 5 | 44485 | O | 144659.20 | 1994-07-30 |   | file: 1.binlog, pos: 100 |
+                +---+---+-------+---+-----------+------------+---+--------------------------+"#]);
             expected.assert_eq(&chunk.to_pretty().to_string());
         } else {
             panic!("expected a chunk from parsed stream");
