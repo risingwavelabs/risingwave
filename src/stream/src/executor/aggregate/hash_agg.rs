@@ -125,6 +125,9 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
 
     /// Should emit on window close according to watermark?
     emit_on_window_close: bool,
+    
+    /// If agg has not emitted results in X milliseconds, then we force the agg to emit once
+    force_emit_interval: u64
 }
 
 impl<K: HashKey, S: StateStore> ExecutorInner<K, S> {
