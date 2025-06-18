@@ -101,6 +101,7 @@ pub mod fetch_cursor;
 mod flush;
 pub mod handle_privilege;
 pub mod kill_process;
+mod prepared_statement;
 pub mod privilege;
 pub mod query;
 mod recover;
@@ -1223,6 +1224,14 @@ pub async fn handle(
             comment,
         } => comment::handle_comment(handler_args, object_type, object_name, comment).await,
         Statement::Use { db_name } => use_db::handle_use_db(handler_args, db_name),
+        Statement::Prepare {
+            name,
+            data_types,
+            statement,
+        } => prepared_statement::handle_prepare(name, data_types, statement).await,
+        Statement::Deallocate { name, prepare } => {
+            prepared_statement::handle_deallocate(name, prepare).await
+        }
         _ => bail_not_implemented!("Unhandled statement: {}", stmt),
     }
 }
