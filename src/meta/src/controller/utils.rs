@@ -729,7 +729,7 @@ where
                     ));
                 }
                 // only the table, sink, subscription, view and index will depend on other objects.
-                ty @ _ => bail!("unexpected referring object type: {}", ty.as_str()),
+                _ => bail!("unexpected referring object type: {}", obj_type.as_str()),
             }
         }
 
