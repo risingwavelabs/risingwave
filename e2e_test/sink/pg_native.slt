@@ -1,0 +1,70 @@
+control substitution on
+
+statement ok
+DROP SINK IF EXISTS pg_sink;
+
+statement ok
+DROP TABLE IF EXISTS datagen_source;
+
+system ok
+psql -c 'DROP TABLE IF EXISTS datagen_source;'
+
+system ok
+psql -c 'CREATE TABLE datagen_source (id INT PRIMARY KEY, v1 varchar);'
+
+statement ok
+CREATE TABLE datagen_source (id INT PRIMARY KEY, v1 varchar);
+
+statement ok
+INSERT INTO datagen_source SELECT key, 'asjdkk2kbdk2uk2ubek2' FROM generate_series(1, 10000) t(key);
+
+statement ok
+flush;
+
+statement ok
+CREATE SINK pg_sink FROM datagen_source WITH (
+    connector='postgres',
+    host='$PGHOST',
+    port='$PGPORT',
+    user='$PGUSER',
+    password='$PGPASSWORD',
+    database='$PGDATABASE',
+    table='datagen_source',
+    type='upsert',
+    primary_key='id',
+);
+
+query I retry 3 backoff 10s
+select * from postgres_query(
+    '$PGHOST',
+    '$PGPORT',
+    '$PGUSER',
+    '${PGPASSWORD:postgres}',
+    '${PGDATABASE}',
+    'select * from datagen_source'
+) except select * from datagen_source;
+----
+
+query I retry 3 backoff 10s
+select * from datagen_source except
+select * from postgres_query(
+    '$PGHOST',
+    '$PGPORT',
+    '$PGUSER',
+    '${PGPASSWORD:postgres}',
+    '${PGDATABASE}',
+    'select * from datagen_source'
+);
+----
+
+statement ok
+DROP SINK IF EXISTS pg_sink;
+
+statement ok
+DROP TABLE IF EXISTS datagen_source;
+
+system ok
+psql -c 'DROP TABLE IF EXISTS datagen_source;'
+
+system ok
+psql -c 'DROP TABLE IF EXISTS datagen_source_jdbc;'

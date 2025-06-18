@@ -59,6 +59,9 @@ prepare_pg
 echo "--- starting risingwave cluster: ci-1cn-1fe-switch-to-pg-native"
 risedev ci-start ci-1cn-1fe-jdbc-to-native
 
+echo "--- test sink: pg_native"
+risedev slt './e2e_test/sink/pg_native.slt'
+
 echo "--- test sink: jdbc:postgres switch to postgres native"
 # check sink destination postgres
 risedev slt './e2e_test/sink/remote/jdbc.load.slt'
