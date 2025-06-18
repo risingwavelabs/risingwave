@@ -152,6 +152,7 @@ Caused by these errors (recent errors listed first):
   6: dns error
   7: failed to lookup address information: Name or service not known
 
+
 statement error
 CREATE SINK opensearch_sink
 FROM t
