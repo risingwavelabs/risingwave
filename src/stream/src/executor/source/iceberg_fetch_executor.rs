@@ -560,8 +560,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                             for chunk in &chunks {
                                 let chunk = prune_additional_cols(
                                     chunk,
-                                    file_path_idx,
-                                    file_pos_idx,
+                                    &[file_path_idx, file_pos_idx],
                                     &source_desc.columns,
                                 );
                                 // pad row_id

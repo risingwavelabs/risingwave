@@ -22,8 +22,9 @@ use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColum
 use risingwave_pb::plan_common::{
     AdditionalCollectionName, AdditionalColumn, AdditionalColumnFilename, AdditionalColumnHeader,
     AdditionalColumnHeaders, AdditionalColumnKey, AdditionalColumnOffset,
-    AdditionalColumnPartition, AdditionalColumnPayload, AdditionalColumnTimestamp,
-    AdditionalDatabaseName, AdditionalSchemaName, AdditionalSubject, AdditionalTableName,
+    AdditionalColumnPartition, AdditionalColumnPayload, AdditionalColumnPulsarMessageIdData,
+    AdditionalColumnTimestamp, AdditionalDatabaseName, AdditionalSchemaName, AdditionalSubject,
+    AdditionalTableName,
 };
 
 use crate::error::ConnectorResult;
@@ -53,6 +54,7 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
             ),
             (
                 PULSAR_CONNECTOR,
+                // "message_id_data" is derived internally, so it's not included here
                 HashSet::from(["key", "partition", "offset", "payload"]),
             ),
             (
@@ -277,10 +279,54 @@ pub fn build_additional_column_desc(
                 column_type: Some(AdditionalColumnType::Subject(AdditionalSubject {})),
             },
         ),
+        "message_id_data" => ColumnDesc::named_with_additional_column(
+            column_name,
+            column_id,
+            DataType::Bytea,
+            AdditionalColumn {
+                column_type: Some(AdditionalColumnType::PulsarMessageIdData(
+                    AdditionalColumnPulsarMessageIdData {},
+                )),
+            },
+        ),
         _ => unreachable!(),
     };
 
     Ok(col_desc)
+}
+
+pub fn derive_pulsar_message_id_data_column(
+    columns: &[ColumnCatalog],
+    connector_name: &str,
+    skip_col_id: bool,
+    column_exist: &mut Vec<bool>,
+    additional_columns: &mut Vec<ColumnDesc>,
+) {
+    let mut last_column_id = max_column_id(columns);
+    let mut assign_col_id = || {
+        if skip_col_id {
+            // col id will be filled outside later. Here just use a placeholder.
+            ColumnId::placeholder()
+        } else {
+            last_column_id = last_column_id.next();
+            last_column_id
+        }
+    };
+
+    column_exist.push(false);
+    additional_columns.push(
+        build_additional_column_desc(
+            assign_col_id(),
+            connector_name,
+            "message_id_data",
+            None,
+            None,
+            None,
+            false,
+            false,
+        )
+        .unwrap(),
+    );
 }
 
 /// Utility function for adding partition and offset columns to the columns, if not specified by the user.
@@ -292,8 +338,8 @@ pub fn source_add_partition_offset_cols(
     columns: &[ColumnCatalog],
     connector_name: &str,
     skip_col_id: bool,
-) -> ([bool; 2], [ColumnDesc; 2]) {
-    let mut columns_exist = [false; 2];
+) -> (Vec<bool>, Vec<ColumnDesc>) {
+    let mut columns_exist = vec![false; 2];
 
     let mut last_column_id = max_column_id(columns);
     let mut assign_col_id = || {
@@ -365,7 +411,7 @@ pub fn source_add_partition_offset_cols(
         }
     }
 
-    (columns_exist, additional_columns.try_into().unwrap())
+    (columns_exist, additional_columns)
 }
 
 fn build_header_catalog(

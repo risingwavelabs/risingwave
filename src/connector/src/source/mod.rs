@@ -114,6 +114,7 @@ pub enum WaitCheckpointTask {
     CommitCdcOffset(Option<(SplitId, String)>),
     AckPubsubMessage(Subscription, Vec<ArrayRef>),
     AckNatsJetStream(JetStreamContext, Vec<ArrayRef>, JetStreamAckPolicy),
+    AckPulsarMessage(Vec<ArrayRef>),
 }
 
 impl WaitCheckpointTask {
@@ -134,6 +135,9 @@ impl WaitCheckpointTask {
                         }
                     }
                 }
+            }
+            WaitCheckpointTask::AckPulsarMessage(ack_id_arrs) => {
+                todo!()
             }
             WaitCheckpointTask::AckPubsubMessage(subscription, ack_id_arrs) => {
                 async fn ack(subscription: &Subscription, ack_ids: Vec<String>) {

@@ -192,6 +192,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("plan_common.ExternalTableDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.ColumnDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.AdditionalColumn", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.AdditionalColumnPulsarMessageIdData", "#[derive(Eq, Hash)]")
         .type_attribute(
             "plan_common.AdditionalColumn.column_type",
             "#[derive(Eq, Hash)]",

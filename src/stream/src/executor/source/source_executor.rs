@@ -468,7 +468,8 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut wait_checkpoint_task_builder =
             Self::spawn_wait_checkpoint_worker(&core, source_desc.source.clone()).await?;
 
-        let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
+        let (Some(split_idx), Some(offset_idx), pulsar_message_id_idx) =
+            get_split_offset_col_idx(&source_desc.columns)
         else {
             unreachable!("Partition and offset columns must be set.");
         };
@@ -684,8 +685,13 @@ impl<S: StateStore> SourceExecutor<S> {
 
                 Either::Right((chunk, latest_state)) => {
                     if let Some(task_builder) = &mut wait_checkpoint_task_builder {
-                        let offset_col = chunk.column_at(offset_idx);
-                        task_builder.update_task_on_chunk(offset_col.clone());
+                        if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
+                            let pulsar_message_id_col = chunk.column_at(pulsar_message_id_idx);
+                            task_builder.update_task_on_chunk(pulsar_message_id_col.clone());
+                        } else {
+                            let offset_col = chunk.column_at(offset_idx);
+                            task_builder.update_task_on_chunk(offset_col.clone());
+                        }
                     }
                     if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
                         // Exceeds the max wait barrier time, the source will be paused.
@@ -727,8 +733,14 @@ impl<S: StateStore> SourceExecutor<S> {
                         .extend(latest_state);
 
                     source_output_row_count.inc_by(chunk.cardinality() as u64);
+                    let to_remove_col_indices =
+                        if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
+                            vec![split_idx, offset_idx, pulsar_message_id_idx]
+                        } else {
+                            vec![split_idx, offset_idx]
+                        };
                     let chunk =
-                        prune_additional_cols(&chunk, split_idx, offset_idx, &source_desc.columns);
+                        prune_additional_cols(&chunk, &to_remove_col_indices, &source_desc.columns);
                     yield Message::Chunk(chunk);
                     self.try_flush_data().await?;
                 }
@@ -801,6 +813,9 @@ impl WaitCheckpointTaskBuilder {
                 arrays.push(offset_col);
             }
             WaitCheckpointTask::AckNatsJetStream(_, arrays, _) => {
+                arrays.push(offset_col);
+            }
+            WaitCheckpointTask::AckPulsarMessage(arrays) => {
                 arrays.push(offset_col);
             }
             WaitCheckpointTask::CommitCdcOffset(_) => {}

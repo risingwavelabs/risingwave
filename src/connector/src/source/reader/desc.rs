@@ -23,12 +23,14 @@ use risingwave_pb::plan_common::PbColumnCatalog;
 #[expect(deprecated)]
 use super::fs_reader::LegacyFsSourceReader;
 use super::reader::SourceReader;
-use crate::WithOptionsSecResolved;
 use crate::error::ConnectorResult;
-use crate::parser::additional_columns::source_add_partition_offset_cols;
+use crate::parser::additional_columns::{
+    derive_pulsar_message_id_data_column, source_add_partition_offset_cols,
+};
 use crate::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
 use crate::source::monitor::SourceMetrics;
 use crate::source::{SourceColumnDesc, SourceColumnType, UPSTREAM_SOURCE_KEY};
+use crate::{WithOptionsSecResolved, WithPropertiesExt};
 
 pub const DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE: usize = 16;
 
@@ -90,8 +92,22 @@ impl SourceDescBuilder {
             .get(UPSTREAM_SOURCE_KEY)
             .map(|s| s.to_lowercase())
             .unwrap();
-        let (columns_exist, additional_columns) =
-            source_add_partition_offset_cols(&self.columns, &connector_name, false);
+        let (columns_exist, additional_columns) = {
+            let (mut columns_exist, mut additional_columns) =
+                source_add_partition_offset_cols(&self.columns, &connector_name, false);
+
+            // add `message_id_data` column for pulsar source, which is used for ack message
+            if self.with_properties.is_pulsar_connector() {
+                derive_pulsar_message_id_data_column(
+                    &self.columns,
+                    &connector_name,
+                    false,
+                    &mut columns_exist,
+                    &mut additional_columns,
+                );
+            }
+            (columns_exist, additional_columns)
+        };
 
         let mut columns: Vec<_> = self
             .columns

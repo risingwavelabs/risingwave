@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 use std::task::Poll;
 
 use anyhow::Context;
@@ -20,9 +20,11 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use moka::future::Cache as MokaCache;
 use pulsar::consumer::{InitialPosition, Message};
 use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
+use pulsar_prost::Message as PulsarProstMessage;
 use risingwave_common::{bail, ensure};
 
 use crate::error::ConnectorResult;
@@ -33,6 +35,9 @@ use crate::source::{
     BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SplitId, SplitMetaData,
     SplitReader, into_chunk_stream,
 };
+pub static PULSAR_ACK_CHANNEL: LazyLock<
+    MokaCache<(String, Arc<str>), tokio::sync::mpsc::UnboundedSender<Vec<u8>>>,
+> = LazyLock::new(|| moka::future::Cache::builder().build()); // mapping:
 
 const PULSAR_DEFAULT_SUBSCRIPTION_PREFIX: &str = "rw-consumer";
 
@@ -260,26 +265,22 @@ impl PulsarBrokerReader {
     }
 }
 
-use std::sync::Arc;
-
-use moka::future::Cache as MokaCache;
-
-pub static PULSAR_ACK_CHANNEL: LazyLock<
-    MokaCache<(String, Arc<str>), tokio::sync::mpsc::UnboundedSender<i32>>,
-> = LazyLock::new(|| moka::future::Cache::builder().build()); // mapping:
-
 struct PulsarConsumeStream {
     pulsar_reader: Consumer<Vec<u8>, TokioExecutor>,
-    ack_rx: tokio::sync::mpsc::UnboundedReceiver<i32>,
+    ack_rx: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
     topic: String,
 }
 
 impl PulsarConsumeStream {
-    fn do_ack(&mut self, message_id: MessageIdData) {
+    fn do_ack(&mut self, message_id_bytes: Vec<u8>) {
+        let message_id = MessageIdData::decode(message_id_bytes.as_slice()).unwrap();
         let topic = self.topic.clone();
         let _ = tokio::task::block_in_place(move || {
-            tokio::runtime::Handle::current()
-                .block_on(async { self.pulsar_reader.ack_with_id(&topic, message_id).await })
+            tokio::runtime::Handle::current().block_on(async {
+                self.pulsar_reader
+                    .cumulative_ack_with_id(&topic, message_id)
+                    .await
+            })
         })
         .map_err(|e| {
             tracing::warn!(
@@ -301,8 +302,10 @@ impl futures::Stream for PulsarConsumeStream {
             self.pulsar_reader.poll_next_unpin(cx),
         ) {
             (Poll::Pending, Poll::Pending) => {}
-            (Poll::Ready(_some_ack), Poll::Pending) => {
-                self.do_ack(MessageIdData::default());
+            (Poll::Ready(some_ack), Poll::Pending) => {
+                if let Some(ack_message_id) = some_ack {
+                    self.do_ack(ack_message_id);
+                }
             }
             (Poll::Pending, Poll::Ready(maybe_message)) => match maybe_message {
                 Some(Ok(msg)) => {
@@ -313,8 +316,10 @@ impl futures::Stream for PulsarConsumeStream {
                 }
                 None => {}
             },
-            (Poll::Ready(_some_ack), Poll::Ready(maybe_message)) => {
-                self.do_ack(MessageIdData::default());
+            (Poll::Ready(some_ack), Poll::Ready(maybe_message)) => {
+                if let Some(ack_message_id) = some_ack {
+                    self.do_ack(ack_message_id);
+                }
                 match maybe_message {
                     Some(Ok(msg)) => {
                         return Poll::Ready(Some(Ok(msg)));
