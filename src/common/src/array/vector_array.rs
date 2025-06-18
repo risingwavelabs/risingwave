@@ -304,7 +304,7 @@ impl<'a> VectorRef<'a> {
     }
 
     /// Get the slice of floats in this vector.
-    pub fn into_slice(self) -> &'a [crate::types::F32] {
-        self.inner.as_primitive_slice().unwrap()
+    pub fn into_slice(self) -> &'a [f32] {
+        crate::types::F32::inner_slice(self.inner.as_primitive_slice().unwrap())
     }
 }
