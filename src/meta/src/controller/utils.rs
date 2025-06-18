@@ -728,17 +728,39 @@ where
                         },
                     ));
                 }
-                // only the table, sink, subscription, view and index will depend on other objects.
+                ObjectType::Source => {
+                    let sources: Vec<(String, String)> = Object::find()
+                        .join(JoinType::InnerJoin, object::Relation::Source.def())
+                        .join(JoinType::InnerJoin, object::Relation::Database2.def())
+                        .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                        .select_only()
+                        .column(schema::Column::Name)
+                        .column(view::Column::Name)
+                        .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                        .into_tuple()
+                        .all(db)
+                        .await?;
+                    details.extend(sources.into_iter().map(|(schema_name, view_name)| {
+                        format!("source {}.{} depends on it", schema_name, view_name)
+                    }));
+                }
+                // only the table, source, sink, subscription, view and index will depend on other objects.
                 _ => bail!("unexpected referring object type: {}", obj_type.as_str()),
             }
         }
 
         return Err(MetaError::permission_denied(format!(
             "{} used by {} other objects. \nDETAIL: {}\n\
-            HINT:  Use DROP ... CASCADE to drop the dependent objects too.",
+            {}",
             object_type.as_str(),
             count,
-            details.join("\n")
+            details.join("\n"),
+            match object_type {
+                ObjectType::Function | ObjectType::Connection | ObjectType::Secret =>
+                    "HINT: DROP the dependent objects first.",
+                ObjectType::Database | ObjectType::Schema => unreachable!(),
+                _ => "HINT:  Use DROP ... CASCADE to drop the dependent objects too.",
+            }
         )));
     }
     Ok(())
