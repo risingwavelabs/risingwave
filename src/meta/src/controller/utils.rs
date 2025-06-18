@@ -616,8 +616,9 @@ where
     Ok(())
 }
 
-/// `ensure_object_not_refer` ensures that object is not used by any other ones except indexes.
-pub async fn ensure_object_not_refer<C>(
+/// `check_object_refer_for_drop` checks whether the object is used by other objects except indexes.
+/// It returns an error that contains the details of the referring objects if it is used by others.
+pub async fn check_object_refer_for_drop<C>(
     object_type: ObjectType,
     object_id: ObjectId,
     db: &C,
@@ -646,10 +647,98 @@ where
             .await?
     };
     if count != 0 {
+        // find the name of all objects that are using the given one.
+        let referring_objects = get_referring_objects(object_id, db).await?;
+        let referring_objs_map = referring_objects
+            .into_iter()
+            .filter(|o| o.obj_type != ObjectType::Index)
+            .into_group_map_by(|o| o.obj_type);
+        let mut details = vec![];
+        for (obj_type, objs) in referring_objs_map {
+            match obj_type {
+                ObjectType::Table => {
+                    let tables: Vec<(String, String)> = Object::find()
+                        .join(JoinType::InnerJoin, object::Relation::Table.def())
+                        .join(JoinType::InnerJoin, object::Relation::Database2.def())
+                        .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                        .select_only()
+                        .column(schema::Column::Name)
+                        .column(table::Column::Name)
+                        .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                        .into_tuple()
+                        .all(db)
+                        .await?;
+                    details.extend(tables.into_iter().map(|(schema_name, table_name)| {
+                        format!(
+                            "materialized view {}.{} depends on it",
+                            schema_name, table_name
+                        )
+                    }));
+                }
+                ObjectType::Sink => {
+                    let sinks: Vec<(String, String)> = Object::find()
+                        .join(JoinType::InnerJoin, object::Relation::Sink.def())
+                        .join(JoinType::InnerJoin, object::Relation::Database2.def())
+                        .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                        .select_only()
+                        .column(schema::Column::Name)
+                        .column(sink::Column::Name)
+                        .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                        .into_tuple()
+                        .all(db)
+                        .await?;
+                    details.extend(sinks.into_iter().map(|(schema_name, sink_name)| {
+                        format!("sink {}.{} depends on it", schema_name, sink_name)
+                    }));
+                }
+                ObjectType::View => {
+                    let views: Vec<(String, String)> = Object::find()
+                        .join(JoinType::InnerJoin, object::Relation::View.def())
+                        .join(JoinType::InnerJoin, object::Relation::Database2.def())
+                        .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                        .select_only()
+                        .column(schema::Column::Name)
+                        .column(view::Column::Name)
+                        .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                        .into_tuple()
+                        .all(db)
+                        .await?;
+                    details.extend(views.into_iter().map(|(schema_name, view_name)| {
+                        format!("view {}.{} depends on it", schema_name, view_name)
+                    }));
+                }
+                ObjectType::Subscription => {
+                    let subscriptions: Vec<(String, String)> = Object::find()
+                        .join(JoinType::InnerJoin, object::Relation::Subscription.def())
+                        .join(JoinType::InnerJoin, object::Relation::Database2.def())
+                        .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                        .select_only()
+                        .column(schema::Column::Name)
+                        .column(subscription::Column::Name)
+                        .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                        .into_tuple()
+                        .all(db)
+                        .await?;
+                    details.extend(subscriptions.into_iter().map(
+                        |(schema_name, subscription_name)| {
+                            format!(
+                                "subscription {}.{} depends on it",
+                                schema_name, subscription_name
+                            )
+                        },
+                    ));
+                }
+                // only the table, sink, subscription, view and index will depend on other objects.
+                ty @ _ => bail!("unexpected referring object type: {}", ty.as_str()),
+            }
+        }
+
         return Err(MetaError::permission_denied(format!(
-            "{} used by {} other objects.",
+            "{} used by {} other objects. \nDETAIL: {}\n\
+            HINT:  Use DROP ... CASCADE to drop the dependent objects too.",
             object_type.as_str(),
-            count
+            count,
+            details.join("\n")
         )));
     }
     Ok(())
@@ -1807,7 +1896,9 @@ pub async fn rename_relation_refer(
                 rename_relation_ref!(Table, table, table_id, index_table_id.unwrap());
             }
             _ => {
-                bail!("only table, sink, subscription, view and index depend on other objects.")
+                bail!(
+                    "only the table, sink, subscription, view and index will depend on other objects."
+                )
             }
         }
     }
