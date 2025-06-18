@@ -223,18 +223,22 @@ impl FrontendEnv {
         let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
         let client_pool = Arc::new(ComputeClientPool::for_test());
         let creating_streaming_tracker = StreamingJobTracker::new(meta_client.clone());
-        let compute_runtime = Arc::new(BackgroundShutdownRuntime::from(
-            Builder::new_multi_thread()
-                .worker_threads(
-                    load_config("", FrontendOpts::default())
-                        .batch
-                        .frontend_compute_runtime_worker_threads,
-                )
+        let runtime = {
+            let mut builder = Builder::new_multi_thread();
+            if let Some(frontend_compute_runtime_worker_threads) =
+                load_config("", FrontendOpts::default())
+                    .batch
+                    .frontend_compute_runtime_worker_threads
+            {
+                builder.worker_threads(frontend_compute_runtime_worker_threads);
+            }
+            builder
                 .thread_name("rw-batch-local")
                 .enable_all()
                 .build()
-                .unwrap(),
-        ));
+                .unwrap()
+        };
+        let compute_runtime = Arc::new(BackgroundShutdownRuntime::from(runtime));
         let sessions_map = Arc::new(RwLock::new(HashMap::new()));
         Self {
             meta_client,
@@ -431,14 +435,20 @@ impl FrontendEnv {
         let creating_streaming_job_tracker =
             Arc::new(StreamingJobTracker::new(frontend_meta_client.clone()));
 
-        let compute_runtime = Arc::new(BackgroundShutdownRuntime::from(
-            Builder::new_multi_thread()
-                .worker_threads(config.batch.frontend_compute_runtime_worker_threads)
+        let runtime = {
+            let mut builder = Builder::new_multi_thread();
+            if let Some(frontend_compute_runtime_worker_threads) =
+                config.batch.frontend_compute_runtime_worker_threads
+            {
+                builder.worker_threads(frontend_compute_runtime_worker_threads);
+            }
+            builder
                 .thread_name("rw-batch-local")
                 .enable_all()
                 .build()
-                .unwrap(),
-        ));
+                .unwrap()
+        };
+        let compute_runtime = Arc::new(BackgroundShutdownRuntime::from(runtime));
 
         let sessions = sessions_map.clone();
         // Idle transaction background monitor
@@ -1071,11 +1081,13 @@ impl SessionImpl {
             Some(schema_name) => catalog_reader.get_schema_by_name(db_name, &schema_name)?,
             None => catalog_reader.first_valid_schema(db_name, &search_path, user_name)?,
         };
+        let schema_name = schema.name();
 
-        check_schema_writable(&schema.name())?;
+        check_schema_writable(&schema_name)?;
         self.check_privileges(&[ObjectCheckItem::new(
             schema.owner(),
             AclMode::Create,
+            schema_name,
             Object::SchemaId(schema.id()),
         )])?;
 
@@ -1100,6 +1112,7 @@ impl SessionImpl {
         self.check_privileges(&[ObjectCheckItem::new(
             connection.owner(),
             AclMode::Usage,
+            connection.name.clone(),
             Object::ConnectionId(connection.id),
         )])?;
 
@@ -1168,6 +1181,7 @@ impl SessionImpl {
         self.check_privileges(&[ObjectCheckItem::new(
             table.owner(),
             AclMode::Select,
+            table_name.to_owned(),
             Object::TableId(table.id.table_id()),
         )])?;
 
@@ -1190,6 +1204,7 @@ impl SessionImpl {
         self.check_privileges(&[ObjectCheckItem::new(
             secret.owner(),
             AclMode::Create,
+            secret.name.clone(),
             Object::SecretId(secret.id.secret_id()),
         )])?;
 

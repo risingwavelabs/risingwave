@@ -29,6 +29,7 @@ use crate::TableCatalog;
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result, RwError, bail_bind_error, bind_error};
 use crate::expr::{Expr as _, ExprImpl, SubqueryKind};
+use crate::handler::privilege::ObjectCheckItem;
 use crate::user::UserId;
 
 /// Project into `exprs` in `BoundUpdate` to get the new values for updating.
@@ -135,10 +136,13 @@ impl Binder {
         let table_catalog = &table.table_catalog;
         Self::check_for_dml(table_catalog, false)?;
         self.check_privilege(
-            PbObject::TableId(table_catalog.id.table_id),
+            ObjectCheckItem::new(
+                table_catalog.owner,
+                AclMode::Update,
+                table_name.clone(),
+                PbObject::TableId(table_catalog.id.table_id),
+            ),
             table_catalog.database_id,
-            AclMode::Update,
-            table_catalog.owner,
         )?;
 
         let default_columns_from_catalog =
