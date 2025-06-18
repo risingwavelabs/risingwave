@@ -369,6 +369,90 @@ where
             .as_ref()
             .and_then(|accessor| parse_transaction_meta(accessor, connector_props).ok())
     }
+
+    pub fn is_update(&self) -> AccessResult<bool> {
+        if let Some(accessor) = &self.value_accessor {
+            if let Some(ScalarRefImpl::Utf8(op)) =
+                accessor.access(&[OP], &DataType::Varchar)?.to_datum_ref()
+            {
+                return Ok(op == DEBEZIUM_UPDATE_OP);
+            }
+        }
+        Ok(false)
+    }
+
+    pub fn access_before_field(&self, desc: &SourceColumnDesc) -> AccessResult<DatumCow<'_>> {
+        // For delete events of MongoDB, the "before" and "after" field both are null in the value,
+        // we need to extract the _id field from the key.
+        if self.is_mongodb && desc.name == "_id" {
+            return self
+                .key_accessor
+                .as_ref()
+                .expect("key_accessor must be provided for delete operation")
+                .access(&[&desc.name], &desc.data_type);
+        }
+
+        if let Some(va) = self.value_accessor.as_ref() {
+            va.access(&[BEFORE, &desc.name], &desc.data_type)
+        } else {
+            self.key_accessor
+                .as_ref()
+                .unwrap()
+                .access(&[&desc.name], &desc.data_type)
+        }
+    }
+
+    pub fn access_after_field(&self, desc: &SourceColumnDesc) -> AccessResult<DatumCow<'_>> {
+        // For upsert operation, if desc is an additional column, access field in the `SOURCE` field.
+        desc.additional_column.column_type.as_ref().map_or_else(
+            || {
+                self.value_accessor
+                    .as_ref()
+                    .expect("value_accessor must be provided for upsert operation")
+                    .access(&[AFTER, &desc.name], &desc.data_type)
+            },
+            |additional_column_type| {
+                match *additional_column_type {
+                    ColumnType::Timestamp(_) => {
+                        // access payload.source.ts_ms
+                        let ts_ms = self
+                            .value_accessor
+                            .as_ref()
+                            .expect("value_accessor must be provided for upsert operation")
+                            .access_owned(&[SOURCE, SOURCE_TS_MS], &DataType::Int64)?;
+                        Ok(DatumCow::Owned(ts_ms.map(|scalar| {
+                            Timestamptz::from_millis(scalar.into_int64())
+                                .expect("source.ts_ms must in millisecond")
+                                .to_scalar_value()
+                        })))
+                    }
+                    ColumnType::DatabaseName(_) => self
+                        .value_accessor
+                        .as_ref()
+                        .expect("value_accessor must be provided for upsert operation")
+                        .access(&[SOURCE, SOURCE_DB], &desc.data_type),
+                    ColumnType::SchemaName(_) => self
+                        .value_accessor
+                        .as_ref()
+                        .expect("value_accessor must be provided for upsert operation")
+                        .access(&[SOURCE, SOURCE_SCHEMA], &desc.data_type),
+                    ColumnType::TableName(_) => self
+                        .value_accessor
+                        .as_ref()
+                        .expect("value_accessor must be provided for upsert operation")
+                        .access(&[SOURCE, SOURCE_TABLE], &desc.data_type),
+                    ColumnType::CollectionName(_) => self
+                        .value_accessor
+                        .as_ref()
+                        .expect("value_accessor must be provided for upsert operation")
+                        .access(&[SOURCE, SOURCE_COLLECTION], &desc.data_type),
+                    _ => Err(AccessError::UnsupportedAdditionalColumn {
+                        name: desc.name.clone(),
+                    }),
+                }
+            },
+        )
+    }
 }
 
 impl<A> ChangeEvent for DebeziumChangeEvent<A>
@@ -377,79 +461,8 @@ where
 {
     fn access_field(&self, desc: &SourceColumnDesc) -> super::AccessResult<DatumCow<'_>> {
         match self.op()? {
-            ChangeEventOperation::Delete => {
-                // For delete events of MongoDB, the "before" and "after" field both are null in the value,
-                // we need to extract the _id field from the key.
-                if self.is_mongodb && desc.name == "_id" {
-                    return self
-                        .key_accessor
-                        .as_ref()
-                        .expect("key_accessor must be provided for delete operation")
-                        .access(&[&desc.name], &desc.data_type);
-                }
-
-                if let Some(va) = self.value_accessor.as_ref() {
-                    va.access(&[BEFORE, &desc.name], &desc.data_type)
-                } else {
-                    self.key_accessor
-                        .as_ref()
-                        .unwrap()
-                        .access(&[&desc.name], &desc.data_type)
-                }
-            }
-
-            // value should not be None.
-            ChangeEventOperation::Upsert => {
-                // For upsert operation, if desc is an additional column, access field in the `SOURCE` field.
-                desc.additional_column.column_type.as_ref().map_or_else(
-                    || {
-                        self.value_accessor
-                            .as_ref()
-                            .expect("value_accessor must be provided for upsert operation")
-                            .access(&[AFTER, &desc.name], &desc.data_type)
-                    },
-                    |additional_column_type| {
-                        match *additional_column_type {
-                            ColumnType::Timestamp(_) => {
-                                // access payload.source.ts_ms
-                                let ts_ms = self
-                                    .value_accessor
-                                    .as_ref()
-                                    .expect("value_accessor must be provided for upsert operation")
-                                    .access_owned(&[SOURCE, SOURCE_TS_MS], &DataType::Int64)?;
-                                Ok(DatumCow::Owned(ts_ms.map(|scalar| {
-                                    Timestamptz::from_millis(scalar.into_int64())
-                                        .expect("source.ts_ms must in millisecond")
-                                        .to_scalar_value()
-                                })))
-                            }
-                            ColumnType::DatabaseName(_) => self
-                                .value_accessor
-                                .as_ref()
-                                .expect("value_accessor must be provided for upsert operation")
-                                .access(&[SOURCE, SOURCE_DB], &desc.data_type),
-                            ColumnType::SchemaName(_) => self
-                                .value_accessor
-                                .as_ref()
-                                .expect("value_accessor must be provided for upsert operation")
-                                .access(&[SOURCE, SOURCE_SCHEMA], &desc.data_type),
-                            ColumnType::TableName(_) => self
-                                .value_accessor
-                                .as_ref()
-                                .expect("value_accessor must be provided for upsert operation")
-                                .access(&[SOURCE, SOURCE_TABLE], &desc.data_type),
-                            ColumnType::CollectionName(_) => self
-                                .value_accessor
-                                .as_ref()
-                                .expect("value_accessor must be provided for upsert operation")
-                                .access(&[SOURCE, SOURCE_COLLECTION], &desc.data_type),
-                            _ => Err(AccessError::UnsupportedAdditionalColumn {
-                                name: desc.name.clone(),
-                            }),
-                        }
-                    },
-                )
-            }
+            ChangeEventOperation::Delete => self.access_before_field(desc),
+            ChangeEventOperation::Upsert => self.access_after_field(desc),
         }
     }
 
