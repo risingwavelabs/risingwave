@@ -1069,14 +1069,10 @@ impl MetaClient {
         Ok(resp.distributions)
     }
 
-    pub async fn list_creating_stream_scan_fragment_distribution(
-        &self,
-    ) -> Result<Vec<FragmentDistribution>> {
+    pub async fn list_creating_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>> {
         let resp = self
             .inner
-            .list_creating_stream_scan_fragment_distribution(
-                ListCreatingStreamScanFragmentDistributionRequest {},
-            )
+            .list_creating_fragment_distribution(ListCreatingFragmentDistributionRequest {})
             .await?;
         Ok(resp.distributions)
     }
@@ -1340,12 +1336,6 @@ impl MetaClient {
         let req = GetTelemetryInfoRequest {};
         let resp = self.inner.get_telemetry_info(req).await?;
         Ok(resp)
-    }
-
-    pub async fn get_system_params(&self) -> Result<SystemParamsReader> {
-        let req = GetSystemParamsRequest {};
-        let resp = self.inner.get_system_params(req).await?;
-        Ok(resp.params.unwrap().into())
     }
 
     pub async fn get_meta_store_endpoint(&self) -> Result<String> {
@@ -2258,7 +2248,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ stream_client, list_streaming_job_states, ListStreamingJobStatesRequest, ListStreamingJobStatesResponse }
             ,{ stream_client, list_fragment_distribution, ListFragmentDistributionRequest, ListFragmentDistributionResponse }
-            ,{ stream_client, list_creating_stream_scan_fragment_distribution, ListCreatingStreamScanFragmentDistributionRequest, ListCreatingStreamScanFragmentDistributionResponse }
+            ,{ stream_client, list_creating_fragment_distribution, ListCreatingFragmentDistributionRequest, ListCreatingFragmentDistributionResponse }
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ stream_client, list_actor_splits, ListActorSplitsRequest, ListActorSplitsResponse }
             ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }

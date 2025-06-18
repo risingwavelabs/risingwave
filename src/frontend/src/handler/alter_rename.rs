@@ -280,7 +280,7 @@ pub async fn handle_rename_schema(
                 && !user.has_privilege(&grant_privilege::Object::DatabaseId(db_id), AclMode::Create)
             {
                 return Err(ErrorCode::PermissionDenied(
-                    "Do not have create privilege on the current database".to_owned(),
+                    "Do not have CREATE privilege on the current database".to_owned(),
                 )
                 .into());
             }

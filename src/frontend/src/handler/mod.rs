@@ -639,7 +639,7 @@ pub async fn handle(
         Statement::SetTimeZone { local: _, value } => {
             variable::handle_set_time_zone(handler_args, value)
         }
-        Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable).await,
+        Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable),
         Statement::CreateIndex {
             name,
             table_name,
@@ -983,9 +983,9 @@ pub async fn handle(
         }
 
         Statement::AlterSink { name, operation } => match operation {
-            AlterSinkOperation::SetSinkProps { changed_props } => {
-                alter_sink_props::handle_alter_sink_props(handler_args, name, changed_props).await
-            }
+            AlterSinkOperation::AlterConnectorProps {
+                alter_props: changed_props,
+            } => alter_sink_props::handle_alter_sink_props(handler_args, name, changed_props).await,
             AlterSinkOperation::RenameSink { sink_name } => {
                 alter_rename::handle_rename_sink(handler_args, name, sink_name).await
             }

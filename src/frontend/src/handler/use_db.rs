@@ -35,6 +35,7 @@ pub fn handle_use_db(handler_args: HandlerArgs, database_name: ObjectName) -> Re
     session.check_privileges(&[ObjectCheckItem::new(
         owner_id,
         AclMode::Connect,
+        database_name.clone(),
         GrantObject::DatabaseId(database_id),
     )])?;
 

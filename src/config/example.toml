@@ -131,7 +131,6 @@ acquire_timeout_sec = 30
 [batch]
 enable_barrier_read = false
 statement_timeout_in_sec = 3600
-frontend_compute_runtime_worker_threads = 4
 mask_worker_temporary_secs = 30
 redact_sql_option_keywords = ["credential", "key", "password", "private", "secret", "token"]
 enable_spill = true

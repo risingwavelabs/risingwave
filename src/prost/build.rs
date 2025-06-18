@@ -105,6 +105,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "node_body",
             "#[derive(::enum_as_inner::EnumAsInner, ::strum::Display, ::strum::EnumDiscriminants)]",
         )
+        .type_attribute(
+            "node_body",
+            "#[strum_discriminants(derive(::strum::Display))]",
+        )
         .type_attribute("rex_node", "#[derive(::enum_as_inner::EnumAsInner)]")
         .type_attribute(
             "meta.PausedReason",

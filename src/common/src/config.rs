@@ -658,9 +658,9 @@ pub struct BatchConfig {
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
 
-    #[serde(default = "default::batch::frontend_compute_runtime_worker_threads")]
+    #[serde(default)]
     /// frontend compute runtime worker threads
-    pub frontend_compute_runtime_worker_threads: usize,
+    pub frontend_compute_runtime_worker_threads: Option<usize>,
 
     /// This is the secs used to mask a worker unavailable temporarily.
     #[serde(default = "default::batch::mask_worker_temporary_secs")]
@@ -2400,10 +2400,6 @@ pub mod default {
         pub fn statement_timeout_in_sec() -> u32 {
             // 1 hour
             60 * 60
-        }
-
-        pub fn frontend_compute_runtime_worker_threads() -> usize {
-            4
         }
 
         pub fn mask_worker_temporary_secs() -> usize {

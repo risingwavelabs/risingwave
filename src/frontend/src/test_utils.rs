@@ -1025,9 +1025,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(vec![])
     }
 
-    async fn list_creating_stream_scan_fragment_distribution(
-        &self,
-    ) -> RpcResult<Vec<FragmentDistribution>> {
+    async fn list_creating_fragment_distribution(&self) -> RpcResult<Vec<FragmentDistribution>> {
         Ok(vec![])
     }
 
@@ -1045,10 +1043,6 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn list_meta_snapshots(&self) -> RpcResult<Vec<MetaSnapshotMetadata>> {
         Ok(vec![])
-    }
-
-    async fn get_system_params(&self) -> RpcResult<SystemParamsReader> {
-        Ok(SystemParams::default().into())
     }
 
     async fn set_system_param(

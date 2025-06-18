@@ -15,6 +15,7 @@
 use std::collections::BTreeMap;
 use std::hash::Hash;
 use std::io::Write;
+use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
@@ -544,38 +545,17 @@ impl PulsarCommon {
         aws_auth_props: &AwsAuthProps,
     ) -> ConnectorResult<Pulsar<TokioExecutor>> {
         let mut pulsar_builder = Pulsar::builder(&self.service_url, TokioExecutor);
-        let mut temp_file = None;
+        let mut _temp_file = None; // Keep temp file alive
+
         if let Some(oauth) = oauth.as_ref() {
-            let url = Url::parse(&oauth.credentials_url)?;
-            match url.scheme() {
-                "s3" => {
-                    let credentials = load_file_descriptor_from_s3(&url, aws_auth_props).await?;
-                    temp_file = Some(
-                        create_credential_temp_file(&credentials)
-                            .context("failed to create temp file for pulsar credentials")?,
-                    );
-                }
-                "file" => {}
-                _ => {
-                    bail!("invalid credentials_url, only file url and s3 url are supported",);
-                }
-            }
+            let (credentials_url, temp_file) = self
+                .resolve_pulsar_credentials_url(oauth, aws_auth_props)
+                .await?;
+            _temp_file = temp_file;
 
             let auth_params = OAuth2Params {
                 issuer_url: oauth.issuer_url.clone(),
-                credentials_url: if temp_file.is_none() {
-                    oauth.credentials_url.clone()
-                } else {
-                    let mut raw_path = temp_file
-                        .as_ref()
-                        .unwrap()
-                        .path()
-                        .to_str()
-                        .unwrap()
-                        .to_owned();
-                    raw_path.insert_str(0, "file://");
-                    raw_path
-                },
+                credentials_url,
                 audience: Some(oauth.audience.clone()),
                 scope: oauth.scope.clone(),
             };
@@ -590,8 +570,64 @@ impl PulsarCommon {
         }
 
         let res = pulsar_builder.build().await.map_err(|e| anyhow!(e))?;
-        drop(temp_file);
+        drop(_temp_file); // Explicitly drop temp file after client is built
         Ok(res)
+    }
+
+    pub(crate) async fn resolve_pulsar_credentials_url(
+        &self,
+        oauth: &PulsarOauthCommon,
+        aws_auth_props: &AwsAuthProps,
+    ) -> ConnectorResult<(String, Option<NamedTempFile>)> {
+        // Try parsing as URL first
+        if let Ok(url) = Url::parse(&oauth.credentials_url) {
+            return self
+                .handle_pulsar_credentials_url(&url, aws_auth_props)
+                .await;
+        }
+
+        // If not a valid URL, check if it's an absolute file path
+        let path = Path::new(&oauth.credentials_url);
+        if !path.is_absolute() {
+            bail!("credentials_url must be a valid URL (s3://, file://) or an absolute file path");
+        }
+
+        // Verify the file exists
+        if !tokio::fs::try_exists(&oauth.credentials_url)
+            .await
+            .unwrap_or(false)
+        {
+            bail!("credentials file does not exist: {}", oauth.credentials_url);
+        }
+
+        // Return absolute path with file:// prefix
+        Ok((format!("file://{}", oauth.credentials_url), None))
+    }
+
+    pub(crate) async fn handle_pulsar_credentials_url(
+        &self,
+        url: &Url,
+        aws_auth_props: &AwsAuthProps,
+    ) -> ConnectorResult<(String, Option<NamedTempFile>)> {
+        match url.scheme() {
+            "s3" => {
+                let credentials = load_file_descriptor_from_s3(url, aws_auth_props).await?;
+                let temp_file = create_credential_temp_file(&credentials)
+                    .context("failed to create temp file for pulsar credentials")?;
+
+                let temp_path = temp_file
+                    .path()
+                    .to_str()
+                    .context("temp file path is not valid UTF-8")?;
+
+                Ok((format!("file://{}", temp_path), Some(temp_file)))
+            }
+            "file" => Ok((url.to_string(), None)),
+            _ => bail!(
+                "invalid credentials_url scheme '{}', only file://, s3://, and absolute file paths are supported",
+                url.scheme()
+            ),
+        }
     }
 }
 
