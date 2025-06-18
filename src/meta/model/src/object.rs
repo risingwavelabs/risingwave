@@ -17,7 +17,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{DatabaseId, ObjectId, SchemaId, UserId};
 
-#[derive(Clone, Debug, PartialEq, Eq, Copy, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, Hash, PartialEq, Eq, Copy, EnumIter, DeriveActiveEnum, Serialize, Deserialize,
+)]
 #[sea_orm(rs_type = "String", db_type = "string(None)")]
 pub enum ObjectType {
     #[sea_orm(string_value = "DATABASE")]
