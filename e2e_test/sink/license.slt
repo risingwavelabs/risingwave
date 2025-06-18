@@ -50,8 +50,7 @@ db error: ERROR: Failed to run the query
 Caused by these errors (recent errors listed first):
   1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSink`) failed: Internal error
   2: failed to validate sink
-  3: Internal error
-  4: feature SnowflakeSink is only available for tier Paid and above, while the current tier is Free
+  3: feature SnowflakeSink is only available for tier Paid and above, while the current tier is Free
 
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
 
