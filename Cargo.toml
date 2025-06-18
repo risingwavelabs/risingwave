@@ -351,12 +351,6 @@ incremental = true
 split-debuginfo = "packed"
 lto = "off"
 
-# Patch profile for production clusters.
-# It will trade-off lto for faster build time.
-[profile.patch-production]
-inherits = "production"
-lto = "off"
-
 [profile.production]
 inherits = "release"
 incremental = false
