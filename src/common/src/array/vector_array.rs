@@ -150,8 +150,8 @@ pub struct VectorVal {
 }
 
 impl Debug for VectorVal {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!("VECTOR_PLACEHOLDER")
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.as_scalar_ref().fmt(f)
     }
 }
 
@@ -242,8 +242,8 @@ pub struct VectorRef<'a> {
 }
 
 impl Debug for VectorRef<'_> {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!("VECTOR_PLACEHOLDER")
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.write_with_type(&DataType::Vector(self.into_slice().len()), f)
     }
 }
 
@@ -266,8 +266,7 @@ impl Ord for VectorRef<'_> {
 
 impl ToText for VectorRef<'_> {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
-        // TODO: use the correct type; `Vector(0)` is invalid
-        self.write_with_type(&DataType::Vector(0), f)
+        self.write_with_type(&DataType::Vector(self.into_slice().len()), f)
     }
 
     fn write_with_type<W: std::fmt::Write>(&self, _ty: &DataType, f: &mut W) -> std::fmt::Result {
