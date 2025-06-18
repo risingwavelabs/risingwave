@@ -21,6 +21,7 @@ package com.risingwave.connector.cdc.debezium.internal;
 import static com.risingwave.java.binding.Binding.getObject;
 import static com.risingwave.java.binding.Binding.putObject;
 
+import io.debezium.DebeziumException;
 import io.debezium.config.Configuration;
 import io.debezium.relational.history.AbstractFileBasedSchemaHistory;
 import io.debezium.relational.history.HistoryRecord;
@@ -43,12 +44,12 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
             SchemaHistoryListener listener,
             boolean useCatalogBeforeSchema) {
         super.configure(config, comparator, listener, useCatalogBeforeSchema);
-        // if (!config.validateAndRecord(ALL_FIELDS, LOGGER::error)) {
-        //     throw new DebeziumException(
-        //             "Error configuring an instance of "
-        //                     + getClass().getSimpleName()
-        //                     + "; check the logs for details");
-        // }
+        if (!config.validateAndRecord(ALL_FIELDS, LOGGER::error)) {
+            throw new DebeziumException(
+                    "Error configuring an instance of "
+                            + getClass().getSimpleName()
+                            + "; check the logs for details");
+        }
         LOGGER.info("Database history will be stored in bucket");
     }
 
@@ -63,14 +64,14 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
         try {
             objectInputStream = retrieveObjectFromStorage();
         } catch (Exception e) {
-            throw new SchemaHistoryException("111Can't retrieve file with schema history", e);
+            throw new SchemaHistoryException("Can't retrieve file with schema history", e);
         }
 
         if (objectInputStream != null) {
             try {
                 toHistoryRecord(objectInputStream);
             } catch (Exception e) {
-                throw new SchemaHistoryException("222Can't retrieve file with schema history", e);
+                throw new SchemaHistoryException("Can't retrieve file with schema history", e);
             }
         }
     }
