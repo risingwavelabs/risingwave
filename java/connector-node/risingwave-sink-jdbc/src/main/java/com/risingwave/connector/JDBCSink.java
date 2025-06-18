@@ -259,17 +259,15 @@ public class JDBCSink implements SinkWriter {
                 }
 
                 this.upsertStatement =
-                        conn.prepareStatement(upsertSql.get(), Statement.RETURN_GENERATED_KEYS);
+                        conn.prepareStatement(upsertSql.get(), Statement.SUCCESS_NO_INFO);
                 // upsert sink will handle DELETE events
                 var deleteSql = jdbcDialect.getDeleteStatement(schemaTableName, pkColumnNames);
-                this.deleteStatement =
-                        conn.prepareStatement(deleteSql, Statement.RETURN_GENERATED_KEYS);
+                this.deleteStatement = conn.prepareStatement(deleteSql, Statement.SUCCESS_NO_INFO);
             } else {
                 var insertSql =
                         jdbcDialect.getInsertIntoStatement(
                                 schemaTableName, List.of(tableSchema.getColumnNames()));
-                this.insertStatement =
-                        conn.prepareStatement(insertSql, Statement.RETURN_GENERATED_KEYS);
+                this.insertStatement = conn.prepareStatement(insertSql, Statement.SUCCESS_NO_INFO);
             }
         }
 
