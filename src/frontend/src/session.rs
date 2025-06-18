@@ -1083,11 +1083,13 @@ impl SessionImpl {
             Some(schema_name) => catalog_reader.get_schema_by_name(db_name, &schema_name)?,
             None => catalog_reader.first_valid_schema(db_name, &search_path, user_name)?,
         };
+        let schema_name = schema.name();
 
-        check_schema_writable(&schema.name())?;
+        check_schema_writable(&schema_name)?;
         self.check_privileges(&[ObjectCheckItem::new(
             schema.owner(),
             AclMode::Create,
+            schema_name,
             Object::SchemaId(schema.id()),
         )])?;
 
@@ -1112,6 +1114,7 @@ impl SessionImpl {
         self.check_privileges(&[ObjectCheckItem::new(
             connection.owner(),
             AclMode::Usage,
+            connection.name.clone(),
             Object::ConnectionId(connection.id),
         )])?;
 
@@ -1180,6 +1183,7 @@ impl SessionImpl {
         self.check_privileges(&[ObjectCheckItem::new(
             table.owner(),
             AclMode::Select,
+            table_name.to_owned(),
             Object::TableId(table.id.table_id()),
         )])?;
 
@@ -1202,6 +1206,7 @@ impl SessionImpl {
         self.check_privileges(&[ObjectCheckItem::new(
             secret.owner(),
             AclMode::Create,
+            secret.name.clone(),
             Object::SecretId(secret.id.secret_id()),
         )])?;
 

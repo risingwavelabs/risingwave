@@ -41,7 +41,9 @@ pub async fn handle_create_database(
         let reader = user_reader.read_guard();
         if let Some(info) = reader.get_user_by_name(&session.user_name()) {
             if !info.can_create_db && !info.is_super {
-                return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
+                return Err(
+                    PermissionDenied("permission denied to create database".to_owned()).into(),
+                );
             }
         } else {
             return Err(PermissionDenied("Session user is invalid".to_owned()).into());
