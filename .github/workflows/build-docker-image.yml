@@ -51,6 +51,8 @@ jobs:
           IMAGE_TAG="v$VERSION--$LABEL--$COMMIT_SHA--$NO_SLASH_BRANCH_NAME"
           echo "IMAGE_TAG=$IMAGE_TAG"
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          echo "IMAGE_TAG_FAST=$IMAGE_TAG--fast"
+          echo "IMAGE_TAG_FAST=$IMAGE_TAG--fast" >> $GITHUB_ENV
       - name: 'Trigger Docker build fast Workflow via Buildkite'
         if: ${{ github.event.inputs.fast }}
         uses: buildkite/trigger-pipeline-action@v2.0.0
@@ -59,8 +61,8 @@ jobs:
           pipeline: 'risingwavelabs/fast-docker-build-arm'
           branch: ${{ env.BRANCH_NAME }}
           commit: HEAD
-          message: ':github: Triggering Docker build with image tag: ${{ env.IMAGE_TAG }}--fast'
-          build_env_vars: '{ "IMAGE_TAG": "${{ env.IMAGE_TAG }}--fast" }'
+          message: ':github: Triggering Docker build with image tag: ${{ env.IMAGE_TAG_FAST }}'
+          build_env_vars: '{ "IMAGE_TAG": "${{ env.IMAGE_TAG_FAST }}" }'
       - name: 'Trigger Docker build Workflow via Buildkite'
         uses: buildkite/trigger-pipeline-action@v2.0.0
         with:
