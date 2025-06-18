@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::borrow::Cow;
+use std::cmp::{max, min};
 use std::collections::HashMap;
 use std::ops::Bound;
 
@@ -851,9 +852,10 @@ pub fn create_builder(
 ) -> DataChunkBuilder {
     let batch_size = match rate_limit {
         RateLimit::Disabled | RateLimit::Pause => chunk_size,
-        RateLimit::Fixed(limit) if limit.get() as usize >= chunk_size => chunk_size,
-        RateLimit::Fixed(limit) => limit.get() as usize,
+        RateLimit::Fixed(limit) => min(limit.get() as usize, chunk_size),
     };
+    // Ensure that the batch size is at least 2, to have enough space for two rows in a single update.
+    let batch_size = max(2, batch_size);
     DataChunkBuilder::new(data_types, batch_size)
 }
 
