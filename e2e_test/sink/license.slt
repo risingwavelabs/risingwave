@@ -140,6 +140,7 @@ WITH (
     s3.region_name = 'xx',
     s3.path = 'xx',
 );
+----
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
