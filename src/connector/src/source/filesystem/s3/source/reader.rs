@@ -247,7 +247,6 @@ mod tests {
         SpecificParserConfig,
     };
     use crate::source::filesystem::LegacyS3SplitEnumerator;
-    use crate::source::filesystem::file_common::CompressionFormat;
     use crate::source::filesystem::s3::S3PropertiesCommon;
     use crate::source::{
         SourceColumnDesc, SourceContext, SourceEnumeratorContext, SplitEnumerator,
@@ -262,8 +261,8 @@ mod tests {
             match_pattern: None,
             access: None,
             secret: None,
+            enable_config_load: None,
             endpoint_url: None,
-            compression_format: CompressionFormat::None,
         }
         .into();
         let mut enumerator =

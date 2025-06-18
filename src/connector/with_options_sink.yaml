@@ -847,6 +847,34 @@ KinesisSinkConfig:
     required: false
     alias:
     - kinesis.assumerole.external_id
+  - name: kinesis.sdk.connect_timeout_ms
+    field_type: u64
+    required: false
+    default: '10000'
+  - name: kinesis.sdk.read_timeout_ms
+    field_type: u64
+    required: false
+    default: '10000'
+  - name: kinesis.sdk.operation_timeout_ms
+    field_type: u64
+    required: false
+    default: '10000'
+  - name: kinesis.sdk.operation_attempt_timeout_ms
+    field_type: u64
+    required: false
+    default: '10000'
+  - name: kinesis.sdk.max_retry_limit
+    field_type: u32
+    required: false
+    default: '3'
+  - name: kinesis.sdk.init_backoff_ms
+    field_type: u64
+    required: false
+    default: '1000'
+  - name: kinesis.sdk.max_backoff_ms
+    field_type: u64
+    required: false
+    default: '20000'
 MongodbConfig:
   fields:
   - name: mongodb.url
@@ -1121,6 +1149,11 @@ S3Config:
     default: Default::default
     alias:
     - snowflake.s3_path
+  - name: enable_config_load
+    field_type: bool
+    comments: Enable config load. This parameter set to true will load s3 credentials from the environment. Only allowed to be used in a self-hosted environment.
+    required: false
+    default: Default::default
   - name: s3.credentials.access
     field_type: String
     required: false

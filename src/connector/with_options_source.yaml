@@ -28,6 +28,10 @@ AzblobProperties:
     field_type: CompressionFormat
     required: false
     default: Default::default
+  - name: compression_format
+    field_type: CompressionFormat
+    required: false
+    default: Default::default
 DatagenProperties:
   fields:
   - name: datagen.split.num
@@ -75,6 +79,10 @@ GcsProperties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
+  - name: compression_format
+    field_type: CompressionFormat
+    required: false
+    default: Default::default
   - name: compression_format
     field_type: CompressionFormat
     required: false
@@ -497,6 +505,34 @@ KinesisProperties:
     required: false
     alias:
     - kinesis.assumerole.external_id
+  - name: kinesis.sdk.connect_timeout_ms
+    field_type: u64
+    required: false
+    default: '10000'
+  - name: kinesis.sdk.read_timeout_ms
+    field_type: u64
+    required: false
+    default: '10000'
+  - name: kinesis.sdk.operation_timeout_ms
+    field_type: u64
+    required: false
+    default: '10000'
+  - name: kinesis.sdk.operation_attempt_timeout_ms
+    field_type: u64
+    required: false
+    default: '10000'
+  - name: kinesis.sdk.max_retry_limit
+    field_type: u32
+    required: false
+    default: '3'
+  - name: kinesis.sdk.init_backoff_ms
+    field_type: u64
+    required: false
+    default: '1000'
+  - name: kinesis.sdk.max_backoff_ms
+    field_type: u64
+    required: false
+    default: '20000'
 LegacyS3Properties:
   fields:
   - name: s3.region_name
@@ -517,13 +553,13 @@ LegacyS3Properties:
     field_type: String
     required: false
     default: Default::default
+  - name: enable_config_load
+    field_type: bool
+    required: false
+    default: Default::default
   - name: s3.endpoint_url
     field_type: String
     required: false
-  - name: compression_format
-    field_type: CompressionFormat
-    required: false
-    default: Default::default
 MongodbCommon:
   fields:
   - name: mongodb.url
@@ -926,13 +962,13 @@ OpendalS3Properties:
     field_type: String
     required: false
     default: Default::default
+  - name: enable_config_load
+    field_type: bool
+    required: false
+    default: Default::default
   - name: s3.endpoint_url
     field_type: String
     required: false
-  - name: compression_format
-    field_type: CompressionFormat
-    required: false
-    default: Default::default
   - name: s3.assume_role
     field_type: String
     comments: The following are only supported by `s3_v2` (opendal) source.
@@ -941,6 +977,10 @@ OpendalS3Properties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
+  - name: compression_format
+    field_type: CompressionFormat
+    required: false
+    default: Default::default
 PosixFsProperties:
   fields:
   - name: posix_fs.root
@@ -955,6 +995,10 @@ PosixFsProperties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
+  - name: compression_format
+    field_type: CompressionFormat
+    required: false
+    default: Default::default
   - name: compression_format
     field_type: CompressionFormat
     required: false
