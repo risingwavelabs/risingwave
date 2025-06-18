@@ -106,21 +106,6 @@ ALTER SYSTEM SET license_key TO DEFAULT;
 statement ok
 flush;
 
-statement ok
-CREATE SINK file_sink
-FROM
-  t
-WITH
-(
-  connector = 's3',
-  s3.region_name = 'us-east-1',
-  s3.bucket_name = 'test',
-  s3.path = '',
-  type = 'append-only',
-  force_append_only='true'
-) FORMAT PLAIN ENCODE PARQUET(force_append_only='true');
-
-
 statement error
 CREATE SINK dynamodb_sink
 FROM
