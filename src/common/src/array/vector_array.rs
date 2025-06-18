@@ -211,7 +211,27 @@ impl VectorVal {
         Ok(Self { inner })
     }
 
+    /// Create a new vector from inner [`ListValue`].
+    ///
+    /// This is leak of implementation. Prefer [`VectorVal::from_iter`] below.
     pub fn from_inner(inner: ListValue) -> Self {
+        Self { inner }
+    }
+}
+
+// The `F32` wrapping is unnecessary given nan/inf/-inf are not allowed in vector.
+// There is not going to be `F16` for `halfvec` later; just `f16`.
+// We keep it for now because the inner `List` type contains `PrimitiveArray<F32>`.
+impl FromIterator<crate::types::F32> for VectorVal {
+    fn from_iter<I: IntoIterator<Item = crate::types::F32>>(iter: I) -> Self {
+        let inner = ListValue::from_iter(iter);
+        Self { inner }
+    }
+}
+
+impl FromIterator<f32> for VectorVal {
+    fn from_iter<I: IntoIterator<Item = f32>>(iter: I) -> Self {
+        let inner = ListValue::from_iter(iter.into_iter().map(crate::types::F32::from));
         Self { inner }
     }
 }
@@ -277,7 +297,15 @@ impl<'a> ScalarRef<'a> for VectorRef<'a> {
 }
 
 impl<'a> VectorRef<'a> {
+    /// Get the inner [`ListRef`].
+    ///
+    /// This is leak of implementation. Prefer [`Self::into_slice`] below.
     pub fn into_inner(self) -> ListRef<'a> {
         self.inner
+    }
+
+    /// Get the slice of floats in this vector.
+    pub fn into_slice(self) -> &'a [crate::types::F32] {
+        self.inner.as_primitive_slice().unwrap()
     }
 }
