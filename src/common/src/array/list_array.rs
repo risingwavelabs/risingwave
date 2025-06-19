@@ -20,7 +20,6 @@ use std::mem::size_of;
 
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
-use risingwave_common::types::F32;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::{ListArrayData, PbArray, PbArrayType};
 use serde::{Deserialize, Serializer};
@@ -595,15 +594,6 @@ impl<'a> ListRef<'a> {
     /// Returns a slice if the list is of type `int64[]`.
     pub fn as_i64_slice(&self) -> Option<&[i64]> {
         self.as_primitive_slice()
-    }
-
-    pub fn as_f32_slice(&self) -> Option<&[f32]> {
-        match &self.array {
-            ArrayImpl::Float32(array) => Some(F32::inner_slice(
-                &array.as_slice()[self.start as usize..self.end as usize],
-            )),
-            _ => None,
-        }
     }
 
     /// # Panics
