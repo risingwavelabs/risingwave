@@ -398,6 +398,10 @@ impl PostgresSinkWriter {
         let upsert_sql = create_upsert_sql(&schema, &config.schema, &config.table, &pk_indices, &pk_indices_lookup);
         let delete_sql = create_delete_sql(&schema, &config.schema, &config.table, &pk_indices);
 
+        let insert_sql = client.prepare(&insert_sql).await.context("failed to prepare insert statement")?;
+        let upsert_sql = client.prepare(&upsert_sql).await.context("failed to prepare upsert statement")?;
+        let delete_sql = client.prepare(&delete_sql).await.context("failed to prepare delete statement")?;
+
         let writer = Self {
             config,
             pk_indices,
@@ -407,7 +411,9 @@ impl PostgresSinkWriter {
             pk_types,
             schema_types,
             schema,
-
+            insert_sql,
+            upsert_sql,
+            delete_sql,
         };
         Ok(writer)
     }
