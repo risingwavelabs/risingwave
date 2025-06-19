@@ -23,7 +23,7 @@ dylint_testing = "=4.0.1"
 
 # UI test dependencies
 anyhow = "1"
-thiserror = "2"
+thiserror = { workspace = true }
 thiserror-ext = "0.2"
 tracing = "0.1"
 
