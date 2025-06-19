@@ -27,7 +27,6 @@ use num_traits::{
 };
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::ArrayType;
-use serde::ser::Serializer as _;
 use serde::{Deserialize, Serialize};
 use to_text::ToText;
 
