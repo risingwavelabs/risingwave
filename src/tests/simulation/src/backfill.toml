@@ -9,5 +9,5 @@ stream_chunk_size = 1
 # NOTE(kwannoel): If can't reproduce it, set to a lower number.
 # This will throttle snapshot read.
 # barrier_interval_ms = 1
-barrier_interval_ms = 50
+barrier_interval_ms = 100
 max_concurrent_creating_streaming_jobs = 0
