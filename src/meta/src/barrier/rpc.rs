@@ -1036,9 +1036,9 @@ pub(super) fn merge_node_rpc_errors<E: Error + Send + Sync + 'static>(
     message: &str,
     errors: impl IntoIterator<Item = (WorkerId, E)>,
 ) -> MetaError {
-    use std::error::request_value;
     use std::fmt::Write;
 
+    use risingwave_common::error::error_request_copy;
     use risingwave_common::error::tonic::extra::Score;
 
     let errors = errors.into_iter().collect_vec();
@@ -1061,13 +1061,15 @@ pub(super) fn merge_node_rpc_errors<E: Error + Send + Sync + 'static>(
     // Find the error with the highest score.
     let max_score = errors
         .iter()
-        .filter_map(|(_, e)| request_value::<Score>(e))
+        .filter_map(|(_, e)| error_request_copy::<Score>(e))
         .max();
 
     if let Some(max_score) = max_score {
         let mut errors = errors;
         let max_scored = errors
-            .extract_if(.., |(_, e)| request_value::<Score>(e) == Some(max_score))
+            .extract_if(.., |(_, e)| {
+                error_request_copy::<Score>(e) == Some(max_score)
+            })
             .next()
             .unwrap();
 

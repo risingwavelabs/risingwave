@@ -12,29 +12,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
+
 use risingwave_common::error::code::PostgresErrorCode;
+use risingwave_common::error::error_request_copy;
+use thiserror_ext::AsReport;
+
+use crate::pg_server::BoxedError;
 
 /// ErrorOrNoticeMessage defines messages that can appear in ErrorResponse and NoticeResponse.
 pub struct ErrorOrNoticeMessage<'a> {
     pub severity: Severity,
     pub error_code: PostgresErrorCode,
-    pub message: &'a str,
+    pub message: Cow<'a, str>,
 }
 
 impl<'a> ErrorOrNoticeMessage<'a> {
-    pub fn internal_error(message: &'a str) -> Self {
+    /// Create a Postgres error message from an error, with the error code and message extracted from the error.
+    pub fn error(error: &BoxedError) -> Self {
+        let message = error.to_report_string_pretty();
+        let error_code = error_request_copy::<PostgresErrorCode>(&**error)
+            .filter(|e| e.is_error()) // should not be warning or success
+            .unwrap_or(PostgresErrorCode::InternalError);
+
         Self {
             severity: Severity::Error,
-            error_code: PostgresErrorCode::InternalError,
-            message,
+            error_code,
+            message: Cow::Owned(message),
         }
     }
 
+    /// Create a Postgres notice message from a string.
     pub fn notice(message: &'a str) -> Self {
         Self {
             severity: Severity::Notice,
             error_code: PostgresErrorCode::SuccessfulCompletion,
-            message,
+            message: Cow::Borrowed(message),
         }
     }
 }

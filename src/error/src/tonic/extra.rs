@@ -14,6 +14,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::error_request_copy;
+
 /// The score of the error.
 ///
 /// Currently, it's used to identify the root cause of streaming pipeline failures, i.e., which actor
@@ -62,7 +64,7 @@ impl Extra {
         T: ?Sized + std::error::Error,
     {
         Self {
-            score: std::error::request_value(error),
+            score: error_request_copy(error),
         }
     }
 
