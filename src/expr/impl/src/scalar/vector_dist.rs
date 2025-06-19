@@ -18,8 +18,8 @@ use risingwave_expr::{ExprError, Result, function};
 
 #[function("l2_distance(vector, vector) -> float8"/*, type_infer = "unreachable"*/)]
 fn l2_distance(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
-    let lhs = lhs.into_inner();
-    let rhs = rhs.into_inner();
+    let lhs = lhs.into_slice();
+    let rhs = rhs.into_slice();
     if lhs.len() != rhs.len() {
         return Err(ExprError::InvalidParam {
             name: "l2_distance",
@@ -33,7 +33,7 @@ fn l2_distance(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
     }
     let mut sum = 0.0f32;
     for (l, r) in lhs.iter().zip_eq_fast(rhs.iter()) {
-        let diff = l.unwrap().into_float32().0 - r.unwrap().into_float32().0;
+        let diff = l - r;
         sum += diff * diff;
     }
     Ok((sum as f64).sqrt().into())
