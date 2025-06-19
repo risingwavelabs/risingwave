@@ -264,6 +264,7 @@ sqlx = { version = "0.8.2", default-features = false, features = [
     "time",
     "uuid",
 ] }
+thiserror = { git = "https://github.com/BugenZhao/thiserror.git", tag = "bz-provide-3" }
 thiserror-ext = { version = "0.3", features = ["backtrace"] }
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [

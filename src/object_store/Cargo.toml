@@ -46,7 +46,7 @@ reqwest = "0.12.2" # required by opendal
 risingwave_common = { workspace = true }
 risingwave_jni_core = { workspace = true, optional = true }
 spin = "0.10"
-thiserror = "2"
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["fs"] }
 tokio-retry = "0.3"
