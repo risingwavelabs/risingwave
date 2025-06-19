@@ -139,18 +139,14 @@ WITH (
     s3.credentials.secret = 'xx',
     s3.region_name = 'xx',
     s3.path = 'xx',
+    primary_key = 'xx',
 );
 ----
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSink`) failed: Internal error
-  2: failed to validate sink
-  3: Unexpected (persistent) at List::next, context: { url: https://s3.xx.amazonaws.com/xx?delimiter=%2F&list-type=2&prefix=xx, called: http_util::Client::send, service: s3, path: xx, listed: 0 } => send http request, source
-  4: error sending request for url (https://s3.xx.amazonaws.com/xx?delimiter=%2F&list-type=2&prefix=xx)
-  5: client error (Connect)
-  6: dns error
-  7: failed to lookup address information: Name or service not known
+  1: Sink error
+  2: Sink primary key column not found: xx. Please use ',' as the delimiter for different primary key columns.
 
 
 statement error
