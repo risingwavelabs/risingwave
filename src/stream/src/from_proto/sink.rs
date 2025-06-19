@@ -281,6 +281,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     table,
                     params.vnode_bitmap.clone().map(Arc::new),
                     65536,
+                    params.env.config().developer.chunk_size,
                     metrics,
                     log_store_identity,
                     pk_info,
