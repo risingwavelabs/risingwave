@@ -17,8 +17,8 @@
 /// Each variant corresponds to a specific `Condition Name` from the PostgreSQL documentation.
 /// This enum provides a type-safe way to handle and match on specific SQLSTATE error codes.
 ///
-/// See: https://www.postgresql.org/docs/13/errcodes-appendix.html.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// See: <https://www.postgresql.org/docs/13/errcodes-appendix.html>.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum PostgresErrorCode {
     // Class 00 — Successful Completion
@@ -625,8 +625,23 @@ pub enum PostgresErrorCode {
 }
 
 impl PostgresErrorCode {
+    /// Returns true if the error code is a success.
+    pub fn is_success(self) -> bool {
+        self == PostgresErrorCode::SuccessfulCompletion
+    }
+
+    /// Returns true if the error code is a warning.
+    pub fn is_warning(self) -> bool {
+        self >= PostgresErrorCode::Warning && self < PostgresErrorCode::NoData
+    }
+
+    /// Returns true if the error code is an error.
+    pub fn is_error(self) -> bool {
+        self >= PostgresErrorCode::NoData
+    }
+
     /// Returns the static five-character SQLSTATE string for the given error code.
-    pub const fn sqlstate(&self) -> &'static str {
+    pub const fn sqlstate(self) -> &'static str {
         match self {
             // Class 00
             PostgresErrorCode::SuccessfulCompletion => "00000",
