@@ -118,6 +118,7 @@ pub trait ToArrow {
             ArrayImpl::List(array) => self.list_to_arrow(data_type, array),
             ArrayImpl::Struct(array) => self.struct_to_arrow(data_type, array),
             ArrayImpl::Map(array) => self.map_to_arrow(data_type, array),
+            ArrayImpl::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
         }?;
         if arrow_array.data_type() != data_type {
             arrow_cast::cast(&arrow_array, data_type).map_err(ArrayError::to_arrow)
@@ -330,6 +331,7 @@ pub trait ToArrow {
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
             DataType::List(datatype) => self.list_type_to_arrow(datatype)?,
             DataType::Map(datatype) => self.map_type_to_arrow(datatype)?,
+            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
         };
         Ok(arrow_schema::Field::new(name, data_type, true))
     }
@@ -1352,6 +1354,23 @@ impl TryFrom<&arrow_array::StringArray> for JsonbArray {
                 .transpose()
             })
             .try_collect()
+    }
+}
+
+impl From<&IntervalArray> for arrow_array::StringArray {
+    fn from(array: &IntervalArray) -> Self {
+        let mut builder =
+            arrow_array::builder::StringBuilder::with_capacity(array.len(), array.len() * 16);
+        for value in array.iter() {
+            match value {
+                Some(interval) => {
+                    write!(&mut builder, "{}", interval).unwrap();
+                    builder.append_value("");
+                }
+                None => builder.append_null(),
+            }
+        }
+        builder.finish()
     }
 }
 

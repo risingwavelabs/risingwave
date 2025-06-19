@@ -30,17 +30,17 @@ use risingwave_common::session_config::SessionConfig;
 use risingwave_common::session_config::parallelism::ConfigParallelism;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
-    BackfillOrderStrategy, DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag,
-    NoOpNode, StreamContext, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
-    StreamScanType,
+    BackfillOrder, DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag, NoOpNode,
+    PbDispatchOutputMapping, StreamContext, StreamFragmentGraph as StreamFragmentGraphProto,
+    StreamNode, StreamScanType,
 };
 
 use self::rewrite::build_delta_join_without_arrange;
-use crate::error::Result;
+use crate::error::ErrorCode::NotSupported;
+use crate::error::{Result, RwError};
 use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::reorganize_elements_id;
-use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::parallelism::derive_parallelism;
 
 /// The mutable state when building fragment graph.
@@ -67,6 +67,9 @@ pub struct BuildFragmentGraphState {
     share_mapping: HashMap<u32, LocalFragmentId>,
     /// operator id to `StreamNode` mapping used by share operator.
     share_stream_node_mapping: HashMap<u32, StreamNode>,
+
+    has_source_backfill: bool,
+    has_snapshot_backfill: bool,
 }
 
 impl BuildFragmentGraphState {
@@ -146,21 +149,30 @@ impl GraphJobType {
 pub fn build_graph(
     plan_node: PlanRef,
     job_type: Option<GraphJobType>,
-) -> SchedulerResult<StreamFragmentGraphProto> {
+) -> Result<StreamFragmentGraphProto> {
     build_graph_with_strategy(plan_node, job_type, None)
 }
 
 pub fn build_graph_with_strategy(
     plan_node: PlanRef,
     job_type: Option<GraphJobType>,
-    backfill_order_strategy: Option<BackfillOrderStrategy>,
-) -> SchedulerResult<StreamFragmentGraphProto> {
+    backfill_order: Option<BackfillOrder>,
+) -> Result<StreamFragmentGraphProto> {
     let ctx = plan_node.plan_base().ctx();
     let plan_node = reorganize_elements_id(plan_node);
 
     let mut state = BuildFragmentGraphState::default();
     let stream_node = plan_node.to_stream_prost(&mut state)?;
-    generate_fragment_graph(&mut state, stream_node).unwrap();
+    generate_fragment_graph(&mut state, stream_node)?;
+    if state.has_source_backfill && state.has_snapshot_backfill {
+        return Err(RwError::from(NotSupported(
+            "Snapshot backfill with shared source backfill is not supported".to_owned(),
+            "`SET streaming_use_shared_source = false` to disable shared source backfill, or \
+                    `SET streaming_use_snapshot_backfill = false` to disable snapshot backfill"
+                .to_owned(),
+        )));
+    }
+
     let mut fragment_graph = state.fragment_graph.to_protobuf();
 
     // Set table ids.
@@ -186,7 +198,7 @@ pub fn build_graph_with_strategy(
         timezone: ctx.get_session_timezone(),
     });
 
-    fragment_graph.backfill_order_strategy = backfill_order_strategy;
+    fragment_graph.backfill_order = backfill_order;
 
     Ok(fragment_graph)
 }
@@ -355,6 +367,7 @@ fn build_fragment(
                     StreamScanType::SnapshotBackfill => {
                         current_fragment.fragment_type_mask |=
                             FragmentTypeFlag::SnapshotBackfillStreamScan as u32;
+                        state.has_snapshot_backfill = true;
                     }
                     StreamScanType::CrossDbSnapshotBackfill => {
                         current_fragment.fragment_type_mask |=
@@ -379,6 +392,7 @@ fn build_fragment(
                 current_fragment.fragment_type_mask |= FragmentTypeFlag::StreamScan as u32;
                 // the backfill algorithm is not parallel safe
                 current_fragment.requires_singleton = true;
+                state.has_source_backfill = true;
             }
 
             NodeBody::CdcFilter(node) => {
@@ -397,6 +411,7 @@ fn build_fragment(
                 let source_id = node.upstream_source_id;
                 state.dependent_table_ids.insert(source_id.into());
                 current_fragment.upstream_table_ids.push(source_id);
+                state.has_source_backfill = true;
             }
 
             NodeBody::Now(_) => {
@@ -478,8 +493,10 @@ fn build_fragment(
                             let no_shuffle_strategy = DispatchStrategy {
                                 r#type: DispatcherType::NoShuffle as i32,
                                 dist_key_indices: vec![],
-                                output_indices: (0..ref_fragment_node.fields.len() as u32)
-                                    .collect(),
+                                output_mapping: PbDispatchOutputMapping::identical(
+                                    ref_fragment_node.fields.len(),
+                                )
+                                .into(),
                             };
 
                             let no_shuffle_exchange_operator_id = state.gen_operator_id() as u64;

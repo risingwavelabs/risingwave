@@ -1061,6 +1061,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         }
         AstDataType::Bytea => DataType::Bytea,
         AstDataType::Jsonb => DataType::Jsonb,
+        AstDataType::Vector(size) => DataType::Vector(*size as _),
         AstDataType::Regclass
         | AstDataType::Regproc
         | AstDataType::Uuid

@@ -7,13 +7,22 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[features]
+# rocksdb-local = ["rocksdb"]
+# tikv = ["tikv-client"]
+test = ["risingwave_hummock_sdk/test"]
+failpoints = ["fail/failpoints"]
+hm-trace = []
+
 [dependencies]
 anyhow = "1"
 arc-swap = { workspace = true }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 await-tree = { workspace = true }
+bergloom-core = { git = "https://github.com/nimtable/BergLoom.git", rev = "4c136f38e3aa5aaea13b06075f2bcb50f65eaee1" }
 bytes = { version = "1", features = ["serde"] }
+derive_builder = "0.20"
 dyn-clone = "1.0.14"
 either = "1"
 enum-as-inner = "0.6"
@@ -22,6 +31,7 @@ foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
+iceberg = { workspace = true }
 itertools = { workspace = true }
 libc = "0.2"
 lz4 = "1.28.0"
@@ -31,6 +41,7 @@ moka = { version = "0.12.0", features = ["future", "sync"] }
 more-asserts = "0.3"
 num-integer = "0.1"
 parking_lot = { workspace = true }
+parquet = { workspace = true }
 prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true }
 rand = { workspace = true }
@@ -38,6 +49,7 @@ risingwave_backup = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_common_service = { workspace = true }
+risingwave_connector = { workspace = true }
 risingwave_expr = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_hummock_trace = { workspace = true }
@@ -51,7 +63,7 @@ sled = "0.34.7"
 spin = "0.10"
 sync-point = { path = "../utils/sync-point" }
 tempfile = "3"
-thiserror = "1"
+thiserror = "2"
 thiserror-ext = { workspace = true }
 # tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
@@ -70,18 +82,18 @@ xorf = "0.11.0"
 xxhash-rust = { version = "0.8.7", features = ["xxh32", "xxh64"] }
 zstd = { version = "0.13", default-features = false }
 
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../workspace-hack" }
+
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.17", default-features = false }
 libc = "0.2"
 nix = { version = "0.30", features = ["fs", "mman"] }
+procfs = { version = "0.17", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
 libc = "0.2.148"
 mach2 = "0.4"
-
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 bincode = "1"
@@ -93,13 +105,6 @@ uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 fiemap = "0.1.1"
-
-[features]
-# rocksdb-local = ["rocksdb"]
-# tikv = ["tikv-client"]
-test = ["risingwave_hummock_sdk/test"]
-failpoints = ["fail/failpoints"]
-hm-trace = []
 
 [[bench]]
 name = "bench_block_iter"

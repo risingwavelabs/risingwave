@@ -755,6 +755,12 @@ if [[ -n ${containers} ]]; then
   docker stop ${containers}
 fi
 
+# Wait for a while for all components to gracefully exit to dump profiling data for coverage.
+if [[ -n $LLVM_PROFILE_FILE ]]; then
+  echo "Waiting for 5 seconds for coverage data to be dumped..."
+  sleep 5
+fi
+
 ${TMUX} kill-server
 test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
 '''
@@ -1107,7 +1113,7 @@ test $? -eq 0 || exit 1
 private = true
 category = "RiseDev - Check"
 description = "Run cargo sort check and attempt to fix"
-install_crate = { min_version = "1.0.9", crate_name = "cargo-sort", binary = "cargo", test_arg = [
+install_crate = { min_version = "2.0.1", crate_name = "cargo-sort", binary = "cargo", test_arg = [
     "sort",
     "--help",
 ], install_command = "binstall" }

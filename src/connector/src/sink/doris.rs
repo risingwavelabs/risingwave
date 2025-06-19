@@ -216,6 +216,7 @@ impl DorisSink {
             risingwave_common::types::DataType::Map(_) => {
                 Err(SinkError::Doris("doris can not support Map".to_owned()))
             }
+            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
         }
     }
 }

@@ -23,8 +23,8 @@ use deltalake::aws::storage::s3_constants::{
     AWS_ACCESS_KEY_ID, AWS_ALLOW_HTTP, AWS_ENDPOINT_URL, AWS_REGION, AWS_S3_ALLOW_UNSAFE_RENAME,
     AWS_SECRET_ACCESS_KEY,
 };
+use deltalake::kernel::transaction::CommitBuilder;
 use deltalake::kernel::{Action, Add, DataType as DeltaLakeDataType, PrimitiveType, StructType};
-use deltalake::operations::transaction::CommitBuilder;
 use deltalake::protocol::{DeltaOperation, SaveMode};
 use deltalake::writer::{DeltaWriter, RecordBatchWriter};
 use phf::{Set, phf_set};
@@ -43,7 +43,7 @@ use serde_with::{DisplayFromStr, serde_as};
 use tokio::sync::mpsc::UnboundedSender;
 use with_options::WithOptions;
 
-use crate::connector_common::{AwsAuthProps, IcebergCompactionStat};
+use crate::connector_common::{AwsAuthProps, IcebergSinkCompactionUpdate};
 use crate::enforce_secret::{EnforceSecret, EnforceSecretError};
 use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::decouple_checkpoint_log_sink::default_commit_checkpoint_interval;
@@ -270,7 +270,7 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
         DataType::Decimal => {
             matches!(
                 dl_data_type,
-                DeltaLakeDataType::Primitive(PrimitiveType::Decimal(_, _))
+                DeltaLakeDataType::Primitive(PrimitiveType::Decimal(_))
             )
         }
         DataType::Date => {
@@ -414,7 +414,7 @@ impl Sink for DeltaLakeSink {
     async fn new_coordinator(
         &self,
         _db: DatabaseConnection,
-        _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergCompactionStat>>,
+        _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
     ) -> Result<Self::Coordinator> {
         Ok(DeltaLakeSinkCommitter {
             table: self.config.common.create_deltalake_client().await?,

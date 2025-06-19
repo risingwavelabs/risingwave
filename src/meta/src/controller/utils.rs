@@ -45,7 +45,9 @@ use risingwave_pb::meta::subscribe_response::Info as NotificationInfo;
 use risingwave_pb::meta::{
     FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup,
 };
-use risingwave_pb::stream_plan::{PbDispatcher, PbDispatcherType, PbFragmentTypeFlag};
+use risingwave_pb::stream_plan::{
+    PbDispatchOutputMapping, PbDispatcher, PbDispatcherType, PbFragmentTypeFlag,
+};
 use risingwave_pb::user::grant_privilege::{
     PbAction, PbActionWithGrantOption, PbObject as PbGrantObject,
 };
@@ -568,7 +570,11 @@ where
                             .await?,
                         Some(JobStatus::Created)
                     ) {
-                    Err(MetaError::catalog_under_creation($obj_type.as_str(), name))
+                    Err(MetaError::catalog_under_creation(
+                        $obj_type.as_str(),
+                        name,
+                        oid,
+                    ))
                 } else {
                     Err(MetaError::catalog_duplicated($obj_type.as_str(), name))
                 };
@@ -610,8 +616,9 @@ where
     Ok(())
 }
 
-/// `ensure_object_not_refer` ensures that object is not used by any other ones except indexes.
-pub async fn ensure_object_not_refer<C>(
+/// `check_object_refer_for_drop` checks whether the object is used by other objects except indexes.
+/// It returns an error that contains the details of the referring objects if it is used by others.
+pub async fn check_object_refer_for_drop<C>(
     object_type: ObjectType,
     object_id: ObjectId,
     db: &C,
@@ -640,10 +647,136 @@ where
             .await?
     };
     if count != 0 {
+        // find the name of all objects that are using the given one.
+        let referring_objects = get_referring_objects(object_id, db).await?;
+        let referring_objs_map = referring_objects
+            .into_iter()
+            .filter(|o| o.obj_type != ObjectType::Index)
+            .into_group_map_by(|o| o.obj_type);
+        let mut details = vec![];
+        for (obj_type, objs) in referring_objs_map {
+            match obj_type {
+                ObjectType::Table => {
+                    let tables: Vec<(String, String)> = Object::find()
+                        .join(JoinType::InnerJoin, object::Relation::Table.def())
+                        .join(JoinType::InnerJoin, object::Relation::Database2.def())
+                        .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                        .select_only()
+                        .column(schema::Column::Name)
+                        .column(table::Column::Name)
+                        .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                        .into_tuple()
+                        .all(db)
+                        .await?;
+                    details.extend(tables.into_iter().map(|(schema_name, table_name)| {
+                        format!(
+                            "materialized view {}.{} depends on it",
+                            schema_name, table_name
+                        )
+                    }));
+                }
+                ObjectType::Sink => {
+                    let sinks: Vec<(String, String)> = Object::find()
+                        .join(JoinType::InnerJoin, object::Relation::Sink.def())
+                        .join(JoinType::InnerJoin, object::Relation::Database2.def())
+                        .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                        .select_only()
+                        .column(schema::Column::Name)
+                        .column(sink::Column::Name)
+                        .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                        .into_tuple()
+                        .all(db)
+                        .await?;
+                    details.extend(sinks.into_iter().map(|(schema_name, sink_name)| {
+                        format!("sink {}.{} depends on it", schema_name, sink_name)
+                    }));
+                }
+                ObjectType::View => {
+                    let views: Vec<(String, String)> = Object::find()
+                        .join(JoinType::InnerJoin, object::Relation::View.def())
+                        .join(JoinType::InnerJoin, object::Relation::Database2.def())
+                        .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                        .select_only()
+                        .column(schema::Column::Name)
+                        .column(view::Column::Name)
+                        .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                        .into_tuple()
+                        .all(db)
+                        .await?;
+                    details.extend(views.into_iter().map(|(schema_name, view_name)| {
+                        format!("view {}.{} depends on it", schema_name, view_name)
+                    }));
+                }
+                ObjectType::Subscription => {
+                    let subscriptions: Vec<(String, String)> = Object::find()
+                        .join(JoinType::InnerJoin, object::Relation::Subscription.def())
+                        .join(JoinType::InnerJoin, object::Relation::Database2.def())
+                        .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                        .select_only()
+                        .column(schema::Column::Name)
+                        .column(subscription::Column::Name)
+                        .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                        .into_tuple()
+                        .all(db)
+                        .await?;
+                    details.extend(subscriptions.into_iter().map(
+                        |(schema_name, subscription_name)| {
+                            format!(
+                                "subscription {}.{} depends on it",
+                                schema_name, subscription_name
+                            )
+                        },
+                    ));
+                }
+                ObjectType::Source => {
+                    let sources: Vec<(String, String)> = Object::find()
+                        .join(JoinType::InnerJoin, object::Relation::Source.def())
+                        .join(JoinType::InnerJoin, object::Relation::Database2.def())
+                        .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                        .select_only()
+                        .column(schema::Column::Name)
+                        .column(source::Column::Name)
+                        .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                        .into_tuple()
+                        .all(db)
+                        .await?;
+                    details.extend(sources.into_iter().map(|(schema_name, view_name)| {
+                        format!("source {}.{} depends on it", schema_name, view_name)
+                    }));
+                }
+                ObjectType::Connection => {
+                    let connections: Vec<(String, String)> = Object::find()
+                        .join(JoinType::InnerJoin, object::Relation::Connection.def())
+                        .join(JoinType::InnerJoin, object::Relation::Database2.def())
+                        .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                        .select_only()
+                        .column(schema::Column::Name)
+                        .column(connection::Column::Name)
+                        .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                        .into_tuple()
+                        .all(db)
+                        .await?;
+                    details.extend(connections.into_iter().map(|(schema_name, view_name)| {
+                        format!("connection {}.{} depends on it", schema_name, view_name)
+                    }));
+                }
+                // only the table, source, sink, subscription, view, connection and index will depend on other objects.
+                _ => bail!("unexpected referring object type: {}", obj_type.as_str()),
+            }
+        }
+
         return Err(MetaError::permission_denied(format!(
-            "{} used by {} other objects.",
+            "{} used by {} other objects. \nDETAIL: {}\n\
+            {}",
             object_type.as_str(),
-            count
+            count,
+            details.join("\n"),
+            match object_type {
+                ObjectType::Function | ObjectType::Connection | ObjectType::Secret =>
+                    "HINT: DROP the dependent objects first.",
+                ObjectType::Database | ObjectType::Schema => unreachable!(),
+                _ => "HINT:  Use DROP ... CASCADE to drop the dependent objects too.",
+            }
         )));
     }
     Ok(())
@@ -955,11 +1088,13 @@ pub async fn insert_fragment_relations(
                     .collect_vec()
                     .into(),
                 output_indices: downstream
-                    .output_indices
+                    .output_mapping
+                    .indices
                     .iter()
                     .map(|idx| *idx as i32)
                     .collect_vec()
                     .into(),
+                output_type_mapping: Some(downstream.output_mapping.types.clone().into()),
             };
             FragmentRelation::insert(relation.into_active_model())
                 .exec(db)
@@ -1029,6 +1164,7 @@ where
         dispatcher_type,
         dist_key_indices,
         output_indices,
+        output_type_mapping,
     } in fragment_relations
     {
         let (source_fragment_distribution, source_fragment_actors) = {
@@ -1053,6 +1189,10 @@ where
             };
             (*distribution, actors.clone())
         };
+        let output_mapping = PbDispatchOutputMapping {
+            indices: output_indices.into_u32_array(),
+            types: output_type_mapping.unwrap_or_default().to_protobuf(),
+        };
         let dispatchers = compose_dispatchers(
             source_fragment_distribution,
             &source_fragment_actors,
@@ -1061,7 +1201,7 @@ where
             &target_fragment_actors,
             dispatcher_type,
             dist_key_indices.into_u32_array(),
-            output_indices.into_u32_array(),
+            output_mapping,
         );
         let actor_dispatchers_map = actor_dispatchers_map
             .entry(source_fragment_id as _)
@@ -1084,14 +1224,14 @@ pub fn compose_dispatchers(
     target_fragment_actors: &HashMap<crate::model::ActorId, Option<Bitmap>>,
     dispatcher_type: DispatcherType,
     dist_key_indices: Vec<u32>,
-    output_indices: Vec<u32>,
+    output_mapping: PbDispatchOutputMapping,
 ) -> HashMap<crate::model::ActorId, PbDispatcher> {
     match dispatcher_type {
         DispatcherType::Hash => {
             let dispatcher = PbDispatcher {
                 r#type: PbDispatcherType::from(dispatcher_type) as _,
                 dist_key_indices: dist_key_indices.clone(),
-                output_indices: output_indices.clone(),
+                output_mapping: output_mapping.into(),
                 hash_mapping: Some(
                     ActorMapping::from_bitmaps(
                         &target_fragment_actors
@@ -1123,7 +1263,7 @@ pub fn compose_dispatchers(
             let dispatcher = PbDispatcher {
                 r#type: PbDispatcherType::from(dispatcher_type) as _,
                 dist_key_indices: dist_key_indices.clone(),
-                output_indices: output_indices.clone(),
+                output_mapping: output_mapping.into(),
                 hash_mapping: None,
                 dispatcher_id: target_fragment_id as _,
                 downstream_actor_id: target_fragment_actors
@@ -1149,7 +1289,7 @@ pub fn compose_dispatchers(
                 PbDispatcher {
                     r#type: PbDispatcherType::NoShuffle as _,
                     dist_key_indices: dist_key_indices.clone(),
-                    output_indices: output_indices.clone(),
+                    output_mapping: output_mapping.clone().into(),
                     hash_mapping: None,
                     dispatcher_id: target_fragment_id as _,
                     downstream_actor_id: vec![downstream_actor_id as _],
@@ -1794,7 +1934,9 @@ pub async fn rename_relation_refer(
                 rename_relation_ref!(Table, table, table_id, index_table_id.unwrap());
             }
             _ => {
-                bail!("only table, sink, subscription, view and index depend on other objects.")
+                bail!(
+                    "only the table, sink, subscription, view and index will depend on other objects."
+                )
             }
         }
     }

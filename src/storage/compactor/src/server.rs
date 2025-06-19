@@ -17,7 +17,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_common::config::{
-    AsyncStackTraceOption, MetricLevel, RwConfig, extract_storage_memory_config, load_config,
+    AsyncStackTraceOption, CompactorMode, MetricLevel, RwConfig, extract_storage_memory_config,
+    load_config,
 };
 use risingwave_common::monitor::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
@@ -45,7 +46,7 @@ use risingwave_storage::hummock::compactor::{
 };
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::utils::HummockMemoryCollector;
-use risingwave_storage::hummock::{MemoryLimiter, SstableObjectIdManager, SstableStore};
+use risingwave_storage::hummock::{MemoryLimiter, ObjectIdManager, SstableStore};
 use risingwave_storage::monitor::{
     CompactorMetrics, GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS, monitor_cache,
 };
@@ -86,16 +87,15 @@ pub async fn prepare_start_parameters(
         * config.storage.compactor_memory_available_proportion)
         as usize;
     let meta_cache_capacity_bytes = compactor_opts.compactor_meta_cache_memory_bytes;
-    let compactor_memory_limit_bytes = match config.storage.compactor_memory_limit_mb {
+    let mut compactor_memory_limit_bytes = match config.storage.compactor_memory_limit_mb {
         Some(compactor_memory_limit_mb) => compactor_memory_limit_mb * (1 << 20),
-        None => {
-            non_reserved_memory_bytes
-        }
-    }
-    .checked_sub(compactor_opts.compactor_meta_cache_memory_bytes).unwrap_or_else(|| {
+        None => non_reserved_memory_bytes,
+    };
+
+    compactor_memory_limit_bytes = compactor_memory_limit_bytes.checked_sub(compactor_opts.compactor_meta_cache_memory_bytes).unwrap_or_else(|| {
         panic!(
-            "compactor_total_memory_bytes {} is too small to hold compactor_meta_cache_memory_bytes {}",
-            meta_cache_capacity_bytes,
+            "compactor_memory_limit_bytes{} is too small to hold compactor_meta_cache_memory_bytes {}",
+            compactor_memory_limit_bytes,
             meta_cache_capacity_bytes
         );
     });
@@ -186,6 +186,7 @@ pub async fn compactor_serve(
     advertise_addr: HostAddr,
     opts: CompactorOpts,
     shutdown: CancellationToken,
+    compactor_mode: CompactorMode,
 ) {
     let config = load_config(&opts.config_path, &opts);
     info!("Starting compactor node",);
@@ -243,7 +244,7 @@ pub async fn compactor_serve(
     // limited at first.
     let _observer_join_handle = observer_manager.start().await;
 
-    let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
+    let object_id_manager = Arc::new(ObjectIdManager::new(
         hummock_meta_client.clone(),
         storage_opts.sstable_id_remote_fetch_number,
     ));
@@ -269,12 +270,22 @@ pub async fn compactor_serve(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
         ),
-        risingwave_storage::hummock::compactor::start_compactor(
-            compactor_context.clone(),
-            hummock_meta_client.clone(),
-            sstable_object_id_manager.clone(),
-            compaction_catalog_manager_ref,
-        ),
+        match compactor_mode {
+            CompactorMode::Dedicated => risingwave_storage::hummock::compactor::start_compactor(
+                compactor_context.clone(),
+                hummock_meta_client.clone(),
+                object_id_manager.clone(),
+                compaction_catalog_manager_ref,
+            ),
+            CompactorMode::Shared => unreachable!(),
+            CompactorMode::DedicatedIceberg => {
+                risingwave_storage::hummock::compactor::start_iceberg_compactor(
+                    compactor_context.clone(),
+                    hummock_meta_client.clone(),
+                )
+            }
+            CompactorMode::SharedIceberg => unreachable!(),
+        },
     ];
 
     let telemetry_manager = TelemetryManager::new(

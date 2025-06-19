@@ -82,9 +82,11 @@ pub(crate) fn gen_create_index_plan(
     }
 
     if !session.is_super_user() && session.user_id() != table.owner {
-        return Err(
-            ErrorCode::PermissionDenied(format!("must be owner of table {}", table.name)).into(),
-        );
+        return Err(ErrorCode::PermissionDenied(format!(
+            "must be owner of table \"{}\"",
+            table.name
+        ))
+        .into());
     }
 
     let mut binder = Binder::new_for_stream(session);
@@ -434,8 +436,8 @@ pub async fn handle_create_index(
         let (schema_name, table, index_table_name) =
             resolve_index_schema(&session, index_name, table_name)?;
         let qualified_index_name = ObjectName(vec![
-            Ident::with_quote_unchecked('"', &schema_name),
-            Ident::with_quote_unchecked('"', &index_table_name),
+            Ident::from_real_value(&schema_name),
+            Ident::from_real_value(&index_table_name),
         ]);
         if let Either::Right(resp) = session.check_relation_name_duplicated(
             qualified_index_name,
@@ -480,7 +482,7 @@ pub async fn handle_create_index(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_index(index, index_table, graph)
+        .create_index(index, index_table, graph, if_not_exists)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_INDEX))

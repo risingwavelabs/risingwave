@@ -6,7 +6,6 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [package.metadata.cargo-machete]
 ignored = ["rw-tokio"]
@@ -19,13 +18,13 @@ either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hostname = "0.4"
 parking_lot = { workspace = true }
-pprof = { version = "0.14", features = ["flamegraph"] }
+pprof = { version = "0.15", features = ["flamegraph"] }
 risingwave_common = { workspace = true }
 risingwave_variables = { workspace = true }
 rlimit = "0.10"
 rustls = "0.23.5"
 # Explicitly specify the tokio version used in RisingWave runtime
-rw-tokio = { version = "=1.44.0", package = "tokio" }
+rw-tokio = { version = "=1.44.2", package = "tokio" }
 thiserror-ext = { workspace = true }
 time = { version = "0.3", features = ["formatting", "local-offset"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
@@ -49,6 +48,8 @@ tracing-subscriber = { version = "0.3", features = [
 ] }
 
 [target.'cfg(not(madsim))'.dependencies]
+fastrace = "0.7"
+fastrace-opentelemetry = "0.10"
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 opentelemetry-semantic-conventions = { workspace = true }
@@ -56,8 +57,6 @@ opentelemetry_sdk = { workspace = true, features = [
     "rt-tokio",
 ] } # only enable `rt-tokio` feature under non-madsim target
 workspace-hack = { path = "../../workspace-hack" }
-fastrace = "0.7"
-fastrace-opentelemetry = "0.10"
 
 [lints]
 workspace = true

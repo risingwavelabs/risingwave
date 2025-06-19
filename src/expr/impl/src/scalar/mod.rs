@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod ai_model;
 mod arithmetic_op;
 mod array;
 mod array_access;
@@ -65,6 +66,7 @@ mod jsonb_set;
 mod length;
 mod lower;
 mod make_time;
+mod map_filter;
 mod md5;
 mod overlay;
 mod position;

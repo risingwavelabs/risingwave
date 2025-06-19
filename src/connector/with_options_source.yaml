@@ -28,6 +28,10 @@ AzblobProperties:
     field_type: CompressionFormat
     required: false
     default: Default::default
+  - name: compression_format
+    field_type: CompressionFormat
+    required: false
+    default: Default::default
 DatagenProperties:
   fields:
   - name: datagen.split.num
@@ -75,6 +79,10 @@ GcsProperties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
+  - name: compression_format
+    field_type: CompressionFormat
+    required: false
+    default: Default::default
   - name: compression_format
     field_type: CompressionFormat
     required: false
@@ -176,7 +184,7 @@ IcebergProperties:
     default: Default::default
   - name: enable_config_load
     field_type: bool
-    comments: enable config load.
+    comments: Enable config load. This parameter set to true will load warehouse credentials from the environment. Only allowed to be used in a self-hosted environment.
     required: false
     default: Default::default
   - name: hosted_catalog
@@ -957,13 +965,13 @@ OpendalS3Properties:
     field_type: String
     required: false
     default: Default::default
+  - name: enable_config_load
+    field_type: bool
+    required: false
+    default: Default::default
   - name: s3.endpoint_url
     field_type: String
     required: false
-  - name: compression_format
-    field_type: CompressionFormat
-    required: false
-    default: Default::default
   - name: s3.assume_role
     field_type: String
     comments: The following are only supported by `s3_v2` (opendal) source.
@@ -972,6 +980,10 @@ OpendalS3Properties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
+  - name: compression_format
+    field_type: CompressionFormat
+    required: false
+    default: Default::default
 PosixFsProperties:
   fields:
   - name: posix_fs.root
@@ -986,6 +998,10 @@ PosixFsProperties:
   - name: refresh.interval.sec
     field_type: u64
     required: false
+  - name: compression_format
+    field_type: CompressionFormat
+    required: false
+    default: Default::default
   - name: compression_format
     field_type: CompressionFormat
     required: false

@@ -6,7 +6,6 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 async-trait = "0.1"
@@ -19,7 +18,7 @@ risingwave_common = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 serde = { version = "1", features = ["derive"] }
-thiserror = "1"
+thiserror = "2"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 tonic = { workspace = true }

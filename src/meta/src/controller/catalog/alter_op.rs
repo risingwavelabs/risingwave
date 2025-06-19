@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::AlterDatabaseParam;
 use sea_orm::DatabaseTransaction;
 
 use super::*;
@@ -845,5 +846,43 @@ impl CatalogController {
         let user_infos = list_user_info_by_ids(to_update_user_ids, txn).await?;
 
         Ok((user_infos, to_drop_objects))
+    }
+
+    pub async fn alter_database_param(
+        &self,
+        database_id: DatabaseId,
+        param: AlterDatabaseParam,
+    ) -> MetaResult<(NotificationVersion, risingwave_meta_model::database::Model)> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let mut database = database::ActiveModel {
+            database_id: Set(database_id),
+            ..Default::default()
+        };
+        match param {
+            AlterDatabaseParam::BarrierIntervalMs(interval) => {
+                database.barrier_interval_ms = Set(interval.map(|i| i as i32));
+            }
+            AlterDatabaseParam::CheckpointFrequency(frequency) => {
+                database.checkpoint_frequency = Set(frequency.map(|f| f as i64));
+            }
+        }
+        let database = database.update(&txn).await?;
+
+        let obj = Object::find_by_id(database_id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("database", database_id))?;
+
+        txn.commit().await?;
+
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::Database(ObjectModel(database.clone(), obj).into()),
+            )
+            .await;
+        Ok((version, database))
     }
 }

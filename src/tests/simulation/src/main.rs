@@ -119,6 +119,14 @@ pub struct Args {
     #[clap(long)]
     generate_sqlsmith_queries: Option<String>,
 
+    /// Path to weight configuration file.
+    #[clap(long, default_value = "src/tests/sqlsmith/config.yml")]
+    weight_config_path: String,
+
+    /// Features to enable (e.g. eowc).
+    #[clap(long = "enable", value_delimiter = ',', action = clap::ArgAction::Append)]
+    enabled_features: Vec<String>,
+
     /// Run sqlsmith for differential testing
     #[clap(long)]
     run_differential_tests: bool,
@@ -191,6 +199,9 @@ async fn main() {
     }
 
     let seed = sqlsmith_seed();
+    let mut sqlsmith_config =
+        risingwave_sqlsmith::config::Configuration::new(&args.weight_config_path);
+    sqlsmith_config.enable_features_from_args(&args.enabled_features);
     if let Some(count) = args.sqlsmith {
         cluster
             .run_on_client(async move {
@@ -203,6 +214,7 @@ async fn main() {
                         &args.files,
                         count,
                         &outdir,
+                        &sqlsmith_config,
                         Some(seed),
                     )
                     .await;
@@ -213,6 +225,7 @@ async fn main() {
                         rw.pg_client(),
                         &args.files,
                         count,
+                        &sqlsmith_config,
                         Some(seed),
                     )
                     .await
@@ -224,6 +237,7 @@ async fn main() {
                     rw.pg_client(),
                     &args.files,
                     count,
+                    &sqlsmith_config,
                     Some(seed),
                 )
                 .await;

@@ -23,7 +23,9 @@ use risingwave_backup::meta_snapshot::Metadata;
 use risingwave_backup::storage::{MetaSnapshotStorage, MetaSnapshotStorageRef};
 use risingwave_common::config::{MetaBackend, ObjectStoreConfig};
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX, version_checkpoint_path};
+use risingwave_hummock_sdk::{
+    HummockRawObjectId, try_get_object_id_from_path, version_checkpoint_path,
+};
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::hummock::PbHummockVersionCheckpoint;
@@ -154,7 +156,7 @@ async fn restore_impl(
     if opts.validate_integrity {
         tracing::info!("Start integrity validation.");
         validate_integrity(
-            snapshot.ssts.clone(),
+            snapshot.objects.clone(),
             &opts.hummock_storage_url,
             &opts.hummock_storage_directory,
         )
@@ -237,23 +239,10 @@ pub async fn restore(opts: RestoreOpts) -> BackupResult<()> {
 }
 
 async fn validate_integrity(
-    mut object_ids: HashSet<HummockSstableObjectId>,
+    mut object_ids: HashSet<HummockRawObjectId>,
     hummock_storage_url: &str,
     hummock_storage_directory: &str,
 ) -> BackupResult<()> {
-    fn try_get_object_id_from_path(path: &str) -> Option<HummockSstableObjectId> {
-        let split: Vec<_> = path.split(&['/', '.']).collect();
-        if split.len() <= 2 {
-            return None;
-        }
-        if split[split.len() - 1] != OBJECT_SUFFIX {
-            return None;
-        }
-        let id = split[split.len() - 2]
-            .parse::<HummockSstableObjectId>()
-            .unwrap_or_else(|_| panic!("expect valid sst id, got {}", split[split.len() - 2]));
-        Some(id)
-    }
     tracing::info!("expect {} objects", object_ids.len());
     let object_store = Arc::new(
         build_remote_object_store(
@@ -271,7 +260,7 @@ async fn validate_integrity(
         let Some(obj_id) = try_get_object_id_from_path(&obj.key) else {
             continue;
         };
-        if object_ids.remove(&obj_id) && object_ids.is_empty() {
+        if object_ids.remove(&obj_id.as_raw()) && object_ids.is_empty() {
             break;
         }
     }

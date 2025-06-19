@@ -7,14 +7,19 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[features]
+test = []
+failpoints = ["fail/failpoints"]
+
 [dependencies]
 anyhow = "1"
 arc-swap = { workspace = true }
 assert_matches = "1"
 async-trait = "0.1"
+await-tree = { workspace = true }
 base64-url = { version = "3.0.0" }
 bytes = { version = "1", features = ["serde"] }
-chrono = "0.4"
+chrono = { workspace = true }
 clap = { workspace = true }
 comfy-table = "7"
 crepe = "0.1"
@@ -62,7 +67,7 @@ serde = { version = "1.0.196", features = ["derive"] }
 serde_json = "1.0.113"
 strum = { version = "0.27", features = ["derive"] }
 sync-point = { path = "../utils/sync-point" }
-thiserror = "1"
+thiserror = "2"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -77,6 +82,7 @@ tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tower = { version = "0.5", features = ["util", "load-shed"] }
 tracing = "0.1"
+twox-hash = "1.6.3"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
@@ -97,10 +103,6 @@ risingwave_hummock_sdk = { workspace = true, features = ["test"] }
 risingwave_test_runner = { workspace = true }
 tempfile = "3"
 tracing-subscriber = "0.3"
-
-[features]
-test = []
-failpoints = ["fail/failpoints"]
 
 [lints]
 workspace = true

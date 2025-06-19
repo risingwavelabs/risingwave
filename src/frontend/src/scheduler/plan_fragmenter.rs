@@ -39,6 +39,7 @@ use risingwave_connector::source::filesystem::opendal_source::{
 };
 use risingwave_connector::source::iceberg::IcebergSplitEnumerator;
 use risingwave_connector::source::kafka::KafkaSplitEnumerator;
+use risingwave_connector::source::prelude::DatagenSplitEnumerator;
 use risingwave_connector::source::reader::reader::build_opendal_fs_list_for_batch;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SplitEnumerator, SplitImpl,
@@ -342,9 +343,21 @@ impl SourceScanInfo {
 
                 Ok(SourceScanInfo::Complete(split_info))
             }
+            (ConnectorProperties::Datagen(prop), SourceFetchParameters::Empty) => {
+                let mut datagen_enumerator =
+                    DatagenSplitEnumerator::new(*prop, SourceEnumeratorContext::dummy().into())
+                        .await?;
+                let split_info = datagen_enumerator.list_splits().await?;
+                let res = split_info.into_iter().map(SplitImpl::Datagen).collect_vec();
+
+                Ok(SourceScanInfo::Complete(res))
+            }
             (ConnectorProperties::OpendalS3(prop), SourceFetchParameters::Empty) => {
-                let lister: OpendalEnumerator<OpendalS3> =
-                    OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
+                let lister: OpendalEnumerator<OpendalS3> = OpendalEnumerator::new_s3_source(
+                    &prop.s3_properties,
+                    prop.assume_role,
+                    prop.fs_common.compression_format,
+                )?;
                 let stream = build_opendal_fs_list_for_batch(lister);
 
                 let batch_res: Vec<_> = stream.try_collect().await?;
@@ -398,8 +411,10 @@ impl SourceScanInfo {
 
                 Ok(SourceScanInfo::Complete(split_info))
             }
-            _ => Err(SchedulerError::Internal(anyhow!(
-                "Unsupported to query directly from this source"
+            (connector, _) => Err(SchedulerError::Internal(anyhow!(
+                "Unsupported to query directly from this {} source, \
+                 please create a table or streaming job from it",
+                connector.kind()
             ))),
         }
     }

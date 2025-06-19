@@ -14,8 +14,10 @@
 
 //! Provides E2E Test runner functionality.
 
+use risingwave_sqlparser::ast::Statement;
 use tokio_postgres::Client;
 
+use crate::config::Configuration;
 use crate::test_runners::utils::{
     create_base_tables, create_mviews, drop_mview_table, drop_tables, format_drop_mview,
     generate_rng, populate_tables, run_query, set_variable, test_batch_queries,
@@ -48,6 +50,7 @@ pub async fn generate(
     testdata: &str,
     count: usize,
     _outdir: &str,
+    config: &Configuration,
     seed: Option<u64>,
 ) {
     let timeout_duration = 5;
@@ -61,15 +64,22 @@ pub async fn generate(
 
     let rows_per_table = 50;
     let max_rows_inserted = rows_per_table * base_tables.len();
-    let inserts = populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
+    let inserts = populate_tables(
+        client,
+        &mut rng,
+        base_tables.clone(),
+        rows_per_table,
+        config,
+    )
+    .await;
     tracing::info!("Populated base tables");
 
-    let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client)
+    let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client, config)
         .await
         .unwrap();
 
     // Generate an update for some inserts, on the corresponding table.
-    update_base_tables(client, &mut rng, &base_tables, &inserts).await;
+    update_base_tables(client, &mut rng, &base_tables, &inserts, config).await;
 
     test_sqlsmith(
         client,
@@ -77,6 +87,7 @@ pub async fn generate(
         tables.clone(),
         base_tables.clone(),
         max_rows_inserted,
+        config,
     )
     .await;
     tracing::info!("Passed sqlsmith tests");
@@ -86,7 +97,7 @@ pub async fn generate(
     let mut generated_queries = 0;
     for _ in 0..count {
         test_session_variable(client, &mut rng).await;
-        let sql = sql_gen(&mut rng, tables.clone());
+        let sql = sql_gen(&mut rng, tables.clone(), config);
         tracing::info!("[EXECUTING TEST_BATCH]: {}", sql);
         let result = run_query(timeout_duration, client, sql.as_str()).await;
         match result {
@@ -107,7 +118,7 @@ pub async fn generate(
     let mut generated_queries = 0;
     for _ in 0..count {
         test_session_variable(client, &mut rng).await;
-        let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query");
+        let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query", config);
         tracing::info!("[EXECUTING TEST_STREAM]: {}", sql);
         let result = run_query(timeout_duration, client, sql.as_str()).await;
         match result {
@@ -131,7 +142,13 @@ pub async fn generate(
 }
 
 /// e2e test runner for sqlsmith
-pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64>) {
+pub async fn run(
+    client: &Client,
+    testdata: &str,
+    count: usize,
+    config: &Configuration,
+    seed: Option<u64>,
+) {
     let mut rng = generate_rng(seed);
 
     set_variable(client, "RW_IMPLICIT_FLUSH", "TRUE").await;
@@ -141,16 +158,52 @@ pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64
     let base_tables = create_base_tables(testdata, client).await.unwrap();
 
     let rows_per_table = 50;
-    let inserts = populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
+    let inserts = populate_tables(
+        client,
+        &mut rng,
+        base_tables.clone(),
+        rows_per_table,
+        config,
+    )
+    .await;
     tracing::info!("Populated base tables");
 
-    let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client)
+    let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client, config)
         .await
         .unwrap();
     tracing::info!("Created tables");
 
+    // Filter out not-append-only tables.
+    let updatable_base_tables: Vec<_> = base_tables
+        .iter()
+        .filter(|table| !table.is_append_only)
+        .cloned()
+        .collect();
+
+    // Filter out inserts on not-append-only tables.
+    let updatable_inserts: Vec<_> = inserts
+        .iter()
+        .filter(|stmt| {
+            if let Statement::Insert { table_name, .. } = stmt {
+                updatable_base_tables
+                    .iter()
+                    .any(|table| table.name == table_name.base_name())
+            } else {
+                false
+            }
+        })
+        .cloned()
+        .collect();
+
     // Generate an update for some inserts, on the corresponding table.
-    update_base_tables(client, &mut rng, &base_tables, &inserts).await;
+    update_base_tables(
+        client,
+        &mut rng,
+        &updatable_base_tables,
+        &updatable_inserts,
+        config,
+    )
+    .await;
     tracing::info!("Ran updates");
 
     let max_rows_inserted = rows_per_table * base_tables.len();
@@ -160,15 +213,16 @@ pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64
         tables.clone(),
         base_tables.clone(),
         max_rows_inserted,
+        config,
     )
     .await;
     tracing::info!("Passed sqlsmith tests");
 
-    test_batch_queries(client, &mut rng, tables.clone(), count)
+    test_batch_queries(client, &mut rng, tables.clone(), count, config)
         .await
         .unwrap();
     tracing::info!("Passed batch queries");
-    test_stream_queries(client, &mut rng, tables.clone(), count)
+    test_stream_queries(client, &mut rng, tables.clone(), count, config)
         .await
         .unwrap();
     tracing::info!("Passed stream queries");

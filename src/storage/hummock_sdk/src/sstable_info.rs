@@ -22,10 +22,11 @@ use crate::key_range::KeyRange;
 use crate::version::{ObjectIdReader, SstableIdReader};
 use crate::{HummockSstableId, HummockSstableObjectId};
 
-#[derive(Debug, PartialEq, Clone, Default)]
+#[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(Default))]
 pub struct SstableInfoInner {
-    pub object_id: u64,
-    pub sst_id: u64,
+    pub object_id: HummockSstableObjectId,
+    pub sst_id: HummockSstableId,
     pub key_range: KeyRange,
     pub file_size: u64,
     pub table_ids: Vec<u32>,
@@ -69,8 +70,8 @@ impl From<PbSstableInfo> for SstableInfoInner {
     fn from(pb_sstable_info: PbSstableInfo) -> Self {
         assert!(pb_sstable_info.table_ids.is_sorted());
         Self {
-            object_id: pb_sstable_info.object_id,
-            sst_id: pb_sstable_info.sst_id,
+            object_id: pb_sstable_info.object_id.into(),
+            sst_id: pb_sstable_info.sst_id.into(),
             key_range: {
                 // Due to the stripped key range, the key range may be `None`
                 if let Some(pb_keyrange) = pb_sstable_info.key_range {
@@ -107,8 +108,8 @@ impl From<&PbSstableInfo> for SstableInfoInner {
     fn from(pb_sstable_info: &PbSstableInfo) -> Self {
         assert!(pb_sstable_info.table_ids.is_sorted());
         Self {
-            object_id: pb_sstable_info.object_id,
-            sst_id: pb_sstable_info.sst_id,
+            object_id: pb_sstable_info.object_id.into(),
+            sst_id: pb_sstable_info.sst_id.into(),
             key_range: {
                 if let Some(pb_keyrange) = &pb_sstable_info.key_range {
                     KeyRange {
@@ -144,8 +145,8 @@ impl From<SstableInfoInner> for PbSstableInfo {
     fn from(sstable_info: SstableInfoInner) -> Self {
         assert!(sstable_info.table_ids.is_sorted());
         PbSstableInfo {
-            object_id: sstable_info.object_id,
-            sst_id: sstable_info.sst_id,
+            object_id: sstable_info.object_id.inner(),
+            sst_id: sstable_info.sst_id.inner(),
             key_range: {
                 let keyrange = sstable_info.key_range;
                 if keyrange.inf_key_range() {
@@ -182,8 +183,8 @@ impl From<&SstableInfoInner> for PbSstableInfo {
     fn from(sstable_info: &SstableInfoInner) -> Self {
         assert!(sstable_info.table_ids.is_sorted());
         PbSstableInfo {
-            object_id: sstable_info.object_id,
-            sst_id: sstable_info.sst_id,
+            object_id: sstable_info.object_id.inner(),
+            sst_id: sstable_info.sst_id.inner(),
             key_range: {
                 let keyrange = &sstable_info.key_range;
                 if keyrange.inf_key_range() {
@@ -233,7 +234,8 @@ impl ObjectIdReader for SstableInfoInner {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Default)]
+#[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(Default))]
 pub struct SstableInfo(Arc<SstableInfoInner>);
 
 impl From<&PbSstableInfo> for SstableInfo {

@@ -90,7 +90,7 @@ impl TrivialMovePicker {
 
                 continue;
             }
-            overlap_info.update(sst);
+            overlap_info.update(&sst.key_range);
             let overlap_files_range = overlap_info.check_multiple_overlap(target_tables);
 
             if overlap_files_range.is_empty() {
@@ -168,7 +168,7 @@ pub mod tests {
     #[test]
     fn test_allowed_trivial_move_min_size() {
         let sst: SstableInfo = SstableInfoInner {
-            sst_id: 1,
+            sst_id: 1.into(),
             file_size: 100,
             sst_size: 100,
             ..Default::default()
@@ -214,28 +214,28 @@ pub mod tests {
     #[test]
     fn test_pick_multi_trivial_move_sst() {
         let sst1: SstableInfo = SstableInfoInner {
-            sst_id: 1,
+            sst_id: 1.into(),
             file_size: 100,
             sst_size: 100,
             ..Default::default()
         }
         .into();
         let sst2: SstableInfo = SstableInfoInner {
-            sst_id: 2,
+            sst_id: 2.into(),
             file_size: 100,
             sst_size: 100,
             ..Default::default()
         }
         .into();
         let sst3: SstableInfo = SstableInfoInner {
-            sst_id: 3,
+            sst_id: 3.into(),
             file_size: 100,
             sst_size: 100,
             ..Default::default()
         }
         .into();
         let sst4: SstableInfo = SstableInfoInner {
-            sst_id: 4,
+            sst_id: 4.into(),
             file_size: 100,
             sst_size: 100,
             ..Default::default()
@@ -295,7 +295,7 @@ pub mod tests {
         }
 
         {
-            levels_handler[0].test_add_pending_sst(2, 1);
+            levels_handler[0].test_add_pending_sst(2.into(), 1);
             let trivial_move_picker =
                 super::TrivialMovePicker::new(0, 1, overlap_strategy.clone(), 50, 4);
             let trivial_move_task = trivial_move_picker.pick_multi_trivial_move_ssts(

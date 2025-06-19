@@ -88,6 +88,7 @@ impl From<(&HummockVersion, &HashSet<StateTableId>)> for IncompleteHummockVersio
             // time travel metadata doesn't include table change log
             table_change_log: HashMap::default(),
             state_table_info: version.state_table_info.clone(),
+            vector_indexes: version.vector_indexes.clone(),
         }
     }
 }
@@ -164,6 +165,7 @@ impl From<(&HummockVersionDelta, &HashSet<StateTableId>)> for IncompleteHummockV
                 })
                 .collect(),
             state_table_info_delta: delta.state_table_info_delta.clone(),
+            vector_index_delta: delta.vector_index_delta.clone(),
         }
     }
 }
@@ -209,8 +211,8 @@ impl ObjectIdReader for SstableIdInVersion {
 impl From<&SstableIdInVersion> for PbSstableInfo {
     fn from(sst_id: &SstableIdInVersion) -> Self {
         Self {
-            sst_id: sst_id.sst_id,
-            object_id: sst_id.object_id,
+            sst_id: sst_id.sst_id.inner(),
+            object_id: sst_id.object_id.inner(),
             ..Default::default()
         }
     }
@@ -225,8 +227,8 @@ impl From<SstableIdInVersion> for PbSstableInfo {
 impl From<&PbSstableInfo> for SstableIdInVersion {
     fn from(s: &PbSstableInfo) -> Self {
         SstableIdInVersion {
-            sst_id: s.sst_id,
-            object_id: s.object_id,
+            sst_id: s.sst_id.into(),
+            object_id: s.object_id.into(),
         }
     }
 }

@@ -599,3 +599,11 @@ impl CreateType {
         }
     }
 }
+
+#[derive(Clone, Debug)]
+pub enum AlterDatabaseParam {
+    // Barrier related parameters, per database.
+    // None represents the default value, which means it follows `SystemParams`.
+    BarrierIntervalMs(Option<u32>),
+    CheckpointFrequency(Option<u64>),
+}

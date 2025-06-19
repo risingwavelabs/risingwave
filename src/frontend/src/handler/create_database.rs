@@ -30,6 +30,8 @@ pub async fn handle_create_database(
     if_not_exist: bool,
     owner: Option<ObjectName>,
     resource_group: Option<SetVariableValue>,
+    barrier_interval_ms: Option<u32>,
+    checkpoint_frequency: Option<u64>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let database_name = Binder::resolve_database_name(database_name)?;
@@ -39,7 +41,9 @@ pub async fn handle_create_database(
         let reader = user_reader.read_guard();
         if let Some(info) = reader.get_user_by_name(&session.user_name()) {
             if !info.can_create_db && !info.is_super {
-                return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
+                return Err(
+                    PermissionDenied("permission denied to create database".to_owned()).into(),
+                );
             }
         } else {
             return Err(PermissionDenied("Session user is invalid".to_owned()).into());
@@ -56,7 +60,7 @@ pub async fn handle_create_database(
                     .notice(format!("database \"{}\" exists, skipping", database_name))
                     .into())
             } else {
-                Err(CatalogError::Duplicated("database", database_name, false).into())
+                Err(CatalogError::duplicated("database", database_name).into())
             };
         }
     }
@@ -89,7 +93,13 @@ pub async fn handle_create_database(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_database(&database_name, database_owner, resource_group)
+        .create_database(
+            &database_name,
+            database_owner,
+            resource_group,
+            barrier_interval_ms,
+            checkpoint_frequency,
+        )
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_DATABASE))

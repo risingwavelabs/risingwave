@@ -22,7 +22,7 @@ use risingwave_common::catalog::{Field, debug_assert_column_ids_distinct, is_sys
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::user::grant_privilege::PbObject;
-use risingwave_sqlparser::ast::{AsOf, Statement, TableAlias};
+use risingwave_sqlparser::ast::{AsOf, ObjectName, Statement, TableAlias};
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 
@@ -37,7 +37,7 @@ use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::{CatalogError, DatabaseId, IndexCatalog, TableId};
 use crate::error::ErrorCode::PermissionDenied;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::user::UserId;
+use crate::handler::privilege::ObjectCheckItem;
 
 #[derive(Debug, Clone)]
 pub struct BoundBaseTable {
@@ -70,14 +70,32 @@ impl BoundSource {
 }
 
 impl Binder {
+    pub fn bind_catalog_relation_by_object_name(
+        &mut self,
+        object_name: ObjectName,
+        bind_creating_relations: bool,
+    ) -> Result<Relation> {
+        let (schema_name, table_name) =
+            Binder::resolve_schema_qualified_name(&self.db_name, object_name)?;
+        self.bind_catalog_relation_by_name(
+            None,
+            schema_name.as_deref(),
+            &table_name,
+            None,
+            None,
+            bind_creating_relations,
+        )
+    }
+
     /// Binds table or source, or logical view according to what we get from the catalog.
-    pub fn bind_relation_by_name_inner(
+    pub fn bind_catalog_relation_by_name(
         &mut self,
         db_name: Option<&str>,
         schema_name: Option<&str>,
         table_name: &str,
         alias: Option<TableAlias>,
         as_of: Option<AsOf>,
+        bind_creating_relations: bool,
     ) -> Result<Relation> {
         // define some helper functions converting catalog to bound relation
         let resolve_sys_table_relation = |sys_table_catalog: &Arc<SystemTableCatalog>| {
@@ -137,7 +155,8 @@ impl Binder {
                         self.resolve_source_relation(&source_catalog.clone(), as_of, true)?
                     } else if let Ok((table_catalog, schema_name)) = self
                         .catalog
-                        .get_created_table_by_name(db_name, schema_path, table_name)
+                        .get_any_table_by_name(db_name, schema_path, table_name)
+                        && (bind_creating_relations || table_catalog.is_created())
                     {
                         self.resolve_table_relation(table_catalog.clone(), schema_name, as_of)?
                     } else if let Ok((source_catalog, _)) =
@@ -187,8 +206,11 @@ impl Binder {
                                         as_of,
                                         true,
                                     );
-                                } else if let Some(table_catalog) = schema
-                                    .get_created_table_or_any_internal_table_by_name(table_name)
+                                } else if let Some(table_catalog) =
+                                    schema.get_any_table_by_name(table_name)
+                                    && (bind_creating_relations
+                                        || table_catalog.is_internal_table()
+                                        || table_catalog.is_created())
                                 {
                                     return self.resolve_table_relation(
                                         table_catalog.clone(),
@@ -223,10 +245,8 @@ impl Binder {
 
     pub(crate) fn check_privilege(
         &self,
-        object: PbObject,
+        item: ObjectCheckItem,
         database_id: DatabaseId,
-        mode: AclMode,
-        owner: UserId,
     ) -> Result<()> {
         // security invoker is disabled for view, ignore privilege check.
         if self.context.disable_security_invoker {
@@ -238,28 +258,36 @@ impl Binder {
                 // reject sources for cross-db access
                 if matches!(self.bind_for, BindFor::Stream)
                     && self.database_id != database_id
-                    && matches!(object, PbObject::SourceId(_))
+                    && matches!(item.object, PbObject::SourceId(_))
                 {
-                    return Err(PermissionDenied(
-                        "SOURCE is not allowed for cross-db access".to_owned(),
-                    )
+                    return Err(PermissionDenied(format!(
+                        "SOURCE \"{}\" is not allowed for cross-db access",
+                        item.name
+                    ))
                     .into());
                 }
                 if let Some(user) = self.user.get_user_by_name(&self.auth_context.user_name) {
-                    if user.is_super || user.id == owner {
+                    if user.is_super || user.id == item.owner {
                         return Ok(());
                     }
-                    if !user.has_privilege(&object, mode) {
-                        return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
+                    if !user.has_privilege(&item.object, item.mode) {
+                        return Err(PermissionDenied(item.error_message()).into());
                     }
 
                     // check CONNECT privilege for cross-db access
                     if self.database_id != database_id
                         && !user.has_privilege(&PbObject::DatabaseId(database_id), AclMode::Connect)
                     {
-                        return Err(
-                            PermissionDenied("Do not have CONNECT privilege".to_owned()).into()
-                        );
+                        let db_name = self
+                            .catalog
+                            .get_database_by_id(&database_id)?
+                            .name
+                            .to_owned();
+
+                        return Err(PermissionDenied(format!(
+                            "permission denied for database \"{db_name}\""
+                        ))
+                        .into());
                     }
                 } else {
                     return Err(PermissionDenied("Session user is invalid".to_owned()).into());
@@ -285,10 +313,13 @@ impl Binder {
             .map(|c| (c.is_hidden, Field::from(&c.column_desc)))
             .collect_vec();
         self.check_privilege(
-            PbObject::TableId(table_id.table_id),
+            ObjectCheckItem::new(
+                table_catalog.owner,
+                AclMode::Select,
+                table_catalog.name.clone(),
+                PbObject::TableId(table_id.table_id),
+            ),
             table_catalog.database_id,
-            AclMode::Select,
-            table_catalog.owner,
         )?;
         self.included_relations.insert(table_id);
 
@@ -313,10 +344,13 @@ impl Binder {
         debug_assert_column_ids_distinct(&source_catalog.columns);
         if !is_temporary {
             self.check_privilege(
-                PbObject::SourceId(source_catalog.id),
+                ObjectCheckItem::new(
+                    source_catalog.owner,
+                    AclMode::Select,
+                    source_catalog.name.clone(),
+                    PbObject::SourceId(source_catalog.id),
+                ),
                 source_catalog.database_id,
-                AclMode::Select,
-                source_catalog.owner,
             )?;
         }
         self.included_relations.insert(source_catalog.id.into());
@@ -339,10 +373,13 @@ impl Binder {
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
         if !view_catalog.is_system_view() {
             self.check_privilege(
-                PbObject::ViewId(view_catalog.id),
+                ObjectCheckItem::new(
+                    view_catalog.owner,
+                    AclMode::Select,
+                    view_catalog.name.clone(),
+                    PbObject::ViewId(view_catalog.id),
+                ),
                 view_catalog.database_id,
-                AclMode::Select,
-                view_catalog.owner,
             )?;
         }
 

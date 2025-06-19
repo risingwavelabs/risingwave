@@ -4,6 +4,7 @@
 set -euo pipefail
 
 source ci/scripts/common.sh
+export RW_BUILD_INSTRUMENT_COVERAGE=1 # enable coverage instrument
 
 while getopts 'p:' opt; do
     case ${opt} in

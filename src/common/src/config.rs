@@ -562,6 +562,19 @@ pub struct MetaDeveloperConfig {
     #[serde(default = "default::developer::hummock_time_travel_filter_out_objects_batch_size")]
     pub hummock_time_travel_filter_out_objects_batch_size: usize,
 
+    #[serde(default = "default::developer::hummock_time_travel_filter_out_objects_v1")]
+    pub hummock_time_travel_filter_out_objects_v1: bool,
+
+    #[serde(
+        default = "default::developer::hummock_time_travel_filter_out_objects_list_version_batch_size"
+    )]
+    pub hummock_time_travel_filter_out_objects_list_version_batch_size: usize,
+
+    #[serde(
+        default = "default::developer::hummock_time_travel_filter_out_objects_list_delta_batch_size"
+    )]
+    pub hummock_time_travel_filter_out_objects_list_delta_batch_size: usize,
+
     #[serde(default)]
     pub compute_client_config: RpcClientConfig,
 
@@ -645,9 +658,9 @@ pub struct BatchConfig {
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
 
-    #[serde(default = "default::batch::frontend_compute_runtime_worker_threads")]
+    #[serde(default)]
     /// frontend compute runtime worker threads
-    pub frontend_compute_runtime_worker_threads: usize,
+    pub frontend_compute_runtime_worker_threads: Option<usize>,
 
     /// This is the secs used to mask a worker unavailable temporarily.
     #[serde(default = "default::batch::mask_worker_temporary_secs")]
@@ -965,6 +978,21 @@ pub struct StorageConfig {
 
     #[serde(default = "default::storage::time_travel_version_cache_capacity")]
     pub time_travel_version_cache_capacity: u64,
+
+    // iceberg compaction
+    #[serde(default = "default::storage::iceberg_compaction_target_file_size_mb")]
+    pub iceberg_compaction_target_file_size_mb: u32,
+    #[serde(default = "default::storage::iceberg_compaction_enable_validate")]
+    pub iceberg_compaction_enable_validate: bool,
+    #[serde(default = "default::storage::iceberg_compaction_max_record_batch_rows")]
+    pub iceberg_compaction_max_record_batch_rows: usize,
+    #[serde(default = "default::storage::iceberg_compaction_min_size_per_partition_mb")]
+    pub iceberg_compaction_min_size_per_partition_mb: u32,
+    #[serde(default = "default::storage::iceberg_compaction_max_file_count_per_partition")]
+    pub iceberg_compaction_max_file_count_per_partition: u32,
+
+    #[serde(default = "default::storage::iceberg_compaction_write_parquet_max_row_group_rows")]
+    pub iceberg_compaction_write_parquet_max_row_group_rows: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
@@ -1298,6 +1326,9 @@ pub struct BatchDeveloperConfig {
 
     #[serde(default)]
     pub compute_client_config: RpcClientConfig,
+
+    #[serde(default)]
+    pub frontend_client_config: RpcClientConfig,
 
     #[serde(default = "default::developer::batch_local_execute_buffer_size")]
     pub local_execute_buffer_size: usize,
@@ -1965,6 +1996,30 @@ pub mod default {
         pub fn time_travel_version_cache_capacity() -> u64 {
             10
         }
+
+        pub fn iceberg_compaction_target_file_size_mb() -> u32 {
+            1024
+        }
+
+        pub fn iceberg_compaction_enable_validate() -> bool {
+            false
+        }
+
+        pub fn iceberg_compaction_max_record_batch_rows() -> usize {
+            1024
+        }
+
+        pub fn iceberg_compaction_write_parquet_max_row_group_rows() -> usize {
+            1024 * 100 // 100k
+        }
+
+        pub fn iceberg_compaction_min_size_per_partition_mb() -> u32 {
+            1024
+        }
+
+        pub fn iceberg_compaction_max_file_count_per_partition() -> u32 {
+            32
+        }
     }
 
     pub mod streaming {
@@ -2228,6 +2283,18 @@ pub mod default {
             1000
         }
 
+        pub fn hummock_time_travel_filter_out_objects_v1() -> bool {
+            false
+        }
+
+        pub fn hummock_time_travel_filter_out_objects_list_version_batch_size() -> usize {
+            10
+        }
+
+        pub fn hummock_time_travel_filter_out_objects_list_delta_batch_size() -> usize {
+            1000
+        }
+
         pub fn memory_controller_threshold_aggressive() -> f64 {
             0.9
         }
@@ -2333,10 +2400,6 @@ pub mod default {
         pub fn statement_timeout_in_sec() -> u32 {
             // 1 hour
             60 * 60
-        }
-
-        pub fn frontend_compute_runtime_worker_threads() -> usize {
-            4
         }
 
         pub fn mask_worker_temporary_secs() -> usize {

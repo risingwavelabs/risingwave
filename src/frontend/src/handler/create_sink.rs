@@ -36,8 +36,8 @@ use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
 use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
 use risingwave_connector::sink::kafka::KAFKA_SINK;
 use risingwave_connector::sink::{
-    CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
-    SINK_WITHOUT_BACKFILL, enforce_secret_sink,
+    CONNECTOR_TYPE_KEY, SINK_SNAPSHOT_OPTION, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+    enforce_secret_sink,
 };
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSink, PbSource, Table};
@@ -105,6 +105,7 @@ pub async fn gen_sink_plan(
     handler_args: HandlerArgs,
     stmt: CreateSinkStatement,
     explain_options: Option<ExplainOptions>,
+    is_iceberg_engine_internal: bool,
 ) -> Result<SinkPlanContext> {
     let session = handler_args.session.clone();
     let session = session.as_ref();
@@ -235,14 +236,18 @@ pub async fn gen_sink_plan(
     };
 
     let definition = context.normalized_sql().to_owned();
-    let mut plan_root = Planner::new_for_stream(context.into()).plan_query(bound)?;
+    let mut plan_root = if is_iceberg_engine_internal {
+        Planner::new_for_iceberg_table_engine_sink(context.into()).plan_query(bound)?
+    } else {
+        Planner::new_for_stream(context.into()).plan_query(bound)?
+    };
     if let Some(col_names) = &col_names {
         plan_root.set_out_names(col_names.clone())?;
     };
 
-    let without_backfill = match resolved_with_options.remove(SINK_WITHOUT_BACKFILL) {
+    let without_backfill = match resolved_with_options.remove(SINK_SNAPSHOT_OPTION) {
         Some(flag) if flag.eq_ignore_ascii_case("false") => {
-            if direct_sink {
+            if direct_sink || is_iceberg_engine_internal {
                 true
             } else {
                 return Err(ErrorCode::BindError(
@@ -313,6 +318,7 @@ pub async fn gen_sink_plan(
         ctx.trace("Create Sink:");
         ctx.trace(sink_plan.explain_to_string());
     }
+    tracing::trace!("sink_plan: {:?}", sink_plan.explain_to_string());
 
     // TODO(rc): To be consistent with UDF dependency check, we should collect relation dependencies
     // during binding instead of visiting the optimized plan.
@@ -466,15 +472,17 @@ async fn get_partition_compute_info_for_iceberg(
 pub async fn handle_create_sink(
     handle_args: HandlerArgs,
     stmt: CreateSinkStatement,
+    is_iceberg_engine_internal: bool,
 ) -> Result<RwPgResponse> {
     let session = handle_args.session.clone();
 
     session.check_cluster_limits().await?;
 
+    let if_not_exists = stmt.if_not_exists;
     if let Either::Right(resp) = session.check_relation_name_duplicated(
         stmt.sink_name.clone(),
         StatementType::CREATE_SINK,
-        stmt.if_not_exists,
+        if_not_exists,
     )? {
         return Ok(resp);
     }
@@ -486,7 +494,7 @@ pub async fn handle_create_sink(
             sink_catalog: sink,
             target_table_catalog,
             dependencies,
-        } = gen_sink_plan(handle_args, stmt, None).await?;
+        } = gen_sink_plan(handle_args, stmt, None, is_iceberg_engine_internal).await?;
 
         let has_order_by = !query.order_by.is_empty();
         if has_order_by {
@@ -543,7 +551,6 @@ pub async fn handle_create_sink(
                 },
             )),
             fragment_graph: Some(graph),
-            table_col_index_mapping: None,
         });
     }
 
@@ -565,6 +572,7 @@ pub async fn handle_create_sink(
             graph,
             target_table_replace_plan,
             dependencies,
+            if_not_exists,
         )
         .await?;
 

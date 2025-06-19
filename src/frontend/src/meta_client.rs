@@ -69,6 +69,8 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>>;
 
+    async fn list_creating_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>>;
+
     async fn list_actor_states(&self) -> Result<Vec<ActorState>>;
 
     async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>>;
@@ -76,8 +78,6 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>>;
 
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>>;
-
-    async fn get_system_params(&self) -> Result<SystemParamsReader>;
 
     async fn set_system_param(
         &self,
@@ -147,6 +147,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>>;
 
     async fn get_fragment_by_id(&self, fragment_id: u32) -> Result<Option<FragmentDistribution>>;
+
+    fn worker_id(&self) -> u32;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -188,6 +190,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.list_fragment_distributions().await
     }
 
+    async fn list_creating_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>> {
+        self.0.list_creating_fragment_distribution().await
+    }
+
     async fn list_actor_states(&self) -> Result<Vec<ActorState>> {
         self.0.list_actor_states().await
     }
@@ -203,10 +209,6 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>> {
         let manifest = self.0.get_meta_snapshot_manifest().await?;
         Ok(manifest.snapshot_metadata)
-    }
-
-    async fn get_system_params(&self) -> Result<SystemParamsReader> {
-        self.0.get_system_params().await
     }
 
     async fn set_system_param(
@@ -358,5 +360,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn get_fragment_by_id(&self, fragment_id: u32) -> Result<Option<FragmentDistribution>> {
         self.0.get_fragment_by_id(fragment_id).await
+    }
+
+    fn worker_id(&self) -> u32 {
+        self.0.worker_id()
     }
 }

@@ -35,6 +35,7 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(object_type.as_str(), object_id))?;
         assert_eq!(obj.obj_type, object_type);
+        let drop_database = object_type == ObjectType::Database;
         let database_id = if object_type == ObjectType::Database {
             object_id
         } else {
@@ -56,7 +57,7 @@ impl CatalogController {
                     Default::default()
                 }
                 ObjectType::Table => {
-                    ensure_object_not_refer(object_type, object_id, &txn).await?;
+                    check_object_refer_for_drop(object_type, object_id, &txn).await?;
                     let indexes = get_referring_objects(object_id, &txn).await?;
                     for obj in indexes.iter().filter(|object| {
                         object.obj_type == ObjectType::Source || object.obj_type == ObjectType::Sink
@@ -70,7 +71,7 @@ impl CatalogController {
                     indexes
                 }
                 object_type @ (ObjectType::Source | ObjectType::Sink) => {
-                    ensure_object_not_refer(object_type, object_id, &txn).await?;
+                    check_object_refer_for_drop(object_type, object_id, &txn).await?;
                     report_drop_object(object_type, object_id, &txn).await;
                     vec![]
                 }
@@ -81,7 +82,7 @@ impl CatalogController {
                 | ObjectType::Connection
                 | ObjectType::Subscription
                 | ObjectType::Secret => {
-                    ensure_object_not_refer(object_type, object_id, &txn).await?;
+                    check_object_refer_for_drop(object_type, object_id, &txn).await?;
                     vec![]
                 }
             },
@@ -132,6 +133,26 @@ impl CatalogController {
                         return Err(MetaError::permission_denied(format!(
                             "Found sink into table in dependency: {}, please drop it manually",
                             sink.name,
+                        )));
+                    }
+                }
+            }
+        }
+
+        // 1. Detect when an Iceberg table is part of the dependencies.
+        // 2. Drop database with iceberg tables in it is not supported.
+        if object_type != ObjectType::Table || drop_database {
+            for obj in &removed_objects {
+                // if the obj is iceberg engine table, bail out
+                if obj.obj_type == ObjectType::Table {
+                    let table = Table::find_by_id(obj.oid)
+                        .one(&txn)
+                        .await?
+                        .ok_or_else(|| MetaError::catalog_id_not_found("table", obj.oid))?;
+                    if matches!(table.engine, Some(table::Engine::Iceberg)) {
+                        return Err(MetaError::permission_denied(format!(
+                            "Found iceberg table in dependency: {}, please drop it manually",
+                            table.name,
                         )));
                     }
                 }
@@ -350,17 +371,23 @@ async fn report_drop_object(
     let connector_name = {
         match object_type {
             ObjectType::Sink => Sink::find_by_id(object_id)
+                .select_only()
+                .column(sink::Column::Properties)
+                .into_tuple::<Property>()
                 .one(txn)
                 .await
                 .ok()
                 .flatten()
-                .and_then(|sink| sink.properties.inner_ref().get("connector").cloned()),
+                .and_then(|properties| properties.inner_ref().get("connector").cloned()),
             ObjectType::Source => Source::find_by_id(object_id)
+                .select_only()
+                .column(source::Column::WithProperties)
+                .into_tuple::<Property>()
                 .one(txn)
                 .await
                 .ok()
                 .flatten()
-                .and_then(|source| source.with_properties.inner_ref().get("connector").cloned()),
+                .and_then(|properties| properties.inner_ref().get("connector").cloned()),
             _ => unreachable!(),
         }
     };
