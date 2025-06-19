@@ -16,8 +16,8 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
 use risingwave_common::acl::{AclMode, AclModeSet};
-use risingwave_pb::user::grant_privilege::{Action, Object as GrantObject, Object};
-use risingwave_pb::user::{PbAuthInfo, PbGrantPrivilege, PbUserInfo};
+use risingwave_pb::user::grant_privilege::Object as GrantObject;
+use risingwave_pb::user::{PbAction, PbAuthInfo, PbGrantPrivilege, PbUserInfo};
 
 use crate::catalog::{DatabaseId, SchemaId};
 use crate::user::UserId;
@@ -78,31 +78,31 @@ impl UserCatalog {
 
     fn get_acl_entry(&mut self, object: GrantObject) -> Entry<'_, u32, AclModeSet> {
         match object {
-            Object::DatabaseId(id) => self.database_acls.entry(id),
-            Object::SchemaId(id) => self.schema_acls.entry(id),
-            Object::TableId(id)
-            | Object::SourceId(id)
-            | Object::SinkId(id)
-            | Object::ViewId(id)
-            | Object::FunctionId(id)
-            | Object::SubscriptionId(id)
-            | Object::ConnectionId(id)
-            | Object::SecretId(id) => self.object_acls.entry(id),
+            GrantObject::DatabaseId(id) => self.database_acls.entry(id),
+            GrantObject::SchemaId(id) => self.schema_acls.entry(id),
+            GrantObject::TableId(id)
+            | GrantObject::SourceId(id)
+            | GrantObject::SinkId(id)
+            | GrantObject::ViewId(id)
+            | GrantObject::FunctionId(id)
+            | GrantObject::SubscriptionId(id)
+            | GrantObject::ConnectionId(id)
+            | GrantObject::SecretId(id) => self.object_acls.entry(id),
         }
     }
 
     fn get_acl(&self, object: &GrantObject) -> Option<&AclModeSet> {
         match object {
-            Object::DatabaseId(id) => self.database_acls.get(id),
-            Object::SchemaId(id) => self.schema_acls.get(id),
-            Object::TableId(id)
-            | Object::SourceId(id)
-            | Object::SinkId(id)
-            | Object::ViewId(id)
-            | Object::FunctionId(id)
-            | Object::SubscriptionId(id)
-            | Object::ConnectionId(id)
-            | Object::SecretId(id) => self.object_acls.get(id),
+            GrantObject::DatabaseId(id) => self.database_acls.get(id),
+            GrantObject::SchemaId(id) => self.schema_acls.get(id),
+            GrantObject::TableId(id)
+            | GrantObject::SourceId(id)
+            | GrantObject::SinkId(id)
+            | GrantObject::ViewId(id)
+            | GrantObject::FunctionId(id)
+            | GrantObject::SubscriptionId(id)
+            | GrantObject::ConnectionId(id)
+            | GrantObject::SecretId(id) => self.object_acls.get(id),
         }
     }
 
@@ -172,7 +172,7 @@ impl UserCatalog {
     pub fn check_privilege_with_grant_option(
         &self,
         object: &GrantObject,
-        actions: &Vec<(Action, bool)>,
+        actions: &Vec<(PbAction, bool)>,
     ) -> bool {
         if self.is_super {
             return true;

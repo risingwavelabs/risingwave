@@ -31,6 +31,7 @@ use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
 use risingwave_meta_model::table::TableType;
+use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::*;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::PbOptionalAssociatedSourceId;
@@ -64,8 +65,8 @@ use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
 use crate::controller::utils::{
     PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
     check_sink_into_table_cycle, ensure_object_id, ensure_user_id, get_fragment_actor_ids,
-    get_fragment_mappings, get_internal_tables_by_id, insert_fragment_relations,
-    rebuild_fragment_mapping_from_actors,
+    get_fragment_mappings, get_internal_tables_by_id, grant_default_privileges_automatically,
+    insert_fragment_relations, list_user_info_by_ids, rebuild_fragment_mapping_from_actors,
 };
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
 use crate::model::{
@@ -865,6 +866,7 @@ impl CatalogController {
             })
             .collect_vec();
         let mut notification_op = NotificationOperation::Add;
+        let mut updated_user_info = vec![];
 
         match job_type {
             ObjectType::Table => {
@@ -923,6 +925,54 @@ impl CatalogController {
                         )),
                     });
                 }
+
+                // If the index is created on a table with privileges, we should also
+                // grant the privileges for the index and its state tables.
+                let primary_table_privileges = UserPrivilege::find()
+                    .filter(
+                        user_privilege::Column::Oid
+                            .eq(index.primary_table_id)
+                            .and(user_privilege::Column::Action.eq(Action::Select)),
+                    )
+                    .all(&txn)
+                    .await?;
+                if !primary_table_privileges.is_empty() {
+                    let index_state_table_ids: Vec<TableId> = Table::find()
+                        .select_only()
+                        .column(table::Column::TableId)
+                        .filter(
+                            table::Column::BelongsToJobId
+                                .eq(job_id)
+                                .or(table::Column::TableId.eq(index.index_table_id)),
+                        )
+                        .into_tuple()
+                        .all(&txn)
+                        .await?;
+                    let mut new_privileges = vec![];
+                    for privilege in &primary_table_privileges {
+                        for state_table_id in &index_state_table_ids {
+                            new_privileges.push(user_privilege::ActiveModel {
+                                id: Default::default(),
+                                oid: Set(*state_table_id),
+                                user_id: Set(privilege.user_id),
+                                action: Set(Action::Select),
+                                dependent_id: Set(privilege.dependent_id),
+                                granted_by: Set(privilege.granted_by),
+                                with_grant_option: Set(privilege.with_grant_option),
+                            });
+                        }
+                    }
+                    UserPrivilege::insert_many(new_privileges)
+                        .exec(&txn)
+                        .await?;
+
+                    updated_user_info = list_user_info_by_ids(
+                        primary_table_privileges.into_iter().map(|p| p.user_id),
+                        &txn,
+                    )
+                    .await?;
+                }
+
                 objects.push(PbObject {
                     object_info: Some(PbObjectInfo::Index(ObjectModel(index, obj.unwrap()).into())),
                 });
@@ -972,6 +1022,9 @@ impl CatalogController {
             None => None,
         };
 
+        if job_type != ObjectType::Index {
+            updated_user_info = grant_default_privileges_automatically(&txn, job_id).await?;
+        }
         txn.commit().await?;
 
         self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
@@ -983,6 +1036,11 @@ impl CatalogController {
                 NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
             )
             .await;
+
+        // notify users about the default privileges
+        if !updated_user_info.is_empty() {
+            version = self.notify_users_update(updated_user_info).await;
+        }
 
         if let Some((objects, fragment_mapping)) = replace_table_mapping_update {
             self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)

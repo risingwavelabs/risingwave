@@ -103,6 +103,7 @@ use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
 use risingwave_pb::monitor_service::{StackTraceRequest, StackTraceResponse};
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
+use risingwave_pb::user::alter_default_privilege_request::Operation as AlterDefaultPrivilegeOperation;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;
 use risingwave_pb::user::*;
@@ -913,6 +914,25 @@ impl MetaClient {
         };
         let resp = self.inner.revoke_privilege(request).await?;
         Ok(resp.version)
+    }
+
+    pub async fn alter_default_privilege(
+        &self,
+        user_ids: Vec<u32>,
+        database_id: DatabaseId,
+        schema_ids: Vec<SchemaId>,
+        operation: AlterDefaultPrivilegeOperation,
+        granted_by: u32,
+    ) -> Result<()> {
+        let request = AlterDefaultPrivilegeRequest {
+            user_ids,
+            database_id,
+            schema_ids,
+            operation: Some(operation),
+            granted_by,
+        };
+        self.inner.alter_default_privilege(request).await?;
+        Ok(())
     }
 
     /// Unregister the current node from the cluster.
@@ -2333,6 +2353,7 @@ macro_rules! for_all_meta_rpc {
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
             ,{ user_client, grant_privilege, GrantPrivilegeRequest, GrantPrivilegeResponse }
             ,{ user_client, revoke_privilege, RevokePrivilegeRequest, RevokePrivilegeResponse }
+            ,{ user_client, alter_default_privilege, AlterDefaultPrivilegeRequest, AlterDefaultPrivilegeResponse }
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
             ,{ scale_client, reschedule, RescheduleRequest, RescheduleResponse }
             ,{ notification_client, subscribe, SubscribeRequest, Streaming<SubscribeResponse> }
