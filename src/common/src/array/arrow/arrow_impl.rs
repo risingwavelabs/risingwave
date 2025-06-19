@@ -1456,62 +1456,49 @@ pub fn is_parquet_schema_match_source_schema(
     arrow_data_type: &arrow_schema::DataType,
     rw_data_type: &crate::types::DataType,
 ) -> bool {
-    matches!(
-        (arrow_data_type, rw_data_type),
-        (arrow_schema::DataType::Boolean, RwDataType::Boolean)
-            | (
-                arrow_schema::DataType::Int8
-                    | arrow_schema::DataType::Int16
-                    | arrow_schema::DataType::UInt8,
-                RwDataType::Int16
-            )
-            | (
-                arrow_schema::DataType::Int32 | arrow_schema::DataType::UInt16,
-                RwDataType::Int32
-            )
-            | (
-                arrow_schema::DataType::Int64 | arrow_schema::DataType::UInt32,
-                RwDataType::Int64
-            )
-            | (
-                arrow_schema::DataType::UInt64 | arrow_schema::DataType::Decimal128(_, _),
-                RwDataType::Decimal
-            )
-            | (arrow_schema::DataType::Decimal256(_, _), RwDataType::Int256)
-            | (
-                arrow_schema::DataType::Float16 | arrow_schema::DataType::Float32,
-                RwDataType::Float32
-            )
-            | (arrow_schema::DataType::Float64, RwDataType::Float64)
-            | (
-                arrow_schema::DataType::Timestamp(_, None),
-                RwDataType::Timestamp
-            )
-            | (
-                arrow_schema::DataType::Timestamp(_, Some(_)),
-                RwDataType::Timestamptz
-            )
-            | (arrow_schema::DataType::Date32, RwDataType::Date)
-            | (
-                arrow_schema::DataType::Time32(_) | arrow_schema::DataType::Time64(_),
-                RwDataType::Time
-            )
-            | (
-                arrow_schema::DataType::Interval(IntervalUnit::MonthDayNano),
-                RwDataType::Interval
-            )
-            | (
-                arrow_schema::DataType::Utf8 | arrow_schema::DataType::LargeUtf8,
-                RwDataType::Varchar
-            )
-            | (
-                arrow_schema::DataType::Binary | arrow_schema::DataType::LargeBinary,
-                RwDataType::Bytea
-            )
-            | (arrow_schema::DataType::List(_), RwDataType::List(_))
-            | (arrow_schema::DataType::Struct(_), RwDataType::Struct(_))
-            | (arrow_schema::DataType::Map(_, _), RwDataType::Map(_))
-    )
+    use arrow_schema::DataType as ArrowType;
+
+    use crate::types::{DataType as RwType, MapType, StructType};
+
+    match (arrow_data_type, rw_data_type) {
+        (ArrowType::Boolean, RwType::Boolean)
+        | (ArrowType::Int8 | ArrowType::Int16 | ArrowType::UInt8, RwType::Int16)
+        | (ArrowType::Int32 | ArrowType::UInt16, RwType::Int32)
+        | (ArrowType::Int64 | ArrowType::UInt32, RwType::Int64)
+        | (ArrowType::UInt64 | ArrowType::Decimal128(_, _), RwType::Decimal)
+        | (ArrowType::Decimal256(_, _), RwType::Int256)
+        | (ArrowType::Float16 | ArrowType::Float32, RwType::Float32)
+        | (ArrowType::Float64, RwType::Float64)
+        | (ArrowType::Timestamp(_, None), RwType::Timestamp)
+        | (ArrowType::Timestamp(_, Some(_)), RwType::Timestamptz)
+        | (ArrowType::Date32, RwType::Date)
+        | (ArrowType::Time32(_) | ArrowType::Time64(_), RwType::Time)
+        | (ArrowType::Interval(arrow_schema::IntervalUnit::MonthDayNano), RwType::Interval)
+        | (ArrowType::Utf8 | ArrowType::LargeUtf8, RwType::Varchar)
+        | (ArrowType::Binary | ArrowType::LargeBinary, RwType::Bytea) => true,
+
+        // Recursive struct matching
+        (ArrowType::Struct(arrow_fields), RwType::Struct(rw_struct)) => {
+            if arrow_fields.len() != rw_struct.len() {
+                return false;
+            }
+            for (arrow_field, (rw_name, rw_ty)) in arrow_fields.iter().zip(rw_struct.iter()) {
+                if arrow_field.name() != rw_name {
+                    return false;
+                }
+                if !is_parquet_schema_match_source_schema(arrow_field.data_type(), rw_ty) {
+                    return false;
+                }
+            }
+            true
+        }
+        // Recursive list matching
+        (ArrowType::List(arrow_field), RwType::List(rw_elem_ty)) => {
+            is_parquet_schema_match_source_schema(arrow_field.data_type(), rw_elem_ty)
+        }
+        (ArrowType::Map(_, _), RwType::Map(_)) => true,
+        _ => false,
+    }
 }
 
 #[cfg(test)]
