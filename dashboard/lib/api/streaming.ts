@@ -176,7 +176,7 @@ function extendedTableFromJSON(json: any): ExtendedTable {
   const table = Table.fromJSON(json)
   return {
     ...table,
-    totalSizeBytes: json.total_size_bytes
+    totalSizeBytes: json.total_size_bytes,
   }
 }
 
