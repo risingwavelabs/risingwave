@@ -265,14 +265,8 @@ impl UInt256Ref<'_> {
         &self,
         serializer: &mut memcomparable::Serializer<impl bytes::BufMut>,
     ) -> memcomparable::Result<()> {
-        // Big-endian rendering of the full 256-bit value.
-        // We push the 32 bytes one-by-one with `serialize_u8`, which the
-        // docs guarantee writes a *single* raw byte – no length tags,
-        // no terminators. :contentReference[oaicite:0]{index=0}
-        for byte in self.0.to_be_bytes() {
-            serializer.serialize_u8(byte)?;
-        }
-        Ok(())
+        let (hi, lo) = self.0.into_words();
+        (hi, lo).serialize(serializer)
     }
 }
 
