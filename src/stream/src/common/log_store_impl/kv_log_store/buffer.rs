@@ -162,28 +162,7 @@ impl LogStoreBufferInner {
         end_seq_id: SeqIdType,
         new_vnode_bitmap: Bitmap,
     ) {
-        if let Some((
-            item_epoch,
-            LogStoreBufferItem::Flushed {
-                end_seq_id: prev_end_seq_id,
-                vnode_bitmap,
-                ..
-            },
-        )) = self.unconsumed_queue.front_mut()
         {
-            assert!(
-                *prev_end_seq_id < start_seq_id,
-                "prev end_seq_id {} should be smaller than current start_seq_id {}",
-                end_seq_id,
-                start_seq_id
-            );
-            assert_eq!(
-                epoch, *item_epoch,
-                "epoch of newly added flushed item must be the same as the last flushed item"
-            );
-            *prev_end_seq_id = end_seq_id;
-            *vnode_bitmap |= new_vnode_bitmap;
-        } else {
             let chunk_id = self.next_chunk_id;
             self.next_chunk_id += 1;
             self.add_item(
