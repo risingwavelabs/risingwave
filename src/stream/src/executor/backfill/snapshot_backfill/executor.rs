@@ -152,7 +152,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
             }
         };
         let first_recv_barrier_epoch = first_recv_barrier.epoch;
-        let backfill_paused =
+        let initial_backfill_paused =
             first_recv_barrier.is_backfill_pause_on_startup(self.actor_ctx.fragment_id);
         yield Message::Barrier(first_recv_barrier);
         let mut backfill_state = BackfillState::new(
@@ -210,7 +210,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             &mut self.progress,
                             &mut backfill_state,
                             first_recv_barrier_epoch,
-                            backfill_paused,
+                            initial_backfill_paused,
                             &self.actor_ctx,
                         );
 
@@ -830,7 +830,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     progress: &'a mut CreateMviewProgressReporter,
     backfill_state: &'a mut BackfillState<S>,
     first_recv_barrier_epoch: EpochPair,
-    backfill_paused: bool,
+    initial_backfill_paused: bool,
     actor_ctx: &'a ActorContextRef,
 ) {
     let mut barrier_epoch = first_recv_barrier_epoch;
@@ -863,7 +863,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
 
     let mut count = 0;
     let mut epoch_row_count = 0;
-    let mut backfill_paused = backfill_paused;
+    let mut backfill_paused = initial_backfill_paused;
     loop {
         let throttle_snapshot_stream = epoch_row_count as u64 > rate_limit.to_u64();
         match select_barrier_and_snapshot_stream(
