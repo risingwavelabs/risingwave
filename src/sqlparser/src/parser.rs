@@ -5856,7 +5856,11 @@ impl Parser<'_> {
 
     fn parse_deallocate(&mut self) -> ModalResult<Statement> {
         let prepare = self.parse_keyword(Keyword::PREPARE);
-        let name = self.parse_identifier()?;
+        let name = if self.parse_keyword(Keyword::ALL) {
+            None
+        } else {
+            Some(self.parse_identifier()?)
+        };
         Ok(Statement::Deallocate { name, prepare })
     }
 
