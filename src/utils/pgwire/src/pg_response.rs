@@ -115,6 +115,8 @@ pub enum StatementType {
     KILL,
     RECOVER,
     USE,
+    PREPARE,
+    DEALLOCATE,
 }
 
 impl std::fmt::Display for StatementType {
