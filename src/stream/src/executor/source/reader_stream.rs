@@ -145,7 +145,7 @@ impl StreamReaderBuilder {
             }
         };
 
-        let (Some(split_idx), Some(offset_idx)) =
+        let (Some(split_idx), Some(offset_idx), _) =
             get_split_offset_col_idx(&self.source_desc.columns)
         else {
             unreachable!("Partition and offset columns must be set.");

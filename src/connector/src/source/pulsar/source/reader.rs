@@ -36,7 +36,7 @@ use crate::source::{
     SplitReader, into_chunk_stream,
 };
 pub static PULSAR_ACK_CHANNEL: LazyLock<
-    MokaCache<(String, Arc<str>), tokio::sync::mpsc::UnboundedSender<Vec<u8>>>,
+    MokaCache<String, tokio::sync::mpsc::UnboundedSender<Vec<u8>>>,
 > = LazyLock::new(|| moka::future::Cache::builder().build()); // mapping:
 
 const PULSAR_DEFAULT_SUBSCRIPTION_PREFIX: &str = "rw-consumer";
@@ -254,7 +254,6 @@ impl PulsarBrokerReader {
     }
 
     async fn into_stream(self) -> PulsarConsumeStream {
-        let x = self.split_id;
         let (_ack_tx, ack_rx) = tokio::sync::mpsc::unbounded_channel();
 
         PulsarConsumeStream {
