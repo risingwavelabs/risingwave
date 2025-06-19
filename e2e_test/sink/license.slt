@@ -148,7 +148,7 @@ Caused by these errors (recent errors listed first):
   1: Sink error
   2: Sink primary key column not found: xx. Please use ',' as the delimiter for different primary key columns.
 
-  
+
 statement error
 CREATE SINK opensearch_sink
 FROM t
