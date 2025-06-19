@@ -249,17 +249,15 @@ macro_rules! impl_system_params_from_kv {
 /// Define check rules when a field is changed.
 /// If you want custom rules, please override the default implementation in
 /// `OverrideValidateOnSet` below.
-macro_rules! impl_default_validation_on_set {
+macro_rules! impl_default_validation {
     ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, $($rest:tt)* },)*) => {
         #[allow(clippy::ptr_arg)]
-        trait ValidateOnSet {
+        trait Validate {
             $(
+                /// Default implementation does nothing.
+                /// Specific checks are implemented in `OverrideValidate`.
                 fn $field(_v: &$type) -> Result<()> {
-                    if !$is_mutable {
-                        Err(format!("{:?} is immutable", key_of!($field)))
-                    } else {
-                        Ok(())
-                    }
+                    Ok(())
                 }
             )*
 
@@ -311,11 +309,11 @@ macro_rules! impl_default_from_other_params {
 }
 
 macro_rules! impl_set_system_param {
-    ($({ $field:ident, $type:ty, $default:expr, $($rest:tt)* },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, $($rest:tt)* },)*) => {
         /// Set a system parameter with the given value or default one.
         ///
-        /// Returns the new value if changed, or an error if the parameter is unrecognized
-        /// or the value is invalid.
+        /// Returns the new value if changed, or an error if the parameter is unrecognized,
+        /// immutable, or the value is invalid.
         pub fn set_system_param(
             params: &mut PbSystemParams,
             key: &str,
@@ -326,13 +324,17 @@ macro_rules! impl_set_system_param {
             match key {
                 $(
                     key_of!($field) => {
+                        if !$is_mutable {
+                            return Err(format!("{:?} is immutable", key_of!($field)));
+                        }
+
                         let v: $type = if let Some(v) = value {
                             #[allow(rw::format_error)]
                             v.as_ref().parse().map_err(|e| format!("cannot parse parameter value: {e}"))?
                         } else {
                             $default.ok_or_else(|| format!("{} does not have a default value", key))?
                         };
-                        OverrideValidateOnSet::$field(&v)?;
+                        OverrideValidate::$field(&v)?;
 
                         let changed = SystemParamsReader::new(&*params).$field() != v;
                         if changed {
@@ -387,8 +389,33 @@ macro_rules! impl_system_params_for_test {
             ret.backup_storage_url = Some("memory-isolated-for-test".into());
             ret.backup_storage_directory = Some("backup".into());
             ret.use_new_object_prefix_strategy = Some(false);
-            ret.time_travel_retention_ms = Some(0);
             ret
+        }
+    };
+}
+
+macro_rules! impl_validate_all_params {
+    ($({ $field:ident, $type:ty, $($rest:tt)* },)*) => {
+        /// Validates all present parameters in a `PbSystemParams`.
+        ///
+        /// This function checks the validity of values against the rules in `OverrideValidate`,
+        /// regardless of whether a parameter is mutable. It is suitable for validating
+        /// initial parameters.
+        pub fn validate_init_system_params(params: &PbSystemParams) -> Result<()> {
+            $(
+                if let Some(ref v_pb) = params.$field {
+                    // 1. Convert the protobuf value (`v_pb`) to a string. `v_pb` could be &u32, &String, etc.
+                    //    `to_string()` works for all of them.
+                    // 2. Parse the string into the target logical type (`$type`), e.g., `LicenseKey`.
+                    //    This relies on the `FromStr` bound on `ParamValue`.
+                    let logical_v: $type = v_pb.to_string().parse()
+                        .map_err(|e| format!("cannot parse value for parameter '{}': {}", key_of!($field), e))?;
+                    // 3. Pass a reference to the correctly-typed logical value to the validator.
+                    OverrideValidate::$field(&logical_v)
+                        .map_err(|e| format!("invalid value for parameter '{}': {}", key_of!($field), e))?;
+                }
+            )*
+            Ok(())
         }
     };
 }
@@ -399,11 +426,12 @@ for_all_params!(impl_derive_missing_fields);
 for_all_params!(impl_check_missing_fields);
 for_all_params!(impl_system_params_to_kv);
 for_all_params!(impl_set_system_param);
-for_all_params!(impl_default_validation_on_set);
+for_all_params!(impl_default_validation);
+for_all_params!(impl_validate_all_params);
 for_all_params!(impl_system_params_for_test);
 
-struct OverrideValidateOnSet;
-impl ValidateOnSet for OverrideValidateOnSet {
+struct OverrideValidate;
+impl Validate for OverrideValidate {
     fn barrier_interval_ms(v: &u32) -> Result<()> {
         Self::expect_range(*v, 100..)
     }
@@ -502,6 +530,17 @@ mod tests {
         // Normal set.
         assert!(set_system_param(&mut p, CHECKPOINT_FREQUENCY_KEY, Some("500".to_owned())).is_ok());
         assert_eq!(p.checkpoint_frequency, Some(500));
+    }
+
+    #[test]
+    fn test_init() {
+        let mut p = system_params_for_test();
+        // Validate all params.
+        assert!(validate_init_system_params(&p).is_ok());
+        p.barrier_interval_ms = Some(10);
+        assert!(validate_init_system_params(&p).is_err());
+        p.barrier_interval_ms = Some(1000);
+        assert!(validate_init_system_params(&p).is_ok());
     }
 
     // Test that we always redact the value of the license key when displaying it, but when it comes to
