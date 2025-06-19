@@ -27,6 +27,7 @@ impl From<Message<Vec<u8>>> for SourceMessage {
     fn from(msg: Message<Vec<u8>>) -> Self {
         let message_id = msg.message_id.id;
         let ack_data_bytes = message_id.encode_to_vec();
+        tracing::info!("ack message id original: {:?}", ack_data_bytes);
 
         SourceMessage {
             key: msg.payload.metadata.partition_key.clone().map(|k| k.into()),

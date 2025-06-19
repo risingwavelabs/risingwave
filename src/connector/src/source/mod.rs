@@ -67,6 +67,7 @@ pub use kafka::KAFKA_CONNECTOR;
 pub use kinesis::KINESIS_CONNECTOR;
 pub use mqtt::MQTT_CONNECTOR;
 pub use nats::NATS_CONNECTOR;
+use risingwave_common::catalog::TableId;
 mod common;
 pub mod iceberg;
 mod manager;
@@ -86,6 +87,7 @@ pub use crate::source::filesystem::opendal_source::{
 };
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
 pub use crate::source::pulsar::PULSAR_CONNECTOR;
+use crate::source::pulsar::source::reader::PULSAR_ACK_CHANNEL;
 
 pub fn should_copy_to_format_encode_options(key: &str, connector: &str) -> bool {
     const PREFIXES: &[&str] = &[
@@ -114,7 +116,7 @@ pub enum WaitCheckpointTask {
     CommitCdcOffset(Option<(SplitId, String)>),
     AckPubsubMessage(Subscription, Vec<ArrayRef>),
     AckNatsJetStream(JetStreamContext, Vec<ArrayRef>, JetStreamAckPolicy),
-    AckPulsarMessage(Vec<ArrayRef>),
+    AckPulsarMessage(Vec<(String, ArrayRef)>),
 }
 
 impl WaitCheckpointTask {
@@ -136,8 +138,20 @@ impl WaitCheckpointTask {
                     }
                 }
             }
-            WaitCheckpointTask::AckPulsarMessage(ack_id_arrs) => {
-                todo!()
+            WaitCheckpointTask::AckPulsarMessage(ack_array) => {
+                if let Some((ack_channel_id, to_cumulative_ack)) = ack_array.last() {
+                    let encode_message_id_data = to_cumulative_ack
+                        .as_bytea()
+                        .iter()
+                        .flatten()
+                        .map(|x| x.to_owned())
+                        .next()
+                        .unwrap();
+                    tracing::info!("ack message id tx: {:?}", encode_message_id_data);
+                    if let Some(ack_tx) = PULSAR_ACK_CHANNEL.get(ack_channel_id).await {
+                        let _ = ack_tx.send(encode_message_id_data);
+                    }
+                }
             }
             WaitCheckpointTask::AckPubsubMessage(subscription, ack_id_arrs) => {
                 async fn ack(subscription: &Subscription, ack_ids: Vec<String>) {
@@ -210,4 +224,9 @@ impl WaitCheckpointTask {
             }
         }
     }
+}
+
+#[inline]
+pub fn build_pulsar_ack_channel_id(source_id: &TableId, split_id: &SplitId) -> String {
+    format!("{}-{}", source_id, split_id)
 }

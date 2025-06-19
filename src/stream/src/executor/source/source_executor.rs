@@ -29,7 +29,7 @@ use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
     ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl, SplitMetaData,
-    StreamChunkWithState, WaitCheckpointTask,
+    StreamChunkWithState, WaitCheckpointTask, build_pulsar_ack_channel_id,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::TryWaitEpochOptions;
@@ -458,6 +458,7 @@ impl<S: StateStore> SourceExecutor<S> {
         yield Message::Barrier(first_barrier);
 
         let mut core = self.stream_source_core.unwrap();
+        let source_id = core.source_id;
 
         // Build source description from the builder.
         let source_desc_builder: SourceDescBuilder = core.source_desc_builder.take().unwrap();
@@ -687,10 +688,18 @@ impl<S: StateStore> SourceExecutor<S> {
                     if let Some(task_builder) = &mut wait_checkpoint_task_builder {
                         if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
                             let pulsar_message_id_col = chunk.column_at(pulsar_message_id_idx);
-                            task_builder.update_task_on_chunk(pulsar_message_id_col.clone());
+                            task_builder.update_task_on_chunk(
+                                &source_id,
+                                &latest_state,
+                                pulsar_message_id_col.clone(),
+                            );
                         } else {
                             let offset_col = chunk.column_at(offset_idx);
-                            task_builder.update_task_on_chunk(offset_col.clone());
+                            task_builder.update_task_on_chunk(
+                                &source_id,
+                                &latest_state,
+                                offset_col.clone(),
+                            );
                         }
                     }
                     if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
@@ -807,7 +816,12 @@ struct WaitCheckpointTaskBuilder {
 }
 
 impl WaitCheckpointTaskBuilder {
-    fn update_task_on_chunk(&mut self, offset_col: ArrayRef) {
+    fn update_task_on_chunk(
+        &mut self,
+        source_id: &TableId,
+        latest_state: &HashMap<SplitId, SplitImpl>,
+        offset_col: ArrayRef,
+    ) {
         match &mut self.building_task {
             WaitCheckpointTask::AckPubsubMessage(_, arrays) => {
                 arrays.push(offset_col);
@@ -816,7 +830,9 @@ impl WaitCheckpointTaskBuilder {
                 arrays.push(offset_col);
             }
             WaitCheckpointTask::AckPulsarMessage(arrays) => {
-                arrays.push(offset_col);
+                let split_id = latest_state.keys().next().unwrap();
+                let pulsar_ack_channel_id = build_pulsar_ack_channel_id(source_id, split_id);
+                arrays.push((pulsar_ack_channel_id, offset_col));
             }
             WaitCheckpointTask::CommitCdcOffset(_) => {}
         }

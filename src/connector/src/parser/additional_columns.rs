@@ -54,8 +54,7 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
             ),
             (
                 PULSAR_CONNECTOR,
-                // "message_id_data" is derived internally, so it's not included here
-                HashSet::from(["key", "partition", "offset", "payload"]),
+                HashSet::from(["key", "partition", "offset", "payload", "message_id_data"]),
             ),
             (
                 KINESIS_CONNECTOR,

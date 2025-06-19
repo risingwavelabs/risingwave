@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::{Arc, LazyLock};
+use std::sync::LazyLock;
 use std::task::Poll;
 
 use anyhow::Context;
@@ -33,7 +33,7 @@ use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
     BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SplitId, SplitMetaData,
-    SplitReader, into_chunk_stream,
+    SplitReader, build_pulsar_ack_channel_id, into_chunk_stream,
 };
 pub static PULSAR_ACK_CHANNEL: LazyLock<
     MokaCache<String, tokio::sync::mpsc::UnboundedSender<Vec<u8>>>,
@@ -218,6 +218,8 @@ impl SplitReader for PulsarBrokerReader {
             //     .await?;
         }
 
+        tracing::info!("consumer created with split {:?}", split);
+
         Ok(Self {
             pulsar,
             consumer,
@@ -254,9 +256,16 @@ impl PulsarBrokerReader {
     }
 
     async fn into_stream(self) -> PulsarConsumeStream {
-        let (_ack_tx, ack_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (ack_tx, ack_rx) = tokio::sync::mpsc::unbounded_channel();
+        let channel_entry = build_pulsar_ack_channel_id(&self.source_ctx.source_id, &self.split_id);
+        PULSAR_ACK_CHANNEL
+            .entry(channel_entry)
+            .and_upsert_with(|_| std::future::ready(ack_tx))
+            .await;
 
         PulsarConsumeStream {
+            source_ctx: self.source_ctx,
+            split_id: self.split_id,
             pulsar_reader: self.consumer,
             ack_rx,
             topic: self.split.topic.to_string(),
@@ -265,6 +274,8 @@ impl PulsarBrokerReader {
 }
 
 struct PulsarConsumeStream {
+    source_ctx: SourceContextRef,
+    split_id: SplitId,
     pulsar_reader: Consumer<Vec<u8>, TokioExecutor>,
     ack_rx: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
     topic: String,
@@ -274,6 +285,11 @@ impl PulsarConsumeStream {
     fn do_ack(&mut self, message_id_bytes: Vec<u8>) {
         let message_id = MessageIdData::decode(message_id_bytes.as_slice()).unwrap();
         let topic = self.topic.clone();
+        tracing::info!(
+            "ack message id: {:?} from channel {}",
+            message_id,
+            build_pulsar_ack_channel_id(&self.source_ctx.source_id, &self.split_id)
+        );
         let _ = tokio::task::block_in_place(move || {
             tokio::runtime::Handle::current().block_on(async {
                 self.pulsar_reader
