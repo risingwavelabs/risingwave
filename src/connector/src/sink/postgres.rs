@@ -333,6 +333,9 @@ pub struct PostgresSinkWriter {
     pk_types: Vec<PgType>,
     schema_types: Vec<PgType>,
     schema: Schema,
+    insert_sql: tokio_postgres::Statement,
+    upsert_sql: tokio_postgres::Statement,
+    delete_sql: tokio_postgres::Statement,
 }
 
 impl PostgresSinkWriter {
@@ -391,6 +394,10 @@ impl PostgresSinkWriter {
             (pk_types, schema_types)
         };
 
+        let insert_sql = create_insert_sql(&schema, &config.schema, &config.table);
+        let upsert_sql = create_upsert_sql(&schema, &config.schema, &config.table, &pk_indices, &pk_indices_lookup);
+        let delete_sql = create_delete_sql(&schema, &config.schema, &config.table, &pk_indices);
+
         let writer = Self {
             config,
             pk_indices,
@@ -400,6 +407,7 @@ impl PostgresSinkWriter {
             pk_types,
             schema_types,
             schema,
+
         };
         Ok(writer)
     }
@@ -656,12 +664,7 @@ fn create_insert_sql(
     schema: &Schema,
     schema_name: &str,
     table_name: &str,
-    number_of_rows: usize,
 ) -> String {
-    assert!(
-        number_of_rows > 0,
-        "number of parameters must be greater than 0"
-    );
     let normalized_table_name = format!(
         "{}.{}",
         quote_identifier(schema_name),
@@ -673,16 +676,10 @@ fn create_insert_sql(
         .iter()
         .map(|field| quote_identifier(&field.name))
         .join(", ");
-    let parameters: String = (0..number_of_rows)
-        .map(|i| {
-            let row_parameters = (0..number_of_columns)
-                .map(|j| format!("${}", i * number_of_columns + j + 1))
-                .join(", ");
-            format!("({row_parameters})")
-        })
-        .collect_vec()
+    let column_parameters: String = (0..number_of_columns)
+        .map(|i| format!("${}", i + 1))
         .join(", ");
-    format!("INSERT INTO {normalized_table_name} ({columns}) VALUES {parameters}")
+    format!("INSERT INTO {normalized_table_name} ({columns}) VALUES ({column_parameters})")
 }
 
 fn create_delete_sql(
@@ -690,18 +687,12 @@ fn create_delete_sql(
     schema_name: &str,
     table_name: &str,
     pk_indices: &[usize],
-    number_of_rows: usize,
 ) -> String {
-    assert!(
-        number_of_rows > 0,
-        "number of parameters must be greater than 0"
-    );
     let normalized_table_name = format!(
         "{}.{}",
         quote_identifier(schema_name),
         quote_identifier(table_name)
     );
-    let number_of_pk = pk_indices.len();
     let pk = {
         let pk_symbols = pk_indices
             .iter()
@@ -709,14 +700,8 @@ fn create_delete_sql(
             .join(", ");
         format!("({})", pk_symbols)
     };
-    let parameters: String = (0..number_of_rows)
-        .map(|i| {
-            let row_parameters: String = (0..pk_indices.len())
-                .map(|j| format!("${}", i * number_of_pk + j + 1))
-                .join(", ");
-            format!("({row_parameters})")
-        })
-        .collect_vec()
+    let parameters: String = (0..pk_indices.len())
+        .map(|i| format!("${}", i + 1))
         .join(", ");
     format!("DELETE FROM {normalized_table_name} WHERE {pk} in ({parameters})")
 }
@@ -727,16 +712,14 @@ fn create_upsert_sql(
     table_name: &str,
     pk_indices: &[usize],
     pk_indices_lookup: &HashSet<usize>,
-    number_of_rows: usize,
 ) -> String {
-    let number_of_columns = schema.len();
-    let insert_sql = create_insert_sql(schema, schema_name, table_name, number_of_rows);
+    let insert_sql = create_insert_sql(schema, schema_name, table_name);
     let pk_columns = pk_indices
         .iter()
         .map(|pk_index| quote_identifier(&schema.fields()[*pk_index].name))
         .collect_vec()
         .join(", ");
-    let update_parameters: String = (0..number_of_columns)
+    let update_parameters: String = (0..schema.len())
         .filter(|i| !pk_indices_lookup.contains(i))
         .map(|i| {
             let column = quote_identifier(&schema.fields()[i].name);
