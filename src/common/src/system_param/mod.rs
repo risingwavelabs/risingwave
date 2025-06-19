@@ -401,6 +401,7 @@ macro_rules! impl_validate_all_params {
         /// This function checks the validity of values against the rules in `OverrideValidate`,
         /// regardless of whether a parameter is mutable. It is suitable for validating
         /// initial parameters.
+        #[allow(rw::format_error)]
         pub fn validate_init_system_params(params: &PbSystemParams) -> Result<()> {
             $(
                 if let Some(ref v_pb) = params.$field {
