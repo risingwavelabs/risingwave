@@ -123,9 +123,16 @@ impl BackfillOrderState {
             tracing::error!(actor_id, "fragment not found for actor");
             return vec![];
         };
-        // Some nodes might be finished out of order, for instance
-        // if there's no data to backfill at all.
-        // in such cases, we should directly update it in remaining backfill nodes instead.
+        // NOTE(kwannoel):
+        // Backfill order are specified by the user, for instance:
+        // t1->t2 means that t1 must be backfilled before t2.
+        // However, each snapshot executor may finish ahead of time if there's no data to backfill.
+        // For instance, if t2 has no data to backfill,
+        // and t1 has a lot of data to backfill,
+        // t2's scan operator might finish immediately,
+        // and t2 will finish before t1.
+        // In such cases, we should directly update it in remaining backfill nodes instead,
+        // so we should track whether a node finished in order.
         let (node, is_in_order) = match self.current_backfill_nodes.get_mut(fragment_id) {
             Some(node) => (node, true),
             None => {
