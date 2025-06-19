@@ -46,8 +46,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::prelude::{StateTable, StreamExt, try_stream};
 use crate::executor::{
     ActorContextRef, Barrier, BoxedMessageStream, DispatcherBarrier, DispatcherMessage, Execute,
-    MergeExecutorInput, Message, Mutation, StreamExecutorError, StreamExecutorResult,
-    expect_first_barrier,
+    MergeExecutorInput, Message, StreamExecutorError, StreamExecutorResult, expect_first_barrier,
 };
 use crate::task::CreateMviewProgressReporter;
 
@@ -880,10 +879,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
                 if barrier_epoch.curr >= snapshot_epoch {
                     return Err(anyhow!("should not receive barrier with epoch {barrier_epoch:?} later than snapshot epoch {snapshot_epoch}").into());
                 }
-                if let Some(mutation) = barrier.mutation.as_deref()
-                    && let Mutation::StartFragmentBackfill { fragment_ids } = mutation
-                    && fragment_ids.contains(&actor_ctx.fragment_id)
-                {
+                if barrier.should_start_fragment_backfill(actor_ctx.fragment_id) {
                     if backfill_paused {
                         backfill_paused = false;
                     } else {
