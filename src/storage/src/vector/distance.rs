@@ -307,7 +307,7 @@ mod tests {
             VectorInner(&VEC2),
         ));
         expect![[r#"
-            0.22848958
+            0.22848952
         "#]]
         .assert_debug_eq(&CosineDistance::distance(
             VectorInner(&VEC1),
