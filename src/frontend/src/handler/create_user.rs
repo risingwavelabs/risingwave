@@ -71,7 +71,7 @@ pub async fn handle_create_user(
             }
 
             if !session_user.can_create_user {
-                return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
+                return Err(PermissionDenied("permission denied to create user".to_owned()).into());
             }
         }
 

@@ -1640,7 +1640,7 @@ pub enum Statement {
     ///
     /// Note: this is a PostgreSQL-specific statement.
     Deallocate {
-        name: Ident,
+        name: Option<Ident>,
         prepare: bool,
     },
     /// `EXECUTE name [ ( parameter [, ...] ) ]`
@@ -2351,12 +2351,22 @@ impl Statement {
                 write!(f, " {}", if *cascade { "CASCADE" } else { "RESTRICT" })?;
                 Ok(())
             }
-            Statement::Deallocate { name, prepare } => write!(
-                f,
-                "DEALLOCATE {prepare}{name}",
-                prepare = if *prepare { "PREPARE " } else { "" },
-                name = name,
-            ),
+            Statement::Deallocate { name, prepare } => {
+                if let Some(name) = name {
+                    write!(
+                        f,
+                        "DEALLOCATE {prepare}{name}",
+                        prepare = if *prepare { "PREPARE " } else { "" },
+                        name = name,
+                    )
+                } else {
+                    write!(
+                        f,
+                        "DEALLOCATE {prepare}ALL",
+                        prepare = if *prepare { "PREPARE " } else { "" },
+                    )
+                }
+            }
             Statement::Execute { name, parameters } => {
                 write!(f, "EXECUTE {}", name)?;
                 if !parameters.is_empty() {

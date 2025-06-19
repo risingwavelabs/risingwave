@@ -482,7 +482,7 @@ fn parse_deallocate() {
     assert_eq!(
         stmt,
         Statement::Deallocate {
-            name: "a".into(),
+            name: Some("a".into()),
             prepare: false,
         }
     );
@@ -492,7 +492,7 @@ fn parse_deallocate() {
     assert_eq!(
         stmt,
         Statement::Deallocate {
-            name: Ident::new_unchecked("ALL"),
+            name: None,
             prepare: false,
         }
     );
@@ -501,7 +501,7 @@ fn parse_deallocate() {
     assert_eq!(
         stmt,
         Statement::Deallocate {
-            name: "a".into(),
+            name: Some("a".into()),
             prepare: true,
         }
     );
@@ -511,7 +511,7 @@ fn parse_deallocate() {
     assert_eq!(
         stmt,
         Statement::Deallocate {
-            name: Ident::new_unchecked("ALL"),
+            name: None,
             prepare: true,
         }
     );

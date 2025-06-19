@@ -915,7 +915,7 @@ impl CatalogController {
         Ok(source_actors)
     }
 
-    pub async fn list_rw_table_scan_fragments(
+    pub async fn list_creating_fragment_descs(
         &self,
     ) -> MetaResult<Vec<(FragmentDesc, Vec<FragmentId>)>> {
         let inner = self.inner.read().await;
