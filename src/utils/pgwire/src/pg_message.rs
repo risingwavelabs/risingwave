@@ -782,7 +782,7 @@ fn write_err_or_notice(buf: &mut BytesMut, msg: &ErrorOrNoticeMessage<'_>) -> Re
         write_cstr(buf, msg.severity.as_str().as_bytes())?;
 
         buf.put_u8(b'C'); // SQLSTATE error code
-        write_cstr(buf, msg.state.code().as_bytes())?;
+        write_cstr(buf, msg.error_code.sqlstate().as_bytes())?;
 
         buf.put_u8(b'M'); // the message
         write_cstr(buf, msg.message.as_bytes())?;
