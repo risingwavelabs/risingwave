@@ -742,6 +742,7 @@ fn data_type_to_alias(data_type: &AstDataType) -> Option<String> {
         AstDataType::Jsonb => "jsonb".to_owned(),
         AstDataType::Array(ty) => return data_type_to_alias(ty),
         AstDataType::Custom(ty) => format!("{}", ty),
+        AstDataType::Vector(_) => "vector".to_owned(),
         AstDataType::Struct(_) | AstDataType::Map(_) => {
             // It doesn't bother to derive aliases for these types.
             return None;

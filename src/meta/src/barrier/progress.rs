@@ -231,6 +231,15 @@ pub enum TrackingJob {
     Recovered(RecoveredTrackingJob),
 }
 
+impl std::fmt::Display for TrackingJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TrackingJob::New(command) => write!(f, "{}", command.job_id),
+            TrackingJob::Recovered(recovered) => write!(f, "{}<recovered>", recovered.id),
+        }
+    }
+}
+
 impl TrackingJob {
     /// Notify metadata manager that the job is finished.
     pub(crate) async fn finish(self, metadata_manager: &MetadataManager) -> MetaResult<()> {

@@ -43,7 +43,7 @@ other-sql-backend: &other-sql-backend
       - with:
           label: "postgres"
           # PGPASSWORD=postgres psql -h db -p 5432 -U postgres -d rwmeta
-          endpoint: "postgres://postgres:postgres@db:5432/rwmeta"
+          endpoint: "postgres://postgres:post\\tgres@db:5432/rwmeta"
       - with:
           label: "mysql"
           # mysql -h mysql-meta -P 3306 -u root -p123456 -D rwmeta
@@ -493,7 +493,7 @@ steps:
     retry: *auto-retry
 
   - label: "integration test (deterministic simulation)"
-    command: "TEST_NUM=5 ci/scripts/deterministic-it-test.sh"
+    command: "TEST_NUM=5 ci/scripts/deterministic-it-test.sh pull-request"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-integration-test-deterministic-simulation"
@@ -503,7 +503,7 @@ steps:
       - docker-compose#v5.5.0: *docker-compose
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
-    timeout_in_minutes: 40
+    timeout_in_minutes: 22
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"

@@ -639,6 +639,22 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("source", source_id.to_string()))
     }
 
+    pub fn get_table_by_name<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        table_name: &str,
+        bind_creating_relations: bool,
+    ) -> CatalogResult<(&Arc<TableCatalog>, &'a str)> {
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_table_by_name(table_name, bind_creating_relations))
+            })?
+            .ok_or_else(|| CatalogError::NotFound("table", table_name.to_owned()))
+    }
+
     /// Used to get `TableCatalog` for Materialized Views, Tables and Indexes.
     /// Retrieves all tables, created or creating.
     pub fn get_any_table_by_name<'a>(
@@ -647,13 +663,7 @@ impl Catalog {
         schema_path: SchemaPath<'a>,
         table_name: &str,
     ) -> CatalogResult<(&Arc<TableCatalog>, &'a str)> {
-        schema_path
-            .try_find(|schema_name| {
-                Ok(self
-                    .get_schema_by_name(db_name, schema_name)?
-                    .get_table_by_name(table_name))
-            })?
-            .ok_or_else(|| CatalogError::NotFound("table", table_name.to_owned()))
+        self.get_table_by_name(db_name, schema_path, table_name, true)
     }
 
     /// Used to get `TableCatalog` for Materialized Views, Tables and Indexes.
@@ -664,13 +674,7 @@ impl Catalog {
         schema_path: SchemaPath<'a>,
         table_name: &str,
     ) -> CatalogResult<(&Arc<TableCatalog>, &'a str)> {
-        schema_path
-            .try_find(|schema_name| {
-                Ok(self
-                    .get_schema_by_name(db_name, schema_name)?
-                    .get_created_table_by_name(table_name))
-            })?
-            .ok_or_else(|| CatalogError::NotFound("table", table_name.to_owned()))
+        self.get_table_by_name(db_name, schema_path, table_name, false)
     }
 
     pub fn get_any_table_by_id(&self, table_id: &TableId) -> CatalogResult<&Arc<TableCatalog>> {
@@ -692,6 +696,16 @@ impl Catalog {
             }
         }
         Err(CatalogError::NotFound("table id", table_id.to_string()))
+    }
+
+    pub fn iter_tables(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
+        self.table_by_id.values()
+    }
+
+    pub fn iter_backfilling_internal_tables(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
+        self.table_by_id
+            .values()
+            .filter(|t| t.is_internal_table() && !t.is_created())
     }
 
     // Used by test_utils only.
@@ -943,7 +957,7 @@ impl Catalog {
     ) -> CatalogResult<()> {
         let schema = self.get_schema_by_name(db_name, schema_name)?;
 
-        if let Some(table) = schema.get_table_by_name(relation_name) {
+        if let Some(table) = schema.get_any_table_by_name(relation_name) {
             let is_creating = table.stream_job_status == StreamJobStatus::Creating;
             if table.is_index() {
                 Err(CatalogError::Duplicated(
