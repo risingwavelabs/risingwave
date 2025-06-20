@@ -50,7 +50,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         let name = Expr::Identifier(source_table_name.as_str().into());
         let size = self.gen_size(1);
         let time_col = time_cols.choose(&mut self.rng).unwrap();
-        let time_col = Expr::Identifier(time_col.name.as_str().into());
+        let time_col = time_col.name_expr();
         let args = create_args(vec![name, time_col, size]);
         let relation = create_tvf("tumble", alias, args, false);
 
@@ -80,7 +80,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         // We fix slide to "1" here, as slide needs to be divisible by size.
         let (slide_secs, slide) = self.gen_slide();
         let size = self.gen_size(slide_secs);
-        let time_col = Expr::Identifier(time_col.name.as_str().into());
+        let time_col = time_col.name_expr();
         let args = create_args(vec![name, time_col, slide, size]);
 
         let relation = create_tvf("hop", alias, args, false);
@@ -160,7 +160,7 @@ fn find_tables_with_timestamp_cols(tables: Vec<Table>) -> Vec<(String, Vec<Colum
             let columns = table.get_qualified_columns();
             let mut timestamp_cols = vec![];
             for col in columns {
-                let col_name = col.name.clone();
+                let col_name = col.name.base_name();
                 if col_name.contains("window_start") || col_name.contains("window_end") {
                     return None;
                 }

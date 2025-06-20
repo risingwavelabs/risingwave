@@ -22,6 +22,7 @@ use super::{Binder, BoundBaseTable};
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::ExprImpl;
+use crate::handler::privilege::ObjectCheckItem;
 use crate::user::UserId;
 
 #[derive(Debug, Clone)]
@@ -78,10 +79,13 @@ impl Binder {
         let table_catalog = &table.table_catalog;
         Self::check_for_dml(table_catalog, false)?;
         self.check_privilege(
-            PbObject::TableId(table_catalog.id.table_id),
+            ObjectCheckItem::new(
+                table_catalog.owner,
+                AclMode::Delete,
+                table_name.clone(),
+                PbObject::TableId(table_catalog.id.table_id),
+            ),
             table_catalog.database_id,
-            AclMode::Delete,
-            table_catalog.owner,
         )?;
 
         if !returning_items.is_empty() && table_catalog.has_generated_column() {

@@ -3197,6 +3197,8 @@ impl Parser<'_> {
             self.parse_alter_secret()
         } else if self.parse_word("FRAGMENT") {
             self.parse_alter_fragment()
+        } else if self.parse_keywords(&[Keyword::DEFAULT, Keyword::PRIVILEGES]) {
+            self.parse_alter_default_privileges()
         } else {
             self.expected(
                 "DATABASE, FRAGMENT, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SUBSCRIPTION, SOURCE, FUNCTION, USER, SECRET or SYSTEM after ALTER"
@@ -3644,7 +3646,9 @@ impl Parser<'_> {
             AlterSinkOperation::SwapRenameSink { target_sink }
         } else if self.parse_keyword(Keyword::CONNECTOR) {
             let changed_props = self.parse_with_properties()?;
-            AlterSinkOperation::SetSinkProps { changed_props }
+            AlterSinkOperation::AlterConnectorProps {
+                alter_props: changed_props,
+            }
         } else {
             return self.expected("RENAME or OWNER TO or SET or CONNECTOR WITH after ALTER SINK");
         };
@@ -5373,7 +5377,7 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_grant_revoke_privileges_objects(&mut self) -> ModalResult<(Privileges, GrantObjects)> {
+    fn parse_privileges(&mut self) -> ModalResult<Privileges> {
         let privileges = if self.parse_keyword(Keyword::ALL) {
             Privileges::All {
                 with_privileges_keyword: self.parse_keyword(Keyword::PRIVILEGES),
@@ -5400,6 +5404,12 @@ impl Parser<'_> {
                     .collect(),
             )
         };
+
+        Ok(privileges)
+    }
+
+    fn parse_grant_revoke_privileges_objects(&mut self) -> ModalResult<(Privileges, GrantObjects)> {
+        let privileges = self.parse_privileges()?;
 
         self.expect_keyword(Keyword::ON)?;
 
@@ -5582,6 +5592,105 @@ impl Parser<'_> {
             revoke_grant_option,
             cascade,
         })
+    }
+
+    fn parse_privilege_object_types(&mut self) -> ModalResult<PrivilegeObjectType> {
+        let object_type = if self.parse_keyword(Keyword::TABLES) {
+            PrivilegeObjectType::Tables
+        } else if self.parse_keyword(Keyword::SOURCES) {
+            PrivilegeObjectType::Sources
+        } else if self.parse_keyword(Keyword::SINKS) {
+            PrivilegeObjectType::Sinks
+        } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEWS]) {
+            PrivilegeObjectType::Mviews
+        } else if self.parse_keyword(Keyword::VIEWS) {
+            PrivilegeObjectType::Views
+        } else if self.parse_keyword(Keyword::FUNCTIONS) {
+            PrivilegeObjectType::Functions
+        } else if self.parse_keyword(Keyword::SECRETS) {
+            PrivilegeObjectType::Secrets
+        } else if self.parse_keyword(Keyword::CONNECTIONS) {
+            PrivilegeObjectType::Connections
+        } else if self.parse_keyword(Keyword::SUBSCRIPTIONS) {
+            PrivilegeObjectType::Subscriptions
+        } else if self.parse_keyword(Keyword::SCHEMAS) {
+            PrivilegeObjectType::Schemas
+        } else {
+            return self.expected("TABLES, SOURCES, SINKS, MATERIALIZED VIEWS, VIEWS, FUNCTIONS, SECRETS, CONNECTIONS, SUBSCRIPTIONS or SCHEMAS");
+        };
+
+        Ok(object_type)
+    }
+
+    pub fn parse_alter_default_privileges(&mut self) -> ModalResult<Statement> {
+        // [ FOR USER target_user [, ...] ]
+        let target_users = if self.parse_keyword(Keyword::FOR) {
+            self.expect_keyword(Keyword::USER)?;
+            Some(self.parse_comma_separated(Parser::parse_identifier)?)
+        } else {
+            None
+        };
+
+        // [ IN SCHEMA schema_name [, ...] ]
+        let schema_names = if self.parse_keywords(&[Keyword::IN, Keyword::SCHEMA]) {
+            Some(self.parse_comma_separated(Parser::parse_object_name)?)
+        } else {
+            None
+        };
+        let keyword = self.expect_one_of_keywords(&[Keyword::GRANT, Keyword::REVOKE])?;
+        let for_grant = keyword == Keyword::GRANT;
+        if for_grant {
+            let privileges = self.parse_privileges()?;
+            self.expect_keyword(Keyword::ON)?;
+            let object_type = self.parse_privilege_object_types()?;
+            if schema_names.is_some() && object_type == PrivilegeObjectType::Schemas {
+                parser_err!("cannot use IN SCHEMA clause when using GRANT/REVOKE ON SCHEMAS");
+            }
+            self.expect_keyword(Keyword::TO)?;
+            let grantees = self.parse_comma_separated(Parser::parse_identifier)?;
+
+            let with_grant_option =
+                self.parse_keywords(&[Keyword::WITH, Keyword::GRANT, Keyword::OPTION]);
+
+            Ok(Statement::AlterDefaultPrivileges {
+                target_users,
+                schema_names,
+                operation: DefaultPrivilegeOperation::Grant {
+                    privileges,
+                    object_type,
+                    grantees,
+                    with_grant_option,
+                },
+            })
+        } else {
+            let revoke_grant_option =
+                self.parse_keywords(&[Keyword::GRANT, Keyword::OPTION, Keyword::FOR]);
+            let privileges = self.parse_privileges()?;
+            self.expect_keyword(Keyword::ON)?;
+            let object_type = self.parse_privilege_object_types()?;
+            if schema_names.is_some() && object_type == PrivilegeObjectType::Schemas {
+                parser_err!("cannot use IN SCHEMA clause when using GRANT/REVOKE ON SCHEMAS");
+            }
+            self.expect_keyword(Keyword::FROM)?;
+            let grantees = self.parse_comma_separated(Parser::parse_identifier)?;
+            let cascade = self.parse_keyword(Keyword::CASCADE);
+            let restrict = self.parse_keyword(Keyword::RESTRICT);
+            if cascade && restrict {
+                parser_err!("Cannot specify both CASCADE and RESTRICT in REVOKE");
+            }
+
+            Ok(Statement::AlterDefaultPrivileges {
+                target_users,
+                schema_names,
+                operation: DefaultPrivilegeOperation::Revoke {
+                    privileges,
+                    object_type,
+                    grantees,
+                    revoke_grant_option,
+                    cascade,
+                },
+            })
+        }
     }
 
     /// Parse an INSERT statement
@@ -5866,7 +5975,11 @@ impl Parser<'_> {
 
     fn parse_deallocate(&mut self) -> ModalResult<Statement> {
         let prepare = self.parse_keyword(Keyword::PREPARE);
-        let name = self.parse_identifier()?;
+        let name = if self.parse_keyword(Keyword::ALL) {
+            None
+        } else {
+            Some(self.parse_identifier()?)
+        };
         Ok(Statement::Deallocate { name, prepare })
     }
 

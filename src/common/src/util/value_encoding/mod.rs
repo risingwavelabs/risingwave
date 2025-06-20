@@ -230,7 +230,7 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
         ScalarRefImpl::Struct(s) => serialize_struct(s, buf),
         ScalarRefImpl::List(v) => serialize_list(v, buf),
         ScalarRefImpl::Map(m) => serialize_list(m.into_inner(), buf),
-        ScalarRefImpl::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+        ScalarRefImpl::Vector(v) => serialize_list(v.into_inner(), buf),
     }
 }
 
@@ -257,7 +257,7 @@ fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
         ScalarRefImpl::Struct(s) => estimate_serialize_struct_size(s),
         ScalarRefImpl::List(v) => estimate_serialize_list_size(v),
         ScalarRefImpl::Map(v) => estimate_serialize_list_size(v.into_inner()),
-        ScalarRefImpl::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+        ScalarRefImpl::Vector(v) => estimate_serialize_list_size(v.into_inner()),
     }
 }
 
@@ -360,7 +360,11 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         ),
         DataType::Struct(struct_def) => deserialize_struct(struct_def, data)?,
         DataType::Bytea => ScalarImpl::Bytea(deserialize_bytea(data).into()),
-        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+        DataType::Vector(size) => {
+            let inner = deserialize_list(&DataType::Float32, data)?.into_list();
+            assert_eq!(inner.len(), *size);
+            VectorVal::from_inner(inner).into()
+        }
         DataType::List(item_type) => deserialize_list(item_type, data)?,
         DataType::Map(map_type) => {
             // FIXME: clone type everytime here is inefficient

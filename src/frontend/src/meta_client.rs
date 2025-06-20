@@ -69,9 +69,7 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>>;
 
-    async fn list_creating_stream_scan_fragment_distribution(
-        &self,
-    ) -> Result<Vec<FragmentDistribution>>;
+    async fn list_creating_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>>;
 
     async fn list_actor_states(&self) -> Result<Vec<ActorState>>;
 
@@ -80,8 +78,6 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>>;
 
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>>;
-
-    async fn get_system_params(&self) -> Result<SystemParamsReader>;
 
     async fn set_system_param(
         &self,
@@ -202,12 +198,8 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.list_fragment_distributions().await
     }
 
-    async fn list_creating_stream_scan_fragment_distribution(
-        &self,
-    ) -> Result<Vec<FragmentDistribution>> {
-        self.0
-            .list_creating_stream_scan_fragment_distribution()
-            .await
+    async fn list_creating_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>> {
+        self.0.list_creating_fragment_distribution().await
     }
 
     async fn list_actor_states(&self) -> Result<Vec<ActorState>> {
@@ -225,10 +217,6 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>> {
         let manifest = self.0.get_meta_snapshot_manifest().await?;
         Ok(manifest.snapshot_metadata)
-    }
-
-    async fn get_system_params(&self) -> Result<SystemParamsReader> {
-        self.0.get_system_params().await
     }
 
     async fn set_system_param(

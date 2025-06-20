@@ -47,9 +47,7 @@ use crate::barrier::schedule::{NewBarrier, PeriodicBarriers};
 use crate::barrier::utils::{
     NodeToCollect, collect_creating_job_commit_epoch_info, is_valid_after_worker_err,
 };
-use crate::barrier::{
-    BarrierKind, Command, CreateStreamingJobType, InflightSubscriptionInfo, TracedEpoch,
-};
+use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, InflightSubscriptionInfo};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::fill_snapshot_backfill_epoch;
@@ -153,18 +151,6 @@ impl CheckpointControl {
         })
     }
 
-    pub(crate) fn max_prev_epoch(&self) -> Option<TracedEpoch> {
-        self.databases
-            .values()
-            .flat_map(|database| {
-                database
-                    .running_state()
-                    .map(|database| database.state.in_flight_prev_epoch())
-            })
-            .max_by_key(|epoch| epoch.value())
-            .cloned()
-    }
-
     pub(crate) fn recovering_databases(&self) -> impl Iterator<Item = DatabaseId> + '_ {
         self.databases.iter().filter_map(|(database_id, database)| {
             database.running_state().is_none().then_some(*database_id)
@@ -182,14 +168,15 @@ impl CheckpointControl {
         &mut self,
         new_barrier: NewBarrier,
         control_stream_manager: &mut ControlStreamManager,
-    ) -> Option<HashMap<DatabaseId, MetaError>> {
+    ) -> MetaResult<()> {
         let NewBarrier {
+            database_id,
             command,
             span,
             checkpoint,
         } = new_barrier;
 
-        if let Some((database_id, mut command, notifiers)) = command {
+        if let Some((mut command, notifiers)) = command {
             if let &mut Command::CreateStreamingJob {
                 ref mut cross_db_snapshot_backfill_info,
                 ref info,
@@ -224,43 +211,25 @@ impl CheckpointControl {
                             notifier.notify_start_failed(err.clone());
                         }
 
-                        return None;
+                        return Ok(());
                     }
                 }
             }
 
-            let max_prev_epoch = self.max_prev_epoch();
-            let (database, max_prev_epoch) = match self.databases.entry(database_id) {
-                Entry::Occupied(entry) => (
-                    entry
-                        .into_mut()
-                        .expect_running("should not have command when not running"),
-                    max_prev_epoch.expect("should exist when having some database"),
-                ),
+            let database = match self.databases.entry(database_id) {
+                Entry::Occupied(entry) => entry
+                    .into_mut()
+                    .expect_running("should not have command when not running"),
                 Entry::Vacant(entry) => match &command {
                     Command::CreateStreamingJob {
                         job_type: CreateStreamingJobType::Normal,
                         ..
                     } => {
                         let new_database = DatabaseCheckpointControl::new(database_id);
-                        let max_prev_epoch = if let Some(max_prev_epoch) = max_prev_epoch {
-                            if max_prev_epoch.value()
-                                < new_database.state.in_flight_prev_epoch().value()
-                            {
-                                new_database.state.in_flight_prev_epoch().clone()
-                            } else {
-                                max_prev_epoch
-                            }
-                        } else {
-                            new_database.state.in_flight_prev_epoch().clone()
-                        };
                         control_stream_manager.add_partial_graph(database_id, None);
-                        (
-                            entry
-                                .insert(DatabaseCheckpointControlStatus::Running(new_database))
-                                .expect_running("just initialized as running"),
-                            max_prev_epoch,
-                        )
+                        entry
+                            .insert(DatabaseCheckpointControlStatus::Running(new_database))
+                            .expect_running("just initialized as running")
                     }
                     Command::Flush | Command::Pause | Command::Resume => {
                         for mut notifier in notifiers {
@@ -268,7 +237,7 @@ impl CheckpointControl {
                             notifier.notify_collected();
                         }
                         warn!(?command, "skip command for empty database");
-                        return None;
+                        return Ok(());
                     }
                     _ => {
                         panic!(
@@ -279,73 +248,33 @@ impl CheckpointControl {
                 },
             };
 
-            let curr_epoch = max_prev_epoch.next();
-
-            let mut failed_databases: Option<HashMap<_, _>> = None;
-
-            if let Err(e) = database.handle_new_barrier(
+            database.handle_new_barrier(
                 Some((command, notifiers)),
                 checkpoint,
                 span.clone(),
                 control_stream_manager,
                 &self.hummock_version_stats,
-                curr_epoch.clone(),
-            ) {
-                failed_databases
-                    .get_or_insert_default()
-                    .try_insert(database_id, e)
-                    .expect("non-duplicate");
-            }
-            for database in self.databases.values_mut() {
-                let Some(database) = database.running_state_mut() else {
-                    continue;
-                };
-                if database.database_id == database_id {
-                    continue;
-                }
-                if let Err(e) = database.handle_new_barrier(
-                    None,
-                    checkpoint,
-                    span.clone(),
-                    control_stream_manager,
-                    &self.hummock_version_stats,
-                    curr_epoch.clone(),
-                ) {
-                    failed_databases
-                        .get_or_insert_default()
-                        .try_insert(database.database_id, e)
-                        .expect("non-duplicate");
-                }
-            }
-            failed_databases
+            )
         } else {
-            #[expect(clippy::question_mark)]
-            let Some(max_prev_epoch) = self.max_prev_epoch() else {
-                return None;
-            };
-            let curr_epoch = max_prev_epoch.next();
-
-            let mut failed_databases: Option<HashMap<_, _>> = None;
-            for database in self.databases.values_mut() {
-                let Some(database) = database.running_state_mut() else {
-                    continue;
-                };
-                if let Err(e) = database.handle_new_barrier(
-                    None,
-                    checkpoint,
-                    span.clone(),
-                    control_stream_manager,
-                    &self.hummock_version_stats,
-                    curr_epoch.clone(),
-                ) {
-                    failed_databases
-                        .get_or_insert_default()
-                        .try_insert(database.database_id, e)
-                        .expect("non-duplicate");
+            let database = match self.databases.entry(database_id) {
+                Entry::Occupied(entry) => entry.into_mut(),
+                Entry::Vacant(_) => {
+                    // If it does not exist in the HashMap yet, it means that the first streaming
+                    // job has not been created, and we do not need to send a barrier.
+                    return Ok(());
                 }
-            }
-
-            failed_databases
+            };
+            let Some(database) = database.running_state_mut() else {
+                // Skip new barrier for database which is not running.
+                return Ok(());
+            };
+            database.handle_new_barrier(
+                None,
+                checkpoint,
+                span.clone(),
+                control_stream_manager,
+                &self.hummock_version_stats,
+            )
         }
     }
 
@@ -768,7 +697,7 @@ impl DatabaseCheckpointControl {
                     .expect("should exist")
                     .collect(resp);
                 if should_merge_to_upstream {
-                    periodic_barriers.force_checkpoint_in_next_barrier();
+                    periodic_barriers.force_checkpoint_in_next_barrier(self.database_id);
                 }
             }
         }
@@ -904,7 +833,7 @@ impl DatabaseCheckpointControl {
                             .values()
                             .all(|node| !node.command_ctx.barrier_info.kind.is_checkpoint())
                     {
-                        periodic_barriers.force_checkpoint_in_next_barrier();
+                        periodic_barriers.force_checkpoint_in_next_barrier(self.database_id);
                     }
                     continue;
                 }
@@ -1016,8 +945,9 @@ impl DatabaseCheckpointControl {
         span: tracing::Span,
         control_stream_manager: &mut ControlStreamManager,
         hummock_version_stats: &HummockVersionStats,
-        curr_epoch: TracedEpoch,
     ) -> MetaResult<()> {
+        let curr_epoch = self.state.in_flight_prev_epoch().next();
+
         let (mut command, mut notifiers) = if let Some((command, notifiers)) = command {
             (Some(command), notifiers)
         } else {

@@ -338,14 +338,14 @@ impl StreamManagerService for StreamServiceImpl {
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn list_creating_stream_scan_fragment_distribution(
+    async fn list_creating_fragment_distribution(
         &self,
-        _request: Request<ListCreatingStreamScanFragmentDistributionRequest>,
-    ) -> Result<Response<ListCreatingStreamScanFragmentDistributionResponse>, Status> {
+        _request: Request<ListCreatingFragmentDistributionRequest>,
+    ) -> Result<Response<ListCreatingFragmentDistributionResponse>, Status> {
         let fragment_descs = self
             .metadata_manager
             .catalog_controller
-            .list_rw_table_scan_fragments()
+            .list_creating_fragment_descs()
             .await?;
         let distributions = fragment_descs
             .into_iter()
@@ -354,9 +354,9 @@ impl StreamManagerService for StreamServiceImpl {
             })
             .collect_vec();
 
-        Ok(Response::new(
-            ListCreatingStreamScanFragmentDistributionResponse { distributions },
-        ))
+        Ok(Response::new(ListCreatingFragmentDistributionResponse {
+            distributions,
+        }))
     }
 
     #[cfg_attr(coverage, coverage(off))]

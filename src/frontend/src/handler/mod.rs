@@ -102,6 +102,7 @@ pub mod fetch_cursor;
 mod flush;
 pub mod handle_privilege;
 pub mod kill_process;
+mod prepared_statement;
 pub mod privilege;
 pub mod query;
 mod recover;
@@ -640,7 +641,7 @@ pub async fn handle(
         Statement::SetTimeZone { local: _, value } => {
             variable::handle_set_time_zone(handler_args, value)
         }
-        Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable).await,
+        Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable),
         Statement::CreateIndex {
             name,
             table_name,
@@ -993,9 +994,9 @@ pub async fn handle(
         }
 
         Statement::AlterSink { name, operation } => match operation {
-            AlterSinkOperation::SetSinkProps { changed_props } => {
-                alter_sink_props::handle_alter_sink_props(handler_args, name, changed_props).await
-            }
+            AlterSinkOperation::AlterConnectorProps {
+                alter_props: changed_props,
+            } => alter_sink_props::handle_alter_sink_props(handler_args, name, changed_props).await,
             AlterSinkOperation::RenameSink { sink_name } => {
                 alter_rename::handle_rename_sink(handler_args, name, sink_name).await
             }
@@ -1217,6 +1218,9 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterDefaultPrivileges { .. } => {
+            handle_privilege::handle_alter_default_privileges(handler_args, stmt).await
+        }
         Statement::StartTransaction { modes } => {
             transaction::handle_begin(handler_args, START_TRANSACTION, modes).await
         }
@@ -1241,6 +1245,14 @@ pub async fn handle(
             comment,
         } => comment::handle_comment(handler_args, object_type, object_name, comment).await,
         Statement::Use { db_name } => use_db::handle_use_db(handler_args, db_name),
+        Statement::Prepare {
+            name,
+            data_types,
+            statement,
+        } => prepared_statement::handle_prepare(name, data_types, statement).await,
+        Statement::Deallocate { name, prepare } => {
+            prepared_statement::handle_deallocate(name, prepare).await
+        }
         _ => bail_not_implemented!("Unhandled statement: {}", stmt),
     }
 }

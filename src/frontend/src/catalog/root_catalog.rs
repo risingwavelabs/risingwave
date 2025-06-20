@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, StreamJobStatus, TableId};
+use risingwave_common::catalog::{FunctionId, IndexId, StreamJobStatus, TableId};
 use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
@@ -98,7 +98,6 @@ impl<'a> SchemaPath<'a> {
 ///       - table/sink/source/index/view catalog
 ///        - column catalog
 pub struct Catalog {
-    version: CatalogVersion,
     database_by_name: HashMap<String, DatabaseCatalog>,
     db_name_by_id: HashMap<DatabaseId, String>,
     /// all table catalogs in the cluster identified by universal unique table id.
@@ -110,7 +109,6 @@ pub struct Catalog {
 impl Default for Catalog {
     fn default() -> Self {
         Self {
-            version: 0,
             database_by_name: HashMap::new(),
             db_name_by_id: HashMap::new(),
             table_by_id: HashMap::new(),
@@ -1067,16 +1065,6 @@ impl Catalog {
         } else {
             Ok(())
         }
-    }
-
-    /// Get the catalog cache's catalog version.
-    pub fn version(&self) -> u64 {
-        self.version
-    }
-
-    /// Set the catalog cache's catalog version.
-    pub fn set_version(&mut self, catalog_version: CatalogVersion) {
-        self.version = catalog_version;
     }
 
     pub fn table_stats(&self) -> &HummockVersionStats {
