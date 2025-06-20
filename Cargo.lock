@@ -6874,9 +6874,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "iceberg-compact-core"
+name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compact.git?rev=444a614fae777fa0b0a59d4d518a8abbcfa6bad8#444a614fae777fa0b0a59d4d518a8abbcfa6bad8"
+source = "git+https://github.com/nimtable/iceberg-compact.git?rev=acd4119eb5da59cb2807c5e7394804ed6cd64f0b#acd4119eb5da59cb2807c5e7394804ed6cd64f0b"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -12801,7 +12801,7 @@ dependencies = [
  "futures-async-stream",
  "hex",
  "iceberg",
- "iceberg-compact-core",
+ "iceberg-compaction-core",
  "itertools 0.14.0",
  "libc",
  "lz4",

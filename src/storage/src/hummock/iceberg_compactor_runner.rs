@@ -19,11 +19,11 @@ use std::sync::{Arc, LazyLock};
 
 use derive_builder::Builder;
 use iceberg::{Catalog, TableIdent};
-use iceberg_compact_core::compaction::{
+use iceberg_compaction_core::compaction::{
     Compaction, CompactionType, RewriteDataFilesCommitManagerRetryConfig,
 };
-use iceberg_compact_core::config::CompactionConfigBuilder;
-use iceberg_compact_core::executor::RewriteFilesStat;
+use iceberg_compaction_core::config::CompactionConfigBuilder;
+use iceberg_compaction_core::executor::RewriteFilesStat;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
@@ -319,7 +319,7 @@ impl IcebergCompactorRunner {
                 .with_compaction_type(CompactionType::Full)
                 .with_config(compaction_config)
                 .with_table_ident(self.table_ident.clone())
-                .with_executor_type(iceberg_compact_core::executor::ExecutorType::DataFusion)
+                .with_executor_type(iceberg_compaction_core::executor::ExecutorType::DataFusion)
                 .with_registry(BERGLOOM_METRICS_REGISTRY.clone())
                 .with_retry_config(retry_config)
                 .build()
