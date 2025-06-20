@@ -283,7 +283,7 @@ struct PulsarConsumeStream {
 
 impl PulsarConsumeStream {
     fn do_ack(&mut self, message_id_bytes: Vec<u8>) {
-        let message_id = match PulsarProstMessage::decode(message_id_bytes.as_slice()) {
+        let message_id = match MessageIdData::decode(message_id_bytes.as_slice()) {
             Ok(message_id) => message_id,
             Err(e) => {
                 tracing::warn!(
@@ -298,18 +298,22 @@ impl PulsarConsumeStream {
             message_id,
             build_pulsar_ack_channel_id(&self.source_ctx.source_id, &self.split_id)
         );
-        let _ = tokio::task::block_in_place(move || {
-            tokio::runtime::Handle::current().block_on(async {
-                self.pulsar_reader
-                    .cumulative_ack_with_id(&topic, message_id)
-                    .await
+        #[cfg(not(madsim))]
+        {
+            // FIXME: madsim does not support block_on and block_in_place
+            let _ = tokio::task::block_in_place(move || {
+                tokio::runtime::Handle::current().block_on(async {
+                    self.pulsar_reader
+                        .cumulative_ack_with_id(&topic, message_id)
+                        .await
+                })
             })
-        })
-        .map_err(|e| {
-            tracing::warn!(
-                error=?e, "meet error when ack message"
-            )
-        });
+            .map_err(|e| {
+                tracing::warn!(
+                    error=?e, "meet error when ack message"
+                )
+            });
+        }
     }
 }
 
