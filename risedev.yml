@@ -1404,7 +1404,7 @@ template:
     user-managed: false
 
     # New optional field for latency
-    latency-ms: null  # Optional: latency in milliseconds
+    latency-ms: 0  # Optional: latency in milliseconds
 
   # Sql Server service backed by docker.
   sqlserver:
