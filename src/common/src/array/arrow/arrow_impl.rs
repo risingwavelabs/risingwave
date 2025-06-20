@@ -1490,8 +1490,7 @@ pub fn is_parquet_schema_match_source_schema(
             if arrow_fields.len() != rw_struct.len() {
                 return false;
             }
-            for (arrow_field, (rw_name, rw_ty)) in
-                arrow_fields.iter().zip_eq_fast(rw_struct.iter())
+            for (arrow_field, (rw_name, rw_ty)) in arrow_fields.iter().zip_eq_fast(rw_struct.iter())
             {
                 if arrow_field.name() != rw_name {
                     return false;
