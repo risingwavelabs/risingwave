@@ -70,6 +70,7 @@ pub struct BuildFragmentGraphState {
 
     has_source_backfill: bool,
     has_snapshot_backfill: bool,
+    has_cross_db_snapshot_backfill: bool,
 }
 
 impl BuildFragmentGraphState {
@@ -170,6 +171,15 @@ pub fn build_graph_with_strategy(
             "`SET streaming_use_shared_source = false` to disable shared source backfill, or \
                     `SET streaming_use_snapshot_backfill = false` to disable snapshot backfill"
                 .to_owned(),
+        )));
+    }
+    if state.has_cross_db_snapshot_backfill
+        && let Some(ref backfill_order) = backfill_order
+        && !backfill_order.order.is_empty()
+    {
+        return Err(RwError::from(NotSupported(
+            "Backfill order control with cross-db snapshot backfill is not supported".to_owned(),
+            "Please remove backfill order specification from your query".to_owned(),
         )));
     }
 
@@ -372,6 +382,7 @@ fn build_fragment(
                     StreamScanType::CrossDbSnapshotBackfill => {
                         current_fragment.fragment_type_mask |=
                             FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32;
+                        state.has_cross_db_snapshot_backfill = true;
                     }
                     StreamScanType::Unspecified
                     | StreamScanType::Chain
