@@ -66,8 +66,8 @@ pub trait DockerServiceConfig: Send + 'static {
     /// Network latency in milliseconds to add to the container.
     ///
     /// `Some` if latency should be added, `None` otherwise.
-    fn latency_ms(&self) -> Option<u32> {
-        None
+    fn latency_ms(&self) -> u32 {
+        0
     }
 }
 
@@ -117,7 +117,7 @@ where
             .arg("host.docker.internal:host-gateway");
 
         // Add capabilities for traffic control if latency is configured
-        if self.config.latency_ms().is_some() {
+        if self.config.latency_ms() > 0 {
             cmd.arg("--cap-add=NET_ADMIN").arg("--cap-add=NET_RAW");
         }
 
@@ -167,7 +167,7 @@ where
         ctx.run_command(ctx.tmux_run(self.docker_run()?)?)?;
 
         // If latency is configured, add it after the container starts
-        if let Some(latency) = self.config.latency_ms() {
+        if self.config.latency_ms() > 0 {
             ctx.pb.set_message("configuring network latency...");
 
             // Wait a moment for the container to be ready
@@ -182,7 +182,7 @@ where
                 .arg("-c")
                 .arg(format!(
                     "apk add --no-cache iproute2 && tc qdisc add dev eth0 root netem delay {}ms",
-                    latency
+                    self.config.latency_ms()
                 ));
 
             // Run the tc command, but don't fail if it doesn't work

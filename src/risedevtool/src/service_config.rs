@@ -391,8 +391,8 @@ pub struct PostgresConfig {
     pub user_managed: bool,
     pub persist_data: bool,
 
-    // New field for latency
-    pub latency_ms: Option<u32>,
+    // Inject latency into any network calls to the postgres service.
+    pub latency_ms: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

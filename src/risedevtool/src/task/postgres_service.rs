@@ -64,7 +64,7 @@ impl DockerServiceConfig for PostgresConfig {
             .then(|| "/var/lib/postgresql/data".to_owned())
     }
 
-    fn latency_ms(&self) -> Option<u32> {
+    fn latency_ms(&self) -> u32 {
         self.latency_ms
     }
 }
