@@ -59,7 +59,7 @@ sha1 = "0.10"
 sha2 = "0.10"
 smallvec = { workspace = true }
 sql-json-path = { version = "0.1", features = ["jsonbb"] }
-thiserror = "2"
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["time"] }
 # For arrow-udf-runtime/remote
