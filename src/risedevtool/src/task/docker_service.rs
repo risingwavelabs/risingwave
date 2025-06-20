@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::env;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::thread;
+use std::{env, thread};
 
 use anyhow::{Context, Result};
 
@@ -119,8 +118,7 @@ where
 
         // Add capabilities for traffic control if latency is configured
         if self.config.latency_ms().is_some() {
-            cmd.arg("--cap-add=NET_ADMIN")
-                .arg("--cap-add=NET_RAW");
+            cmd.arg("--cap-add=NET_ADMIN").arg("--cap-add=NET_RAW");
         }
 
         for (k, v) in self.config.envs() {
@@ -171,18 +169,22 @@ where
         // If latency is configured, add it after the container starts
         if let Some(latency) = self.config.latency_ms() {
             ctx.pb.set_message("configuring network latency...");
-            
+
             // Wait a moment for the container to be ready
             thread::sleep(std::time::Duration::from_secs(2));
-            
+
             // Add latency using docker exec
             let mut tc_cmd = Command::new("docker");
-            tc_cmd.arg("exec")
+            tc_cmd
+                .arg("exec")
                 .arg(format!("risedev-{}", self.id()))
                 .arg("sh")
                 .arg("-c")
-                .arg(format!("apk add --no-cache iproute2 && tc qdisc add dev eth0 root netem delay {}ms", latency));
-            
+                .arg(format!(
+                    "apk add --no-cache iproute2 && tc qdisc add dev eth0 root netem delay {}ms",
+                    latency
+                ));
+
             // Run the tc command, but don't fail if it doesn't work
             let _ = tc_cmd.output();
         }
