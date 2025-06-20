@@ -51,6 +51,8 @@ impl StreamReaderBuilder {
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
 
+        debug_assert!(column_ids.iter().all_unique(), "column_ids must be unique");
+
         let (schema_change_tx, mut schema_change_rx) =
             mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
         let schema_change_tx = if self.is_auto_schema_change_enable {

@@ -295,27 +295,21 @@ pub fn build_additional_column_desc(
 }
 
 pub fn derive_pulsar_message_id_data_column(
-    columns: &[ColumnCatalog],
     connector_name: &str,
-    skip_col_id: bool,
     column_exist: &mut Vec<bool>,
     additional_columns: &mut Vec<ColumnDesc>,
 ) {
-    let mut last_column_id = max_column_id(columns);
-    let mut assign_col_id = || {
-        if skip_col_id {
-            // col id will be filled outside later. Here just use a placeholder.
-            ColumnId::placeholder()
-        } else {
-            last_column_id = last_column_id.next();
-            last_column_id
-        }
-    };
+    // additional columns already check the max_column_id
+    // so we can take the max column id of additional columns as the max column id of all columns
+    let max_column_id = additional_columns
+        .iter()
+        .fold(ColumnId::first_user_column(), |a, b| a.max(b.column_id));
 
+    // assume user does not include `message_id_data` column
     column_exist.push(false);
     additional_columns.push(
         build_additional_column_desc(
-            assign_col_id(),
+            max_column_id.next(),
             connector_name,
             "message_id_data",
             None,

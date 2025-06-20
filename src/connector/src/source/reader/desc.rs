@@ -99,9 +99,7 @@ impl SourceDescBuilder {
             // add `message_id_data` column for pulsar source, which is used for ack message
             if self.with_properties.is_pulsar_connector() {
                 derive_pulsar_message_id_data_column(
-                    &self.columns,
                     &connector_name,
-                    false,
                     &mut columns_exist,
                     &mut additional_columns,
                 );

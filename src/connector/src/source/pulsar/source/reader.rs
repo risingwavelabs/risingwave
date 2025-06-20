@@ -283,7 +283,15 @@ struct PulsarConsumeStream {
 
 impl PulsarConsumeStream {
     fn do_ack(&mut self, message_id_bytes: Vec<u8>) {
-        let message_id = MessageIdData::decode(message_id_bytes.as_slice()).unwrap();
+        let message_id = match PulsarProstMessage::decode(message_id_bytes.as_slice()) {
+            Ok(message_id) => message_id,
+            Err(e) => {
+                tracing::warn!(
+                    error=?e, "meet error when decode message id, skip ack"
+                );
+                return;
+            }
+        };
         let topic = self.topic.clone();
         tracing::info!(
             "ack message id: {:?} from channel {}",
