@@ -434,7 +434,7 @@ for_all_params!(impl_system_params_for_test);
 struct OverrideValidate;
 impl Validate for OverrideValidate {
     fn barrier_interval_ms(v: &u32) -> Result<()> {
-        Self::expect_range(*v, 100..)
+        Self::expect_range(*v, 50..)
     }
 
     fn checkpoint_frequency(v: &u64) -> Result<()> {
