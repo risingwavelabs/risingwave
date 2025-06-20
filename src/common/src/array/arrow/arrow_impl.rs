@@ -48,7 +48,6 @@ use arrow_buffer::OffsetBuffer;
 use arrow_schema::TimeUnit;
 use chrono::{DateTime, NaiveDateTime, NaiveTime};
 use itertools::Itertools;
-use rw_iter_util::ZipEqDebug;
 
 use super::arrow_schema::IntervalUnit;
 // This is important because we want to use the arrow version specified by the outer mod.
