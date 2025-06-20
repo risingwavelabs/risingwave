@@ -152,7 +152,7 @@ impl Rule for OverWindowToTopNRule {
 
 impl OverWindowToTopNRule {
     /// Simplify arithmetic expressions in filter conditions before TopN optimization
-    /// For example: (`row_number` - 1) = 0 -> `row_number` = 1
+    /// For example: `(row_number - 1) = 0` -> `row_number = 1`
     fn simplify_filter_arithmetic(&self, filter: &LogicalFilter) -> Option<LogicalFilter> {
         let new_predicate = self.simplify_filter_arithmetic_condition(filter.predicate())?;
         Some(LogicalFilter::new(filter.input(), new_predicate))
@@ -172,7 +172,7 @@ impl OverWindowToTopNRule {
     }
 }
 
-/// Filter arithmetic simplification rewriter: simplifies (col op const) = const2 to col = (const2 `reverse_op` const)
+/// Filter arithmetic simplification rewriter: simplifies `(col op const) = const2` to `col = (const2 reverse_op const)`
 struct FilterArithmeticRewriter {}
 
 impl ExprRewriter for FilterArithmeticRewriter {
@@ -235,7 +235,7 @@ impl FilterArithmeticRewriter {
                         let reverse_op = match arithmetic_func.func_type() {
                             Add => Subtract,
                             Subtract => Add,
-                            _ => return None,
+                            _ => unreachable!(),
                         };
                         (&inputs[0], &inputs[1], reverse_op)
                     } else if inputs[0].is_const() && arithmetic_func.func_type() == Add {
