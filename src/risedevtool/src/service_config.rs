@@ -390,6 +390,9 @@ pub struct PostgresConfig {
     pub image: String,
     pub user_managed: bool,
     pub persist_data: bool,
+
+    // New field for latency
+    pub latency_ms: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
