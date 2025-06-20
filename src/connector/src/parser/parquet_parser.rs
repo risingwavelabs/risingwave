@@ -116,8 +116,6 @@ impl ParquetParser {
                     let rw_data_type: &risingwave_common::types::DataType =
                         &source_column.data_type;
                     let rw_column_name = &source_column.name;
-                    println!("rw_column_name: {}", rw_column_name);
-                    println!("rw_data_type: {:?}", rw_data_type);
                     if let Some(parquet_column) = record_batch.column_by_name(rw_column_name)
                         && is_parquet_schema_match_source_schema(
                             parquet_column.data_type(),
