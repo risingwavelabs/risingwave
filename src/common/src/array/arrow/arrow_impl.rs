@@ -1531,11 +1531,111 @@ pub fn is_parquet_schema_match_source_schema(
         _ => false,
     }
 }
-
 #[cfg(test)]
 mod tests {
 
+    use arrow_schema::{DataType as ArrowType, Field as ArrowField};
+
     use super::*;
+    use crate::types::{DataType as RwType, MapType, StructType};
+
+    #[test]
+    fn test_struct_schema_match() {
+        // Arrow: struct<f1: Double, f2: Utf8>
+
+        let arrow_struct = ArrowType::Struct(
+            vec![
+                ArrowField::new("f1", ArrowType::Float64, true),
+                ArrowField::new("f2", ArrowType::Utf8, true),
+            ]
+            .into(),
+        );
+        // RW: struct<f1 Double, f2 Varchar>
+        let rw_struct = RwType::Struct(StructType::new(vec![
+            ("f1".to_owned(), RwType::Float64),
+            ("f2".to_owned(), RwType::Varchar),
+        ]));
+        assert!(is_parquet_schema_match_source_schema(
+            &arrow_struct,
+            &rw_struct
+        ));
+
+        // Field names do not match
+        let arrow_struct2 = ArrowType::Struct(
+            vec![
+                ArrowField::new("f1", ArrowType::Float64, true),
+                ArrowField::new("f3", ArrowType::Utf8, true),
+            ]
+            .into(),
+        );
+        assert!(!is_parquet_schema_match_source_schema(
+            &arrow_struct2,
+            &rw_struct
+        ));
+    }
+
+    #[test]
+    fn test_list_schema_match() {
+        // Arrow: list<double>
+        let arrow_list =
+            ArrowType::List(Box::new(ArrowField::new("item", ArrowType::Float64, true)).into());
+        // RW: list<double>
+        let rw_list = RwType::List(Box::new(RwType::Float64));
+        assert!(is_parquet_schema_match_source_schema(&arrow_list, &rw_list));
+
+        let rw_list2 = RwType::List(Box::new(RwType::Int32));
+        assert!(!is_parquet_schema_match_source_schema(
+            &arrow_list,
+            &rw_list2
+        ));
+    }
+
+    #[test]
+    fn test_map_schema_match() {
+        // Arrow: map<utf8, int32>
+        let arrow_map = ArrowType::Map(
+            Arc::new(ArrowField::new(
+                "entries",
+                ArrowType::Struct(
+                    vec![
+                        ArrowField::new("key", ArrowType::Utf8, false),
+                        ArrowField::new("value", ArrowType::Int32, true),
+                    ]
+                    .into(),
+                ),
+                false,
+            )),
+            false,
+        );
+        // RW: map<varchar, int32>
+        let rw_map = RwType::Map(MapType::from_kv(RwType::Varchar, RwType::Int32));
+        assert!(is_parquet_schema_match_source_schema(&arrow_map, &rw_map));
+
+        // Key type does not match
+        let rw_map2 = RwType::Map(MapType::from_kv(RwType::Int32, RwType::Int32));
+        assert!(!is_parquet_schema_match_source_schema(&arrow_map, &rw_map2));
+
+        // Value type does not match
+        let rw_map3 = RwType::Map(MapType::from_kv(RwType::Varchar, RwType::Float64));
+        assert!(!is_parquet_schema_match_source_schema(&arrow_map, &rw_map3));
+
+        // Arrow inner struct field name does not match
+        let arrow_map2 = ArrowType::Map(
+            Arc::new(ArrowField::new(
+                "entries",
+                ArrowType::Struct(
+                    vec![
+                        ArrowField::new("k", ArrowType::Utf8, false),
+                        ArrowField::new("value", ArrowType::Int32, true),
+                    ]
+                    .into(),
+                ),
+                false,
+            )),
+            false,
+        );
+        assert!(!is_parquet_schema_match_source_schema(&arrow_map2, &rw_map));
+    }
 
     #[test]
     fn bool() {
