@@ -519,7 +519,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                             Message::Barrier(barrier) => {
                                 last_barrier_time = Instant::now();
 
-                                if pause_control.self_paused && pause_control.self_resume() {
+                                if pause_control.self_resume() {
                                     resume_reader!();
                                 }
 
@@ -528,9 +528,8 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     match mutation {
                                         Mutation::Pause => {
                                             // pause_reader should not be invoked consecutively more than once.
-                                            if pause_control.command_pause() {
-                                                pause_reader!();
-                                            }
+                                            pause_control.command_pause();
+                                            pause_reader!();
                                         }
                                         Mutation::Resume => {
                                             // pause_reader.take should not be invoked consecutively more than once.
@@ -747,9 +746,10 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                         let chunk = msg?;
 
                         if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
-                            if pause_control.self_pause() {
-                                pause_reader!();
-                            }
+                            // Pause to let barrier catch up via backpressure of snapshot stream.
+                            pause_control.self_pause();
+                            pause_reader!();
+
                             // Exceeds the max wait barrier time, the source will be paused.
                             // Currently we can guarantee the
                             // source is not paused since it received stream
@@ -1168,11 +1168,11 @@ impl PauseControl {
     }
 
     /// returns whether we need to pause the reader.
-    fn backfill_pause(&mut self) -> bool {
+    fn backfill_pause(&mut self) {
         if self.backfill_paused {
             tracing::warn!("backfill_pause invoked twice");
         }
-        true
+        self.backfill_paused = true;
     }
 
     /// returns whether we need to resume the reader.
@@ -1185,7 +1185,7 @@ impl PauseControl {
     }
 
     /// returns whether we need to pause the reader.
-    fn self_pause(&mut self) -> bool {
+    fn self_pause(&mut self) {
         assert!(
             !self.backfill_paused,
             "backfill stream should not be read when backfill_pause is set"
@@ -1198,27 +1198,22 @@ impl PauseControl {
             tracing::warn!("self_pause invoked twice");
         }
         self.self_paused = true;
-        true
     }
 
     /// returns whether we need to resume the reader.
     /// `self_resume` has the lowest precedence,
     /// it can only resume if we are not paused due to `backfill_paused` or `command_paused`.
     fn self_resume(&mut self) -> bool {
-        if !self.self_paused {
-            tracing::warn!("self_resume invoked twice");
-        }
         self.self_paused = false;
         !(self.backfill_paused || self.command_paused)
     }
 
     /// returns whether we need to pause the reader.
-    fn command_pause(&mut self) -> bool {
+    fn command_pause(&mut self) {
         if self.command_paused {
             tracing::warn!("command_pause invoked twice");
         }
         self.command_paused = true;
-        true
     }
 
     /// returns whether we need to resume the reader.
