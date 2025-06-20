@@ -453,7 +453,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             };
         }
 
-        if pause_control.pause_on_startup() {
+        if pause_control.is_paused() {
             pause_reader!();
         }
 
@@ -1163,8 +1163,8 @@ impl PauseControl {
         }
     }
 
-    fn pause_on_startup(&self) -> bool {
-        self.backfill_paused || self.command_paused
+    fn is_paused(&self) -> bool {
+        self.backfill_paused || self.command_paused || self.self_paused
     }
 
     /// returns whether we need to pause the reader.
