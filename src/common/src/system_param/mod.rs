@@ -389,6 +389,7 @@ macro_rules! impl_system_params_for_test {
             ret.backup_storage_url = Some("memory-isolated-for-test".into());
             ret.backup_storage_directory = Some("backup".into());
             ret.use_new_object_prefix_strategy = Some(false);
+            ret.time_travel_retention_ms = Some(0);
             ret
         }
     };
@@ -458,7 +459,8 @@ impl Validate for OverrideValidate {
     fn time_travel_retention_ms(v: &u64) -> Result<()> {
         // This is intended to guarantee that non-time-travel batch query can still function even compute node's recent versions doesn't include the desired version.
         let min_retention_ms = 600_000;
-        if *v < min_retention_ms {
+        // 0 is used to disable time travel.
+        if *v != 0 && *v < min_retention_ms {
             return Err(format!(
                 "time_travel_retention_ms cannot be less than {min_retention_ms}"
             ));
