@@ -12834,6 +12834,7 @@ dependencies = [
  "sled",
  "spin 0.10.0",
  "sync-point",
+ "sysinfo",
  "tempfile",
  "thiserror 2.0.12",
  "thiserror-ext",
