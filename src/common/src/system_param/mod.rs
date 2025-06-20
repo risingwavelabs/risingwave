@@ -101,6 +101,11 @@ macro_rules! for_all_params {
     };
 }
 
+// Warn user if barrier_interval_ms is set above 5mins.
+pub const NOTICE_BARRIER_INTERVAL_MS: u32 = 300000;
+// Warn user if checkpoint_frequency is set above 60.
+pub const NOTICE_CHECKPOINT_FREQUENCY: u64 = 60;
+
 /// Convert field name to string.
 #[macro_export]
 macro_rules! key_of {
@@ -252,7 +257,7 @@ macro_rules! impl_system_params_from_kv {
 macro_rules! impl_default_validation {
     ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, $($rest:tt)* },)*) => {
         #[allow(clippy::ptr_arg)]
-        trait Validate {
+        pub trait Validate {
             $(
                 /// Default implementation does nothing.
                 /// Specific checks are implemented in `OverrideValidate`.
@@ -432,7 +437,7 @@ for_all_params!(impl_default_validation);
 for_all_params!(impl_validate_all_params);
 for_all_params!(impl_system_params_for_test);
 
-struct OverrideValidate;
+pub struct OverrideValidate;
 impl Validate for OverrideValidate {
     fn barrier_interval_ms(v: &u32) -> Result<()> {
         Self::expect_range(*v, 50..)
