@@ -6,6 +6,7 @@ set -euo pipefail
 REPO_ROOT=${PWD}
 
 source ci/scripts/common.sh
+# TODO: use llvm-cov's nextest wrapper to provide coverage information
 
 echo "+++ Run unit tests"
 # use tee to disable progress bar
