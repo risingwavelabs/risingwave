@@ -26,6 +26,7 @@
 #![feature(trait_alias)]
 
 pub mod anyhow;
+pub mod code;
 pub mod common;
 pub mod macros;
 pub mod tonic;
