@@ -1,3 +1,5 @@
+control substitution on
+
 statement ok
 alter sink jdbc_pg_sink set sink_rate_limit = default;
 
@@ -12,3 +14,5 @@ select * from postgres_query(
 );
 ----
 
+
+control substitution off
