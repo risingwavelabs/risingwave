@@ -1480,7 +1480,7 @@ pub async fn create_iceberg_engine_table(
                 )
             })?
             .into_owned(),
-        None => "".to_string(),
+        None => "".to_owned(),
     };
     let meta_store_host = meta_store_endpoint
         .host_str()
