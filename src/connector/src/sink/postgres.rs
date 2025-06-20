@@ -23,7 +23,7 @@ use itertools::Itertools;
 use phf::phf_set;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::Row;
+use risingwave_common::row::{Row, RowExt};
 use serde_derive::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use simd_json::prelude::ArrayTrait;
@@ -261,6 +261,7 @@ impl Sink for PostgresSink {
 pub struct PostgresSinkWriter {
     is_append_only: bool,
     client: tokio_postgres::Client,
+    pk_indices: Vec<usize>,
     pk_types: Vec<PgType>,
     schema_types: Vec<PgType>,
     raw_insert_sql: Arc<String>,
@@ -353,6 +354,7 @@ impl PostgresSinkWriter {
         let writer = Self {
             is_append_only,
             client,
+            pk_indices,
             pk_types,
             schema_types,
             raw_insert_sql: Arc::new(raw_insert_sql),
@@ -425,7 +427,8 @@ impl PostgresSinkWriter {
         for (op, row) in chunk.rows() {
             match op {
                 Op::Delete | Op::UpdateDelete => {
-                    let pg_row = convert_row_to_pg_row(row, &self.pk_types);
+                    let pg_row =
+                        convert_row_to_pg_row(row.project(&self.pk_indices), &self.pk_types);
                     let delete_sql = self.delete_sql.clone();
                     let raw_delete_sql = self.raw_delete_sql.clone();
                     let transaction = transaction.clone();
