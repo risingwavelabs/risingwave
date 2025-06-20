@@ -1,0 +1,92 @@
+# Reproduce recovery + unapplied delete scenario
+#
+# PK indices: [0]
+#
+# 1. Trigger logstore lag, by using sink rate limit to throttle progress processing speed.
+# 2. Once lag is high, inject these chunks via DML, let sink compaction occur.
+#
+# (do this for all PKs)
+#
+# Chunk 1:
+# - 1 2
+# + 1 3
+# 
+# Chunk 2:
+# - 1 3
+#
+# 3. Trigger recovery.
+#
+# This will trigger logstore reads.
+# From logstore, we will get chunks like:
+# - 1 2
+# + 1 3
+# - 1 3
+#
+# 4. From pg sink, we will batch deletes followed by upserts.
+# - 1 2
+# - 1 3
+# + 1 3
+#
+# We should see redundant data in pg sink (1 3).
+
+system ok
+set streaming_parallelism = 1;
+
+statement ok
+drop sink if exists jdbc_pg_sink;
+
+statement ok
+drop table if exists t cascade;
+
+
+system ok
+psql -c 'drop table if exists t cascade;'
+
+# backpressure logstore to force data persistence
+statement ok
+set sink_rate_limit = 2;
+
+statement ok
+create table t(a int primary key, b int);
+
+system ok
+psql -c 'create table t(a int primary key, b int);'
+
+statement ok
+insert into t select id as a, 1 as b from generate_series(1, 200) z(id);
+
+statement ok
+set background_ddl=true;
+
+statement ok
+
+
+control substitution on
+
+
+statement ok
+create sink jdbc_pg_sink from t with (
+    connector='jdbc',
+    jdbc.url='jdbc:postgresql://${PGHOST}:${PGPORT}/${PGDATABASE}?user=${PGUSER}&password=${PGPASSWORD}',
+    table.name='t',
+    primary_key='a',
+    type='upsert'
+);
+
+control substitution off
+
+statement ok
+flush;
+
+# create the pattern described above for (3) and (4)
+statement ok
+update t set b = 2;
+
+statement ok
+flush;
+
+statement ok
+delete from t;
+
+statement ok
+flush;
