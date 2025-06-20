@@ -63,7 +63,7 @@ thiserror = "2"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["time"] }
 # For arrow-udf-runtime/remote
-tonic = { version = "0.12.3", optional = true }
+tonic = { version = "0.13.1", optional = true }
 tracing = "0.1"
 zstd = { version = "0.13", default-features = false, optional = true }
 
