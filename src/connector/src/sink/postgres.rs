@@ -13,9 +13,12 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashSet};
+use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
+use futures::StreamExt;
+use futures::stream::FuturesOrdered;
 use itertools::Itertools;
 use phf::phf_set;
 use risingwave_common::array::{Op, StreamChunk};
@@ -260,12 +263,12 @@ pub struct PostgresSinkWriter {
     client: tokio_postgres::Client,
     pk_types: Vec<PgType>,
     schema_types: Vec<PgType>,
-    raw_insert_sql: String,
-    raw_upsert_sql: String,
-    raw_delete_sql: String,
-    insert_sql: tokio_postgres::Statement,
-    delete_sql: tokio_postgres::Statement,
-    upsert_sql: tokio_postgres::Statement,
+    raw_insert_sql: Arc<String>,
+    raw_upsert_sql: Arc<String>,
+    raw_delete_sql: Arc<String>,
+    insert_sql: Arc<tokio_postgres::Statement>,
+    delete_sql: Arc<tokio_postgres::Statement>,
+    upsert_sql: Arc<tokio_postgres::Statement>,
 }
 
 impl PostgresSinkWriter {
@@ -352,12 +355,12 @@ impl PostgresSinkWriter {
             client,
             pk_types,
             schema_types,
-            raw_insert_sql,
-            raw_upsert_sql,
-            raw_delete_sql,
-            insert_sql,
-            delete_sql,
-            upsert_sql,
+            raw_insert_sql: Arc::new(raw_insert_sql),
+            raw_upsert_sql: Arc::new(raw_upsert_sql),
+            raw_delete_sql: Arc::new(raw_delete_sql),
+            insert_sql: Arc::new(insert_sql),
+            delete_sql: Arc::new(delete_sql),
+            upsert_sql: Arc::new(upsert_sql),
         };
         Ok(writer)
     }
@@ -373,20 +376,27 @@ impl PostgresSinkWriter {
     }
 
     async fn write_batch_append_only(&mut self, chunk: StreamChunk) -> Result<()> {
-        let transaction = self.client.transaction().await?;
+        let transaction = Arc::new(self.client.transaction().await?);
+        let mut insert_futures = FuturesOrdered::new();
         for (op, row) in chunk.rows() {
             match op {
                 Op::Insert => {
                     let pg_row = convert_row_to_pg_row(row, &self.schema_types);
-                    transaction
-                        .execute_raw(&self.insert_sql, &pg_row)
-                        .await
-                        .with_context(|| {
-                            format!(
-                                "failed to execute insert statement: {}, parameters: {:?}",
-                                self.raw_insert_sql, pg_row
-                            )
-                        })?;
+                    let insert_sql = self.insert_sql.clone();
+                    let raw_insert_sql = self.raw_insert_sql.clone();
+                    let transaction = transaction.clone();
+                    let future = async move {
+                        transaction
+                            .execute_raw(insert_sql.as_ref(), &pg_row)
+                            .await
+                            .with_context(|| {
+                                format!(
+                                    "failed to execute insert statement: {}, parameters: {:?}",
+                                    raw_insert_sql, pg_row
+                                )
+                            })
+                    };
+                    insert_futures.push_back(future);
                 }
                 _ => {
                     tracing::error!(
@@ -395,40 +405,74 @@ impl PostgresSinkWriter {
                 }
             }
         }
+
+        while let Some(result) = insert_futures.next().await {
+            result?;
+        }
+        if let Some(transaction) = Arc::into_inner(transaction) {
+            transaction.commit().await?;
+        } else {
+            tracing::error!("transaction lost!");
+        }
+
         Ok(())
     }
 
     async fn write_batch_non_append_only(&mut self, chunk: StreamChunk) -> Result<()> {
-        let transaction = self.client.transaction().await?;
+        let transaction = Arc::new(self.client.transaction().await?);
+        let mut delete_futures = FuturesOrdered::new();
+        let mut upsert_futures = FuturesOrdered::new();
         for (op, row) in chunk.rows() {
             match op {
                 Op::Delete | Op::UpdateDelete => {
                     let pg_row = convert_row_to_pg_row(row, &self.pk_types);
-                    transaction
-                        .execute_raw(&self.delete_sql, &pg_row)
-                        .await
-                        .with_context(|| {
-                            format!(
-                                "failed to execute delete statement: {}, parameters: {:?}",
-                                self.raw_delete_sql, pg_row
-                            )
-                        })?;
+                    let delete_sql = self.delete_sql.clone();
+                    let raw_delete_sql = self.raw_delete_sql.clone();
+                    let transaction = transaction.clone();
+                    let future = async move {
+                        transaction
+                            .execute_raw(delete_sql.as_ref(), &pg_row)
+                            .await
+                            .with_context(|| {
+                                format!(
+                                    "failed to execute delete statement: {}, parameters: {:?}",
+                                    raw_delete_sql, pg_row
+                                )
+                            })
+                    };
+                    delete_futures.push_back(future);
                 }
                 Op::Insert | Op::UpdateInsert => {
                     let pg_row = convert_row_to_pg_row(row, &self.schema_types);
-                    transaction
-                        .execute_raw(&self.upsert_sql, &pg_row)
-                        .await
-                        .with_context(|| {
-                            format!(
-                                "failed to execute upsert statement: {}, parameters: {:?}",
-                                self.raw_upsert_sql, pg_row
-                            )
-                        })?;
+                    let upsert_sql = self.upsert_sql.clone();
+                    let raw_upsert_sql = self.raw_upsert_sql.clone();
+                    let transaction = transaction.clone();
+                    let future = async move {
+                        transaction
+                            .execute_raw(upsert_sql.as_ref(), &pg_row)
+                            .await
+                            .with_context(|| {
+                                format!(
+                                    "failed to execute upsert statement: {}, parameters: {:?}",
+                                    raw_upsert_sql, pg_row
+                                )
+                            })
+                    };
+                    upsert_futures.push_back(future);
                 }
             }
         }
-        transaction.commit().await?;
+        while let Some(result) = delete_futures.next().await {
+            result?;
+        }
+        while let Some(result) = upsert_futures.next().await {
+            result?;
+        }
+        if let Some(transaction) = Arc::into_inner(transaction) {
+            transaction.commit().await?;
+        } else {
+            tracing::error!("transaction lost!");
+        }
         Ok(())
     }
 }
