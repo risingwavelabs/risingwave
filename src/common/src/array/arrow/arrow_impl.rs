@@ -1491,7 +1491,7 @@ pub fn is_parquet_schema_match_source_schema(
                 return false;
             }
             for (arrow_field, (rw_name, rw_ty)) in
-                arrow_fields.iter().zip_eq_debug(rw_struct.iter())
+                arrow_fields.iter().zip_eq_fast(rw_struct.iter())
             {
                 if arrow_field.name() != rw_name {
                     return false;
