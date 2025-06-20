@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use jni::objects::{JByteArray, JString};
+use risingwave_common::STATE_STORE_URL;
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{ObjectStoreImpl, build_remote_object_store};
@@ -24,7 +25,7 @@ use risingwave_object_store::object::{ObjectStoreImpl, build_remote_object_store
 use crate::{EnvParam, JAVA_BINDING_ASYNC_RUNTIME, execute_and_catch, to_guarded_slice};
 
 pub async fn new_object_store() -> ObjectStoreImpl {
-    let hummock_url = "hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001";
+    let hummock_url = STATE_STORE_URL.get().unwrap();
     let object_store = build_remote_object_store(
         hummock_url.strip_prefix("hummock+").unwrap(),
         Arc::new(ObjectStoreMetrics::unused()),

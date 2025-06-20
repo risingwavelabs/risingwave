@@ -47,6 +47,8 @@ extern crate self as risingwave_common;
 // since they were previously defined and exported from `risingwave_common`.
 #[macro_use]
 extern crate risingwave_error;
+use std::sync::OnceLock;
+
 pub use risingwave_error::common::{
     bail_no_function, bail_not_implemented, no_function, not_implemented,
 };
@@ -113,6 +115,8 @@ pub const SERVER_VERSION_NUM: i32 = 130014;
 pub const SERVER_ENCODING: &str = "UTF8";
 /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-STANDARD-CONFORMING-STRINGS>
 pub const STANDARD_CONFORMING_STRINGS: &str = "on";
+
+pub static STATE_STORE_URL: OnceLock<String> = OnceLock::new();
 
 #[macro_export]
 macro_rules! git_sha {

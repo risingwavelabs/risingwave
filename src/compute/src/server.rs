@@ -37,7 +37,7 @@ use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::pretty_bytes::convert;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
-use risingwave_common::{GIT_SHA, RW_VERSION};
+use risingwave_common::{GIT_SHA, RW_VERSION, STATE_STORE_URL};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::{MetricsManager, ObserverManager, TracingExtractLayer};
 use risingwave_connector::source::iceberg::GLOBAL_ICEBERG_SCAN_METRICS;
@@ -206,6 +206,9 @@ pub async fn compute_node_serve(
     };
 
     LicenseManager::get().refresh(system_params.license_key());
+    // Store the state_store_url in a static OnceLock for later use in JNI crate
+    let _ = STATE_STORE_URL.set(state_store_url.to_string());
+
     let state_store = StateStoreImpl::new(
         state_store_url,
         storage_opts.clone(),
