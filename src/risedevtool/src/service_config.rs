@@ -390,6 +390,9 @@ pub struct PostgresConfig {
     pub image: String,
     pub user_managed: bool,
     pub persist_data: bool,
+
+    // Inject latency into any network calls to the postgres service.
+    pub latency_ms: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
