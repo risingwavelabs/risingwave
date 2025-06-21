@@ -16,6 +16,7 @@ RUN apt-get update -yy && \
     python3.12 python3.12-dev \
     golang perl \
     dumb-init \
+    libblas-dev liblapack-dev libomp-dev \
     && rm -rf /var/lib/{apt,dpkg,cache,log}/
 ENV PYO3_PYTHON=python3.12
 
