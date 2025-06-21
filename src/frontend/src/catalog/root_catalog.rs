@@ -862,6 +862,22 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("secret", secret_name.to_owned()))
     }
 
+    pub fn get_connection_by_id(
+        &self,
+        db_name: &str,
+        connection_id: ConnectionId,
+    ) -> CatalogResult<&Arc<ConnectionCatalog>> {
+        for schema in self.get_database_by_name(db_name)?.iter_schemas() {
+            if let Some(conn) = schema.get_connection_by_id(&connection_id) {
+                return Ok(conn);
+            }
+        }
+        Err(CatalogError::NotFound(
+            "connection",
+            connection_id.to_string(),
+        ))
+    }
+
     pub fn get_connection_by_name<'a>(
         &self,
         db_name: &str,

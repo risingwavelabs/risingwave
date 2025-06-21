@@ -20,7 +20,6 @@ use risingwave_connector::source::AnySplitEnumerator;
 use super::*;
 
 const MAX_FAIL_CNT: u32 = 10;
-const DEFAULT_SOURCE_TICK_TIMEOUT: Duration = Duration::from_secs(10);
 
 // The key used to load `SplitImpl` directly from source properties.
 // When this key is present, the enumerator will only return the given ones
@@ -306,6 +305,13 @@ impl ConnectorSourceWorker {
                                     tracing::warn!(error = %e.as_report(), "error happened when finish backfill");
                                 }
                             }
+                            SourceWorkerCommand::UpdateProps(new_props) => {
+                                self.connector_properties = new_props;
+                                if let Err(e) = self.refresh().await {
+                                    tracing::error!(error = %e.as_report(), "error happened when refresh from connector source worker");
+                                }
+                                tracing::debug!("source {} worker properties updated", self.source_name);
+                            }
                             SourceWorkerCommand::Terminate => {
                                 return;
                             }
@@ -447,6 +453,13 @@ impl ConnectorSourceWorkerHandle {
         }
     }
 
+    pub fn update_props(&self, new_props: ConnectorProperties) {
+        if let Err(e) = self.send_command(SourceWorkerCommand::UpdateProps(new_props)) {
+            // ignore update props error, just log it
+            tracing::warn!(error = %e.as_report(), "failed to update source worker properties");
+        }
+    }
+
     pub fn terminate(&self, dropped_fragments: Option<BTreeSet<FragmentId>>) {
         tracing::debug!("terminate: {:?}", dropped_fragments);
         if let Some(dropped_fragments) = dropped_fragments {
@@ -470,4 +483,6 @@ pub enum SourceWorkerCommand {
     FinishBackfill(Vec<FragmentId>),
     /// Terminate the worker task.
     Terminate,
+    /// Update the properties of the source worker.
+    UpdateProps(ConnectorProperties),
 }
