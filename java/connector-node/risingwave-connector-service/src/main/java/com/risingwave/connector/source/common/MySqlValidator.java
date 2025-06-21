@@ -300,6 +300,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 return val == Data.DataType.TypeName.DOUBLE_VALUE;
             case "decimal":
                 return val == Data.DataType.TypeName.DECIMAL_VALUE;
+            case "char":
             case "varchar":
                 return val == Data.DataType.TypeName.VARCHAR_VALUE;
             case "date":
@@ -310,8 +311,10 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 return val == Data.DataType.TypeName.TIMESTAMP_VALUE;
             case "timestamp":
                 return val == Data.DataType.TypeName.TIMESTAMPTZ_VALUE;
+            case "json":
+                return val == Data.DataType.TypeName.JSONB_VALUE;
             default:
-                return true; // true for other uncovered types
+                return false; // false for other uncovered types
         }
     }
 }
