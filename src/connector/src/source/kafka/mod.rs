@@ -106,6 +106,7 @@ pub struct RdKafkaPropertiesConsumer {
     pub enable_auto_commit: Option<bool>,
 }
 
+#[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct KafkaProperties {
     /// This parameter is not intended to be exposed to users.
@@ -131,6 +132,14 @@ pub struct KafkaProperties {
         alias = "scan.startup.timestamp_millis" // keep for compatibility
     )]
     pub time_offset: Option<String>,
+
+    #[serde(
+        rename = "enable.mux.reader",
+        alias = "kafka.enable.mux.reader",
+        default = "default_enable_mux_reader"
+    )]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub enable_mux_reader: Option<bool>,
 
     /// Specify a custom consumer group id prefix for the source.
     /// Defaults to `rw-consumer`.
@@ -172,6 +181,10 @@ pub struct KafkaProperties {
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
+}
+
+const fn default_enable_mux_reader() -> Option<bool> {
+    None
 }
 
 impl EnforceSecret for KafkaProperties {

@@ -38,6 +38,7 @@ pub struct SourceDesc {
     pub source: SourceReader,
     pub columns: Vec<SourceColumnDesc>,
     pub metrics: Arc<SourceMetrics>,
+    pub info: PbStreamSourceInfo,
 }
 
 /// `FsSourceDesc` describes a stream source.
@@ -133,6 +134,7 @@ impl SourceDescBuilder {
         Ok(SourceDesc {
             source,
             columns,
+            info: self.source_info,
             metrics: self.metrics,
         })
     }
