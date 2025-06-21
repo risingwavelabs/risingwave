@@ -153,7 +153,7 @@ public class DbzConnectorConfig {
                 // If cdc backfill enabled, the source only emit incremental changes, so we must
                 // rewind to the given offset and continue binlog reading from there
                 if (null != startOffset && !startOffset.isBlank()) {
-                    mysqlProps.setProperty("snapshot.mode", "recovery");
+                    mysqlProps.setProperty("snapshot.mode", "no_data");
                     mysqlProps.setProperty(
                             ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
                 } else {
@@ -167,7 +167,7 @@ public class DbzConnectorConfig {
                     // 'snapshot.mode=recovery' must be configured if binlog offset is
                     // specified. It only snapshots the schemas, not the data, and continue binlog
                     // reading from the specified offset
-                    mysqlProps.setProperty("snapshot.mode", "recovery");
+                    mysqlProps.setProperty("snapshot.mode", "no_data");
                     mysqlProps.setProperty(
                             ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
                 }

@@ -43,6 +43,10 @@ public class Binding {
 
     static native boolean iteratorNext(long pointer);
 
+    public static native void putObject(String object, byte[] data);
+
+    public static native byte[] getObject(String object);
+
     static native void iteratorClose(long pointer);
 
     static native long newStreamChunkFromPayload(byte[] streamChunkPayload);

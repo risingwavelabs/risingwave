@@ -413,6 +413,10 @@ macro_rules! for_all_plain_native_methods {
 
                 static native boolean iteratorNext(long pointer);
 
+                public static native void putObject(String objectName, byte[] data);
+
+                public static native byte[] getObject(String objectName);
+
                 static native void iteratorClose(long pointer);
 
                 static native long newStreamChunkFromPayload(byte[] streamChunkPayload);
