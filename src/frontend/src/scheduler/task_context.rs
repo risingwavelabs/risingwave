@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use prometheus::core::Atomic;
 use risingwave_batch::error::Result;
 use risingwave_batch::monitor::BatchMetrics;
+use risingwave_batch::task::task_stats::{TaskStats, TaskStatsRef};
 use risingwave_batch::task::{BatchTaskContext, TaskOutput, TaskOutputId};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::catalog::SysCatalogReaderRef;
@@ -36,6 +39,8 @@ pub struct FrontendBatchTaskContext {
     session: Arc<SessionImpl>,
 
     mem_context: MemoryContext,
+
+    task_stats: TaskStatsRef,
 }
 
 impl FrontendBatchTaskContext {
@@ -45,6 +50,7 @@ impl FrontendBatchTaskContext {
         Arc::new(Self {
             session,
             mem_context,
+            task_stats: Arc::new(TaskStats::new()),
         })
     }
 }
@@ -103,5 +109,36 @@ impl BatchTaskContext for FrontendBatchTaskContext {
 
     fn worker_node_manager(&self) -> Option<WorkerNodeManagerRef> {
         Some(self.session.env().worker_node_manager_ref())
+    }
+
+    fn task_stats(&self) -> Option<TaskStatsRef> {
+        Some(self.task_stats.clone())
+    }
+}
+
+pub type StageStats = QueryStats;
+
+#[derive(Debug)]
+pub struct QueryStats {
+    pub row_scan_count: u64,
+}
+
+impl QueryStats {
+    pub fn new() -> Self {
+        Self { row_scan_count: 0 }
+    }
+
+    pub fn add_task_stats(&mut self, task_stats: &TaskStats) {
+        self.row_scan_count += task_stats.row_scan_count.load(Ordering::Relaxed);
+    }
+
+    pub fn add_stage_stats(&mut self, stage_stats: &StageStats) {
+        self.row_scan_count += stage_stats.row_scan_count;
+    }
+}
+
+impl Display for QueryStats {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "row_scan_count={}", self.row_scan_count)
     }
 }

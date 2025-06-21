@@ -310,6 +310,7 @@ where
             mode,
             session_id,
             sql = tracing::field::Empty, // record SQL later in each `process` call
+            stats = tracing::field::Empty, // record stats for the query
         )
     }
 
