@@ -1248,7 +1248,9 @@ fn parse_interval(s: &str) -> ParseResult<Vec<TimeStrToken>> {
             }
             chr if chr.is_ascii_whitespace() => {
                 convert_unit(&mut char_buf, &mut tokens)?;
-                convert_digit(&mut num_buf, &mut tokens)?;
+                if !(num_buf == "-" || num_buf == "+") {
+                    convert_digit(&mut num_buf, &mut tokens)?;
+                }
             }
             ':' => {
                 // there must be a digit before the ':'
