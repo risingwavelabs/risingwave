@@ -311,7 +311,7 @@ impl PulsarConsumeStream {
             })
             .map_err(|e| {
                 tracing::warn!(
-                    error=?e, "meet error when ack message"
+                    error=%e.as_report(), "meet error when ack message"
                 )
             });
         }
