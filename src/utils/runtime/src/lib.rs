@@ -74,6 +74,12 @@ where
 {
     set_panic_hook();
 
+    // Register a custom handler for SIGSEGV and SIGABRT to print backtrace when occurs, typically
+    // due to stack overflow. This is not robust enough to use in production.
+    if cfg!(debug_assertions) {
+        unsafe { backtrace_on_stack_overflow::enable() };
+    }
+
     rustls::crypto::ring::default_provider()
         .install_default()
         .inspect_err(|e| {
