@@ -76,6 +76,30 @@ impl Connection for KafkaConnection {
     }
 }
 
+use rdkafka::config::RDKafkaLogLevel;
+
+pub fn read_kafka_log_level() -> RDKafkaLogLevel {
+    let log_level =
+        std::env::var("RISINGWAVE_KAFKA_LOG_LEVEL").unwrap_or_else(|_| "INFO".to_owned());
+    match log_level.to_uppercase().as_str() {
+        "DEBUG" => RDKafkaLogLevel::Debug,
+        "INFO" => RDKafkaLogLevel::Info,
+        "WARN" => RDKafkaLogLevel::Warning,
+        "ERROR" => RDKafkaLogLevel::Error,
+        "CRITICAL" => RDKafkaLogLevel::Critical,
+        "EMERG" => RDKafkaLogLevel::Emerg,
+        "ALERT" => RDKafkaLogLevel::Alert,
+        "NOTICE" => RDKafkaLogLevel::Notice,
+        _ => {
+            tracing::info!(
+                "Invalid RISINGWAVE_KAFKA_LOG_LEVEL: {}, using INFO instead",
+                log_level
+            );
+            RDKafkaLogLevel::Info
+        }
+    }
+}
+
 impl KafkaConnection {
     async fn build_client(&self) -> ConnectorResult<BaseConsumer<RwConsumerContext>> {
         let mut config = ClientConfig::new();
@@ -94,8 +118,10 @@ impl KafkaConnection {
         )
         .await?;
         let client_ctx = RwConsumerContext::new(ctx_common);
-        let client: BaseConsumer<RwConsumerContext> =
-            config.create_with_context(client_ctx).await?;
+        let client: BaseConsumer<RwConsumerContext> = config
+            .set_log_level(read_kafka_log_level())
+            .create_with_context(client_ctx)
+            .await?;
         if self.inner.is_aws_msk_iam() {
             #[cfg(not(madsim))]
             client.poll(Duration::from_secs(10)); // note: this is a blocking call
