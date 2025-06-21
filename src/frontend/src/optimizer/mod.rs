@@ -512,6 +512,18 @@ impl PlanRoot {
             ApplyOrder::BottomUp,
         ))?;
 
+        if ctx
+            .session_ctx()
+            .config()
+            .streaming_separate_consecutive_join()
+        {
+            plan = plan.optimize_by_rules(&OptimizationStage::new(
+                "Separate consecutive StreamHashJoin by no-shuffle StreamExchange",
+                vec![SeparateConsecutiveJoinRule::create()],
+                ApplyOrder::BottomUp,
+            ))?;
+        }
+
         // Add Logstore for Unaligned join
         // Apply this BEFORE delta join rule, because delta join removes
         // the join

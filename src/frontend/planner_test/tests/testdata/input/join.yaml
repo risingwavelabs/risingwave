@@ -364,3 +364,16 @@
   expected_outputs:
   - batch_plan
   - stream_plan
+- name: Separate consecutive StreamHashJoin by no-shuffle Exchange
+  sql: |
+    set streaming_separate_consecutive_join = true;
+    create table t1(v1 int primary key);
+    create table t2(v2 int primary key);
+    create table t3(v3 int primary key);
+    create table t4(v4 int primary key);
+    create table t5(v5 int primary key);
+    create table t6(v6 int primary key);
+    select v1, v2, v3, v4, v5, v6 from t1 left join t2 on t1.v1 = t2.v2 left join t3 on t1.v1 = t3.v3 left join t4 on t1.v1 = t4.v4 left join t5 on t1.v1 = t5.v5 left join t6 on t1.v1 = t6.v6;
+  expected_outputs:
+    - stream_plan
+    - stream_dist_plan

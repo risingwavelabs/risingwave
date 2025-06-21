@@ -219,6 +219,10 @@ pub struct SessionConfig {
     #[parameter(default = true)]
     streaming_enable_materialized_expressions: bool,
 
+    /// Separate consecutive StreamHashJoin by no-shuffle StreamExchange
+    #[parameter(default = false)]
+    streaming_separate_consecutive_join: bool,
+
     /// Enable join ordering for streaming and batch queries. Defaults to true.
     #[parameter(default = true, alias = "rw_enable_join_ordering")]
     enable_join_ordering: bool,
