@@ -307,6 +307,9 @@ message ExprNode {
     MAP_DELETE = 710;
     MAP_FILTER = 711;
 
+    // Vector functions
+    L2_DISTANCE = 750;
+
     // Internal function for schema change
     COMPOSITE_CAST = 800;
 
