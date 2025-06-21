@@ -26,6 +26,7 @@ use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
 use pulsar_prost::Message as PulsarProstMessage;
 use risingwave_common::{bail, ensure};
+use thiserror_ext::AsReport;
 
 use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
@@ -287,7 +288,7 @@ impl PulsarConsumeStream {
             Ok(message_id) => message_id,
             Err(e) => {
                 tracing::warn!(
-                    error=?e, "meet error when decode message id, skip ack"
+                    error=%e.as_report(), "meet error when decode message id, skip ack"
                 );
                 return;
             }
