@@ -1,14 +1,4 @@
 #!/usr/bin/env python3
-"""
-Pulsar Cat - A command-line tool for Apache Pulsar operations
-Similar to kafka-cat but for Pulsar
-
-Usage:
-    python pulsar_cat.py create-topic --topic <topic> [--partitions <n>] [--non-persistent]
-    python pulsar_cat.py produce --topic <topic> [--broker <url>]
-    python pulsar_cat.py consume --topic <topic> --subscription <sub> [--broker <url>] [--position <pos>]
-    python pulsar_cat.py unacked --topic <topic> --subscription <sub> [--broker <url>]
-"""
 
 import argparse
 import sys
@@ -38,7 +28,7 @@ class PulsarCat:
 
     def create_topic(self, topic: str, partitions: int = 0, non_persistent: bool = False):
         """Create a topic (persistent/non-persistent, partitioned or not)"""
-        
+
         # Determine topic type
         if non_persistent:
             if topic.startswith('persistent://'):
@@ -52,13 +42,13 @@ class PulsarCat:
                 topic = f'persistent://public/default/{topic}'
 
         print(f"Creating topic: {topic}")
-        
+
         if partitions > 0:
             # Create partitioned topic
             url = f"{self.admin_url}/admin/v2/{topic.replace('://', '/')}/partitions"
             response = requests.put(url, json=partitions)
         else:
-            # Create non-partitioned topic  
+            # Create non-partitioned topic
             url = f"{self.admin_url}/admin/v2/{topic.replace('://', '/')}"
             response = requests.put(url)
 
@@ -74,17 +64,77 @@ class PulsarCat:
             print(f"Failed to create topic: {response.status_code} - {response.text}")
             sys.exit(1)
 
+    def drop_topic(self, topic: str, force: bool = False):
+        """Drop/delete a topic"""
+
+        # Handle topic naming - if no scheme specified, assume persistent
+        if not topic.startswith(('persistent://', 'non-persistent://')):
+            topic = f'persistent://public/default/{topic}'
+
+        print(f"Dropping topic: {topic}")
+
+        # Try to delete as non-partitioned topic first
+        url = f"{self.admin_url}/admin/v2/{topic.replace('://', '/')}"
+        params = {}
+        if force:
+            params['force'] = 'true'
+        response = requests.delete(url, params=params)
+
+        # If we get a 409 error saying it's a partitioned topic, try deleting as partitioned
+        if response.status_code == 409:
+            try:
+                error_info = response.json()
+                if "partitioned topic" in error_info.get("reason", "").lower():
+                    print("Detected partitioned topic, trying partitioned topic deletion...")
+
+                    # Delete as partitioned topic
+                    partitioned_url = f"{self.admin_url}/admin/v2/{topic.replace('://', '/')}/partitions"
+                    partitioned_params = {}
+                    if force:
+                        partitioned_params['force'] = 'true'
+                    response = requests.delete(partitioned_url, params=partitioned_params)
+
+                    if response.status_code in [200, 204]:
+                        print(f"Partitioned topic {topic} dropped successfully")
+                        print("All partitions have been deleted")
+                        return
+            except:
+                # If we can't parse the error, fall through to general error handling
+                pass
+
+        # Handle the response
+        if response.status_code in [200, 204]:
+            print(f"Topic {topic} dropped successfully")
+        elif response.status_code == 404:
+            print(f"Topic {topic} not found")
+        elif response.status_code == 412:
+            print(f"Failed to drop topic: Topic has active subscriptions")
+            print("Use --force flag to force deletion or delete subscriptions first")
+            sys.exit(1)
+        elif response.status_code == 409:
+            # Handle other 409 errors that aren't partitioned topic related
+            try:
+                error_info = response.json()
+                reason = error_info.get("reason", "Unknown conflict")
+                print(f"Failed to drop topic: {reason}")
+            except:
+                print(f"Failed to drop topic: 409 - Conflict")
+            sys.exit(1)
+        else:
+            print(f"Failed to drop topic: {response.status_code} - {response.text}")
+            sys.exit(1)
+
     def produce(self, topic: str):
         """Produce messages from stdin, each line with UTF-8 encoding"""
         if not topic.startswith(('persistent://', 'non-persistent://')):
             topic = f'persistent://public/default/{topic}'
-            
+
         print(f"Producing to topic: {topic}")
         print("Type messages (Ctrl+C to stop):")
-        
+
         client = self.get_client()
         producer = client.create_producer(topic)
-        
+
         try:
             line_count = 0
             for line in sys.stdin:
@@ -102,7 +152,7 @@ class PulsarCat:
         """Consume messages from a topic"""
         if not topic.startswith(('persistent://', 'non-persistent://')):
             topic = f'persistent://public/default/{topic}'
-            
+
         print(f"Consuming from topic: {topic}")
         print(f"Subscription: {subscription}")
         print(f"Position: {position}")
@@ -110,26 +160,26 @@ class PulsarCat:
             print("Mode: Exit when no more messages available")
         else:
             print("Mode: Keep waiting for new messages (Ctrl+C to stop)")
-        
+
         client = self.get_client()
-        
+
         # Set initial position
         initial_pos = InitialPosition.Latest
         if position.lower() == 'earliest':
             initial_pos = InitialPosition.Earliest
-        
+
         consumer = client.subscribe(
             topic,
             subscription,
             consumer_type=ConsumerType.Shared,
             initial_position=initial_pos
         )
-        
+
         try:
             message_count = 0
             consecutive_timeouts = 0
             max_consecutive_timeouts = 3  # Exit after 3 consecutive timeouts in exit_on_end mode
-            
+
             while True:
                 try:
                     # Use shorter timeout for exit_on_end mode to be more responsive
@@ -137,13 +187,13 @@ class PulsarCat:
                     msg = consumer.receive(timeout_millis=timeout_ms)
                     message_count += 1
                     consecutive_timeouts = 0  # Reset timeout counter on successful receive
-                    
+
                     # Decode message
                     try:
                         content = msg.data().decode('utf-8')
                     except UnicodeDecodeError:
                         content = f"<binary data: {len(msg.data())} bytes>"
-                    
+
                     # Print message info
                     print(f"Message {message_count}:")
                     print(f"  Topic: {msg.topic_name()}")
@@ -152,15 +202,15 @@ class PulsarCat:
                     print(f"  Properties: {msg.properties()}")
                     print(f"  Content: {content}")
                     print("---")
-                    
+
                     # Acknowledge the message
                     consumer.acknowledge(msg)
-                    
+
                 except Exception as e:
                     # More robust timeout detection
                     error_str = str(e).lower()
                     is_timeout = any(keyword in error_str for keyword in ['timeout', 'timed out', 'no message available'])
-                    
+
                     if is_timeout:
                         consecutive_timeouts += 1
                         if exit_on_end:
@@ -174,7 +224,7 @@ class PulsarCat:
                         print(f"Error receiving message: {e}")
                         consecutive_timeouts = 0
                         continue
-                    
+
         except KeyboardInterrupt:
             print(f"\nConsumed {message_count} messages")
         finally:
@@ -186,20 +236,20 @@ class PulsarCat:
         """Check unacknowledged messages for a subscription"""
         if not topic.startswith(('persistent://', 'non-persistent://')):
             topic = f'persistent://public/default/{topic}'
-            
+
         print(f"Checking unacknowledged messages for:")
         print(f"  Topic: {topic}")
         print(f"  Subscription: {subscription}")
-        
+
         # Use admin API to get subscription stats
         encoded_topic = topic.replace('://', '/').replace('/', '%2F')
         url = f"{self.admin_url}/admin/v2/{topic.replace('://', '/')}/subscriptions/{subscription}"
-        
+
         try:
             response = requests.get(url)
             if response.status_code == 200:
                 stats = response.json()
-                
+
                 print("\nSubscription Statistics:")
                 print(f"  Type: {stats.get('type', 'N/A')}")
                 print(f"  Total Messages: {stats.get('msgOutCounter', 0)}")
@@ -207,46 +257,51 @@ class PulsarCat:
                 print(f"  Bytes Rate (per sec): {stats.get('bytesOutRate', 0)}")
                 print(f"  Unacked Messages: {stats.get('unackedMessages', 0)}")
                 print(f"  Blocked on Unacked Messages: {stats.get('blockedSubscriptionOnUnackedMsgs', False)}")
-                
+
                 consumers = stats.get('consumers', [])
                 print(f"  Active Consumers: {len(consumers)}")
-                
+
                 for i, consumer in enumerate(consumers):
                     print(f"    Consumer {i + 1}:")
                     print(f"      Name: {consumer.get('consumerName', 'N/A')}")
                     print(f"      Unacked Messages: {consumer.get('unackedMessages', 0)}")
                     print(f"      Blocked: {consumer.get('blockedConsumerOnUnackedMsgs', False)}")
-                    
+
             elif response.status_code == 404:
                 print("Subscription not found")
             else:
                 print(f"Failed to get subscription stats: {response.status_code} - {response.text}")
-                
+
         except Exception as e:
             print(f"Error checking unacked messages: {e}")
 
 
 def main():
     parser = argparse.ArgumentParser(description='Pulsar Cat - Command-line tool for Apache Pulsar')
-    parser.add_argument('--broker', '-b', 
+    parser.add_argument('--broker', '-b',
                        default=os.environ.get('PULSAR_BROKER_URL', 'pulsar://localhost:6650'),
                        help='Pulsar broker URL (default: pulsar://localhost:6650)')
     parser.add_argument('--admin-url', '-a',
                        default=os.environ.get('PULSAR_HTTP_URL', 'http://localhost:8080'),
                        help='Pulsar admin HTTP URL (default: http://localhost:8080)')
-    
+
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
-    
+
     # Create topic command
     create_parser = subparsers.add_parser('create-topic', help='Create a topic')
     create_parser.add_argument('--topic', '-t', required=True, help='Topic name')
     create_parser.add_argument('--partitions', '-p', type=int, default=0, help='Number of partitions (0 = non-partitioned)')
     create_parser.add_argument('--non-persistent', action='store_true', help='Create non-persistent topic')
-    
+
+    # Drop topic command
+    drop_parser = subparsers.add_parser('drop-topic', help='Drop/delete a topic')
+    drop_parser.add_argument('--topic', '-t', required=True, help='Topic name')
+    drop_parser.add_argument('--force', '-f', action='store_true', help='Force deletion even if topic has active subscriptions')
+
     # Produce command
     produce_parser = subparsers.add_parser('produce', help='Produce messages from stdin')
     produce_parser.add_argument('--topic', '-t', required=True, help='Topic name')
-    
+
     # Consume command
     consume_parser = subparsers.add_parser('consume', help='Consume messages from a topic')
     consume_parser.add_argument('--topic', '-t', required=True, help='Topic name')
@@ -255,24 +310,26 @@ def main():
                                help='Starting position (default: latest)')
     consume_parser.add_argument('--exit-on-end', action='store_true',
                                help='Exit when no more messages are available instead of waiting for new ones')
-    
+
     # Unacked command
     unacked_parser = subparsers.add_parser('unacked', help='Check unacknowledged messages')
     unacked_parser.add_argument('--topic', '-t', required=True, help='Topic name')
     unacked_parser.add_argument('--subscription', '-s', required=True, help='Subscription name')
-    
+
     args = parser.parse_args()
-    
+
     if not args.command:
         parser.print_help()
         sys.exit(1)
-    
+
     # Create PulsarCat instance
     pulsar_cat = PulsarCat(args.broker, args.admin_url)
-    
+
     try:
         if args.command == 'create-topic':
             pulsar_cat.create_topic(args.topic, args.partitions, args.non_persistent)
+        elif args.command == 'drop-topic':
+            pulsar_cat.drop_topic(args.topic, args.force)
         elif args.command == 'produce':
             pulsar_cat.produce(args.topic)
         elif args.command == 'consume':
@@ -284,4 +341,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main() 
+    main()
