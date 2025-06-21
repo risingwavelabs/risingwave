@@ -833,6 +833,9 @@ pub struct NatsCommon {
     #[serde(rename = "max_message_size")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_message_size: Option<i32>,
+    #[serde(rename = "allow_create_stream", default)]
+    #[serde_as(as = "DisplayFromStr")]
+    pub allow_create_stream: bool,
 }
 
 impl EnforceSecret for NatsCommon {
@@ -950,20 +953,28 @@ impl NatsCommon {
     pub(crate) async fn build_or_get_stream(
         &self,
         jetstream: jetstream::Context,
-        stream: String,
+        stream_str: String,
     ) -> ConnectorResult<jetstream::stream::Stream> {
         let subjects: Vec<String> = self.subject.split(',').map(|s| s.to_owned()).collect();
-        if let Ok(mut stream_instance) = jetstream.get_stream(&stream).await {
+        if let Ok(mut stream_instance) = jetstream.get_stream(&stream_str).await {
             tracing::info!(
                 "load existing nats stream ({:?}) with config {:?}",
-                stream,
+                stream_str,
                 stream_instance.info().await?
             );
             return Ok(stream_instance);
         }
 
+        if !self.allow_create_stream {
+            return Err(anyhow!(
+                "stream {} not found, set `allow_create_stream` to true to create a stream",
+                stream_str
+            )
+            .into());
+        }
+
         let mut config = jetstream::stream::Config {
-            name: stream.clone(),
+            name: stream_str.clone(),
             max_bytes: 1000000,
             subjects,
             ..Default::default()
@@ -985,7 +996,7 @@ impl NatsCommon {
         }
         tracing::info!(
             "create nats stream ({:?}) with config {:?}",
-            &stream,
+            &stream_str,
             config
         );
         let stream = jetstream.get_or_create_stream(config).await?;

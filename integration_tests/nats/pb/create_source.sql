@@ -5,6 +5,7 @@ WITH
     server_url = 'nats-server:4222',
     subject = 'live_stream_metrics',
     stream = 'risingwave',
+    allow_create_stream = 'true',
     connect_mode = 'plain'
   ) FORMAT PLAIN ENCODE PROTOBUF (
     message = 'livestream.schema.LiveStreamMetrics',

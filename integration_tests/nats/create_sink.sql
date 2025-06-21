@@ -13,6 +13,7 @@ WITH
     server_url = 'nats-server:4222',
     subject = 'subject1',
     type = 'append-only',
+    allow_create_stream = 'true',
     force_append_only = 'true',
     connect_mode = 'plain'
   );
@@ -41,6 +42,7 @@ WITH
     connector = 'nats',
     server_url = 'nats-server:4222',
     subject = 'subject2',
+    allow_create_stream = 'true',
     type = 'append-only',
     force_append_only = 'true',
     connect_mode = 'plain'

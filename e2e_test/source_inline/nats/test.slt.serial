@@ -3,6 +3,18 @@ control substitution on
 statement ok
 set streaming_use_shared_source to false;
 
+statement error set `allow_create_stream` to true to create a stream
+create table t_nats ( i int ) with (
+  connector = 'nats',
+  server_url='nats-server:4222',
+  subject='testsubject',
+  connect_mode='plain',
+  consumer.durable_name = 'demo1',
+  consumer.ack_policy = 'all',
+  stream='teststream',
+  consumer.max_ack_pending = '100000')
+format plain encode json;
+
 system ok
 python3 e2e_test/source_inline/nats/operation.py create_stream "teststream" "testsubject"
 

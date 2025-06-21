@@ -1067,6 +1067,10 @@ NatsConfig:
   - name: max_message_size
     field_type: i32
     required: false
+  - name: allow_create_stream
+    field_type: bool
+    required: false
+    default: Default::default
   - name: r#type
     field_type: String
     required: true
