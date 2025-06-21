@@ -1,0 +1,65 @@
+system ok
+set streaming_parallelism = 1;
+
+statement ok
+drop sink if exists jdbc_pg_sink;
+
+statement ok
+drop table if exists t cascade;
+
+statement ok
+drop table if exists array_table cascade;
+
+system ok
+psql -c 'drop table if exists t cascade;'
+
+statement ok
+create table t(a int primary key, b varchar[], c varchar[], d varchar[], e varchar[], f varchar[]);
+
+statement ok
+create table array_table(a int);
+
+statement ok
+insert into array_table select id as a from generate_series(1, 10000) z(id);
+
+statement ok
+create sink s1 into t as select
+  gen.id as a,
+  arr.b as b,
+  arr.c as c,
+  arr.d as d,
+  arr.e as e,
+  arr.f as f
+from
+  (select 
+    1 as a,
+    array_agg(repeat(arr.a::text, 20)) as b,
+    array_agg(repeat((arr.a + 1)::text, 19)) as c,
+    array_agg(repeat((arr.a + 2)::text, 21)) as d,
+    array_agg(repeat((arr.a + 3)::text, 18)) as e,
+    array_agg(repeat((arr.a + 4)::text, 15)) as f
+  from
+    array_table arr
+  ) arr
+  join (select 1 as dummy, id from generate_series(1, 100) gen(id)) gen
+  on arr.a = gen.dummy;
+
+statement ok
+flush;
+
+system ok
+psql -c 'create table t(a int primary key, b varchar[], c varchar[], d varchar[], e varchar[], f varchar[]);'
+
+control substitution on
+
+statement ok
+create sink jdbc_pg_sink from t with (
+    connector='jdbc',
+    jdbc.url='jdbc:postgresql://${PGHOST}:${PGPORT}/${PGDATABASE}?user=${PGUSER}&password=${PGPASSWORD}',
+    table.name='t',
+    primary_key='a',
+    type='upsert'
+);
+
+statement ok
+flush;
