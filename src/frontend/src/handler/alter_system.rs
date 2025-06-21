@@ -15,16 +15,12 @@
 use pgwire::pg_response::StatementType;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::system_param::{NOTICE_BARRIER_INTERVAL_MS, NOTICE_CHECKPOINT_FREQUENCY};
 use risingwave_sqlparser::ast::{Ident, SetVariableValue};
 
 use super::variable::set_var_to_param_str;
 use super::{HandlerArgs, RwPgResponse};
 use crate::error::{ErrorCode, Result};
-
-// Warn user if barrier_interval_ms is set above 5mins.
-const NOTICE_BARRIER_INTERVAL_MS: u32 = 300000;
-// Warn user if checkpoint_frequency is set above 60.
-const NOTICE_CHECKPOINT_FREQUENCY: u64 = 60;
 
 pub async fn handle_alter_system(
     handler_args: HandlerArgs,
