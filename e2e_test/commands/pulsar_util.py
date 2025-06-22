@@ -3,9 +3,6 @@
 import argparse
 import sys
 import os
-import json
-import time
-from typing import Optional
 import requests
 import pulsar
 from pulsar import ConsumerType, InitialPosition
@@ -277,7 +274,7 @@ class PulsarCat:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Pulsar Cat - Command-line tool for Apache Pulsar')
+    parser = argparse.ArgumentParser(description='Pulsar Util - Command-line tool for Apache Pulsar')
     parser.add_argument('--broker', '-b',
                        default=os.environ.get('PULSAR_BROKER_URL', 'pulsar://localhost:6650'),
                        help='Pulsar broker URL (default: pulsar://localhost:6650)')
