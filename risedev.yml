@@ -948,7 +948,7 @@ profile:
         port: 8432
         user: postgres
         database: metadata
-        # Add 100ms latency
+        # Add 100ms latency to any network call to the pg service
         latency-ms: 100
 
 # The `use` field specified in the above `risedev` section will refer to the templates below.

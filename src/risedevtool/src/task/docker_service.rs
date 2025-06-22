@@ -180,6 +180,7 @@ where
                 .arg(format!("risedev-{}", self.id()))
                 .arg("sh")
                 .arg("-c")
+                // add the `netem` queueing discipline to the network interface `eth0`` to emulate latency
                 .arg(format!(
                     "apk add --no-cache iproute2 && tc qdisc add dev eth0 root netem delay {}ms",
                     self.config.latency_ms()
