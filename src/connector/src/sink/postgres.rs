@@ -647,7 +647,7 @@ mod tests {
         let sql = create_delete_sql(&schema, schema_name, table_name, &[1]);
         check(
             sql,
-            expect![[r#"DELETE FROM "test_schema"."test_table" WHERE ("b") in ($1)"#]],
+            expect![[r#"DELETE FROM "test_schema"."test_table" WHERE ("b") in (($1))"#]],
         );
         let table_name = "test_table";
         let sql = create_delete_sql(&schema, schema_name, table_name, &[0, 1]);
