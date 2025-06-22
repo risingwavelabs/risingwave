@@ -16,27 +16,27 @@ class PulsarCat:
 
     def _normalize_topic(self, topic: str, default_persistent: bool = True) -> str:
         """Normalize topic name by adding scheme and default namespace if missing.
-        
+
         Args:
             topic: Topic name to normalize
             default_persistent: Whether to use persistent:// as default scheme (True) or non-persistent:// (False)
-        
+
         Returns:
             Normalized topic name with full scheme
         """
         if topic.startswith(('persistent://', 'non-persistent://')):
             return topic
-        
+
         scheme = 'persistent://' if default_persistent else 'non-persistent://'
         return f'{scheme}public/default/{topic}'
 
     def _normalize_topic_with_persistence(self, topic: str, non_persistent: bool = False) -> str:
         """Normalize topic name and handle persistence type conversion.
-        
+
         Args:
             topic: Topic name to normalize
             non_persistent: Whether the topic should be non-persistent
-        
+
         Returns:
             Normalized topic name with appropriate persistence scheme
         """
