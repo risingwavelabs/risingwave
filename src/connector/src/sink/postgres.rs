@@ -341,15 +341,15 @@ impl PostgresSinkWriter {
         let insert_sql = client
             .prepare(&raw_insert_sql)
             .await
-            .context("failed to prepare insert statement")?;
+            .with_context(|| format!("failed to prepare insert statement: {}", raw_insert_sql))?;
         let upsert_sql = client
             .prepare(&raw_upsert_sql)
             .await
-            .context("failed to prepare upsert statement")?;
+            .with_context(|| format!("failed to prepare upsert statement: {}", raw_upsert_sql))?;
         let delete_sql = client
             .prepare(&raw_delete_sql)
             .await
-            .context("failed to prepare delete statement")?;
+            .with_context(|| format!("failed to prepare delete statement: {}", raw_delete_sql))?;
 
         let writer = Self {
             is_append_only,
@@ -524,6 +524,11 @@ fn create_delete_sql(
         quote_identifier(schema_name),
         quote_identifier(table_name)
     );
+    let pk_indices = if pk_indices.is_empty() {
+        (0..schema.len()).collect_vec()
+    } else {
+        pk_indices.to_vec()
+    };
     let pk = {
         let pk_symbols = pk_indices
             .iter()
@@ -545,6 +550,9 @@ fn create_upsert_sql(
     pk_indices_lookup: &HashSet<usize>,
 ) -> String {
     let insert_sql = create_insert_sql(schema, schema_name, table_name);
+    if pk_indices.is_empty() {
+        return insert_sql;
+    }
     let pk_columns = pk_indices
         .iter()
         .map(|pk_index| quote_identifier(&schema.fields()[*pk_index].name))
