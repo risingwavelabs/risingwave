@@ -539,7 +539,7 @@ fn create_delete_sql(
     let parameters: String = (0..pk_indices.len())
         .map(|i| format!("${}", i + 1))
         .join(", ");
-    format!("DELETE FROM {normalized_table_name} WHERE {pk} in ({parameters})")
+    format!("DELETE FROM {normalized_table_name} WHERE {pk} in (({parameters}))")
 }
 
 fn create_upsert_sql(
@@ -653,7 +653,7 @@ mod tests {
         let sql = create_delete_sql(&schema, schema_name, table_name, &[0, 1]);
         check(
             sql,
-            expect![[r#"DELETE FROM "test_schema"."test_table" WHERE ("a", "b") in ($1, $2)"#]],
+            expect![[r#"DELETE FROM "test_schema"."test_table" WHERE ("a", "b") in (($1, $2))"#]],
         );
     }
 
