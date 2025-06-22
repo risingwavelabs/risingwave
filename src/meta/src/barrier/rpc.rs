@@ -672,7 +672,10 @@ impl ControlStreamManager {
             background_mviews
                 .iter()
                 .map(|(table_id, (definition, stream_job_fragments))| {
-                    (*table_id, (definition.clone(), stream_job_fragments))
+                    (
+                        *table_id,
+                        (definition.clone(), stream_job_fragments, Default::default()),
+                    )
                 }),
             hummock_version_stats,
         );
