@@ -14,6 +14,48 @@ class PulsarCat:
         self.admin_url = admin_url
         self.client = None
 
+    def _normalize_topic(self, topic: str, default_persistent: bool = True) -> str:
+        """Normalize topic name by adding scheme and default namespace if missing.
+        
+        Args:
+            topic: Topic name to normalize
+            default_persistent: Whether to use persistent:// as default scheme (True) or non-persistent:// (False)
+        
+        Returns:
+            Normalized topic name with full scheme
+        """
+        if topic.startswith(('persistent://', 'non-persistent://')):
+            return topic
+        
+        scheme = 'persistent://' if default_persistent else 'non-persistent://'
+        return f'{scheme}public/default/{topic}'
+
+    def _normalize_topic_with_persistence(self, topic: str, non_persistent: bool = False) -> str:
+        """Normalize topic name and handle persistence type conversion.
+        
+        Args:
+            topic: Topic name to normalize
+            non_persistent: Whether the topic should be non-persistent
+        
+        Returns:
+            Normalized topic name with appropriate persistence scheme
+        """
+        # Determine topic type
+        if non_persistent:
+            if topic.startswith('persistent://'):
+                return topic.replace('persistent://', 'non-persistent://', 1)
+            elif not topic.startswith('non-persistent://'):
+                return f'non-persistent://public/default/{topic}'
+            else:
+                return topic
+        else:
+            if topic.startswith('non-persistent://'):
+                return topic.replace('non-persistent://', 'persistent://', 1)
+            elif not topic.startswith('persistent://'):
+                return f'persistent://public/default/{topic}'
+            else:
+                return topic
+
     def get_client(self):
         if self.client is None:
             self.client = pulsar.Client(self.broker_url)
@@ -26,18 +68,7 @@ class PulsarCat:
     def create_topic(self, topic: str, partitions: int = 0, non_persistent: bool = False):
         """Create a topic (persistent/non-persistent, partitioned or not)"""
 
-        # Determine topic type
-        if non_persistent:
-            if topic.startswith('persistent://'):
-                topic = topic.replace('persistent://', 'non-persistent://', 1)
-            elif not topic.startswith('non-persistent://'):
-                topic = f'non-persistent://public/default/{topic}'
-        else:
-            if topic.startswith('non-persistent://'):
-                topic = topic.replace('non-persistent://', 'persistent://', 1)
-            elif not topic.startswith('persistent://'):
-                topic = f'persistent://public/default/{topic}'
-
+        topic = self._normalize_topic_with_persistence(topic, non_persistent)
         print(f"Creating topic: {topic}")
 
         if partitions > 0:
@@ -64,10 +95,7 @@ class PulsarCat:
     def drop_topic(self, topic: str, force: bool = False):
         """Drop/delete a topic"""
 
-        # Handle topic naming - if no scheme specified, assume persistent
-        if not topic.startswith(('persistent://', 'non-persistent://')):
-            topic = f'persistent://public/default/{topic}'
-
+        topic = self._normalize_topic(topic)
         print(f"Dropping topic: {topic}")
 
         # Try to delete as non-partitioned topic first
@@ -123,9 +151,7 @@ class PulsarCat:
 
     def produce(self, topic: str):
         """Produce messages from stdin, each line with UTF-8 encoding"""
-        if not topic.startswith(('persistent://', 'non-persistent://')):
-            topic = f'persistent://public/default/{topic}'
-
+        topic = self._normalize_topic(topic)
         print(f"Producing to topic: {topic}")
         print("Type messages (Ctrl+C to stop):")
 
@@ -147,9 +173,7 @@ class PulsarCat:
 
     def consume(self, topic: str, subscription: str, position: str = 'latest', exit_on_end: bool = False):
         """Consume messages from a topic"""
-        if not topic.startswith(('persistent://', 'non-persistent://')):
-            topic = f'persistent://public/default/{topic}'
-
+        topic = self._normalize_topic(topic)
         print(f"Consuming from topic: {topic}")
         print(f"Subscription: {subscription}")
         print(f"Position: {position}")
@@ -231,16 +255,14 @@ class PulsarCat:
 
     def check_unacked(self, topic: str, subscription: str):
         """Check unacknowledged messages for a subscription"""
-        if not topic.startswith(('persistent://', 'non-persistent://')):
-            topic = f'persistent://public/default/{topic}'
-
+        topic = self._normalize_topic(topic)
         print(f"Checking unacknowledged messages for:")
         print(f"  Topic: {topic}")
         print(f"  Subscription: {subscription}")
 
         # Use admin API to get subscription stats
         encoded_topic = topic.replace('://', '/').replace('/', '%2F')
-        url = f"{self.admin_url}/admin/v2/{topic.replace('://', '/')}/subscriptions/{subscription}"
+        url = f"{self.admin_url}/admin/v2/{encoded_topic}/subscriptions/{subscription}"
 
         try:
             response = requests.get(url)

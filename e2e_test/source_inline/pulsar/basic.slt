@@ -5,6 +5,7 @@ curl "$PULSAR_HTTP_URL/admin/v2/brokers/ready"
 ----
 ok
 
+
 # test with partitioned topic
 system ok
 python3 e2e_test/commands/pulsar_util.py --broker '${PULSAR_BROKER_URL}' --admin-url '${PULSAR_HTTP_URL}' create-topic --topic 'persistent://public/default/topic' --partitions 3
@@ -44,6 +45,7 @@ with (
   topic = 'persistent://public/default/topic',
 ) format plain encode json;
 
+
 statement ok
 create table t_unpartitioned (
   f1 int,
@@ -65,11 +67,13 @@ with (
   topic = 'non-persistent://public/default/non-persistent',
 ) format plain encode json;
 
+
 query IT rowsort retry 3 backoff 2s
 select * from t_partitioned;
 ----
 12 foo
 17 bar
+
 
 query IT rowsort retry 3 backoff 2s
 select * from t_unpartitioned;
@@ -77,10 +81,12 @@ select * from t_unpartitioned;
 12 foo
 17 bar
 
+
 query I retry 3 backoff 2s
 select count(*) from t_non_persistent;
 ----
 0
+
 
 system ok
 python3 e2e_test/commands/pulsar_util.py --broker '${PULSAR_BROKER_URL}' --admin-url '${PULSAR_HTTP_URL}' produce -t "non-persistent://public/default/non-persistent" <<EOF
@@ -95,6 +101,7 @@ select * from t_non_persistent;
 ----
 12 foo
 17 bar
+
 
 statement ok
 drop table t_partitioned;
