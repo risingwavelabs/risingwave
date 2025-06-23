@@ -167,7 +167,7 @@ impl Distribution {
                         (
                             actor.actor_id as hash::ActorId,
                             actor.vnode_bitmap.clone().unwrap(),
-                        )
+                        )s
                     })
                     .collect();
 
