@@ -16,7 +16,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::{env, thread};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 
 use super::{ExecuteContext, Task};
 use crate::DummyService;
@@ -186,8 +186,19 @@ where
                     self.config.latency_ms()
                 ));
 
-            // Run the tc command, but don't fail if it doesn't work
-            let _ = tc_cmd.output();
+            match tc_cmd.output() {
+                Ok(output) => {
+                    if !output.status.success() {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        return Err(
+                            anyhow!("{}", stderr).context("failed to configure network latency")
+                        );
+                    }
+                }
+                Err(e) => {
+                    return Err(anyhow!(e).context("failed to configure network latency"));
+                }
+            }
         }
 
         ctx.pb.set_message("started");
