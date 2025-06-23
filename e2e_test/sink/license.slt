@@ -165,7 +165,8 @@ db error: ERROR: Failed to run the query
 Caused by these errors (recent errors listed first):
   1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSink`) failed: Internal error
   2: failed to validate sink
-  3: sink cannot pass validation: INTERNAL: Connection is closed
+  3: ElasticSearch/OpenSearch error
+  4: relative URL without a base
 
 
 statement error
