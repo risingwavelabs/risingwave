@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_connector::source::SplitMetaData;
 use risingwave_meta::barrier::BarrierManagerRef;
 use risingwave_meta::controller::fragment::StreamingJobInfo;
@@ -554,14 +555,14 @@ impl StreamManagerService for StreamServiceImpl {
             .mutate_fragments_by_job_id(
                 job_id as _,
                 |_mask, stream_node| {
-                    if let Some(body) = &mut stream_node.node_body
-                        && let NodeBody::SyncLogStore(sync_log_store) = body
-                    {
-                        sync_log_store.aligned = aligned;
-                        true
-                    } else {
-                        false
-                    }
+                    let mut visited = false;
+                    visit_stream_node_mut(stream_node, |body| {
+                        if let NodeBody::SyncLogStore(sync_log_store) = body {
+                            sync_log_store.aligned = aligned;
+                            visited = true
+                        }
+                    });
+                    visited
                 },
                 "no fragments found with synced log store",
             )
