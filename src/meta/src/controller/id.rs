@@ -15,8 +15,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use risingwave_meta_model::prelude::{Actor, Fragment};
-use risingwave_meta_model::{actor, fragment};
+use risingwave_meta_model::fragment;
+use risingwave_meta_model::prelude::Fragment;
 use sea_orm::sea_query::{Expr, Func};
 use sea_orm::{DatabaseConnection, EntityTrait, QuerySelect};
 
@@ -55,16 +55,7 @@ impl<const TYPE: IdCategoryType> IdGenerator<TYPE> {
                 .one(conn)
                 .await?
                 .unwrap_or_default(),
-            IdCategory::Actor => Actor::find()
-                .select_only()
-                .expr(Func::if_null(
-                    Expr::col(actor::Column::ActorId).max().add(1),
-                    1,
-                ))
-                .into_tuple()
-                .one(conn)
-                .await?
-                .unwrap_or_default(),
+            IdCategory::Actor => 0,
             _ => unreachable!("IdGeneratorV2 only supports Table, Fragment, and Actor"),
         };
 

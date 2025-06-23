@@ -491,10 +491,10 @@ async fn test_graph_builder() -> MetaResult<()> {
 
     let stream_job_fragments = StreamJobFragments::for_test(TableId::default(), graph);
     let actors = stream_job_fragments.actors();
-    let mview_actor_ids = stream_job_fragments.mview_actor_ids();
+    let mview_fragment_ids = stream_job_fragments.mview_fragment_ids();
 
+    assert_eq!(mview_fragment_ids.len(), 1);
     assert_eq!(actors.len(), 9);
-    assert_eq!(mview_actor_ids, vec![1]);
     assert_eq!(internal_tables.len(), 3);
 
     for fragment in stream_job_fragments.fragments() {

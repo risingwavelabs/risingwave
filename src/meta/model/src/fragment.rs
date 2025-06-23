@@ -35,9 +35,7 @@ pub struct Model {
     pub vnode_count: i32,
 }
 
-#[derive(
-    Copy, Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize, Hash,
-)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "string(None)")]
 pub enum DistributionType {
     #[sea_orm(string_value = "SINGLE")]
@@ -67,8 +65,8 @@ impl From<PbFragmentDistributionType> for DistributionType {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(has_many = "super::actor::Entity")]
-    Actor,
+    // #[sea_orm(has_many = "super::actor::Entity")]
+    // Actor,
     #[sea_orm(
         belongs_to = "super::object::Entity",
         from = "Column::JobId",
@@ -78,12 +76,11 @@ pub enum Relation {
     )]
     Object,
 }
-
-impl Related<super::actor::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Actor.def()
-    }
-}
+// impl Related<super::actor::Entity> for Entity {
+//     fn to() -> RelationDef {
+//         Relation::Actor.def()
+//     }
+// }
 
 impl Related<super::object::Entity> for Entity {
     fn to() -> RelationDef {

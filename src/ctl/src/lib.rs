@@ -897,7 +897,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::meta::validate_source(context, props).await?
         }
         Commands::Meta(MetaCommands::GraphCheck { endpoint }) => {
-            cmd_impl::meta::graph_check(endpoint).await?
+            cmd_impl::meta::graph_check(endpoint)?
         }
         Commands::AwaitTree(AwaitTreeCommands::Dump {
             actor_traces_format,

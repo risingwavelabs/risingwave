@@ -228,7 +228,8 @@ async fn test_issue_19563() -> Result<()> {
         .with_env_filter("risingwave_stream::executor::source::source_backfill_executor=DEBUG,integration_tests=DEBUG")
         .init();
 
-    let mut cluster = Cluster::start(Configuration::for_scale_shared_source()).await?;
+    let configuration = Configuration::for_scale_shared_source();
+    let mut cluster = Cluster::start(configuration).await?;
     cluster.create_kafka_topics(convert_args!(hashmap!(
         "shared_source" => 4,
     )));
@@ -249,23 +250,7 @@ CREATE SOURCE s(v1 timestamp with time zone) WITH (
     session
         .run("create materialized view mv1 as select v1 from s where v1 between now() and now() + interval '1 day' * 365 * 2000;")
         .await?;
-    let source_fragment = cluster
-        .locate_one_fragment([
-            identity_contains("Source"),
-            no_identity_contains("StreamSourceScan"),
-        ])
-        .await?;
-    let source_workers = source_fragment.all_worker_count().into_keys().collect_vec();
-    let source_backfill_dynamic_filter_fragment = cluster
-        .locate_one_fragment([
-            identity_contains("StreamSourceScan"),
-            identity_contains("StreamDynamicFilter"),
-        ])
-        .await?;
-    let source_backfill_workers = source_backfill_dynamic_filter_fragment
-        .all_worker_count()
-        .into_keys()
-        .collect_vec();
+
     validate_splits_aligned(&mut cluster).await?;
     expect_test::expect![[r#"
         1 6 HASH {SOURCE} 6 256
@@ -278,28 +263,9 @@ CREATE SOURCE s(v1 timestamp with time zone) WITH (
         8 CREATED ADAPTIVE 256"#]]
     .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
 
-    // SourceBackfill/DynamicFilter cannot be scaled because of NoShuffle.
-    assert!(
-        &cluster
-            .reschedule(
-                source_backfill_dynamic_filter_fragment
-                    .reschedule([WorkerSlotId::new(source_backfill_workers[0], 0)], []),
-            )
-            .await.unwrap_err().to_string().contains("rescheduling NoShuffle downstream fragment (maybe Chain fragment) is forbidden, please use NoShuffle upstream fragment (like Materialized fragment) to scale"),
-    );
-
     // source is the NoShuffle upstream. It can be scaled, and the downstream SourceBackfill/DynamicFilter will be scaled together.
-    cluster
-        .reschedule(source_fragment.reschedule(
-            [
-                WorkerSlotId::new(source_workers[0], 0),
-                WorkerSlotId::new(source_workers[0], 1),
-                WorkerSlotId::new(source_workers[2], 0),
-            ],
-            [],
-        ))
-        .await
-        .unwrap();
+    cluster.run("alter source s set parallelism = 3").await?;
+
     validate_splits_aligned(&mut cluster).await?;
     expect_test::expect![[r#"
         1 6 HASH {SOURCE} 3 256
@@ -313,18 +279,8 @@ CREATE SOURCE s(v1 timestamp with time zone) WITH (
     .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
 
     // resolve_no_shuffle for backfill fragment is OK, which will scale the upstream together.
-    cluster
-        .reschedule_resolve_no_shuffle(source_backfill_dynamic_filter_fragment.reschedule(
-            [],
-            [
-                WorkerSlotId::new(source_workers[0], 0),
-                WorkerSlotId::new(source_workers[0], 1),
-                WorkerSlotId::new(source_workers[2], 0),
-                WorkerSlotId::new(source_workers[2], 1),
-            ],
-        ))
-        .await
-        .unwrap();
+    cluster.run("alter source s set parallelism = 7").await?;
+
     validate_splits_aligned(&mut cluster).await?;
     expect_test::expect![[r#"
         1 6 HASH {SOURCE} 7 256

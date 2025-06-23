@@ -50,9 +50,11 @@ pub async fn handle_alter_parallelism(
             StatementType::ALTER_TABLE
             | StatementType::ALTER_MATERIALIZED_VIEW
             | StatementType::ALTER_INDEX => {
+                println!("real_table_name: {}", real_table_name);
                 let (table, schema_name) =
                     reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
 
+                println!("table: {:#?}", table);
                 match (table.table_type(), stmt_type) {
                     (TableType::Internal, _) => {
                         // we treat internal table as NOT FOUND
@@ -105,14 +107,20 @@ pub async fn handle_alter_parallelism(
         }
     };
 
+    println!("f111");
+
     let target_parallelism = extract_table_parallelism(parallelism)?;
 
     let mut builder = RwPgResponse::builder(stmt_type);
+
+    println!("f222");
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .alter_parallelism(job_id, target_parallelism, deferred)
         .await?;
+
+    println!("f3333");
 
     if deferred {
         builder = builder.notice("DEFERRED is used, please ensure that automatic parallelism control is enabled on the meta, otherwise, the alter will not take effect.".to_owned());

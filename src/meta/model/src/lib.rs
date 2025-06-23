@@ -69,6 +69,7 @@ pub mod user_privilege;
 pub mod view;
 pub mod worker;
 pub mod worker_property;
+pub mod source_splits;
 
 pub type WorkerId = i32;
 
