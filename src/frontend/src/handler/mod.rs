@@ -52,6 +52,7 @@ mod alter_set_schema;
 mod alter_sink_props;
 mod alter_source_column;
 mod alter_source_with_sr;
+mod alter_streaming_enable_unaligned_join;
 mod alter_streaming_rate_limit;
 mod alter_swap_rename;
 mod alter_system;
@@ -986,7 +987,7 @@ pub async fn handle(
                             "ALTER VIEW SET STREAMING_ENABLE_UNALIGNED_JOIN is only supported for materialized views"
                         );
                     }
-                    todo!()
+                    alter_streaming_enable_unaligned_join::handle_alter_streaming_enable_unaligned_join(handler_args, name, enable).await
                 }
             }
         }
@@ -1049,7 +1050,12 @@ pub async fn handle(
                 .await
             }
             AlterSinkOperation::SetStreamingEnableUnalignedJoin { enable } => {
-                todo!()
+                alter_streaming_enable_unaligned_join::handle_alter_streaming_enable_unaligned_join(
+                    handler_args,
+                    name,
+                    enable,
+                )
+                .await
             }
         },
         Statement::AlterSubscription { name, operation } => match operation {
