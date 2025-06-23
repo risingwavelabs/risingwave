@@ -7,8 +7,12 @@ REPO_ROOT=${PWD}
 
 source ci/scripts/common.sh
 
-# Enable coverage instrumentation.
-export RW_BUILD_INSTRUMENT_COVERAGE=1
+# Enable coverage instrumentation only for ci-dev (PR workflow),
+# as ci-release (main-cron workflow) has heavier workload.
+if [[ "$profile" == "ci-dev" ]]; then
+    export RW_BUILD_INSTRUMENT_COVERAGE=1
+fi
+
 # `cargo-nextest` will spawn a process for each test. Avoid including `%p` in the file name pattern
 # to avoid creating too many profraw files. Instead, use `%m` to reuse the profraw files for the
 # same test binary. Here `%4m` means that there's a pool of 4 profraw files for each test binary.
