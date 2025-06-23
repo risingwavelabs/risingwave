@@ -12,7 +12,7 @@ source ci/scripts/common.sh
 # to avoid creating too many profraw files.
 # https://github.com/taiki-e/cargo-llvm-cov/issues/335#issuecomment-1890349373
 export RW_BUILD_INSTRUMENT_COVERAGE=1
-export LLVM_PROFILE_FILE='/risingwave/target/risingwave-unit-test-%m.profraw'
+export LLVM_PROFILE_FILE='/risingwave/target/risingwave-unit-test-%8m.profraw'
 
 echo "+++ Run unit tests"
 # use tee to disable progress bar
