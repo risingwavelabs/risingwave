@@ -64,6 +64,10 @@ pub const DEFAULT_SUPER_USER_ID: u32 = 1;
 pub const DEFAULT_SUPER_USER_FOR_PG: &str = "postgres";
 pub const DEFAULT_SUPER_USER_FOR_PG_ID: u32 = 2;
 
+// This is the default superuser for admin, which is used only for cloud control plane.
+pub const DEFAULT_SUPER_USER_FOR_ADMIN: &str = "rwadmin";
+pub const DEFAULT_SUPER_USER_FOR_ADMIN_ID: u32 = 3;
+
 pub const NON_RESERVED_USER_ID: i32 = 11;
 
 pub const MAX_SYS_CATALOG_NUM: i32 = 5000;
@@ -82,7 +86,7 @@ pub fn is_system_schema(schema_name: &str) -> bool {
 
 pub const RW_RESERVED_COLUMN_NAME_PREFIX: &str = "_rw_";
 
-/// When there is no primary key specified while creating source, will use the
+/// When there is no primary key specified while creating source, will use
 /// the message key as primary key in `BYTEA` type with this name.
 /// Note: the field has version to track, please refer to [`default_key_column_name_version_mapping`]
 pub const DEFAULT_KEY_COLUMN_NAME: &str = "_rw_key";

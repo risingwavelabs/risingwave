@@ -931,6 +931,14 @@ impl MigrationTrait for Migration {
                 true.into(),
                 true.into(),
             ])
+            .values_panic([
+                3.into(),
+                "rwadmin".into(),
+                true.into(),
+                true.into(),
+                true.into(),
+                true.into(),
+            ])
             .to_owned();
 
         // Since User table is newly created, we assume that the initial user id of `root` is 1 and `postgres` is 2.
