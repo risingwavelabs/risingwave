@@ -137,7 +137,6 @@ where
 
         cmd.arg(self.config.image());
 
-        // Always add args for PostgreSQL
         cmd.args(self.config.args());
 
         Ok(cmd)
