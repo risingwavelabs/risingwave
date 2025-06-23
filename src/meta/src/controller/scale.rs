@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::num::NonZeroUsize;
 use std::ops::{BitAnd, BitOrAssign};
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
@@ -24,8 +26,8 @@ use risingwave_meta_model::prelude::{
     Actor, Fragment, FragmentRelation, Sink, Source, StreamingJob, Table,
 };
 use risingwave_meta_model::{
-    ConnectorSplits, DispatcherType, FragmentId, ObjectId, VnodeBitmap, actor, fragment,
-    fragment_relation, sink, source, streaming_job, table,
+    ConnectorSplits, DispatcherType, FragmentId, ObjectId, StreamingParallelism, VnodeBitmap,
+    WorkerId, actor, fragment, fragment_relation, object, sink, source, streaming_job, table,
 };
 use risingwave_meta_model_migration::{
     Alias, CommonTableExpression, Expr, IntoColumnRef, QueryStatementBuilder, SelectStatement,
@@ -34,12 +36,16 @@ use risingwave_meta_model_migration::{
 use risingwave_pb::stream_plan::PbDispatcher;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DbErr, DerivePartialModel, EntityTrait, FromQueryResult,
-    QueryFilter, QuerySelect, Statement, TransactionTrait,
+    JoinType, QueryFilter, QuerySelect, RelationTrait, Statement, TransactionTrait,
 };
 
+
 use crate::controller::catalog::{ActorInfo, CatalogController};
+use crate::barrier::Reschedule;
+use crate::controller::catalog::CatalogController;
 use crate::controller::utils::{get_existing_job_resource_group, get_fragment_actor_dispatchers};
-use crate::model::ActorId;
+use crate::model::{ActorId, StreamActor};
+use crate::stream::AssignerBuilder;
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find `no_shuffle` upstream relation graph for target fragments.
@@ -664,3 +670,518 @@ impl CatalogController {
         Ok(())
     }
 }
+
+async fn render_fragments<C>(
+    txn: &C,
+    fragment_ids: &[FragmentId],
+    workers: BTreeMap<WorkerId, NonZeroUsize>,
+) -> MetaResult<Vec<()>>
+where
+    C: ConnectionTrait,
+{
+    let total_parallelism = workers.values().map(|w| w.get()).sum::<usize>();
+
+    let graphs = find_no_shuffle_dags_detailed(txn, fragment_ids).await?;
+
+    let all_fragment_ids: HashSet<_> = graphs
+        .iter()
+        .flat_map(|graph| graph.components.iter().cloned())
+        .collect();
+
+    let fragments = Fragment::find()
+        .filter(fragment::Column::FragmentId.is_in(all_fragment_ids.clone()))
+        .all(txn)
+        .await?;
+
+    let fragment_map: HashMap<_, _> = fragments.into_iter().map(|f| (f.fragment_id, f)).collect();
+
+    let streaming_jobs = StreamingJob::find()
+        .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
+        .join(JoinType::InnerJoin, object::Relation::Fragment.def())
+        .filter(fragment::Column::FragmentId.is_in(all_fragment_ids))
+        .all(txn)
+        .await?;
+
+    let streaming_jobs_map: HashMap<_, _> = streaming_jobs
+        .into_iter()
+        .map(|job| (job.job_id, job))
+        .collect();
+
+    let job_definitions =
+        resolve_streaming_job_definition(txn, &streaming_jobs_map.keys().cloned().collect())
+            .await?;
+
+    let mut fragment_actors = HashMap::new();
+
+    for NoShuffleEnsemble {
+        entries,
+        components,
+    } in graphs
+    {
+        let entry_fragments = entries
+            .iter()
+            .map(|fragment_id| fragment_map.get(fragment_id).unwrap())
+            .collect_vec();
+
+        let (job_id, vnode_count) = entry_fragments
+            .iter()
+            .map(|f| (f.job_id, f.vnode_count as usize))
+            .exactly_one()
+            .map_err(|_| anyhow!("Multiple jobs found in no-shuffle ensemble"))?;
+
+        let job = streaming_jobs_map.get(&job_id).unwrap();
+
+        let parallelism = &job.parallelism;
+        let max_parallelism = job.max_parallelism;
+
+        let fact_parallelism = match parallelism {
+            StreamingParallelism::Fixed(parallelism) => *parallelism,
+            _ => total_parallelism,
+        }
+        .min(max_parallelism as usize)
+        .min(vnode_count);
+
+        let assigner = AssignerBuilder::new(job_id).build();
+
+        let actors = (0..fact_parallelism).collect_vec();
+        let vnodes = (0..vnode_count).collect_vec();
+
+        let assignment = assigner.assign_hierarchical(&workers, &actors, &vnodes)?;
+
+        for fragment_id in components {
+            let fragment = fragment_map.get(&fragment_id).unwrap();
+
+            let actors = assignment
+                .iter()
+                .flat_map(|(worker_id, actors)| {
+                    actors
+                        .iter()
+                        .map(move |(actor_id, vnodes)| (worker_id, actor_id, vnodes))
+                })
+                .map(|(&worker_id, &actor_idx, vnodes)| {
+                    let vnode_bitmap = match fragment.distribution_type {
+                        DistributionType::Single => None,
+                        DistributionType::Hash => Some(Bitmap::from_indices(vnode_count, vnodes)),
+                    };
+                    let mview_definition = job_definitions
+                        .get(&fragment.job_id)
+                        .cloned()
+                        .unwrap_or_else(|| "unknown".to_owned());
+                    StreamActor {
+                        actor_id: (fragment_id << 16) as u32 | actor_idx as u32,
+                        fragment_id: fragment_id as u32,
+                        vnode_bitmap,
+                        mview_definition,
+                        expr_context: None,
+                    }
+                })
+                .collect_vec();
+
+            fragment_actors.insert(fragment_id, actors);
+        }
+    }
+
+    todo!()
+}
+
+// Helper struct to make the function signature cleaner and to properly bundle the required data.
+#[derive(Debug)]
+pub struct ActorGraph<'a> {
+    pub fragments: &'a HashMap<FragmentId, (Fragment, Vec<StreamActor>)>,
+    pub locations: &'a HashMap<ActorId, WorkerId>,
+}
+
+fn diff_graph(prev: &ActorGraph, curr: &ActorGraph) -> MetaResult<HashMap<FragmentId, Reschedule>> {
+    // Collect all unique fragment IDs from both previous and current graphs.
+    let prev_fragment_ids: HashSet<_> = prev.fragments.keys().cloned().collect();
+    let curr_fragment_ids: HashSet<_> = curr.fragments.keys().cloned().collect();
+    let all_fragment_ids = prev_fragment_ids.union(&curr_fragment_ids);
+
+    let mut reschedules = HashMap::new();
+
+    for &fragment_id in all_fragment_ids {
+        let prev_state = prev.fragments.get(&fragment_id);
+        let curr_state = curr.fragments.get(&fragment_id);
+
+        let prev
+
+        let prev_actor_map: HashMap<_, _> = prev_actors.iter().map(|a| (a.actor_id, a)).collect();
+        let curr_actor_map: HashMap<_, _> = curr_actors.iter().map(|a| (a.actor_id, a)).collect();
+
+        let prev_ids: HashSet<_> = prev_actor_map.keys().cloned().collect();
+        let curr_ids: HashSet<_> = curr_actor_map.keys().cloned().collect();
+
+        // Find removed, added, and kept actors.
+        //
+        // 找出被移除、被添加和被保留的 actor。
+        let removed_actors: HashSet<_> = &prev_ids - &curr_ids;
+        let added_actor_ids: HashSet<_> = &curr_ids - &prev_ids;
+        let kept_ids: HashSet<_> = prev_ids.intersection(&curr_ids).cloned().collect();
+
+        let mut added_actors_by_worker = HashMap::new();
+        for &actor_id in &added_actor_ids {
+            let worker_id = curr
+                .locations
+                .get(&actor_id)
+                .ok_or_else(|| anyhow!("BUG: Worker not found for new actor {}", actor_id))?;
+            added_actors_by_worker
+                .entry(*worker_id)
+                .or_insert_with(Vec::new)
+                .push(actor_id);
+        }
+
+        let mut vnode_bitmap_updates = HashMap::new();
+        for actor_id in kept_ids {
+            let prev_actor = prev_actor_map[&actor_id];
+            let curr_actor = curr_actor_map[&actor_id];
+
+            // Check if the vnode distribution has changed.
+            //
+            // 检查 vnode 分布是否发生变化。
+            if prev_actor.vnode_bitmap != curr_actor.vnode_bitmap {
+                if let Some(bitmap) = curr_actor.vnode_bitmap.clone() {
+                    vnode_bitmap_updates.insert(actor_id, bitmap);
+                }
+            }
+        }
+
+        // Only generate a reschedule plan if there are actual changes.
+        //
+        // 只有在确实发生变更时才生成 reschedule 计划。
+        if !added_actors_by_worker.is_empty()
+            || !removed_actors.is_empty()
+            || !vnode_bitmap_updates.is_empty()
+        {
+            Some(Reschedule {
+                added_actors: added_actors_by_worker,
+                removed_actors,
+                vnode_bitmap_updates,
+                // NOTE: The following fields require more context about graph topology
+                // (like upstream/downstream relations) and source configurations.
+                // They are left as placeholders and should be populated by the caller
+                // or with more context.
+                //
+                // 注意: 以下字段需要更多关于 graph 拓扑（如上下游关系）和数据源配置的上下文信息。
+                // 这里作为占位符，应由调用者或在拥有更多上下文的地方填充。
+                upstream_fragment_dispatcher_ids: vec![], /* e.g., collect from prev_frag.upstreams */
+                upstream_dispatcher_mapping: None,
+                downstream_fragment_ids: vec![], // e.g., collect from prev_frag.downstreams
+                actor_splits: HashMap::new(),
+                newly_created_actors: HashMap::new(), /* This also needs more context to build `StreamActorWithDispatchers`. */
+            })
+        } else {
+            None // No changes, no reschedule needed.
+        }
+    }
+    // if let Some(reschedule) = reschedule {
+    //     reschedules.insert(fragment_id, reschedule);
+    // }
+    // }
+
+    Ok(reschedules)
+}
+
+struct NoShuffleEnsemble {
+    entries: HashSet<FragmentId>,
+    components: HashSet<FragmentId>,
+}
+
+async fn find_no_shuffle_dags_detailed(
+    db: &impl ConnectionTrait,
+    initial_fragment_ids: &[FragmentId],
+) -> MetaResult<Vec<NoShuffleEnsemble>> {
+    let all_no_shuffle_relations: Vec<(_, _)> = FragmentRelation::find()
+        .columns([
+            fragment_relation::Column::SourceFragmentId,
+            fragment_relation::Column::TargetFragmentId,
+        ])
+        .filter(fragment_relation::Column::DispatcherType.eq(DispatcherType::NoShuffle))
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    let mut forward_edges: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
+    let mut backward_edges: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
+
+    for (src, dst) in all_no_shuffle_relations {
+        forward_edges.entry(src).or_default().push(dst);
+        backward_edges.entry(dst).or_default().push(src);
+    }
+
+    find_no_shuffle_graphs(initial_fragment_ids, &forward_edges, &backward_edges)
+}
+
+fn find_no_shuffle_graphs(
+    initial_fragment_ids: &[FragmentId],
+    forward_edges: &HashMap<FragmentId, Vec<FragmentId>>,
+    backward_edges: &HashMap<FragmentId, Vec<FragmentId>>,
+) -> MetaResult<Vec<NoShuffleEnsemble>> {
+    let mut graphs: Vec<NoShuffleEnsemble> = Vec::new();
+    let mut globally_visited: HashSet<FragmentId> = HashSet::new();
+
+    for &init_id in initial_fragment_ids {
+        if globally_visited.contains(&init_id) {
+            continue;
+        }
+
+        // Found a new component. Traverse it to find all its nodes.
+        let mut components = HashSet::new();
+        let mut queue: VecDeque<FragmentId> = VecDeque::new();
+
+        queue.push_back(init_id);
+        globally_visited.insert(init_id);
+
+        while let Some(current_id) = queue.pop_front() {
+            components.insert(current_id);
+            let neighbors = forward_edges
+                .get(&current_id)
+                .into_iter()
+                .flatten()
+                .chain(backward_edges.get(&current_id).into_iter().flatten());
+
+            for &neighbor_id in neighbors {
+                if globally_visited.insert(neighbor_id) {
+                    queue.push_back(neighbor_id);
+                }
+            }
+        }
+
+        // For the newly found component, identify its roots.
+        let mut entries = HashSet::new();
+        for &node_id in &components {
+            let is_root = match backward_edges.get(&node_id) {
+                Some(parents) => parents.iter().all(|p| !components.contains(p)),
+                None => true,
+            };
+            if is_root {
+                entries.insert(node_id);
+            }
+        }
+
+        // Store the detailed DAG structure (roots, all nodes in this DAG).
+        if !entries.is_empty() {
+            graphs.push(NoShuffleEnsemble {
+                entries,
+                components,
+            });
+        }
+    }
+
+    Ok(graphs)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{HashMap, HashSet};
+
+    use super::*;
+
+    // Helper type aliases for cleaner test code
+    type FragmentId = i32; // Assuming i32 based on previous context
+    type Edges = (
+        HashMap<FragmentId, Vec<FragmentId>>,
+        HashMap<FragmentId, Vec<FragmentId>>,
+    );
+
+    /// A helper function to build forward and backward edge maps from a simple list of tuples.
+    /// This reduces boilerplate in each test.
+    fn build_edges(relations: &[(FragmentId, FragmentId)]) -> Edges {
+        let mut forward_edges: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
+        let mut backward_edges: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
+        for &(src, dst) in relations {
+            forward_edges.entry(src).or_default().push(dst);
+            backward_edges.entry(dst).or_default().push(src);
+        }
+        (forward_edges, backward_edges)
+    }
+
+    /// Helper function to create a `HashSet` from a slice easily.
+    fn to_hashset(ids: &[FragmentId]) -> HashSet<FragmentId> {
+        ids.iter().cloned().collect()
+    }
+
+    #[test]
+    fn test_single_linear_chain() {
+        // Scenario: A simple linear graph 1 -> 2 -> 3.
+        // We start from the middle node (2).
+        let (forward, backward) = build_edges(&[(1, 2), (2, 3)]);
+        let initial_ids = &[2];
+
+        // Act
+        let result = find_no_shuffle_graphs(initial_ids, &forward, &backward);
+
+        // Assert
+        assert!(result.is_ok());
+        let graphs = result.unwrap();
+
+        assert_eq!(graphs.len(), 1);
+        let graph = &graphs[0];
+        assert_eq!(graph.entries, to_hashset(&[1]));
+        assert_eq!(graph.components, to_hashset(&[1, 2, 3]));
+    }
+
+    #[test]
+    fn test_two_disconnected_graphs() {
+        // Scenario: Two separate graphs: 1->2 and 10->11.
+        // We start with one node from each graph.
+        let (forward, backward) = build_edges(&[(1, 2), (10, 11)]);
+        let initial_ids = &[2, 10];
+
+        // Act
+        let mut graphs = find_no_shuffle_graphs(initial_ids, &forward, &backward).unwrap();
+
+        // Assert
+        assert_eq!(graphs.len(), 2);
+
+        // Sort results to make the test deterministic, as HashMap iteration order is not guaranteed.
+        graphs.sort_by_key(|g| *g.components.iter().min().unwrap_or(&0));
+
+        // Graph 1
+        assert_eq!(graphs[0].entries, to_hashset(&[1]));
+        assert_eq!(graphs[0].components, to_hashset(&[1, 2]));
+
+        // Graph 2
+        assert_eq!(graphs[1].entries, to_hashset(&[10]));
+        assert_eq!(graphs[1].components, to_hashset(&[10, 11]));
+    }
+
+    #[test]
+    fn test_multiple_entries_in_one_graph() {
+        // Scenario: A graph with two roots feeding into one node: 1->3, 2->3.
+        let (forward, backward) = build_edges(&[(1, 3), (2, 3)]);
+        let initial_ids = &[3];
+
+        // Act
+        let graphs = find_no_shuffle_graphs(initial_ids, &forward, &backward).unwrap();
+
+        // Assert
+        assert_eq!(graphs.len(), 1);
+        let graph = &graphs[0];
+        assert_eq!(graph.entries, to_hashset(&[1, 2]));
+        assert_eq!(graph.components, to_hashset(&[1, 2, 3]));
+    }
+
+    #[test]
+    fn test_diamond_shape_graph() {
+        // Scenario: A diamond shape: 1->2, 1->3, 2->4, 3->4
+        let (forward, backward) = build_edges(&[(1, 2), (1, 3), (2, 4), (3, 4)]);
+        let initial_ids = &[4];
+
+        // Act
+        let graphs = find_no_shuffle_graphs(initial_ids, &forward, &backward).unwrap();
+
+        // Assert
+        assert_eq!(graphs.len(), 1);
+        let graph = &graphs[0];
+        assert_eq!(graph.entries, to_hashset(&[1]));
+        assert_eq!(graph.components, to_hashset(&[1, 2, 3, 4]));
+    }
+
+    #[test]
+    fn test_starting_with_multiple_nodes_in_same_graph() {
+        // Scenario: Start with two different nodes (2 and 4) from the same component.
+        // Should only identify one graph, not two.
+        let (forward, backward) = build_edges(&[(1, 2), (2, 3), (3, 4)]);
+        let initial_ids = &[2, 4];
+
+        // Act
+        let graphs = find_no_shuffle_graphs(initial_ids, &forward, &backward).unwrap();
+
+        // Assert
+        assert_eq!(graphs.len(), 1);
+        let graph = &graphs[0];
+        assert_eq!(graph.entries, to_hashset(&[1]));
+        assert_eq!(graph.components, to_hashset(&[1, 2, 3, 4]));
+    }
+
+    #[test]
+    fn test_empty_initial_ids() {
+        // Scenario: The initial ID list is empty.
+        let (forward, backward) = build_edges(&[(1, 2)]);
+        let initial_ids = &[];
+
+        // Act
+        let graphs = find_no_shuffle_graphs(initial_ids, &forward, &backward).unwrap();
+
+        // Assert
+        assert!(graphs.is_empty());
+    }
+
+    #[test]
+    fn test_isolated_node_as_input() {
+        // Scenario: Start with an ID that has no relations.
+        let (forward, backward) = build_edges(&[(1, 2)]);
+        let initial_ids = &[100];
+
+        // Act
+        let graphs = find_no_shuffle_graphs(initial_ids, &forward, &backward).unwrap();
+
+        // Assert
+        assert_eq!(graphs.len(), 1);
+        let graph = &graphs[0];
+        assert_eq!(graph.entries, to_hashset(&[100]));
+        assert_eq!(graph.components, to_hashset(&[100]));
+    }
+
+    #[test]
+    fn test_graph_with_a_cycle() {
+        // Scenario: A graph with a cycle: 1 -> 2 -> 3 -> 1.
+        // The algorithm should correctly identify all nodes in the component.
+        // Crucially, NO node is a root because every node has a parent *within the component*.
+        // Therefore, the `entries` set should be empty, and the graph should not be included in the results.
+        let (forward, backward) = build_edges(&[(1, 2), (2, 3), (3, 1)]);
+        let initial_ids = &[2];
+
+        // Act
+        let graphs = find_no_shuffle_graphs(initial_ids, &forward, &backward).unwrap();
+
+        // Assert
+        assert!(
+            graphs.is_empty(),
+            "A graph with no entries should not be returned"
+        );
+    }
+    #[test]
+    fn test_custom_complex() {
+        let (forward, backward) = build_edges(&[(1, 3), (1, 8), (2, 3), (4, 3), (3, 5), (6, 7)]);
+        let initial_ids = &[1, 2, 4, 6];
+
+        // Act
+        let mut graphs = find_no_shuffle_graphs(initial_ids, &forward, &backward).unwrap();
+
+        // Assert
+        assert_eq!(graphs.len(), 2);
+        // Sort results to make the test deterministic, as HashMap iteration order is not guaranteed.
+        graphs.sort_by_key(|g| *g.components.iter().min().unwrap_or(&0));
+
+        // Graph 1
+        assert_eq!(graphs[0].entries, to_hashset(&[1, 2, 4]));
+        assert_eq!(graphs[0].components, to_hashset(&[1, 2, 3, 4, 5, 8]));
+
+        // Graph 2
+        assert_eq!(graphs[1].entries, to_hashset(&[6]));
+        assert_eq!(graphs[1].components, to_hashset(&[6, 7]));
+    }
+}
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//
+//     #[test]
+//     fn test_dag() {
+//         let x = find_no_shuffle_graphs(
+//             &[1, 2, 4, 6],
+//             &HashMap::from([
+//                 (1, vec![3, 8]),
+//                 (2, vec![3]),
+//                 (4, vec![3]),
+//                 (3, vec![5]),
+//                 (6, vec![7]),
+//             ]),
+//             &HashMap::from([(7, vec![6]), (8, vec![1]), (3, vec![1, 2, 4]), (5, vec![3])]),
+//         )
+//         .unwrap();
+//
+//         println!("{:?}", x);
+//     }
+// }
