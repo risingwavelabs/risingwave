@@ -956,6 +956,9 @@ impl NatsCommon {
         stream_str: String,
     ) -> ConnectorResult<jetstream::stream::Stream> {
         let subjects: Vec<String> = self.subject.split(',').map(|s| s.to_owned()).collect();
+
+        // In `SourceEnumerator`, we may create a stream
+        // In `SourceReader`, the desired stream MUST exist
         if let Ok(mut stream_instance) = jetstream.get_stream(&stream_str).await {
             tracing::info!(
                 "load existing nats stream ({:?}) with config {:?}",
