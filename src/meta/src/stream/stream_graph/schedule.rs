@@ -244,8 +244,6 @@ impl Scheduler {
         let default_hash_mapping =
             ActorAlignmentMapping::from_assignment(assignment, expected_vnode_count);
 
-        assert_eq!(default_hash_mapping.len(), parallelism);
-
         let single_actor_idxes = std::iter::once(0).collect_vec();
 
         let single_assignment =
