@@ -253,9 +253,11 @@ impl Scheduler {
             single_assignment.keys().exactly_one().cloned().unwrap() as _;
 
         let dynamic_mapping_fn = Box::new(move |limited_count: usize| {
+            let parallelism = parallelism.min(limited_count);
+
             let assignment = assigner.assign_hierarchical(
                 &worker_weights,
-                &(0..limited_count).collect_vec(),
+                &(0..parallelism).collect_vec(),
                 &(0..limited_count).collect_vec(),
             )?;
 
@@ -408,7 +410,7 @@ impl Scheduler {
 pub struct Locations {
     /// actor location map.
     pub actor_locations: BTreeMap<ActorId, ActorAlignmentId>,
-    /// worker location map.n
+    /// worker location map.
     pub worker_locations: HashMap<WorkerId, WorkerNode>,
 }
 
