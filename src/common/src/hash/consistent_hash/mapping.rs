@@ -480,17 +480,22 @@ impl ActorAlignmentMapping {
         assignment: BTreeMap<u32, BTreeMap<usize, Vec<usize>>>,
         vnode_size: usize,
     ) -> Self {
-        let mut result = HashMap::new();
+        let mut all_bitmaps = HashMap::new();
 
         for (worker_id, actors) in &assignment {
             for (actor_idx, vnodes) in actors {
-                let bitmap = Bitmap::from_vec_with_len(vnodes.clone(), vnode_size);
-
-                result.insert(ActorAlignmentId::new(*worker_id, *actor_idx), bitmap);
+                let mut bitmap_builder = BitmapBuilder::zeroed(vnode_size);
+                vnodes
+                    .iter()
+                    .for_each(|vnode| bitmap_builder.set(*vnode, true));
+                all_bitmaps.insert(
+                    ActorAlignmentId::new(*worker_id, *actor_idx),
+                    bitmap_builder.finish(),
+                );
             }
         }
 
-        Self::from_bitmaps(&result)
+        Self::from_bitmaps(&all_bitmaps)
     }
 }
 
