@@ -22,7 +22,9 @@ use futures::FutureExt;
 use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
+
 use risingwave_common::catalog::{DatabaseId, Field, TableId};
+use risingwave_common::hash::VnodeCountCompat;
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
 use risingwave_pb::meta::object::PbObjectInfo;
@@ -36,8 +38,8 @@ use tokio::sync::{Mutex, oneshot};
 use tracing::Instrument;
 
 use super::{
-    FragmentBackfillOrder, JobParallelismTarget, JobReschedulePolicy, JobReschedulePostUpdates,
-    JobRescheduleTarget, JobResourceGroupTarget, Locations, RescheduleOptions, ScaleControllerRef,
+    FragmentBackfillOrder, JobParallelismTarget, JobReschedulePolicy, JobRescheduleTarget,
+    JobResourceGroupTarget, Locations, RescheduleOptions, RescheduleTarget, ScaleControllerRef,
 };
 use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
@@ -197,7 +199,10 @@ impl AutoRefreshSchemaSinkContext {
     pub fn new_fragment_info(&self) -> InflightFragmentInfo {
         InflightFragmentInfo {
             fragment_id: self.new_fragment.fragment_id,
+            job_id: 0, // todo
             distribution_type: self.new_fragment.distribution_type.into(),
+            fragment_type_mask: self.new_fragment.fragment_type_mask,
+            vnode_count: self.new_fragment.vnode_count(),
             nodes: self.new_fragment.nodes.clone(),
             actors: self
                 .new_fragment
@@ -371,7 +376,7 @@ impl GlobalStreamManager {
                 }
             }
         }
-        .in_current_span();
+            .in_current_span();
 
         let fut = (self.env.await_tree_reg())
             .register(await_tree_key, await_tree_span)
@@ -761,6 +766,15 @@ impl GlobalStreamManager {
                         id
                     )))?;
                 }
+                //   let state = self
+                //                     .metadata_manager.get_job_state_by_id(&id)
+                //                     .await?;
+                //                 if state == PbState::Created {
+                //                     Err(MetaError::invalid_parameter(format!(
+                //                         "streaming job {} is already created",
+                //                         id
+                //                     )))?;
+                //                 }
 
                 let (_, database_id) = self.metadata_manager
                     .catalog_controller
@@ -788,6 +802,153 @@ impl GlobalStreamManager {
 
         cancelled_ids.extend(cancelled_recovered_ids);
         cancelled_ids
+    }
+
+    pub(crate) async fn reschedule_streaming_job_v2(
+        &self,
+        job_id: u32,
+        target: RescheduleTarget,
+        deferred: bool,
+    ) -> MetaResult<()> {
+        let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
+
+        let background_jobs = self
+            .metadata_manager
+            .list_background_creating_jobs()
+            .await?;
+
+        if !background_jobs.is_empty() {
+            let related_jobs = self
+                .scale_controller
+                .resolve_related_no_shuffle_jobs(&background_jobs)
+                .await?;
+
+            for job in background_jobs {
+                if related_jobs.contains(&job) {
+                    bail!(
+                        "Cannot alter the job {} because the related job {} is currently being created",
+                        job_id,
+                        job.table_id
+                    );
+                }
+            }
+        }
+
+        let database_id = DatabaseId::new(
+            self.metadata_manager
+                .catalog_controller
+                .get_object_database_id(job_id as ObjectId)
+                .await? as _,
+        );
+
+        let job_id = TableId::new(job_id);
+
+        let worker_nodes = self
+            .metadata_manager
+            .list_active_streaming_compute_nodes()
+            .await?
+            .into_iter()
+            .filter(|w| w.is_streaming_schedulable())
+            .collect_vec();
+
+        // Check if the provided parallelism is valid.
+        let available_parallelism = worker_nodes
+            .iter()
+            .map(|w| w.compute_node_parallelism())
+            .sum::<usize>();
+        let max_parallelism = self
+            .metadata_manager
+            .get_job_max_parallelism(job_id)
+            .await?;
+
+        // if deferred {
+        //     tracing::debug!(
+        //         "deferred mode enabled for job {}, set the parallelism directly to parallelism {:?}, resource group {:?}",
+        //         job_id,
+        //         parallelism_change,
+        //         resource_group_change,
+        //     );
+        //     self.scale_controller
+        //         .post_apply_reschedule(
+        //             &HashMap::new(),
+        //             &JobReschedulePostUpdates {
+        //                 parallelism_updates: table_parallelism_assignment,
+        //                 resource_group_updates: resource_group_assignment,
+        //             },
+        //         )
+        //         .await?;
+        // } else {
+        let workers = worker_nodes.into_iter().map(|x| (x.id as i32, x)).collect();
+        let command = self
+            .scale_controller
+            .reschedule_x(HashMap::from([(job_id.table_id as _, target)]), workers)
+            .await?;
+
+        println!("before run command");
+        self.barrier_scheduler
+            .run_command(database_id, command)
+            .await?;
+
+        println!("after run command");
+        // if reschedule_plan.reschedules.is_empty() {
+        //     tracing::debug!(
+        //         "empty reschedule plan generated for job {}, set the parallelism directly to {:?}",
+        //         job_id,
+        //         reschedule_plan.post_updates
+        //     );
+        //     self.scale_controller
+        //         .post_apply_reschedule(&HashMap::new(), &reschedule_plan.post_updates)
+        //         .await?;
+        // } else {
+        //     self.reschedule_actors(
+        //         database_id,
+        //         reschedule_plan,
+        //         RescheduleOptions {
+        //             resolve_no_shuffle_upstream: false,
+        //             skip_create_new_actors: false,
+        //         },
+        //         workers,
+        //     )
+        //     .await?;
+        //
+        //     // let reschedule_plan = self
+        //     //     .scale_controller
+        //     //     .generate_job_reschedule_plan(JobReschedulePolicy {
+        //     //         targets: HashMap::from([(
+        //     //             job_id.table_id,
+        //     //             JobRescheduleTarget {
+        //     //                 parallelism: parallelism_change,
+        //     //                 resource_group: resource_group_change,
+        //     //             },
+        //     //         )]),
+        //     //     })
+        //     //     .await?;
+        //     //
+        //     if reschedule_plan.reschedules.is_empty() {
+        //         tracing::debug!(
+        //             "empty reschedule plan generated for job {}, set the parallelism directly to {:?}",
+        //             job_id,
+        //             reschedule_plan.post_updates
+        //         );
+        //         self.scale_controller
+        //             .post_apply_reschedule(&HashMap::new(), &reschedule_plan.post_updates)
+        //             .await?;
+        //     } else {
+        //         self.reschedule_actors(
+        //             database_id,
+        //             reschedule_plan,
+        //             RescheduleOptions {
+        //                 resolve_no_shuffle_upstream: false,
+        //                 skip_create_new_actors: false,
+        //             },
+        //         )
+        //         .await?;
+        //     }
+        // };
+
+        // todo!()
+        // }
+        Ok(())
     }
 
     pub(crate) async fn reschedule_streaming_job(
@@ -894,53 +1055,83 @@ impl GlobalStreamManager {
                 resource_group_change,
             );
             self.scale_controller
-                .post_apply_reschedule(
-                    &HashMap::new(),
-                    &JobReschedulePostUpdates {
-                        parallelism_updates: table_parallelism_assignment,
-                        resource_group_updates: resource_group_assignment,
-                    },
-                )
+                .post_apply_reschedule(&HashMap::new())
                 .await?;
         } else {
-            let reschedule_plan = self
-                .scale_controller
-                .generate_job_reschedule_plan(
-                    JobReschedulePolicy {
-                        targets: HashMap::from([(
-                            job_id.table_id,
-                            JobRescheduleTarget {
-                                parallelism: parallelism_change,
-                                resource_group: resource_group_change,
-                            },
-                        )]),
-                    },
-                    false,
-                )
-                .await?;
+            // let workers = worker_nodes.into_iter().map(|x| (x.id as i32, x)).collect();
+            // let _ = self
+            //     .scale_controller
+            //     .reschedule_x(
+            //         JobReschedulePolicy {
+            //             targets: HashMap::from([(
+            //                 job_id.table_id,
+            //                 JobRescheduleTarget {
+            //                     parallelism: parallelism_change,
+            //                     resource_group: resource_group_change,
+            //                 },
+            //             )]),
+            //         },
+            //         workers,
+            //     )
+            //     .await?;
+            // if reschedule_plan.reschedules.is_empty() {
+            //     tracing::debug!(
+            //         "empty reschedule plan generated for job {}, set the parallelism directly to {:?}",
+            //         job_id,
+            //         reschedule_plan.post_updates
+            //     );
+            //     self.scale_controller
+            //         .post_apply_reschedule(&HashMap::new(), &reschedule_plan.post_updates)
+            //         .await?;
+            // } else {
+            //     self.reschedule_actors(
+            //         database_id,
+            //         reschedule_plan,
+            //         RescheduleOptions {
+            //             resolve_no_shuffle_upstream: false,
+            //             skip_create_new_actors: false,
+            //         },
+            //         workers,
+            //     )
+            //     .await?;
+            //
+            //     // let reschedule_plan = self
+            //     //     .scale_controller
+            //     //     .generate_job_reschedule_plan(JobReschedulePolicy {
+            //     //         targets: HashMap::from([(
+            //     //             job_id.table_id,
+            //     //             JobRescheduleTarget {
+            //     //                 parallelism: parallelism_change,
+            //     //                 resource_group: resource_group_change,
+            //     //             },
+            //     //         )]),
+            //     //     })
+            //     //     .await?;
+            //     //
+            //     if reschedule_plan.reschedules.is_empty() {
+            //         tracing::debug!(
+            //             "empty reschedule plan generated for job {}, set the parallelism directly to {:?}",
+            //             job_id,
+            //             reschedule_plan.post_updates
+            //         );
+            //         self.scale_controller
+            //             .post_apply_reschedule(&HashMap::new(), &reschedule_plan.post_updates)
+            //             .await?;
+            //     } else {
+            //         self.reschedule_actors(
+            //             database_id,
+            //             reschedule_plan,
+            //             RescheduleOptions {
+            //                 resolve_no_shuffle_upstream: false,
+            //                 skip_create_new_actors: false,
+            //             },
+            //         )
+            //         .await?;
+            //     }
+            // };
 
-            if reschedule_plan.reschedules.is_empty() {
-                tracing::debug!(
-                    "empty reschedule plan generated for job {}, set the parallelism directly to {:?}",
-                    job_id,
-                    reschedule_plan.post_updates
-                );
-                self.scale_controller
-                    .post_apply_reschedule(&HashMap::new(), &reschedule_plan.post_updates)
-                    .await?;
-            } else {
-                self.reschedule_actors(
-                    database_id,
-                    reschedule_plan,
-                    RescheduleOptions {
-                        resolve_no_shuffle_upstream: false,
-                        skip_create_new_actors: false,
-                    },
-                )
-                .await?;
-            }
-        };
-
+            todo!()
+        }
         Ok(())
     }
 
@@ -1003,9 +1194,9 @@ impl GlobalStreamManager {
                 post_updates = ?reschedule_plan.post_updates,
                 "Empty reschedule plan generated for job.",
             );
-            self.scale_controller
-                .post_apply_reschedule(&HashMap::new(), &reschedule_plan.post_updates)
-                .await?;
+            // self.scale_controller
+            //     .post_apply_reschedule(&HashMap::new())
+            //     .await?;
         } else {
             self.reschedule_actors(
                 database_id,
