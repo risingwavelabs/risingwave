@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use serde::{Deserialize, Serialize};
+
 /// Represents all possible PostgreSQL error codes as defined in Table A.1.
 ///
 /// Each variant corresponds to a specific `Condition Name` from the PostgreSQL documentation.
 /// This enum provides a type-safe way to handle and match on specific SQLSTATE error codes.
 ///
 /// See: <https://www.postgresql.org/docs/13/errcodes-appendix.html>.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum PostgresErrorCode {
     // Class 00 — Successful Completion
