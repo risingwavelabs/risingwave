@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::error::code::PostgresErrorCode;
 use risingwave_common::error::{BoxedError, NotImplemented};
 use risingwave_common::secret::SecretError;
 use risingwave_common::session_config::SessionConfigError;
@@ -26,6 +27,7 @@ use crate::model::MetadataModelError;
 
 pub type MetaResult<T> = std::result::Result<T, MetaError>;
 
+// TODO(error-handling): provide more concrete error code for different object types.
 #[derive(
     thiserror::Error,
     thiserror_ext::ReportDebug,
@@ -66,6 +68,7 @@ pub enum MetaErrorInner {
     InvalidParameter(#[message] String),
 
     // Used for catalog errors.
+    #[provide(PostgresErrorCode => PostgresErrorCode::UndefinedObject)]
     #[error("{0} id not found: {1}")]
     #[construct(skip)]
     CatalogIdNotFound(&'static str, String),
@@ -73,6 +76,7 @@ pub enum MetaErrorInner {
     #[error("table_fragment not exist: id={0}")]
     FragmentNotFound(u32),
 
+    #[provide(PostgresErrorCode => PostgresErrorCode::DuplicateObject)]
     #[error("{0} with name {1} exists{under_creation}", under_creation = (.2).map(|_| " but under creation").unwrap_or(""))]
     Duplicated(
         &'static str,
