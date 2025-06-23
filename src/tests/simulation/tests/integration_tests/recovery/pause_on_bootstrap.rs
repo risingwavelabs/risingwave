@@ -15,6 +15,8 @@
 use std::time::Duration;
 
 use anyhow::Result;
+use madsim::rand::seq::IteratorRandom;
+use madsim::rand::{Rng, thread_rng};
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::nexmark::NexmarkCluster;
 use risingwave_simulation::utils::AssertResult;
@@ -52,16 +54,14 @@ async fn test_impl(resume_by: ResumeBy) -> Result<()> {
     const CREATE_VALUES: &str = "CREATE MATERIALIZED VIEW values as VALUES (1), (2), (3)";
     const SELECT_VALUES: &str = "SELECT count(*) FROM values";
 
-    let mut cluster = NexmarkCluster::new(
-        Configuration {
-            meta_nodes: 1,
-            ..Configuration::for_scale()
-        },
-        6,
-        None,
-        false,
-    )
-    .await?;
+    let configuration = Configuration {
+        meta_nodes: 1,
+        ..Configuration::for_scale()
+    };
+
+    let total_parallelism = configuration.compute_nodes * configuration.compute_node_cores;
+
+    let mut cluster = NexmarkCluster::new(configuration, 6, None, false).await?;
 
     cluster.run(SET_PARAMETER).await?;
     cluster.run(CREATE).await?;
@@ -81,10 +81,22 @@ async fn test_impl(resume_by: ResumeBy) -> Result<()> {
 
     // Scaling will trigger a pair of `Pause` and `Resume`. However, this should not affect the
     // "manual" pause.
-    let random_fragment_id = cluster.locate_random_fragment().await?;
-    cluster
-        .reschedule(random_fragment_id.random_reschedule())
-        .await?;
+    let rng = &mut thread_rng();
+    let job = ["TABLE t", "MATERIALIZED VIEW count_bid"]
+        .iter()
+        .choose(rng)
+        .cloned()
+        .unwrap();
+
+    let query = format!(
+        "alter {} set parallelism = {}",
+        job,
+        rng.gen_range(1..total_parallelism)
+    );
+    println!("query {}", query);
+
+    cluster.run(query).await?;
+
     sleep(Duration::from_secs(10)).await;
     cluster.run(SELECT).await?.assert_result_eq(&count);
 
@@ -106,6 +118,9 @@ async fn test_impl(resume_by: ResumeBy) -> Result<()> {
 
     // Resume the cluster.
     resume_by.resume(&mut cluster).await?;
+    sleep(Duration::from_secs(30)).await;
+
+    // TODO: Wait a bit more to make sure the source manager is ready.
     sleep(Duration::from_secs(30)).await;
 
     // The source should be resumed.

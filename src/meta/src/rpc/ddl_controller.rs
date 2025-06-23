@@ -89,9 +89,9 @@ use crate::stream::cdc::{
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
-    GlobalStreamManagerRef, JobRescheduleTarget, ReplaceStreamJobContext, SourceChange,
-    SourceManagerRef, StreamFragmentGraph, UpstreamSinkInfo,
-    check_sink_fragments_support_refresh_schema, create_source_worker,
+    FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
+    ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef, StreamFragmentGraph,
+    UpstreamSinkInfo, check_sink_fragments_support_refresh_schema, create_source_worker,
     rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
@@ -489,9 +489,10 @@ impl DdlController {
     pub async fn reschedule_streaming_job(
         &self,
         job_id: u32,
-        target: JobRescheduleTarget,
+        target: ReschedulePolicy,
         mut deferred: bool,
     ) -> MetaResult<()> {
+        println!("altering job  {}", job_id);
         tracing::info!("alter parallelism");
         if self.barrier_manager.check_status_running().is_err() {
             tracing::info!(
@@ -505,19 +506,19 @@ impl DdlController {
             .await
     }
 
-    pub async fn reschedule_cdc_table_backfill(
-        &self,
-        job_id: u32,
-        target: JobRescheduleTarget,
-    ) -> MetaResult<()> {
-        tracing::info!("alter CDC table backfill parallelism");
-        if self.barrier_manager.check_status_running().is_err() {
-            return Err(anyhow::anyhow!("CDC table backfill reschedule is unavailable because the system is in recovery state").into());
-        }
-        self.stream_manager
-            .reschedule_cdc_table_backfill(job_id, target)
-            .await
-    }
+    // pub async fn reschedule_cdc_table_backfill(
+    //     &self,
+    //     job_id: u32,
+    //     target: JobRescheduleTarget,
+    // ) -> MetaResult<()> {
+    //     tracing::info!("alter CDC table backfill parallelism");
+    //     if self.barrier_manager.check_status_running().is_err() {
+    //         return Err(anyhow::anyhow!("CDC table backfill reschedule is unavailable because the system is in recovery state").into());
+    //     }
+    //     self.stream_manager
+    //         .reschedule_cdc_table_backfill(job_id, target)
+    //         .await
+    // }
 
     async fn drop_database(&self, database_id: DatabaseId) -> MetaResult<NotificationVersion> {
         self.drop_object(ObjectType::Database, database_id as _, DropMode::Cascade)
@@ -1714,7 +1715,7 @@ impl DdlController {
 
         let upstream_actors = upstream_root_fragments
             .values()
-            .map(|fragment| {
+            .map(|(fragment, _)| {
                 (
                     fragment.fragment_id,
                     fragment.actors.keys().copied().collect(),
@@ -1724,8 +1725,10 @@ impl DdlController {
 
         let complete_graph = CompleteStreamFragmentGraph::with_upstreams(
             fragment_graph,
-            upstream_root_fragments,
-            existing_actor_location,
+            FragmentGraphUpstreamContext {
+                upstream_root_fragments,
+                upstream_actor_location: existing_actor_location,
+            },
             (&stream_job).into(),
         )?;
 
@@ -1894,6 +1897,11 @@ impl DdlController {
             .await?;
         let old_internal_table_ids = old_fragments.internal_table_ids();
 
+        //   let old_internal_table_ids = self
+        //             .metadata_manager
+        //             .list_job_internal_table_ids_by_id(&id.into())
+        //             .await?;
+
         // handle drop table's associated source
         let mut drop_table_connector_ctx = None;
         if let Some(to_remove_source_id) = drop_table_associated_source_id {
@@ -1951,13 +1959,13 @@ impl DdlController {
                 .iter()
                 .map(|sink| sink.original_fragment.fragment_id)
                 .collect();
-            for (_, downstream_fragment) in &mut downstream_fragments {
+            for (_, downstream_fragment, _) in &mut downstream_fragments {
                 if let Some(sink) = auto_refresh_schema_sinks.iter().find(|sink| {
                     sink.original_fragment.fragment_id == downstream_fragment.fragment_id
                 }) {
                     assert!(remaining_fragment.remove(&downstream_fragment.fragment_id));
-                    for actor in &downstream_fragment.actors {
-                        downstream_actor_location.remove(&actor.actor_id);
+                    for actor_id in downstream_fragment.actors.keys() {
+                        downstream_actor_location.remove(actor_id);
                     }
                     for (actor_id, status) in &sink.actor_status {
                         downstream_actor_location.insert(
@@ -1965,7 +1973,8 @@ impl DdlController {
                             status.location.as_ref().unwrap().worker_node_id as WorkerId,
                         );
                     }
-                    *downstream_fragment = sink.new_fragment.clone();
+
+                    *downstream_fragment = (&sink.new_fragment_info()).into();
                 }
             }
             assert!(remaining_fragment.is_empty());
@@ -1976,9 +1985,11 @@ impl DdlController {
             StreamingJobType::Table(TableJobType::General) | StreamingJobType::Source => {
                 CompleteStreamFragmentGraph::with_downstreams(
                     fragment_graph,
-                    original_root_fragment.fragment_id,
-                    downstream_fragments,
-                    downstream_actor_location,
+                    FragmentGraphDownstreamContext {
+                        original_root_fragment_id: original_root_fragment.fragment_id,
+                        downstream_fragments,
+                        downstream_actor_location,
+                    },
                     job_type,
                 )?
             }
@@ -1992,11 +2003,15 @@ impl DdlController {
 
                 CompleteStreamFragmentGraph::with_upstreams_and_downstreams(
                     fragment_graph,
-                    upstream_root_fragments,
-                    upstream_actor_location,
-                    original_root_fragment.fragment_id,
-                    downstream_fragments,
-                    downstream_actor_location,
+                    FragmentGraphUpstreamContext {
+                        upstream_root_fragments,
+                        upstream_actor_location,
+                    },
+                    FragmentGraphDownstreamContext {
+                        original_root_fragment_id: original_root_fragment.fragment_id,
+                        downstream_fragments,
+                        downstream_actor_location,
+                    },
                     job_type,
                 )?
             }
