@@ -980,6 +980,14 @@ pub async fn handle(
                     )
                     .await
                 }
+                AlterViewOperation::SetStreamingEnableUnalignedJoin { enable } => {
+                    if !materialized {
+                        bail!(
+                            "ALTER VIEW SET STREAMING_ENABLE_UNALIGNED_JOIN is only supported for materialized views"
+                        );
+                    }
+                    todo!()
+                }
             }
         }
 
@@ -1039,6 +1047,9 @@ pub async fn handle(
                     rate_limit,
                 )
                 .await
+            }
+            AlterSinkOperation::SetStreamingEnableUnalignedJoin { enable } => {
+                todo!()
             }
         },
         Statement::AlterSubscription { name, operation } => match operation {
