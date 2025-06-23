@@ -12,13 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+
 use risingwave_common::catalog::ColumnCatalog;
+
 use risingwave_meta_model::table::RefreshState;
+use risingwave_common::hash::ActorAlignmentId;
+use risingwave_pb::plan_common::ExprContext;
 
 use super::*;
+use crate::controller::fragment::InflightFragmentInfo;
+use crate::controller::scale::resolve_streaming_job_definition;
 use crate::controller::utils::{
     get_database_resource_group, get_existing_job_resource_group, get_table_columns,
 };
+use crate::model::{StreamActor, StreamContext, StreamJobFragments, TableParallelism};
 
 impl CatalogController {
     pub async fn get_secret_by_id(&self, secret_id: SecretId) -> MetaResult<PbSecret> {
@@ -515,6 +523,22 @@ impl CatalogController {
         Ok(job_id)
     }
 
+    pub async fn list_streaming_job_with_database(
+        &self,
+    ) -> MetaResult<HashMap<DatabaseId, Vec<ObjectId>>> {
+        let inner = self.inner.read().await;
+        let database_objects: Vec<(DatabaseId, ObjectId)> = StreamingJob::find()
+            .select_only()
+            .column(object::Column::DatabaseId)
+            .column(streaming_job::Column::JobId)
+            .join(JoinType::LeftJoin, streaming_job::Relation::Object.def())
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        Ok(database_objects.into_iter().into_group_map())
+    }
+
     // Output: Vec<(table id, db name, schema name, table name, resource group)>
     pub async fn list_table_objects(
         &self,
@@ -588,5 +612,113 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", streaming_job_id))?;
         Ok(status)
+    }
+
+    pub async fn restore_background_streaming_job(
+        &self,
+        job_infos: HashMap<ObjectId, HashMap<FragmentId, InflightFragmentInfo>>,
+    ) -> MetaResult<HashMap<risingwave_common::catalog::TableId, (String, StreamJobFragments)>>
+    {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let job_ids = job_infos.keys().cloned().collect::<HashSet<_>>();
+
+        let streaming_jobs: Vec<_> = StreamingJob::find()
+            .filter(streaming_job::Column::JobId.is_in(job_ids.clone()))
+            .all(&txn)
+            .await?;
+
+        let definitions = resolve_streaming_job_definition(&txn, &job_ids).await?;
+
+        let mut result = HashMap::new();
+
+        for streaming_job::Model {
+            job_id,
+            job_status: _,
+            create_type: _,
+            timezone,
+            parallelism,
+            max_parallelism,
+            specific_resource_group: _,
+            ..
+        } in streaming_jobs
+        {
+            let fragment_infos = job_infos.get(&job_id).unwrap();
+
+            let definition = definitions.get(&job_id).cloned().unwrap_or_default();
+
+            let mut fragments = BTreeMap::new();
+            let mut actor_locations = BTreeMap::new();
+
+            for (
+                fragment_id,
+                InflightFragmentInfo {
+                    fragment_id: _,
+                    job_id: _,
+                    distribution_type,
+                    fragment_type_mask,
+                    vnode_count,
+                    nodes,
+                    actors,
+                    state_table_ids,
+                },
+            ) in fragment_infos
+            {
+                let stream_actors = actors
+                    .iter()
+                    .map(|(actor_id, actor_info)| StreamActor {
+                        actor_id: *actor_id as _,
+                        fragment_id: *fragment_id as _,
+                        vnode_bitmap: actor_info.vnode_bitmap.clone(),
+                        mview_definition: definition.clone(),
+                        expr_context: Some(ExprContext::default()),
+                    })
+                    .collect_vec();
+
+                for (idx, (actor_id, actor_info)) in actors
+                    .iter()
+                    .sorted_by(|(a, _), (b, _)| a.cmp(b))
+                    .enumerate()
+                {
+                    actor_locations.insert(
+                        *actor_id,
+                        ActorAlignmentId::new(actor_info.worker_id as u32, idx),
+                    );
+                }
+
+                let fragment = crate::model::Fragment {
+                    fragment_id: *fragment_id as _,
+                    fragment_type_mask: *fragment_type_mask,
+                    distribution_type: (*distribution_type).into(),
+                    actors: stream_actors,
+                    state_table_ids: state_table_ids.iter().map(|id| id.table_id).collect(),
+                    maybe_vnode_count: Some(*vnode_count as _),
+                    nodes: nodes.clone(),
+                };
+
+                fragments.insert(*fragment_id as u32, fragment);
+            }
+
+            let ctx = StreamContext {
+                timezone: timezone.clone(),
+            };
+
+            let table_parallelism: TableParallelism = parallelism.into();
+
+            let job_id = risingwave_common::catalog::TableId::new(job_id as _);
+            let stream_job_fragments = StreamJobFragments::new(
+                job_id,
+                fragments,
+                &actor_locations,
+                ctx,
+                table_parallelism,
+                max_parallelism as _,
+            );
+
+            result.insert(job_id, (definition, stream_job_fragments));
+        }
+
+        Ok(result)
     }
 }

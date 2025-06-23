@@ -42,7 +42,7 @@ async fn scale_and_check(
         if prev_count == target_count {
             return Ok(());
         }
-        cluster.reschedule(plan).await?;
+        cluster.run(plan).await?;
         let after_count = test_sink.store.id_count();
         sleep(Duration::from_secs(10)).await;
         if thread_rng().random_bool(0.5) {
@@ -57,6 +57,9 @@ async fn scale_and_check(
 
 async fn scale_test_inner(is_decouple: bool, is_coordinated_sink: bool) -> Result<()> {
     let mut cluster = start_sink_test_cluster().await?;
+
+    // todo, make it configurable
+    let total_cores = 6;
 
     let source_parallelism = 6;
 
@@ -91,42 +94,16 @@ async fn scale_test_inner(is_decouple: bool, is_coordinated_sink: bool) -> Resul
         &test_sink,
         count,
         vec![
-            // (format!("{id}-[1,2,3]"), 3),
             (
-                fragment.reschedule(
-                    [
-                        WorkerSlotId::new(workers[0], 0),
-                        WorkerSlotId::new(workers[1], 0),
-                        WorkerSlotId::new(workers[1], 1),
-                    ],
-                    [],
-                ),
+                format!("alter sink test_sink set parallelism = {}", total_cores - 3),
                 3,
             ),
-            // (format!("{id}-[4,5]+[1,2]"), 3)
             (
-                fragment.reschedule(
-                    [
-                        WorkerSlotId::new(workers[2], 0),
-                        WorkerSlotId::new(workers[2], 1),
-                    ],
-                    [
-                        WorkerSlotId::new(workers[0], 1),
-                        WorkerSlotId::new(workers[1], 0),
-                    ],
-                ),
-                3,
+                format!("alter sink test_sink set parallelism = {}", total_cores - 4),
+                2,
             ),
-            // (format!("{id}+[3,4,5]"), 6),
             (
-                fragment.reschedule(
-                    [],
-                    [
-                        WorkerSlotId::new(workers[1], 1),
-                        WorkerSlotId::new(workers[2], 0),
-                        WorkerSlotId::new(workers[2], 1),
-                    ],
-                ),
+                format!("alter sink test_sink set parallelism = {}", total_cores),
                 6,
             ),
         ]

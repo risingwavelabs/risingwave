@@ -16,7 +16,6 @@ use std::iter::repeat_with;
 
 use anyhow::Result;
 use itertools::Itertools;
-use risingwave_common::hash::WorkerSlotId;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
 
@@ -39,37 +38,27 @@ macro_rules! insert_and_flush {
 
 #[tokio::test]
 async fn test_table() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
-    cluster.run(ROOT_TABLE_CREATE).await?;
+    let configuration = Configuration::for_scale();
+    let total_core = configuration.compute_nodes * configuration.compute_node_cores;
 
-    let fragment = cluster
-        .locate_one_fragment([identity_contains("dml"), identity_contains("source")])
-        .await?;
+    let mut cluster = Cluster::start(configuration).await?;
+    cluster.run(ROOT_TABLE_CREATE).await?;
 
     insert_and_flush!(cluster);
 
-    let workers = fragment.all_worker_count().into_keys().collect_vec();
-
     cluster
-        .reschedule(fragment.reschedule(
-            [
-                WorkerSlotId::new(workers[0], 0),
-                WorkerSlotId::new(workers[1], 0),
-                WorkerSlotId::new(workers[2], 0),
-            ],
-            [],
+        .run(format!(
+            "alter table t set parallelism = {}",
+            total_core - 3
         ))
         .await?;
 
     insert_and_flush!(cluster);
 
     cluster
-        .reschedule(fragment.reschedule(
-            [WorkerSlotId::new(workers[0], 1)],
-            [
-                WorkerSlotId::new(workers[0], 0),
-                WorkerSlotId::new(workers[2], 0),
-            ],
+        .run(format!(
+            "alter table t set parallelism = {}",
+            total_core - 2
         ))
         .await?;
 
@@ -80,35 +69,25 @@ async fn test_table() -> Result<()> {
 
 #[tokio::test]
 async fn test_mv_on_scaled_table() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let configuration = Configuration::for_scale();
+    let total_core = configuration.compute_nodes * configuration.compute_node_cores;
+
+    let mut cluster = Cluster::start(configuration).await?;
     cluster.run(ROOT_TABLE_CREATE).await?;
 
-    let fragment = cluster
-        .locate_one_fragment([identity_contains("materialize")])
-        .await?;
-
-    let workers = fragment.all_worker_count().into_keys().collect_vec();
-
     cluster
-        .reschedule(fragment.reschedule(
-            [
-                WorkerSlotId::new(workers[0], 0),
-                WorkerSlotId::new(workers[1], 0),
-                WorkerSlotId::new(workers[2], 0),
-            ],
-            [],
+        .run(format!(
+            "alter table t set parallelism = {}",
+            total_core - 3
         ))
         .await?;
 
     insert_and_flush!(cluster);
 
     cluster
-        .reschedule(fragment.reschedule(
-            [WorkerSlotId::new(workers[0], 1)],
-            [
-                WorkerSlotId::new(workers[0], 0),
-                WorkerSlotId::new(workers[2], 0),
-            ],
+        .run(format!(
+            "alter table t set parallelism = {}",
+            total_core - 1
         ))
         .await?;
 
@@ -123,48 +102,36 @@ async fn test_mv_on_scaled_table() -> Result<()> {
 
 #[tokio::test]
 async fn test_scale_on_schema_change() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale_no_shuffle()).await?;
+    let configuration = Configuration::for_scale_no_shuffle();
+    let total_core = configuration.compute_nodes * configuration.compute_node_cores;
+    let mut cluster = Cluster::start(configuration).await?;
+
     cluster.run(ROOT_TABLE_CREATE).await?;
 
     cluster.run(MV1).await?;
 
-    let fragment = cluster
-        .locate_one_fragment([identity_contains("materialize"), identity_contains("union")])
-        .await?;
-
-    let workers = fragment.all_worker_count().into_keys().collect_vec();
-
+    println!("q111111");
     cluster
-        .reschedule(fragment.reschedule(
-            [
-                WorkerSlotId::new(workers[0], 0),
-                WorkerSlotId::new(workers[1], 0),
-                WorkerSlotId::new(workers[2], 0),
-            ],
-            [],
+        .run(format!(
+            "alter table t set parallelism = {}",
+            total_core - 3
         ))
         .await?;
 
     insert_and_flush!(cluster);
 
+    println!("q222222");
     cluster.run("alter table t add column v2 int").await?;
 
-    let fragment = cluster
-        .locate_one_fragment([
-            identity_contains("materialize"),
-            identity_contains("StreamTableScan"),
-        ])
-        .await?;
-
+    println!("q3333333");
     cluster
-        .reschedule_resolve_no_shuffle(fragment.reschedule(
-            [WorkerSlotId::new(workers[0], 1)],
-            [
-                WorkerSlotId::new(workers[0], 0),
-                WorkerSlotId::new(workers[2], 0),
-            ],
+        .run(format!(
+            "alter table t set parallelism = {}",
+            total_core - 2
         ))
         .await?;
+
+    println!("q44444");
 
     let fragment = cluster
         .locate_one_fragment([identity_contains("materialize"), identity_contains("union")])

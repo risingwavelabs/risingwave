@@ -39,7 +39,8 @@ use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::common::PbActorInfo;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
 use risingwave_pb::source::{
-    ConnectorSplit, ConnectorSplits, PbCdcTableSnapshotSplitsWithGeneration,
+    ConnectorSplit, ConnectorSplits, PbCdcTableSnapshotSplitsWithGeneration, PbConnectorSplit,
+    PbConnectorSplits,
 };
 use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
@@ -73,9 +74,8 @@ use crate::model::{
     StreamJobFragments, StreamJobFragmentsToCreate,
 };
 use crate::stream::{
-    AutoRefreshSchemaSinkContext, ConnectorPropsChange, FragmentBackfillOrder,
-    JobReschedulePostUpdates, SplitAssignment, SplitState, ThrottleConfig, UpstreamSinkInfo,
-    build_actor_connector_splits,
+    AutoRefreshSchemaSinkContext, ConnectorPropsChange, FragmentBackfillOrder, SplitAssignment,
+    SplitState, ThrottleConfig, UpstreamSinkInfo, build_actor_connector_splits,
 };
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -245,6 +245,7 @@ impl StreamJobFragments {
                 fragment.fragment_id,
                 InflightFragmentInfo {
                     fragment_id: fragment.fragment_id,
+                    job_id: self.stream_job_id.table_id as _,
                     distribution_type: fragment.distribution_type.into(),
                     fragment_type_mask: fragment.fragment_type_mask,
                     vnode_count: fragment.vnode_count(),
@@ -359,7 +360,7 @@ pub enum Command {
         // Should contain the actor ids in upstream and downstream fragment of `reschedules`
         fragment_actors: HashMap<FragmentId, HashSet<ActorId>>,
         // Used for updating additional metadata after the barrier ends
-        post_updates: JobReschedulePostUpdates,
+        // post_updates: JobReschedulePostUpdates,
     },
 
     /// `ReplaceStreamJob` command generates a `Update` barrier with the given `replace_upstream`. This is
@@ -1272,7 +1273,7 @@ impl Command {
                     actor_cdc_table_snapshot_splits,
                     sink_add_columns: Default::default(),
                 });
-                tracing::debug!("update mutation: {mutation:?}");
+                tracing::debug!("update mutation: {mutation:#?}");
                 Some(mutation)
             }
 

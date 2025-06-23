@@ -38,7 +38,7 @@ use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::stream_plan::DispatcherType::{self, *};
 
 use crate::MetaResult;
-use crate::controller::fragment::InflightFragmentInfo;
+use crate::barrier::SharedFragmentInfo;
 use crate::model::ActorId;
 use crate::stream::AssignerBuilder;
 use crate::stream::stream_graph::fragment::CompleteStreamFragmentGraph;
@@ -153,7 +153,7 @@ impl Distribution {
 
     /// Create a distribution from a persisted protobuf `Fragment`.
     pub fn from_fragment(
-        fragment: &InflightFragmentInfo,
+        fragment: &SharedFragmentInfo,
         actor_location: &HashMap<ActorId, WorkerId>,
     ) -> Self {
         match fragment.distribution_type {
