@@ -36,6 +36,7 @@ use risingwave_pb::meta::table_fragments::PbState;
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::meta::*;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::{BarrierScheduler, Command};
@@ -538,6 +539,35 @@ impl StreamManagerService for StreamServiceImpl {
             .await?;
 
         Ok(Response::new(AlterConnectorPropsResponse {}))
+    }
+
+    async fn set_sync_log_store_aligned(
+        &self,
+        request: Request<SetSyncLogStoreAlignedRequest>,
+    ) -> Result<Response<SetSyncLogStoreAlignedResponse>, Status> {
+        let req = request.into_inner();
+        let job_id = req.job_id;
+        let aligned = req.aligned;
+
+        self.metadata_manager
+            .catalog_controller
+            .mutate_fragments_by_job_id(
+                job_id as _,
+                |_mask, stream_node| {
+                    if let Some(body) = &mut stream_node.node_body
+                        && let NodeBody::SyncLogStore(sync_log_store) = body
+                    {
+                        sync_log_store.aligned = aligned;
+                        true
+                    } else {
+                        false
+                    }
+                },
+                "no fragments found with synced log store",
+            )
+            .await?;
+
+        Ok(Response::new(SetSyncLogStoreAlignedResponse {}))
     }
 }
 
