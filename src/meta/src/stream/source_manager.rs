@@ -352,23 +352,8 @@ impl SourceManager {
                 )
             })
             .collect();
-        let actor_splits = metadata_manager
-            .catalog_controller
-            .deprecated_load_actor_splits()
-            .await?
-            .into_iter()
-            .map(|(actor_id, splits)| {
-                (
-                    actor_id as ActorId,
-                    splits
-                        .to_protobuf()
-                        .splits
-                        .iter()
-                        .map(|split| SplitImpl::try_from(split).unwrap())
-                        .collect(),
-                )
-            })
-            .collect();
+
+        let actor_splits = Default::default();
 
         let core = Mutex::new(SourceManagerCore::new(
             metadata_manager,

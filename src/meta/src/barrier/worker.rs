@@ -773,6 +773,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 .context
                 .reload_runtime_info()
                 .await?;
+
             runtime_info_snapshot.validate().inspect_err(|e| {
                 warn!(err = ?e.as_report(), ?runtime_info_snapshot, "reloaded runtime info failed to validate");
             })?;

@@ -248,6 +248,12 @@ impl Fragment {
             })
             .collect();
 
+        println!("actor to worker {:#?}", actor_to_worker);
+
+        println!(
+            "actors {:?}",
+            self.inner.actors.iter().map(|x| x.actor_id).collect_vec()
+        );
         self.inner
             .actors
             .iter()

@@ -17,11 +17,13 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
+use parking_lot::RawRwLock;
+use parking_lot::lock_api::RwLockReadGuard;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::{DatabaseId, FragmentTypeMask, TableId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
-use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
+use risingwave_meta_model::{ObjectId, WorkerId};
 use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
 use risingwave_pb::meta::subscribe_response::Operation;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -39,37 +41,80 @@ use crate::model::{ActorId, FragmentId, SubscriptionId};
 #[derive(Debug, Clone)]
 pub struct SharedFragmentInfo {
     pub fragment_id: FragmentId,
+    pub job_id: ObjectId,
     pub distribution_type: DistributionType,
     pub actors: HashMap<ActorId, InflightActorInfo>,
+    pub fragment_type_mask: FragmentTypeMask,
+    pub vnode_count: usize,
+    //    pub nodes: PbStreamNode,
 }
 
 impl From<&InflightFragmentInfo> for SharedFragmentInfo {
     fn from(info: &InflightFragmentInfo) -> Self {
+        let InflightFragmentInfo {
+            fragment_id,
+            job_id,
+            distribution_type,
+            fragment_type_mask,
+            vnode_count,
+            // nodes,
+            actors,
+            // state_table_ids,
+            ..
+        } = info;
+
         Self {
-            fragment_id: info.fragment_id,
-            distribution_type: info.distribution_type,
-            actors: info.actors.clone(),
+            fragment_id: *fragment_id,
+            job_id: *job_id,
+            distribution_type: *distribution_type,
+            fragment_type_mask: *fragment_type_mask,
+            vnode_count: *vnode_count,
+            // nodes: nodes.clone(),
+            actors: actors.clone(),
         }
     }
 }
 
-type SharedActorInfosInner = HashMap<DatabaseId, HashMap<FragmentId, SharedFragmentInfo>>;
+#[derive(Default, Debug)]
+pub struct SharedActorInfosInner {
+    info: HashMap<DatabaseId, HashMap<FragmentId, SharedFragmentInfo>>,
+}
+
+impl SharedActorInfosInner {
+    pub fn get_fragment(&self, fragment_id: FragmentId) -> Option<&SharedFragmentInfo> {
+        self.info
+            .values()
+            .find_map(|database| database.get(&fragment_id))
+    }
+
+    pub fn get_database(
+        &self,
+        database_id: DatabaseId,
+    ) -> Option<&HashMap<FragmentId, SharedFragmentInfo>> {
+        self.info.get(&database_id)
+    }
+
+    pub fn iter(
+        &self,
+    ) -> impl Iterator<Item = (&DatabaseId, &HashMap<FragmentId, SharedFragmentInfo>)> {
+        self.info.iter()
+    }
+
+    pub fn iter_over_fragments(&self) -> impl Iterator<Item = (&FragmentId, &SharedFragmentInfo)> {
+        self.info.values().flatten()
+    }
+}
 
 #[derive(Clone, educe::Educe)]
 #[educe(Debug)]
-pub(crate) struct SharedActorInfos {
+pub struct SharedActorInfos {
     inner: Arc<parking_lot::RwLock<SharedActorInfosInner>>,
     #[educe(Debug(ignore))]
     notification_manager: NotificationManagerRef,
 }
 
 impl SharedActorInfos {
-    pub fn read_guard(
-        &self,
-    ) -> parking_lot::RwLockReadGuard<
-        '_,
-        HashMap<DatabaseId, HashMap<FragmentId, InflightFragmentInfo>>,
-    > {
+    pub fn read_guard(&self) -> RwLockReadGuard<'_, RawRwLock, SharedActorInfosInner> {
         self.inner.read()
     }
 }
@@ -83,7 +128,7 @@ impl SharedActorInfos {
     }
 
     pub(super) fn remove_database(&self, database_id: DatabaseId) {
-        if let Some(database) = self.inner.write().remove(&database_id) {
+        if let Some(database) = self.inner.write().info.remove(&database_id) {
             let mapping = database
                 .into_values()
                 .map(|fragment| rebuild_fragment_mapping(&fragment))
@@ -102,6 +147,7 @@ impl SharedActorInfos {
         for fragment in self
             .inner
             .write()
+            .info
             .extract_if(|database_id, _| !database_ids.contains(database_id))
             .flat_map(|(_, fragments)| fragments.into_values())
         {
@@ -123,7 +169,7 @@ impl SharedActorInfos {
             .collect();
         // delete the fragments that exist previously, but not included in the recovered fragments
         let mut writer = self.start_writer(database_id);
-        let database = writer.write_guard.entry(database_id).or_default();
+        let database = writer.write_guard.info.entry(database_id).or_default();
         for (_, fragment) in database.extract_if(|fragment_id, fragment_info| {
             if let Some(info) = remaining_fragments.remove(fragment_id) {
                 let info = info.into();
@@ -186,7 +232,7 @@ pub(super) struct SharedActorInfoWriter<'a> {
 
 impl SharedActorInfoWriter<'_> {
     pub(super) fn upsert(&mut self, infos: impl IntoIterator<Item = &InflightFragmentInfo>) {
-        let database = self.write_guard.entry(self.database_id).or_default();
+        let database = self.write_guard.info.entry(self.database_id).or_default();
         for info in infos {
             match database.entry(info.fragment_id) {
                 Entry::Occupied(mut entry) => {
@@ -208,7 +254,7 @@ impl SharedActorInfoWriter<'_> {
     }
 
     pub(super) fn remove(&mut self, info: &InflightFragmentInfo) {
-        if let Some(database) = self.write_guard.get_mut(&self.database_id)
+        if let Some(database) = self.write_guard.info.get_mut(&self.database_id)
             && let Some(fragment) = database.remove(&info.fragment_id)
         {
             self.deleted_fragment_mapping
@@ -438,7 +484,7 @@ impl InflightDatabaseInfo {
                         for (actor_id, new_vnodes) in actor_update_vnode_bitmap {
                             actors
                                 .get_mut(&actor_id)
-                                .expect("should exist")
+                                .unwrap_or_else(|| panic!("actor {actor_id} should exist"))
                                 .vnode_bitmap = Some(new_vnodes);
                         }
                         for (actor_id, actor) in new_actors {
