@@ -42,8 +42,8 @@ use tokio::sync::{Mutex, MutexGuard, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 use tokio::{select, time};
-pub use worker::create_source_worker;
 use worker::{ConnectorSourceWorkerHandle, create_source_worker_async};
+pub use worker::{SourceWorkerProperties, create_source_worker};
 
 use crate::MetaResult;
 use crate::barrier::{BarrierScheduler, Command, ReplaceStreamJobPlan, SharedActorInfos};
@@ -440,6 +440,23 @@ impl SourceManager {
         core.update_source_splits(source_id).await?;
 
         Ok(())
+    }
+
+
+    pub async fn list_sources_special_props(&self) -> HashMap<SourceId, SourceWorkerProperties> {
+        let core = self.core.lock().await;
+        core.managed_sources
+            .iter()
+            .map(|(source_id, handle)| {
+                (
+                    *source_id,
+                    SourceWorkerProperties {
+                        enable_drop_split: handle.enable_drop_split,
+                        enable_adaptive_splits: handle.enable_adaptive_splits,
+                    },
+                )
+            })
+            .collect()
     }
 
     pub async fn get_running_info(&self) -> SourceManagerRunningInfo {

@@ -20,7 +20,7 @@ use crate::{
     ActorId, ActorUpstreamActors, ConnectorSplits, ExprContext, FragmentId, VnodeBitmap, WorkerId,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "string(None)")]
 pub enum ActorStatus {
     #[sea_orm(string_value = "INACTIVE")]
@@ -60,7 +60,18 @@ pub struct Model {
     #[deprecated]
     pub upstream_actor_ids: ActorUpstreamActors,
     pub vnode_bitmap: Option<VnodeBitmap>,
-    pub expr_context: ExprContext,
+    // pub expr_context: ExprContext,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActorModel {
+    pub actor_id: ActorId,
+    pub fragment_id: FragmentId,
+    pub status: ActorStatus,
+    pub splits: Option<ConnectorSplits>,
+    pub worker_id: WorkerId,
+    pub vnode_bitmap: Option<VnodeBitmap>,
+    pub expr_context_2: ExprContext,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

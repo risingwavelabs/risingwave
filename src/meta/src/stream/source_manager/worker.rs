@@ -392,6 +392,12 @@ pub struct ConnectorSourceWorkerHandle {
     pub enable_adaptive_splits: bool,
 }
 
+#[derive(Default)]
+pub struct SourceWorkerProperties {
+    pub enable_drop_split: bool,
+    pub enable_adaptive_splits: bool,
+}
+
 impl ConnectorSourceWorkerHandle {
     pub fn get_enable_adaptive_splits(&self) -> bool {
         self.enable_adaptive_splits
