@@ -1007,7 +1007,7 @@ impl MigrationTrait for Migration {
                     .get_connection()
                     .execute(Statement::from_string(
                         DatabaseBackend::Postgres,
-                        "SELECT setval('user_user_id_seq', 2)",
+                        "SELECT setval('user_user_id_seq', 3)",
                     ))
                     .await?;
             }
