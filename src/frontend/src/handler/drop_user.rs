@@ -45,7 +45,8 @@ pub async fn handle_drop_user(
             }
             if user_name == DEFAULT_SUPER_USER_FOR_ADMIN {
                 return Err(ErrorCode::PermissionDenied(format!(
-                    "cannot drop the admin superuser \"{user_name}\""
+                    "cannot drop the admin superuser \"{}\"",
+                    user_name
                 ))
                 .into());
             }
