@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 use std::ops::Index;
@@ -30,6 +30,51 @@ use crate::util::iter_util::ZipEqDebug;
 
 // TODO: find a better place for this.
 pub type ActorId = u32;
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub struct ActorAlignmentId(u64);
+
+impl ActorAlignmentId {
+    pub fn worker_id(&self) -> u32 {
+        (self.0 >> 32) as u32
+    }
+
+    pub fn actor_idx(&self) -> u32 {
+        self.0 as u32
+    }
+
+    pub fn new(worker_id: u32, actor_idx: usize) -> Self {
+        Self((worker_id as u64) << 32 | actor_idx as u64)
+    }
+
+    pub fn new_single(worker_id: u32) -> Self {
+        Self::new(worker_id, 0)
+    }
+}
+
+impl From<ActorAlignmentId> for u64 {
+    fn from(id: ActorAlignmentId) -> Self {
+        id.0
+    }
+}
+
+impl From<u64> for ActorAlignmentId {
+    fn from(id: u64) -> Self {
+        Self(id)
+    }
+}
+
+impl Display for ActorAlignmentId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("[{}/{}]", self.worker_id(), self.actor_idx()))
+    }
+}
+
+impl Debug for ActorAlignmentId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("[{}/{}]", self.worker_id(), self.actor_idx()))
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct WorkerSlotId(u64);
@@ -299,6 +344,12 @@ pub mod marker {
     impl VnodeMappingItem for WorkerSlot {
         type Item = WorkerSlotId;
     }
+
+    /// A marker type for items of [`ActorAlignmentId`].
+    pub struct ActorAlignment;
+    impl VnodeMappingItem for ActorAlignment {
+        type Item = ActorAlignmentId;
+    }
 }
 
 /// A mapping from [`VirtualNode`] to [`ActorId`].
@@ -310,6 +361,11 @@ pub type ExpandedActorMapping = ExpandedMapping<marker::Actor>;
 pub type WorkerSlotMapping = VnodeMapping<marker::WorkerSlot>;
 /// An expanded mapping from [`VirtualNode`] to [`WorkerSlotId`].
 pub type ExpandedWorkerSlotMapping = ExpandedMapping<marker::WorkerSlot>;
+
+/// A mapping from [`VirtualNode`] to [`ActorAlignmentId`].
+pub type ActorAlignmentMapping = VnodeMapping<marker::ActorAlignment>;
+/// An expanded mapping from [`VirtualNode`] to [`ActorAlignmentId`].
+pub type ExpandedActorAlignment = ExpandedMapping<marker::ActorAlignment>;
 
 impl ActorMapping {
     /// Transform the actor mapping to the worker slot mapping. Note that the parameter is a mapping from actor to worker.
@@ -331,6 +387,39 @@ impl ActorMapping {
         for (worker, actors) in worker_actors {
             for (idx, &actor) in actors.iter().enumerate() {
                 actor_location.insert(actor, WorkerSlotId::new(worker, idx));
+            }
+        }
+
+        self.transform(&actor_location)
+    }
+
+    /// Transform the actor mapping to the actor alignment mapping. Note that the parameter is a mapping from actor to worker.
+    pub fn to_actor_alignment(
+        &self,
+        actor_to_worker: &HashMap<ActorId, u32>,
+    ) -> ActorAlignmentMapping {
+        let mut worker_actors = HashMap::new();
+
+        let challenge = self.iter_unique().collect_vec();
+
+        assert!(challenge.is_sorted());
+
+        for (idx, actor_id) in self.iter_unique().enumerate() {
+            let worker_id = actor_to_worker
+                .get(&actor_id)
+                .cloned()
+                .unwrap_or_else(|| panic!("location for actor {} not found", actor_id));
+
+            worker_actors
+                .entry(worker_id)
+                .or_insert(BTreeSet::new())
+                .insert((actor_id, idx));
+        }
+
+        let mut actor_location = HashMap::new();
+        for (worker, idxes) in worker_actors {
+            for (actor, idx) in idxes {
+                actor_location.insert(actor, ActorAlignmentId::new(worker, idx));
             }
         }
 
@@ -383,6 +472,25 @@ impl WorkerSlotMapping {
     /// Transform this worker slot mapping to an actor mapping, essentially `transform`.
     pub fn to_actor(&self, to_map: &HashMap<WorkerSlotId, ActorId>) -> ActorMapping {
         self.transform(to_map)
+    }
+}
+
+impl ActorAlignmentMapping {
+    pub fn from_assignment(
+        assignment: BTreeMap<u32, BTreeMap<usize, Vec<usize>>>,
+        vnode_size: usize,
+    ) -> Self {
+        let mut result = HashMap::new();
+
+        for (worker_id, actors) in &assignment {
+            for (actor_idx, vnodes) in actors {
+                let bitmap = Bitmap::from_vec_with_len(vnodes.clone(), vnode_size);
+
+                result.insert(ActorAlignmentId::new(*worker_id, *actor_idx), bitmap);
+            }
+        }
+
+        Self::from_bitmaps(&result)
     }
 }
 

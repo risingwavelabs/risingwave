@@ -262,7 +262,7 @@ impl Bitmap {
     }
 
     /// Creates a new bitmap from vector.
-    fn from_vec_with_len(buf: Vec<usize>, num_bits: usize) -> Self {
+    pub fn from_vec_with_len(buf: Vec<usize>, num_bits: usize) -> Self {
         debug_assert_eq!(buf.len(), Self::vec_len(num_bits));
         let count_ones = buf.iter().map(|&x| x.count_ones()).sum::<u32>() as usize;
         debug_assert!(count_ones <= num_bits);

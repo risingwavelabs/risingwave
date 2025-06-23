@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{
-    IsSingleton, VirtualNode, VnodeCount, VnodeCountCompat, WorkerSlotId,
+    ActorAlignmentId, IsSingleton, VirtualNode, VnodeCount, VnodeCountCompat,
 };
 use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node_body};
 use risingwave_connector::source::SplitImpl;
@@ -366,18 +366,18 @@ impl StreamJobFragments {
     pub fn new(
         stream_job_id: TableId,
         fragments: BTreeMap<FragmentId, Fragment>,
-        actor_locations: &BTreeMap<ActorId, WorkerSlotId>,
+        actor_locations: &BTreeMap<ActorId, ActorAlignmentId>,
         ctx: StreamContext,
         table_parallelism: TableParallelism,
         max_parallelism: usize,
     ) -> Self {
         let actor_status = actor_locations
             .iter()
-            .map(|(&actor_id, worker_slot_id)| {
+            .map(|(&actor_id, alignment_id)| {
                 (
                     actor_id,
                     ActorStatus {
-                        location: PbActorLocation::from_worker(worker_slot_id.worker_id()),
+                        location: PbActorLocation::from_worker(alignment_id.worker_id()),
                         state: ActorState::Inactive as i32,
                     },
                 )
