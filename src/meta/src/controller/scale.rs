@@ -16,8 +16,9 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::num::NonZeroUsize;
 use std::ops::{BitAnd, BitOrAssign};
 
+use anyhow::anyhow;
 use itertools::Itertools;
-use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
+use risingwave_common::bitmap::Bitmap;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
@@ -701,7 +702,13 @@ where
         .map(|job| (job.job_id, job))
         .collect();
 
-    for NoShuffleGraph {
+    let job_definitions =
+        resolve_streaming_job_definition(txn, &streaming_jobs_map.keys().cloned().collect())
+            .await?;
+
+    let mut fragment_actors = HashMap::new();
+
+    for NoShuffleEnsemble {
         entries,
         components,
     } in graphs
@@ -713,9 +720,9 @@ where
 
         let (job_id, vnode_count) = entry_fragments
             .iter()
-            .map(|f| (f.job_id, f.vnode_count))
+            .map(|f| (f.job_id, f.vnode_count as usize))
             .exactly_one()
-            .unwrap();
+            .map_err(|_| anyhow!("Multiple jobs found in no-shuffle ensemble"))?;
 
         let job = streaming_jobs_map.get(&job_id).unwrap();
 
@@ -727,7 +734,7 @@ where
             _ => total_parallelism,
         }
         .min(max_parallelism as usize)
-        .min(vnode_count as usize);
+        .min(vnode_count);
 
         let assigner = AssignerBuilder::new(job_id).build();
 
@@ -738,38 +745,41 @@ where
 
         for fragment_id in components {
             let fragment = fragment_map.get(&fragment_id).unwrap();
-            let job = streaming_jobs_map.get(&fragment.job_id).unwrap();
 
             let actors = assignment
                 .iter()
                 .flat_map(|(worker_id, actors)| {
                     actors
                         .iter()
-                        .map(|(actor_id, vnodes)| (worker_id, actor_id, vnodes))
+                        .map(move |(actor_id, vnodes)| (worker_id, actor_id, vnodes))
                 })
                 .map(|(&worker_id, &actor_idx, vnodes)| {
-                    let mut builder = BitmapBuilder::zeroed(vnode_count as usize);
-                    vnodes
-                        .iter()
-                        .for_each(|vnode| builder.set(*vnode as usize, true));
-                    let bitmap = builder.finish();
-
+                    let vnode_bitmap = match fragment.distribution_type {
+                        DistributionType::Single => None,
+                        DistributionType::Hash => Some(Bitmap::from_indices(vnode_count, vnodes)),
+                    };
+                    let mview_definition = job_definitions
+                        .get(&fragment.job_id)
+                        .cloned()
+                        .unwrap_or_else(|| "unknown".to_owned());
                     StreamActor {
-                        actor_id: (fragment_id << 10) as u32 | actor_idx as u32,
+                        actor_id: (fragment_id << 16) as u32 | actor_idx as u32,
                         fragment_id: fragment_id as u32,
-                        vnode_bitmap: Some(bitmap),
-                        mview_definition: "".to_string(),
+                        vnode_bitmap,
+                        mview_definition,
                         expr_context: None,
                     }
                 })
                 .collect_vec();
+
+            fragment_actors.insert(fragment_id, actors);
         }
     }
 
     todo!()
 }
 
-struct NoShuffleGraph {
+struct NoShuffleEnsemble {
     entries: HashSet<FragmentId>,
     components: HashSet<FragmentId>,
 }
@@ -777,7 +787,7 @@ struct NoShuffleGraph {
 async fn find_no_shuffle_dags_detailed(
     db: &impl ConnectionTrait,
     initial_fragment_ids: &[FragmentId],
-) -> MetaResult<Vec<NoShuffleGraph>> {
+) -> MetaResult<Vec<NoShuffleEnsemble>> {
     let all_no_shuffle_relations: Vec<(_, _)> = FragmentRelation::find()
         .columns([
             fragment_relation::Column::SourceFragmentId,
@@ -803,8 +813,8 @@ fn find_no_shuffle_graphs(
     initial_fragment_ids: &[FragmentId],
     forward_edges: &HashMap<FragmentId, Vec<FragmentId>>,
     backward_edges: &HashMap<FragmentId, Vec<FragmentId>>,
-) -> MetaResult<Vec<NoShuffleGraph>> {
-    let mut graphs: Vec<NoShuffleGraph> = Vec::new();
+) -> MetaResult<Vec<NoShuffleEnsemble>> {
+    let mut graphs: Vec<NoShuffleEnsemble> = Vec::new();
     let mut globally_visited: HashSet<FragmentId> = HashSet::new();
 
     for &init_id in initial_fragment_ids {
@@ -813,14 +823,14 @@ fn find_no_shuffle_graphs(
         }
 
         // Found a new component. Traverse it to find all its nodes.
-        let mut component_nodes = HashSet::new();
+        let mut components = HashSet::new();
         let mut queue: VecDeque<FragmentId> = VecDeque::new();
 
         queue.push_back(init_id);
         globally_visited.insert(init_id);
 
         while let Some(current_id) = queue.pop_front() {
-            component_nodes.insert(current_id);
+            components.insert(current_id);
             let neighbors = forward_edges
                 .get(&current_id)
                 .into_iter()
@@ -834,11 +844,11 @@ fn find_no_shuffle_graphs(
             }
         }
 
-        // 3For the newly found component, identify its roots.
+        // For the newly found component, identify its roots.
         let mut entries = HashSet::new();
-        for &node_id in &component_nodes {
+        for &node_id in &components {
             let is_root = match backward_edges.get(&node_id) {
-                Some(parents) => parents.iter().all(|p| !component_nodes.contains(p)),
+                Some(parents) => parents.iter().all(|p| !components.contains(p)),
                 None => true,
             };
             if is_root {
@@ -848,9 +858,9 @@ fn find_no_shuffle_graphs(
 
         // Store the detailed DAG structure (roots, all nodes in this DAG).
         if !entries.is_empty() {
-            graphs.push(NoShuffleGraph {
+            graphs.push(NoShuffleEnsemble {
                 entries,
-                components: component_nodes,
+                components,
             });
         }
     }
@@ -883,7 +893,7 @@ mod tests {
         (forward_edges, backward_edges)
     }
 
-    /// Helper function to create a HashSet from a slice easily.
+    /// Helper function to create a `HashSet` from a slice easily.
     fn to_hashset(ids: &[FragmentId]) -> HashSet<FragmentId> {
         ids.iter().cloned().collect()
     }
