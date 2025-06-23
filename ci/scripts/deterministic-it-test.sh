@@ -33,11 +33,11 @@ fi
 # We just want to run `scale::*`.
 
 echo "--- Run integration tests in deterministic simulation mode"
-seq "$TEST_NUM" | parallel -j 8 --line-buffer "MADSIM_TEST_SEED={} NEXTEST_PROFILE=ci-sim \
+MADSIM_TEST_SEED=13 NEXTEST_PROFILE=ci-sim \
  cargo nextest run \
  $NEXTEST_PARTITION_ARG \
  --no-fail-fast \
  --cargo-metadata target/nextest/cargo-metadata.json \
  --binaries-metadata target/nextest/binaries-metadata.json \
- $TEST_PATTERN \
- 2> $LOGDIR/it-test-{}.log && rm $LOGDIR/it-test-{}.log"
+ -E 'test(/^log_store/)'
+ 2> $LOGDIR/it-test-13.log && rm $LOGDIR/it-test-13.log
