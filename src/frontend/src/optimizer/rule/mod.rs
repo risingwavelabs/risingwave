@@ -172,6 +172,8 @@ mod apply_share_eliminate_rule;
 pub use apply_share_eliminate_rule::*;
 mod top_n_on_index_rule;
 pub use top_n_on_index_rule::*;
+mod top_n_push_down_rule;
+pub use top_n_push_down_rule::*;
 mod stream;
 pub use stream::bushy_tree_join_ordering_rule::*;
 pub use stream::filter_with_now_to_join_rule::*;
@@ -350,6 +352,7 @@ macro_rules! for_all_rules {
             , { SourceToIcebergScanRule }
             , { AddLogstoreRule }
             , { EmptyAggRemoveRule }
+            , { TopNPushDownRule }
         }
     };
 }
