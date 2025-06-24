@@ -15,7 +15,7 @@
 use risingwave_hummock_sdk::vector_index::VectorFileInfo;
 
 use crate::hummock::vector::file::{VectorBlock, VectorBlockBuilder, VectorBlockMeta};
-use crate::hummock::{HummockError, HummockResult, SstableStoreRef, VectorBlockHolder};
+use crate::hummock::{HummockResult, SstableStoreRef, VectorBlockHolder};
 use crate::vector::VectorRef;
 use crate::vector::hnsw::{VectorAccessor, VectorStore};
 
@@ -40,7 +40,7 @@ impl VectorAccessor for VectorBlockAccessor {
 pub enum EnumVectorAccessor<'a> {
     Builder(&'a VectorBlockBuilder, usize),
     BlockRef(&'a VectorBlock, usize),
-    BloclHolder(VectorBlockAccessor),
+    BlockHolder(VectorBlockAccessor),
 }
 
 impl VectorAccessor for EnumVectorAccessor<'_> {
@@ -48,7 +48,7 @@ impl VectorAccessor for EnumVectorAccessor<'_> {
         match self {
             EnumVectorAccessor::Builder(builder, offset) => builder.vec_ref(*offset),
             EnumVectorAccessor::BlockRef(block, offset) => block.vec_ref(*offset),
-            EnumVectorAccessor::BloclHolder(accessor) => accessor.vec_ref(),
+            EnumVectorAccessor::BlockHolder(accessor) => accessor.vec_ref(),
         }
     }
 
@@ -56,7 +56,7 @@ impl VectorAccessor for EnumVectorAccessor<'_> {
         match self {
             EnumVectorAccessor::Builder(builder, offset) => builder.info(*offset),
             EnumVectorAccessor::BlockRef(block, offset) => block.info(*offset),
-            EnumVectorAccessor::BloclHolder(accessor) => accessor.info(),
+            EnumVectorAccessor::BlockHolder(accessor) => accessor.info(),
         }
     }
 }
@@ -66,9 +66,9 @@ pub async fn get_vector_block(
     files: &[VectorFileInfo],
     idx: usize,
 ) -> HummockResult<VectorBlockAccessor> {
-    let vector_file = search_vector_files(files, idx)?;
+    let vector_file = search_vector_files(files, idx);
     let meta = sstable_store.get_vector_file_meta(vector_file).await?;
-    let (block_meta, block_idx, offset) = search_blocks(&meta.block_metas, idx)?;
+    let (block_meta, block_idx, offset) = search_blocks(&meta.block_metas, idx);
     let block = sstable_store
         .get_vector_block(vector_file, block_idx, block_meta)
         .await?;
@@ -100,53 +100,33 @@ impl VectorStore for FileVectorStore {
     }
 }
 
-fn search_vector_files(files: &[VectorFileInfo], idx: usize) -> HummockResult<&VectorFileInfo> {
-    let (file_idx, _) = search_vector(
-        files,
-        idx,
-        |file| file.start_vector_id,
-        |file| file.vector_count,
-    )?;
-    Ok(&files[file_idx])
+fn search_vector_files(files: &[VectorFileInfo], idx: usize) -> &VectorFileInfo {
+    let (file_idx, _) = search_vector(files, idx, |file| file.start_vector_id);
+    &files[file_idx]
 }
 
-fn search_blocks(
-    blocks: &[VectorBlockMeta],
-    idx: usize,
-) -> HummockResult<(&VectorBlockMeta, usize, usize)> {
-    let (block_idx, offset) = search_vector(
-        blocks,
-        idx,
-        |block| block.start_vector_id,
-        |block| block.vector_count,
-    )?;
-    Ok((&blocks[block_idx], block_idx, offset))
+fn search_blocks(blocks: &[VectorBlockMeta], idx: usize) -> (&VectorBlockMeta, usize, usize) {
+    let (block_idx, offset) = search_vector(blocks, idx, |block| block.start_vector_id);
+    (&blocks[block_idx], block_idx, offset)
 }
 
 /// return (`holder_idx`, `offset` inside holder)
-pub fn search_vector<T: std::fmt::Debug>(
+pub fn search_vector<T>(
     vector_holders: &[T],
     idx: usize,
     get_start_vector_id: impl Fn(&T) -> usize,
-    get_vector_count: impl Fn(&T) -> usize,
-) -> HummockResult<(usize, usize)> {
+) -> (usize, usize) {
     let holder_idx = vector_holders
         .partition_point(|holder| get_start_vector_id(holder) <= idx)
         .checked_sub(1)
-        .ok_or_else(|| {
-            HummockError::other(format!(
+        .unwrap_or_else(|| {
+            panic!(
                 "idx {} too small for first vector id {}",
                 idx,
                 vector_holders.first().map_or(0, &get_start_vector_id)
-            ))
-        })?;
+            )
+        });
     let holder = &vector_holders[holder_idx];
     let offset = idx - get_start_vector_id(holder);
-    if offset >= get_vector_count(holder) {
-        return Err(HummockError::other(format!(
-            "idx {} out of range for {:?}",
-            idx, holder
-        )));
-    }
-    Ok((holder_idx, offset))
+    (holder_idx, offset)
 }
