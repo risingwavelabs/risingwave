@@ -15,7 +15,7 @@
 use std::sync::atomic::Ordering::Relaxed;
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use itertools::Itertools;
 use madsim::runtime::init_logger;
 use risingwave_common::hash::WorkerSlotId;
