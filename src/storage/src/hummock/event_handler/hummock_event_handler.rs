@@ -992,7 +992,7 @@ mod tests {
 
         send_event(HummockEvent::ImmToUploader {
             instance_id: guard.instance_id,
-            imms: vec![imm1],
+            imms: read_version.write().start_upload_pending_imms(),
         });
 
         send_event(HummockEvent::StartEpoch {
