@@ -524,7 +524,7 @@ async fn test_state_store_sync() {
     {
         // after sync 1 epoch
         let read_version = hummock_storage.read_version();
-        assert_eq!(1, read_version.read().staging().imm.len());
+        assert_eq!(1, read_version.read().staging().uploading_imms.len());
         assert!(read_version.read().staging().sst.is_empty());
     }
 
@@ -570,7 +570,7 @@ async fn test_state_store_sync() {
     {
         // after sync all epoch
         let read_version = hummock_storage.read_version();
-        assert!(read_version.read().staging().imm.is_empty());
+        assert!(read_version.read().staging().uploading_imms.is_empty());
         assert!(read_version.read().staging().sst.is_empty());
     }
 
