@@ -265,6 +265,14 @@ JNIEXPORT jbyteArray JNICALL Java_com_risingwave_java_binding_Binding_getObject
 
 /*
  * Class:     com_risingwave_java_binding_Binding
+ * Method:    listObject
+ * Signature: (Ljava/lang/String;) [Ljava/lang/String;
+ */
+JNIEXPORT jobjectArray JNICALL Java_com_risingwave_java_binding_Binding_listObject
+  (JNIEnv *, jclass, jstring dir);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
  * Method:    sendSinkCoordinatorResponseToChannel
  * Signature: (J[B)Z
  */

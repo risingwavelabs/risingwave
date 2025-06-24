@@ -19,6 +19,7 @@
 package com.risingwave.connector.cdc.debezium.internal;
 
 import static com.risingwave.java.binding.Binding.getObject;
+import static com.risingwave.java.binding.Binding.listObject;
 import static com.risingwave.java.binding.Binding.putObject;
 
 import io.debezium.DebeziumException;
@@ -28,8 +29,19 @@ import io.debezium.relational.history.HistoryRecord;
 import io.debezium.relational.history.HistoryRecordComparator;
 import io.debezium.relational.history.SchemaHistoryException;
 import io.debezium.relational.history.SchemaHistoryListener;
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.ByteArrayInputStream;
-import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,6 +49,11 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     private static final Logger LOGGER = LoggerFactory.getLogger(OpendalSchemaHistory.class);
     private String objectName = "schema_history.dat";
     public static final String SOURCE_ID = "schema.history.internal.source.id";
+    private static final int MAX_RECORDS_PER_FILE = 1;
+    private List<HistoryRecord> buffer = new ArrayList<>();
+    private String objectDir = "";
+    private static final Pattern HISTORY_FILE_PATTERN =
+            Pattern.compile("schema_history_(\\d+)\\.dat");
 
     @Override
     public void configure(
@@ -56,9 +73,9 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
             sourceId = "default_source";
             config = config.edit().with("source_id", sourceId).build();
         }
-        objectName =
-                String.format("mysql-cdc-schema-history-source-%s/schema_history.dat", sourceId);
-        LOGGER.info("Database history will be stored in bucket as {}", objectName);
+        objectDir = String.format("mysql-cdc-schema-history-source-%s", sourceId);
+        objectName = String.format("%s/schema_history.dat", objectDir); // 兼容老逻辑
+        LOGGER.info("Database history will be stored in bucket dir {}", objectDir);
     }
 
     @Override
@@ -68,32 +85,46 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
 
     @Override
     protected void doStart() {
-        InputStream objectInputStream = null;
         try {
-            objectInputStream = retrieveObjectFromStorage();
-        } catch (Exception e) {
-            throw new SchemaHistoryException("Can't retrieve file with schema history", e);
-        }
-
-        if (objectInputStream != null) {
-            try {
-                toHistoryRecord(objectInputStream);
-            } catch (Exception e) {
-                throw new SchemaHistoryException("Can't retrieve file with schema history", e);
+            // 验证 listObject 是否可用，列出 hummock_001 下的对象并打印
+            String[] testList = listObject("hummock_001");
+            if (testList != null) {
+                LOGGER.info(
+                        "listObject(\"hummock_001\") 返回: {}", java.util.Arrays.toString(testList));
+            } else {
+                LOGGER.info("listObject(\"hummock_001\") 返回 null");
             }
+
+            List<String> files = new ArrayList<>();
+            String[] fileArray = listObject(objectDir);
+            if (fileArray != null) {
+                Collections.addAll(files, fileArray);
+            }
+            List<String> historyFiles = new ArrayList<>();
+            for (String file : files) {
+                if (file.contains("schema_history_") && file.endsWith(".dat")) {
+                    historyFiles.add(file);
+                }
+            }
+            // 按时间戳排序
+            Collections.sort(
+                    historyFiles, Comparator.comparingLong(this::extractTimestampFromFileName));
+            for (String file : historyFiles) {
+                byte[] data = getObject(file);
+                List<HistoryRecord> records = toHistoryRecords(data);
+                this.records.addAll(records);
+            }
+        } catch (Exception e) {
+            throw new SchemaHistoryException("Can't retrieve files with schema history", e);
         }
-    }
-
-    private InputStream retrieveObjectFromStorage() {
-        LOGGER.info("retrieveObjectFromStorage");
-        byte[] byteArray = getObject(objectName);
-
-        return new ByteArrayInputStream(byteArray);
     }
 
     @Override
     public void doStop() {
         LOGGER.info("doStop");
+        if (!buffer.isEmpty()) {
+            flushBufferToNewFile();
+        }
     }
 
     @Override
@@ -109,13 +140,9 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     @Override
     protected void doStoreRecord(HistoryRecord record) {
         LOGGER.info("doStoreRecord");
-        try {
-            byte[] newData = fromHistoryRecord(record);
-
-            putObject(objectName, newData);
-        } catch (Exception e) {
-            LOGGER.error("Error storing record to object storage", e);
-            throw new SchemaHistoryException("Can not store record to object storage", e);
+        buffer.add(record);
+        if (buffer.size() >= MAX_RECORDS_PER_FILE) {
+            flushBufferToNewFile();
         }
     }
 
@@ -133,5 +160,67 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     @Override
     public String toString() {
         return "Opendal-S3";
+    }
+
+    private void flushBufferToNewFile() {
+        if (buffer.isEmpty()) {
+            return;
+        }
+        String fileName =
+                String.format("%s/schema_history_%d.dat", objectDir, System.currentTimeMillis());
+        byte[] data = fromHistoryRecords(buffer);
+        putObject(fileName, data);
+        buffer.clear();
+        LOGGER.info("Flushed schema history to {}", fileName);
+    }
+
+    // 序列化多条记录
+    private byte[] fromHistoryRecords(List<HistoryRecord> records) {
+        try {
+            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+            BufferedWriter writer =
+                    new BufferedWriter(
+                            new OutputStreamWriter(outputStream, StandardCharsets.UTF_8));
+            for (HistoryRecord r : records) {
+                String line = documentWriter.write(r.document());
+                if (line != null) {
+                    writer.write(line);
+                    writer.newLine();
+                }
+            }
+            writer.flush();
+            return outputStream.toByteArray();
+        } catch (Exception e) {
+            throw new SchemaHistoryException("Failed to serialize history records", e);
+        }
+    }
+
+    // 反序列化多条记录
+    private List<HistoryRecord> toHistoryRecords(byte[] data) {
+        List<HistoryRecord> result = new ArrayList<>();
+        try {
+            BufferedReader reader =
+                    new BufferedReader(
+                            new InputStreamReader(
+                                    new ByteArrayInputStream(data), StandardCharsets.UTF_8));
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (!line.isEmpty()) {
+                    result.add(new HistoryRecord(documentReader.read(line)));
+                }
+            }
+        } catch (Exception e) {
+            throw new SchemaHistoryException("Failed to deserialize history records", e);
+        }
+        return result;
+    }
+
+    // 提取文件名中的时间戳
+    private long extractTimestampFromFileName(String fileName) {
+        Matcher m = HISTORY_FILE_PATTERN.matcher(fileName);
+        if (m.find()) {
+            return Long.parseLong(m.group(1));
+        }
+        return 0L;
     }
 }

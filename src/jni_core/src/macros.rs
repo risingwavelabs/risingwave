@@ -417,6 +417,8 @@ macro_rules! for_all_plain_native_methods {
 
                 public static native byte[] getObject(String objectName);
 
+                public static native String[] listObject(String dir);
+
                 static native void iteratorClose(long pointer);
 
                 static native long newStreamChunkFromPayload(byte[] streamChunkPayload);

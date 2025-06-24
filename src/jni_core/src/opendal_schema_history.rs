@@ -16,7 +16,7 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use jni::objects::{JByteArray, JString};
+use jni::objects::{JByteArray, JObject, JString};
 use risingwave_common::STATE_STORE_URL;
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
@@ -77,5 +77,46 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_getObject<'a>(
         });
 
         Ok(env.byte_array_from_slice(&result)?)
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_listObject<'a>(
+    env: EnvParam<'a>,
+    dir: JString<'a>,
+) -> jni::sys::jobjectArray {
+    **execute_and_catch(env, move |env: &mut EnvParam<'_>| {
+        let dir = env.get_string(&dir)?;
+        let dir: Cow<'_, str> = (&dir).into();
+        // files 是 Vec<String>
+        let files: Vec<String> = JAVA_BINDING_ASYNC_RUNTIME.block_on(async {
+            let object_store = new_object_store().await;
+            let mut file_names = Vec::new();
+            let mut stream = match object_store.list(&dir, None, None).await {
+                Ok(s) => s,
+                Err(_) => return file_names, // 如果 list 失败，直接返回空列表
+            };
+            use futures::StreamExt;
+            while let Some(obj) = stream.next().await {
+                match obj {
+                    Ok(obj) => file_names.push(obj.key),
+                    Err(_) => continue,
+                }
+            }
+            file_names
+        });
+
+        // 构造 Java String 数组返回
+        let string_class = env.find_class("java/lang/String")?;
+        let array = env.new_object_array(
+            files.len() as i32,
+            string_class,
+            JObject::null(),
+        )?;
+        for (i, file) in files.iter().enumerate() {
+            let jstr = env.new_string(file)?;
+            env.set_object_array_element(&array, i as i32, &jstr)?;
+        }
+        Ok(array)
     })
 }
