@@ -400,10 +400,6 @@ impl ActorMapping {
     ) -> ActorAlignmentMapping {
         let mut worker_actors = HashMap::new();
 
-        let challenge = self.iter_unique().collect_vec();
-
-        assert!(challenge.is_sorted());
-
         for (idx, actor_id) in self.iter_unique().enumerate() {
             let worker_id = actor_to_worker
                 .get(&actor_id)
