@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::acl::AclMode;
-use risingwave_common::catalog::DEFAULT_SUPER_USER_FOR_ADMIN;
+use risingwave_common::catalog::{DEFAULT_SUPER_USER_FOR_ADMIN, is_reserved_admin_user};
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::user::grant_privilege;
 use risingwave_sqlparser::ast::{Ident, ObjectName};
@@ -73,7 +73,7 @@ pub async fn handle_alter_owner(
         let new_owner = user_reader
             .get_user_by_name(&new_owner_name)
             .ok_or(CatalogError::NotFound("user", new_owner_name))?;
-        if new_owner.name == DEFAULT_SUPER_USER_FOR_ADMIN {
+        if is_reserved_admin_user(&new_owner.name) {
             return Err(PermissionDenied(
                 format!("{} is reserved for admin", DEFAULT_SUPER_USER_FOR_ADMIN).to_owned(),
             )

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::DEFAULT_SUPER_USER_FOR_ADMIN;
+use risingwave_common::catalog::is_reserved_admin_user;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
@@ -43,7 +43,7 @@ pub async fn handle_drop_user(
                 )
                 .into());
             }
-            if user_name == DEFAULT_SUPER_USER_FOR_ADMIN {
+            if is_reserved_admin_user(&user_name) {
                 return Err(ErrorCode::PermissionDenied(format!(
                     "cannot drop the admin superuser \"{}\"",
                     user_name

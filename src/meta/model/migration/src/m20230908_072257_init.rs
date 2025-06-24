@@ -941,7 +941,8 @@ impl MigrationTrait for Migration {
             ])
             .to_owned();
 
-        // Since User table is newly created, we assume that the initial user id of `root` is 1 and `postgres` is 2.
+        // Since the User table is newly created, we assume that the initial
+        // user id of `root` is 1, `postgres` is 2 and `rwadmin` is 3.
         let insert_objects = Query::insert()
             .into_table(Object::Table)
             .columns([

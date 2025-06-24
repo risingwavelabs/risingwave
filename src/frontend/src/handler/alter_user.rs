@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::StatementType;
-use risingwave_common::catalog::DEFAULT_SUPER_USER_FOR_ADMIN;
+use risingwave_common::catalog::{DEFAULT_SUPER_USER_FOR_ADMIN, is_reserved_admin_user};
 use risingwave_pb::user::UserInfo;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_sqlparser::ast::{AlterUserStatement, ObjectName, UserOption, UserOptions};
@@ -41,7 +41,7 @@ fn alter_prost_user_info(
             UserOption::EncryptedPassword(_) | UserOption::Password(_) | UserOption::OAuth(_)
         );
 
-    if !change_self_password_only && user_info.name == DEFAULT_SUPER_USER_FOR_ADMIN {
+    if !change_self_password_only && is_reserved_admin_user(&user_info.name) {
         // The admin superuser cannot be altered except for changing its password by itself.
         return Err(PermissionDenied(
             format!("{} cannot be altered", DEFAULT_SUPER_USER_FOR_ADMIN).to_owned(),
@@ -154,13 +154,13 @@ fn alter_rename_prost_user_info(
     }
 
     let new_name = Binder::resolve_user_name(new_name)?;
-    if new_name == DEFAULT_SUPER_USER_FOR_ADMIN {
+    if is_reserved_admin_user(&new_name) {
         return Err(PermissionDenied(
             format!("{} is reserved for admin", DEFAULT_SUPER_USER_FOR_ADMIN).to_owned(),
         )
         .into());
     }
-    if user_info.name == DEFAULT_SUPER_USER_FOR_ADMIN {
+    if is_reserved_admin_user(&user_info.name) {
         return Err(PermissionDenied(
             format!("{} cannot be renamed", DEFAULT_SUPER_USER_FOR_ADMIN).to_owned(),
         )
