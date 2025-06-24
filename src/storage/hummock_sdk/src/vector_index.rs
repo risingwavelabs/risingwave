@@ -31,6 +31,9 @@ use crate::{HummockObjectId, HummockVectorFileId};
 pub struct VectorFileInfo {
     pub object_id: HummockVectorFileId,
     pub file_size: u64,
+    pub start_vector_id: usize,
+    pub vector_count: usize,
+    pub meta_offset: usize,
 }
 
 impl From<PbVectorFileInfo> for VectorFileInfo {
@@ -38,6 +41,9 @@ impl From<PbVectorFileInfo> for VectorFileInfo {
         Self {
             object_id: pb.object_id.into(),
             file_size: pb.file_size,
+            start_vector_id: pb.start_vector_id.try_into().unwrap(),
+            vector_count: pb.vector_count.try_into().unwrap(),
+            meta_offset: pb.meta_offset.try_into().unwrap(),
         }
     }
 }
@@ -47,6 +53,57 @@ impl From<VectorFileInfo> for PbVectorFileInfo {
         Self {
             object_id: info.object_id.inner(),
             file_size: info.file_size,
+            start_vector_id: info.start_vector_id.try_into().unwrap(),
+            vector_count: info.vector_count.try_into().unwrap(),
+            meta_offset: info.meta_offset.try_into().unwrap(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct VectorStoreInfo {
+    pub next_vector_id: usize,
+    pub vector_files: Vec<VectorFileInfo>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct VectorStoreInfoDelta {
+    pub next_vector_id: usize,
+    pub added_vector_files: Vec<VectorFileInfo>,
+}
+
+impl VectorStoreInfo {
+    fn empty() -> Self {
+        Self {
+            next_vector_id: 0,
+            vector_files: vec![],
+        }
+    }
+
+    fn apply_vector_store_delta(&mut self, delta: &VectorStoreInfoDelta) {
+        for new_vector_file in &delta.added_vector_files {
+            if let Some(latest_vector_file) = self.vector_files.last() {
+                assert!(
+                    new_vector_file.start_vector_id
+                        >= latest_vector_file.start_vector_id + latest_vector_file.vector_count,
+                    "new vector file's start vector id {} should be greater than the last vector file's start vector id {} + vector count {}",
+                    new_vector_file.start_vector_id,
+                    latest_vector_file.start_vector_id,
+                    latest_vector_file.vector_count
+                );
+            }
+            self.vector_files.push(new_vector_file.clone());
+        }
+        self.next_vector_id = delta.next_vector_id;
+        if let Some(latest_vector_file) = self.vector_files.last() {
+            assert!(
+                latest_vector_file.start_vector_id + latest_vector_file.vector_count
+                    <= self.next_vector_id,
+                "next_vector_id {} should be greater than the last vector file's start vector id {} + vector count {}",
+                self.next_vector_id,
+                latest_vector_file.start_vector_id,
+                latest_vector_file.vector_count
+            );
         }
     }
 }
@@ -54,20 +111,20 @@ impl From<VectorFileInfo> for PbVectorFileInfo {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FlatIndex {
     pub config: PbFlatIndexConfig,
-    pub vector_files: Vec<VectorFileInfo>,
+    pub vector_store_info: VectorStoreInfo,
 }
 
 impl FlatIndex {
     fn new(config: &PbFlatIndexConfig) -> FlatIndex {
         FlatIndex {
             config: *config,
-            vector_files: vec![],
+            vector_store_info: VectorStoreInfo::empty(),
         }
     }
 
     fn apply_flat_index_add(&mut self, add: &FlatIndexAdd) {
-        self.vector_files
-            .extend(add.added_vector_files.iter().cloned());
+        self.vector_store_info
+            .apply_vector_store_delta(&add.vector_store_info_delta);
     }
 }
 
@@ -75,11 +132,14 @@ impl From<PbFlatIndex> for FlatIndex {
     fn from(pb: PbFlatIndex) -> Self {
         Self {
             config: pb.config.unwrap(),
-            vector_files: pb
-                .vector_files
-                .into_iter()
-                .map(VectorFileInfo::from)
-                .collect(),
+            vector_store_info: VectorStoreInfo {
+                next_vector_id: pb.next_vector_id.try_into().unwrap(),
+                vector_files: pb
+                    .vector_files
+                    .into_iter()
+                    .map(VectorFileInfo::from)
+                    .collect(),
+            },
         }
     }
 }
@@ -87,7 +147,9 @@ impl From<FlatIndex> for PbFlatIndex {
     fn from(index: FlatIndex) -> Self {
         Self {
             config: Some(index.config),
+            next_vector_id: index.vector_store_info.next_vector_id.try_into().unwrap(),
             vector_files: index
+                .vector_store_info
                 .vector_files
                 .into_iter()
                 .map(PbVectorFileInfo::from)
@@ -135,6 +197,7 @@ impl VectorIndex {
         };
         match &self.inner {
             VectorIndexImpl::Flat(flat) => flat
+                .vector_store_info
                 .vector_files
                 .iter()
                 .map(|file| (HummockObjectId::VectorFile(file.object_id), file.file_size)),
@@ -154,17 +217,20 @@ impl From<PbVectorIndex> for VectorIndex {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FlatIndexAdd {
-    pub added_vector_files: Vec<VectorFileInfo>,
+    pub vector_store_info_delta: VectorStoreInfoDelta,
 }
 
 impl From<PbFlatIndexAdd> for FlatIndexAdd {
     fn from(add: PbFlatIndexAdd) -> Self {
         Self {
-            added_vector_files: add
-                .added_vector_files
-                .into_iter()
-                .map(VectorFileInfo::from)
-                .collect(),
+            vector_store_info_delta: VectorStoreInfoDelta {
+                next_vector_id: add.next_vector_id.try_into().unwrap(),
+                added_vector_files: add
+                    .added_vector_files
+                    .into_iter()
+                    .map(VectorFileInfo::from)
+                    .collect(),
+            },
         }
     }
 }
@@ -172,7 +238,13 @@ impl From<PbFlatIndexAdd> for FlatIndexAdd {
 impl From<FlatIndexAdd> for PbFlatIndexAdd {
     fn from(add: FlatIndexAdd) -> Self {
         Self {
+            next_vector_id: add
+                .vector_store_info_delta
+                .next_vector_id
+                .try_into()
+                .unwrap(),
             added_vector_files: add
+                .vector_store_info_delta
                 .added_vector_files
                 .into_iter()
                 .map(PbVectorFileInfo::from)
@@ -228,6 +300,7 @@ impl VectorIndexDelta {
             VectorIndexDelta::Adds(adds) => Some(adds.iter().flat_map(|add| {
                 match add {
                     VectorIndexAdd::Flat(add) => add
+                        .vector_store_info_delta
                         .added_vector_files
                         .iter()
                         .map(|file| (HummockObjectId::VectorFile(file.object_id), file.file_size)),

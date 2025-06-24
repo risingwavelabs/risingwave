@@ -492,15 +492,15 @@ impl SstableStore {
     }
 
     pub fn get_sst_data_path(&self, object_id: impl Into<HummockSstableObjectId>) -> String {
-        let object_id = object_id.into();
-        let obj_prefix = self
-            .store
-            .get_object_prefix(object_id.inner(), self.use_new_object_prefix_strategy);
-        risingwave_hummock_sdk::get_object_data_path(
-            &obj_prefix,
-            &self.path,
-            HummockObjectId::Sstable(object_id),
-        )
+        self.get_object_data_path(HummockObjectId::Sstable(object_id.into()))
+    }
+
+    pub fn get_object_data_path(&self, object_id: HummockObjectId) -> String {
+        let obj_prefix = self.store.get_object_prefix(
+            object_id.as_raw().inner(),
+            self.use_new_object_prefix_strategy,
+        );
+        risingwave_hummock_sdk::get_object_data_path(&obj_prefix, &self.path, object_id)
     }
 
     pub fn get_object_id_from_path(path: &str) -> HummockObjectId {
