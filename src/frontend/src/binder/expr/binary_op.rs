@@ -94,16 +94,6 @@ impl Binder {
             BinaryOperator::GtEq => ExprType::GreaterThanOrEqual,
             BinaryOperator::And => ExprType::And,
             BinaryOperator::Or => ExprType::Or,
-            BinaryOperator::PGLikeMatch => ExprType::Like,
-            BinaryOperator::PGNotLikeMatch => {
-                func_types.push(ExprType::Not);
-                ExprType::Like
-            }
-            BinaryOperator::PGILikeMatch => ExprType::ILike,
-            BinaryOperator::PGNotILikeMatch => {
-                func_types.push(ExprType::Not);
-                ExprType::ILike
-            }
             BinaryOperator::BitwiseOr => ExprType::BitwiseOr,
             BinaryOperator::BitwiseAnd => ExprType::BitwiseAnd,
             BinaryOperator::BitwiseXor => ExprType::Pow,
@@ -113,6 +103,20 @@ impl Binder {
             BinaryOperator::Arrow => ExprType::JsonbAccess,
             BinaryOperator::Custom(name) => match name.as_str() {
                 "->>" => ExprType::JsonbAccessStr,
+                "~~" => ExprType::Like,
+                "~~*" => ExprType::ILike,
+                "!~" => {
+                    func_types.push(ExprType::Not);
+                    ExprType::RegexpEq
+                }
+                "!~~" => {
+                    func_types.push(ExprType::Not);
+                    ExprType::Like
+                }
+                "!~~*" => {
+                    func_types.push(ExprType::Not);
+                    ExprType::ILike
+                }
                 _ => bail_not_implemented!(issue = 112, "binary op: {:?}", name),
             },
             BinaryOperator::HashMinus => ExprType::JsonbDeletePath,
@@ -201,10 +205,6 @@ impl Binder {
                 }
             }
             BinaryOperator::PGRegexMatch => ExprType::RegexpEq,
-            BinaryOperator::PGRegexNotMatch => {
-                func_types.push(ExprType::Not);
-                ExprType::RegexpEq
-            }
             _ => bail_not_implemented!(issue = 112, "binary op: {:?}", op),
         };
         func_types.push(final_type);

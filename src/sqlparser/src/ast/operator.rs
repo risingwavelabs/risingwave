@@ -92,20 +92,6 @@ pub enum BinaryOperator {
     PGBitwiseShiftRight,
     /// String matches regular expression (case sensitively), e.g. `a ~ b` (PostgreSQL-specific)
     PGRegexMatch,
-    /// String matches regular expression (case insensitively), e.g. `a ~* b` (PostgreSQL-specific)
-    PGRegexIMatch,
-    /// String does not match regular expression (case sensitively), e.g. `a !~ b` (PostgreSQL-specific)
-    PGRegexNotMatch,
-    /// String does not match regular expression (case insensitively), e.g. `a !~* b` (PostgreSQL-specific)
-    PGRegexNotIMatch,
-    /// String matches pattern (case sensitively), e.g. `a ~~ b` (PostgreSQL-specific)
-    PGLikeMatch,
-    /// String matches pattern (case insensitively), e.g. `a ~~* b` (PostgreSQL-specific)
-    PGILikeMatch,
-    /// String does not match pattern (case sensitively), e.g. `a !~~ b` (PostgreSQL-specific)
-    PGNotLikeMatch,
-    /// String does not match pattern (case insensitively), e.g. `a !~~* b` (PostgreSQL-specific)
-    PGNotILikeMatch,
     /// String "starts with", eg: `a ^@ b` (PostgreSQL-specific)
     Arrow,
     HashArrow,
@@ -152,13 +138,6 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::PGBitwiseShiftLeft => "<<",
             BinaryOperator::PGBitwiseShiftRight => ">>",
             BinaryOperator::PGRegexMatch => "~",
-            BinaryOperator::PGRegexIMatch => "~*",
-            BinaryOperator::PGRegexNotMatch => "!~",
-            BinaryOperator::PGRegexNotIMatch => "!~*",
-            BinaryOperator::PGLikeMatch => "~~",
-            BinaryOperator::PGILikeMatch => "~~*",
-            BinaryOperator::PGNotLikeMatch => "!~~",
-            BinaryOperator::PGNotILikeMatch => "!~~*",
             BinaryOperator::Arrow => "->",
             BinaryOperator::HashArrow => "#>",
             BinaryOperator::HashLongArrow => "#>>",

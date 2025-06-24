@@ -130,20 +130,6 @@ pub enum Token {
     /// Tilde `~` used for PostgreSQL Bitwise NOT operator or case sensitive match regular
     /// expression operator
     Tilde,
-    /// `~*` , a case insensitive match regular expression operator in PostgreSQL
-    TildeAsterisk,
-    /// `!~` , a case sensitive not match regular expression operator in PostgreSQL
-    ExclamationMarkTilde,
-    /// `!~*` , a case insensitive not match regular expression operator in PostgreSQL
-    ExclamationMarkTildeAsterisk,
-    /// `~~`, a case sensitive LIKE expression operator in PostgreSQL
-    DoubleTilde,
-    /// `~~*` , a case insensitive ILIKE regular expression operator in PostgreSQL
-    DoubleTildeAsterisk,
-    /// `!~~` , a case sensitive NOT LIKE regular expression operator in PostgreSQL
-    ExclamationMarkDoubleTilde,
-    /// `!~~*` , a case insensitive NOT ILIKE regular expression operator in PostgreSQL
-    ExclamationMarkDoubleTildeAsterisk,
     /// `<<`, a bitwise shift left operator in PostgreSQL
     ShiftLeft,
     /// `>>`, a bitwise shift right operator in PostgreSQL
@@ -232,13 +218,6 @@ impl fmt::Display for Token {
             Token::ExclamationMark => f.write_str("!"),
             Token::DoubleExclamationMark => f.write_str("!!"),
             Token::Tilde => f.write_str("~"),
-            Token::TildeAsterisk => f.write_str("~*"),
-            Token::ExclamationMarkTilde => f.write_str("!~"),
-            Token::ExclamationMarkTildeAsterisk => f.write_str("!~*"),
-            Token::DoubleTilde => f.write_str("~~"),
-            Token::DoubleTildeAsterisk => f.write_str("~~*"),
-            Token::ExclamationMarkDoubleTilde => f.write_str("!~~"),
-            Token::ExclamationMarkDoubleTildeAsterisk => f.write_str("!~~*"),
             Token::AtSign => f.write_str("@"),
             Token::ShiftLeft => f.write_str("<<"),
             Token::ShiftRight => f.write_str(">>"),
@@ -751,10 +730,6 @@ impl<'a> Tokenizer<'a> {
                         "=>" => Ok(Some(Token::RArrow)),
                         "!=" => Ok(Some(Token::Neq)),
                         "!!" => Ok(Some(Token::DoubleExclamationMark)),
-                        "!~~*" => Ok(Some(Token::ExclamationMarkDoubleTildeAsterisk)),
-                        "!~~" => Ok(Some(Token::ExclamationMarkDoubleTilde)),
-                        "!~*" => Ok(Some(Token::ExclamationMarkTildeAsterisk)),
-                        "!~" => Ok(Some(Token::ExclamationMarkTilde)),
                         "!" => Ok(Some(Token::ExclamationMark)),
                         "<=>" => Ok(Some(Token::Spaceship)),
                         "<=" => Ok(Some(Token::LtEq)),
@@ -768,9 +743,6 @@ impl<'a> Tokenizer<'a> {
                         "&" => Ok(Some(Token::Ampersand)),
                         "^@" => Ok(Some(Token::Prefix)),
                         "^" => Ok(Some(Token::Caret)),
-                        "~~*" => Ok(Some(Token::DoubleTildeAsterisk)),
-                        "~~" => Ok(Some(Token::DoubleTilde)),
-                        "~*" => Ok(Some(Token::TildeAsterisk)),
                         "~" => Ok(Some(Token::Tilde)),
                         "#-" => Ok(Some(Token::HashMinus)),
                         "#>>" => Ok(Some(Token::HashLongArrow)),
@@ -1668,21 +1640,21 @@ mod tests {
             Token::Whitespace(Whitespace::Space),
             Token::make_word("col", None),
             Token::Whitespace(Whitespace::Space),
-            Token::TildeAsterisk,
+            Token::Op("~*".to_owned()),
             Token::Whitespace(Whitespace::Space),
             Token::SingleQuotedString("^a".into()),
             Token::Comma,
             Token::Whitespace(Whitespace::Space),
             Token::make_word("col", None),
             Token::Whitespace(Whitespace::Space),
-            Token::ExclamationMarkTilde,
+            Token::Op("!~".to_owned()),
             Token::Whitespace(Whitespace::Space),
             Token::SingleQuotedString("^a".into()),
             Token::Comma,
             Token::Whitespace(Whitespace::Space),
             Token::make_word("col", None),
             Token::Whitespace(Whitespace::Space),
-            Token::ExclamationMarkTildeAsterisk,
+            Token::Op("!~*".to_owned()),
             Token::Whitespace(Whitespace::Space),
             Token::SingleQuotedString("^a".into()),
         ];
