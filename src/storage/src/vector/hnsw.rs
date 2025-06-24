@@ -557,7 +557,7 @@ pub async fn nearest<O: Send, M: MeasureDistanceBuilder>(
         )
         .await?;
         Ok((
-            entrypoints.collect_with(|(_, output)| output, Some(top_n)),
+            entrypoints.collect_with(|_, (_, output)| output, Some(top_n)),
             stats,
         ))
     }
