@@ -210,6 +210,8 @@ pub(crate) async fn realign_join(
 
     // wait for recovery
     cluster.wait_for_recovery().await?;
+    // trigger a flush
+    session.flush().await?;
     // assert no lag
     assert_no_lag_in_log_store(cluster, name, result_count).await?;
     Ok(())
