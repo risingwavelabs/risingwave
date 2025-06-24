@@ -35,6 +35,7 @@
 #![feature(iter_from_coroutine)]
 #![feature(get_mut_unchecked)]
 #![feature(map_try_insert)]
+#![feature(portable_simd)]
 
 pub mod hummock;
 pub mod memory;
