@@ -108,11 +108,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_listObject<'a>(
 
         // 构造 Java String 数组返回
         let string_class = env.find_class("java/lang/String")?;
-        let array = env.new_object_array(
-            files.len() as i32,
-            string_class,
-            JObject::null(),
-        )?;
+        let array = env.new_object_array(files.len() as i32, string_class, JObject::null())?;
         for (i, file) in files.iter().enumerate() {
             let jstr = env.new_string(file)?;
             env.set_object_array_element(&array, i as i32, &jstr)?;

@@ -52,7 +52,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     private static final Logger LOGGER = LoggerFactory.getLogger(OpendalSchemaHistory.class);
     private String objectName = "schema_history.dat";
     public static final String SOURCE_ID = "schema.history.internal.source.id";
-    private static final int MAX_RECORDS_PER_FILE = 2;
+    private static final int MAX_RECORDS_PER_FILE = 10;
     private List<HistoryRecord> buffer = new ArrayList<>();
     private String objectDir = "";
     private static final Pattern HISTORY_FILE_PATTERN =
@@ -77,13 +77,13 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
             config = config.edit().with("source_id", sourceId).build();
         }
         objectDir = String.format("mysql-cdc-schema-history-source-%s", sourceId);
-        objectName = String.format("%s/schema_history.dat", objectDir); // 兼容老逻辑
+        objectName = String.format("%s/schema_history.dat", objectDir); // compatible with old logic
         LOGGER.info("Database history will be stored in bucket dir {}", objectDir);
     }
 
     @Override
     protected void doPreStart() {
-        // 无需预启动操作
+        // No pre-start operation required
     }
 
     @Override
@@ -134,9 +134,43 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     @Override
     protected void doStoreRecord(HistoryRecord record) {
         LOGGER.info("doStoreRecord");
-        buffer.add(record);
-        if (buffer.size() >= MAX_RECORDS_PER_FILE) {
-            flushBufferToNewFile();
+        try {
+            // 1. Find the latest schema_history_*.dat file
+            List<String> files = new ArrayList<>();
+            String[] fileArray = listObject(objectDir);
+            if (fileArray != null) {
+                Collections.addAll(files, fileArray);
+            }
+            files.removeIf(file -> !HISTORY_FILE_PATTERN.matcher(file).find());
+            if (!files.isEmpty()) {
+                files.sort(Comparator.comparingLong(this::extractTimestampFromFileName));
+            }
+            String latestFile = files.isEmpty() ? null : files.get(files.size() - 1);
+
+            List<HistoryRecord> records;
+            if (latestFile != null) {
+                // 2. Read the latest file content
+                byte[] data = getObject(latestFile);
+                records = toHistoryRecords(data);
+                if (records.size() < MAX_RECORDS_PER_FILE) {
+                    // 3. Append and overwrite the file
+                    records.add(record);
+                    putObject(latestFile, fromHistoryRecords(records));
+                    LOGGER.info(
+                            "Appended record to existing file: {} (now {} records)",
+                            latestFile,
+                            records.size());
+                    return;
+                }
+            }
+            // 4. Create a new file
+            String newFile =
+                    String.format(
+                            "%s/schema_history_%d.dat", objectDir, System.currentTimeMillis());
+            putObject(newFile, fromHistoryRecords(Collections.singletonList(record)));
+            LOGGER.info("Created new schema history file: {}", newFile);
+        } catch (Exception e) {
+            throw new SchemaHistoryException("Failed to store schema history record", e);
         }
     }
 
@@ -168,7 +202,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
         LOGGER.info("Flushed schema history to {}", fileName);
     }
 
-    // 序列化多条记录
+    // Serialize multiple records
     private byte[] fromHistoryRecords(List<HistoryRecord> records) {
         try {
             ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
@@ -189,7 +223,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
         }
     }
 
-    // 反序列化多条记录
+    // Deserialize multiple records
     private List<HistoryRecord> toHistoryRecords(byte[] data) {
         List<HistoryRecord> result = new ArrayList<>();
         try {
@@ -209,7 +243,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
         return result;
     }
 
-    // 提取文件名中的时间戳
+    // Extract timestamp from file name
     private long extractTimestampFromFileName(String fileName) {
         Matcher m = HISTORY_FILE_PATTERN.matcher(fileName);
         if (m.find()) {
