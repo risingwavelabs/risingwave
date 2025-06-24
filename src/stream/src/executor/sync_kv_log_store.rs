@@ -597,8 +597,18 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                         // Truncate the logstore
                         if !progress_tracked {
                             progress_tracked = true;
-                            let _post_seal = initial_write_state
+
+                            let post_seal = initial_write_state
                                 .seal_current_epoch(barrier.epoch.curr, progress.take());
+
+                            let update_vnode_bitmap = barrier
+                                .as_update_vnode_bitmap(self.actor_context.id);
+                            tracing::trace!(
+                                ?update_vnode_bitmap,
+                                actor_id = self.actor_context.id,
+                                "update vnode bitmap"
+                            );
+                            post_seal.post_yield_barrier(update_vnode_bitmap).await?;
                         }
                         yield Message::Barrier(barrier);
                     }
