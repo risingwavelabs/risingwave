@@ -19,6 +19,7 @@
 package com.risingwave.connector.cdc.debezium.internal;
 
 import static com.risingwave.java.binding.Binding.getObject;
+import static com.risingwave.java.binding.Binding.getObjectStoreType;
 import static com.risingwave.java.binding.Binding.listObject;
 import static com.risingwave.java.binding.Binding.putObject;
 
@@ -182,12 +183,13 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
 
     @Override
     public void initializeStorage() {
-        LOGGER.info("Using hummock bucket to store database history");
+        String type = getObjectStoreType();
+        LOGGER.info("Using hummock object store {} to store database history.", type);
     }
 
     @Override
     public String toString() {
-        return "Opendal-S3";
+        return getObjectStoreType();
     }
 
     private void flushBufferToNewFile() {
@@ -269,8 +271,8 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
                     @Override
                     protected boolean removeEldestEntry(
                             Map.Entry<Integer, List<HistoryRecord>> eldest) {
-                        // Cache up to 5 files' content
-                        return size() > 5;
+                        // Cache up to 100 files' content
+                        return size() > 100;
                     }
                 };
 
@@ -312,13 +314,15 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
             // Check cache first
             List<HistoryRecord> recordsInFile = cache.get(fileIndex);
             if (recordsInFile == null) {
-                // Not in cache, load from Opendal and add to cache
-                LOGGER.debug("Cache miss for file index {}. Loading from Opendal.", fileIndex);
+                // Not in cache, load from remote object store and add to cache
+                LOGGER.info(
+                        "Cache miss for file index {}. Loading from remote object store.",
+                        fileIndex);
                 byte[] data = getObject(filePaths.get(fileIndex));
                 recordsInFile = toHistoryRecords(data);
                 cache.put(fileIndex, recordsInFile);
             } else {
-                LOGGER.debug("Cache hit for file index {}.", fileIndex);
+                LOGGER.info("Cache hit for file index {}.", fileIndex);
             }
 
             // Calculate the index within the file

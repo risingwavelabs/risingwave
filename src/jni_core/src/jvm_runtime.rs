@@ -27,6 +27,7 @@ use tracing::error;
 
 use crate::opendal_schema_history::{
     Java_com_risingwave_java_binding_Binding_getObject,
+    Java_com_risingwave_java_binding_Binding_getObjectStoreType,
     Java_com_risingwave_java_binding_Binding_listObject,
     Java_com_risingwave_java_binding_Binding_putObject,
 };

@@ -266,10 +266,18 @@ JNIEXPORT jbyteArray JNICALL Java_com_risingwave_java_binding_Binding_getObject
 /*
  * Class:     com_risingwave_java_binding_Binding
  * Method:    listObject
- * Signature: (Ljava/lang/String;) [Ljava/lang/String;
+ * Signature: (Ljava/lang/String;)[Ljava/lang/String;
  */
 JNIEXPORT jobjectArray JNICALL Java_com_risingwave_java_binding_Binding_listObject
   (JNIEnv *, jclass, jstring dir);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    getObjectStoreType
+ * Signature: ()Ljava/lang/String;
+ */
+JNIEXPORT jstring JNICALL Java_com_risingwave_java_binding_Binding_getObjectStoreType
+  (JNIEnv *, jclass);
 
 /*
  * Class:     com_risingwave_java_binding_Binding

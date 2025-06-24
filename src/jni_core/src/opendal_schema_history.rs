@@ -81,6 +81,19 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_getObject<'a>(
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_getObjectStoreType<'a>(
+    env: EnvParam<'a>,
+) -> JString<'a> {
+    execute_and_catch(env, move |env: &mut EnvParam<'_>| {
+        let media_type = JAVA_BINDING_ASYNC_RUNTIME.block_on(async {
+            let object_store = new_object_store().await;
+            object_store.media_type().to_string()
+        });
+        Ok(env.new_string(media_type)?)
+    })
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_listObject<'a>(
     env: EnvParam<'a>,
     dir: JString<'a>,

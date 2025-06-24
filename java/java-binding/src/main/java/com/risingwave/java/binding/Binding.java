@@ -45,6 +45,8 @@ public class Binding {
 
     public static native void putObject(String object, byte[] data);
 
+    public static native String getObjectStoreType();
+
     public static native byte[] getObject(String object);
 
     public static native String[] listObject(String dir);

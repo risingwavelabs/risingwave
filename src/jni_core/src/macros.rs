@@ -415,6 +415,8 @@ macro_rules! for_all_plain_native_methods {
 
                 public static native void putObject(String objectName, byte[] data);
 
+                public static native String getObjectStoreType();
+
                 public static native byte[] getObject(String objectName);
 
                 public static native String[] listObject(String dir);
