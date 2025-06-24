@@ -25,7 +25,6 @@ macro_rules! main {
     ($component:ident) => {
         risingwave_common::enable_jemalloc!();
 
-        #[cfg_attr(coverage, coverage(off))]
         fn main() {
             let opts = clap::Parser::parse();
             $crate::$component(opts);

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #![feature(let_chains)]
-#![cfg_attr(coverage, feature(coverage_attribute))]
+#![feature(coverage_attribute)]
 
 mod server;
 
