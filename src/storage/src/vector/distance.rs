@@ -15,6 +15,8 @@
 use std::simd::Simd;
 use std::simd::num::SimdFloat;
 
+use risingwave_pb::common::PbDistanceType;
+
 use crate::vector::{
     MeasureDistance, MeasureDistanceBuilder, VectorDistance, VectorItem, VectorRef,
 };
@@ -40,6 +42,21 @@ macro_rules! define_measure {
     }) => {
         pub enum DistanceMeasurement {
             $($distance_name),+
+        }
+
+        impl From<PbDistanceType> for DistanceMeasurement {
+            fn from(value: PbDistanceType) -> Self {
+                match value {
+                    PbDistanceType::Unspecified => {
+                        unreachable!()
+                    }
+                    $(
+                        PbDistanceType::$distance_name => {
+                            DistanceMeasurement::$distance_name
+                        }
+                    ),+
+                }
+            }
         }
     };
     () => {
