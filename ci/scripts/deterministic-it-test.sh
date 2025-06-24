@@ -5,7 +5,7 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
-export RUST_LOG="info,risingwave_simulation=debug"
+export RUST_LOG="info,risingwave_stream::executor::sync_kv_log_store=trace,integration_tests::log_store::scale=info,risingwave_stream::common::log_store_impl::kv_log_store=trace"
 export LOGDIR=.risingwave/log
 mkdir -p $LOGDIR
 
@@ -39,5 +39,5 @@ MADSIM_TEST_SEED=13 NEXTEST_PROFILE=ci-sim \
  --no-fail-fast \
  --cargo-metadata target/nextest/cargo-metadata.json \
  --binaries-metadata target/nextest/binaries-metadata.json \
- -E 'test(/^log_store/)'
+ -E 'test(/^log_store/)' \
  2> $LOGDIR/it-test-13.log && rm $LOGDIR/it-test-13.log
