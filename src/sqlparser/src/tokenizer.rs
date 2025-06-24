@@ -65,8 +65,6 @@ pub enum Token {
     Whitespace(Whitespace),
     /// Custom Operator
     Op(String),
-    /// Double equals sign `==`
-    DoubleEq,
     /// Equality operator `=`
     Eq,
     /// Not Equals operator `<>` (or `!=` in some dialects)
@@ -164,7 +162,6 @@ impl fmt::Display for Token {
             Token::Comma => f.write_str(","),
             Token::Whitespace(ws) => write!(f, "{}", ws),
             Token::Op(op) => write!(f, "{}", op),
-            Token::DoubleEq => f.write_str("=="),
             Token::Eq => f.write_str("="),
             Token::Neq => f.write_str("<>"),
             Token::Lt => f.write_str("<"),

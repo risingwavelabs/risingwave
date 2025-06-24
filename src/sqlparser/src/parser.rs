@@ -1302,7 +1302,6 @@ impl Parser<'_> {
         let tok = self.next_token();
         debug!("parsing infix {:?}", tok.token);
         let regular_binary_operator = match &tok.token {
-            Token::DoubleEq => Some(BinaryOperator::Eq),
             Token::Eq => Some(BinaryOperator::Eq),
             Token::Neq => Some(BinaryOperator::NotEq),
             Token::Gt => Some(BinaryOperator::Gt),
@@ -1699,13 +1698,9 @@ impl Parser<'_> {
             Token::Word(w) if w.keyword == Keyword::IS => Ok(P::Is),
             Token::Word(w) if w.keyword == Keyword::ISNULL => Ok(P::Is),
             Token::Word(w) if w.keyword == Keyword::NOTNULL => Ok(P::Is),
-            Token::Eq
-            | Token::Lt
-            | Token::LtEq
-            | Token::Neq
-            | Token::Gt
-            | Token::GtEq
-            | Token::DoubleEq => Ok(P::Cmp),
+            Token::Eq | Token::Lt | Token::LtEq | Token::Neq | Token::Gt | Token::GtEq => {
+                Ok(P::Cmp)
+            }
             Token::Word(w) if w.keyword == Keyword::IN => Ok(P::Between),
             Token::Word(w) if w.keyword == Keyword::BETWEEN => Ok(P::Between),
             Token::Word(w) if w.keyword == Keyword::LIKE => Ok(P::Like),
