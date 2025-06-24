@@ -5,7 +5,7 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
-export RUST_LOG="info,risingwave_stream::executor::sync_kv_log_store=trace,integration_tests::log_store::scale=info,risingwave_stream::common::log_store_impl::kv_log_store=trace"
+export RUST_LOG="risingwave_stream::executor::sync_kv_log_store=trace,integration_tests::log_store::scale=info,risingwave_stream::common::log_store_impl::kv_log_store=trace"
 export LOGDIR=.risingwave/log
 mkdir -p $LOGDIR
 
