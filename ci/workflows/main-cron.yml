@@ -122,7 +122,7 @@ steps:
       plugins:
         - docker-compose#v5.5.0: *docker-compose-standard
         - ./ci/plugins/upload-failure-logs
-      timeout_in_minutes: 9
+      timeout_in_minutes: 15
       retry: *auto-retry
 
     - label: "end-to-end test (parallel, {{matrix.backend}} backend)"
@@ -638,7 +638,7 @@ steps:
           <<: *docker-compose
           run: source-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30
+    timeout_in_minutes: 50
     retry: *auto-retry
 
   - label: "e2e standalone binary test"
@@ -1046,7 +1046,7 @@ steps:
       bash -c 'echo test && sleep 300'
     timeout_in_minutes: 1
 
-  - wait: true
+  - wait: ~
     continue_on_failure: true
     allow_dependency_failure: true
 
@@ -1056,3 +1056,20 @@ steps:
   - label: "trigger failed test notification"
     if: build.pull_request.labels includes "ci/main-cron/test-notify" || build.branch == "main"
     command: "ci/scripts/notify.py"
+
+  - wait: ~
+
+  # Only if all steps are successful, we upload coverage reports.
+  - label: "upload coverage reports"
+    command: "ci/scripts/upload-coverage.sh"
+    plugins:
+      - seek-oss/aws-sm#v2.3.2:
+          env:
+            CODECOV_TOKEN: my-codecov-token
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          environment:
+          - CODECOV_TOKEN
+    timeout_in_minutes: 10
+    retry: *auto-retry
+    soft_fail: true
