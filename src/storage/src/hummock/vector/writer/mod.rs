@@ -13,18 +13,20 @@
 // limitations under the License.
 
 mod hnsw;
-
 use std::mem::take;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::FutureExt;
-use risingwave_hummock_sdk::vector_index::{FlatIndex, FlatIndexAdd, VectorFileInfo, VectorIndex, VectorIndexAdd, VectorIndexImpl, VectorStoreInfoDelta};
+pub use hnsw::HnswFlatIndexWriter;
+use risingwave_hummock_sdk::vector_index::{
+    FlatIndex, FlatIndexAdd, VectorFileInfo, VectorIndex, VectorIndexAdd, VectorIndexImpl,
+    VectorStoreInfoDelta,
+};
 use risingwave_hummock_sdk::{HummockObjectId, HummockRawObjectId};
 
 use crate::hummock::vector::file::VectorFileBuilder;
-use crate::hummock::{HummockResult, ObjectIdManager, ObjectIdManagerRef, SstableStoreRef};
-use crate::hummock::vector::writer::hnsw::HnswFlatIndexWriter;
+use crate::hummock::{HummockResult, ObjectIdManager, SstableStoreRef};
 use crate::opts::StorageOpts;
 use crate::vector::{DistanceMeasurement, Vector};
 
@@ -77,15 +79,15 @@ impl VectorWriterImpl {
     pub(crate) async fn new(
         index: &VectorIndex,
         sstable_store: SstableStoreRef,
-        object_id_manager: ObjectIdManagerRef,
+        object_id_manager: VectorObjectIdManagerRef,
         storage_opts: &StorageOpts,
     ) -> HummockResult<Self> {
         Ok(match &index.inner {
             VectorIndexImpl::Flat(flat) => VectorWriterImpl::Flat(FlatIndexWriter::new(
                 flat,
                 index.dimension,
-                sstable_store.clone(),
-                object_id_manager.clone(),
+                sstable_store,
+                object_id_manager,
                 storage_opts,
             )),
             VectorIndexImpl::HnswFlat(hnsw_flat) => VectorWriterImpl::HnswFlat(
@@ -93,8 +95,8 @@ impl VectorWriterImpl {
                     hnsw_flat,
                     index.dimension,
                     DistanceMeasurement::from(index.distance_type),
-                    sstable_store.clone(),
-                    object_id_manager.clone(),
+                    sstable_store,
+                    object_id_manager,
                     storage_opts,
                 )
                 .await?,
@@ -112,7 +114,9 @@ impl VectorWriterImpl {
     pub(crate) fn seal_current_epoch(&mut self) -> Option<VectorIndexAdd> {
         match self {
             VectorWriterImpl::Flat(writer) => writer.seal_current_epoch(),
-            VectorWriterImpl::HnswFlat(writer) => writer.seal_current_epoch(),
+            VectorWriterImpl::HnswFlat(writer) => {
+                writer.seal_current_epoch().map(VectorIndexAdd::HnswFlat)
+            }
         }
     }
 
@@ -142,7 +146,7 @@ impl FlatIndexWriter {
         index: &FlatIndex,
         dimension: usize,
         sstable_store: SstableStoreRef,
-        object_id_manager: ObjectIdManagerRef,
+        object_id_manager: VectorObjectIdManagerRef,
         storage_opts: &StorageOpts,
     ) -> Self {
         Self {

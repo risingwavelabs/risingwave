@@ -5314,7 +5314,7 @@ dependencies = [
 [[package]]
 name = "faiss"
 version = "0.12.2-alpha.0"
-source = "git+https://github.com/risingwavelabs/faiss-rs.git?rev=aa605e3#aa605e3fad1c429ca80d1d396900342d627879f4"
+source = "git+https://github.com/risingwavelabs/faiss-rs.git?rev=6d91517#6d9151786bda100674a501eea4840af04e711515"
 dependencies = [
  "faiss-sys",
 ]
@@ -5322,7 +5322,7 @@ dependencies = [
 [[package]]
 name = "faiss-sys"
 version = "0.6.3-alpha.0"
-source = "git+https://github.com/risingwavelabs/faiss-rs.git?rev=aa605e3#aa605e3fad1c429ca80d1d396900342d627879f4"
+source = "git+https://github.com/risingwavelabs/faiss-rs.git?rev=6d91517#6d9151786bda100674a501eea4840af04e711515"
 dependencies = [
  "cmake",
 ]
@@ -12260,6 +12260,29 @@ dependencies = [
  "risingwave_pb",
  "thiserror 2.0.12",
  "tracing",
+]
+
+[[package]]
+name = "risingwave_hummock_vector_service"
+version = "2.5.0-alpha"
+dependencies = [
+ "bytes",
+ "clap",
+ "foyer",
+ "madsim-tokio",
+ "madsim-tonic",
+ "risingwave_backup",
+ "risingwave_common",
+ "risingwave_common_estimate_size",
+ "risingwave_common_service",
+ "risingwave_connector",
+ "risingwave_expr",
+ "risingwave_hummock_sdk",
+ "risingwave_hummock_trace",
+ "risingwave_object_store",
+ "risingwave_pb",
+ "risingwave_rpc_client",
+ "risingwave_storage",
 ]
 
 [[package]]

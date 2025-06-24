@@ -48,6 +48,7 @@ members = [
     "src/storage/compactor",
     "src/storage/hummock_sdk",
     "src/storage/hummock_test",
+    "src/storage/hummock_vector_service",
     "src/stream",
     "src/stream/spill_test",
     "src/test_runner",
@@ -383,7 +384,7 @@ debug = "line-tables-only"
 opt-level = 2
 
 [patch.crates-io]
-faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "aa605e3" }
+faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "6d91517" }
 # Patch third-party crates for deterministic simulation.
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae" }
 # Don't patch `tokio-stream`, but only use the madsim version for **direct** dependencies.
