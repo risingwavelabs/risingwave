@@ -566,6 +566,7 @@ impl SstableStore {
         &self,
         graph_file: &HnswGraphFileInfo,
     ) -> HummockResult<PbHnswGraph> {
+        let todo = 0;
         let graph_file_path =
             self.get_object_data_path(HummockObjectId::HnswGraphFile(graph_file.object_id));
         let encoded_graph = self.store.read(&graph_file_path, ..).await?;
