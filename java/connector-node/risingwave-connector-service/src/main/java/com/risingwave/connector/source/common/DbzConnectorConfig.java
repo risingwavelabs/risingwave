@@ -149,7 +149,8 @@ public class DbzConnectorConfig {
             if (isCdcBackfill) {
                 // disable snapshot locking at all
                 mysqlProps.setProperty("snapshot.locking.mode", "none");
-
+                mysqlProps.setProperty(
+                        "schema.history.internal.source.id", String.valueOf(sourceId));
                 // If cdc backfill enabled, the source only emit incremental changes, so we must
                 // rewind to the given offset and continue binlog reading from there
                 if (null != startOffset && !startOffset.isBlank()) {

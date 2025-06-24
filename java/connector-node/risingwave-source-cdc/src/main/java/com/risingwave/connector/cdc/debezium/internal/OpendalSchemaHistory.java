@@ -35,7 +35,8 @@ import org.slf4j.LoggerFactory;
 
 public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     private static final Logger LOGGER = LoggerFactory.getLogger(OpendalSchemaHistory.class);
-    private String objectName = "SchemaHistory.dat";
+    private String objectName = "schema_history.dat";
+    public static final String SOURCE_ID = "schema.history.internal.source.id";
 
     @Override
     public void configure(
@@ -50,12 +51,19 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
                             + getClass().getSimpleName()
                             + "; check the logs for details");
         }
-        LOGGER.info("Database history will be stored in bucket");
+        String sourceId = config.getString("schema.history.internal.source.id");
+        if (sourceId == null || sourceId.isEmpty()) {
+            sourceId = "default_source";
+            config = config.edit().with("source_id", sourceId).build();
+        }
+        objectName =
+                String.format("mysql-cdc-schema-history-source-%s/schema_history.dat", sourceId);
+        LOGGER.info("Database history will be stored in bucket as {}", objectName);
     }
 
     @Override
     protected void doPreStart() {
-        // No need for pre-start actions
+        // 无需预启动操作
     }
 
     @Override
@@ -124,6 +132,6 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
 
     @Override
     public String toString() {
-        return "Opendal-S3"; // More descriptive return value
+        return "Opendal-S3";
     }
 }
