@@ -555,6 +555,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         let mut initial_write_epoch = first_write_epoch;
 
         if self.aligned {
+            tracing::info!("aligned mode");
             // We want to realign the buffer and the stream.
             // We just block the upstream input stream,
             // and wait until the persisted logstore is empty.
@@ -568,7 +569,6 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                 .await?;
 
             let mut progress = LogStoreVnodeProgress::None;
-            let mut progress_tracked = false;
             #[for_await]
             for message in log_store_stream {
                 let message = message?;
@@ -595,21 +595,11 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                 match message? {
                     Message::Barrier(barrier) => {
                         // Truncate the logstore
-                        if !progress_tracked {
-                            progress_tracked = true;
-
-                            let post_seal = initial_write_state
-                                .seal_current_epoch(barrier.epoch.curr, progress.take());
-
-                            let update_vnode_bitmap = barrier
-                                .as_update_vnode_bitmap(self.actor_context.id);
-                            tracing::trace!(
-                                ?update_vnode_bitmap,
-                                actor_id = self.actor_context.id,
-                                "update vnode bitmap"
-                            );
-                            post_seal.post_yield_barrier(update_vnode_bitmap).await?;
-                        }
+                        let post_seal = initial_write_state
+                            .seal_current_epoch(barrier.epoch.curr, progress.take());
+                        let update_vnode_bitmap =
+                            barrier.as_update_vnode_bitmap(self.actor_context.id);
+                        post_seal.post_yield_barrier(update_vnode_bitmap).await?;
                         yield Message::Barrier(barrier);
                     }
                     Message::Chunk(chunk) => {
