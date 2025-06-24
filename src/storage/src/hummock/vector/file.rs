@@ -407,28 +407,15 @@ impl VectorFileBuilder {
         }
     }
 
-    pub fn get_vector(&self, idx: usize) -> HummockResult<EnumVectorAccessor<'_>> {
-        if idx >= self.next_vector_id {
-            return Err(HummockError::other(format!(
-                "vector index {} out of bounds {}",
-                idx, self.next_vector_id
-            )));
-        }
+    pub fn get_vector(&self, idx: usize) -> EnumVectorAccessor<'_> {
         if let Some((builder, start_vector_id)) = &self.building_block
             && idx >= *start_vector_id
         {
-            Ok(EnumVectorAccessor::Builder(builder, idx - start_vector_id))
+            EnumVectorAccessor::Builder(builder, idx - start_vector_id)
         } else {
-            let (block_idx, offset) = search_vector(
-                &self.block_metas,
-                idx,
-                |meta| meta.start_vector_id,
-                |meta| meta.vector_count,
-            )?;
-            Ok(EnumVectorAccessor::BlockRef(
-                &self.blocks[block_idx],
-                offset,
-            ))
+            let (block_idx, offset) =
+                search_vector(&self.block_metas, idx, |meta| meta.start_vector_id);
+            EnumVectorAccessor::BlockRef(&self.blocks[block_idx], offset)
         }
     }
 
