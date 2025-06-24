@@ -15,7 +15,7 @@
 use std::sync::atomic::Ordering::Relaxed;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use itertools::Itertools;
 use madsim::runtime::init_logger;
 use risingwave_common::hash::WorkerSlotId;
@@ -127,9 +127,9 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
         let mut session = cluster.start_session();
         let result = session.run(compare_sql).await?;
         if !result.is_empty() {
-            anyhow!(
+            Err(anyhow!(
                 "{UNALIGNED_MV_NAME} missing the following results from {ALIGNED_MV_NAME}: {result}"
-            );
+            ))
         } else {
             Ok(())
         }
@@ -141,9 +141,9 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
         let mut session = cluster.start_session();
         let result = session.run(compare_sql).await?;
         if !result.is_empty() {
-            anyhow!(
+            Err(anyhow!(
                 "{UNALIGNED_MV_NAME} has the following results that {ALIGNED_MV_NAME} does not: {result}"
-            );
+            ))
         } else {
             Ok(())
         }

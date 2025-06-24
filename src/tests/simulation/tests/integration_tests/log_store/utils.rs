@@ -136,7 +136,7 @@ pub(crate) async fn assert_lag_in_log_store(
     bail!("there was no lag in the logstore")
 }
 
-pub(crate) async fn assert_no_lag_in_log_store(cluster: &mut Cluster, name: &str) -> Result<()> {
+pub(crate) async fn assert_no_lag_in_log_store(cluster: &mut Cluster, name: &str, result_count: usize) -> Result<()> {
     let mut session = cluster.start_session();
     let query = format!("SELECT COUNT(*) FROM {name}");
     let result = session.run(query).await?;
@@ -194,17 +194,17 @@ pub(crate) async fn realign_join(
     session.run(query).await?;
     // reset all the CNs
     cluster
-        .simple_restart_nodes(&[
+       .simple_restart_nodes(&[
             "compute-1",
             "compute-2",
             "compute-3",
             "compute-4",
             "compute-5",
         ])
-        .await?;
+        .await;
     // wait for recovery
     cluster.wait_for_recovery().await?;
     // assert no lag
-    assert_no_lag_in_log_store(&mut cluster, name, result_count).await?;
+    assert_no_lag_in_log_store(cluster, name, result_count).await?;
     Ok(())
 }
