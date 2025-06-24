@@ -842,7 +842,7 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT)?;
 
         plan = plan.optimize_by_rules(&PULL_UP_HOP)?;
-        
+
         tracing::info!("Before top-n push down, plan: {}", plan.explain_to_string());
 
         plan = plan.optimize_by_rules(&TOP_N_PUSH_DOWN)?;
@@ -850,7 +850,10 @@ impl LogicalOptimizer {
 
         plan = plan.optimize_by_rules(&TOP_N_AGG_ON_INDEX)?;
 
-        tracing::info!("After topn agg on index, plan: {}", plan.explain_to_string());
+        tracing::info!(
+            "After topn agg on index, plan: {}",
+            plan.explain_to_string()
+        );
 
         plan = plan.optimize_by_rules(&LIMIT_PUSH_DOWN)?;
 
