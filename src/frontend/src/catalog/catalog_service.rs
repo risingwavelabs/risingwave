@@ -41,6 +41,7 @@ use super::root_catalog::Catalog;
 use super::{DatabaseId, SecretId, TableId};
 use crate::error::Result;
 use crate::scheduler::HummockSnapshotManagerRef;
+use crate::session::current::notice_to_user;
 use crate::user::UserId;
 
 pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
@@ -91,6 +92,12 @@ pub trait CatalogWriter: Send + Sync {
         dependencies: HashSet<ObjectId>,
         specific_resource_group: Option<String>,
         if_not_exists: bool,
+    ) -> Result<()>;
+
+    async fn replace_materialized_view(
+        &self,
+        table: PbTable,
+        graph: StreamFragmentGraph,
     ) -> Result<()>;
 
     async fn create_table(
@@ -317,6 +324,23 @@ impl CatalogWriter for CatalogWriterImpl {
             self.wait_version(version).await?
         }
         Ok(())
+    }
+
+    async fn replace_materialized_view(
+        &self,
+        table: PbTable,
+        graph: StreamFragmentGraph,
+    ) -> Result<()> {
+        notice_to_user(format!("table: {table:#?}"));
+        notice_to_user(format!("graph: {graph:#?}"));
+
+        Ok(())
+
+        // let version = self
+        //     .meta_client
+        //     .replace_job(graph, ReplaceJob::ReplaceTable(todo!()))
+        //     .await?;
+        // self.wait_version(version).await
     }
 
     async fn create_view(&self, view: PbView) -> Result<()> {
