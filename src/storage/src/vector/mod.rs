@@ -55,7 +55,21 @@ impl Vector {
     }
 }
 
+impl<'a> VectorRef<'a> {
+    pub fn from_slice(slice: &'a [VectorItem]) -> Self {
+        VectorInner(slice)
+    }
+}
+
 impl<T: AsRef<[VectorItem]>> VectorInner<T> {
+    pub fn dimension(&self) -> usize {
+        self.0.as_ref().len()
+    }
+
+    pub fn as_slice(&self) -> &[VectorItem] {
+        self.0.as_ref()
+    }
+
     pub fn magnitude(&self) -> VectorItem {
         self.0
             .as_ref()
