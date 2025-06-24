@@ -111,8 +111,7 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
             tracing::info!("ran insert amplification workload");
         }
 
-        wait_unaligned_join(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
-        assert_no_lag_in_log_store(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
+        realign_join(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
     }
 
     // aligned join workload
@@ -123,22 +122,28 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
     // compare results
 
     let compare_missing_result = {
-        let compare_sql = format!("select * from {ALIGNED_MV_NAME} except select * from {UNALIGNED_MV_NAME}");
+        let compare_sql =
+            format!("select * from {ALIGNED_MV_NAME} except select * from {UNALIGNED_MV_NAME}");
         let mut session = cluster.start_session();
         let result = session.run(compare_sql).await?;
         if !result.is_empty() {
-            anyhow!("{UNALIGNED_MV_NAME} missing the following results from {ALIGNED_MV_NAME}: {result}");
+            anyhow!(
+                "{UNALIGNED_MV_NAME} missing the following results from {ALIGNED_MV_NAME}: {result}"
+            );
         } else {
             Ok(())
         }
     };
 
     let compare_extra_result = {
-        let compare_sql = format!("select * from {UNALIGNED_MV_NAME} except select * from {ALIGNED_MV_NAME}");
+        let compare_sql =
+            format!("select * from {UNALIGNED_MV_NAME} except select * from {ALIGNED_MV_NAME}");
         let mut session = cluster.start_session();
         let result = session.run(compare_sql).await?;
         if !result.is_empty() {
-            anyhow!("{UNALIGNED_MV_NAME} has the following results that {ALIGNED_MV_NAME} does not: {result}");
+            anyhow!(
+                "{UNALIGNED_MV_NAME} has the following results that {ALIGNED_MV_NAME} does not: {result}"
+            );
         } else {
             Ok(())
         }
