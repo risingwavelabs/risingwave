@@ -146,26 +146,10 @@ pub enum Token {
     PGCubeRoot,
     /// `->`, access JSON object field or array element in PostgreSQL
     Arrow,
-    /// `#>`, extract JSON sub-object at the specified path in PostgreSQL
-    HashArrow,
-    /// `#>>`, extract JSON sub-object at the specified path as text in PostgreSQL
-    HashLongArrow,
-    /// `#-`, delete a key from a JSON object in PostgreSQL
-    HashMinus,
     /// `@>`, does the left JSON value contain the right JSON path/value entries at the top level
     AtArrow,
     /// `<@`, does the right JSON value contain the left JSON path/value entries at the top level
     ArrowAt,
-    /// `?`, does the string exist as a top-level key within the JSON value
-    QuestionMark,
-    /// `?|`, do any of the strings exist as top-level keys or array elements?
-    QuestionMarkPipe,
-    /// `?&`, do all of the strings exist as top-level keys or array elements?
-    QuestionMarkAmpersand,
-    /// `@?`, does JSON path return any item for the specified JSON value?
-    AtQuestionMark,
-    /// `@@`, returns the result of a JSON path predicate check for the specified JSON value.
-    AtAt,
 }
 
 impl fmt::Display for Token {
@@ -224,16 +208,8 @@ impl fmt::Display for Token {
             Token::PGSquareRoot => f.write_str("|/"),
             Token::PGCubeRoot => f.write_str("||/"),
             Token::Arrow => f.write_str("->"),
-            Token::HashArrow => f.write_str("#>"),
-            Token::HashLongArrow => f.write_str("#>>"),
-            Token::HashMinus => f.write_str("#-"),
             Token::AtArrow => f.write_str("@>"),
             Token::ArrowAt => f.write_str("<@"),
-            Token::QuestionMark => f.write_str("?"),
-            Token::QuestionMarkPipe => f.write_str("?|"),
-            Token::QuestionMarkAmpersand => f.write_str("?&"),
-            Token::AtQuestionMark => f.write_str("@?"),
-            Token::AtAt => f.write_str("@@"),
         }
     }
 }
@@ -744,17 +720,9 @@ impl<'a> Tokenizer<'a> {
                         "^@" => Ok(Some(Token::Prefix)),
                         "^" => Ok(Some(Token::Caret)),
                         "~" => Ok(Some(Token::Tilde)),
-                        "#-" => Ok(Some(Token::HashMinus)),
-                        "#>>" => Ok(Some(Token::HashLongArrow)),
-                        "#>" => Ok(Some(Token::HashArrow)),
                         "#" => Ok(Some(Token::Sharp)),
                         "@>" => Ok(Some(Token::AtArrow)),
-                        "@?" => Ok(Some(Token::AtQuestionMark)),
-                        "@@" => Ok(Some(Token::AtAt)),
                         "@" => Ok(Some(Token::AtSign)),
-                        "?|" => Ok(Some(Token::QuestionMarkPipe)),
-                        "?&" => Ok(Some(Token::QuestionMarkAmpersand)),
-                        "?" => Ok(Some(Token::QuestionMark)),
                         _ => Ok(Some(Token::Op(op.to_owned()))),
                     }
                 }

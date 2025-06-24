@@ -1326,16 +1326,8 @@ impl Parser<'_> {
             Token::Tilde => Some(BinaryOperator::PGRegexMatch),
             Token::Op(name) => Some(BinaryOperator::Custom(name.clone())),
             Token::Arrow => Some(BinaryOperator::Arrow),
-            Token::HashArrow => Some(BinaryOperator::HashArrow),
-            Token::HashLongArrow => Some(BinaryOperator::HashLongArrow),
-            Token::HashMinus => Some(BinaryOperator::HashMinus),
             Token::AtArrow => Some(BinaryOperator::Contains),
             Token::ArrowAt => Some(BinaryOperator::Contained),
-            Token::QuestionMark => Some(BinaryOperator::Exists),
-            Token::QuestionMarkPipe => Some(BinaryOperator::ExistsAny),
-            Token::QuestionMarkAmpersand => Some(BinaryOperator::ExistsAll),
-            Token::AtQuestionMark => Some(BinaryOperator::PathExists),
-            Token::AtAt => Some(BinaryOperator::PathMatch),
             Token::Word(w) => match w.keyword {
                 Keyword::AND => Some(BinaryOperator::And),
                 Keyword::OR => Some(BinaryOperator::Or),
@@ -1728,18 +1720,10 @@ impl Parser<'_> {
             Token::Tilde
             | Token::Concat
             | Token::Prefix
-            | Token::Op(_)
             | Token::Arrow
-            | Token::HashArrow
-            | Token::HashLongArrow
-            | Token::HashMinus
             | Token::AtArrow
             | Token::ArrowAt
-            | Token::QuestionMark
-            | Token::QuestionMarkPipe
-            | Token::QuestionMarkAmpersand
-            | Token::AtQuestionMark
-            | Token::AtAt => Ok(P::Other),
+            | Token::Op(_) => Ok(P::Other),
             Token::Word(w)
                 if w.keyword == Keyword::OPERATOR && self.peek_nth_token(1) == Token::LParen =>
             {
