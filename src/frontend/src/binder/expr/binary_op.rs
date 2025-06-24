@@ -104,6 +104,7 @@ impl Binder {
             BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
             BinaryOperator::Arrow => ExprType::JsonbAccess,
             BinaryOperator::Custom(name) => match name.as_str() {
+                "^@" => ExprType::StartsWith,
                 "->>" => ExprType::JsonbAccessStr,
                 "~~" => ExprType::Like,
                 "~~*" => ExprType::ILike,
@@ -127,7 +128,6 @@ impl Binder {
                 "?&" => ExprType::JsonbExistsAll,
                 _ => bail_not_implemented!(issue = 112, "binary op: {:?}", name),
             },
-            BinaryOperator::Prefix => ExprType::StartsWith,
             BinaryOperator::Contains => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());

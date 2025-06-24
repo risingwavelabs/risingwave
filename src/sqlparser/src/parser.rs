@@ -1302,7 +1302,6 @@ impl Parser<'_> {
         let tok = self.next_token();
         debug!("parsing infix {:?}", tok.token);
         let regular_binary_operator = match &tok.token {
-            Token::Spaceship => Some(BinaryOperator::Spaceship),
             Token::DoubleEq => Some(BinaryOperator::Eq),
             Token::Eq => Some(BinaryOperator::Eq),
             Token::Neq => Some(BinaryOperator::NotEq),
@@ -1317,7 +1316,6 @@ impl Parser<'_> {
             Token::Concat => Some(BinaryOperator::Concat),
             Token::Pipe => Some(BinaryOperator::BitwiseOr),
             Token::Caret => Some(BinaryOperator::BitwiseXor),
-            Token::Prefix => Some(BinaryOperator::Prefix),
             Token::Ampersand => Some(BinaryOperator::BitwiseAnd),
             Token::Div => Some(BinaryOperator::Divide),
             Token::ShiftLeft => Some(BinaryOperator::PGBitwiseShiftLeft),
@@ -1707,8 +1705,7 @@ impl Parser<'_> {
             | Token::Neq
             | Token::Gt
             | Token::GtEq
-            | Token::DoubleEq
-            | Token::Spaceship => Ok(P::Cmp),
+            | Token::DoubleEq => Ok(P::Cmp),
             Token::Word(w) if w.keyword == Keyword::IN => Ok(P::Between),
             Token::Word(w) if w.keyword == Keyword::BETWEEN => Ok(P::Between),
             Token::Word(w) if w.keyword == Keyword::LIKE => Ok(P::Like),
@@ -1719,7 +1716,6 @@ impl Parser<'_> {
             Token::Word(w) if w.keyword == Keyword::SOME => Ok(P::Other),
             Token::Tilde
             | Token::Concat
-            | Token::Prefix
             | Token::Arrow
             | Token::AtArrow
             | Token::ArrowAt

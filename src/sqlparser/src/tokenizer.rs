@@ -79,8 +79,6 @@ pub enum Token {
     LtEq,
     /// Greater Than Or Equals operator `>=`
     GtEq,
-    /// Spaceship operator <=>
-    Spaceship,
     /// Plus operator `+`
     Plus,
     /// Minus operator `-`
@@ -117,8 +115,6 @@ pub enum Token {
     Pipe,
     /// Caret `^`
     Caret,
-    /// Prefix `^@`
-    Prefix,
     /// Left brace `{`
     LBrace,
     /// Right brace `}`
@@ -169,7 +165,6 @@ impl fmt::Display for Token {
             Token::Whitespace(ws) => write!(f, "{}", ws),
             Token::Op(op) => write!(f, "{}", op),
             Token::DoubleEq => f.write_str("=="),
-            Token::Spaceship => f.write_str("<=>"),
             Token::Eq => f.write_str("="),
             Token::Neq => f.write_str("<>"),
             Token::Lt => f.write_str("<"),
@@ -193,7 +188,6 @@ impl fmt::Display for Token {
             Token::RBracket => f.write_str("]"),
             Token::Ampersand => f.write_str("&"),
             Token::Caret => f.write_str("^"),
-            Token::Prefix => f.write_str("^@"),
             Token::Pipe => f.write_str("|"),
             Token::LBrace => f.write_str("{"),
             Token::RBrace => f.write_str("}"),
@@ -707,7 +701,6 @@ impl<'a> Tokenizer<'a> {
                         "!=" => Ok(Some(Token::Neq)),
                         "!!" => Ok(Some(Token::DoubleExclamationMark)),
                         "!" => Ok(Some(Token::ExclamationMark)),
-                        "<=>" => Ok(Some(Token::Spaceship)),
                         "<=" => Ok(Some(Token::LtEq)),
                         "<>" => Ok(Some(Token::Neq)),
                         "<@" => Ok(Some(Token::ArrowAt)),
@@ -717,7 +710,6 @@ impl<'a> Tokenizer<'a> {
                         ">=" => Ok(Some(Token::GtEq)),
                         ">" => Ok(Some(Token::Gt)),
                         "&" => Ok(Some(Token::Ampersand)),
-                        "^@" => Ok(Some(Token::Prefix)),
                         "^" => Ok(Some(Token::Caret)),
                         "~" => Ok(Some(Token::Tilde)),
                         "#" => Ok(Some(Token::Sharp)),
