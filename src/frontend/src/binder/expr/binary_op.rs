@@ -111,7 +111,10 @@ impl Binder {
             BinaryOperator::PGBitwiseShiftLeft => ExprType::BitwiseShiftLeft,
             BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
             BinaryOperator::Arrow => ExprType::JsonbAccess,
-            BinaryOperator::LongArrow => ExprType::JsonbAccessStr,
+            BinaryOperator::Custom(name) => match name.as_str() {
+                "->>" => ExprType::JsonbAccessStr,
+                _ => bail_not_implemented!(issue = 112, "binary op: {:?}", name),
+            },
             BinaryOperator::HashMinus => ExprType::JsonbDeletePath,
             BinaryOperator::HashArrow => ExprType::JsonbExtractPathVariadic,
             BinaryOperator::HashLongArrow => ExprType::JsonbExtractPathTextVariadic,

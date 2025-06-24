@@ -1331,8 +1331,8 @@ impl Parser<'_> {
             Token::DoubleTildeAsterisk => Some(BinaryOperator::PGILikeMatch),
             Token::ExclamationMarkDoubleTilde => Some(BinaryOperator::PGNotLikeMatch),
             Token::ExclamationMarkDoubleTildeAsterisk => Some(BinaryOperator::PGNotILikeMatch),
+            Token::Op(name) => Some(BinaryOperator::Custom(name.clone())),
             Token::Arrow => Some(BinaryOperator::Arrow),
-            Token::LongArrow => Some(BinaryOperator::LongArrow),
             Token::HashArrow => Some(BinaryOperator::HashArrow),
             Token::HashLongArrow => Some(BinaryOperator::HashLongArrow),
             Token::HashMinus => Some(BinaryOperator::HashMinus),
@@ -1742,8 +1742,8 @@ impl Parser<'_> {
             | Token::ExclamationMarkDoubleTildeAsterisk
             | Token::Concat
             | Token::Prefix
+            | Token::Op(_)
             | Token::Arrow
-            | Token::LongArrow
             | Token::HashArrow
             | Token::HashLongArrow
             | Token::HashMinus

@@ -108,7 +108,6 @@ pub enum BinaryOperator {
     PGNotILikeMatch,
     /// String "starts with", eg: `a ^@ b` (PostgreSQL-specific)
     Arrow,
-    LongArrow,
     HashArrow,
     HashLongArrow,
     HashMinus,
@@ -119,6 +118,7 @@ pub enum BinaryOperator {
     ExistsAll,
     PathMatch,
     PathExists,
+    Custom(String),
     PGQualified(Box<QualifiedOperator>),
 }
 
@@ -160,7 +160,6 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::PGNotLikeMatch => "!~~",
             BinaryOperator::PGNotILikeMatch => "!~~*",
             BinaryOperator::Arrow => "->",
-            BinaryOperator::LongArrow => "->>",
             BinaryOperator::HashArrow => "#>",
             BinaryOperator::HashLongArrow => "#>>",
             BinaryOperator::HashMinus => "#-",
@@ -171,6 +170,7 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::ExistsAll => "?&",
             BinaryOperator::PathMatch => "@@",
             BinaryOperator::PathExists => "@?",
+            BinaryOperator::Custom(name) => name,
             BinaryOperator::PGQualified(_) => unreachable!(),
         })
     }

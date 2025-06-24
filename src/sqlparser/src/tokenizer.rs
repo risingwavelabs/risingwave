@@ -160,8 +160,6 @@ pub enum Token {
     PGCubeRoot,
     /// `->`, access JSON object field or array element in PostgreSQL
     Arrow,
-    /// `->>`, access JSON object field or array element as text in PostgreSQL
-    LongArrow,
     /// `#>`, extract JSON sub-object at the specified path in PostgreSQL
     HashArrow,
     /// `#>>`, extract JSON sub-object at the specified path as text in PostgreSQL
@@ -247,7 +245,6 @@ impl fmt::Display for Token {
             Token::PGSquareRoot => f.write_str("|/"),
             Token::PGCubeRoot => f.write_str("||/"),
             Token::Arrow => f.write_str("->"),
-            Token::LongArrow => f.write_str("->>"),
             Token::HashArrow => f.write_str("#>"),
             Token::HashLongArrow => f.write_str("#>>"),
             Token::HashMinus => f.write_str("#-"),
@@ -743,7 +740,6 @@ impl<'a> Tokenizer<'a> {
                         "+" => Ok(Some(Token::Plus)),
                         "-" => Ok(Some(Token::Minus)),
                         "->" => Ok(Some(Token::Arrow)),
-                        "->>" => Ok(Some(Token::LongArrow)),
                         "*" => Ok(Some(Token::Mul)),
                         "/" => Ok(Some(Token::Div)),
                         "%" => Ok(Some(Token::Mod)),
