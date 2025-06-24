@@ -36,10 +36,13 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
+import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -49,7 +52,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     private static final Logger LOGGER = LoggerFactory.getLogger(OpendalSchemaHistory.class);
     private String objectName = "schema_history.dat";
     public static final String SOURCE_ID = "schema.history.internal.source.id";
-    private static final int MAX_RECORDS_PER_FILE = 1;
+    private static final int MAX_RECORDS_PER_FILE = 2;
     private List<HistoryRecord> buffer = new ArrayList<>();
     private String objectDir = "";
     private static final Pattern HISTORY_FILE_PATTERN =
@@ -86,36 +89,27 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     @Override
     protected void doStart() {
         try {
-            // 验证 listObject 是否可用，列出 hummock_001 下的对象并打印
-            String[] testList = listObject("hummock_001");
-            if (testList != null) {
-                LOGGER.info(
-                        "listObject(\"hummock_001\") 返回: {}", java.util.Arrays.toString(testList));
-            } else {
-                LOGGER.info("listObject(\"hummock_001\") 返回 null");
-            }
-
-            List<String> files = new ArrayList<>();
+            // 1. List and sort history files by timestamp
+            List<String> historyFiles = new ArrayList<>();
             String[] fileArray = listObject(objectDir);
             if (fileArray != null) {
-                Collections.addAll(files, fileArray);
+                Collections.addAll(historyFiles, fileArray);
             }
-            List<String> historyFiles = new ArrayList<>();
-            for (String file : files) {
-                if (file.contains("schema_history_") && file.endsWith(".dat")) {
-                    historyFiles.add(file);
-                }
-            }
-            // 按时间戳排序
+            historyFiles.removeIf(file -> !HISTORY_FILE_PATTERN.matcher(file).find());
             Collections.sort(
                     historyFiles, Comparator.comparingLong(this::extractTimestampFromFileName));
-            for (String file : historyFiles) {
-                byte[] data = getObject(file);
-                List<HistoryRecord> records = toHistoryRecords(data);
-                this.records.addAll(records);
-            }
+
+            // 2. Assign the lazy list to this.records.
+            // This is the key change to avoid OOM. We are overriding the parent's list
+            // with our own implementation that loads data on demand.
+            this.records = new LazyHistoryRecordList(historyFiles);
+            LOGGER.info(
+                    "Initialized lazy schema history with {} total records across {} files.",
+                    this.records.size(),
+                    historyFiles.size());
+
         } catch (Exception e) {
-            throw new SchemaHistoryException("Can't retrieve files with schema history", e);
+            throw new SchemaHistoryException("Failed to initialize lazy schema history", e);
         }
     }
 
@@ -222,5 +216,87 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
             return Long.parseLong(m.group(1));
         }
         return 0L;
+    }
+
+    /**
+     * A custom List implementation that loads schema history records from Opendal on demand. This
+     * avoids loading all history records into memory at once.
+     */
+    private class LazyHistoryRecordList extends AbstractList<HistoryRecord> {
+        private final List<String> filePaths;
+        // Stores the cumulative number of records up to file i
+        private final int[] recordsPerFileIndex;
+        private final int totalRecords;
+
+        // An LRU cache to hold the contents of the most recently accessed files.
+        // Key: file index, Value: list of records in that file.
+        private final Map<Integer, List<HistoryRecord>> cache =
+                new LinkedHashMap<Integer, List<HistoryRecord>>(6, 0.75f, true) {
+                    @Override
+                    protected boolean removeEldestEntry(
+                            Map.Entry<Integer, List<HistoryRecord>> eldest) {
+                        // Cache up to 5 files' content
+                        return size() > 5;
+                    }
+                };
+
+        public LazyHistoryRecordList(List<String> filePaths) {
+            this.filePaths = filePaths;
+            this.recordsPerFileIndex = new int[filePaths.size()];
+
+            int cumulativeRecords = 0;
+            if (!filePaths.isEmpty()) {
+                LOGGER.info("Calculating total records for lazy list...");
+                for (int i = 0; i < filePaths.size(); i++) {
+                    // This reads the file content, but only holds it temporarily to count records.
+                    byte[] data = getObject(filePaths.get(i));
+                    // We must deserialize to count accurately.
+                    List<HistoryRecord> recs = toHistoryRecords(data);
+                    cumulativeRecords += recs.size();
+                    this.recordsPerFileIndex[i] = cumulativeRecords;
+                }
+            }
+            this.totalRecords = cumulativeRecords;
+            LOGGER.info("Lazy list calculation complete. Total records: {}", this.totalRecords);
+        }
+
+        @Override
+        public HistoryRecord get(int index) {
+            if (index < 0 || index >= totalRecords) {
+                throw new IndexOutOfBoundsException("Index: " + index + ", Size: " + totalRecords);
+            }
+
+            // Find which file contains the record for the given index
+            int fileIndex = 0;
+            for (int i = 0; i < recordsPerFileIndex.length; i++) {
+                if (index < recordsPerFileIndex[i]) {
+                    fileIndex = i;
+                    break;
+                }
+            }
+
+            // Check cache first
+            List<HistoryRecord> recordsInFile = cache.get(fileIndex);
+            if (recordsInFile == null) {
+                // Not in cache, load from Opendal and add to cache
+                LOGGER.debug("Cache miss for file index {}. Loading from Opendal.", fileIndex);
+                byte[] data = getObject(filePaths.get(fileIndex));
+                recordsInFile = toHistoryRecords(data);
+                cache.put(fileIndex, recordsInFile);
+            } else {
+                LOGGER.debug("Cache hit for file index {}.", fileIndex);
+            }
+
+            // Calculate the index within the file
+            int baseIndex = (fileIndex == 0) ? 0 : recordsPerFileIndex[fileIndex - 1];
+            int indexInFile = index - baseIndex;
+
+            return recordsInFile.get(indexInFile);
+        }
+
+        @Override
+        public int size() {
+            return this.totalRecords;
+        }
     }
 }
