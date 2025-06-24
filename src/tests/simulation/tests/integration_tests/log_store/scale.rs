@@ -155,6 +155,4 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
         (Ok(()), Err(e)) => Err(e),
         (Err(e1), Err(e2)) => Err(anyhow!("missing and extra results: {e1}, {e2}")),
     }
-
-    Ok(())
 }
