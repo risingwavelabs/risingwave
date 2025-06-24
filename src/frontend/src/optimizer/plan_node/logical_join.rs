@@ -128,6 +128,10 @@ impl LogicalJoin {
         &self.core.on
     }
 
+    pub fn core(&self) -> &generic::Join<PlanRef> {
+        &self.core
+    }
+
     /// Collect all input ref in the on condition. And separate them into left and right.
     pub fn input_idx_on_condition(&self) -> (Vec<usize>, Vec<usize>) {
         let input_refs = self
