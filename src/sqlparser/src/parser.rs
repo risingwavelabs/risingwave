@@ -3514,7 +3514,12 @@ impl Parser<'_> {
                     new_schema_name: schema_name,
                 }
             } else if self.parse_word("STREAMING_ENABLE_UNALIGNED_JOIN") {
-                self.expect_keyword(Keyword::TO)?;
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self
+                        .expected("TO or = after ALTER TABLE SET STREAMING_ENABLE_UNALIGNED_JOIN");
+                }
                 let value = self.parse_boolean()?;
                 AlterViewOperation::SetStreamingEnableUnalignedJoin { enable: value }
             } else if self.parse_keyword(Keyword::PARALLELISM) && materialized {
