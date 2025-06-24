@@ -136,6 +136,24 @@ pub(crate) async fn assert_lag_in_log_store(
     bail!("there was no lag in the logstore")
 }
 
+pub(crate) async fn assert_no_lag_in_log_store(
+    cluster: &mut Cluster,
+    name: &str,
+) -> Result<()> {
+    let mut session = cluster.start_session();
+    let query = format!("SELECT COUNT(*) FROM {name}");
+    let result = session.run(query).await?;
+    let current_count: usize = result.parse()?;
+    tracing::info!("current count: {current_count}");
+    if current_count == result_count {
+        return Ok(());
+    } else if current_count > result_count {
+        bail!("there was more data in the logstore than expected")
+    } else {
+        bail!("there was less data in the logstore than expected")
+    }
+}
+
 /// Wait for it to finish consuming logstore
 pub(crate) async fn wait_unaligned_join(
     cluster: &mut Cluster,
