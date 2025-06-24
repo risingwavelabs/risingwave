@@ -168,6 +168,11 @@ impl<I> BoundedNearest<I> {
             self.heap.pop();
         }
     }
+
+    #[expect(clippy::len_without_is_empty)]
+    pub fn len(&self) -> usize {
+        self.heap.0.len()
+    }
 }
 
 impl<'a, I> IntoIterator for &'a BoundedNearest<I> {

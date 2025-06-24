@@ -18,6 +18,8 @@ use std::marker::PhantomData;
 use faiss::index::hnsw::Hnsw;
 use rand::Rng;
 use rand::distr::uniform::{UniformFloat, UniformSampler};
+use risingwave_pb::hummock::PbHnswGraph;
+use risingwave_pb::hummock::hnsw_graph::{PbHnswLevel, PbHnswNeighbor, PbHnswNode};
 
 use crate::hummock::HummockResult;
 use crate::vector::utils::{BoundedNearest, MinDistanceHeap};
@@ -169,6 +171,37 @@ pub trait HnswGraph {
     ) -> impl Iterator<Item = (usize, VectorDistance)> + '_;
 }
 
+impl HnswGraph for PbHnswGraph {
+    fn entrypoint(&self) -> usize {
+        self.entrypoint_id as _
+    }
+
+    fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
+    fn node_level(&self, idx: usize) -> usize {
+        self.nodes[idx].levels.len()
+    }
+
+    fn node_neighbours(
+        &self,
+        idx: usize,
+        level: usize,
+    ) -> impl Iterator<Item = (usize, VectorDistance)> + '_ {
+        self.nodes[idx]
+            .levels
+            .get(level)
+            .into_iter()
+            .flat_map(|level| {
+                level
+                    .neighbors
+                    .iter()
+                    .map(|neighbor| (neighbor.vector_id as usize, neighbor.distance))
+            })
+    }
+}
+
 pub struct HnswGraphBuilder {
     /// entrypoint of the graph: Some(`entrypoint_vector_idx`)
     entrypoint: usize,
@@ -181,6 +214,51 @@ impl HnswGraphBuilder {
             entrypoint: 0,
             nodes: vec![node],
         }
+    }
+
+    pub fn to_protobuf(&self) -> PbHnswGraph {
+        let mut nodes = Vec::with_capacity(self.nodes.len());
+        for node in &self.nodes {
+            let mut levels = Vec::with_capacity(node.level());
+            for level in &node.level_neighbours {
+                let mut neighbors = Vec::with_capacity(level.len());
+                for (distance, &neighbor_index) in level {
+                    neighbors.push(PbHnswNeighbor {
+                        vector_id: neighbor_index as u64,
+                        distance,
+                    });
+                }
+                levels.push(PbHnswLevel { neighbors });
+            }
+            nodes.push(PbHnswNode { levels });
+        }
+        PbHnswGraph {
+            entrypoint_id: self.entrypoint as u64,
+            nodes,
+        }
+    }
+
+    pub fn from_protobuf(pb: &PbHnswGraph) -> Self {
+        let entrypoint = pb.entrypoint_id as usize;
+        let nodes = pb
+            .nodes
+            .iter()
+            .map(|node| {
+                let level_neighbours = node
+                    .levels
+                    .iter()
+                    .map(|level| {
+                        let mut nearest = BoundedNearest::new(level.neighbors.len());
+                        for neighbor in &level.neighbors {
+                            nearest.insert(neighbor.distance, || neighbor.vector_id as _);
+                        }
+                        nearest
+                    })
+                    .collect();
+                VectorHnswNode { level_neighbours }
+            })
+            .collect();
+        Self { entrypoint, nodes }
     }
 }
 
