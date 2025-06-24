@@ -21,8 +21,8 @@ use bytes::{BufMut, Bytes};
 use foyer::Hint;
 use futures::TryStreamExt;
 use itertools::Itertools;
-use risingwave_common::bitmap::BitmapBuilder;
-use risingwave_common::catalog::TableId;
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::range::RangeBoundsExt;
 use risingwave_common::util::epoch::{EpochExt, INVALID_EPOCH, test_epoch};
@@ -776,6 +776,198 @@ async fn test_state_store_sync() {
                 ))
             );
         }
+    }
+}
+
+#[tokio::test]
+async fn test_state_store_multiple_flush_no_upload() {
+    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
+    let test_env = prepare_hummock_test_env().await;
+    test_env.register_table_id(TEST_TABLE_ID).await;
+    let mut hummock_storage = test_env
+        .storage
+        .new_local(NewLocalOptions {
+            table_id: TEST_TABLE_ID,
+            op_consistency_level: OpConsistencyLevel::Inconsistent,
+            table_option: TableOption {
+                retention_seconds: None,
+            },
+            is_replicated: false,
+            vnodes: Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+            upload_on_flush: false,
+        })
+        .await;
+
+    let flushed_reader = hummock_storage.new_flushed_snapshot_reader();
+
+    let read_version = hummock_storage.read_version();
+
+    let base_epoch = read_version
+        .read()
+        .committed()
+        .table_committed_epoch(TEST_TABLE_ID)
+        .unwrap();
+    let epoch1 = base_epoch.next_epoch();
+    test_env
+        .storage
+        .start_epoch(epoch1, HashSet::from_iter([TEST_TABLE_ID]));
+    hummock_storage.init_for_test(epoch1).await.unwrap();
+
+    // ingest 16B batch
+    let mut batch1 = vec![
+        (
+            gen_key_from_str(VirtualNode::ZERO, "aaaa"),
+            StorageValue::new_put("1111"),
+        ),
+        (
+            gen_key_from_str(VirtualNode::ZERO, "bbbb"),
+            StorageValue::new_put("2222"),
+        ),
+        (
+            gen_key_from_str(VirtualNode::ZERO, "cccc"),
+            StorageValue::new_put("3333"),
+        ),
+    ];
+
+    batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    hummock_storage.ingest_batch(batch1).await.unwrap();
+
+    // ingest 24B batch
+    let mut batch2 = vec![
+        (
+            gen_key_from_str(VirtualNode::ZERO, "aaaa"),
+            StorageValue::new_put("1112"),
+        ),
+        (
+            gen_key_from_str(VirtualNode::ZERO, "bbbb"),
+            StorageValue::new_delete(),
+        ),
+        (
+            gen_key_from_str(VirtualNode::ZERO, "dddd"),
+            StorageValue::new_put("4444"),
+        ),
+    ];
+    batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    hummock_storage.ingest_batch(batch2).await.unwrap();
+
+    let check_flushed_reader = async || {
+        let kv_map = [
+            (gen_key_from_str(VirtualNode::ZERO, "aaaa"), "1112"),
+            (gen_key_from_str(VirtualNode::ZERO, "cccc"), "3333"),
+            (gen_key_from_str(VirtualNode::ZERO, "dddd"), "4444"),
+        ];
+
+        for (k, v) in &kv_map {
+            let value = flushed_reader
+                .get(
+                    k.clone(),
+                    ReadOptions {
+                        table_id: TEST_TABLE_ID,
+                        cache_policy: CachePolicy::Fill(Hint::Normal),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(value, Bytes::from(*v));
+        }
+
+        let iter = flushed_reader
+            .iter(
+                (
+                    Unbounded,
+                    Included(gen_key_from_str(VirtualNode::ZERO, "eeee")),
+                ),
+                risingwave_storage::store::ReadOptions::default(),
+            )
+            .await
+            .unwrap()
+            .into_stream(to_owned_item);
+        futures::pin_mut!(iter);
+        let mut i = 0;
+        while let Some(row) = iter.try_next().await.unwrap() {
+            assert_eq!(row.0.user_key.table_id, TEST_TABLE_ID);
+            assert_eq!(row.0.user_key.table_key, kv_map[i].0);
+            assert_eq!(row.1, kv_map[i].1);
+            i += 1;
+        }
+        assert_eq!(i, kv_map.len());
+
+        let rev_iter = flushed_reader
+            .rev_iter(
+                (
+                    Unbounded,
+                    Included(gen_key_from_str(VirtualNode::ZERO, "eeee")),
+                ),
+                risingwave_storage::store::ReadOptions::default(),
+            )
+            .await
+            .unwrap()
+            .into_stream(to_owned_item);
+        futures::pin_mut!(rev_iter);
+        let mut i = 0;
+        while let Some(row) = rev_iter.try_next().await.unwrap() {
+            let idx = kv_map.len() - 1 - i;
+            assert_eq!(row.0.user_key.table_id, TEST_TABLE_ID);
+            assert_eq!(row.0.user_key.table_key, kv_map[idx].0);
+            assert_eq!(row.1, kv_map[idx].1);
+            i += 1;
+        }
+        assert_eq!(i, kv_map.len());
+    };
+
+    check_flushed_reader().await;
+
+    {
+        // after two flushes, but not sealed
+        let read_version = hummock_storage.read_version();
+        assert_eq!(2, read_version.read().staging().pending_imms.len());
+        assert!(read_version.read().staging().uploading_imms.is_empty());
+        assert!(read_version.read().staging().sst.is_empty());
+    }
+
+    let epoch2 = epoch1.next_epoch();
+    test_env
+        .storage
+        .start_epoch(epoch2, HashSet::from_iter([TEST_TABLE_ID]));
+    hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
+
+    {
+        // after two flushes, but not sealed
+        let read_version = hummock_storage.read_version();
+        assert!(read_version.read().staging().pending_imms.is_empty());
+        assert_eq!(2, read_version.read().staging().uploading_imms.len());
+        assert!(read_version.read().staging().sst.is_empty());
+    }
+
+    check_flushed_reader().await;
+
+    let res = test_env
+        .storage
+        .seal_and_sync_epoch(epoch1, table_id_set.clone())
+        .await
+        .unwrap();
+    {
+        // after two flushes, but not sealed
+        let read_version = hummock_storage.read_version();
+        assert!(read_version.read().staging().pending_imms.is_empty());
+        assert!(read_version.read().staging().uploading_imms.is_empty());
+        assert_eq!(1, read_version.read().staging().sst.len());
+    }
+    test_env
+        .meta_client
+        .commit_epoch(epoch1, res)
+        .await
+        .unwrap();
+    test_env.wait_sync_committed_version().await;
+    {
+        // after sync 1 epoch
+        let read_version = hummock_storage.read_version();
+        assert!(read_version.read().staging().pending_imms.is_empty());
+        assert!(read_version.read().staging().uploading_imms.is_empty());
+        assert!(read_version.read().staging().sst.is_empty());
     }
 }
 
