@@ -1246,6 +1246,9 @@ where
         self.write_no_flush(&BeMessage::ParameterStatus(
             BeParameterStatusMessage::ServerVersion(PG_VERSION),
         ))?;
+        self.write_no_flush(&BeMessage::ParameterStatus(
+            BeParameterStatusMessage::TimeZone("UTC"),
+        ))?;
         if let Some(application_name) = &status.application_name {
             self.write_no_flush(&BeMessage::ParameterStatus(
                 BeParameterStatusMessage::ApplicationName(application_name),

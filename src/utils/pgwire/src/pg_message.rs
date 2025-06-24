@@ -447,6 +447,7 @@ pub enum BeParameterStatusMessage<'a> {
     StandardConformingString(&'a str),
     ServerVersion(&'a str),
     ApplicationName(&'a str),
+    TimeZone(&'a str),
 }
 
 #[derive(Debug)]
@@ -513,6 +514,7 @@ impl BeMessage<'_> {
                     }
                     ServerVersion(val) => [b"server_version", val.as_bytes()],
                     ApplicationName(val) => [b"application_name", val.as_bytes()],
+                    TimeZone(val) => [b"TimeZone", val.as_bytes()],
                 };
 
                 // Parameter names and values are passed as null-terminated strings
