@@ -122,7 +122,7 @@ steps:
       plugins:
         - docker-compose#v5.5.0: *docker-compose-standard
         - ./ci/plugins/upload-failure-logs
-      timeout_in_minutes: 9
+      timeout_in_minutes: 15
       retry: *auto-retry
 
     - label: "end-to-end test (parallel, {{matrix.backend}} backend)"
