@@ -39,6 +39,7 @@ use sea_orm::{
     JoinType, QueryFilter, QuerySelect, RelationTrait, Statement, TransactionTrait,
 };
 
+use crate::barrier::Reschedule;
 use crate::controller::catalog::CatalogController;
 use crate::controller::utils::{get_existing_job_resource_group, get_fragment_actor_dispatchers};
 use crate::model::{ActorId, StreamActor};
@@ -777,6 +778,103 @@ where
     }
 
     todo!()
+}
+
+// Helper struct to make the function signature cleaner and to properly bundle the required data.
+#[derive(Debug)]
+pub struct ActorGraph<'a> {
+    pub fragments: &'a HashMap<FragmentId, (Fragment, Vec<StreamActor>)>,
+    pub locations: &'a HashMap<ActorId, WorkerId>,
+}
+
+fn diff_graph(prev: &ActorGraph, curr: &ActorGraph) -> MetaResult<HashMap<FragmentId, Reschedule>> {
+    // Collect all unique fragment IDs from both previous and current graphs.
+    let prev_fragment_ids: HashSet<_> = prev.fragments.keys().cloned().collect();
+    let curr_fragment_ids: HashSet<_> = curr.fragments.keys().cloned().collect();
+    let all_fragment_ids = prev_fragment_ids.union(&curr_fragment_ids);
+
+    let mut reschedules = HashMap::new();
+
+    for &fragment_id in all_fragment_ids {
+        let prev_state = prev.fragments.get(&fragment_id);
+        let curr_state = curr.fragments.get(&fragment_id);
+
+        let prev
+
+        let prev_actor_map: HashMap<_, _> = prev_actors.iter().map(|a| (a.actor_id, a)).collect();
+        let curr_actor_map: HashMap<_, _> = curr_actors.iter().map(|a| (a.actor_id, a)).collect();
+
+        let prev_ids: HashSet<_> = prev_actor_map.keys().cloned().collect();
+        let curr_ids: HashSet<_> = curr_actor_map.keys().cloned().collect();
+
+        // Find removed, added, and kept actors.
+        //
+        // 找出被移除、被添加和被保留的 actor。
+        let removed_actors: HashSet<_> = &prev_ids - &curr_ids;
+        let added_actor_ids: HashSet<_> = &curr_ids - &prev_ids;
+        let kept_ids: HashSet<_> = prev_ids.intersection(&curr_ids).cloned().collect();
+
+        let mut added_actors_by_worker = HashMap::new();
+        for &actor_id in &added_actor_ids {
+            let worker_id = curr
+                .locations
+                .get(&actor_id)
+                .ok_or_else(|| anyhow!("BUG: Worker not found for new actor {}", actor_id))?;
+            added_actors_by_worker
+                .entry(*worker_id)
+                .or_insert_with(Vec::new)
+                .push(actor_id);
+        }
+
+        let mut vnode_bitmap_updates = HashMap::new();
+        for actor_id in kept_ids {
+            let prev_actor = prev_actor_map[&actor_id];
+            let curr_actor = curr_actor_map[&actor_id];
+
+            // Check if the vnode distribution has changed.
+            //
+            // 检查 vnode 分布是否发生变化。
+            if prev_actor.vnode_bitmap != curr_actor.vnode_bitmap {
+                if let Some(bitmap) = curr_actor.vnode_bitmap.clone() {
+                    vnode_bitmap_updates.insert(actor_id, bitmap);
+                }
+            }
+        }
+
+        // Only generate a reschedule plan if there are actual changes.
+        //
+        // 只有在确实发生变更时才生成 reschedule 计划。
+        if !added_actors_by_worker.is_empty()
+            || !removed_actors.is_empty()
+            || !vnode_bitmap_updates.is_empty()
+        {
+            Some(Reschedule {
+                added_actors: added_actors_by_worker,
+                removed_actors,
+                vnode_bitmap_updates,
+                // NOTE: The following fields require more context about graph topology
+                // (like upstream/downstream relations) and source configurations.
+                // They are left as placeholders and should be populated by the caller
+                // or with more context.
+                //
+                // 注意: 以下字段需要更多关于 graph 拓扑（如上下游关系）和数据源配置的上下文信息。
+                // 这里作为占位符，应由调用者或在拥有更多上下文的地方填充。
+                upstream_fragment_dispatcher_ids: vec![], /* e.g., collect from prev_frag.upstreams */
+                upstream_dispatcher_mapping: None,
+                downstream_fragment_ids: vec![], // e.g., collect from prev_frag.downstreams
+                actor_splits: HashMap::new(),
+                newly_created_actors: HashMap::new(), /* This also needs more context to build `StreamActorWithDispatchers`. */
+            })
+        } else {
+            None // No changes, no reschedule needed.
+        }
+    }
+    // if let Some(reschedule) = reschedule {
+    //     reschedules.insert(fragment_id, reschedule);
+    // }
+    // }
+
+    Ok(reschedules)
 }
 
 struct NoShuffleEnsemble {
