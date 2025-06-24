@@ -1321,10 +1321,10 @@ impl Parser<'_> {
             Token::ShiftRight => Some(BinaryOperator::PGBitwiseShiftRight),
             Token::Sharp => Some(BinaryOperator::PGBitwiseXor),
             Token::Tilde => Some(BinaryOperator::PGRegexMatch),
-            Token::Op(name) => Some(BinaryOperator::Custom(name.clone())),
             Token::Arrow => Some(BinaryOperator::Arrow),
             Token::AtArrow => Some(BinaryOperator::Contains),
             Token::ArrowAt => Some(BinaryOperator::Contained),
+            Token::Op(name) => Some(BinaryOperator::Custom(name.clone())),
             Token::Word(w) => match w.keyword {
                 Keyword::AND => Some(BinaryOperator::And),
                 Keyword::OR => Some(BinaryOperator::Or),

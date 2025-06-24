@@ -103,31 +103,6 @@ impl Binder {
             BinaryOperator::PGBitwiseShiftLeft => ExprType::BitwiseShiftLeft,
             BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
             BinaryOperator::Arrow => ExprType::JsonbAccess,
-            BinaryOperator::Custom(name) => match name.as_str() {
-                "^@" => ExprType::StartsWith,
-                "->>" => ExprType::JsonbAccessStr,
-                "~~" => ExprType::Like,
-                "~~*" => ExprType::ILike,
-                "!~" => {
-                    func_types.push(ExprType::Not);
-                    ExprType::RegexpEq
-                }
-                "!~~" => {
-                    func_types.push(ExprType::Not);
-                    ExprType::Like
-                }
-                "!~~*" => {
-                    func_types.push(ExprType::Not);
-                    ExprType::ILike
-                }
-                "#-" => ExprType::JsonbDeletePath,
-                "#>" => ExprType::JsonbExtractPathVariadic,
-                "#>>" => ExprType::JsonbExtractPathTextVariadic,
-                "?" => ExprType::JsonbExists,
-                "?|" => ExprType::JsonbExistsAny,
-                "?&" => ExprType::JsonbExistsAll,
-                _ => bail_not_implemented!(issue = 112, "binary op: {:?}", name),
-            },
             BinaryOperator::Contains => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
@@ -207,6 +182,31 @@ impl Binder {
                 }
             }
             BinaryOperator::PGRegexMatch => ExprType::RegexpEq,
+            BinaryOperator::Custom(name) => match name.as_str() {
+                "^@" => ExprType::StartsWith,
+                "~~" => ExprType::Like,
+                "~~*" => ExprType::ILike,
+                "!~" => {
+                    func_types.push(ExprType::Not);
+                    ExprType::RegexpEq
+                }
+                "!~~" => {
+                    func_types.push(ExprType::Not);
+                    ExprType::Like
+                }
+                "!~~*" => {
+                    func_types.push(ExprType::Not);
+                    ExprType::ILike
+                }
+                "->>" => ExprType::JsonbAccessStr,
+                "#-" => ExprType::JsonbDeletePath,
+                "#>" => ExprType::JsonbExtractPathVariadic,
+                "#>>" => ExprType::JsonbExtractPathTextVariadic,
+                "?" => ExprType::JsonbExists,
+                "?|" => ExprType::JsonbExistsAny,
+                "?&" => ExprType::JsonbExistsAll,
+                _ => bail_not_implemented!(issue = 112, "binary op: {:?}", name),
+            },
             _ => bail_not_implemented!(issue = 112, "binary op: {:?}", op),
         };
         func_types.push(final_type);
