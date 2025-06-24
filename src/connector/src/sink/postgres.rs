@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
+use futures::StreamExt;
 use futures::stream::FuturesOrdered;
-use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use phf::phf_set;
 use risingwave_common::array::{Op, StreamChunk};
@@ -422,7 +422,8 @@ impl PostgresSinkWriter {
 
     async fn write_batch_non_append_only(&mut self, chunk: StreamChunk) -> Result<()> {
         let transaction = Arc::new(self.client.transaction().await?);
-        let mut futures = FuturesOrdered::new();
+        let mut delete_futures = FuturesOrdered::new();
+        let mut upsert_futures = FuturesOrdered::new();
         for (op, row) in chunk.rows() {
             match op {
                 Op::Delete | Op::UpdateDelete => {
@@ -442,7 +443,7 @@ impl PostgresSinkWriter {
                                 )
                             })
                     };
-                    futures.push_back(future.boxed());
+                    delete_futures.push_back(future);
                 }
                 Op::Insert | Op::UpdateInsert => {
                     let pg_row = convert_row_to_pg_row(row, &self.schema_types);
@@ -460,11 +461,14 @@ impl PostgresSinkWriter {
                                 )
                             })
                     };
-                    futures.push_back(future.boxed());
+                    upsert_futures.push_back(future);
                 }
             }
         }
-        while let Some(result) = futures.next().await {
+        while let Some(result) = delete_futures.next().await {
+            result?;
+        }
+        while let Some(result) = upsert_futures.next().await {
             result?;
         }
         if let Some(transaction) = Arc::into_inner(transaction) {
