@@ -42,6 +42,7 @@ enumflags2 = { version = "0.7.8" }
 ethnum = { version = "1", features = ["serde"] }
 fixedbitset = "0.5"
 foyer = { workspace = true }
+fs-err = "3"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 governor = { workspace = true }
 hashbrown = "0.15.2"
@@ -51,6 +52,7 @@ humantime = "2.2"
 itertools = { workspace = true }
 itoa = "1.0"
 jiff = "0.1.15"
+jni = { version = "0.21.1", features = ["invocation"] }
 jsonbb = { workspace = true }
 lru = { workspace = true }
 memcomparable = { version = "0.2", features = ["decimal"] }

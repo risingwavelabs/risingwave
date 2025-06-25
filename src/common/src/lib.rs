@@ -28,6 +28,7 @@
 #![feature(portable_simd)]
 #![feature(array_chunks)]
 #![feature(inline_const_pat)]
+#![feature(once_cell_try)]
 #![allow(incomplete_features)]
 #![feature(iterator_try_collect)]
 #![feature(iter_order_by)]
@@ -69,25 +70,9 @@ pub mod config;
 pub mod constants;
 pub mod field_generator;
 pub mod hash;
+pub mod jvm_runtime;
 pub mod log;
 pub mod memory;
-pub use risingwave_common_metrics::{
-    monitor, register_guarded_gauge_vec_with_registry,
-    register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
-    register_guarded_int_gauge_vec_with_registry, register_guarded_uint_gauge_vec_with_registry,
-};
-pub use {
-    risingwave_common_metrics as metrics, risingwave_common_secret as secret,
-    risingwave_license as license,
-};
-pub mod lru;
-pub mod operator;
-pub mod opts;
-pub mod range;
-pub mod row;
-pub mod sequence;
-pub mod session_config;
-pub mod system_param;
 pub mod telemetry;
 pub mod test_utils;
 pub mod transaction;
@@ -150,3 +135,21 @@ macro_rules! panic_if_debug {
         }
     };
 }
+
+pub use risingwave_common_metrics::{
+    monitor, register_guarded_gauge_vec_with_registry,
+    register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
+    register_guarded_int_gauge_vec_with_registry, register_guarded_uint_gauge_vec_with_registry,
+};
+pub use {
+    risingwave_common_metrics as metrics, risingwave_common_secret as secret,
+    risingwave_license as license,
+};
+pub mod lru;
+pub mod operator;
+pub mod opts;
+pub mod range;
+pub mod row;
+pub mod sequence;
+pub mod session_config;
+pub mod system_param;

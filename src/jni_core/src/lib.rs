@@ -46,6 +46,7 @@ pub use paste::paste;
 use prost::{DecodeError, Message};
 use risingwave_common::array::{ArrayError, StreamChunk};
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::jvm_runtime::JVM;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::test_prelude::StreamChunkTestExt;
 use risingwave_common::types::{Decimal, ScalarRefImpl};
@@ -63,6 +64,14 @@ use tracing_slf4j::*;
 
 pub static JAVA_BINDING_ASYNC_RUNTIME: LazyLock<Runtime> =
     LazyLock::new(|| tokio::runtime::Runtime::new().unwrap());
+
+// Initialize JVM and register native methods when the module is loaded
+pub fn init_jvm_and_register_methods() -> anyhow::Result<()> {
+    let jvm = JVM.get_or_init()?;
+    let mut env = jvm.attach_current_thread()?;
+    crate::jvm_runtime::register_java_binding_native_methods(&mut env)?;
+    Ok(())
+}
 
 #[derive(Error, Debug)]
 pub enum BindingError {
