@@ -7,6 +7,9 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[lib]
+test = false
+
 [dependencies]
 clap = { workspace = true }
 educe = "0.6"
@@ -40,9 +43,6 @@ tracing = "0.1"
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
-
-[lib]
-test = false
 
 [lints]
 workspace = true

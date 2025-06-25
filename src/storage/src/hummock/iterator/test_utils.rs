@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use foyer::{Engine, HybridCacheBuilder};
+use foyer::{Engine, HybridCacheBuilder, LargeEngineOptions};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
@@ -28,6 +28,7 @@ use risingwave_object_store::object::{
     InMemObjectStore, ObjectStore, ObjectStoreImpl, ObjectStoreRef,
 };
 
+use crate::hummock::none::NoneRecentFilter;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferValue;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStore;
@@ -70,14 +71,14 @@ pub async fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> Ssta
     let meta_cache = HybridCacheBuilder::new()
         .memory(64 << 20)
         .with_shards(2)
-        .storage(Engine::Large)
+        .storage(Engine::Large(LargeEngineOptions::new()))
         .build()
         .await
         .unwrap();
     let block_cache = HybridCacheBuilder::new()
         .memory(64 << 20)
         .with_shards(2)
-        .storage(Engine::Large)
+        .storage(Engine::Large(LargeEngineOptions::new()))
         .build()
         .await
         .unwrap();
@@ -88,7 +89,7 @@ pub async fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> Ssta
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
 
-        recent_filter: None,
+        recent_filter: Arc::new(NoneRecentFilter::default().into()),
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
         use_new_object_prefix_strategy: true,
 

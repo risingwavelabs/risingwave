@@ -7,13 +7,6 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
-[features]
-rw-static-link = ["workspace-config/rw-static-link"]
-rw-dynamic-link = ["workspace-config/rw-dynamic-link"]
-openssl-vendored = ["workspace-config/openssl-vendored"]
-default = ["rw-static-link"]
-fips = ["workspace-config/fips"]
-
 [package.metadata.cargo-machete]
 ignored = [
     "workspace-hack",
@@ -25,6 +18,21 @@ ignored = [
 
 [package.metadata.cargo-udeps.ignore]
 normal = ["workspace-hack", "workspace-config", "task_stats_alloc"]
+
+[lib]
+test = false
+
+[[bin]]
+name = "risectl"
+path = "src/bin/ctl.rs"
+test = false
+
+[features]
+rw-static-link = ["workspace-config/rw-static-link"]
+rw-dynamic-link = ["workspace-config/rw-dynamic-link"]
+openssl-vendored = ["workspace-config/openssl-vendored"]
+default = ["rw-static-link"]
+fips = ["workspace-config/fips"]
 
 [dependencies]
 clap = { workspace = true }
@@ -53,14 +61,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 
 workspace-config = { path = "../utils/workspace-config" }
 workspace-hack = { path = "../workspace-hack" }
-
-[lib]
-test = false
-
-[[bin]]
-name = "risectl"
-path = "src/bin/ctl.rs"
-test = false
 
 [lints]
 workspace = true

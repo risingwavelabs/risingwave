@@ -36,17 +36,17 @@ time = "0.3.30"
 tracing = "0.1"
 url = "2"
 
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../../workspace-hack" }
+
+[build-dependencies]
+prost-build = "0.13"
+
 [dev-dependencies]
 expect-test = "1"
 fs-err = "3"
 hex = "0.4"
 tokio = { version = "0.2", package = "madsim-tokio" }
-
-[build-dependencies]
-prost-build = "0.13"
-
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../../workspace-hack" }
 
 [lints]
 workspace = true

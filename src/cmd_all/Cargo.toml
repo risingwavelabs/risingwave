@@ -7,6 +7,17 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack", "workspace-config", "task_stats_alloc", "tikv-jemallocator"]
+
+[package.metadata.cargo-udeps.ignore]
+ignored = ["workspace-hack", "workspace-config", "task_stats_alloc", "tikv-jemallocator"]
+
+[[bin]]
+name = "risingwave"
+path = "src/bin/risingwave.rs"
+test = false
+
 [features]
 default = ["rw-static-link"]
 rw-static-link = ["workspace-config/rw-static-link"]
@@ -14,12 +25,6 @@ rw-dynamic-link = ["workspace-config/rw-dynamic-link"]
 openssl-vendored = ["workspace-config/openssl-vendored"]
 udf = ["risingwave_expr_impl/udf"]
 fips = ["workspace-config/fips"]
-
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack", "workspace-config", "task_stats_alloc", "tikv-jemallocator"]
-
-[package.metadata.cargo-udeps.ignore]
-ignored = ["workspace-hack", "workspace-config", "task_stats_alloc", "tikv-jemallocator"]
 
 [dependencies]
 clap = { workspace = true }
@@ -55,9 +60,6 @@ tracing = { version = "0.1" }
 workspace-config = { path = "../utils/workspace-config" }
 workspace-hack = { path = "../workspace-hack" }
 
-[dev-dependencies]
-expect-test = "1"
-
 [build-dependencies]
 thiserror-ext = { workspace = true }
 vergen = { version = "8", default-features = false, features = [
@@ -66,10 +68,8 @@ vergen = { version = "8", default-features = false, features = [
     "gitcl",
 ] }
 
-[[bin]]
-name = "risingwave"
-path = "src/bin/risingwave.rs"
-test = false
+[dev-dependencies]
+expect-test = "1"
 
 [lints]
 workspace = true

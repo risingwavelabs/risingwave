@@ -8,8 +8,18 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 repository = { workspace = true }
 
+[package.metadata.release]
+# Instruct `cargo release` to not run `cargo publish` locally:
+# https://github.com/sunng87/cargo-release/blob/master/docs/reference.md#config-fields
+# See docs/releasing.md for details.
+disable-publish = true
+
 [lib]
 path = "src/lib.rs"
+
+[[bin]]
+name = "sqlparser"
+path = "src/bin/sqlparser.rs"
 
 [features]
 default = ["std"]
@@ -36,16 +46,6 @@ serde = { version = "1", features = ["derive"] }
 serde_with = "3"
 serde_yaml = "0.9"
 walkdir = "2"
-
-[package.metadata.release]
-# Instruct `cargo release` to not run `cargo publish` locally:
-# https://github.com/sunng87/cargo-release/blob/master/docs/reference.md#config-fields
-# See docs/releasing.md for details.
-disable-publish = true
-
-[[bin]]
-name = "sqlparser"
-path = "src/bin/sqlparser.rs"
 
 [[test]]
 name = "parser_test"

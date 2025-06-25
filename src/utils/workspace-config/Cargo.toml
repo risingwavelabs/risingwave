@@ -55,7 +55,7 @@ dynamic-zstd-sys = { package = "zstd-sys", version = "2", optional = true, defau
 ] }
 
 # FIPS
-aws-lc-rs ={ version = "1.13", optional = true, default-features = false, features = [
+aws-lc-rs = { version = "1.13", optional = true, default-features = false, features = [
     "fips",
 ] }
 # workspace-hack = { path = "../../workspace-hack" }
