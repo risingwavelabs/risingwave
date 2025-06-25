@@ -640,21 +640,27 @@ impl<'a> Tokenizer<'a> {
                         }
                     }
                     match op {
+                        // https://github.com/postgres/postgres/blob/REL_17_4/src/backend/parser/scan.l#L965-L973
                         "+" => Ok(Some(Token::Plus)),
                         "-" => Ok(Some(Token::Minus)),
                         "*" => Ok(Some(Token::Mul)),
                         "/" => Ok(Some(Token::Div)),
                         "%" => Ok(Some(Token::Mod)),
-                        "|" => Ok(Some(Token::Pipe)),
-                        "=" => Ok(Some(Token::Eq)),
-                        "=>" => Ok(Some(Token::RArrow)),
-                        "!=" => Ok(Some(Token::Neq)),
-                        "<=" => Ok(Some(Token::LtEq)),
-                        "<>" => Ok(Some(Token::Neq)),
-                        "<" => Ok(Some(Token::Lt)),
-                        ">=" => Ok(Some(Token::GtEq)),
-                        ">" => Ok(Some(Token::Gt)),
                         "^" => Ok(Some(Token::Caret)),
+                        "<" => Ok(Some(Token::Lt)),
+                        ">" => Ok(Some(Token::Gt)),
+                        "=" => Ok(Some(Token::Eq)),
+                        // https://github.com/postgres/postgres/blob/REL_17_4/src/backend/parser/scan.l#L974-L992
+                        "=>" => Ok(Some(Token::RArrow)),
+                        "<=" => Ok(Some(Token::LtEq)),
+                        ">=" => Ok(Some(Token::GtEq)),
+                        "<>" => Ok(Some(Token::Neq)),
+                        "!=" => Ok(Some(Token::Neq)),
+                        // Our support of `Expr::LambdaFunction` makes us PostgreSQL-incompatible here.
+                        //     foo(bar, | x | x)
+                        // In PostgreSQL, this is unary operator `|` applied to `x`, then bitwise-or `x`.
+                        // In our dialect, this is a lambda function - the identity function.
+                        "|" => Ok(Some(Token::Pipe)),
                         _ => Ok(Some(Token::Op(op.to_owned()))),
                     }
                 }

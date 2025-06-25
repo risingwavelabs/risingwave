@@ -346,7 +346,9 @@ impl Binder {
                 "||/" => ExprType::Cbrt,
                 _ => bail_not_implemented!(issue = 112, "unsupported unary expression: {:?}", op),
             },
-            _ => bail_not_implemented!(issue = 112, "unsupported unary expression: {:?}", op),
+            UnaryOperator::PGQualified(_) => {
+                bail_not_implemented!(issue = 112, "unsupported unary expression: {:?}", op)
+            }
         };
         let expr = self.bind_expr_inner(expr)?;
         FunctionCall::new(func_type, vec![expr]).map(|f| f.into())

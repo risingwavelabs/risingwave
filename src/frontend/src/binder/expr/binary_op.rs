@@ -176,11 +176,13 @@ impl Binder {
                 }
             }
             BinaryOperator::Custom(name) => match name.as_str() {
+                // number
                 "&" => ExprType::BitwiseAnd,
                 "|" => ExprType::BitwiseOr,
                 "#" => ExprType::BitwiseXor,
                 "<<" => ExprType::BitwiseShiftLeft,
                 ">>" => ExprType::BitwiseShiftRight,
+                // string
                 "^@" => ExprType::StartsWith,
                 "~" => ExprType::RegexpEq,
                 "~~" => ExprType::Like,
@@ -197,6 +199,7 @@ impl Binder {
                     func_types.push(ExprType::Not);
                     ExprType::ILike
                 }
+                // jsonb
                 "->" => ExprType::JsonbAccess,
                 "->>" => ExprType::JsonbAccessStr,
                 "#-" => ExprType::JsonbDeletePath,
@@ -207,7 +210,9 @@ impl Binder {
                 "?&" => ExprType::JsonbExistsAll,
                 _ => bail_not_implemented!(issue = 112, "binary op: {:?}", name),
             },
-            _ => bail_not_implemented!(issue = 112, "binary op: {:?}", op),
+            BinaryOperator::Xor | BinaryOperator::PGQualified(_) => {
+                bail_not_implemented!(issue = 112, "binary op: {:?}", op)
+            }
         };
         func_types.push(final_type);
         Ok(func_types)
