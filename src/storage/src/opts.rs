@@ -104,6 +104,7 @@ pub struct StorageOpts {
     pub cache_refill_recent_filter_rotate_interval_ms: usize,
     pub cache_refill_unit: usize,
     pub cache_refill_threshold: f64,
+    pub cache_refill_skip_recent_filter: bool,
 
     pub meta_file_cache_dir: String,
     pub meta_file_cache_capacity_mb: usize,
@@ -247,6 +248,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .storage
                 .cache_refill
                 .recent_filter_rotate_interval_ms,
+            cache_refill_skip_recent_filter: c.storage.cache_refill.skip_recent_filter,
             cache_refill_unit: c.storage.cache_refill.unit,
             cache_refill_threshold: c.storage.cache_refill.threshold,
             max_preload_wait_time_mill: c.storage.max_preload_wait_time_mill,
