@@ -610,6 +610,8 @@ pub struct NewLocalOptions {
 
     /// The vnode bitmap for the local state store instance
     pub vnodes: Arc<Bitmap>,
+
+    pub upload_on_flush: bool,
 }
 
 impl From<TracedNewLocalOptions> for NewLocalOptions {
@@ -629,6 +631,7 @@ impl From<TracedNewLocalOptions> for NewLocalOptions {
             table_option: value.table_option.into(),
             is_replicated: value.is_replicated,
             vnodes: Arc::new(value.vnodes.into()),
+            upload_on_flush: value.upload_on_flush,
         }
     }
 }
@@ -646,6 +649,7 @@ impl From<NewLocalOptions> for TracedNewLocalOptions {
             table_option: value.table_option.into(),
             is_replicated: value.is_replicated,
             vnodes: value.vnodes.as_ref().clone().into(),
+            upload_on_flush: value.upload_on_flush,
         }
     }
 }
@@ -656,6 +660,7 @@ impl NewLocalOptions {
         op_consistency_level: OpConsistencyLevel,
         table_option: TableOption,
         vnodes: Arc<Bitmap>,
+        upload_on_flush: bool,
     ) -> Self {
         NewLocalOptions {
             table_id,
@@ -663,6 +668,7 @@ impl NewLocalOptions {
             table_option,
             is_replicated: false,
             vnodes,
+            upload_on_flush,
         }
     }
 
@@ -678,6 +684,7 @@ impl NewLocalOptions {
             table_option,
             is_replicated: true,
             vnodes,
+            upload_on_flush: false,
         }
     }
 
@@ -690,6 +697,7 @@ impl NewLocalOptions {
             },
             is_replicated: false,
             vnodes: Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+            upload_on_flush: true,
         }
     }
 }

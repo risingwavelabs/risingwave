@@ -127,15 +127,8 @@ impl StagingSstableInfo {
     }
 }
 
-#[derive(Clone)]
-pub enum StagingData {
-    ImmMem(ImmutableMemtable),
-    Sst(Arc<StagingSstableInfo>),
-}
-
 pub enum VersionUpdate {
-    /// a new staging data entry will be added.
-    Staging(StagingData),
+    Sst(Arc<StagingSstableInfo>),
     CommittedSnapshot(CommittedVersion),
     NewTableWatermark {
         direction: WatermarkDirection,
@@ -147,10 +140,20 @@ pub enum VersionUpdate {
 
 #[derive(Clone)]
 pub struct StagingVersion {
-    // newer data comes first
-    // Note: Currently, building imm and writing to staging version is not atomic, and therefore
-    // imm of smaller batch id may be added later than one with greater batch id
-    pub imm: VecDeque<ImmutableMemtable>,
+    pending_imm_size: usize,
+    /// It contains the imms added but not sent to the uploader of hummock event handler.
+    /// It is non-empty only when `upload_on_flush` is false.
+    ///
+    /// It will be sent to the uploader when `pending_imm_size` exceed threshold or on `seal_current_epoch`.
+    ///
+    /// newer data comes last
+    pub pending_imms: Vec<ImmutableMemtable>,
+    /// It contains the imms already sent to uploader of hummock event handler.
+    /// Note: Currently, building imm and writing to staging version is not atomic, and therefore
+    /// imm of smaller batch id may be added later than one with greater batch id
+    ///
+    /// Newer data comes first.
+    pub uploading_imms: VecDeque<ImmutableMemtable>,
 
     // newer data comes first
     pub sst: VecDeque<Arc<StagingSstableInfo>>,
@@ -171,16 +174,21 @@ impl StagingVersion {
         let (left, right) = table_key_range;
         let left = left.as_ref().map(|key| TableKey(key.0.as_ref()));
         let right = right.as_ref().map(|key| TableKey(key.0.as_ref()));
-        let overlapped_imms = self.imm.iter().filter(move |imm| {
-            // retain imm which is overlapped with (min_epoch_exclusive, max_epoch_inclusive]
-            imm.min_epoch() <= max_epoch_inclusive
-                && imm.table_id == table_id
-                && range_overlap(
-                    &(left, right),
-                    &imm.start_table_key(),
-                    Included(&imm.end_table_key()),
-                )
-        });
+        let overlapped_imms = self
+            .pending_imms
+            .iter()
+            .rev() // rev to let newer imm come first
+            .chain(self.uploading_imms.iter())
+            .filter(move |imm| {
+                // retain imm which is overlapped with (min_epoch_exclusive, max_epoch_inclusive]
+                imm.min_epoch() <= max_epoch_inclusive
+                    && imm.table_id == table_id
+                    && range_overlap(
+                        &(left, right),
+                        &imm.start_table_key(),
+                        Included(&imm.end_table_key()),
+                    )
+            });
 
         // TODO: Remove duplicate sst based on sst id
         let overlapped_ssts = self
@@ -205,7 +213,7 @@ impl StagingVersion {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.imm.is_empty() && self.sst.is_empty()
+        self.pending_imms.is_empty() && self.uploading_imms.is_empty() && self.sst.is_empty()
     }
 }
 
@@ -268,7 +276,9 @@ impl HummockReadVersion {
                 }
             },
             staging: StagingVersion {
-                imm: VecDeque::default(),
+                pending_imm_size: 0,
+                pending_imms: Vec::default(),
+                uploading_imms: VecDeque::default(),
                 sst: VecDeque::default(),
             },
 
@@ -292,6 +302,34 @@ impl HummockReadVersion {
         self.table_id
     }
 
+    pub fn add_imm(&mut self, imm: ImmutableMemtable) {
+        if let Some(item) = self
+            .staging
+            .pending_imms
+            .last()
+            .or_else(|| self.staging.uploading_imms.front())
+        {
+            // check batch_id order from newest to old
+            debug_assert!(item.batch_id() < imm.batch_id());
+        }
+
+        self.staging.pending_imm_size += imm.size();
+        self.staging.pending_imms.push(imm);
+    }
+
+    pub fn pending_imm_size(&self) -> usize {
+        self.staging.pending_imm_size
+    }
+
+    pub fn start_upload_pending_imms(&mut self) -> Vec<ImmutableMemtable> {
+        let pending_imms = std::mem::take(&mut self.staging.pending_imms);
+        for imm in &pending_imms {
+            self.staging.uploading_imms.push_front(imm.clone());
+        }
+        self.staging.pending_imm_size = 0;
+        pending_imms
+    }
+
     /// Updates the read version with `VersionUpdate`.
     /// There will be three data types to be processed
     /// `VersionUpdate::Staging`
@@ -303,18 +341,8 @@ impl HummockReadVersion {
     /// `staging_sst` and `staging_imm` in memory according to epoch
     pub fn update(&mut self, info: VersionUpdate) {
         match info {
-            VersionUpdate::Staging(staging) => match staging {
-                // TODO: add a check to ensure that the added batch id of added imm is greater than
-                // the batch id of imm at the front
-                StagingData::ImmMem(imm) => {
-                    if let Some(item) = self.staging.imm.front() {
-                        // check batch_id order from newest to old
-                        debug_assert!(item.batch_id() < imm.batch_id());
-                    }
-
-                    self.staging.imm.push_front(imm)
-                }
-                StagingData::Sst(staging_sst_ref) => {
+            VersionUpdate::Sst(staging_sst_ref) => {
+                {
                     let Some(imms) = staging_sst_ref.imm_ids.get(&self.instance_id) else {
                         warn!(
                             instance_id = self.instance_id,
@@ -325,7 +353,7 @@ impl HummockReadVersion {
 
                     // old data comes first
                     for imm_id in imms.iter().rev() {
-                        let check_err = match self.staging.imm.pop_back() {
+                        let check_err = match self.staging.uploading_imms.pop_back() {
                             None => Some("empty".to_owned()),
                             Some(prev_imm_id) => {
                                 if prev_imm_id.batch_id() == *imm_id {
@@ -344,14 +372,20 @@ impl HummockReadVersion {
                             "should be valid staging_sst.size {},
                                     staging_sst.imm_ids {:?},
                                     staging_sst.epochs {:?},
-                                    local_imm_ids {:?},
+                                    local_pending_imm_ids {:?},
+                                    local_uploading_imm_ids {:?},
                                     instance_id {}
                                     check_err {:?}",
                             staging_sst_ref.imm_size,
                             staging_sst_ref.imm_ids,
                             staging_sst_ref.epochs,
                             self.staging
-                                .imm
+                                .pending_imms
+                                .iter()
+                                .map(|imm| imm.batch_id())
+                                .collect_vec(),
+                            self.staging
+                                .uploading_imms
                                 .iter()
                                 .map(|imm| imm.batch_id())
                                 .collect_vec(),
@@ -362,7 +396,7 @@ impl HummockReadVersion {
 
                     self.staging.sst.push_front(staging_sst_ref);
                 }
-            },
+            }
 
             VersionUpdate::CommittedSnapshot(committed_version) => {
                 if let Some(info) = committed_version
@@ -371,14 +405,28 @@ impl HummockReadVersion {
                     .get(&self.table_id)
                 {
                     let committed_epoch = info.committed_epoch;
-                    self.staging.imm.retain(|imm| {
-                        if self.is_replicated {
-                            imm.min_epoch() > committed_epoch
-                        } else {
-                            assert!(imm.min_epoch() > committed_epoch);
-                            true
-                        }
-                    });
+                    if self.is_replicated {
+                        self.staging
+                            .uploading_imms
+                            .retain(|imm| imm.min_epoch() > committed_epoch);
+                        self.staging
+                            .pending_imms
+                            .retain(|imm| imm.min_epoch() > committed_epoch);
+                    } else {
+                        self.staging
+                            .pending_imms
+                            .iter()
+                            .chain(self.staging.uploading_imms.iter())
+                            .for_each(|imm| {
+                                assert!(
+                                    imm.min_epoch() > committed_epoch,
+                                    "imm of table {} min_epoch {} should be greater than committed_epoch {}",
+                                    imm.table_id,
+                                    imm.min_epoch(),
+                                    committed_epoch
+                                )
+                            });
+                    }
 
                     self.staging.sst.retain(|sst| {
                         sst.epochs.first().expect("epochs not empty") > &committed_epoch

@@ -539,6 +539,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
                 },
                 is_replicated: false,
                 vnodes: serde.vnodes().clone(),
+                upload_on_flush: false,
             })
             .await;
 

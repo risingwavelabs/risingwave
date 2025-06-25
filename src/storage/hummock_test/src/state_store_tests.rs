@@ -1461,6 +1461,7 @@ async fn test_iter_log() {
             table_option: Default::default(),
             is_replicated: false,
             vnodes: Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into(),
+            upload_on_flush: true,
         })
         .await;
 
@@ -1476,6 +1477,7 @@ async fn test_iter_log() {
             table_option: Default::default(),
             is_replicated: false,
             vnodes: Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into(),
+            upload_on_flush: true,
         })
         .await;
     // flush for about 10 times per epoch
@@ -1601,6 +1603,7 @@ async fn test_read_log_next_epoch() {
             table_option: Default::default(),
             is_replicated: false,
             vnodes: Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into(),
+            upload_on_flush: true,
         })
         .await;
     // flush for about 10 times per epoch
