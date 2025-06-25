@@ -568,23 +568,14 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                 )
                 .await?;
 
-            let mut progress = LogStoreVnodeProgress::None;
             #[for_await]
             for message in log_store_stream {
-                let message = message?;
+                let (_epoch, message) = message?;
                 match message {
-                    (epoch, KvLogStoreItem::Barrier { vnodes, .. }) => {
-                        progress.apply_aligned(vnodes, epoch, None);
+                    KvLogStoreItem::Barrier { .. } => {
                         continue;
                     }
-                    (
-                        epoch,
-                        KvLogStoreItem::StreamChunk {
-                            chunk,
-                            progress: chunk_progress,
-                        },
-                    ) => {
-                        progress.apply_per_vnode(epoch, chunk_progress);
+                    KvLogStoreItem::StreamChunk { chunk, .. } => {
                         yield Message::Chunk(chunk);
                     }
                 }
@@ -594,6 +585,12 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             for message in input {
                 match message? {
                     Message::Barrier(barrier) => {
+                        let mut progress = LogStoreVnodeProgress::None;
+                        progress.apply_aligned(
+                            read_state.vnodes().clone(),
+                            barrier.epoch.prev,
+                            None,
+                        );
                         // Truncate the logstore
                         let post_seal = initial_write_state
                             .seal_current_epoch(barrier.epoch.curr, progress.take());
