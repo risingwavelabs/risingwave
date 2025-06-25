@@ -192,6 +192,6 @@ Caused by these errors (recent errors listed first):
   3: BigQuery error
   4: No such file or directory (os error 2)
 
-  
+
 statement ok
 DROP TABLE t;
