@@ -697,5 +697,4 @@ mod tests {
             println!("OwnedRow: {:?}", row);
         }
     }
-
 }
