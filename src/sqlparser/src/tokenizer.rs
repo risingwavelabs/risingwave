@@ -119,9 +119,6 @@ pub enum Token {
     RArrow,
     /// Sharp `#` used for PostgreSQL Bitwise XOR operator
     Sharp,
-    /// Tilde `~` used for PostgreSQL Bitwise NOT operator or case sensitive match regular
-    /// expression operator
-    Tilde,
 }
 
 impl fmt::Display for Token {
@@ -167,7 +164,6 @@ impl fmt::Display for Token {
             Token::RBrace => f.write_str("}"),
             Token::RArrow => f.write_str("=>"),
             Token::Sharp => f.write_str("#"),
-            Token::Tilde => f.write_str("~"),
         }
     }
 }
@@ -666,7 +662,6 @@ impl<'a> Tokenizer<'a> {
                         ">" => Ok(Some(Token::Gt)),
                         "&" => Ok(Some(Token::Ampersand)),
                         "^" => Ok(Some(Token::Caret)),
-                        "~" => Ok(Some(Token::Tilde)),
                         "#" => Ok(Some(Token::Sharp)),
                         _ => Ok(Some(Token::Op(op.to_owned()))),
                     }
@@ -1546,7 +1541,7 @@ mod tests {
             Token::Whitespace(Whitespace::Space),
             Token::make_word("col", None),
             Token::Whitespace(Whitespace::Space),
-            Token::Tilde,
+            Token::Op("~".to_owned()),
             Token::Whitespace(Whitespace::Space),
             Token::SingleQuotedString("^a".into()),
             Token::Comma,

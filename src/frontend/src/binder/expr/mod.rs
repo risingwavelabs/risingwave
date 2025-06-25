@@ -336,11 +336,11 @@ impl Binder {
         let func_type = match &op {
             UnaryOperator::Not => ExprType::Not,
             UnaryOperator::Minus => ExprType::Neg,
-            UnaryOperator::PGBitwiseNot => ExprType::BitwiseNot,
             UnaryOperator::Plus => {
                 return self.rewrite_positive(expr);
             }
             UnaryOperator::Custom(name) => match name.as_str() {
+                "~" => ExprType::BitwiseNot,
                 "@" => ExprType::Abs,
                 "|/" => ExprType::Sqrt,
                 "||/" => ExprType::Cbrt,

@@ -176,7 +176,7 @@ fn make_unary_op(func: ExprType, expr: &Expr) -> Option<Expr> {
     let unary_op = match func {
         E::Neg => U::Minus,
         E::Not => U::Not,
-        E::BitwiseNot => U::PGBitwiseNot,
+        E::BitwiseNot => U::Custom("~".to_owned()),
         _ => return None,
     };
     Some(Expr::UnaryOp {

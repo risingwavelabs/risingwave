@@ -178,11 +178,11 @@ impl Binder {
                     }
                 }
             }
-            BinaryOperator::PGRegexMatch => ExprType::RegexpEq,
             BinaryOperator::Custom(name) => match name.as_str() {
                 "<<" => ExprType::BitwiseShiftLeft,
                 ">>" => ExprType::BitwiseShiftRight,
                 "^@" => ExprType::StartsWith,
+                "~" => ExprType::RegexpEq,
                 "~~" => ExprType::Like,
                 "~~*" => ExprType::ILike,
                 "!~" => {

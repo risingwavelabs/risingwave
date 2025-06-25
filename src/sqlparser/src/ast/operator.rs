@@ -24,8 +24,6 @@ pub enum UnaryOperator {
     Plus,
     Minus,
     Not,
-    /// Bitwise Not, e.g. `~9` (PostgreSQL-specific)
-    PGBitwiseNot,
     Custom(String),
     /// Qualified, e.g. `OPERATOR(pg_catalog.+) 9` (PostgreSQL-specific)
     PGQualified(Box<QualifiedOperator>),
@@ -40,7 +38,6 @@ impl fmt::Display for UnaryOperator {
             UnaryOperator::Plus => "+",
             UnaryOperator::Minus => "-",
             UnaryOperator::Not => "NOT",
-            UnaryOperator::PGBitwiseNot => "~",
             UnaryOperator::Custom(name) => name,
             UnaryOperator::PGQualified(_) => unreachable!(),
         })
@@ -70,8 +67,6 @@ pub enum BinaryOperator {
     BitwiseXor,
     /// Bitwise XOR, e.g. `a # b` (PostgreSQL-specific)
     PGBitwiseXor,
-    /// String matches regular expression (case sensitively), e.g. `a ~ b` (PostgreSQL-specific)
-    PGRegexMatch,
     Custom(String),
     PGQualified(Box<QualifiedOperator>),
 }
@@ -100,7 +95,6 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::BitwiseAnd => "&",
             BinaryOperator::BitwiseXor => "^",
             BinaryOperator::PGBitwiseXor => "#",
-            BinaryOperator::PGRegexMatch => "~",
             BinaryOperator::Custom(name) => name,
             BinaryOperator::PGQualified(_) => unreachable!(),
         })

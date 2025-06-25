@@ -629,7 +629,7 @@ fn parse_pg_bitwise_binary_ops() {
 #[test]
 fn parse_pg_unary_ops() {
     let pg_unary_ops = &[
-        ("~", UnaryOperator::PGBitwiseNot),
+        ("~", UnaryOperator::Custom("~".to_owned())),
         ("|/", UnaryOperator::Custom("|/".to_owned())),
         ("||/", UnaryOperator::Custom("||/".to_owned())),
         ("@", UnaryOperator::Custom("@".to_owned())),
@@ -650,7 +650,7 @@ fn parse_pg_unary_ops() {
 #[test]
 fn parse_pg_regex_match_ops() {
     let pg_regex_match_ops = &[
-        ("~", BinaryOperator::PGRegexMatch),
+        ("~", BinaryOperator::Custom("~".to_owned())),
         ("~*", BinaryOperator::Custom("~*".to_owned())),
         ("!~", BinaryOperator::Custom("!~".to_owned())),
         ("!~*", BinaryOperator::Custom("!~*".to_owned())),
