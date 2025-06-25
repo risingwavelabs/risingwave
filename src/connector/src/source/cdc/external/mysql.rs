@@ -583,12 +583,10 @@ impl MySqlExternalTableReader {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::time::Duration;
 
-    use futures::{StreamExt, pin_mut};
+    use futures::pin_mut;
     use futures_async_stream::for_await;
     use maplit::{convert_args, hashmap};
-    use mysql_async::prelude::*;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
     use risingwave_common::types::DataType;
 
