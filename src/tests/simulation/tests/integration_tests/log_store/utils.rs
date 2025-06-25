@@ -155,38 +155,6 @@ pub(crate) async fn assert_no_lag_in_log_store(
     }
 }
 
-/// Wait for it to finish consuming logstore
-pub(crate) async fn wait_unaligned_join(
-    cluster: &mut Cluster,
-    name: &str,
-    result_count: usize,
-) -> Result<()> {
-    let mut session = cluster.start_session();
-    let query = format!("SELECT COUNT(*) FROM {name}");
-    const MAX_RETRIES: usize = 100;
-    let mut current_count = 0;
-    for i in 0..MAX_RETRIES {
-        let result = session.run(query.clone()).await?;
-        current_count = result.parse()?;
-        tracing::info!("current count: {current_count}");
-        if current_count == result_count {
-            if i == 0 {
-                // If count is immediately equal to result_count,
-                // it likely means there's no lag in the logstore.
-                // This is a failure case, as we expect some lag.
-                bail!("there was no lag in the logstore")
-            }
-            return Ok(());
-        }
-        sleep(Duration::from_millis(1)).await;
-    }
-    // In a subsequent step we will compare the results, and print the missing records.
-    tracing::error!(
-        "failed after {MAX_RETRIES} retries, expected {result_count} but got {current_count}"
-    );
-    Ok(())
-}
-
 pub(crate) async fn realign_join(
     cluster: &mut Cluster,
     name: &str,
