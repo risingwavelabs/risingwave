@@ -336,13 +336,13 @@ impl Binder {
         let func_type = match &op {
             UnaryOperator::Not => ExprType::Not,
             UnaryOperator::Minus => ExprType::Neg,
-            UnaryOperator::PGAbs => ExprType::Abs,
             UnaryOperator::PGBitwiseNot => ExprType::BitwiseNot,
             UnaryOperator::Plus => {
                 return self.rewrite_positive(expr);
             }
-            UnaryOperator::PGSquareRoot => ExprType::Sqrt,
             UnaryOperator::Custom(name) => match name.as_str() {
+                "@" => ExprType::Abs,
+                "|/" => ExprType::Sqrt,
                 "||/" => ExprType::Cbrt,
                 _ => bail_not_implemented!(issue = 112, "unsupported unary expression: {:?}", op),
             },

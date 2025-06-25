@@ -630,9 +630,9 @@ fn parse_pg_bitwise_binary_ops() {
 fn parse_pg_unary_ops() {
     let pg_unary_ops = &[
         ("~", UnaryOperator::PGBitwiseNot),
-        ("|/", UnaryOperator::PGSquareRoot),
+        ("|/", UnaryOperator::Custom("|/".to_owned())),
         ("||/", UnaryOperator::Custom("||/".to_owned())),
-        ("@", UnaryOperator::PGAbs),
+        ("@", UnaryOperator::Custom("@".to_owned())),
     ];
 
     for (str_op, op) in pg_unary_ops {

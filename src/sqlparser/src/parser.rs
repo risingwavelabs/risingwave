@@ -710,14 +710,9 @@ impl Parser<'_> {
                     expr: Box::new(sub_expr),
                 })
             }
-            tok @ Token::PGSquareRoot
-            | tok @ Token::Op(_)
-            | tok @ Token::AtSign
-            | tok @ Token::Tilde => {
+            tok @ Token::Op(_) | tok @ Token::Tilde => {
                 let op = match tok {
-                    Token::PGSquareRoot => UnaryOperator::PGSquareRoot,
                     Token::Op(name) => UnaryOperator::Custom(name),
-                    Token::AtSign => UnaryOperator::PGAbs,
                     Token::Tilde => UnaryOperator::PGBitwiseNot,
                     _ => unreachable!(),
                 };

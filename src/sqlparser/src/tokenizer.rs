@@ -122,10 +122,6 @@ pub enum Token {
     /// Tilde `~` used for PostgreSQL Bitwise NOT operator or case sensitive match regular
     /// expression operator
     Tilde,
-    /// AtSign `@` used for PostgreSQL abs operator
-    AtSign,
-    /// `|/`, a square root math operator in PostgreSQL
-    PGSquareRoot,
 }
 
 impl fmt::Display for Token {
@@ -172,8 +168,6 @@ impl fmt::Display for Token {
             Token::RArrow => f.write_str("=>"),
             Token::Sharp => f.write_str("#"),
             Token::Tilde => f.write_str("~"),
-            Token::AtSign => f.write_str("@"),
-            Token::PGSquareRoot => f.write_str("|/"),
         }
     }
 }
@@ -662,7 +656,6 @@ impl<'a> Tokenizer<'a> {
                         "/" => Ok(Some(Token::Div)),
                         "%" => Ok(Some(Token::Mod)),
                         "|" => Ok(Some(Token::Pipe)),
-                        "|/" => Ok(Some(Token::PGSquareRoot)),
                         "=" => Ok(Some(Token::Eq)),
                         "=>" => Ok(Some(Token::RArrow)),
                         "!=" => Ok(Some(Token::Neq)),
@@ -675,7 +668,6 @@ impl<'a> Tokenizer<'a> {
                         "^" => Ok(Some(Token::Caret)),
                         "~" => Ok(Some(Token::Tilde)),
                         "#" => Ok(Some(Token::Sharp)),
-                        "@" => Ok(Some(Token::AtSign)),
                         _ => Ok(Some(Token::Op(op.to_owned()))),
                     }
                 }
