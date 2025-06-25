@@ -1004,6 +1004,10 @@ pub async fn handle(
                     if !materialized {
                         bail_not_implemented!("ALTER VIEW AS QUERY");
                     }
+                    // `ALTER MATERIALIZED VIEW AS QUERY` is only available in development build now.
+                    if !cfg!(debug_assertions) {
+                        bail_not_implemented!("ALTER MATERIALIZED VIEW AS QUERY");
+                    }
                     alter_mv::handle_alter_mv(handler_args, name, query).await
                 }
             }

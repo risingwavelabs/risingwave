@@ -331,16 +331,11 @@ impl CatalogWriter for CatalogWriterImpl {
         table: PbTable,
         graph: StreamFragmentGraph,
     ) -> Result<()> {
+        // TODO: this is a dummy implementation for debugging only.
         notice_to_user(format!("table: {table:#?}"));
         notice_to_user(format!("graph: {graph:#?}"));
 
         Ok(())
-
-        // let version = self
-        //     .meta_client
-        //     .replace_job(graph, ReplaceJob::ReplaceTable(todo!()))
-        //     .await?;
-        // self.wait_version(version).await
     }
 
     async fn create_view(&self, view: PbView) -> Result<()> {

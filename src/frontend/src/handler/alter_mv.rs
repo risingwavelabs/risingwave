@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ConflictBehavior, FunctionId};
+use risingwave_common::hash::VnodeCount;
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query, Statement};
 
 use super::{HandlerArgs, RwPgResponse};
@@ -64,6 +65,7 @@ pub fn fetch_mv_catalog_for_alter(
     Ok(original_catalog)
 }
 
+// TODO(alter-mv): The current implementation is a WIP and may not work at all yet.
 pub async fn handle_alter_mv(
     handler_args: HandlerArgs,
     name: ObjectName,
@@ -105,19 +107,9 @@ pub async fn handle_alter_mv(
     };
     let handler_args = HandlerArgs::new(session.clone(), &new_definition, Arc::from(""))?;
 
-    handle_alter_mv_as_if(handler_args, name, *new_query, columns, emit_mode).await
-}
-
-pub async fn handle_alter_mv_as_if(
-    handler_args: HandlerArgs,
-    name: ObjectName,
-    query: Query,
-    columns: Vec<Ident>,
-    emit_mode: Option<EmitMode>,
-) -> Result<RwPgResponse> {
     let (dependent_relations, dependent_udfs, bound_query) = {
         let mut binder = Binder::new_for_stream(handler_args.session.as_ref());
-        let bound_query = binder.bind_query(query)?;
+        let bound_query = binder.bind_query(*new_query)?;
         (
             binder.included_relations().clone(),
             binder.included_udfs().clone(),
@@ -133,6 +125,7 @@ pub async fn handle_alter_mv_as_if(
         dependent_udfs,
         columns,
         emit_mode,
+        original_catalog,
     )
     .await
 }
@@ -145,12 +138,13 @@ async fn handle_alter_mv_bound(
     dependent_udfs: HashSet<FunctionId>, // TODO(rc): merge with `dependent_relations`
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
+    original_catalog: Arc<TableCatalog>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
     // TODO(alter-mv): use `ColumnIdGenerator` to generate IDs for MV columns, in order to
     // support schema changes.
-    let (table, graph, _dependencies, _resource_group) = {
+    let (mut table, graph, _dependencies, _resource_group) = {
         create_mv::gen_create_mv_graph(
             handler_args,
             name,
@@ -166,6 +160,56 @@ async fn handle_alter_mv_bound(
     // After alter, the data of the MV is not guaranteed to be consistent.
     // Forcely set the conflict behavior to avoid producing inconsistent changes to downstream.
     table.conflict_behavior = ConflictBehavior::Overwrite;
+
+    // Set some fields ourselves so that the meta service does not need to maintain them.
+    table.id = original_catalog.id;
+    assert!(
+        table.incoming_sinks.is_empty(),
+        "materialized view should not have incoming sinks"
+    );
+    table.vnode_count = VnodeCount::set(original_catalog.vnode_count());
+
+    // TODO(alter-mv): check changes on dependencies
+
+    // Validate if the new table is compatible with the original one.
+    {
+        let mut new_table = table.clone();
+        let mut original_table = original_catalog.as_ref().clone();
+
+        macro_rules! ignore_field {
+            ($($field:ident) ,* $(,)?) => {
+                $(
+                    new_table.$field = Default::default();
+                    original_table.$field = Default::default();
+                )*
+            };
+        }
+
+        // Reset some fields that allow to be different before comparing.
+        ignore_field!(
+            fragment_id,
+            dml_fragment_id,
+            definition,
+            created_at_epoch,
+            created_at_cluster_version,
+            initialized_at_epoch,
+            initialized_at_cluster_version,
+            create_type,
+            stream_job_status,
+            conflict_behavior,
+        );
+
+        if new_table != original_table {
+            return Err(ErrorCode::NotSupported(
+                "incompatible alter".to_owned(),
+                format!(
+                    "diff between the new and the original materialized view:\n{}",
+                    pretty_assertions::Comparison::new(&new_table, &original_table)
+                ),
+            )
+            .into());
+        }
+    }
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
