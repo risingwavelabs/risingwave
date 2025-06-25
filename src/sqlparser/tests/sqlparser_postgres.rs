@@ -608,7 +608,7 @@ fn parse_prepare() {
 #[test]
 fn parse_pg_bitwise_binary_ops() {
     let bitwise_ops = &[
-        ("#", BinaryOperator::PGBitwiseXor),
+        ("#", BinaryOperator::Custom("#".to_owned())),
         (">>", BinaryOperator::Custom(">>".to_owned())),
         ("<<", BinaryOperator::Custom("<<".to_owned())),
     ];

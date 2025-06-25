@@ -870,7 +870,7 @@ fn parse_bitwise_ops() {
     let bitwise_ops = &[
         ("^", BinaryOperator::BitwiseXor),
         ("|", BinaryOperator::BitwiseOr),
-        ("&", BinaryOperator::BitwiseAnd),
+        ("&", BinaryOperator::Custom("&".to_owned())),
     ];
 
     for (str_op, op) in bitwise_ops {

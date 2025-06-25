@@ -63,10 +63,7 @@ pub enum BinaryOperator {
     Or,
     Xor,
     BitwiseOr,
-    BitwiseAnd,
     BitwiseXor,
-    /// Bitwise XOR, e.g. `a # b` (PostgreSQL-specific)
-    PGBitwiseXor,
     Custom(String),
     PGQualified(Box<QualifiedOperator>),
 }
@@ -92,9 +89,7 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::Or => "OR",
             BinaryOperator::Xor => "XOR",
             BinaryOperator::BitwiseOr => "|",
-            BinaryOperator::BitwiseAnd => "&",
             BinaryOperator::BitwiseXor => "^",
-            BinaryOperator::PGBitwiseXor => "#",
             BinaryOperator::Custom(name) => name,
             BinaryOperator::PGQualified(_) => unreachable!(),
         })

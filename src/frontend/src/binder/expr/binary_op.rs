@@ -97,9 +97,7 @@ impl Binder {
             BinaryOperator::And => ExprType::And,
             BinaryOperator::Or => ExprType::Or,
             BinaryOperator::BitwiseOr => ExprType::BitwiseOr,
-            BinaryOperator::BitwiseAnd => ExprType::BitwiseAnd,
             BinaryOperator::BitwiseXor => ExprType::Pow,
-            BinaryOperator::PGBitwiseXor => ExprType::BitwiseXor,
             BinaryOperator::Custom(name) if name == "@>" => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
@@ -179,6 +177,8 @@ impl Binder {
                 }
             }
             BinaryOperator::Custom(name) => match name.as_str() {
+                "&" => ExprType::BitwiseAnd,
+                "#" => ExprType::BitwiseXor,
                 "<<" => ExprType::BitwiseShiftLeft,
                 ">>" => ExprType::BitwiseShiftRight,
                 "^@" => ExprType::StartsWith,

@@ -105,8 +105,6 @@ pub enum Token {
     LBracket,
     /// Right bracket `]`
     RBracket,
-    /// Ampersand `&`
-    Ampersand,
     /// Pipe `|`
     Pipe,
     /// Caret `^`
@@ -117,8 +115,6 @@ pub enum Token {
     RBrace,
     /// Right Arrow `=>`
     RArrow,
-    /// Sharp `#` used for PostgreSQL Bitwise XOR operator
-    Sharp,
 }
 
 impl fmt::Display for Token {
@@ -157,13 +153,11 @@ impl fmt::Display for Token {
             Token::Backslash => f.write_str("\\"),
             Token::LBracket => f.write_str("["),
             Token::RBracket => f.write_str("]"),
-            Token::Ampersand => f.write_str("&"),
             Token::Caret => f.write_str("^"),
             Token::Pipe => f.write_str("|"),
             Token::LBrace => f.write_str("{"),
             Token::RBrace => f.write_str("}"),
             Token::RArrow => f.write_str("=>"),
-            Token::Sharp => f.write_str("#"),
         }
     }
 }
@@ -660,9 +654,7 @@ impl<'a> Tokenizer<'a> {
                         "<" => Ok(Some(Token::Lt)),
                         ">=" => Ok(Some(Token::GtEq)),
                         ">" => Ok(Some(Token::Gt)),
-                        "&" => Ok(Some(Token::Ampersand)),
                         "^" => Ok(Some(Token::Caret)),
-                        "#" => Ok(Some(Token::Sharp)),
                         _ => Ok(Some(Token::Op(op.to_owned()))),
                     }
                 }

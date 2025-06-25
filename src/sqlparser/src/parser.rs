@@ -1302,9 +1302,7 @@ impl Parser<'_> {
             Token::Mod => Some(BinaryOperator::Modulo),
             Token::Pipe => Some(BinaryOperator::BitwiseOr),
             Token::Caret => Some(BinaryOperator::BitwiseXor),
-            Token::Ampersand => Some(BinaryOperator::BitwiseAnd),
             Token::Div => Some(BinaryOperator::Divide),
-            Token::Sharp => Some(BinaryOperator::PGBitwiseXor),
             Token::Op(name) => Some(BinaryOperator::Custom(name.clone())),
             Token::Word(w) => match w.keyword {
                 Keyword::AND => Some(BinaryOperator::And),
@@ -1694,8 +1692,6 @@ impl Parser<'_> {
             //   or < xor < and < shift
             // But in PostgreSQL, they are just left to right. So `2 | 3 & 4` is 0.
             Token::Pipe => Ok(P::Other),
-            Token::Sharp => Ok(P::Other),
-            Token::Ampersand => Ok(P::Other),
             Token::Plus | Token::Minus => Ok(P::PlusMinus),
             Token::Mul | Token::Div | Token::Mod => Ok(P::MulDiv),
             Token::Caret => Ok(P::Exp),
