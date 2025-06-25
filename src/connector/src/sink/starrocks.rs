@@ -55,6 +55,10 @@ const fn _default_stream_load_http_timeout_ms() -> u64 {
     30 * 1000
 }
 
+const fn default_use_https() -> bool {
+    false
+}
+
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct StarrocksCommon {
     /// The `StarRocks` host address.
@@ -78,6 +82,11 @@ pub struct StarrocksCommon {
     /// The `StarRocks` table you want to sink data to.
     #[serde(rename = "starrocks.table")]
     pub table: String,
+
+    /// Whether to use https to connect to the `StarRocks` server.
+    #[serde(rename = "starrocks.use_https")]
+    #[serde(default = "default_use_https")]
+    pub use_https: bool,
 }
 
 impl EnforceSecret for StarrocksCommon {
@@ -145,26 +154,6 @@ impl StarrocksConfig {
             )));
         }
         Ok(config)
-    }
-
-    pub fn get_host_with_scheme(&self) -> String {
-        let host = self.common.host.trim();
-        if host.starts_with("http://") || host.starts_with("https://") {
-            host.to_string()
-        } else {
-            format!("http://{}", host)
-        }
-    }
-
-    pub fn get_host_without_scheme(&self) -> String {
-        let host = self.common.host.trim();
-        if let Some(stripped) = host.strip_prefix("http://") {
-            stripped.to_string()
-        } else if let Some(stripped) = host.strip_prefix("https://") {
-            stripped.to_string()
-        } else {
-            host.to_string()
-        }
     }
 }
 
@@ -308,7 +297,7 @@ impl Sink for StarrocksSink {
         }
         // check reachability
         let mut client = StarrocksSchemaClient::new(
-            self.config.get_host_without_scheme(),
+            self.config.common.host.clone(),
             self.config.common.mysql_port.clone(),
             self.config.common.table.clone(),
             self.config.common.database.clone(),
@@ -425,12 +414,13 @@ impl StarrocksSinkWriter {
             .set_table(config.common.table.clone())
             .build();
 
+        let url = if config.common.use_https {
+            format!("https://{}:{}", config.common.host, config.common.http_port)
+        } else {
+            format!("http://{}:{}", config.common.host, config.common.http_port)
+        };
         let txn_request_builder = StarrocksTxnRequestBuilder::new(
-            format!(
-                "{}:{}",
-                config.get_host_with_scheme(),
-                config.common.http_port
-            ),
+            url,
             header,
             config.stream_load_http_timeout_ms,
         )?;
