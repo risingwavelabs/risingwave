@@ -1186,6 +1186,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     fn worker_id(&self) -> u32 {
         0
     }
+
+    async fn set_sync_log_store_aligned(&self, _job_id: u32, _aligned: bool) -> RpcResult<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

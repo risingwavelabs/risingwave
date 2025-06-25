@@ -169,6 +169,9 @@ pub enum AlterViewOperation {
     SwapRenameView {
         target_view: ObjectName,
     },
+    SetStreamingEnableUnalignedJoin {
+        enable: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -197,6 +200,9 @@ pub enum AlterSinkOperation {
     },
     AlterConnectorProps {
         alter_props: Vec<SqlOption>,
+    },
+    SetStreamingEnableUnalignedJoin {
+        enable: bool,
     },
 }
 
@@ -448,6 +454,9 @@ impl fmt::Display for AlterViewOperation {
                     write!(f, "RESET RESOURCE_GROUP {}", deferred)
                 }
             }
+            AlterViewOperation::SetStreamingEnableUnalignedJoin { enable } => {
+                write!(f, "SET STREAMING_ENABLE_UNALIGNED_JOIN TO {}", enable)
+            }
         }
     }
 }
@@ -489,6 +498,9 @@ impl fmt::Display for AlterSinkOperation {
                     "CONNECTOR WITH ({})",
                     display_comma_separated(changed_props)
                 )
+            }
+            AlterSinkOperation::SetStreamingEnableUnalignedJoin { enable } => {
+                write!(f, "SET STREAMING_ENABLE_UNALIGNED_JOIN TO {}", enable)
             }
         }
     }
