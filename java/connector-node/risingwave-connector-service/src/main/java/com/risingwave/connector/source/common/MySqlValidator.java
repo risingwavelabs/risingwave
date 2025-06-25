@@ -313,6 +313,17 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 return val == Data.DataType.TypeName.TIMESTAMPTZ_VALUE;
             case "json":
                 return val == Data.DataType.TypeName.JSONB_VALUE;
+                // todo: check bit()>1) and bit(1)
+            case "bit":
+                return val == Data.DataType.TypeName.BOOLEAN_VALUE
+                        || val == Data.DataType.TypeName.BYTEA_VALUE;
+            case "tinyblob":
+            case "blob":
+            case "mediumblob":
+            case "longblob":
+                return val == Data.DataType.TypeName.BYTEA_VALUE;
+            case "year":
+                return val == Data.DataType.TypeName.INT32_VALUE;
             default:
                 return false; // false for other uncovered types
         }
