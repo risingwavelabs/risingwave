@@ -57,6 +57,7 @@ members = [
     "src/tests/simulation",
     "src/tests/sqlsmith",
     "src/tests/state_cleaning_test",
+    "src/tests/mysql_test",
     "src/utils/delta_btree_map",
     "src/utils/futures_util",
     "src/utils/iter_util",

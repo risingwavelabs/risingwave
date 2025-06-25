@@ -12494,6 +12494,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_mysql_test"
+version = "2.5.0-alpha"
+dependencies = [
+ "futures",
+ "madsim-tokio",
+ "mysql_async",
+]
+
+[[package]]
 name = "risingwave_object_store"
 version = "2.6.0-alpha"
 dependencies = [
