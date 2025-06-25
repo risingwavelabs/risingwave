@@ -464,17 +464,20 @@ impl CacheRefillTask {
         delta: &SstDeltaInfo,
         holders: Vec<TableHolder>,
     ) {
-        // if context.sstable_store.block_cache().
-
-        // return if data file cache is disabled
-        let Some(filter) = context.sstable_store.data_recent_filter() else {
+        // Skip data cache refill if data disk cache is not enabled.
+        if !context.sstable_store.block_cache().is_hybrid() {
             return;
-        };
+        }
 
         // return if no data to refill
         if delta.insert_sst_infos.is_empty() || delta.delete_sst_object_ids.is_empty() {
             return;
         }
+
+        // return if data file cache is disabled
+        let Some(filter) = context.sstable_store.data_recent_filter() else {
+            return;
+        };
 
         // return if recent filter miss
         if !context
