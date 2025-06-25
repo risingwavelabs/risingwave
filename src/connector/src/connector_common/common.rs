@@ -289,6 +289,7 @@ pub struct KafkaCommon {
         deserialize_with = "deserialize_duration_from_string",
         default = "default_kafka_sync_call_timeout"
     )]
+    #[with_option(changeable)]
     pub sync_call_timeout: Duration,
 }
 

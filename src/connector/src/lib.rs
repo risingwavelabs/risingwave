@@ -43,6 +43,7 @@ use duration_str::parse_std;
 use serde::de;
 
 pub mod aws_utils;
+pub mod changeable_fields;
 mod enforce_secret;
 pub mod error;
 mod macros;
@@ -167,7 +168,8 @@ mod tests {
     use expect_test::expect_file;
 
     use crate::with_options_test::{
-        generate_with_options_yaml_sink, generate_with_options_yaml_source,
+        generate_changeable_fields_combined, generate_with_options_yaml_sink,
+        generate_with_options_yaml_source,
     };
 
     /// This test ensures that `src/connector/with_options.yaml` is up-to-date with the default values specified
@@ -178,6 +180,13 @@ mod tests {
         expect_file!("../with_options_source.yaml").assert_eq(&generate_with_options_yaml_source());
 
         expect_file!("../with_options_sink.yaml").assert_eq(&generate_with_options_yaml_sink());
+    }
+
+    /// This test ensures that the changeable fields Rust file is up-to-date.
+    #[test]
+    fn test_changeable_fields_rust_up_to_date() {
+        expect_file!("../src/changeable_fields.rs")
+            .assert_eq(&generate_changeable_fields_combined());
     }
 
     /// Test some serde behavior we rely on.

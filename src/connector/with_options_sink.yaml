@@ -593,6 +593,7 @@ KafkaConfig:
     field_type: Duration
     required: false
     default: 'Duration :: from_secs (5)'
+    changeable: true
   - name: properties.bootstrap.server
     field_type: String
     required: true
