@@ -152,7 +152,7 @@ criterion = { version = "0.5", features = ["async_futures"] }
 # compile time and binary size.
 deltalake = { version = "0.26", features = ["s3", "gcs", "datafusion"] }
 # foyer = { version = "0.17.3", features = ["serde", "tracing", "nightly"] }
-foyer = { git = "http://github.com/foyer-rs/foyer", rev = "8f45475d737abc0b4c572b3bcb5aa11ac387333a", features = [
+foyer = { git = "http://github.com/foyer-rs/foyer", rev = "77eef58d1f231ee50cd601f9ad69c5e3db3415f9", features = [
     "serde",
     "tracing",
     "nightly",
