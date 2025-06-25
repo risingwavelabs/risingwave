@@ -29,9 +29,8 @@ buf format -d --exit-code
 buf lint
 cd ..
 
-# Temporarily disable the check during bumping `cargo-sort` to v2
-# echo "--- Rust cargo-sort check"
-# cargo sort --check --workspace --grouped
+echo "--- Rust cargo-sort check"
+cargo sort --check --workspace --grouped
 
 # Disable hakari until we make sure it's useful
 # echo "--- Rust cargo-hakari check"

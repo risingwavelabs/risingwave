@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::system_param::{OverrideValidate, Validate};
+
 use super::*;
 use crate::barrier::SnapshotBackfillInfo;
 
@@ -37,7 +39,18 @@ impl CatalogController {
         Ok(active_db.insert(txn).await?)
     }
 
-    pub async fn create_database(&self, db: PbDatabase) -> MetaResult<NotificationVersion> {
+    pub async fn create_database(
+        &self,
+        db: PbDatabase,
+    ) -> MetaResult<(NotificationVersion, risingwave_meta_model::database::Model)> {
+        // validate first
+        if let Some(ref interval) = db.barrier_interval_ms {
+            OverrideValidate::barrier_interval_ms(interval).map_err(|e| anyhow::anyhow!(e))?;
+        }
+        if let Some(ref frequency) = db.checkpoint_frequency {
+            OverrideValidate::checkpoint_frequency(frequency).map_err(|e| anyhow::anyhow!(e))?;
+        }
+
         let inner = self.inner.write().await;
         let owner_id = db.owner as _;
         let txn = inner.db.begin().await?;
@@ -66,7 +79,7 @@ impl CatalogController {
         let mut version = self
             .notify_frontend(
                 NotificationOperation::Add,
-                NotificationInfo::Database(ObjectModel(db, db_obj).into()),
+                NotificationInfo::Database(ObjectModel(db.clone(), db_obj).into()),
             )
             .await;
         for schema in schemas {
@@ -75,7 +88,7 @@ impl CatalogController {
                 .await;
         }
 
-        Ok(version)
+        Ok((version, db))
     }
 
     pub async fn create_schema(&self, schema: PbSchema) -> MetaResult<NotificationVersion> {
@@ -97,14 +110,24 @@ impl CatalogController {
         let mut schema: schema::ActiveModel = schema.into();
         schema.schema_id = Set(schema_obj.oid);
         let schema = schema.insert(&txn).await?;
+
+        let updated_user_info =
+            grant_default_privileges_automatically(&txn, schema_obj.oid).await?;
+
         txn.commit().await?;
 
-        let version = self
+        let mut version = self
             .notify_frontend(
                 NotificationOperation::Add,
                 NotificationInfo::Schema(ObjectModel(schema, schema_obj).into()),
             )
             .await;
+
+        // notify default privileges for schemas
+        if !updated_user_info.is_empty() {
+            version = self.notify_users_update(updated_user_info).await;
+        }
+
         Ok(version)
     }
 
@@ -193,14 +216,22 @@ impl CatalogController {
             .await?;
         }
 
+        let updated_user_info = grant_default_privileges_automatically(&txn, source_id).await?;
+
         txn.commit().await?;
 
-        let version = self
+        let mut version = self
             .notify_frontend_relation_info(
                 NotificationOperation::Add,
                 PbObjectInfo::Source(pb_source),
             )
             .await;
+
+        // notify default privileges for source
+        if !updated_user_info.is_empty() {
+            version = self.notify_users_update(updated_user_info).await;
+        }
+
         Ok((source_id, version))
     }
 
@@ -227,14 +258,24 @@ impl CatalogController {
         pb_function.id = function_obj.oid as _;
         let function: function::ActiveModel = pb_function.clone().into();
         Function::insert(function).exec(&txn).await?;
+
+        let updated_user_info =
+            grant_default_privileges_automatically(&txn, function_obj.oid).await?;
+
         txn.commit().await?;
 
-        let version = self
+        let mut version = self
             .notify_frontend(
                 NotificationOperation::Add,
                 NotificationInfo::Function(pb_function),
             )
             .await;
+
+        // notify default privileges for functions
+        if !updated_user_info.is_empty() {
+            version = self.notify_users_update(updated_user_info).await;
+        }
+
         Ok(version)
     }
 
@@ -282,6 +323,8 @@ impl CatalogController {
             .await?;
         }
 
+        let updated_user_info = grant_default_privileges_automatically(&txn, conn_obj.oid).await?;
+
         txn.commit().await?;
 
         {
@@ -303,12 +346,18 @@ impl CatalogController {
             );
         }
 
-        let version = self
+        let mut version = self
             .notify_frontend(
                 NotificationOperation::Add,
                 NotificationInfo::Connection(pb_connection),
             )
             .await;
+
+        // notify default privileges for connections
+        if !updated_user_info.is_empty() {
+            version = self.notify_users_update(updated_user_info).await;
+        }
+
         Ok(version)
     }
 
@@ -337,6 +386,9 @@ impl CatalogController {
         let secret: secret::ActiveModel = pb_secret.clone().into();
         Secret::insert(secret).exec(&txn).await?;
 
+        let updated_user_info =
+            grant_default_privileges_automatically(&txn, secret_obj.oid).await?;
+
         txn.commit().await?;
 
         // Notify the compute and frontend node plain secret
@@ -348,12 +400,17 @@ impl CatalogController {
             .notification_manager()
             .notify_compute_without_version(Operation::Add, Info::Secret(secret_plain.clone()));
 
-        let version = self
+        let mut version = self
             .notify_frontend(
                 NotificationOperation::Add,
                 NotificationInfo::Secret(secret_plain),
             )
             .await;
+
+        // notify default privileges for secrets
+        if !updated_user_info.is_empty() {
+            version = self.notify_users_update(updated_user_info).await;
+        }
 
         Ok(version)
     }
@@ -396,12 +453,19 @@ impl CatalogController {
             .exec(&txn)
             .await?;
         }
+        let updated_user_info = grant_default_privileges_automatically(&txn, view_obj.oid).await?;
 
         txn.commit().await?;
 
-        let version = self
+        let mut version = self
             .notify_frontend_relation_info(NotificationOperation::Add, PbObjectInfo::View(pb_view))
             .await;
+
+        // notify default privileges for views
+        if !updated_user_info.is_empty() {
+            version = self.notify_users_update(updated_user_info).await;
+        }
+
         Ok(version)
     }
 

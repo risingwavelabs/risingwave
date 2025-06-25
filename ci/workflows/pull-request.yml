@@ -43,7 +43,7 @@ other-sql-backend: &other-sql-backend
       - with:
           label: "postgres"
           # PGPASSWORD=postgres psql -h db -p 5432 -U postgres -d rwmeta
-          endpoint: "postgres://postgres:postgres@db:5432/rwmeta"
+          endpoint: "postgres://postgres:post\\tgres@db:5432/rwmeta"
       - with:
           label: "mysql"
           # mysql -h mysql-meta -P 3306 -u root -p123456 -D rwmeta
@@ -218,7 +218,6 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 20
     parallelism: 2
-    cancel_on_build_failing: true
     retry: *auto-retry
 
   - label: "connector node integration test Java {{matrix.java_version}}"
@@ -446,14 +445,9 @@ steps:
     plugins:
       - *cargo-cache
       - ./ci/plugins/swapfile
-      - seek-oss/aws-sm#v2.3.2:
-          env:
-            CODECOV_TOKEN: my-codecov-token
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          environment:
-          - CODECOV_TOKEN
-    timeout_in_minutes: 22
+    timeout_in_minutes: 30
     retry: *auto-retry
 
   - label: "check"
@@ -489,11 +483,10 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 12
-    cancel_on_build_failing: true
     retry: *auto-retry
 
   - label: "integration test (deterministic simulation)"
-    command: "TEST_NUM=5 ci/scripts/deterministic-it-test.sh"
+    command: "TEST_NUM=5 ci/scripts/deterministic-it-test.sh pull-request"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-integration-test-deterministic-simulation"
@@ -503,7 +496,7 @@ steps:
       - docker-compose#v5.5.0: *docker-compose
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
-    timeout_in_minutes: 40
+    timeout_in_minutes: 22
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"
@@ -524,7 +517,6 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 35
     parallelism: 4
-    cancel_on_build_failing: true
     retry: *auto-retry
 
   - label: "recovery test (deterministic simulation)"
@@ -546,7 +538,6 @@ steps:
       #     format: "junit"
     timeout_in_minutes: 40
     parallelism: 4
-    cancel_on_build_failing: true
     retry: *auto-retry
 
   # The following jobs are triggered only when PR has corresponding labels.
@@ -762,3 +753,20 @@ steps:
           - BUILDKITE_TOKEN
           - GITHUB_TOKEN
     timeout_in_minutes: 5
+
+  - wait: ~
+
+  # Only if all steps are successful, we upload coverage reports.
+  - label: "upload coverage reports"
+    command: "ci/scripts/upload-coverage.sh"
+    plugins:
+      - seek-oss/aws-sm#v2.3.2:
+          env:
+            CODECOV_TOKEN: my-codecov-token
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          environment:
+          - CODECOV_TOKEN
+    timeout_in_minutes: 10
+    retry: *auto-retry
+    soft_fail: true

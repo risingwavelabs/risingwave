@@ -45,6 +45,7 @@ num-integer = "0.1"
 parking_lot = { workspace = true }
 parse-display = "0.10"
 paste = "1"
+percent-encoding = "2.3.1"
 petgraph = "0.8"
 pgwire = { path = "../utils/pgwire" }
 pin-project-lite = { workspace = true }
@@ -77,7 +78,7 @@ sha2 = "0.10.7"
 smallvec = { workspace = true, features = ["serde"] }
 speedate = "0.15.0"
 tempfile = "3"
-thiserror = "2"
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

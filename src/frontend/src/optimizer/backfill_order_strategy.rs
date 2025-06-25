@@ -68,6 +68,11 @@ pub mod auto {
                 let relation_id = table_scan.core().table_catalog.id().into();
                 Some(BackfillTreeNode::Scan { id: relation_id })
             }
+            PlanNodeType::StreamSourceScan => {
+                let source_scan = plan.as_stream_source_scan().expect("source scan");
+                let relation_id = source_scan.source_catalog().id;
+                Some(BackfillTreeNode::Scan { id: relation_id })
+            }
             PlanNodeType::StreamUnion => {
                 let inputs = plan.inputs();
                 let mut children = Vec::with_capacity(inputs.len());
@@ -350,16 +355,13 @@ mod common {
     }
 
     fn bind_table(schema_catalog: &SchemaCatalog, name: &String) -> crate::error::Result<ObjectId> {
-        if let Some(table) = schema_catalog.get_created_table_or_any_internal_table_by_name(name) {
+        if let Some(table) = schema_catalog.get_created_table_by_name(name) {
             Ok(table.id().table_id)
+        } else if let Some(source) = schema_catalog.get_source_by_name(name) {
+            Ok(source.id)
         } else {
-            Err(CatalogError::NotFound("table", name.to_owned()).into())
+            Err(CatalogError::NotFound("table or source", name.to_owned()).into())
         }
-        // TODO: support source catalog
-        // else if let Some(source) = schema_catalog.get_source_by_name(name) {
-        //     Ok(source.id)
-        // }
-        // Err(CatalogError::NotFound("table or source", name.to_owned()).into())
     }
 }
 

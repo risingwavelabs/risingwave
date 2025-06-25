@@ -36,6 +36,7 @@ mod stream_chunk_iter;
 pub mod stream_record;
 pub mod struct_array;
 mod utf8_array;
+mod vector_array;
 
 use std::convert::From;
 use std::hash::{Hash, Hasher};
@@ -63,6 +64,7 @@ pub use stream_chunk::{Op, StreamChunk, StreamChunkTestExt};
 pub use stream_chunk_builder::StreamChunkBuilder;
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
+pub use vector_array::{VectorArray, VectorArrayBuilder, VectorRef, VectorVal};
 
 pub use self::error::ArrayError;
 pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder};
@@ -381,6 +383,12 @@ impl From<StructArray> for ArrayImpl {
 impl From<ListArray> for ArrayImpl {
     fn from(arr: ListArray) -> Self {
         Self::List(arr)
+    }
+}
+
+impl From<VectorArray> for ArrayImpl {
+    fn from(arr: VectorArray) -> Self {
+        Self::Vector(arr)
     }
 }
 

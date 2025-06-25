@@ -265,6 +265,16 @@ message ListFragmentDistributionResponse {
   repeated FragmentDistribution distributions = 1;
 }
 
+// List fragments containing stream scans, and corresponding
+// to a streaming job in creation.
+message ListCreatingFragmentDistributionRequest {}
+
+// List fragments containing stream scans, and corresponding
+// to a streaming job in creation.
+message ListCreatingFragmentDistributionResponse {
+  repeated FragmentDistribution distributions = 1;
+}
+
 message ListActorStatesRequest {}
 
 message ListActorStatesResponse {
@@ -358,6 +368,7 @@ service StreamManagerService {
   rpc ListTableFragments(ListTableFragmentsRequest) returns (ListTableFragmentsResponse);
   rpc ListStreamingJobStates(ListStreamingJobStatesRequest) returns (ListStreamingJobStatesResponse);
   rpc ListFragmentDistribution(ListFragmentDistributionRequest) returns (ListFragmentDistributionResponse);
+  rpc ListCreatingFragmentDistribution(ListCreatingFragmentDistributionRequest) returns (ListCreatingFragmentDistributionResponse);
   rpc ListActorStates(ListActorStatesRequest) returns (ListActorStatesResponse);
   rpc ListActorSplits(ListActorSplitsRequest) returns (ListActorSplitsResponse);
   rpc ListObjectDependencies(ListObjectDependenciesRequest) returns (ListObjectDependenciesResponse);
@@ -366,6 +377,7 @@ service StreamManagerService {
   rpc ListRateLimits(ListRateLimitsRequest) returns (ListRateLimitsResponse);
   rpc AlterConnectorProps(AlterConnectorPropsRequest) returns (AlterConnectorPropsResponse);
   rpc GetFragmentById(GetFragmentByIdRequest) returns (GetFragmentByIdResponse);
+  rpc SetSyncLogStoreAligned(SetSyncLogStoreAlignedRequest) returns (SetSyncLogStoreAlignedResponse);
 }
 
 // Below for cluster service.
@@ -967,3 +979,10 @@ message ListIcebergTablesResponse {
   }
   repeated IcebergTable iceberg_tables = 1;
 }
+
+message SetSyncLogStoreAlignedRequest {
+  uint32 job_id = 1;
+  bool aligned = 2;
+}
+
+message SetSyncLogStoreAlignedResponse {}

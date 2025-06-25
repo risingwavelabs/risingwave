@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_fragment_graph::StreamFragment;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{StreamNode, agg_call_state};
+use risingwave_pb::stream_plan::{SourceBackfillNode, StreamNode, StreamScanNode, agg_call_state};
 
 /// A utility for visiting and mutating the [`NodeBody`] of the [`StreamNode`]s recursively.
 pub fn visit_stream_node_mut(stream_node: &mut StreamNode, mut f: impl FnMut(&mut NodeBody)) {
@@ -47,9 +47,16 @@ where
 }
 
 /// A utility for visiting the [`NodeBody`] of the [`StreamNode`]s recursively.
-pub fn visit_stream_node(stream_node: &StreamNode, mut f: impl FnMut(&NodeBody)) {
+pub fn visit_stream_node_body(stream_node: &StreamNode, mut f: impl FnMut(&NodeBody)) {
     visit_stream_node_cont(stream_node, |stream_node| {
         f(stream_node.node_body.as_ref().unwrap());
+        true
+    })
+}
+
+pub fn visit_stream_node(stream_node: &StreamNode, mut f: impl FnMut(&StreamNode)) {
+    visit_stream_node_cont(stream_node, |stream_node| {
+        f(stream_node);
         true
     })
 }
@@ -83,7 +90,7 @@ pub fn visit_fragment_mut(fragment: &mut StreamFragment, f: impl FnMut(&mut Node
 /// A utility for visiting the [`NodeBody`] of the [`StreamNode`]s in a
 /// [`StreamFragment`] recursively.
 pub fn visit_fragment(fragment: &StreamFragment, f: impl FnMut(&NodeBody)) {
-    visit_stream_node(fragment.node.as_ref().unwrap(), f)
+    visit_stream_node_body(fragment.node.as_ref().unwrap(), f)
 }
 
 /// Visit the tables of a [`StreamNode`].
@@ -296,6 +303,25 @@ pub fn visit_stream_node_tables_inner<F>(
     } else {
         visit_body(stream_node.node_body.as_mut().unwrap())
     }
+}
+
+pub fn visit_stream_node_stream_scan(stream_node: &StreamNode, mut f: impl FnMut(&StreamScanNode)) {
+    visit_stream_node_body(stream_node, |body| {
+        if let NodeBody::StreamScan(node) = body {
+            f(node)
+        }
+    })
+}
+
+pub fn visit_stream_node_source_backfill(
+    stream_node: &StreamNode,
+    mut f: impl FnMut(&SourceBackfillNode),
+) {
+    visit_stream_node_body(stream_node, |body| {
+        if let NodeBody::SourceBackfill(node) = body {
+            f(node)
+        }
+    })
 }
 
 pub fn visit_stream_node_internal_tables<F>(stream_node: &mut StreamNode, f: F)

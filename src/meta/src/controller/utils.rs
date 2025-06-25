@@ -27,12 +27,13 @@ use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
+use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::{
     ActorId, DataTypeArray, DatabaseId, DispatcherType, FragmentId, I32Array, JobStatus, ObjectId,
     PrivilegeId, SchemaId, SourceId, StreamNode, StreamSourceInfo, TableId, UserId, VnodeBitmap,
     WorkerId, actor, connection, database, fragment, fragment_relation, function, index, object,
     object_dependency, schema, secret, sink, source, streaming_job, subscription, table, user,
-    user_privilege, view,
+    user_default_privilege, user_privilege, view,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
@@ -48,10 +49,8 @@ use risingwave_pb::meta::{
 use risingwave_pb::stream_plan::{
     PbDispatchOutputMapping, PbDispatcher, PbDispatcherType, PbFragmentTypeFlag,
 };
-use risingwave_pb::user::grant_privilege::{
-    PbAction, PbActionWithGrantOption, PbObject as PbGrantObject,
-};
-use risingwave_pb::user::{PbGrantPrivilege, PbUserInfo};
+use risingwave_pb::user::grant_privilege::{PbActionWithGrantOption, PbObject as PbGrantObject};
+use risingwave_pb::user::{PbAction, PbGrantPrivilege, PbUserInfo};
 use risingwave_sqlparser::ast::Statement as SqlStatement;
 use risingwave_sqlparser::parser::Parser;
 use sea_orm::sea_query::{
@@ -616,8 +615,9 @@ where
     Ok(())
 }
 
-/// `ensure_object_not_refer` ensures that object is not used by any other ones except indexes.
-pub async fn ensure_object_not_refer<C>(
+/// `check_object_refer_for_drop` checks whether the object is used by other objects except indexes.
+/// It returns an error that contains the details of the referring objects if it is used by others.
+pub async fn check_object_refer_for_drop<C>(
     object_type: ObjectType,
     object_id: ObjectId,
     db: &C,
@@ -646,10 +646,136 @@ where
             .await?
     };
     if count != 0 {
+        // find the name of all objects that are using the given one.
+        let referring_objects = get_referring_objects(object_id, db).await?;
+        let referring_objs_map = referring_objects
+            .into_iter()
+            .filter(|o| o.obj_type != ObjectType::Index)
+            .into_group_map_by(|o| o.obj_type);
+        let mut details = vec![];
+        for (obj_type, objs) in referring_objs_map {
+            match obj_type {
+                ObjectType::Table => {
+                    let tables: Vec<(String, String)> = Object::find()
+                        .join(JoinType::InnerJoin, object::Relation::Table.def())
+                        .join(JoinType::InnerJoin, object::Relation::Database2.def())
+                        .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                        .select_only()
+                        .column(schema::Column::Name)
+                        .column(table::Column::Name)
+                        .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                        .into_tuple()
+                        .all(db)
+                        .await?;
+                    details.extend(tables.into_iter().map(|(schema_name, table_name)| {
+                        format!(
+                            "materialized view {}.{} depends on it",
+                            schema_name, table_name
+                        )
+                    }));
+                }
+                ObjectType::Sink => {
+                    let sinks: Vec<(String, String)> = Object::find()
+                        .join(JoinType::InnerJoin, object::Relation::Sink.def())
+                        .join(JoinType::InnerJoin, object::Relation::Database2.def())
+                        .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                        .select_only()
+                        .column(schema::Column::Name)
+                        .column(sink::Column::Name)
+                        .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                        .into_tuple()
+                        .all(db)
+                        .await?;
+                    details.extend(sinks.into_iter().map(|(schema_name, sink_name)| {
+                        format!("sink {}.{} depends on it", schema_name, sink_name)
+                    }));
+                }
+                ObjectType::View => {
+                    let views: Vec<(String, String)> = Object::find()
+                        .join(JoinType::InnerJoin, object::Relation::View.def())
+                        .join(JoinType::InnerJoin, object::Relation::Database2.def())
+                        .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                        .select_only()
+                        .column(schema::Column::Name)
+                        .column(view::Column::Name)
+                        .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                        .into_tuple()
+                        .all(db)
+                        .await?;
+                    details.extend(views.into_iter().map(|(schema_name, view_name)| {
+                        format!("view {}.{} depends on it", schema_name, view_name)
+                    }));
+                }
+                ObjectType::Subscription => {
+                    let subscriptions: Vec<(String, String)> = Object::find()
+                        .join(JoinType::InnerJoin, object::Relation::Subscription.def())
+                        .join(JoinType::InnerJoin, object::Relation::Database2.def())
+                        .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                        .select_only()
+                        .column(schema::Column::Name)
+                        .column(subscription::Column::Name)
+                        .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                        .into_tuple()
+                        .all(db)
+                        .await?;
+                    details.extend(subscriptions.into_iter().map(
+                        |(schema_name, subscription_name)| {
+                            format!(
+                                "subscription {}.{} depends on it",
+                                schema_name, subscription_name
+                            )
+                        },
+                    ));
+                }
+                ObjectType::Source => {
+                    let sources: Vec<(String, String)> = Object::find()
+                        .join(JoinType::InnerJoin, object::Relation::Source.def())
+                        .join(JoinType::InnerJoin, object::Relation::Database2.def())
+                        .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                        .select_only()
+                        .column(schema::Column::Name)
+                        .column(source::Column::Name)
+                        .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                        .into_tuple()
+                        .all(db)
+                        .await?;
+                    details.extend(sources.into_iter().map(|(schema_name, view_name)| {
+                        format!("source {}.{} depends on it", schema_name, view_name)
+                    }));
+                }
+                ObjectType::Connection => {
+                    let connections: Vec<(String, String)> = Object::find()
+                        .join(JoinType::InnerJoin, object::Relation::Connection.def())
+                        .join(JoinType::InnerJoin, object::Relation::Database2.def())
+                        .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                        .select_only()
+                        .column(schema::Column::Name)
+                        .column(connection::Column::Name)
+                        .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                        .into_tuple()
+                        .all(db)
+                        .await?;
+                    details.extend(connections.into_iter().map(|(schema_name, view_name)| {
+                        format!("connection {}.{} depends on it", schema_name, view_name)
+                    }));
+                }
+                // only the table, source, sink, subscription, view, connection and index will depend on other objects.
+                _ => bail!("unexpected referring object type: {}", obj_type.as_str()),
+            }
+        }
+
         return Err(MetaError::permission_denied(format!(
-            "{} used by {} other objects.",
+            "{} used by {} other objects. \nDETAIL: {}\n\
+            {}",
             object_type.as_str(),
-            count
+            count,
+            details.join("\n"),
+            match object_type {
+                ObjectType::Function | ObjectType::Connection | ObjectType::Secret =>
+                    "HINT: DROP the dependent objects first.",
+                ObjectType::Database | ObjectType::Schema => unreachable!(),
+                _ => "HINT:  Use DROP ... CASCADE to drop the dependent objects too.",
+            }
         )));
     }
     Ok(())
@@ -690,7 +816,10 @@ where
 }
 
 /// `list_user_info_by_ids` lists all users' info by their ids.
-pub async fn list_user_info_by_ids<C>(user_ids: Vec<UserId>, db: &C) -> MetaResult<Vec<PbUserInfo>>
+pub async fn list_user_info_by_ids<C>(
+    user_ids: impl IntoIterator<Item = UserId>,
+    db: &C,
+) -> MetaResult<Vec<PbUserInfo>>
 where
     C: ConnectionTrait,
 {
@@ -926,6 +1055,102 @@ where
             }
         })
         .collect())
+}
+
+/// `grant_default_privileges_automatically` grants default privileges automatically
+/// for the given new object. It returns the list of user infos whose privileges are updated.
+pub async fn grant_default_privileges_automatically<C>(
+    db: &C,
+    object_id: ObjectId,
+) -> MetaResult<Vec<PbUserInfo>>
+where
+    C: ConnectionTrait,
+{
+    let object = Object::find_by_id(object_id)
+        .one(db)
+        .await?
+        .ok_or_else(|| MetaError::catalog_id_not_found("object", object_id))?;
+    assert_ne!(object.obj_type, ObjectType::Database);
+
+    let for_mview_filter = if object.obj_type == ObjectType::Table {
+        let table_type = Table::find_by_id(object_id)
+            .select_only()
+            .column(table::Column::TableType)
+            .into_tuple::<TableType>()
+            .one(db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
+        user_default_privilege::Column::ForMaterializedView
+            .eq(table_type == TableType::MaterializedView)
+    } else {
+        user_default_privilege::Column::ForMaterializedView.eq(false)
+    };
+    let schema_filter = if let Some(schema_id) = &object.schema_id {
+        user_default_privilege::Column::SchemaId.eq(*schema_id)
+    } else {
+        user_default_privilege::Column::SchemaId.is_null()
+    };
+
+    let default_privileges: Vec<(UserId, UserId, Action, bool)> = UserDefaultPrivilege::find()
+        .select_only()
+        .columns([
+            user_default_privilege::Column::Grantee,
+            user_default_privilege::Column::GrantedBy,
+            user_default_privilege::Column::Action,
+            user_default_privilege::Column::WithGrantOption,
+        ])
+        .filter(
+            user_default_privilege::Column::DatabaseId
+                .eq(object.database_id.unwrap())
+                .and(schema_filter)
+                .and(user_default_privilege::Column::UserId.eq(object.owner_id))
+                .and(user_default_privilege::Column::ObjectType.eq(object.obj_type))
+                .and(for_mview_filter),
+        )
+        .into_tuple()
+        .all(db)
+        .await?;
+    if default_privileges.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let updated_user_ids = default_privileges
+        .iter()
+        .map(|(grantee, _, _, _)| *grantee)
+        .collect::<HashSet<_>>();
+
+    let internal_table_ids = get_internal_tables_by_id(object_id, db).await?;
+
+    for (grantee, granted_by, action, with_grant_option) in default_privileges {
+        UserPrivilege::insert(user_privilege::ActiveModel {
+            user_id: Set(grantee),
+            oid: Set(object_id),
+            granted_by: Set(granted_by),
+            action: Set(action),
+            with_grant_option: Set(with_grant_option),
+            ..Default::default()
+        })
+        .exec(db)
+        .await?;
+        if action == Action::Select && !internal_table_ids.is_empty() {
+            // Grant SELECT privilege for internal tables if the action is SELECT.
+            for internal_table_id in &internal_table_ids {
+                UserPrivilege::insert(user_privilege::ActiveModel {
+                    user_id: Set(grantee),
+                    oid: Set(*internal_table_id as _),
+                    granted_by: Set(granted_by),
+                    action: Set(Action::Select),
+                    with_grant_option: Set(with_grant_option),
+                    ..Default::default()
+                })
+                .exec(db)
+                .await?;
+            }
+        }
+    }
+
+    let updated_user_infos = list_user_info_by_ids(updated_user_ids, db).await?;
+    Ok(updated_user_infos)
 }
 
 // todo: remove it after migrated to sql backend.
@@ -1807,7 +2032,9 @@ pub async fn rename_relation_refer(
                 rename_relation_ref!(Table, table, table_id, index_table_id.unwrap());
             }
             _ => {
-                bail!("only table, sink, subscription, view and index depend on other objects.")
+                bail!(
+                    "only the table, sink, subscription, view and index will depend on other objects."
+                )
             }
         }
     }

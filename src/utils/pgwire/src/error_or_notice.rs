@@ -12,27 +12,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
+
+use risingwave_common::error::code::PostgresErrorCode;
+use risingwave_common::error::error_request_copy;
+use thiserror_ext::AsReport;
+
+use crate::pg_server::BoxedError;
+
 /// ErrorOrNoticeMessage defines messages that can appear in ErrorResponse and NoticeResponse.
 pub struct ErrorOrNoticeMessage<'a> {
     pub severity: Severity,
-    pub state: SqlState,
-    pub message: &'a str,
+    pub error_code: PostgresErrorCode,
+    pub message: Cow<'a, str>,
 }
 
 impl<'a> ErrorOrNoticeMessage<'a> {
-    pub fn internal_error(message: &'a str) -> Self {
+    /// Create a Postgres error message from an error, with the error code and message extracted from the error.
+    pub fn error(error: &BoxedError) -> Self {
+        let message = error.to_report_string_pretty();
+        let error_code = error_request_copy::<PostgresErrorCode>(&**error)
+            .filter(|e| e.is_error()) // should not be warning or success
+            .unwrap_or(PostgresErrorCode::InternalError);
+
         Self {
             severity: Severity::Error,
-            state: SqlState::INTERNAL_ERROR,
-            message,
+            error_code,
+            message: Cow::Owned(message),
         }
     }
 
+    /// Create a Postgres notice message from a string.
     pub fn notice(message: &'a str) -> Self {
         Self {
             severity: Severity::Notice,
-            state: SqlState::SUCCESSFUL_COMPLETION,
-            message,
+            error_code: PostgresErrorCode::SuccessfulCompletion,
+            message: Cow::Borrowed(message),
         }
     }
 }
@@ -63,37 +78,6 @@ impl Severity {
             Severity::Debug => "DEBUG",
             Severity::Log => "LOG",
             Severity::Info => "INFO",
-        }
-    }
-}
-
-/// Code: the SQLSTATE code for the error (see <https://www.postgresql.org/docs/current/errcodes-appendix.html>).
-/// Not localizable. Always present.
-#[derive(PartialEq, Eq, Clone, Debug)]
-#[allow(clippy::upper_case_acronyms)]
-pub enum Code {
-    E00000,
-    E01000,
-    EXX000,
-}
-
-/// SQLSTATE error code.
-#[derive(PartialEq, Eq, Clone, Debug)]
-pub struct SqlState(Code);
-
-impl SqlState {
-    /// Class XX — Internal Error
-    pub const INTERNAL_ERROR: SqlState = SqlState(Code::EXX000);
-    /// Class 00 — Successful Completion
-    pub const SUCCESSFUL_COMPLETION: SqlState = SqlState(Code::E00000);
-    /// Class 01 — Warning
-    pub const WARNING: SqlState = SqlState(Code::E01000);
-
-    pub fn code(&self) -> &str {
-        match &self.0 {
-            Code::E00000 => "00000",
-            Code::E01000 => "01000",
-            Code::EXX000 => "XX000",
         }
     }
 }

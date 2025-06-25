@@ -66,6 +66,7 @@ use risingwave_pb::meta::{
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
+use risingwave_pb::user::alter_default_privilege_request::Operation as AlterDefaultPrivilegeOperation;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
@@ -968,6 +969,17 @@ impl UserInfoWriter for MockUserInfoWriter {
         }
         Ok(())
     }
+
+    async fn alter_default_privilege(
+        &self,
+        _users: Vec<UserId>,
+        _database_id: DatabaseId,
+        _schemas: Vec<SchemaId>,
+        _operation: AlterDefaultPrivilegeOperation,
+        _operated_by: UserId,
+    ) -> Result<()> {
+        todo!()
+    }
 }
 
 impl MockUserInfoWriter {
@@ -1025,6 +1037,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(vec![])
     }
 
+    async fn list_creating_fragment_distribution(&self) -> RpcResult<Vec<FragmentDistribution>> {
+        Ok(vec![])
+    }
+
     async fn list_actor_states(&self) -> RpcResult<Vec<ActorState>> {
         Ok(vec![])
     }
@@ -1039,10 +1055,6 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn list_meta_snapshots(&self) -> RpcResult<Vec<MetaSnapshotMetadata>> {
         Ok(vec![])
-    }
-
-    async fn get_system_params(&self) -> RpcResult<SystemParamsReader> {
-        Ok(SystemParams::default().into())
     }
 
     async fn set_system_param(
@@ -1173,6 +1185,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     fn worker_id(&self) -> u32 {
         0
+    }
+
+    async fn set_sync_log_store_aligned(&self, _job_id: u32, _aligned: bool) -> RpcResult<()> {
+        Ok(())
     }
 }
 

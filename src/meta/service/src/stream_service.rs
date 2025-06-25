@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_connector::source::SplitMetaData;
 use risingwave_meta::barrier::BarrierManagerRef;
 use risingwave_meta::controller::fragment::StreamingJobInfo;
@@ -36,6 +37,7 @@ use risingwave_pb::meta::table_fragments::PbState;
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::meta::*;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::{BarrierScheduler, Command};
@@ -73,7 +75,6 @@ impl StreamServiceImpl {
 
 #[async_trait::async_trait]
 impl StreamManagerService for StreamServiceImpl {
-    #[cfg_attr(coverage, coverage(off))]
     async fn flush(&self, request: Request<FlushRequest>) -> TonicResponse<FlushResponse> {
         self.env.idle_manager().record_activity();
         let req = request.into_inner();
@@ -85,7 +86,6 @@ impl StreamManagerService for StreamServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn pause(&self, _: Request<PauseRequest>) -> Result<Response<PauseResponse>, Status> {
         for database_id in self.metadata_manager.list_active_database_ids().await? {
             self.barrier_scheduler
@@ -95,7 +95,6 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(PauseResponse {}))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn resume(&self, _: Request<ResumeRequest>) -> Result<Response<ResumeResponse>, Status> {
         for database_id in self.metadata_manager.list_active_database_ids().await? {
             self.barrier_scheduler
@@ -105,7 +104,6 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(ResumeResponse {}))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn apply_throttle(
         &self,
         request: Request<ApplyThrottleRequest>,
@@ -214,7 +212,6 @@ impl StreamManagerService for StreamServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn list_table_fragments(
         &self,
         request: Request<ListTableFragmentsRequest>,
@@ -271,7 +268,6 @@ impl StreamManagerService for StreamServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn list_streaming_job_states(
         &self,
         _request: Request<ListStreamingJobStatesRequest>,
@@ -314,7 +310,6 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(ListStreamingJobStatesResponse { states }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn list_fragment_distribution(
         &self,
         _request: Request<ListFragmentDistributionRequest>,
@@ -336,7 +331,27 @@ impl StreamManagerService for StreamServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
+    async fn list_creating_fragment_distribution(
+        &self,
+        _request: Request<ListCreatingFragmentDistributionRequest>,
+    ) -> Result<Response<ListCreatingFragmentDistributionResponse>, Status> {
+        let fragment_descs = self
+            .metadata_manager
+            .catalog_controller
+            .list_creating_fragment_descs()
+            .await?;
+        let distributions = fragment_descs
+            .into_iter()
+            .map(|(fragment_desc, upstreams)| {
+                fragment_desc_to_distribution(fragment_desc, upstreams)
+            })
+            .collect_vec();
+
+        Ok(Response::new(ListCreatingFragmentDistributionResponse {
+            distributions,
+        }))
+    }
+
     async fn get_fragment_by_id(
         &self,
         request: Request<GetFragmentByIdRequest>,
@@ -352,7 +367,6 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(GetFragmentByIdResponse { distribution }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn list_actor_states(
         &self,
         _request: Request<ListActorStatesRequest>,
@@ -375,7 +389,6 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(ListActorStatesResponse { states }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn list_object_dependencies(
         &self,
         _request: Request<ListObjectDependenciesRequest>,
@@ -391,7 +404,6 @@ impl StreamManagerService for StreamServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn recover(
         &self,
         _request: Request<RecoverRequest>,
@@ -528,6 +540,35 @@ impl StreamManagerService for StreamServiceImpl {
             .await?;
 
         Ok(Response::new(AlterConnectorPropsResponse {}))
+    }
+
+    async fn set_sync_log_store_aligned(
+        &self,
+        request: Request<SetSyncLogStoreAlignedRequest>,
+    ) -> Result<Response<SetSyncLogStoreAlignedResponse>, Status> {
+        let req = request.into_inner();
+        let job_id = req.job_id;
+        let aligned = req.aligned;
+
+        self.metadata_manager
+            .catalog_controller
+            .mutate_fragments_by_job_id(
+                job_id as _,
+                |_mask, stream_node| {
+                    let mut visited = false;
+                    visit_stream_node_mut(stream_node, |body| {
+                        if let NodeBody::SyncLogStore(sync_log_store) = body {
+                            sync_log_store.aligned = aligned;
+                            visited = true
+                        }
+                    });
+                    visited
+                },
+                "no fragments found with synced log store",
+            )
+            .await?;
+
+        Ok(Response::new(SetSyncLogStoreAlignedResponse {}))
     }
 }
 

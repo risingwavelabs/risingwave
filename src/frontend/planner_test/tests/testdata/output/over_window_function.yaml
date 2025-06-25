@@ -855,6 +855,110 @@
           └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
             └─StreamExchange { dist: HashShard(t.x) }
               └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: test ibis window function optimization
+  sql: |
+    CREATE TABLE t (a INT, b INT, c INT);
+    SELECT a, b, c
+    FROM (
+      SELECT
+        a, b, c,
+        ROW_NUMBER() OVER (PARTITION BY a ORDER BY b) - 1 AS rn
+      FROM t
+    )
+    WHERE rn < 10;
+  logical_plan: |-
+    LogicalProject { exprs: [t.a, t.b, t.c] }
+    └─LogicalFilter { predicate: ($expr1 < 10:Int32) }
+      └─LogicalProject { exprs: [t.a, t.b, t.c, (row_number - 1:Int32) as $expr1] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.a ORDER BY t.b ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─LogicalProject { exprs: [t.a, t.b, t.c, t._row_id, t._rw_timestamp] }
+            └─LogicalScan { table: t, columns: [t.a, t.b, t.c, t._row_id, t._rw_timestamp] }
+  optimized_logical_plan_for_batch: |-
+    LogicalTopN { order: [t.b ASC], limit: 10, offset: 0, group_key: [t.a] }
+    └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+  optimized_logical_plan_for_stream: |-
+    LogicalTopN { order: [t.b ASC], limit: 10, offset: 0, group_key: [t.a] }
+    └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+- name: test arithmetic with addition
+  sql: |
+    CREATE TABLE t (a INT, b INT, c INT);
+    SELECT a, b, c
+    FROM (
+      SELECT
+        a, b, c,
+        ROW_NUMBER() OVER (PARTITION BY a ORDER BY b) + 5 AS rn_plus_five
+      FROM t
+    )
+    WHERE rn_plus_five = 6;
+  logical_plan: |-
+    LogicalProject { exprs: [t.a, t.b, t.c] }
+    └─LogicalFilter { predicate: ($expr1 = 6:Int32) }
+      └─LogicalProject { exprs: [t.a, t.b, t.c, (row_number + 5:Int32) as $expr1] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.a ORDER BY t.b ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─LogicalProject { exprs: [t.a, t.b, t.c, t._row_id, t._rw_timestamp] }
+            └─LogicalScan { table: t, columns: [t.a, t.b, t.c, t._row_id, t._rw_timestamp] }
+  optimized_logical_plan_for_batch: |-
+    LogicalTopN { order: [t.b ASC], limit: 1, offset: 0, group_key: [t.a] }
+    └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+  optimized_logical_plan_for_stream: |-
+    LogicalTopN { order: [t.b ASC], limit: 1, offset: 0, group_key: [t.a] }
+    └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+- name: test optimization when rn column is kept
+  sql: |
+    CREATE TABLE t (a INT, b INT, c INT);
+    SELECT a, b, c, rn_plus_one
+    FROM (
+      SELECT
+        a, b, c,
+        ROW_NUMBER() OVER (PARTITION BY a ORDER BY b) + 1 AS rn_plus_one
+      FROM t
+    )
+    WHERE rn_plus_one = 2;
+  logical_plan: |-
+    LogicalProject { exprs: [t.a, t.b, t.c, $expr1] }
+    └─LogicalFilter { predicate: ($expr1 = 2:Int32) }
+      └─LogicalProject { exprs: [t.a, t.b, t.c, (row_number + 1:Int32) as $expr1] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.a ORDER BY t.b ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─LogicalProject { exprs: [t.a, t.b, t.c, t._row_id, t._rw_timestamp] }
+            └─LogicalScan { table: t, columns: [t.a, t.b, t.c, t._row_id, t._rw_timestamp] }
+  optimized_logical_plan_for_batch: |-
+    LogicalProject { exprs: [t.a, t.b, t.c, (row_number + 1:Int32) as $expr1] }
+    └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.a ORDER BY t.b ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+      └─LogicalTopN { order: [t.b ASC], limit: 1, offset: 0, group_key: [t.a] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+  optimized_logical_plan_for_stream: |-
+    LogicalProject { exprs: [t.a, t.b, t.c, (row_number + 1:Int32) as $expr1] }
+    └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.a ORDER BY t.b ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+      └─LogicalTopN { order: [t.b ASC], limit: 1, offset: 0, group_key: [t.a] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+- name: test complex arithmetic not optimized
+  sql: |
+    CREATE TABLE t (a INT, b INT, c INT);
+    SELECT a, b, c, rn
+    FROM (
+      SELECT
+        a, b, c,
+        ROW_NUMBER() OVER (PARTITION BY a ORDER BY b) * 2 + 1 AS rn
+      FROM t
+    )
+    WHERE rn = 3;
+  logical_plan: |-
+    LogicalProject { exprs: [t.a, t.b, t.c, $expr1] }
+    └─LogicalFilter { predicate: ($expr1 = 3:Int32) }
+      └─LogicalProject { exprs: [t.a, t.b, t.c, ((row_number * 2:Int32) + 1:Int32) as $expr1] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.a ORDER BY t.b ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─LogicalProject { exprs: [t.a, t.b, t.c, t._row_id, t._rw_timestamp] }
+            └─LogicalScan { table: t, columns: [t.a, t.b, t.c, t._row_id, t._rw_timestamp] }
+  optimized_logical_plan_for_batch: |-
+    LogicalProject { exprs: [t.a, t.b, t.c, ((row_number * 2:Int32) + 1:Int32) as $expr1] }
+    └─LogicalFilter { predicate: (((row_number * 2:Int32) + 1:Int32) = 3:Int32) }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.a ORDER BY t.b ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+  optimized_logical_plan_for_stream: |-
+    LogicalProject { exprs: [t.a, t.b, t.c, ((row_number * 2:Int32) + 1:Int32) as $expr1] }
+    └─LogicalFilter { predicate: (((row_number * 2:Int32) + 1:Int32) = 3:Int32) }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.a ORDER BY t.b ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
 - id: create_bid
   sql: |
     /*

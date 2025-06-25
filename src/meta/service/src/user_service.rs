@@ -14,13 +14,15 @@
 
 use itertools::Itertools;
 use risingwave_meta::manager::MetadataManager;
-use risingwave_meta_model::UserId;
+use risingwave_meta_model::{SchemaId, UserId};
+use risingwave_pb::user::alter_default_privilege_request::Operation;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_server::UserService;
 use risingwave_pb::user::{
-    CreateUserRequest, CreateUserResponse, DropUserRequest, DropUserResponse,
-    GrantPrivilegeRequest, GrantPrivilegeResponse, RevokePrivilegeRequest, RevokePrivilegeResponse,
-    UpdateUserRequest, UpdateUserResponse,
+    AlterDefaultPrivilegeRequest, AlterDefaultPrivilegeResponse, CreateUserRequest,
+    CreateUserResponse, DropUserRequest, DropUserResponse, GrantPrivilegeRequest,
+    GrantPrivilegeResponse, RevokePrivilegeRequest, RevokePrivilegeResponse, UpdateUserRequest,
+    UpdateUserResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -36,7 +38,6 @@ impl UserServiceImpl {
 
 #[async_trait::async_trait]
 impl UserService for UserServiceImpl {
-    #[cfg_attr(coverage, coverage(off))]
     async fn create_user(
         &self,
         request: Request<CreateUserRequest>,
@@ -54,7 +55,6 @@ impl UserService for UserServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn drop_user(
         &self,
         request: Request<DropUserRequest>,
@@ -72,7 +72,6 @@ impl UserService for UserServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn update_user(
         &self,
         request: Request<UpdateUserRequest>,
@@ -97,7 +96,6 @@ impl UserService for UserServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn grant_privilege(
         &self,
         request: Request<GrantPrivilegeRequest>,
@@ -121,7 +119,6 @@ impl UserService for UserServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn revoke_privilege(
         &self,
         request: Request<RevokePrivilegeRequest>,
@@ -144,6 +141,59 @@ impl UserService for UserServiceImpl {
         Ok(Response::new(RevokePrivilegeResponse {
             status: None,
             version,
+        }))
+    }
+
+    async fn alter_default_privilege(
+        &self,
+        request: Request<AlterDefaultPrivilegeRequest>,
+    ) -> Result<Response<AlterDefaultPrivilegeResponse>, Status> {
+        let req = request.into_inner();
+        let operation = req.get_operation()?;
+        let user_ids: Vec<_> = req.get_user_ids().iter().map(|id| *id as UserId).collect();
+        let schema_ids: Vec<_> = req.schema_ids.iter().map(|id| *id as SchemaId).collect();
+        match operation {
+            Operation::GrantPrivilege(grant_privilege) => {
+                self.metadata_manager
+                    .catalog_controller
+                    .grant_default_privileges(
+                        user_ids,
+                        req.database_id as _,
+                        schema_ids,
+                        req.granted_by as _,
+                        grant_privilege.actions().collect(),
+                        grant_privilege.get_object_type()?,
+                        grant_privilege
+                            .grantees
+                            .iter()
+                            .map(|id| *id as UserId)
+                            .collect(),
+                        grant_privilege.with_grant_option,
+                    )
+                    .await?
+            }
+            Operation::RevokePrivilege(revoke_privilege) => {
+                self.metadata_manager
+                    .catalog_controller
+                    .revoke_default_privileges(
+                        user_ids,
+                        req.database_id as _,
+                        schema_ids,
+                        revoke_privilege.actions().collect(),
+                        revoke_privilege.get_object_type()?,
+                        revoke_privilege
+                            .grantees
+                            .iter()
+                            .map(|id| *id as UserId)
+                            .collect(),
+                        revoke_privilege.revoke_grant_option,
+                    )
+                    .await?
+            }
+        }
+
+        Ok(Response::new(AlterDefaultPrivilegeResponse {
+            status: None,
         }))
     }
 }

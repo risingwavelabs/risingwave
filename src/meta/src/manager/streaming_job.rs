@@ -43,6 +43,20 @@ pub enum StreamingJob {
     Source(PbSource),
 }
 
+impl std::fmt::Display for StreamingJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StreamingJob::MaterializedView(table) => {
+                write!(f, "MaterializedView: {}({})", table.name, table.id)
+            }
+            StreamingJob::Sink(sink, _) => write!(f, "Sink: {}({})", sink.name, sink.id),
+            StreamingJob::Table(_, table, _) => write!(f, "Table: {}({})", table.name, table.id),
+            StreamingJob::Index(index, _) => write!(f, "Index: {}({})", index.name, index.id),
+            StreamingJob::Source(source) => write!(f, "Source: {}({})", source.name, source.id),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StreamingJobType {
     MaterializedView,

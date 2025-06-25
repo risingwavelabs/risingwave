@@ -386,6 +386,7 @@ impl BigQuerySink {
             DataType::Map(_) => Err(SinkError::BigQuery(anyhow::anyhow!(
                 "Bigquery cannot support Map"
             ))),
+            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
         }
     }
 
@@ -441,6 +442,7 @@ impl BigQuerySink {
                     "Bigquery cannot support Map"
                 )));
             }
+            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
         };
         Ok(tfs)
     }
@@ -951,6 +953,7 @@ fn build_protobuf_field(
             )));
         }
         DataType::Map(_) => todo!(),
+        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
     }
     Ok((field, None))
 }

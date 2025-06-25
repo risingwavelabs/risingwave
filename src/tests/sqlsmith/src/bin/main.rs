@@ -74,6 +74,10 @@ struct TestOptions {
     /// Path to weight configuration file.
     #[clap(long, default_value = "src/tests/sqlsmith/config.yml")]
     weight_config_path: String,
+
+    /// Features to enable (e.g. eowc).
+    #[clap(long = "enable", value_delimiter = ',', action = clap::ArgAction::Append)]
+    enabled_features: Vec<String>,
 }
 
 #[derive(clap::Subcommand, Clone, Debug)]
@@ -114,7 +118,8 @@ async fn main() {
             tracing::error!("Postgres connection error: {:?}", e);
         }
     });
-    let config = Configuration::new(&opt.weight_config_path);
+    let mut config = Configuration::new(&opt.weight_config_path);
+    config.enable_features_from_args(&opt.enabled_features);
     if opt.differential_testing {
         return run_differential_testing(&client, &opt.testdata, opt.count, &config, None)
             .await

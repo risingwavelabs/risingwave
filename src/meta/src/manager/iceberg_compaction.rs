@@ -445,10 +445,12 @@ impl IcebergCompactionManager {
         );
 
         let tx = Transaction::new(&table);
+
+        // TODO: use config
         let expired_snapshots = tx
             .expire_snapshot()
-            .clear_expire_files(true)
-            .clear_expire_files(true);
+            .clear_expired_files(true)
+            .clear_expired_meta_data(true);
 
         let tx = expired_snapshots
             .apply()

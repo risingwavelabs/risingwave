@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::common::PbObjectType;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{DatabaseId, ObjectId, SchemaId, UserId};
 
-#[derive(Clone, Debug, PartialEq, Eq, Copy, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, Hash, PartialEq, Eq, Copy, EnumIter, DeriveActiveEnum, Serialize, Deserialize,
+)]
 #[sea_orm(rs_type = "String", db_type = "string(None)")]
 pub enum ObjectType {
     #[sea_orm(string_value = "DATABASE")]
@@ -58,6 +61,27 @@ impl ObjectType {
             ObjectType::Connection => "connection",
             ObjectType::Subscription => "subscription",
             ObjectType::Secret => "secret",
+        }
+    }
+}
+
+impl From<PbObjectType> for ObjectType {
+    fn from(pb_object_type: PbObjectType) -> Self {
+        match pb_object_type {
+            PbObjectType::Database => ObjectType::Database,
+            PbObjectType::Schema => ObjectType::Schema,
+            PbObjectType::Table | PbObjectType::Mview => ObjectType::Table,
+            PbObjectType::Source => ObjectType::Source,
+            PbObjectType::Sink => ObjectType::Sink,
+            PbObjectType::View => ObjectType::View,
+            PbObjectType::Index => ObjectType::Index,
+            PbObjectType::Function => ObjectType::Function,
+            PbObjectType::Connection => ObjectType::Connection,
+            PbObjectType::Subscription => ObjectType::Subscription,
+            PbObjectType::Secret => ObjectType::Secret,
+            PbObjectType::Unspecified => {
+                unreachable!("Unspecified object type")
+            }
         }
     }
 }
@@ -137,6 +161,14 @@ pub enum Relation {
     UserPrivilege,
     #[sea_orm(has_many = "super::view::Entity")]
     View,
+    #[sea_orm(
+        belongs_to = "super::schema::Entity",
+        from = "Column::SchemaId",
+        to = "super::schema::Column::SchemaId",
+        on_update = "NoAction",
+        on_delete = "NoAction"
+    )]
+    Schema2,
 }
 
 impl Related<super::connection::Entity> for Entity {

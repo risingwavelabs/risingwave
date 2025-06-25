@@ -20,7 +20,7 @@
 #![feature(btree_extract_if)]
 #![feature(let_chains)]
 #![feature(error_generic_member_access)]
-#![cfg_attr(coverage, feature(coverage_attribute))]
+#![feature(coverage_attribute)]
 
 pub mod error;
 pub mod meta_snapshot;
