@@ -904,6 +904,11 @@ impl<S: StateStoreRead> ReadFuture<S> {
                             cardinality = chunk.cardinality(),
                             "read buffered chunk of size"
                         );
+                        progress.apply_aligned(
+                            read_state.vnodes().clone(),
+                            item_epoch,
+                            Some(end_seq_id),
+                        );
                         return Ok(chunk);
                     }
                     LogStoreBufferItem::Flushed {
