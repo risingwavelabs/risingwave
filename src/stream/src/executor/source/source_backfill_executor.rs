@@ -345,7 +345,14 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .initial_split_assignment(self.actor_ctx.id)
             .unwrap_or(&[])
             .to_vec();
-        let is_pause_on_startup = barrier.is_pause_on_startup();
+
+        let mut pause_control = PauseControl::new();
+        if barrier.is_backfill_pause_on_startup(self.actor_ctx.fragment_id) {
+            pause_control.backfill_pause();
+        }
+        if barrier.is_pause_on_startup() {
+            pause_control.command_pause();
+        }
         yield Message::Barrier(barrier);
 
         let source_desc_builder: SourceDescBuilder = self.source_desc_builder.take().unwrap();
@@ -422,24 +429,39 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
 
         type PausedReader = Option<impl Stream>;
         let mut paused_reader: PausedReader = None;
-        let mut command_paused = false;
 
         macro_rules! pause_reader {
             () => {
-                let (left, right) = backfill_stream.into_inner();
-                backfill_stream = select_with_strategy(
-                    left,
-                    futures::stream::pending().boxed().map(Either::Right),
-                    select_strategy,
-                );
-                // XXX: do we have to store the original reader? Can we simply rebuild the reader later?
-                paused_reader = Some(right);
+                if !pause_control.reader_paused {
+                    let (left, right) = backfill_stream.into_inner();
+                    backfill_stream = select_with_strategy(
+                        left,
+                        futures::stream::pending().boxed().map(Either::Right),
+                        select_strategy,
+                    );
+                    // XXX: do we have to store the original reader? Can we simply rebuild the reader later?
+                    paused_reader = Some(right);
+                    pause_control.reader_paused = true;
+                }
             };
         }
 
-        // If the first barrier requires us to pause on startup, pause the stream.
-        if is_pause_on_startup {
-            command_paused = true;
+        macro_rules! resume_reader {
+            () => {
+                if pause_control.reader_paused {
+                    backfill_stream = select_with_strategy(
+                        input.by_ref().map(Either::Left),
+                        paused_reader
+                            .take()
+                            .expect("should have paused reader to resume"),
+                        select_strategy,
+                    );
+                    pause_control.reader_paused = false;
+                }
+            };
+        }
+
+        if pause_control.is_paused() {
             pause_reader!();
         }
 
@@ -467,7 +489,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                 as u128
                 * WAIT_BARRIER_MULTIPLE_TIMES;
             let mut last_barrier_time = Instant::now();
-            let mut self_paused = false;
 
             // The main logic of the loop is in handle_upstream_row and handle_backfill_row.
             'backfill_loop: while let Some(either) = backfill_stream.next().await {
@@ -506,18 +527,8 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                             Message::Barrier(barrier) => {
                                 last_barrier_time = Instant::now();
 
-                                if self_paused {
-                                    // command_paused has a higher priority.
-                                    if !command_paused {
-                                        backfill_stream = select_with_strategy(
-                                            input.by_ref().map(Either::Left),
-                                            paused_reader
-                                                .take()
-                                                .expect("no paused reader to resume"),
-                                            select_strategy,
-                                        );
-                                    }
-                                    self_paused = false;
+                                if pause_control.self_resume() {
+                                    resume_reader!();
                                 }
 
                                 let mut maybe_muatation = None;
@@ -525,26 +536,20 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     match mutation {
                                         Mutation::Pause => {
                                             // pause_reader should not be invoked consecutively more than once.
-                                            if !command_paused {
-                                                pause_reader!();
-                                                command_paused = true;
-                                            } else {
-                                                tracing::warn!(command_paused, "unexpected pause");
-                                            }
+                                            pause_control.command_pause();
+                                            pause_reader!();
                                         }
                                         Mutation::Resume => {
                                             // pause_reader.take should not be invoked consecutively more than once.
-                                            if command_paused {
-                                                backfill_stream = select_with_strategy(
-                                                    input.by_ref().map(Either::Left),
-                                                    paused_reader
-                                                        .take()
-                                                        .expect("no paused reader to resume"),
-                                                    select_strategy,
-                                                );
-                                                command_paused = false;
-                                            } else {
-                                                tracing::warn!(command_paused, "unexpected resume");
+                                            if pause_control.command_resume() {
+                                                resume_reader!();
+                                            }
+                                        }
+                                        Mutation::StartFragmentBackfill { fragment_ids } => {
+                                            if fragment_ids.contains(&self.actor_ctx.fragment_id)
+                                                && pause_control.backfill_resume()
+                                            {
+                                                resume_reader!();
                                             }
                                         }
                                         Mutation::SourceChangeSplit(actor_splits) => {
@@ -767,18 +772,14 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                         let chunk = msg?;
 
                         if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
-                            assert!(!command_paused, "command_paused should be false");
-                            // pause_reader should not be invoked consecutively more than once.
-                            if !self_paused {
-                                pause_reader!();
-                            } else {
-                                tracing::warn!(self_paused, "unexpected self pause");
-                            }
+                            // Pause to let barrier catch up via backpressure of snapshot stream.
+                            pause_control.self_pause();
+                            pause_reader!();
+
                             // Exceeds the max wait barrier time, the source will be paused.
                             // Currently we can guarantee the
                             // source is not paused since it received stream
                             // chunks.
-                            self_paused = true;
                             tracing::warn!(
                                 "source {} paused, wait barrier for {:?}",
                                 self.info.identity,
@@ -1176,5 +1177,90 @@ impl<S: StateStore> Debug for SourceBackfillExecutorInner<S> {
             .field("column_ids", &self.column_ids)
             .field("pk_indices", &self.info.pk_indices)
             .finish()
+    }
+}
+
+struct PauseControl {
+    // Paused due to backfill order control
+    backfill_paused: bool,
+    // Paused due to self-pause, e.g. let barrier catch up
+    self_paused: bool,
+    // Paused due to Pause command from meta, pause_on_next_bootstrap
+    command_paused: bool,
+    // reader paused
+    reader_paused: bool,
+}
+
+impl PauseControl {
+    fn new() -> Self {
+        Self {
+            backfill_paused: false,
+            self_paused: false,
+            command_paused: false,
+            reader_paused: false,
+        }
+    }
+
+    fn is_paused(&self) -> bool {
+        self.backfill_paused || self.command_paused || self.self_paused
+    }
+
+    /// returns whether we need to pause the reader.
+    fn backfill_pause(&mut self) {
+        if self.backfill_paused {
+            tracing::warn!("backfill_pause invoked twice");
+        }
+        self.backfill_paused = true;
+    }
+
+    /// returns whether we need to resume the reader.
+    /// same precedence as command.
+    fn backfill_resume(&mut self) -> bool {
+        if !self.backfill_paused {
+            tracing::warn!("backfill_resume invoked twice");
+        }
+        !self.command_paused
+    }
+
+    /// returns whether we need to pause the reader.
+    fn self_pause(&mut self) {
+        assert!(
+            !self.backfill_paused,
+            "backfill stream should not be read when backfill_pause is set"
+        );
+        assert!(
+            !self.command_paused,
+            "backfill stream should not be read when command_pause is set"
+        );
+        if self.self_paused {
+            tracing::warn!("self_pause invoked twice");
+        }
+        self.self_paused = true;
+    }
+
+    /// returns whether we need to resume the reader.
+    /// `self_resume` has the lowest precedence,
+    /// it can only resume if we are not paused due to `backfill_paused` or `command_paused`.
+    fn self_resume(&mut self) -> bool {
+        self.self_paused = false;
+        !(self.backfill_paused || self.command_paused)
+    }
+
+    /// returns whether we need to pause the reader.
+    fn command_pause(&mut self) {
+        if self.command_paused {
+            tracing::warn!("command_pause invoked twice");
+        }
+        self.command_paused = true;
+    }
+
+    /// returns whether we need to resume the reader.
+    /// same precedence as backfill.
+    fn command_resume(&mut self) -> bool {
+        if !self.command_paused {
+            tracing::warn!("command_resume invoked twice");
+        }
+        self.command_paused = false;
+        !self.backfill_paused
     }
 }

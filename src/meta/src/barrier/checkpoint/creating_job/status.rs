@@ -20,7 +20,9 @@ use std::time::Duration;
 use risingwave_common::hash::ActorId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::stream_plan::StartFragmentBackfillMutation;
 use risingwave_pb::stream_plan::barrier::PbBarrierKind;
+use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_service::barrier_complete_response::{
     CreateMviewProgress, PbCreateMviewProgress,
 };
@@ -200,25 +202,47 @@ impl CreatingStreamingJobStatus {
         }
     }
 
-    pub(super) fn on_new_upstream_epoch(&mut self, barrier_info: &BarrierInfo) -> Vec<BarrierInfo> {
+    pub(super) fn on_new_upstream_epoch(
+        &mut self,
+        barrier_info: &BarrierInfo,
+    ) -> Vec<(BarrierInfo, Option<Mutation>)> {
         match self {
             CreatingStreamingJobStatus::ConsumingSnapshot {
                 pending_upstream_barriers,
                 prev_epoch_fake_physical_time,
                 pending_non_checkpoint_barriers,
+                create_mview_tracker,
                 ..
             } => {
+                let mutation = {
+                    let pending_backfill_nodes = create_mview_tracker.take_pending_backfill_nodes();
+                    if pending_backfill_nodes.is_empty() {
+                        None
+                    } else {
+                        Some(Mutation::StartFragmentBackfill(
+                            StartFragmentBackfillMutation {
+                                fragment_ids: pending_backfill_nodes
+                                    .into_iter()
+                                    .map(|fragment_id| fragment_id as _)
+                                    .collect(),
+                            },
+                        ))
+                    }
+                };
                 pending_upstream_barriers.push(barrier_info.clone());
-                vec![CreatingStreamingJobStatus::new_fake_barrier(
-                    prev_epoch_fake_physical_time,
-                    pending_non_checkpoint_barriers,
-                    match barrier_info.kind {
-                        BarrierKind::Barrier => PbBarrierKind::Barrier,
-                        BarrierKind::Checkpoint(_) => PbBarrierKind::Checkpoint,
-                        BarrierKind::Initial => {
-                            unreachable!("upstream new epoch should not be initial")
-                        }
-                    },
+                vec![(
+                    CreatingStreamingJobStatus::new_fake_barrier(
+                        prev_epoch_fake_physical_time,
+                        pending_non_checkpoint_barriers,
+                        match barrier_info.kind {
+                            BarrierKind::Barrier => PbBarrierKind::Barrier,
+                            BarrierKind::Checkpoint(_) => PbBarrierKind::Checkpoint,
+                            BarrierKind::Initial => {
+                                unreachable!("upstream new epoch should not be initial")
+                            }
+                        },
+                    ),
+                    mutation,
                 )]
             }
             CreatingStreamingJobStatus::ConsumingLogStore {
@@ -228,6 +252,7 @@ impl CreatingStreamingJobStatus {
                 .into_iter()
                 .flatten()
                 .chain([barrier_info.clone()])
+                .map(|barrier_info| (barrier_info, None))
                 .collect(),
             CreatingStreamingJobStatus::Finishing { .. } => {
                 vec![]

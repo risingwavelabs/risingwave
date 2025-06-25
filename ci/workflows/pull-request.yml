@@ -447,7 +447,7 @@ steps:
       - ./ci/plugins/swapfile
       - docker-compose#v5.5.0:
           <<: *docker-compose
-    timeout_in_minutes: 22
+    timeout_in_minutes: 30
     retry: *auto-retry
 
   - label: "check"
@@ -756,9 +756,9 @@ steps:
 
   - wait: ~
 
+  # Only if all steps are successful, we upload coverage reports.
   - label: "upload coverage reports"
     command: "ci/scripts/upload-coverage.sh"
-    # TODO: shall we skip this if `run-selected` or `CI_STEPS` is specified.
     plugins:
       - seek-oss/aws-sm#v2.3.2:
           env:

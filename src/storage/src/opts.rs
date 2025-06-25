@@ -119,6 +119,8 @@ pub struct StorageOpts {
     pub meta_file_cache_runtime_config: foyer::RuntimeOptions,
     pub meta_file_cache_throttle: foyer::Throttle,
 
+    pub vector_file_block_size_kb: usize,
+
     /// The storage url for storing backups.
     pub backup_storage_url: String,
     /// The storage directory for storing backups.
@@ -288,6 +290,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             iceberg_compaction_max_file_count_per_partition: c
                 .storage
                 .iceberg_compaction_max_file_count_per_partition,
+            vector_file_block_size_kb: c.storage.vector_file_block_size_kb,
         }
     }
 }

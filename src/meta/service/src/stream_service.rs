@@ -74,7 +74,6 @@ impl StreamServiceImpl {
 
 #[async_trait::async_trait]
 impl StreamManagerService for StreamServiceImpl {
-    #[cfg_attr(coverage, coverage(off))]
     async fn flush(&self, request: Request<FlushRequest>) -> TonicResponse<FlushResponse> {
         self.env.idle_manager().record_activity();
         let req = request.into_inner();
@@ -86,7 +85,6 @@ impl StreamManagerService for StreamServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn pause(&self, _: Request<PauseRequest>) -> Result<Response<PauseResponse>, Status> {
         for database_id in self.metadata_manager.list_active_database_ids().await? {
             self.barrier_scheduler
@@ -96,7 +94,6 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(PauseResponse {}))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn resume(&self, _: Request<ResumeRequest>) -> Result<Response<ResumeResponse>, Status> {
         for database_id in self.metadata_manager.list_active_database_ids().await? {
             self.barrier_scheduler
@@ -106,7 +103,6 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(ResumeResponse {}))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn apply_throttle(
         &self,
         request: Request<ApplyThrottleRequest>,
@@ -215,7 +211,6 @@ impl StreamManagerService for StreamServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn list_table_fragments(
         &self,
         request: Request<ListTableFragmentsRequest>,
@@ -272,7 +267,6 @@ impl StreamManagerService for StreamServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn list_streaming_job_states(
         &self,
         _request: Request<ListStreamingJobStatesRequest>,
@@ -315,7 +309,6 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(ListStreamingJobStatesResponse { states }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn list_fragment_distribution(
         &self,
         _request: Request<ListFragmentDistributionRequest>,
@@ -337,7 +330,6 @@ impl StreamManagerService for StreamServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn list_creating_fragment_distribution(
         &self,
         _request: Request<ListCreatingFragmentDistributionRequest>,
@@ -359,7 +351,6 @@ impl StreamManagerService for StreamServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn get_fragment_by_id(
         &self,
         request: Request<GetFragmentByIdRequest>,
@@ -375,7 +366,6 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(GetFragmentByIdResponse { distribution }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn list_actor_states(
         &self,
         _request: Request<ListActorStatesRequest>,
@@ -398,7 +388,6 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(ListActorStatesResponse { states }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn list_object_dependencies(
         &self,
         _request: Request<ListObjectDependenciesRequest>,
@@ -414,7 +403,6 @@ impl StreamManagerService for StreamServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn recover(
         &self,
         _request: Request<RecoverRequest>,

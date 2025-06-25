@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::system_param::{OverrideValidate, Validate};
+
 use super::*;
 use crate::barrier::SnapshotBackfillInfo;
 
@@ -41,6 +43,14 @@ impl CatalogController {
         &self,
         db: PbDatabase,
     ) -> MetaResult<(NotificationVersion, risingwave_meta_model::database::Model)> {
+        // validate first
+        if let Some(ref interval) = db.barrier_interval_ms {
+            OverrideValidate::barrier_interval_ms(interval).map_err(|e| anyhow::anyhow!(e))?;
+        }
+        if let Some(ref frequency) = db.checkpoint_frequency {
+            OverrideValidate::checkpoint_frequency(frequency).map_err(|e| anyhow::anyhow!(e))?;
+        }
+
         let inner = self.inner.write().await;
         let owner_id = db.owner as _;
         let txn = inner.db.begin().await?;

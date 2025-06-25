@@ -78,7 +78,7 @@ sha2 = "0.10.7"
 smallvec = { workspace = true, features = ["serde"] }
 speedate = "0.15.0"
 tempfile = "3"
-thiserror = "2"
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

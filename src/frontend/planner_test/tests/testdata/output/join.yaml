@@ -802,3 +802,274 @@
           └─StreamExchange { dist: HashShard(t2.v3) }
             └─StreamProject { exprs: [t2.v3, t2.v4, (t2.v4 + 1000:Int32) as $expr1, t2._row_id] }
               └─StreamTableScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+- name: Separate consecutive StreamHashJoin by no-shuffle Exchange
+  sql: |
+    set streaming_separate_consecutive_join = true;
+    create table t1(v1 int primary key);
+    create table t2(v2 int primary key);
+    create table t3(v3 int primary key);
+    create table t4(v4 int primary key);
+    create table t5(v5 int primary key);
+    create table t6(v6 int primary key);
+    select v1, v2, v3, v4, v5, v6 from t1 left join t2 on t1.v1 = t2.v2 left join t3 on t1.v1 = t3.v3 left join t4 on t1.v1 = t4.v4 left join t5 on t1.v1 = t5.v5 left join t6 on t1.v1 = t6.v6;
+  stream_plan: |-
+    StreamMaterialize { columns: [v1, v2, v3, v4, v5, v6], stream_key: [v1], pk_columns: [v1], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(t1.v1) }
+      └─StreamHashJoin { type: LeftOuter, predicate: t1.v1 = t6.v6, output: all }
+        ├─StreamExchange [no_shuffle] { dist: HashShard(t1.v1) }
+        │ └─StreamHashJoin { type: LeftOuter, predicate: t1.v1 = t5.v5, output: all }
+        │   ├─StreamExchange [no_shuffle] { dist: HashShard(t1.v1) }
+        │   │ └─StreamHashJoin { type: LeftOuter, predicate: t1.v1 = t4.v4, output: all }
+        │   │   ├─StreamExchange [no_shuffle] { dist: HashShard(t1.v1) }
+        │   │   │ └─StreamHashJoin { type: LeftOuter, predicate: t1.v1 = t3.v3, output: all }
+        │   │   │   ├─StreamExchange [no_shuffle] { dist: HashShard(t1.v1) }
+        │   │   │   │ └─StreamHashJoin { type: LeftOuter, predicate: t1.v1 = t2.v2, output: all }
+        │   │   │   │   ├─StreamExchange { dist: HashShard(t1.v1) }
+        │   │   │   │   │ └─StreamTableScan { table: t1, columns: [t1.v1], stream_scan_type: ArrangementBackfill, stream_key: [t1.v1], pk: [v1], dist: UpstreamHashShard(t1.v1) }
+        │   │   │   │   └─StreamExchange { dist: HashShard(t2.v2) }
+        │   │   │   │     └─StreamTableScan { table: t2, columns: [t2.v2], stream_scan_type: ArrangementBackfill, stream_key: [t2.v2], pk: [v2], dist: UpstreamHashShard(t2.v2) }
+        │   │   │   └─StreamExchange { dist: HashShard(t3.v3) }
+        │   │   │     └─StreamTableScan { table: t3, columns: [t3.v3], stream_scan_type: ArrangementBackfill, stream_key: [t3.v3], pk: [v3], dist: UpstreamHashShard(t3.v3) }
+        │   │   └─StreamExchange { dist: HashShard(t4.v4) }
+        │   │     └─StreamTableScan { table: t4, columns: [t4.v4], stream_scan_type: ArrangementBackfill, stream_key: [t4.v4], pk: [v4], dist: UpstreamHashShard(t4.v4) }
+        │   └─StreamExchange { dist: HashShard(t5.v5) }
+        │     └─StreamTableScan { table: t5, columns: [t5.v5], stream_scan_type: ArrangementBackfill, stream_key: [t5.v5], pk: [v5], dist: UpstreamHashShard(t5.v5) }
+        └─StreamExchange { dist: HashShard(t6.v6) }
+          └─StreamTableScan { table: t6, columns: [t6.v6], stream_scan_type: ArrangementBackfill, stream_key: [t6.v6], pk: [v6], dist: UpstreamHashShard(t6.v6) }
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [v1, v2, v3, v4, v5, v6], stream_key: [v1], pk_columns: [v1], pk_conflict: NoCheck }
+    ├── tables: [ Materialize: 4294967294 ]
+    └── StreamExchange Hash([0]) from 1
+
+    Fragment 1
+    StreamHashJoin { type: LeftOuter, predicate: t1.v1 = t6.v6, output: all }
+    ├── tables: [ HashJoinLeft: 0, HashJoinDegreeLeft: 1, HashJoinRight: 2, HashJoinDegreeRight: 3 ]
+    ├── StreamExchange NoShuffle from 2
+    └── StreamExchange Hash([0]) from 11
+
+    Fragment 2
+    StreamHashJoin { type: LeftOuter, predicate: t1.v1 = t5.v5, output: all }
+    ├── tables: [ HashJoinLeft: 4, HashJoinDegreeLeft: 5, HashJoinRight: 6, HashJoinDegreeRight: 7 ]
+    ├── StreamExchange NoShuffle from 3
+    └── StreamExchange Hash([0]) from 10
+
+    Fragment 3
+    StreamHashJoin { type: LeftOuter, predicate: t1.v1 = t4.v4, output: all }
+    ├── tables: [ HashJoinLeft: 8, HashJoinDegreeLeft: 9, HashJoinRight: 10, HashJoinDegreeRight: 11 ]
+    ├── StreamExchange NoShuffle from 4
+    └── StreamExchange Hash([0]) from 9
+
+    Fragment 4
+    StreamHashJoin { type: LeftOuter, predicate: t1.v1 = t3.v3, output: all }
+    ├── tables: [ HashJoinLeft: 12, HashJoinDegreeLeft: 13, HashJoinRight: 14, HashJoinDegreeRight: 15 ]
+    ├── StreamExchange NoShuffle from 5
+    └── StreamExchange Hash([0]) from 8
+
+    Fragment 5
+    StreamHashJoin { type: LeftOuter, predicate: t1.v1 = t2.v2, output: all }
+    ├── tables: [ HashJoinLeft: 16, HashJoinDegreeLeft: 17, HashJoinRight: 18, HashJoinDegreeRight: 19 ]
+    ├── StreamExchange Hash([0]) from 6
+    └── StreamExchange Hash([0]) from 7
+
+    Fragment 6
+    StreamTableScan { table: t1, columns: [t1.v1], stream_scan_type: ArrangementBackfill, stream_key: [t1.v1], pk: [v1], dist: UpstreamHashShard(t1.v1) }
+    ├── tables: [ StreamScan: 20 ]
+    ├── Upstream
+    └── BatchPlanNode
+
+    Fragment 7
+    StreamTableScan { table: t2, columns: [t2.v2], stream_scan_type: ArrangementBackfill, stream_key: [t2.v2], pk: [v2], dist: UpstreamHashShard(t2.v2) }
+    ├── tables: [ StreamScan: 21 ]
+    ├── Upstream
+    └── BatchPlanNode
+
+    Fragment 8
+    StreamTableScan { table: t3, columns: [t3.v3], stream_scan_type: ArrangementBackfill, stream_key: [t3.v3], pk: [v3], dist: UpstreamHashShard(t3.v3) }
+    ├── tables: [ StreamScan: 22 ]
+    ├── Upstream
+    └── BatchPlanNode
+
+    Fragment 9
+    StreamTableScan { table: t4, columns: [t4.v4], stream_scan_type: ArrangementBackfill, stream_key: [t4.v4], pk: [v4], dist: UpstreamHashShard(t4.v4) }
+    ├── tables: [ StreamScan: 23 ]
+    ├── Upstream
+    └── BatchPlanNode
+
+    Fragment 10
+    StreamTableScan { table: t5, columns: [t5.v5], stream_scan_type: ArrangementBackfill, stream_key: [t5.v5], pk: [v5], dist: UpstreamHashShard(t5.v5) }
+    ├── tables: [ StreamScan: 24 ]
+    ├── Upstream
+    └── BatchPlanNode
+
+    Fragment 11
+    StreamTableScan { table: t6, columns: [t6.v6], stream_scan_type: ArrangementBackfill, stream_key: [t6.v6], pk: [v6], dist: UpstreamHashShard(t6.v6) }
+    ├── tables: [ StreamScan: 25 ]
+    ├── Upstream
+    └── BatchPlanNode
+
+    Table 0
+    ├── columns: [ t1_v1, t2_v2, t3_v3, t4_v4, t5_v5, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
+
+    Table 1
+    ├── columns: [ t1_v1, _degree, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
+
+    Table 2 { columns: [ t6_v6, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+
+    Table 3
+    ├── columns: [ t6_v6, _degree, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
+
+    Table 4
+    ├── columns: [ t1_v1, t2_v2, t3_v3, t4_v4, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
+
+    Table 5
+    ├── columns: [ t1_v1, _degree, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
+
+    Table 6 { columns: [ t5_v5, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+
+    Table 7
+    ├── columns: [ t5_v5, _degree, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
+
+    Table 8
+    ├── columns: [ t1_v1, t2_v2, t3_v3, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
+
+    Table 9
+    ├── columns: [ t1_v1, _degree, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
+
+    Table 10 { columns: [ t4_v4, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+
+    Table 11
+    ├── columns: [ t4_v4, _degree, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
+
+    Table 12
+    ├── columns: [ t1_v1, t2_v2, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
+
+    Table 13
+    ├── columns: [ t1_v1, _degree, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
+
+    Table 14 { columns: [ t3_v3, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+
+    Table 15
+    ├── columns: [ t3_v3, _degree, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
+
+    Table 16 { columns: [ t1_v1, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+
+    Table 17
+    ├── columns: [ t1_v1, _degree, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
+
+    Table 18 { columns: [ t2_v2, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+
+    Table 19
+    ├── columns: [ t2_v2, _degree, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
+
+    Table 20
+    ├── columns: [ vnode, v1, backfill_finished, row_count, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 21
+    ├── columns: [ vnode, v2, backfill_finished, row_count, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 22
+    ├── columns: [ vnode, v3, backfill_finished, row_count, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 23
+    ├── columns: [ vnode, v4, backfill_finished, row_count, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 24
+    ├── columns: [ vnode, v5, backfill_finished, row_count, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 25
+    ├── columns: [ vnode, v6, backfill_finished, row_count, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 4294967294
+    ├── columns: [ v1, v2, v3, v4, v5, v6, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
+

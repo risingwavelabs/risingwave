@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pgwire::pg_response::{PgResponse, StatementType};
+use pgwire::pg_response::StatementType;
+use risingwave_common::system_param::{NOTICE_BARRIER_INTERVAL_MS, NOTICE_CHECKPOINT_FREQUENCY};
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_sqlparser::ast::{ObjectName, SetVariableValue};
 
@@ -33,6 +34,8 @@ pub async fn handle_create_database(
     barrier_interval_ms: Option<u32>,
     checkpoint_frequency: Option<u64>,
 ) -> Result<RwPgResponse> {
+    let mut builder = RwPgResponse::builder(StatementType::CREATE_DATABASE);
+
     let session = handler_args.session;
     let database_name = Binder::resolve_database_name(database_name)?;
 
@@ -56,7 +59,7 @@ pub async fn handle_create_database(
         if reader.get_database_by_name(&database_name).is_ok() {
             // If `if_not_exist` is true, not return error.
             return if if_not_exist {
-                Ok(PgResponse::builder(StatementType::CREATE_DATABASE)
+                Ok(builder
                     .notice(format!("database \"{}\" exists, skipping", database_name))
                     .into())
             } else {
@@ -91,6 +94,21 @@ pub async fn handle_create_database(
 
     let resource_group = resource_group.as_deref().unwrap_or(DEFAULT_RESOURCE_GROUP);
 
+    if let Some(interval) = barrier_interval_ms {
+        if interval >= NOTICE_BARRIER_INTERVAL_MS {
+            builder = builder.notice(
+                    format!("Barrier interval is set to {} ms >= {} ms. This can hurt freshness and potentially cause OOM.",
+                             interval, NOTICE_BARRIER_INTERVAL_MS));
+        }
+    }
+    if let Some(frequency) = checkpoint_frequency {
+        if frequency >= NOTICE_CHECKPOINT_FREQUENCY {
+            builder = builder.notice(
+                    format!("Checkpoint frequency is set to {} >= {}. This can hurt freshness and potentially cause OOM.",
+                             frequency, NOTICE_CHECKPOINT_FREQUENCY));
+        }
+    }
+
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .create_database(
@@ -102,7 +120,7 @@ pub async fn handle_create_database(
         )
         .await?;
 
-    Ok(PgResponse::empty_result(StatementType::CREATE_DATABASE))
+    Ok(builder.into())
 }
 
 #[cfg(test)]
