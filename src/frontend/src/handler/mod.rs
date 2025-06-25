@@ -984,7 +984,7 @@ pub async fn handle(
                 AlterViewOperation::SetStreamingEnableUnalignedJoin { enable } => {
                     if !materialized {
                         bail!(
-                            "ALTER VIEW SET STREAMING_ENABLE_UNALIGNED_JOIN is only supported for materialized views"
+                            "ALTER VIEW SET STREAMING_ENABLE_UNALIGNED_JOIN is not supported. Only supported for materialized views"
                         );
                     }
                     alter_streaming_enable_unaligned_join::handle_alter_streaming_enable_unaligned_join(handler_args, name, enable).await
