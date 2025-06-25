@@ -668,9 +668,9 @@ fn parse_pg_postfix_factorial() {
 fn parse_pg_regex_match_ops() {
     let pg_regex_match_ops = &[
         ("~", BinaryOperator::PGRegexMatch),
-        ("~*", BinaryOperator::PGRegexIMatch),
-        ("!~", BinaryOperator::PGRegexNotMatch),
-        ("!~*", BinaryOperator::PGRegexNotIMatch),
+        ("~*", BinaryOperator::Custom("~*".to_owned())),
+        ("!~", BinaryOperator::Custom("!~".to_owned())),
+        ("!~*", BinaryOperator::Custom("!~*".to_owned())),
     ];
 
     for (str_op, op) in pg_regex_match_ops {

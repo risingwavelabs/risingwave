@@ -377,6 +377,7 @@ service StreamManagerService {
   rpc ListRateLimits(ListRateLimitsRequest) returns (ListRateLimitsResponse);
   rpc AlterConnectorProps(AlterConnectorPropsRequest) returns (AlterConnectorPropsResponse);
   rpc GetFragmentById(GetFragmentByIdRequest) returns (GetFragmentByIdResponse);
+  rpc SetSyncLogStoreAligned(SetSyncLogStoreAlignedRequest) returns (SetSyncLogStoreAlignedResponse);
 }
 
 // Below for cluster service.
@@ -978,3 +979,10 @@ message ListIcebergTablesResponse {
   }
   repeated IcebergTable iceberg_tables = 1;
 }
+
+message SetSyncLogStoreAlignedRequest {
+  uint32 job_id = 1;
+  bool aligned = 2;
+}
+
+message SetSyncLogStoreAlignedResponse {}
