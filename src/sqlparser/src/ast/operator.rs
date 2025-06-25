@@ -30,10 +30,6 @@ pub enum UnaryOperator {
     PGSquareRoot,
     /// Cube root, e.g. `||/27` (PostgreSQL-specific)
     PGCubeRoot,
-    /// Factorial, e.g. `9!` (PostgreSQL-specific)
-    PGPostfixFactorial,
-    /// Factorial, e.g. `!!9` (PostgreSQL-specific)
-    PGPrefixFactorial,
     /// Absolute value, e.g. `@ -9` (PostgreSQL-specific)
     PGAbs,
     /// Qualified, e.g. `OPERATOR(pg_catalog.+) 9` (PostgreSQL-specific)
@@ -52,8 +48,6 @@ impl fmt::Display for UnaryOperator {
             UnaryOperator::PGBitwiseNot => "~",
             UnaryOperator::PGSquareRoot => "|/",
             UnaryOperator::PGCubeRoot => "||/",
-            UnaryOperator::PGPostfixFactorial => "!",
-            UnaryOperator::PGPrefixFactorial => "!!",
             UnaryOperator::PGAbs => "@",
             UnaryOperator::PGQualified(_) => unreachable!(),
         })

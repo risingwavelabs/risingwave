@@ -632,28 +632,11 @@ fn parse_pg_unary_ops() {
         ("~", UnaryOperator::PGBitwiseNot),
         ("|/", UnaryOperator::PGSquareRoot),
         ("||/", UnaryOperator::PGCubeRoot),
-        ("!!", UnaryOperator::PGPrefixFactorial),
         ("@", UnaryOperator::PGAbs),
     ];
 
     for (str_op, op) in pg_unary_ops {
         let select = verified_only_select(&format!("SELECT {} a", &str_op));
-        assert_eq!(
-            SelectItem::UnnamedExpr(Expr::UnaryOp {
-                op: op.clone(),
-                expr: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
-            }),
-            select.projection[0]
-        );
-    }
-}
-
-#[test]
-fn parse_pg_postfix_factorial() {
-    let postfix_factorial = &[("!", UnaryOperator::PGPostfixFactorial)];
-
-    for (str_op, op) in postfix_factorial {
-        let select = verified_only_select(&format!("SELECT a{}", &str_op));
         assert_eq!(
             SelectItem::UnnamedExpr(Expr::UnaryOp {
                 op: op.clone(),
