@@ -112,6 +112,7 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
         }
 
         realign_join(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
+        tracing::info!("realigned join");
     }
 
     // aligned join workload
