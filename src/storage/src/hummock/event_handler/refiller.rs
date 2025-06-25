@@ -458,11 +458,14 @@ impl CacheRefillTask {
         res
     }
 
+    /// Data cache refill entry point.
     async fn data_cache_refill(
         context: &CacheRefillContext,
         delta: &SstDeltaInfo,
         holders: Vec<TableHolder>,
     ) {
+        // if context.sstable_store.block_cache().
+
         // return if data file cache is disabled
         let Some(filter) = context.sstable_store.data_recent_filter() else {
             return;
