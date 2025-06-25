@@ -29,7 +29,7 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::WatermarkSerdeType;
 use tracing::{Instrument, warn};
 
-use super::version::{StagingData, VersionUpdate};
+use super::version::VersionUpdate;
 use crate::error::StorageResult;
 use crate::hummock::event_handler::hummock_event_handler::HummockEventSender;
 use crate::hummock::event_handler::{HummockEvent, HummockReadVersionRef, LocalInstanceGuard};
@@ -84,6 +84,9 @@ pub struct LocalHummockStorage {
     /// In that case, we use this flag to avoid reading the same data twice,
     /// by ignoring the replicated `ReadVersion`.
     is_replicated: bool,
+
+    /// Whether or not send imm to uploader on every flush.
+    upload_on_flush: bool,
 
     /// Event sender.
     event_sender: HummockEventSender,
@@ -508,6 +511,25 @@ impl LocalStateStore for LocalHummockStorage {
 
     fn seal_current_epoch(&mut self, next_epoch: u64, mut opts: SealCurrentEpochOptions) {
         assert!(!self.is_dirty());
+        if !self.is_replicated {
+            if self.upload_on_flush {
+                debug_assert_eq!(self.read_version.write().pending_imm_size(), 0);
+            } else {
+                let pending_imms = self.read_version.write().start_upload_pending_imms();
+                if !pending_imms.is_empty()
+                    && self
+                        .event_sender
+                        .send(HummockEvent::ImmToUploader {
+                            instance_id: self.instance_id(),
+                            imms: pending_imms,
+                        })
+                        .is_err()
+                {
+                    warn!("failed to send ImmToUploader during seal. maybe shutting down");
+                }
+            }
+        }
+
         if let Some(new_level) = &opts.switch_op_consistency_level {
             self.mem_table.op_consistency_level.update(new_level);
             self.op_consistency_level.update(new_level);
@@ -654,14 +676,17 @@ impl LocalHummockStorage {
             );
             self.spill_offset += 1;
             let imm_size = imm.size();
-            self.read_version
-                .write()
-                .update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
+            let mut read_version = self.read_version.write();
+            read_version.add_imm(imm);
 
             // insert imm to uploader
-            if !self.is_replicated {
+            if !self.is_replicated
+                && (self.upload_on_flush
+                    || read_version.pending_imm_size() >= self.mem_table_spill_threshold)
+            {
+                let imms = read_version.start_upload_pending_imms();
                 self.event_sender
-                    .send(HummockEvent::ImmToUploader { instance_id, imm })
+                    .send(HummockEvent::ImmToUploader { instance_id, imms })
                     .map_err(|_| {
                         HummockError::other("failed to send imm to uploader. maybe shutting down")
                     })?;
@@ -712,6 +737,7 @@ impl LocalHummockStorage {
             write_limiter,
             version_update_notifier_tx,
             mem_table_spill_threshold,
+            upload_on_flush: option.upload_on_flush,
         }
     }
 

@@ -34,7 +34,7 @@ use risingwave_storage::hummock::iterator::test_utils::{
 };
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use risingwave_storage::hummock::store::version::{
-    HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate, read_filter_for_version,
+    HummockReadVersion, StagingSstableInfo, VersionUpdate, read_filter_for_version,
 };
 use risingwave_storage::hummock::test_utils::gen_dummy_batch;
 
@@ -69,7 +69,7 @@ async fn test_read_version_basic() {
             TableId::from(table_id),
         );
 
-        read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
+        read_version.add_imm(imm);
 
         let key = iterator_test_table_key_of(1_usize);
         let key_range = map_table_key_range((
@@ -103,7 +103,8 @@ async fn test_read_version_basic() {
                 TableId::from(table_id),
             );
 
-            read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
+            read_version.add_imm(imm);
+            let _ = read_version.start_upload_pending_imms();
         }
 
         for e in 1..6 {
@@ -129,9 +130,10 @@ async fn test_read_version_basic() {
     {
         // test clean imm with sst update info
         let staging = read_version.staging();
-        assert_eq!(6, staging.imm.len());
+        assert!(staging.pending_imms.is_empty());
+        assert_eq!(6, staging.uploading_imms.len());
         let batch_id_vec_for_clear = staging
-            .imm
+            .uploading_imms
             .iter()
             .rev()
             .map(|imm| imm.batch_id())
@@ -140,7 +142,7 @@ async fn test_read_version_basic() {
             .collect::<Vec<_>>();
 
         let epoch_id_vec_for_clear = staging
-            .imm
+            .uploading_imms
             .iter()
             .rev()
             .map(|imm| imm.min_epoch())
@@ -214,7 +216,7 @@ async fn test_read_version_basic() {
         ));
 
         {
-            read_version.update(VersionUpdate::Staging(StagingData::Sst(dummy_sst)));
+            read_version.update(VersionUpdate::Sst(dummy_sst));
         }
     }
 
@@ -225,11 +227,12 @@ async fn test_read_version_basic() {
         // imm(0, 1, 2) => sst{sst_object_id: 1}
         // staging => {imm(3, 4, 5), sst[{sst_object_id: 1}, {sst_object_id: 2}]}
         let staging = read_version.staging();
-        assert_eq!(3, read_version.staging().imm.len());
+        assert!(read_version.staging().pending_imms.is_empty());
+        assert_eq!(3, read_version.staging().uploading_imms.len());
         assert_eq!(1, read_version.staging().sst.len());
         assert_eq!(2, read_version.staging().sst[0].sstable_infos().len());
         let remain_batch_id_vec = staging
-            .imm
+            .uploading_imms
             .iter()
             .map(|imm| imm.batch_id())
             .collect::<Vec<_>>();
@@ -315,9 +318,7 @@ async fn test_read_filter_basic() {
             TableId::from(table_id),
         );
 
-        read_version
-            .write()
-            .update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
+        read_version.write().add_imm(imm);
 
         // directly prune_overlap
         let key = Bytes::from(iterator_test_table_key_of(epoch as usize));

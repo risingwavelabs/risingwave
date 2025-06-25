@@ -428,6 +428,7 @@ where
                 op_consistency_level,
                 table_option,
                 distribution.vnodes().clone(),
+                true,
             )
         };
         let local_state_store = store.new_local(new_local_options).await;
