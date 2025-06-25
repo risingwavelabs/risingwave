@@ -10,6 +10,8 @@ repository = { workspace = true }
 [dependencies]
 
 [dev-dependencies]
+futures = "0.3"
+mysql_async = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
     "rt",
@@ -19,8 +21,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
-mysql_async = { workspace = true }
-futures = "0.3"
 
 [lints]
 workspace = true
