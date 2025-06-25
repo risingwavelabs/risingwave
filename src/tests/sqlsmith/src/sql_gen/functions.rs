@@ -285,8 +285,8 @@ fn make_bin_op(func: ExprType, exprs: &[Expr]) -> Option<Expr> {
         E::BitwiseAnd => B::BitwiseAnd,
         E::BitwiseOr => B::BitwiseOr,
         E::BitwiseXor => B::PGBitwiseXor,
-        E::BitwiseShiftLeft => B::PGBitwiseShiftLeft,
-        E::BitwiseShiftRight => B::PGBitwiseShiftRight,
+        E::BitwiseShiftLeft => B::Custom("<<".to_owned()),
+        E::BitwiseShiftRight => B::Custom(">>".to_owned()),
         _ => return None,
     };
     Some(Expr::BinaryOp {

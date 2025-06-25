@@ -100,8 +100,6 @@ impl Binder {
             BinaryOperator::BitwiseAnd => ExprType::BitwiseAnd,
             BinaryOperator::BitwiseXor => ExprType::Pow,
             BinaryOperator::PGBitwiseXor => ExprType::BitwiseXor,
-            BinaryOperator::PGBitwiseShiftLeft => ExprType::BitwiseShiftLeft,
-            BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
             BinaryOperator::Arrow => ExprType::JsonbAccess,
             BinaryOperator::Custom(name) if name == "@>" => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
@@ -183,6 +181,8 @@ impl Binder {
             }
             BinaryOperator::PGRegexMatch => ExprType::RegexpEq,
             BinaryOperator::Custom(name) => match name.as_str() {
+                "<<" => ExprType::BitwiseShiftLeft,
+                ">>" => ExprType::BitwiseShiftRight,
                 "^@" => ExprType::StartsWith,
                 "~~" => ExprType::Like,
                 "~~*" => ExprType::ILike,

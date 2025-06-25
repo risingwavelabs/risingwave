@@ -122,10 +122,6 @@ pub enum Token {
     /// Tilde `~` used for PostgreSQL Bitwise NOT operator or case sensitive match regular
     /// expression operator
     Tilde,
-    /// `<<`, a bitwise shift left operator in PostgreSQL
-    ShiftLeft,
-    /// `>>`, a bitwise shift right operator in PostgreSQL
-    ShiftRight,
     /// Exclamation Mark `!` used for PostgreSQL factorial operator
     ExclamationMark,
     /// Double Exclamation Mark `!!` used for PostgreSQL prefix factorial operator
@@ -187,8 +183,6 @@ impl fmt::Display for Token {
             Token::DoubleExclamationMark => f.write_str("!!"),
             Token::Tilde => f.write_str("~"),
             Token::AtSign => f.write_str("@"),
-            Token::ShiftLeft => f.write_str("<<"),
-            Token::ShiftRight => f.write_str(">>"),
             Token::PGSquareRoot => f.write_str("|/"),
             Token::PGCubeRoot => f.write_str("||/"),
             Token::Arrow => f.write_str("->"),
@@ -690,9 +684,7 @@ impl<'a> Tokenizer<'a> {
                         "!" => Ok(Some(Token::ExclamationMark)),
                         "<=" => Ok(Some(Token::LtEq)),
                         "<>" => Ok(Some(Token::Neq)),
-                        "<<" => Ok(Some(Token::ShiftLeft)),
                         "<" => Ok(Some(Token::Lt)),
-                        ">>" => Ok(Some(Token::ShiftRight)),
                         ">=" => Ok(Some(Token::GtEq)),
                         ">" => Ok(Some(Token::Gt)),
                         "&" => Ok(Some(Token::Ampersand)),

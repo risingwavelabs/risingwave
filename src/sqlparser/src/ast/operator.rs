@@ -83,10 +83,6 @@ pub enum BinaryOperator {
     BitwiseXor,
     /// Bitwise XOR, e.g. `a # b` (PostgreSQL-specific)
     PGBitwiseXor,
-    /// Bitwise shift left, e.g. `a << b` (PostgreSQL-specific)
-    PGBitwiseShiftLeft,
-    /// Bitwise shift right, e.g. `a >> b` (PostgreSQL-specific)
-    PGBitwiseShiftRight,
     /// String matches regular expression (case sensitively), e.g. `a ~ b` (PostgreSQL-specific)
     PGRegexMatch,
     /// String "starts with", eg: `a ^@ b` (PostgreSQL-specific)
@@ -119,8 +115,6 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::BitwiseAnd => "&",
             BinaryOperator::BitwiseXor => "^",
             BinaryOperator::PGBitwiseXor => "#",
-            BinaryOperator::PGBitwiseShiftLeft => "<<",
-            BinaryOperator::PGBitwiseShiftRight => ">>",
             BinaryOperator::PGRegexMatch => "~",
             BinaryOperator::Arrow => "->",
             BinaryOperator::Custom(name) => name,
