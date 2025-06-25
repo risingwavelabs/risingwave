@@ -34,9 +34,11 @@ use crate::StateStore;
 use crate::compaction_catalog_manager::{CompactionCatalogManager, RemoteTableAccessor};
 use crate::error::StorageResult;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
+use crate::hummock::none::NoneRecentFilter;
+use crate::hummock::simple::SimpleRecentFilter;
 use crate::hummock::{
-    Block, BlockCacheEventListener, HummockError, HummockStorage, RecentFilter, Sstable,
-    SstableBlockIndex, SstableStore, SstableStoreConfig,
+    Block, BlockCacheEventListener, HummockError, HummockStorage, Sstable, SstableBlockIndex,
+    SstableStore, SstableStoreConfig,
 };
 use crate::memory::MemoryStateStore;
 use crate::memory::sled::SledStateStore;
@@ -696,7 +698,21 @@ impl StateStoreImpl {
                 .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
                     u64::BITS as usize / 8 + value.estimate_size()
                 })
-                .storage(Engine::Large);
+                .storage(Engine::Large(
+                    LargeEngineOptions::new()
+                        .with_indexer_shards(opts.meta_file_cache_indexer_shards)
+                        .with_flushers(opts.meta_file_cache_flushers)
+                        .with_reclaimers(opts.meta_file_cache_reclaimers)
+                        .with_buffer_pool_size(opts.meta_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
+                        .with_clean_region_threshold(
+                            opts.meta_file_cache_reclaimers + opts.meta_file_cache_reclaimers / 2,
+                        )
+                        .with_recover_concurrency(opts.meta_file_cache_recover_concurrency)
+                        .with_blob_index_size(16 * KB)
+                        .with_eviction_pickers(vec![Box::new(FifoPicker::new(
+                            opts.meta_file_cache_fifo_probation_ratio,
+                        ))]),
+                ));
 
             if !opts.meta_file_cache_dir.is_empty() {
                 if let Err(e) = Feature::ElasticDiskCache.check_available() {
@@ -711,25 +727,7 @@ impl StateStoreImpl {
                         )
                         .with_recover_mode(opts.meta_file_cache_recover_mode)
                         .with_compression(opts.meta_file_cache_compression)
-                        .with_runtime_options(opts.meta_file_cache_runtime_config.clone())
-                        .with_large_object_disk_cache_options(
-                            LargeEngineOptions::new()
-                                .with_indexer_shards(opts.meta_file_cache_indexer_shards)
-                                .with_flushers(opts.meta_file_cache_flushers)
-                                .with_reclaimers(opts.meta_file_cache_reclaimers)
-                                .with_buffer_pool_size(
-                                    opts.meta_file_cache_flush_buffer_threshold_mb * MB,
-                                ) // 128 MiB
-                                .with_clean_region_threshold(
-                                    opts.meta_file_cache_reclaimers
-                                        + opts.meta_file_cache_reclaimers / 2,
-                                )
-                                .with_recover_concurrency(opts.meta_file_cache_recover_concurrency)
-                                .with_blob_index_size(16 * KB)
-                                .with_eviction_pickers(vec![Box::new(FifoPicker::new(
-                                    opts.meta_file_cache_fifo_probation_ratio,
-                                ))]),
-                        );
+                        .with_runtime_options(opts.meta_file_cache_runtime_config.clone());
                 }
             }
 
@@ -750,7 +748,21 @@ impl StateStoreImpl {
                     // FIXME(MrCroxx): Calculate block weight more accurately.
                     u64::BITS as usize * 2 / 8 + value.raw().len()
                 })
-                .storage(Engine::Large);
+                .storage(Engine::Large(
+                    LargeEngineOptions::new()
+                        .with_indexer_shards(opts.data_file_cache_indexer_shards)
+                        .with_flushers(opts.data_file_cache_flushers)
+                        .with_reclaimers(opts.data_file_cache_reclaimers)
+                        .with_buffer_pool_size(opts.data_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
+                        .with_clean_region_threshold(
+                            opts.data_file_cache_reclaimers + opts.data_file_cache_reclaimers / 2,
+                        )
+                        .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
+                        .with_blob_index_size(16 * KB)
+                        .with_eviction_pickers(vec![Box::new(FifoPicker::new(
+                            opts.data_file_cache_fifo_probation_ratio,
+                        ))]),
+                ));
 
             if !opts.data_file_cache_dir.is_empty() {
                 if let Err(e) = Feature::ElasticDiskCache.check_available() {
@@ -765,25 +777,7 @@ impl StateStoreImpl {
                         )
                         .with_recover_mode(opts.data_file_cache_recover_mode)
                         .with_compression(opts.data_file_cache_compression)
-                        .with_runtime_options(opts.data_file_cache_runtime_config.clone())
-                        .with_large_object_disk_cache_options(
-                            LargeEngineOptions::new()
-                                .with_indexer_shards(opts.data_file_cache_indexer_shards)
-                                .with_flushers(opts.data_file_cache_flushers)
-                                .with_reclaimers(opts.data_file_cache_reclaimers)
-                                .with_buffer_pool_size(
-                                    opts.data_file_cache_flush_buffer_threshold_mb * MB,
-                                ) // 128 MiB
-                                .with_clean_region_threshold(
-                                    opts.data_file_cache_reclaimers
-                                        + opts.data_file_cache_reclaimers / 2,
-                                )
-                                .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
-                                .with_blob_index_size(16 * KB)
-                                .with_eviction_pickers(vec![Box::new(FifoPicker::new(
-                                    opts.data_file_cache_fifo_probation_ratio,
-                                ))]),
-                        );
+                        .with_runtime_options(opts.data_file_cache_runtime_config.clone());
                 }
             }
 
@@ -791,12 +785,17 @@ impl StateStoreImpl {
         };
 
         let recent_filter = if opts.data_file_cache_dir.is_empty() {
-            None
+            Arc::new(NoneRecentFilter::default().into())
         } else {
-            Some(Arc::new(RecentFilter::new(
-                opts.cache_refill_recent_filter_layers,
-                Duration::from_millis(opts.cache_refill_recent_filter_rotate_interval_ms as u64),
-            )))
+            Arc::new(
+                SimpleRecentFilter::new(
+                    opts.cache_refill_recent_filter_layers,
+                    Duration::from_millis(
+                        opts.cache_refill_recent_filter_rotate_interval_ms as u64,
+                    ),
+                )
+                .into(),
+            )
         };
 
         let store = match s {

@@ -304,6 +304,7 @@ unit = 64
 threshold = 0.5
 recent_filter_layers = 6
 recent_filter_rotate_interval_ms = 10000
+skip_recent_filter = false
 
 [storage.object_store]
 set_atomic_write_dir = false
