@@ -631,7 +631,7 @@ fn parse_pg_unary_ops() {
     let pg_unary_ops = &[
         ("~", UnaryOperator::PGBitwiseNot),
         ("|/", UnaryOperator::PGSquareRoot),
-        ("||/", UnaryOperator::PGCubeRoot),
+        ("||/", UnaryOperator::Custom("||/".to_owned())),
         ("@", UnaryOperator::PGAbs),
     ];
 

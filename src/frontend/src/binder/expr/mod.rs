@@ -333,7 +333,7 @@ impl Binder {
     }
 
     pub(super) fn bind_unary_expr(&mut self, op: UnaryOperator, expr: Expr) -> Result<ExprImpl> {
-        let func_type = match op {
+        let func_type = match &op {
             UnaryOperator::Not => ExprType::Not,
             UnaryOperator::Minus => ExprType::Neg,
             UnaryOperator::PGAbs => ExprType::Abs,
@@ -342,7 +342,10 @@ impl Binder {
                 return self.rewrite_positive(expr);
             }
             UnaryOperator::PGSquareRoot => ExprType::Sqrt,
-            UnaryOperator::PGCubeRoot => ExprType::Cbrt,
+            UnaryOperator::Custom(name) => match name.as_str() {
+                "||/" => ExprType::Cbrt,
+                _ => bail_not_implemented!(issue = 112, "unsupported unary expression: {:?}", op),
+            },
             _ => bail_not_implemented!(issue = 112, "unsupported unary expression: {:?}", op),
         };
         let expr = self.bind_expr_inner(expr)?;

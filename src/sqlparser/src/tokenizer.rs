@@ -126,8 +126,6 @@ pub enum Token {
     AtSign,
     /// `|/`, a square root math operator in PostgreSQL
     PGSquareRoot,
-    /// `||/` , a cube root math operator in PostgreSQL
-    PGCubeRoot,
 }
 
 impl fmt::Display for Token {
@@ -176,7 +174,6 @@ impl fmt::Display for Token {
             Token::Tilde => f.write_str("~"),
             Token::AtSign => f.write_str("@"),
             Token::PGSquareRoot => f.write_str("|/"),
-            Token::PGCubeRoot => f.write_str("||/"),
         }
     }
 }
@@ -666,7 +663,6 @@ impl<'a> Tokenizer<'a> {
                         "%" => Ok(Some(Token::Mod)),
                         "|" => Ok(Some(Token::Pipe)),
                         "|/" => Ok(Some(Token::PGSquareRoot)),
-                        "||/" => Ok(Some(Token::PGCubeRoot)),
                         "=" => Ok(Some(Token::Eq)),
                         "=>" => Ok(Some(Token::RArrow)),
                         "!=" => Ok(Some(Token::Neq)),
