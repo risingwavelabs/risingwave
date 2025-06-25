@@ -327,6 +327,7 @@ pub struct MetaConfig {
     #[deprecated]
     pub cut_table_size_limit: u64,
 
+    /// Whether to protect dropping a table with incoming sink.
     #[serde(default = "default::meta::protect_drop_table_with_incoming_sink")]
     pub protect_drop_table_with_incoming_sink: bool,
 
