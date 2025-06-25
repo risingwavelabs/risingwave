@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::is_reserved_admin_user;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
@@ -40,6 +41,13 @@ pub async fn handle_drop_user(
                 return Err(ErrorCode::PermissionDenied(
                     "current user cannot be dropped".to_owned(),
                 )
+                .into());
+            }
+            if is_reserved_admin_user(&user_name) {
+                return Err(ErrorCode::PermissionDenied(format!(
+                    "cannot drop the admin superuser \"{}\"",
+                    user_name
+                ))
                 .into());
             }
             if let Some(current_user) = user_info_reader

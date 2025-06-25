@@ -31,7 +31,6 @@ impl HeartbeatServiceImpl {
 
 #[async_trait::async_trait]
 impl HeartbeatService for HeartbeatServiceImpl {
-    #[cfg_attr(coverage, coverage(off))]
     async fn heartbeat(
         &self,
         request: Request<HeartbeatRequest>,

@@ -27,11 +27,8 @@ if [[ "$profile" != "ci-dev" ]] && [[ "$profile" != "ci-release" ]]; then
     exit 1
 fi
 
-# Enable coverage instrumentation only for ci-dev (PR workflow),
-# as ci-release (main-cron workflow) has heavier workload.
-if [[ "$profile" == "ci-dev" ]]; then
-    export RW_BUILD_INSTRUMENT_COVERAGE=1
-fi
+# Enable coverage instrumentation.
+export RW_BUILD_INSTRUMENT_COVERAGE=1
 
 echo "--- Build Rust components"
 
