@@ -244,7 +244,6 @@ pub async fn handle_create_mv_bound(
             dependent_udfs,
             columns,
             emit_mode,
-            &session,
         )
         .await?
     };
@@ -261,7 +260,6 @@ pub async fn handle_create_mv_bound(
                 table.name.clone(),
             ));
 
-    let session = session.clone();
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .create_materialized_view(
@@ -286,7 +284,6 @@ pub(crate) async fn gen_create_mv_graph(
     dependent_udfs: HashSet<FunctionId>,
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
-    session: &std::sync::Arc<SessionImpl>,
 ) -> Result<(
     TableCatalog,
     PbStreamFragmentGraph,
@@ -368,12 +365,13 @@ It only indicates the physical clustering of the data, which may improve the per
     }
 
     let context: OptimizerContextRef = context.into();
+    let session = context.session_ctx().as_ref();
 
     let (plan, table) =
-        gen_create_mv_plan_bound(&session, context.clone(), query, name, columns, emit_mode)?;
+        gen_create_mv_plan_bound(session, context.clone(), query, name, columns, emit_mode)?;
 
     let backfill_order = plan_backfill_order(
-        context.session_ctx().as_ref(),
+        session,
         context.with_options().backfill_order_strategy(),
         plan.clone(),
     )?;

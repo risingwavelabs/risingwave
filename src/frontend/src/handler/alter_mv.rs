@@ -159,12 +159,14 @@ async fn handle_alter_mv_bound(
             dependent_udfs,
             columns,
             emit_mode,
-            &session,
         )
         .await?
     };
 
-    let session = session.clone();
+    // After alter, the data of the MV is not guaranteed to be consistent.
+    // Forcely set the conflict behavior to avoid producing inconsistent changes to downstream.
+    table.conflict_behavior = ConflictBehavior::Overwrite;
+
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .replace_materialized_view(table.to_prost(), graph)
