@@ -141,11 +141,18 @@ pub enum VersionUpdate {
 #[derive(Clone)]
 pub struct StagingVersion {
     pending_imm_size: usize,
-    // newer data comes last
+    /// It contains the imms added but not sent to the uploader of hummock event handler.
+    /// It is non-empty only when `upload_on_flush` is false.
+    ///
+    /// It will be sent to the uploader when `pending_imm_size` exceed threshold or on `seal_current_epoch`.
+    ///
+    /// newer data comes last
     pub pending_imms: Vec<ImmutableMemtable>,
-    // newer data comes first
-    // Note: Currently, building imm and writing to staging version is not atomic, and therefore
-    // imm of smaller batch id may be added later than one with greater batch id
+    /// It contains the imms already sent to uploader of hummock event handler.
+    /// Note: Currently, building imm and writing to staging version is not atomic, and therefore
+    /// imm of smaller batch id may be added later than one with greater batch id
+    ///
+    /// Newer data comes first.
     pub uploading_imms: VecDeque<ImmutableMemtable>,
 
     // newer data comes first
