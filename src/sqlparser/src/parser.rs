@@ -1300,7 +1300,7 @@ impl Parser<'_> {
             Token::Minus => Some(BinaryOperator::Minus),
             Token::Mul => Some(BinaryOperator::Multiply),
             Token::Mod => Some(BinaryOperator::Modulo),
-            Token::Pipe => Some(BinaryOperator::BitwiseOr),
+            Token::Pipe => Some(BinaryOperator::Custom("|".to_owned())),
             Token::Caret => Some(BinaryOperator::Pow),
             Token::Div => Some(BinaryOperator::Divide),
             Token::Op(name) => Some(BinaryOperator::Custom(name.clone())),

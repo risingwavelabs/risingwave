@@ -868,7 +868,7 @@ fn parse_string_concat() {
 #[test]
 fn parse_bitwise_ops() {
     let bitwise_ops = &[
-        ("|", BinaryOperator::BitwiseOr),
+        ("|", BinaryOperator::Custom("|".to_owned())),
         ("&", BinaryOperator::Custom("&".to_owned())),
     ];
 

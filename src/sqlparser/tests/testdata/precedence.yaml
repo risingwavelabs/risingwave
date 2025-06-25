@@ -4,7 +4,7 @@
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: Value(Number("2")), op: Plus, right: BinaryOp { left: Value(Number("2")), op: Pow, right: Value(Number("2")) } })], from: [], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: None, offset: None, fetch: None })'
 - input: select 2 | 3 & 4
   formatted_sql: SELECT 2 | 3 & 4
-  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: BinaryOp { left: Value(Number("2")), op: BitwiseOr, right: Value(Number("3")) }, op: Custom("&"), right: Value(Number("4")) })], from: [], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: None, offset: None, fetch: None })'
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: BinaryOp { left: Value(Number("2")), op: Custom("|"), right: Value(Number("3")) }, op: Custom("&"), right: Value(Number("4")) })], from: [], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: None, offset: None, fetch: None })'
 - input: select - 3 ^ 2
   formatted_sql: SELECT -3 ^ 2
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: Value(Number("-3")), op: Pow, right: Value(Number("2")) })], from: [], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: None, offset: None, fetch: None })'

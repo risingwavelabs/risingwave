@@ -283,7 +283,7 @@ fn make_bin_op(func: ExprType, exprs: &[Expr]) -> Option<Expr> {
         E::Or => B::Or,
         E::Like => B::Custom("~~".to_owned()),
         E::BitwiseAnd => B::Custom("&".to_owned()),
-        E::BitwiseOr => B::BitwiseOr,
+        E::BitwiseOr => B::Custom("|".to_owned()),
         E::BitwiseXor => B::Custom("#".to_owned()),
         E::BitwiseShiftLeft => B::Custom("<<".to_owned()),
         E::BitwiseShiftRight => B::Custom(">>".to_owned()),
