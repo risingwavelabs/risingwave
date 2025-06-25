@@ -516,14 +516,12 @@ use std::sync::LazyLock;
 /// Map of source connector names to their changeable field names
 pub static SOURCE_CHANGEABLE_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {{
     let mut map = HashMap::new();{source_entries}
-    
     map
 }});
 
 /// Map of sink connector names to their changeable field names
 pub static SINK_CHANGEABLE_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {{
     let mut map = HashMap::new();{sink_entries}
-    
     map
 }});
 
