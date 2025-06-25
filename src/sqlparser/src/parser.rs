@@ -1312,7 +1312,6 @@ impl Parser<'_> {
             Token::Minus => Some(BinaryOperator::Minus),
             Token::Mul => Some(BinaryOperator::Multiply),
             Token::Mod => Some(BinaryOperator::Modulo),
-            Token::Concat => Some(BinaryOperator::Concat),
             Token::Pipe => Some(BinaryOperator::BitwiseOr),
             Token::Caret => Some(BinaryOperator::BitwiseXor),
             Token::Ampersand => Some(BinaryOperator::BitwiseAnd),
@@ -1322,8 +1321,6 @@ impl Parser<'_> {
             Token::Sharp => Some(BinaryOperator::PGBitwiseXor),
             Token::Tilde => Some(BinaryOperator::PGRegexMatch),
             Token::Arrow => Some(BinaryOperator::Arrow),
-            Token::AtArrow => Some(BinaryOperator::Contains),
-            Token::ArrowAt => Some(BinaryOperator::Contained),
             Token::Op(name) => Some(BinaryOperator::Custom(name.clone())),
             Token::Word(w) => match w.keyword {
                 Keyword::AND => Some(BinaryOperator::And),
@@ -1709,12 +1706,7 @@ impl Parser<'_> {
             Token::Word(w) if w.keyword == Keyword::ALL => Ok(P::Other),
             Token::Word(w) if w.keyword == Keyword::ANY => Ok(P::Other),
             Token::Word(w) if w.keyword == Keyword::SOME => Ok(P::Other),
-            Token::Tilde
-            | Token::Concat
-            | Token::Arrow
-            | Token::AtArrow
-            | Token::ArrowAt
-            | Token::Op(_) => Ok(P::Other),
+            Token::Tilde | Token::Arrow | Token::Op(_) => Ok(P::Other),
             Token::Word(w)
                 if w.keyword == Keyword::OPERATOR && self.peek_nth_token(1) == Token::LParen =>
             {

@@ -103,7 +103,7 @@ impl Binder {
             BinaryOperator::PGBitwiseShiftLeft => ExprType::BitwiseShiftLeft,
             BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
             BinaryOperator::Arrow => ExprType::JsonbAccess,
-            BinaryOperator::Contains => {
+            BinaryOperator::Custom(name) if name == "@>" => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
                 match (left_type, right_type) {
@@ -123,7 +123,7 @@ impl Binder {
                     }
                 }
             }
-            BinaryOperator::Contained => {
+            BinaryOperator::Custom(name) if name == "<@" => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
                 match (left_type, right_type) {
@@ -143,7 +143,7 @@ impl Binder {
                     }
                 }
             }
-            BinaryOperator::Concat => {
+            BinaryOperator::Custom(name) if name == "||" => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
                 match (left_type, right_type) {

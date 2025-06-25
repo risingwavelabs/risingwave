@@ -69,7 +69,6 @@ pub enum BinaryOperator {
     Multiply,
     Divide,
     Modulo,
-    Concat,
     Gt,
     Lt,
     GtEq,
@@ -92,8 +91,6 @@ pub enum BinaryOperator {
     PGRegexMatch,
     /// String "starts with", eg: `a ^@ b` (PostgreSQL-specific)
     Arrow,
-    Contains,
-    Contained,
     Custom(String),
     PGQualified(Box<QualifiedOperator>),
 }
@@ -109,7 +106,6 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::Multiply => "*",
             BinaryOperator::Divide => "/",
             BinaryOperator::Modulo => "%",
-            BinaryOperator::Concat => "||",
             BinaryOperator::Gt => ">",
             BinaryOperator::Lt => "<",
             BinaryOperator::GtEq => ">=",
@@ -127,8 +123,6 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::PGBitwiseShiftRight => ">>",
             BinaryOperator::PGRegexMatch => "~",
             BinaryOperator::Arrow => "->",
-            BinaryOperator::Contains => "@>",
-            BinaryOperator::Contained => "<@",
             BinaryOperator::Custom(name) => name,
             BinaryOperator::PGQualified(_) => unreachable!(),
         })

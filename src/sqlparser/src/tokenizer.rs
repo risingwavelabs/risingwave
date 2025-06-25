@@ -87,8 +87,6 @@ pub enum Token {
     Div,
     /// Modulo Operator `%`
     Mod,
-    /// String concatenation `||`
-    Concat,
     /// Left parenthesis `(`
     LParen,
     /// Right parenthesis `)`
@@ -140,10 +138,6 @@ pub enum Token {
     PGCubeRoot,
     /// `->`, access JSON object field or array element in PostgreSQL
     Arrow,
-    /// `@>`, does the left JSON value contain the right JSON path/value entries at the top level
-    AtArrow,
-    /// `<@`, does the right JSON value contain the left JSON path/value entries at the top level
-    ArrowAt,
 }
 
 impl fmt::Display for Token {
@@ -172,7 +166,6 @@ impl fmt::Display for Token {
             Token::Minus => f.write_str("-"),
             Token::Mul => f.write_str("*"),
             Token::Div => f.write_str("/"),
-            Token::Concat => f.write_str("||"),
             Token::Mod => f.write_str("%"),
             Token::LParen => f.write_str("("),
             Token::RParen => f.write_str(")"),
@@ -199,8 +192,6 @@ impl fmt::Display for Token {
             Token::PGSquareRoot => f.write_str("|/"),
             Token::PGCubeRoot => f.write_str("||/"),
             Token::Arrow => f.write_str("->"),
-            Token::AtArrow => f.write_str("@>"),
-            Token::ArrowAt => f.write_str("<@"),
         }
     }
 }
@@ -690,7 +681,6 @@ impl<'a> Tokenizer<'a> {
                         "/" => Ok(Some(Token::Div)),
                         "%" => Ok(Some(Token::Mod)),
                         "|" => Ok(Some(Token::Pipe)),
-                        "||" => Ok(Some(Token::Concat)),
                         "|/" => Ok(Some(Token::PGSquareRoot)),
                         "||/" => Ok(Some(Token::PGCubeRoot)),
                         "=" => Ok(Some(Token::Eq)),
@@ -700,7 +690,6 @@ impl<'a> Tokenizer<'a> {
                         "!" => Ok(Some(Token::ExclamationMark)),
                         "<=" => Ok(Some(Token::LtEq)),
                         "<>" => Ok(Some(Token::Neq)),
-                        "<@" => Ok(Some(Token::ArrowAt)),
                         "<<" => Ok(Some(Token::ShiftLeft)),
                         "<" => Ok(Some(Token::Lt)),
                         ">>" => Ok(Some(Token::ShiftRight)),
@@ -710,7 +699,6 @@ impl<'a> Tokenizer<'a> {
                         "^" => Ok(Some(Token::Caret)),
                         "~" => Ok(Some(Token::Tilde)),
                         "#" => Ok(Some(Token::Sharp)),
-                        "@>" => Ok(Some(Token::AtArrow)),
                         "@" => Ok(Some(Token::AtSign)),
                         _ => Ok(Some(Token::Op(op.to_owned()))),
                     }
@@ -1186,7 +1174,7 @@ mod tests {
             Token::Whitespace(Whitespace::Space),
             Token::SingleQuotedString(String::from("a")),
             Token::Whitespace(Whitespace::Space),
-            Token::Concat,
+            Token::Op("||".to_owned()),
             Token::Whitespace(Whitespace::Space),
             Token::SingleQuotedString(String::from("b")),
         ];

@@ -858,7 +858,7 @@ fn parse_string_concat() {
     assert_eq!(
         SelectItem::UnnamedExpr(Expr::BinaryOp {
             left: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
-            op: BinaryOperator::Concat,
+            op: BinaryOperator::Custom("||".to_owned()),
             right: Box::new(Expr::Identifier(Ident::new_unchecked("b"))),
         }),
         select.projection[0]
