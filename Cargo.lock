@@ -1816,7 +1816,7 @@ checksum = "3a8241f3ebb85c056b509d4327ad0358fbbba6ffb340bf388f26350aeda225b1"
 [[package]]
 name = "bergloom-codegen"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/BergLoom.git?rev=1f0849b16fa78170146402298c4d58c69d4fe351#1f0849b16fa78170146402298c4d58c69d4fe351"
+source = "git+https://github.com/nimtable/BergLoom.git?rev=8c48cc30d5acd2da4b001de5f5d944129dc44437#8c48cc30d5acd2da4b001de5f5d944129dc44437"
 dependencies = [
  "prost 0.13.4",
  "prost-build 0.13.4",
@@ -1827,7 +1827,7 @@ dependencies = [
 [[package]]
 name = "bergloom-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/BergLoom.git?rev=1f0849b16fa78170146402298c4d58c69d4fe351#1f0849b16fa78170146402298c4d58c69d4fe351"
+source = "git+https://github.com/nimtable/BergLoom.git?rev=8c48cc30d5acd2da4b001de5f5d944129dc44437#8c48cc30d5acd2da4b001de5f5d944129dc44437"
 dependencies = [
  "async-stream",
  "async-trait",
