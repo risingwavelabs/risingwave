@@ -599,8 +599,8 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                             .seal_current_epoch(barrier.epoch.curr, progress.take());
                         let update_vnode_bitmap =
                             barrier.as_update_vnode_bitmap(self.actor_context.id);
-                        post_seal.post_yield_barrier(update_vnode_bitmap).await?;
                         yield Message::Barrier(barrier);
+                        post_seal.post_yield_barrier(update_vnode_bitmap).await?;
                     }
                     Message::Chunk(chunk) => {
                         yield Message::Chunk(chunk);
