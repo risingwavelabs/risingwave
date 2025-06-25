@@ -100,7 +100,6 @@ impl Binder {
             BinaryOperator::BitwiseAnd => ExprType::BitwiseAnd,
             BinaryOperator::BitwiseXor => ExprType::Pow,
             BinaryOperator::PGBitwiseXor => ExprType::BitwiseXor,
-            BinaryOperator::Arrow => ExprType::JsonbAccess,
             BinaryOperator::Custom(name) if name == "@>" => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
@@ -198,6 +197,7 @@ impl Binder {
                     func_types.push(ExprType::Not);
                     ExprType::ILike
                 }
+                "->" => ExprType::JsonbAccess,
                 "->>" => ExprType::JsonbAccessStr,
                 "#-" => ExprType::JsonbDeletePath,
                 "#>" => ExprType::JsonbExtractPathVariadic,

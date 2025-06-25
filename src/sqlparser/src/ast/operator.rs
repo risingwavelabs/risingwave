@@ -85,8 +85,6 @@ pub enum BinaryOperator {
     PGBitwiseXor,
     /// String matches regular expression (case sensitively), e.g. `a ~ b` (PostgreSQL-specific)
     PGRegexMatch,
-    /// String "starts with", eg: `a ^@ b` (PostgreSQL-specific)
-    Arrow,
     Custom(String),
     PGQualified(Box<QualifiedOperator>),
 }
@@ -116,7 +114,6 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::BitwiseXor => "^",
             BinaryOperator::PGBitwiseXor => "#",
             BinaryOperator::PGRegexMatch => "~",
-            BinaryOperator::Arrow => "->",
             BinaryOperator::Custom(name) => name,
             BinaryOperator::PGQualified(_) => unreachable!(),
         })

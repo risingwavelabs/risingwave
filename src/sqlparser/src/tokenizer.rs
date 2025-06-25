@@ -132,8 +132,6 @@ pub enum Token {
     PGSquareRoot,
     /// `||/` , a cube root math operator in PostgreSQL
     PGCubeRoot,
-    /// `->`, access JSON object field or array element in PostgreSQL
-    Arrow,
 }
 
 impl fmt::Display for Token {
@@ -185,7 +183,6 @@ impl fmt::Display for Token {
             Token::AtSign => f.write_str("@"),
             Token::PGSquareRoot => f.write_str("|/"),
             Token::PGCubeRoot => f.write_str("||/"),
-            Token::Arrow => f.write_str("->"),
         }
     }
 }
@@ -670,7 +667,6 @@ impl<'a> Tokenizer<'a> {
                     match op {
                         "+" => Ok(Some(Token::Plus)),
                         "-" => Ok(Some(Token::Minus)),
-                        "->" => Ok(Some(Token::Arrow)),
                         "*" => Ok(Some(Token::Mul)),
                         "/" => Ok(Some(Token::Div)),
                         "%" => Ok(Some(Token::Mod)),

@@ -1318,7 +1318,6 @@ impl Parser<'_> {
             Token::Div => Some(BinaryOperator::Divide),
             Token::Sharp => Some(BinaryOperator::PGBitwiseXor),
             Token::Tilde => Some(BinaryOperator::PGRegexMatch),
-            Token::Arrow => Some(BinaryOperator::Arrow),
             Token::Op(name) => Some(BinaryOperator::Custom(name.clone())),
             Token::Word(w) => match w.keyword {
                 Keyword::AND => Some(BinaryOperator::And),
@@ -1704,7 +1703,7 @@ impl Parser<'_> {
             Token::Word(w) if w.keyword == Keyword::ALL => Ok(P::Other),
             Token::Word(w) if w.keyword == Keyword::ANY => Ok(P::Other),
             Token::Word(w) if w.keyword == Keyword::SOME => Ok(P::Other),
-            Token::Tilde | Token::Arrow | Token::Op(_) => Ok(P::Other),
+            Token::Tilde | Token::Op(_) => Ok(P::Other),
             Token::Word(w)
                 if w.keyword == Keyword::OPERATOR && self.peek_nth_token(1) == Token::LParen =>
             {
@@ -3986,7 +3985,7 @@ impl Parser<'_> {
             0..,
             separated_pair(
                 Self::parse_object_name,
-                Token::Arrow,
+                Token::Op("->".to_owned()),
                 Self::parse_object_name,
             ),
             Token::Comma,
