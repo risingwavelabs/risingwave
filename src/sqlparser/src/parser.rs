@@ -1301,7 +1301,7 @@ impl Parser<'_> {
             Token::Mul => Some(BinaryOperator::Multiply),
             Token::Mod => Some(BinaryOperator::Modulo),
             Token::Pipe => Some(BinaryOperator::BitwiseOr),
-            Token::Caret => Some(BinaryOperator::BitwiseXor),
+            Token::Caret => Some(BinaryOperator::Pow),
             Token::Div => Some(BinaryOperator::Divide),
             Token::Op(name) => Some(BinaryOperator::Custom(name.clone())),
             Token::Word(w) => match w.keyword {

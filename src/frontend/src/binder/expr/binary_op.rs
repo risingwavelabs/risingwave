@@ -97,7 +97,7 @@ impl Binder {
             BinaryOperator::And => ExprType::And,
             BinaryOperator::Or => ExprType::Or,
             BinaryOperator::BitwiseOr => ExprType::BitwiseOr,
-            BinaryOperator::BitwiseXor => ExprType::Pow,
+            BinaryOperator::Pow => ExprType::Pow,
             BinaryOperator::Custom(name) if name == "@>" => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());

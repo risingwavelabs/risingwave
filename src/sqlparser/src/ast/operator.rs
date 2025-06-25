@@ -63,7 +63,7 @@ pub enum BinaryOperator {
     Or,
     Xor,
     BitwiseOr,
-    BitwiseXor,
+    Pow,
     Custom(String),
     PGQualified(Box<QualifiedOperator>),
 }
@@ -89,7 +89,7 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::Or => "OR",
             BinaryOperator::Xor => "XOR",
             BinaryOperator::BitwiseOr => "|",
-            BinaryOperator::BitwiseXor => "^",
+            BinaryOperator::Pow => "^",
             BinaryOperator::Custom(name) => name,
             BinaryOperator::PGQualified(_) => unreachable!(),
         })
