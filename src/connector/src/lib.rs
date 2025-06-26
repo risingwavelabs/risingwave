@@ -43,7 +43,10 @@ use duration_str::parse_std;
 use serde::de;
 
 pub mod aws_utils;
+
+#[rustfmt::skip]
 pub mod changeable_fields;
+
 mod enforce_secret;
 pub mod error;
 mod macros;

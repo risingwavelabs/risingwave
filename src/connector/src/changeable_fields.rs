@@ -19,44 +19,38 @@ use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 /// Map of source connector names to their changeable field names
-pub static SOURCE_CHANGEABLE_FIELDS: LazyLock<HashMap<String, HashSet<String>>> =
-    LazyLock::new(|| {
-        let mut map = HashMap::new();
-        // KafkaProperties
-        map.insert(
-            "KafkaProperties".to_owned(),
-            ["properties.sync.call.timeout".to_owned()]
-                .into_iter()
-                .collect(),
-        );
-
-        map
-    });
+pub static SOURCE_CHANGEABLE_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {
+    let mut map = HashMap::new();
+    // KafkaProperties
+    map.insert(
+        "KafkaProperties".to_owned(),
+        [
+            "properties.sync.call.timeout".to_owned(),
+        ].into_iter().collect(),
+    );
+    map
+});
 
 /// Map of sink connector names to their changeable field names
-pub static SINK_CHANGEABLE_FIELDS: LazyLock<HashMap<String, HashSet<String>>> =
-    LazyLock::new(|| {
-        let mut map = HashMap::new();
-        // KafkaConfig
-        map.insert(
-            "KafkaConfig".to_owned(),
-            ["properties.sync.call.timeout".to_owned()]
-                .into_iter()
-                .collect(),
-        );
-
-        map
-    });
+pub static SINK_CHANGEABLE_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {
+    let mut map = HashMap::new();
+    // KafkaConfig
+    map.insert(
+        "KafkaConfig".to_owned(),
+        [
+            "properties.sync.call.timeout".to_owned(),
+        ].into_iter().collect(),
+    );
+    map
+});
 
 /// Get all source connector names that have changeable fields
 pub fn get_source_connectors_with_changeable_fields() -> Vec<&'static str> {
-    SOURCE_CHANGEABLE_FIELDS
-        .keys()
-        .map(|s| s.as_str())
-        .collect()
+    SOURCE_CHANGEABLE_FIELDS.keys().map(|s| s.as_str()).collect()
 }
 
 /// Get all sink connector names that have changeable fields
 pub fn get_sink_connectors_with_changeable_fields() -> Vec<&'static str> {
     SINK_CHANGEABLE_FIELDS.keys().map(|s| s.as_str()).collect()
 }
+
