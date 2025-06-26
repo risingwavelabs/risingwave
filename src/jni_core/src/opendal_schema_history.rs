@@ -17,14 +17,26 @@ use std::sync::{Arc, OnceLock};
 
 use bytes::Bytes;
 use jni::objects::{JByteArray, JObject, JString};
-use risingwave_common::STATE_STORE_URL;
 use risingwave_common::config::ObjectStoreConfig;
+use risingwave_common::{DATA_DIRECTPRY, STATE_STORE_URL};
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{ObjectStoreImpl, build_remote_object_store};
 
 use crate::{EnvParam, JAVA_BINDING_ASYNC_RUNTIME, execute_and_catch, to_guarded_slice};
 
 static OBJECT_STORE_INSTANCE: OnceLock<Arc<ObjectStoreImpl>> = OnceLock::new();
+
+// schema history is internal state, all data is stored under the DATA_DIRECTPRY directory.
+fn prepend_data_directory(path: &str) -> String {
+    let data_dir = DATA_DIRECTPRY.get().map(|s| s.as_str()).unwrap_or("");
+    if data_dir.is_empty() || path.starts_with(data_dir) {
+        path.to_owned()
+    } else if data_dir.ends_with('/') || path.starts_with('/') {
+        format!("{}{}", data_dir, path)
+    } else {
+        format!("{}/{}", data_dir, path)
+    }
+}
 
 async fn get_object_store() -> Arc<ObjectStoreImpl> {
     if let Some(store) = OBJECT_STORE_INSTANCE.get() {
@@ -53,6 +65,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_putObject(
     execute_and_catch(env, move |env| {
         let object_name = env.get_string(&object_name)?;
         let object_name: Cow<'_, str> = (&object_name).into();
+        let object_name = prepend_data_directory(&object_name);
 
         let data_guard = to_guarded_slice(&data, env)?;
         let data: Vec<u8> = data_guard.slice.to_vec();
@@ -75,6 +88,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_getObject<'a>(
     execute_and_catch(env, move |env: &mut EnvParam<'_>| {
         let object_name = env.get_string(&object_name)?;
         let object_name: Cow<'_, str> = (&object_name).into();
+        let object_name = prepend_data_directory(&object_name);
         let result = JAVA_BINDING_ASYNC_RUNTIME.block_on(async {
             let object_store = get_object_store().await;
             match object_store.read(&object_name, ..).await {
@@ -108,6 +122,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_listObject<'a>(
     **execute_and_catch(env, move |env: &mut EnvParam<'_>| {
         let dir = env.get_string(&dir)?;
         let dir: Cow<'_, str> = (&dir).into();
+        let dir = prepend_data_directory(&dir);
 
         let files: Vec<String> = JAVA_BINDING_ASYNC_RUNTIME.block_on(async {
             let object_store = get_object_store().await;
@@ -144,6 +159,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_deleteObjects<'a
     execute_and_catch(env, move |env: &mut EnvParam<'_>| {
         let dir = env.get_string(&dir)?;
         let dir: Cow<'_, str> = (&dir).into();
+        let dir = prepend_data_directory(&dir);
 
         JAVA_BINDING_ASYNC_RUNTIME.block_on(async {
             let object_store = get_object_store().await;
