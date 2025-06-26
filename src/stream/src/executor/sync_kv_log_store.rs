@@ -536,6 +536,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                 },
                 is_replicated: false,
                 vnodes: self.serde.vnodes().clone(),
+                upload_on_flush: false,
             })
             .await;
 
