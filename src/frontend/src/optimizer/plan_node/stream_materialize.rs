@@ -399,16 +399,17 @@ impl StreamNode for StreamMaterialize {
         use risingwave_pb::stream_plan::*;
 
         PbNodeBody::Materialize(Box::new(MaterializeNode {
-            // We don't need table id for materialize node in frontend. The id will be generated on
-            // meta catalog service.
+            // Do not fill `table` and `table_id` here to avoid duplication. It will be filled by
+            // meta service after global information is generated.
             table_id: 0,
+            table: None,
+
             column_orders: self
                 .table()
                 .pk()
                 .iter()
                 .map(ColumnOrder::to_protobuf)
                 .collect(),
-            table: Some(self.table().to_internal_table_prost()),
         }))
     }
 }
