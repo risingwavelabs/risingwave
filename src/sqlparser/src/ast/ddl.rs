@@ -123,6 +123,10 @@ pub enum AlterTableOperation {
     },
     /// `DROP CONNECTOR`
     DropConnector,
+    /// `ALTER CONNECTOR WITH (<connector_props>)`
+    AlterConnectorProps {
+        alter_props: Vec<SqlOption>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -244,6 +248,9 @@ pub enum AlterSourceOperation {
     SetParallelism {
         parallelism: SetVariableValue,
         deferred: bool,
+    },
+    AlterConnectorProps {
+        alter_props: Vec<SqlOption>,
     },
 }
 
@@ -387,6 +394,13 @@ impl fmt::Display for AlterTableOperation {
             }
             AlterTableOperation::DropConnector => {
                 write!(f, "DROP CONNECTOR")
+            }
+            AlterTableOperation::AlterConnectorProps { alter_props } => {
+                write!(
+                    f,
+                    "CONNECTOR WITH ({})",
+                    display_comma_separated(alter_props)
+                )
             }
         }
     }
@@ -563,6 +577,13 @@ impl fmt::Display for AlterSourceOperation {
                     "SET PARALLELISM TO {}{}",
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
+                )
+            }
+            AlterSourceOperation::AlterConnectorProps { alter_props } => {
+                write!(
+                    f,
+                    "CONNECTOR WITH ({})",
+                    display_comma_separated(alter_props)
                 )
             }
         }
