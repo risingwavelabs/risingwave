@@ -144,6 +144,14 @@ pub trait FrontendMetaClient: Send + Sync {
         connector_conn_ref: Option<u32>,
     ) -> Result<()>;
 
+    async fn alter_source_connector_props(
+        &self,
+        source_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        connector_conn_ref: Option<u32>,
+    ) -> Result<()>;
+
     async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>>;
 
     async fn get_fragment_by_id(&self, fragment_id: u32) -> Result<Option<FragmentDistribution>>;
@@ -349,6 +357,23 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0
             .alter_sink_props(
                 sink_id,
+                changed_props,
+                changed_secret_refs,
+                connector_conn_ref,
+            )
+            .await
+    }
+
+    async fn alter_source_connector_props(
+        &self,
+        source_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        connector_conn_ref: Option<u32>,
+    ) -> Result<()> {
+        self.0
+            .alter_source_connector_props(
+                source_id,
                 changed_props,
                 changed_secret_refs,
                 connector_conn_ref,
