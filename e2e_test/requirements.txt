@@ -1,7 +1,7 @@
 -r source_legacy/requirements.txt
 -r source_inline/requirements.txt
 requests
-confluent_kafka==2.6.2
+confluent_kafka==2.10.1
 # confluent_kafka doesn't list dependencies, so we need to install them manually
 # https://github.com/confluentinc/confluent-kafka-python/issues/1712
 protobuf==5.28.0

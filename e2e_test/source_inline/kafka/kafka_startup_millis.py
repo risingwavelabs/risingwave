@@ -86,7 +86,6 @@ def main():
                 connector = 'kafka',
                 topic = '{args.topic}',
                 properties.bootstrap.server = '{kafka_broker}',
-                scan.startup.mode = 'timestamp',
                 scan.startup.timestamp_millis = '{current_timestamp_millis}'
             ) FORMAT PLAIN ENCODE JSON;
             """
@@ -130,7 +129,7 @@ def main():
             conn.close()
 
     finally:
-        producer.close()
+        pass
 
 
 if __name__ == "__main__":
