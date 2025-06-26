@@ -675,13 +675,17 @@ impl Parser<'_> {
                 k if keywords::RESERVED_FOR_COLUMN_OR_TABLE_NAME.contains(&k) => {
                     parser_err!("syntax error at or near {token}")
                 }
+                Keyword::AGGREGATE => {
+                    *self = checkpoint;
+                    self.parse_function()
+                }
                 // Here `w` is a word, check if it's a part of a multi-part
                 // identifier, a function call, or a simple identifier:
                 _ => match self.peek_token().token {
-                    Token::LParen | Token::Period | Token::Colon => {
+                    Token::LParen | Token::Period => {
                         *self = checkpoint;
                         if let Ok(object_name) = self.parse_object_name()
-                            && !matches!(self.peek_token().token, Token::LParen | Token::Colon)
+                            && !matches!(self.peek_token().token, Token::LParen)
                         {
                             Ok(Expr::CompoundIdentifier(object_name.0))
                         } else {
