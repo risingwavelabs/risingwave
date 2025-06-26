@@ -145,7 +145,6 @@ impl BuildingFragment {
                 if cfg!(not(debug_assertions)) {
                     table.definition = job.name();
                 }
-                table.stream_job_status = StreamJobStatus::Unspecified as _;
 
                 has_job = true;
             }
