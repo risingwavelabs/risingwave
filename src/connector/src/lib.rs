@@ -33,6 +33,7 @@
 #![feature(register_tool)]
 #![feature(assert_matches)]
 #![feature(never_type)]
+#![feature(map_try_insert)]
 #![register_tool(rw)]
 #![recursion_limit = "256"]
 #![feature(min_specialization)]
@@ -185,7 +186,7 @@ mod tests {
         expect_file!("../with_options_sink.yaml").assert_eq(&generate_with_options_yaml_sink());
     }
 
-    /// This test ensures that the allow_alter_on_fly fields Rust file is up-to-date.
+    /// This test ensures that the `allow_alter_on_fly` fields Rust file is up-to-date.
     #[test]
     fn test_allow_alter_on_fly_fields_rust_up_to_date() {
         expect_file!("../src/allow_alter_on_fly_fields.rs")

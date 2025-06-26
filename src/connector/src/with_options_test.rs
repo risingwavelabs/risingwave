@@ -462,36 +462,42 @@ fn generate_rust_allow_alter_on_fly_fields_code_separate(
     sink_info: BTreeMap<String, Vec<String>>,
 ) -> String {
     // Helper function to generate field entries for a single struct
-    let generate_struct_entries = |info: &BTreeMap<String, Vec<String>>| -> String {
-        info.iter()
-            .filter_map(|(struct_name, field_names)| {
-                if field_names.is_empty() {
-                    None
-                } else {
-                    let fields = field_names
-                        .iter()
-                        .map(|field| format!("            \"{}\".to_owned(),", field))
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    Some(format!(
-                        "
+    let generate_struct_entries =
+        |info: &BTreeMap<String, Vec<String>>, is_source: bool| -> String {
+            info.iter()
+                .filter_map(|(struct_name, field_names)| {
+                    let key = if is_source {
+                        format!("std::any::type_name::<{}>().to_owned()", struct_name)
+                    } else {
+                        format!("\"{}\".to_owned()", struct_name)
+                    };
+                    if field_names.is_empty() {
+                        None
+                    } else {
+                        let fields = field_names
+                            .iter()
+                            .map(|field| format!("            \"{}\".to_owned(),", field))
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        Some(format!(
+                            "
     // {}
-    map.insert(
-        \"{}\".to_owned(),
+    map.try_insert(
+        {},
         [
 {}
         ].into_iter().collect(),
-    );",
-                        struct_name, struct_name, fields
-                    ))
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("")
-    };
+    ).unwrap();",
+                            struct_name, key, fields
+                        ))
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("")
+        };
 
-    let source_entries = generate_struct_entries(&source_info);
-    let sink_entries = generate_struct_entries(&sink_info);
+    let source_entries = generate_struct_entries(&source_info, true);
+    let sink_entries = generate_struct_entries(&sink_info, false);
 
     format!(
         r#"// Copyright 2025 RisingWave Labs
@@ -514,8 +520,24 @@ fn generate_rust_allow_alter_on_fly_fields_code_separate(
 use std::collections::{{HashMap, HashSet}};
 use std::sync::LazyLock;
 
+macro_rules! use_source_properties {{
+    ({{ $({{ $variant_name:ident, $prop_name:ty, $split:ty }}),* }}) => {{
+        $(
+            #[allow(unused_imports)]
+            pub(super) use $prop_name;
+        )*
+    }};
+}}
+
+mod source_properties {{
+    use crate::for_all_sources;
+
+    for_all_sources!(use_source_properties);
+}}
+
 /// Map of source connector names to their changeable field names
 pub static SOURCE_CHANGEABLE_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {{
+    use source_properties::*;
     let mut map = HashMap::new();{source_entries}
     map
 }});

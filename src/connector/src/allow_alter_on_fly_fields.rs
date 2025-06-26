@@ -18,39 +18,55 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
-/// Map of source connector names to their allow_alter_on_fly field names
-pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {
+macro_rules! use_source_properties {
+    ({ $({ $variant_name:ident, $prop_name:ty, $split:ty }),* }) => {
+        $(
+            #[allow(unused_imports)]
+            pub(super) use $prop_name;
+        )*
+    };
+}
+
+mod source_properties {
+    use crate::for_all_sources;
+
+    for_all_sources!(use_source_properties);
+}
+
+/// Map of source connector names to their changeable field names
+pub static SOURCE_CHANGEABLE_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {
+    use source_properties::*;
     let mut map = HashMap::new();
     // KafkaProperties
-    map.insert(
-        "KafkaProperties".to_owned(),
+    map.try_insert(
+        std::any::type_name::<KafkaProperties>().to_owned(),
         [
             "properties.sync.call.timeout".to_owned(),
         ].into_iter().collect(),
-    );
+    ).unwrap();
     map
 });
 
-/// Map of sink connector names to their allow_alter_on_fly field names
-pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {
+/// Map of sink connector names to their changeable field names
+pub static SINK_CHANGEABLE_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {
     let mut map = HashMap::new();
     // KafkaConfig
-    map.insert(
+    map.try_insert(
         "KafkaConfig".to_owned(),
         [
             "properties.sync.call.timeout".to_owned(),
         ].into_iter().collect(),
-    );
+    ).unwrap();
     map
 });
 
-/// Get all source connector names that have allow_alter_on_fly fields
-pub fn get_source_connectors_with_allow_alter_on_fly_fields() -> Vec<&'static str> {
-    SOURCE_ALLOW_ALTER_ON_FLY_FIELDS.keys().map(|s| s.as_str()).collect()
+/// Get all source connector names that have changeable fields
+pub fn get_source_connectors_with_changeable_fields() -> Vec<&'static str> {
+    SOURCE_CHANGEABLE_FIELDS.keys().map(|s| s.as_str()).collect()
 }
 
-/// Get all sink connector names that have allow_alter_on_fly fields
-pub fn get_sink_connectors_with_allow_alter_on_fly_fields() -> Vec<&'static str> {
-    SINK_ALLOW_ALTER_ON_FLY_FIELDS.keys().map(|s| s.as_str()).collect()
+/// Get all sink connector names that have changeable fields
+pub fn get_sink_connectors_with_changeable_fields() -> Vec<&'static str> {
+    SINK_CHANGEABLE_FIELDS.keys().map(|s| s.as_str()).collect()
 }
 
