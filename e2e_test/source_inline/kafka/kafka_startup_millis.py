@@ -111,10 +111,7 @@ def main():
 
             # Expected: Should only see records with timestamps >= current_timestamp_millis
             expected_count = len([r for r in additional_records])
-            if count_result == expected_count:
-                print(f"✅ Test PASSED: Got expected count {expected_count}")
-            else:
-                print(f"❌ Test FAILED: Expected count {expected_count}, got {count_result}")
+            assert count_result == expected_count, f"❌ Test FAILED: Expected count {expected_count}, got {count_result}"
 
         finally:
             # Step 7: Drop the table
