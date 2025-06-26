@@ -358,9 +358,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     })?;
                                     let workers = runtime_info.database_fragment_info.workers();
                                     for worker_id in workers {
-                                        if !self.control_stream_manager.contains_worker(worker_id) {
-                                            let node = self.active_streaming_nodes.current()[&worker_id].clone();
-                                            self.control_stream_manager.try_add_worker(node, entering_initializing.inflight_infos(), self.term_id.clone(), &*self.context).await;
+                                        if !self.control_stream_manager.is_connected(worker_id) {
+                                            self.control_stream_manager.try_reconnect_worker(worker_id, entering_initializing.inflight_infos(), self.term_id.clone(), &*self.context).await;
                                         }
                                     }
                                     entering_initializing.enter(runtime_info, &mut self.control_stream_manager);
@@ -456,9 +455,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             )
                             .collect();
                         for worker_id in worker_ids {
-                            if !self.control_stream_manager.contains_worker(worker_id) {
-                                let node = self.active_streaming_nodes.current()[&worker_id].clone();
-                                self.control_stream_manager.try_add_worker(node, self.checkpoint_control.inflight_infos(), self.term_id.clone(), &*self.context).await;
+                            if !self.control_stream_manager.is_connected(worker_id) {
+                                self.control_stream_manager.try_reconnect_worker(worker_id, self.checkpoint_control.inflight_infos(), self.term_id.clone(), &*self.context).await;
                             }
                         }
                     }
