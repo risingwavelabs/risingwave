@@ -30,7 +30,7 @@ use risingwave_common::util::stream_graph_visitor::{
     self, visit_stream_node_cont, visit_stream_node_cont_mut,
 };
 use risingwave_meta_model::WorkerId;
-use risingwave_pb::catalog::{StreamJobStatus, Table};
+use risingwave_pb::catalog::Table;
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::plan_common::PbColumnDesc;
 use risingwave_pb::stream_plan::dispatch_output_mapping::TypePair;
