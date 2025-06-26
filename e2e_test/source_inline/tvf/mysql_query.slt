@@ -202,8 +202,8 @@ sleep 5s
 query I
 select * from test order by id;
 ----
-1 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 \x01020304 b \x3132333435 text tinytext mediumtext longtext
-2 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 NULL f 2022 \x05060708 c \x6162636465 text2 tinytext2 mediumtext2 longtext2
+1 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023   b \x3132333435 text tinytext mediumtext longtext
+2 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 NULL f 2022   c \x6162636465 text2 tinytext2 mediumtext2 longtext2
 
 system ok
 mysql -e "
