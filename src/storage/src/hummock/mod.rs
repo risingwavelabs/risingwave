@@ -54,6 +54,8 @@ pub use recent_filter::*;
 pub mod block_stream;
 mod time_travel_version_cache;
 
+pub mod batch_logger;
+
 pub use error::*;
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 pub use validator::*;

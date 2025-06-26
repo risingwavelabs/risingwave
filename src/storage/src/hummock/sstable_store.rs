@@ -14,8 +14,8 @@
 use std::clone::Clone;
 use std::collections::VecDeque;
 use std::future::Future;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, LazyLock};
 
 use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
@@ -39,6 +39,7 @@ use super::{
     BatchUploadWriter, Block, BlockMeta, BlockResponse, RecentFilter, Sstable, SstableMeta,
     SstableWriterOptions,
 };
+use crate::hummock::batch_logger::BatchLogger;
 use crate::hummock::block_stream::{
     BlockDataStream, BlockStream, MemoryUsageTracker, PrefetchBlockStream,
 };
@@ -47,6 +48,15 @@ use crate::hummock::{BlockHolder, HummockError, HummockResult, RecentFilterTrait
 use crate::monitor::{HummockStateStoreMetrics, StoreLocalStatistic};
 
 pub type TableHolder = HybridCacheEntry<HummockSstableObjectId, Box<Sstable>>;
+
+static MISSES: LazyLock<BatchLogger<(HummockSstableObjectId, usize)>> = LazyLock::new(|| {
+    BatchLogger::new(
+        tracing::Level::INFO,
+        "========== MISSED DATA BLOCKS ==========",
+        std::time::Duration::from_secs(10),
+        1000,
+    )
+});
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
 pub struct SstableBlockIndex {
@@ -450,6 +460,7 @@ impl SstableStore {
                 );
                 if matches!(entry.state(), FetchState::Miss) {
                     stats.cache_data_block_miss += 1;
+                    MISSES.log((object_id, block_index));
                 }
                 Ok(BlockResponse::Entry(entry))
             }
