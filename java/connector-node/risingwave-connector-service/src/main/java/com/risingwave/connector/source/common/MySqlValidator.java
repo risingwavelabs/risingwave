@@ -278,6 +278,8 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
 
     private boolean isDataTypeCompatible(String mysqlDataType, Data.DataType.TypeName typeName) {
         int val = typeName.getNumber();
+        // 打印 MySQL 数据类型，便于调试
+        System.out.println("MySQL data type: " + mysqlDataType + ", RW type: " + typeName);
         switch (mysqlDataType) {
             case "tinyint": // boolean
                 return (val == Data.DataType.TypeName.BOOLEAN_VALUE)
@@ -321,6 +323,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             case "blob":
             case "mediumblob":
             case "longblob":
+            case "binary":
                 return val == Data.DataType.TypeName.BYTEA_VALUE;
             case "year":
                 return val == Data.DataType.TypeName.INT32_VALUE;
