@@ -32,7 +32,16 @@ CREATE TABLE test (
     v20 time,
     v21 timestamp,
     v22 json,
-    v23 int
+    v23 int,
+    v24 bit(1),
+    v25 year,
+    v26 binary(4),
+    v27 enum('a', 'b', 'c'),
+    v28 varbinary(10),
+    v29 text,
+    v30 tinytext,
+    v31 mediumtext,
+    v32 longtext
 );
 INSERT INTO test SELECT
   1 as id,
@@ -59,7 +68,16 @@ INSERT INTO test SELECT
   '12:34:56' as v20,
   '2021-01-01 12:34:56' as v21,
   JSON_OBJECT('key1', 1, 'key2', 'abc') as v22,
-  null as v23;
+  null as v23,
+  true as v24,
+  2023 as v25,
+  x'01020304' as v26,
+  'b' as v27,
+  x'3132333435' as v28,
+  'text' as v29,
+  'tinytext' as v30,
+  'mediumtext' as v31,
+  'longtext' as v32;
 "
 
 statement ok
@@ -73,12 +91,12 @@ create source mysql_cdc_source with (
 query
 select * from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'tvf', 'select * from test;');
 ----
-1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL
+1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 \x01020304 b \x3132333435 text内容 tinytext内容 mediumtext内容 longtext内容
 
 query
 select * from mysql_query('mysql_cdc_source', 'select * from test;');
 ----
-1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL
+1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 \x01020304 b \x3132333435 text内容 tinytext内容 mediumtext内容 longtext内容
 
 
 system ok
@@ -110,7 +128,16 @@ INSERT INTO test SELECT
   '12:34:56' as v20,
   '0000-00-00' as v21,
   JSON_OBJECT('key1', 1, 'key2', 'abc') as v22,
-  null as v23;
+  null as v23,
+  false as v24,
+  2022 as v25,
+  x'05060708' as v26,
+  'c' as v27,
+  x'6162636465' as v28,
+  'text2' as v29,
+  'tinytext2' as v30,
+  'mediumtext2' as v31,
+  'longtext2' as v32;
 "
 
 statement error db error: ERROR: Failed to run the query
@@ -150,7 +177,16 @@ create table test (
     v20 time,
     v21 timestamptz,
     v22 jsonb,
-    v23 int
+    v23 int,
+    v24 bool,
+    v25 int,
+    v26 bytea,
+    v27 varchar,
+    v28 bytea,
+    v29 varchar,
+    v30 varchar,
+    v31 varchar,
+    v32 varchar
 ) with (
  connector = 'mysql-cdc',
  hostname = '$MYSQL_HOST',
@@ -166,8 +202,8 @@ sleep 5s
 query I
 select * from test order by id;
 ----
-1 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL
-2 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 NULL {"key1": 1, "key2": "abc"} NULL
+1 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 \x01020304 b \x3132333435 text内容 tinytext内容 mediumtext内容 longtext内容
+2 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 NULL f 2022 \x05060708 c \x6162636465 text内容2 tinytext内容2 mediumtext内容2 longtext内容2
 
 system ok
 mysql -e "

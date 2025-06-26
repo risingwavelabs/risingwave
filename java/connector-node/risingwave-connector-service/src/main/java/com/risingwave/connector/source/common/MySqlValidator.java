@@ -319,6 +319,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             case "text":
             case "tinytext":
             case "mediumtext":
+                return val == Data.DataType.TypeName.VARCHAR_VALUE;
             case "longtext":
                 return val == Data.DataType.TypeName.BYTEA_VALUE
                         || val == Data.DataType.TypeName.VARCHAR_VALUE;
