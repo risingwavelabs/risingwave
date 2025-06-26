@@ -19,7 +19,6 @@ use std::marker::PhantomData;
 
 use crate::hummock::RecentFilterTrait;
 
-#[derive(Default)]
 pub struct AllRecentFilter<T>(PhantomData<T>);
 
 impl<T> Debug for AllRecentFilter<T> {
@@ -30,6 +29,12 @@ impl<T> Debug for AllRecentFilter<T> {
 
 impl<T> Clone for AllRecentFilter<T> {
     fn clone(&self) -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<T> Default for AllRecentFilter<T> {
+    fn default() -> Self {
         Self(PhantomData)
     }
 }
