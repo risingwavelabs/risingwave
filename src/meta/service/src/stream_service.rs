@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::secret::LocalSecretManager;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_connector::source::SplitMetaData;
 use risingwave_meta::barrier::BarrierManagerRef;
 use risingwave_meta::controller::fragment::StreamingJobInfo;
@@ -37,6 +38,7 @@ use risingwave_pb::meta::table_fragments::PbState;
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::meta::*;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::{BarrierScheduler, Command};
@@ -573,6 +575,35 @@ impl StreamManagerService for StreamServiceImpl {
             .await?;
 
         Ok(Response::new(AlterConnectorPropsResponse {}))
+    }
+
+    async fn set_sync_log_store_aligned(
+        &self,
+        request: Request<SetSyncLogStoreAlignedRequest>,
+    ) -> Result<Response<SetSyncLogStoreAlignedResponse>, Status> {
+        let req = request.into_inner();
+        let job_id = req.job_id;
+        let aligned = req.aligned;
+
+        self.metadata_manager
+            .catalog_controller
+            .mutate_fragments_by_job_id(
+                job_id as _,
+                |_mask, stream_node| {
+                    let mut visited = false;
+                    visit_stream_node_mut(stream_node, |body| {
+                        if let NodeBody::SyncLogStore(sync_log_store) = body {
+                            sync_log_store.aligned = aligned;
+                            visited = true
+                        }
+                    });
+                    visited
+                },
+                "no fragments found with synced log store",
+            )
+            .await?;
+
+        Ok(Response::new(SetSyncLogStoreAlignedResponse {}))
     }
 }
 

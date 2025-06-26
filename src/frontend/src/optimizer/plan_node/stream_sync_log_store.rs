@@ -104,6 +104,7 @@ impl StreamNode for StreamSyncLogStore {
             log_store_table,
             pause_duration_ms: self.pause_duration_ms as _,
             buffer_size: self.buffer_size as _,
+            aligned: false,
         }))
     }
 }

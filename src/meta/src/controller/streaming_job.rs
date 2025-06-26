@@ -1500,7 +1500,7 @@ impl CatalogController {
 
     // edit the content of fragments in given `table_id`
     // return the actor_ids to be applied
-    async fn mutate_fragments_by_job_id(
+    pub async fn mutate_fragments_by_job_id(
         &self,
         job_id: ObjectId,
         // returns true if the mutation is applied
