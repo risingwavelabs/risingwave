@@ -188,7 +188,8 @@ mod tests {
     /// This test ensures that the allow_alter_on_fly fields Rust file is up-to-date.
     #[test]
     fn test_allow_alter_on_fly_fields_rust_up_to_date() {
-        expect_file!("../src/allow_alter_on_fly_fields.rs").assert_eq(&generate_allow_alter_on_fly_fields_combined());
+        expect_file!("../src/allow_alter_on_fly_fields.rs")
+            .assert_eq(&generate_allow_alter_on_fly_fields_combined());
     }
 
     /// Test some serde behavior we rely on.

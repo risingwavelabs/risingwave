@@ -64,8 +64,9 @@ pub fn generate_allow_alter_on_fly_fields_combined() -> String {
     let source_info = extract_allow_alter_on_fly_fields_from_yaml(
         &connector_crate_path().join("with_options_source.yaml"),
     );
-    let sink_info =
-        extract_allow_alter_on_fly_fields_from_yaml(&connector_crate_path().join("with_options_sink.yaml"));
+    let sink_info = extract_allow_alter_on_fly_fields_from_yaml(
+        &connector_crate_path().join("with_options_sink.yaml"),
+    );
 
     generate_rust_allow_alter_on_fly_fields_code_separate(source_info, sink_info)
 }
