@@ -473,7 +473,7 @@ impl Planner {
                 self.correlated_indices_collection.push(
                     subquery.collect_correlated_indices_by_depth_and_assign_id(
                         0,
-                        self.correlated_id.clone().unwrap(),
+                        self.correlated_id.unwrap(),
                     ),
                 );
                 self.subqueries.push(subquery);
@@ -495,7 +495,7 @@ impl Planner {
 
         let mut right = None;
 
-        for subquery in rewriter.subqueries.into_iter() {
+        for subquery in rewriter.subqueries {
             let return_type = subquery.return_type();
             let subroot = self.plan_query(subquery.query)?;
 
