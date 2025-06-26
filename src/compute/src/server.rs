@@ -207,7 +207,7 @@ pub async fn compute_node_serve(
 
     LicenseManager::get().refresh(system_params.license_key());
     // Store the state_store_url in a static OnceLock for later use in JNI crate
-    let _ = STATE_STORE_URL.set(state_store_url.to_string());
+    let _ = STATE_STORE_URL.set(state_store_url.to_owned());
 
     let state_store = StateStoreImpl::new(
         state_store_url,

@@ -94,7 +94,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_getObjectStoreTy
     execute_and_catch(env, move |env: &mut EnvParam<'_>| {
         let media_type = JAVA_BINDING_ASYNC_RUNTIME.block_on(async {
             let object_store = get_object_store().await;
-            object_store.media_type().to_string()
+            object_store.media_type().to_owned()
         });
         Ok(env.new_string(media_type)?)
     })
@@ -134,4 +134,34 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_listObject<'a>(
         }
         Ok(array)
     })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_deleteObjects<'a>(
+    env: EnvParam<'a>,
+    dir: JString<'a>,
+) {
+    execute_and_catch(env, move |env: &mut EnvParam<'_>| {
+        let dir = env.get_string(&dir)?;
+        let dir: Cow<'_, str> = (&dir).into();
+
+        JAVA_BINDING_ASYNC_RUNTIME.block_on(async {
+            let object_store = get_object_store().await;
+            let mut keys = Vec::new();
+            let mut stream = match object_store.list(&dir, None, None).await {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            use futures::StreamExt;
+            while let Some(obj) = stream.next().await {
+                if let Ok(obj) = obj {
+                    keys.push(obj.key);
+                }
+            }
+            for key in keys {
+                let _ = object_store.delete(&key).await;
+            }
+        });
+        Ok(())
+    });
 }

@@ -18,6 +18,7 @@
 
 package com.risingwave.connector.cdc.debezium.internal;
 
+import static com.risingwave.java.binding.Binding.deleteObjects;
 import static com.risingwave.java.binding.Binding.getObject;
 import static com.risingwave.java.binding.Binding.getObjectStoreType;
 import static com.risingwave.java.binding.Binding.listObject;
@@ -51,7 +52,8 @@ import org.slf4j.LoggerFactory;
 
 public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     private static final Logger LOGGER = LoggerFactory.getLogger(OpendalSchemaHistory.class);
-    private String objectName = "schema_history.dat";
+    private String objectName = "";
+    private String sourceId = "";
     public static final String SOURCE_ID = "schema.history.internal.source.id";
     private static final int MAX_RECORDS_PER_FILE = 10;
     private List<HistoryRecord> buffer = new ArrayList<>();
@@ -72,14 +74,17 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
                             + getClass().getSimpleName()
                             + "; check the logs for details");
         }
-        String sourceId = config.getString("schema.history.internal.source.id");
+        sourceId = config.getString("schema.history.internal.source.id");
         if (sourceId == null || sourceId.isEmpty()) {
             sourceId = "default_source";
             config = config.edit().with("source_id", sourceId).build();
         }
         objectDir = String.format("mysql-cdc-schema-history-source-%s", sourceId);
-        objectName = String.format("%s/schema_history.dat", objectDir); // compatible with old logic
-        LOGGER.info("Database history will be stored in bucket dir {}", objectDir);
+        objectName = String.format("%s/schema_history.dat", objectDir);
+        LOGGER.info(
+                "Schema history for source id {} will be stored under directory {}",
+                sourceId,
+                objectDir);
     }
 
     @Override
@@ -116,25 +121,19 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
 
     @Override
     public void doStop() {
-        LOGGER.info("doStop");
-        if (!buffer.isEmpty()) {
-            flushBufferToNewFile();
-        }
+        LOGGER.info(
+                "Source {} is dropped, deleting all schema history records under directory {}",
+                sourceId,
+                objectDir);
+        deleteObjects(objectDir);
     }
 
     @Override
-    protected void doPreStoreRecord(HistoryRecord record) {
-        LOGGER.info("doPreStoreRecord");
-        // Todo: can do some check, can be removed or modified as needed
-        if (false) {
-            throw new SchemaHistoryException(
-                    "No S3 client is available. Ensure that 'start()' is called before storing database history records.");
-        }
-    }
+    protected void doPreStoreRecord(HistoryRecord record) {}
 
     @Override
     protected void doStoreRecord(HistoryRecord record) {
-        LOGGER.info("doStoreRecord");
+        LOGGER.info("Storing new schema history record.");
         try {
             // 1. Find the latest schema_history_*.dat file
             List<String> files = new ArrayList<>();

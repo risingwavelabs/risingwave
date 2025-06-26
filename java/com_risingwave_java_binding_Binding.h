@@ -281,6 +281,14 @@ JNIEXPORT jstring JNICALL Java_com_risingwave_java_binding_Binding_getObjectStor
 
 /*
  * Class:     com_risingwave_java_binding_Binding
+ * Method:    deleteObjects
+ * Signature: (Ljava/lang/String;)V
+ */
+JNIEXPORT void JNICALL Java_com_risingwave_java_binding_Binding_deleteObjects
+  (JNIEnv *, jclass, jstring dir);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
  * Method:    sendSinkCoordinatorResponseToChannel
  * Signature: (J[B)Z
  */

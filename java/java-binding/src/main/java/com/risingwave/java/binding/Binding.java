@@ -47,6 +47,8 @@ public class Binding {
 
     public static native String getObjectStoreType();
 
+    public static native void deleteObjects(String dir);
+
     public static native byte[] getObject(String object);
 
     public static native String[] listObject(String dir);
