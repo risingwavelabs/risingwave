@@ -303,6 +303,7 @@ timeout_ms = 6000
 concurrency = 10
 unit = 64
 threshold = 0.5
+recent_filter_shards = 16
 recent_filter_layers = 6
 recent_filter_rotate_interval_ms = 10000
 skip_recent_filter = false

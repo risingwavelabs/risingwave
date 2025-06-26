@@ -12774,6 +12774,7 @@ dependencies = [
 name = "risingwave_storage"
 version = "2.6.0-alpha"
 dependencies = [
+ "ahash 0.8.11",
  "anyhow",
  "arc-swap",
  "async-trait",

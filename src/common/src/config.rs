@@ -1026,6 +1026,10 @@ pub struct CacheRefillConfig {
     #[serde(default = "default::cache_refill::threshold")]
     pub threshold: f64,
 
+    /// Recent filter layer shards.
+    #[serde(default = "default::cache_refill::recent_filter_shards")]
+    pub recent_filter_shards: usize,
+
     /// Recent filter layer count.
     #[serde(default = "default::cache_refill::recent_filter_layers")]
     pub recent_filter_layers: usize,
@@ -2153,6 +2157,10 @@ pub mod default {
 
         pub fn threshold() -> f64 {
             0.5
+        }
+
+        pub fn recent_filter_shards() -> usize {
+            16
         }
 
         pub fn recent_filter_layers() -> usize {
