@@ -181,16 +181,16 @@
                                                                 ^
 - input: select 'apple' ~~ 'app%'
   formatted_sql: SELECT 'apple' ~~ 'app%'
-  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: Value(SingleQuotedString("apple")), op: PGLikeMatch, right: Value(SingleQuotedString("app%")) })], from: [], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: None, offset: None, fetch: None })'
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: Value(SingleQuotedString("apple")), op: Custom("~~"), right: Value(SingleQuotedString("app%")) })], from: [], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: None, offset: None, fetch: None })'
 - input: select 'apple' ~~* 'App%'
   formatted_sql: SELECT 'apple' ~~* 'App%'
-  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: Value(SingleQuotedString("apple")), op: PGILikeMatch, right: Value(SingleQuotedString("App%")) })], from: [], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: None, offset: None, fetch: None })'
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: Value(SingleQuotedString("apple")), op: Custom("~~*"), right: Value(SingleQuotedString("App%")) })], from: [], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: None, offset: None, fetch: None })'
 - input: select 'apple' !~~ 'app%'
   formatted_sql: SELECT 'apple' !~~ 'app%'
-  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: Value(SingleQuotedString("apple")), op: PGNotLikeMatch, right: Value(SingleQuotedString("app%")) })], from: [], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: None, offset: None, fetch: None })'
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: Value(SingleQuotedString("apple")), op: Custom("!~~"), right: Value(SingleQuotedString("app%")) })], from: [], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: None, offset: None, fetch: None })'
 - input: select 'apple' !~~* 'app%'
   formatted_sql: SELECT 'apple' !~~* 'app%'
-  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: Value(SingleQuotedString("apple")), op: PGNotILikeMatch, right: Value(SingleQuotedString("app%")) })], from: [], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: None, offset: None, fetch: None })'
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: Value(SingleQuotedString("apple")), op: Custom("!~~*"), right: Value(SingleQuotedString("app%")) })], from: [], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: None, offset: None, fetch: None })'
 - input: select '123' IS JSON;
   formatted_sql: SELECT '123' IS JSON
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(IsJson { expr: Value(SingleQuotedString("123")), negated: false, item_type: Value, unique_keys: false })], from: [], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: None, offset: None, fetch: None })'

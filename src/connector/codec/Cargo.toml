@@ -30,7 +30,7 @@ risingwave_common = { workspace = true }
 risingwave_pb = { workspace = true }
 rust_decimal = "1"
 serde_json = "1.0"
-thiserror = "2"
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 time = "0.3.30"
 tracing = "0.1"

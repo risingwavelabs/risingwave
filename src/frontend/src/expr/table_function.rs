@@ -600,6 +600,20 @@ impl TableFunction {
         }
     }
 
+    pub fn new_internal_source_backfill_progress() -> Self {
+        TableFunction {
+            args: vec![],
+            return_type: DataType::Struct(StructType::new(vec![
+                ("job_id".to_owned(), DataType::Int32),
+                ("fragment_id".to_owned(), DataType::Int32),
+                ("backfill_state_table_id".to_owned(), DataType::Int32),
+                ("backfill_progress".to_owned(), DataType::Jsonb),
+            ])),
+            function_type: TableFunctionType::InternalSourceBackfillProgress,
+            user_defined: None,
+        }
+    }
+
     pub fn to_protobuf(&self) -> PbTableFunction {
         PbTableFunction {
             function_type: self.function_type as i32,

@@ -26,7 +26,7 @@
 #![feature(assert_matches)]
 #![feature(btree_extract_if)]
 #![feature(exact_size_is_empty)]
-#![cfg_attr(coverage, feature(coverage_attribute))]
+#![feature(coverage_attribute)]
 #![recursion_limit = "256"]
 #![feature(error_generic_member_access)]
 #![feature(let_chains)]

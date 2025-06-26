@@ -73,7 +73,7 @@ RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/ca
 RUN cargo binstall -y --locked cargo-llvm-cov cargo-nextest cargo-sort cargo-cache cargo-machete \
     cargo-make@0.37.24 \
     sqllogictest-bin@0.28.3 \
-    sccache@0.7.4 \
+    sccache@0.10.0 \
     && cargo cache -a \
     && rm -rf "/root/.cargo/registry/index" \
     && rm -rf "/root/.cargo/registry/cache" \

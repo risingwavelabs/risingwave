@@ -286,7 +286,6 @@ impl Compactor {
 
 /// The background compaction thread that receives compaction tasks from hummock compaction
 /// manager and runs compaction tasks.
-#[cfg_attr(coverage, coverage(off))]
 #[must_use]
 pub fn start_iceberg_compactor(
     compactor_context: CompactorContext,
@@ -547,7 +546,6 @@ pub fn start_iceberg_compactor(
 
 /// The background compaction thread that receives compaction tasks from hummock compaction
 /// manager and runs compaction tasks.
-#[cfg_attr(coverage, coverage(off))]
 #[must_use]
 pub fn start_compactor(
     compactor_context: CompactorContext,
@@ -894,7 +892,6 @@ pub fn start_compactor(
 
 /// The background compaction thread that receives compaction tasks from hummock compaction
 /// manager and runs compaction tasks.
-#[cfg_attr(coverage, coverage(off))]
 #[must_use]
 pub fn start_shared_compactor(
     grpc_proxy_client: GrpcCompactorProxyClient,

@@ -19,7 +19,7 @@ use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::hash::{IsSingleton, VnodeCount, WorkerSlotId};
+use risingwave_common::hash::{ActorAlignmentId, IsSingleton, VnodeCount};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor::visit_tables;
 use risingwave_meta_model::WorkerId;
@@ -319,8 +319,8 @@ impl DownstreamFragmentChange {
     }
 }
 
-/// The worker slot location of actors.
-type ActorLocations = BTreeMap<GlobalActorId, WorkerSlotId>;
+/// The location of actors.
+type ActorLocations = BTreeMap<GlobalActorId, ActorAlignmentId>;
 // no_shuffle upstream actor_id -> actor_id
 type NewExternalNoShuffle = HashMap<GlobalActorId, GlobalActorId>;
 
@@ -385,7 +385,7 @@ impl ActorGraphBuildStateInner {
     fn add_actor(
         &mut self,
         (fragment_id, actor_id): (GlobalFragmentId, GlobalActorId),
-        worker_slot_id: WorkerSlotId,
+        actor_alignment_id: ActorAlignmentId,
         vnode_bitmap: Option<Bitmap>,
     ) {
         self.fragment_actor_builders
@@ -399,14 +399,18 @@ impl ActorGraphBuildStateInner {
             .unwrap();
 
         self.building_locations
-            .try_insert(actor_id, worker_slot_id)
+            .try_insert(actor_id, actor_alignment_id)
             .unwrap();
     }
 
     /// Record the location of an external actor.
-    fn record_external_location(&mut self, actor_id: GlobalActorId, worker_slot_id: WorkerSlotId) {
+    fn record_external_location(
+        &mut self,
+        actor_id: GlobalActorId,
+        actor_alignment_id: ActorAlignmentId,
+    ) {
         self.external_locations
-            .try_insert(actor_id, worker_slot_id)
+            .try_insert(actor_id, actor_alignment_id)
             .unwrap();
     }
 
@@ -462,7 +466,7 @@ impl ActorGraphBuildStateInner {
 
     /// Get the location of an actor. Will look up the location map of both the actors to be built
     /// and the external actors.
-    fn get_location(&self, actor_id: GlobalActorId) -> WorkerSlotId {
+    fn get_location(&self, actor_id: GlobalActorId) -> ActorAlignmentId {
         self.building_locations
             .get(&actor_id)
             .copied()
@@ -695,7 +699,7 @@ impl ActorGraphBuilder {
     fn build_locations(&self, actor_locations: ActorLocations) -> Locations {
         let actor_locations = actor_locations
             .into_iter()
-            .map(|(id, worker_slot_id)| (id.as_global_id(), worker_slot_id))
+            .map(|(id, alignment_id)| (id.as_global_id(), alignment_id))
             .collect();
 
         let worker_locations = self
@@ -736,15 +740,15 @@ impl ActorGraphBuilder {
             external_locations,
         } = self.build_actor_graph(id_gen)?;
 
-        for worker_slot_id in external_locations.values() {
+        for alignment_id in external_locations.values() {
             if self
                 .cluster_info
                 .unschedulable_workers
-                .contains(&worker_slot_id.worker_id())
+                .contains(&alignment_id.worker_id())
             {
                 bail!(
                     "The worker {} where the associated upstream is located is unschedulable",
-                    worker_slot_id.worker_id(),
+                    alignment_id.worker_id(),
                 );
             }
         }
@@ -937,17 +941,17 @@ impl ActorGraphBuilder {
                 let bitmaps = distribution.as_hash().map(|m| m.to_bitmaps());
 
                 distribution
-                    .worker_slots()
-                    .map(|worker_slot| {
+                    .actors()
+                    .map(|alignment_id| {
                         let actor_id = state.next_actor_id();
                         let vnode_bitmap = bitmaps
                             .as_ref()
-                            .map(|m: &HashMap<WorkerSlotId, Bitmap>| &m[&worker_slot])
+                            .map(|m: &HashMap<ActorAlignmentId, Bitmap>| &m[&alignment_id])
                             .cloned();
 
                         state
                             .inner
-                            .add_actor((fragment_id, actor_id), worker_slot, vnode_bitmap);
+                            .add_actor((fragment_id, actor_id), alignment_id, vnode_bitmap);
 
                         actor_id
                     })
@@ -960,16 +964,16 @@ impl ActorGraphBuilder {
                 .iter()
                 .map(|a| {
                     let actor_id = GlobalActorId::new(a.actor_id);
-                    let worker_slot_id = match &distribution {
-                        Distribution::Singleton(worker_slot_id) => *worker_slot_id,
+                    let alignment_id = match &distribution {
+                        Distribution::Singleton(worker_id) => {
+                            ActorAlignmentId::new_single(*worker_id as u32)
+                        }
                         Distribution::Hash(mapping) => mapping
                             .get_matched(a.vnode_bitmap.as_ref().unwrap())
                             .unwrap(),
                     };
 
-                    state
-                        .inner
-                        .record_external_location(actor_id, worker_slot_id);
+                    state.inner.record_external_location(actor_id, alignment_id);
 
                     actor_id
                 })

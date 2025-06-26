@@ -40,13 +40,13 @@ use crate::task::ShutdownToken;
 
 /// Lookup Join Base.
 /// Used by `LocalLookupJoinExecutor` and `DistributedLookupJoinExecutor`.
-pub struct LookupJoinBase<K> {
+pub struct LookupJoinBase<K, B: LookupExecutorBuilder> {
     pub join_type: JoinType,
     pub condition: Option<BoxedExpression>,
     pub outer_side_input: BoxedExecutor,
     pub outer_side_data_types: Vec<DataType>, // Data types of all columns of outer side table
     pub outer_side_key_idxs: Vec<usize>,
-    pub inner_side_builder: Box<dyn LookupExecutorBuilder>,
+    pub inner_side_builder: B,
     pub inner_side_key_types: Vec<DataType>, // Data types only of key columns of inner side table
     pub inner_side_key_idxs: Vec<usize>,
     pub null_safe: Vec<bool>,
@@ -64,7 +64,7 @@ pub struct LookupJoinBase<K> {
 
 const AT_LEAST_OUTER_SIDE_ROWS: usize = 512;
 
-impl<K: HashKey> LookupJoinBase<K> {
+impl<K: HashKey, B: LookupExecutorBuilder> LookupJoinBase<K, B> {
     /// High level Execution flow:
     /// Repeat 1-3:
     ///   1. Read N rows from outer side input and send keys to inner side builder after

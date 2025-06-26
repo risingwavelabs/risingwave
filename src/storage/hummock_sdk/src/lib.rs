@@ -158,23 +158,24 @@ pub type HummockSstableObjectId = TypedPrimitive<1, u64>;
 pub type HummockSstableId = TypedPrimitive<2, u64>;
 pub type HummockVectorFileId = TypedPrimitive<3, u64>;
 
-impl HummockSstableObjectId {
-    pub fn as_raw(&self) -> HummockRawObjectId {
-        HummockRawObjectId::new(self.0)
-    }
+macro_rules! impl_object_id {
+    ($type_name:ty) => {
+        impl $type_name {
+            pub fn as_raw(&self) -> HummockRawObjectId {
+                HummockRawObjectId::new(self.0)
+            }
+        }
+
+        impl From<HummockRawObjectId> for $type_name {
+            fn from(id: HummockRawObjectId) -> Self {
+                Self(id.0)
+            }
+        }
+    };
 }
 
-impl HummockVectorFileId {
-    pub fn as_raw(&self) -> HummockRawObjectId {
-        HummockRawObjectId::new(self.0)
-    }
-}
-
-impl From<HummockRawObjectId> for HummockSstableObjectId {
-    fn from(id: HummockRawObjectId) -> Self {
-        Self(id.0)
-    }
-}
+impl_object_id!(HummockSstableObjectId);
+impl_object_id!(HummockVectorFileId);
 
 pub type HummockRefCount = u64;
 pub type HummockContextId = u32;

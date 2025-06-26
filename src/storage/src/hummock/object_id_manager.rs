@@ -51,6 +51,12 @@ impl ObjectIdManager {
         }
     }
 
+    pub async fn get_new_object_id<I: From<HummockRawObjectId>>(&self) -> HummockResult<I> {
+        self.map_next_object_id(|available_object_ids| available_object_ids.get_next_object_id())
+            .await
+            .map(Into::into)
+    }
+
     /// Executes `f` with next SST id.
     /// May fetch new SST ids via RPC.
     async fn map_next_object_id<F>(&self, f: F) -> HummockResult<HummockRawObjectId>
@@ -137,9 +143,7 @@ impl GetObjectId for ObjectIdManager {
     /// Returns a new SST id.
     /// The id is guaranteed to be monotonic increasing.
     async fn get_new_sst_object_id(&self) -> HummockResult<HummockSstableObjectId> {
-        self.map_next_object_id(|available_object_ids| available_object_ids.get_next_object_id())
-            .await
-            .map(Into::into)
+        self.get_new_object_id().await
     }
 }
 

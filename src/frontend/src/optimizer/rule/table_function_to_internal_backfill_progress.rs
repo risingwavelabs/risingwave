@@ -29,6 +29,7 @@ use crate::expr::{AggCall, ExprImpl, InputRef, Literal, OrderBy, TableFunctionTy
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalProject, LogicalScan, LogicalTableFunction, LogicalUnion, LogicalValues,
+    StreamTableScan,
 };
 use crate::optimizer::{OptimizerContext, PlanRef};
 use crate::utils::{Condition, GroupBy};
@@ -47,7 +48,6 @@ impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
         }
 
         let reader = plan.ctx().session_ctx().env().catalog_reader().read_guard();
-        // TODO(kwannoel): Make sure it reads from source tables as well.
         let backfilling_tables = get_backfilling_tables(reader);
         let plan = Self::build_plan(plan.ctx(), backfilling_tables)?;
         ApplyResult::Ok(plan)
@@ -190,12 +190,20 @@ impl BackfillInfo {
         let Some(job_id) = table.job_id.map(|id| id.table_id) else {
             bail!("`job_id` column not found in backfill table");
         };
-        let Some(row_count_column_index) =
-            table.columns.iter().position(|c| c.name() == "row_count")
+        let Some(row_count_column_index) = table
+            .columns
+            .iter()
+            .position(|c| c.name() == StreamTableScan::ROW_COUNT_COLUMN_NAME)
         else {
-            bail!("`row_count` column not found in backfill table");
+            bail!(
+                "`{}` column not found in backfill table",
+                StreamTableScan::ROW_COUNT_COLUMN_NAME
+            );
         };
-        let epoch_column_index = table.columns.iter().position(|c| c.name() == "epoch");
+        let epoch_column_index = table
+            .columns
+            .iter()
+            .position(|c| c.name() == StreamTableScan::EPOCH_COLUMN_NAME);
         let fragment_id = table.fragment_id;
         let table_id = table.id.table_id;
 

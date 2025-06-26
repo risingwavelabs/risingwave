@@ -82,9 +82,11 @@ pub(crate) fn gen_create_index_plan(
     }
 
     if !session.is_super_user() && session.user_id() != table.owner {
-        return Err(
-            ErrorCode::PermissionDenied(format!("must be owner of table {}", table.name)).into(),
-        );
+        return Err(ErrorCode::PermissionDenied(format!(
+            "must be owner of table \"{}\"",
+            table.name
+        ))
+        .into());
     }
 
     let mut binder = Binder::new_for_stream(session);
