@@ -52,7 +52,7 @@ humantime = "2.2"
 itertools = { workspace = true }
 itoa = "1.0"
 jiff = "0.1.15"
-jni = { version = "0.21.1", features = ["invocation"] }
+jni = { workspace = true }
 jsonbb = { workspace = true }
 lru = { workspace = true }
 memcomparable = { version = "0.2", features = ["decimal"] }
