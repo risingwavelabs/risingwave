@@ -159,6 +159,10 @@ pub(crate) async fn realign_join(
 
     // wait for recovery
     cluster.wait_for_recovery().await?;
+
+    let mut session = cluster.start_session();
+    assert_parallelism_eq(&mut session, 10).await;
+
     // trigger a flush
     session.flush().await?;
     Ok(())
