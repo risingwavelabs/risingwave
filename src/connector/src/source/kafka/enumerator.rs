@@ -454,7 +454,7 @@ impl KafkaSplitEnumerator {
                             self.sync_call_timeout,
                         )
                         .await?;
-                    result.insert(elem.partition(), Some(high_watermark));
+                    result.insert(elem.partition(), Some(high_watermark - 1));
                 }
             }
         }
