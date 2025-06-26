@@ -999,6 +999,12 @@ pub struct CacheRefillConfig {
     #[serde(default = "default::cache_refill::recent_filter_rotate_interval_ms")]
     pub recent_filter_rotate_interval_ms: usize,
 
+    /// Skip check recent filter on data refill.
+    ///
+    /// This option is suitable for a single compute node or debugging.
+    #[serde(default = "default::cache_refill::skip_recent_filter")]
+    pub skip_recent_filter: bool,
+
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -2079,6 +2085,10 @@ pub mod default {
 
         pub fn recent_filter_rotate_interval_ms() -> usize {
             10000
+        }
+
+        pub fn skip_recent_filter() -> bool {
+            false
         }
     }
 

@@ -7,6 +7,10 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[features]
+test = []
+failpoints = ["fail/failpoints"]
+
 [dependencies]
 anyhow = "1"
 arc-swap = { workspace = true }
@@ -96,10 +100,6 @@ risingwave_hummock_sdk = { workspace = true, features = ["test"] }
 risingwave_test_runner = { workspace = true }
 tempfile = "3"
 tracing-subscriber = "0.3"
-
-[features]
-test = []
-failpoints = ["fail/failpoints"]
 
 [lints]
 workspace = true

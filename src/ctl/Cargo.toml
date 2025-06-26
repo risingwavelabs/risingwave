@@ -7,6 +7,9 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[lib]
+test = false
+
 [dependencies]
 anyhow = "1"
 bytes = "1"
@@ -59,6 +62,3 @@ risingwave_hummock_sdk = { workspace = true }
 
 [lints]
 workspace = true
-
-[lib]
-test = false

@@ -39,8 +39,8 @@ tracing-subscriber = "0.3.17"
 [target.'cfg(not(madsim))'.dependencies]
 http-body = "1"
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.17", default-features = false }
 libc = "0.2"
+procfs = { version = "0.17", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }

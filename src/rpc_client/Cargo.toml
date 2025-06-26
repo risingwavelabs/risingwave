@@ -40,11 +40,11 @@ tonic = { workspace = true }
 tower = "0.5"
 tracing = "0.1"
 
-[dev-dependencies]
-risingwave_hummock_sdk = { workspace = true }
-
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
+
+[dev-dependencies]
+risingwave_hummock_sdk = { workspace = true }
 
 [lints]
 workspace = true

@@ -49,6 +49,8 @@ tracing-subscriber = { version = "0.3", features = [
 ] }
 
 [target.'cfg(not(madsim))'.dependencies]
+fastrace = "0.7"
+fastrace-opentelemetry = "0.10"
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 opentelemetry-semantic-conventions = { workspace = true }
@@ -56,8 +58,6 @@ opentelemetry_sdk = { workspace = true, features = [
     "rt-tokio",
 ] } # only enable `rt-tokio` feature under non-madsim target
 workspace-hack = { path = "../../workspace-hack" }
-fastrace = "0.7"
-fastrace-opentelemetry = "0.10"
 
 [lints]
 workspace = true

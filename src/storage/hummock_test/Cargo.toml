@@ -6,6 +6,15 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
+
+[[bin]]
+name = "replay"
+path = "src/bin/replay/main.rs"
+
+[features]
+failpoints = ["risingwave_storage/failpoints"]
+sync_point = ["sync-point/sync_point", "serial_test"]
+test = []
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -47,19 +56,10 @@ risingwave_hummock_sdk = { workspace = true }
 risingwave_test_runner = { workspace = true }
 sync-point = { path = "../../utils/sync-point" }
 
-[features]
-failpoints = ["risingwave_storage/failpoints"]
-sync_point = ["sync-point/sync_point", "serial_test"]
-test = []
-
 [[bench]]
 name = "bench_hummock_iter"
 harness = false
 required-features = ["test"]
-
-[[bin]]
-name = "replay"
-path = "src/bin/replay/main.rs"
 
 [lints]
 workspace = true
