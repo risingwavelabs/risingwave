@@ -49,10 +49,19 @@ use crate::monitor::{HummockStateStoreMetrics, StoreLocalStatistic};
 
 pub type TableHolder = HybridCacheEntry<HummockSstableObjectId, Box<Sstable>>;
 
-static MISSES: LazyLock<BatchLogger<(HummockSstableObjectId, usize)>> = LazyLock::new(|| {
+static MISSED: LazyLock<BatchLogger<SstableBlockIndex>> = LazyLock::new(|| {
     BatchLogger::new(
         tracing::Level::INFO,
         "========== MISSED DATA BLOCKS ==========",
+        std::time::Duration::from_secs(10),
+        1000,
+    )
+});
+
+static EVICTED: LazyLock<BatchLogger<SstableBlockIndex>> = LazyLock::new(|| {
+    BatchLogger::new(
+        tracing::Level::INFO,
+        "========== EVICTED DATA BLOCKS ==========",
         std::time::Duration::from_secs(10),
         1000,
     )
@@ -78,7 +87,7 @@ impl EventListener for BlockCacheEventListener {
     type Key = SstableBlockIndex;
     type Value = Box<Block>;
 
-    fn on_leave(&self, _reason: foyer::Event, _key: &Self::Key, value: &Self::Value)
+    fn on_leave(&self, _reason: foyer::Event, key: &Self::Key, value: &Self::Value)
     where
         Self::Key: foyer::Key,
         Self::Value: foyer::Value,
@@ -86,6 +95,7 @@ impl EventListener for BlockCacheEventListener {
         self.metrics
             .block_efficiency_histogram
             .observe(value.efficiency());
+        EVICTED.log(*key);
     }
 }
 
@@ -446,17 +456,18 @@ impl SstableStore {
 
         match policy {
             CachePolicy::Fill(hint) => {
+                let idx = SstableBlockIndex {
+                    sst_id: object_id,
+                    block_idx: block_index as _,
+                };
                 let entry = self.block_cache.fetch_with_properties(
-                    SstableBlockIndex {
-                        sst_id: object_id,
-                        block_idx: block_index as _,
-                    },
+                    idx,
                     HybridCacheProperties::default().with_hint(hint),
                     fetch_block,
                 );
                 if matches!(entry.state(), FetchState::Miss) {
                     stats.cache_data_block_miss += 1;
-                    MISSES.log((object_id, block_index));
+                    MISSED.log(idx);
                 }
                 Ok(BlockResponse::Entry(entry))
             }
