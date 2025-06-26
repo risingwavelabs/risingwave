@@ -136,69 +136,69 @@
       - t1._row_id(hidden)
       - t1.b(hidden)
       - t1.a(hidden)
+      - t1.a#1(hidden)
+      - t1.a#2(hidden)
+      - t1.a#3(hidden)
+      - t1.a#4(hidden)
+      - t1.a#5(hidden)
+      - t1.a#6(hidden)
+      - t1.a#7(hidden)
+      - t1.a#8(hidden)
+      - t1.a#9(hidden)
+      - t1.a#10(hidden)
+      - t1.a#11(hidden)
+      - t1.a#12(hidden)
+      - t1.a#13(hidden)
+      - t1.a#14(hidden)
+      - t1.a#15(hidden)
+      - t1.a#16(hidden)
+      - t1.a#17(hidden)
       - t1.b#1(hidden)
-      - t1.b#2(hidden)
-      - t1.b#3(hidden)
-      - t1.b#4(hidden)
-      - t1.b#5(hidden)
-      - t1.b#6(hidden)
-      - t1.b#7(hidden)
-      - t1.b#8(hidden)
-      - t1.b#9(hidden)
-      - t1.b#10(hidden)
-      - t1.b#11(hidden)
-      - t1.b#12(hidden)
-      - t1.b#13(hidden)
-      - t1.b#14(hidden)
-      - t1.b#15(hidden)
-      - t1.b#16(hidden)
-      - t1.b#17(hidden)
-      - t1.b#18(hidden)
       pk_columns:
       - t1._row_id
       - t1.b
       - t1.a
+      - t1.a#1
+      - t1.a#2
+      - t1.a#3
+      - t1.a#4
+      - t1.a#5
+      - t1.a#6
+      - t1.a#7
+      - t1.a#8
+      - t1.a#9
+      - t1.a#10
+      - t1.a#11
+      - t1.a#12
+      - t1.a#13
+      - t1.a#14
+      - t1.a#15
+      - t1.a#16
+      - t1.a#17
       - t1.b#1
-      - t1.b#2
-      - t1.b#3
-      - t1.b#4
-      - t1.b#5
-      - t1.b#6
-      - t1.b#7
-      - t1.b#8
-      - t1.b#9
-      - t1.b#10
-      - t1.b#11
-      - t1.b#12
-      - t1.b#13
-      - t1.b#14
-      - t1.b#15
-      - t1.b#16
-      - t1.b#17
-      - t1.b#18
       pk_conflict: NoCheck
       stream_key:
       - t1._row_id
       - t1.b
       - t1.a
+      - t1.a#1
+      - t1.a#2
+      - t1.a#3
+      - t1.a#4
+      - t1.a#5
+      - t1.a#6
+      - t1.a#7
+      - t1.a#8
+      - t1.a#9
+      - t1.a#10
+      - t1.a#11
+      - t1.a#12
+      - t1.a#13
+      - t1.a#14
+      - t1.a#15
+      - t1.a#16
+      - t1.a#17
       - t1.b#1
-      - t1.b#2
-      - t1.b#3
-      - t1.b#4
-      - t1.b#5
-      - t1.b#6
-      - t1.b#7
-      - t1.b#8
-      - t1.b#9
-      - t1.b#10
-      - t1.b#11
-      - t1.b#12
-      - t1.b#13
-      - t1.b#14
-      - t1.b#15
-      - t1.b#16
-      - t1.b#17
-      - t1.b#18
     children:
     - name: StreamProject
       fields:
@@ -224,23 +224,23 @@
         - t1._row_id
         - t1.b
         - t1.a
-        - t1.b
-        - t1.b
-        - t1.b
-        - t1.b
-        - t1.b
-        - t1.b
-        - t1.b
-        - t1.b
-        - t1.b
-        - t1.b
-        - t1.b
-        - t1.b
-        - t1.b
-        - t1.b
-        - t1.b
-        - t1.b
-        - t1.b
+        - t1.a
+        - t1.a
+        - t1.a
+        - t1.a
+        - t1.a
+        - t1.a
+        - t1.a
+        - t1.a
+        - t1.a
+        - t1.a
+        - t1.a
+        - t1.a
+        - t1.a
+        - t1.a
+        - t1.a
+        - t1.a
+        - t1.a
         - t1.b
       children:
       - name: StreamHashJoin
@@ -248,109 +248,134 @@
           predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
           type: LeftOuter
         children:
-        - name: StreamHashJoin
+        - name: StreamExchange
           fields:
-            predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
-            type: LeftOuter
+            dist: HashShard(t1.a, t1.b)
           children:
-          - name: StreamHashJoin
+          - name: StreamTableScan
             fields:
-              predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
-              type: LeftOuter
+              columns:
+              - a
+              - b
+              - _row_id
+              table: t1
+            children: []
+        - name: StreamExchange
+          fields:
+            dist: HashShard(t1.a, t1.b)
+          children:
+          - name: StreamProject
+            fields:
+              exprs:
+              - t1.a
+              - t1.b
+              - t1.b
+              - t1.b
+              - t1.b
+              - t1.b
+              - t1.b
+              - t1.b
+              - t1.b
+              - t1.b
+              - t1.b
+              - t1.b
+              - t1.b
+              - t1.b
+              - t1.b
+              - t1.b
+              - t1.b
+              - t1.b
+              - t1.b
+              - t1.b
+              - t1.a
+              - t1.a
+              - t1.a
+              - t1.a
+              - t1.a
+              - t1.a
+              - t1.a
+              - t1.a
+              - t1.a
+              - t1.a
+              - t1.a
+              - t1.a
+              - t1.a
+              - t1.a
+              - t1.a
+              - t1.a
+              - t1.a
             children:
             - name: StreamHashJoin
               fields:
-                predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
-                type: LeftOuter
+                predicate: t1.a = t2.c
+                type: Inner
               children:
-              - name: StreamHashJoin
+              - name: StreamExchange
                 fields:
-                  predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
-                  type: LeftOuter
+                  dist: HashShard(t1.a)
                 children:
                 - name: StreamHashJoin
                   fields:
                     predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
-                    type: LeftOuter
+                    type: Inner
                   children:
-                  - name: StreamHashJoin
+                  - name: StreamExchange
                     fields:
-                      predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
-                      type: LeftOuter
+                      dist: HashShard(t1.a, t1.b)
                     children:
                     - name: StreamHashJoin
                       fields:
-                        predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
-                        type: LeftOuter
+                        predicate: t1.a = t2.c
+                        type: Inner
                       children:
-                      - name: StreamHashJoin
+                      - name: StreamExchange
                         fields:
-                          predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
-                          type: LeftOuter
+                          dist: HashShard(t1.a)
                         children:
                         - name: StreamHashJoin
                           fields:
                             predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
-                            type: LeftOuter
+                            type: Inner
                           children:
-                          - name: StreamHashJoin
+                          - name: StreamExchange
                             fields:
-                              predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
-                              type: LeftOuter
+                              dist: HashShard(t1.a, t1.b)
                             children:
                             - name: StreamHashJoin
                               fields:
-                                predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
-                                type: LeftOuter
+                                predicate: t1.a = t2.c
+                                type: Inner
                               children:
-                              - name: StreamHashJoin
+                              - name: StreamExchange
                                 fields:
-                                  predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
-                                  type: LeftOuter
+                                  dist: HashShard(t1.a)
                                 children:
                                 - name: StreamHashJoin
                                   fields:
                                     predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
-                                    type: LeftOuter
+                                    type: Inner
                                   children:
-                                  - name: StreamHashJoin
+                                  - name: StreamExchange
                                     fields:
-                                      predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
-                                      type: LeftOuter
+                                      dist: HashShard(t1.a, t1.b)
                                     children:
                                     - name: StreamHashJoin
                                       fields:
-                                        predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
-                                        type: LeftOuter
+                                        predicate: t1.a = t2.c
+                                        type: Inner
                                       children:
-                                      - name: StreamHashJoin
+                                      - name: StreamExchange
                                         fields:
-                                          predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
-                                          type: LeftOuter
+                                          dist: HashShard(t1.a)
                                         children:
                                         - name: StreamHashJoin
                                           fields:
                                             predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
-                                            type: LeftOuter
+                                            type: Inner
                                           children:
                                           - name: StreamExchange
                                             fields:
-                                              dist: HashShard(t1.a)
-                                            children:
-                                            - name: StreamTableScan
-                                              fields:
-                                                columns:
-                                                - a
-                                                - b
-                                                - _row_id
-                                                table: t1
-                                              children: []
-                                          - name: StreamProject
-                                            fields:
-                                              exprs:
-                                              - t1.a
-                                              - t1.b
-                                              - t1.b
+                                              dist: HashShard(t1.a, t1.b)
                                             children:
                                             - name: StreamHashJoin
                                               fields:
@@ -361,32 +386,734 @@
                                                 fields:
                                                   dist: HashShard(t1.a)
                                                 children:
-                                                - name: StreamProject
+                                                - name: StreamHashJoin
                                                   fields:
-                                                    exprs:
-                                                    - t1.a
-                                                    - t1.b
+                                                    predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
+                                                    type: Inner
                                                   children:
-                                                  - name: StreamHashAgg
+                                                  - name: StreamExchange
                                                     fields:
-                                                      aggs:
-                                                      - count
-                                                      group_key:
+                                                      dist: HashShard(t1.a, t1.b)
+                                                    children:
+                                                    - name: StreamHashJoin
+                                                      fields:
+                                                        predicate: t1.a = t2.c
+                                                        type: Inner
+                                                      children:
+                                                      - name: StreamExchange
+                                                        fields:
+                                                          dist: HashShard(t1.a)
+                                                        children:
+                                                        - name: StreamHashJoin
+                                                          fields:
+                                                            predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
+                                                            type: Inner
+                                                          children:
+                                                          - name: StreamExchange
+                                                            fields:
+                                                              dist: HashShard(t1.a, t1.b)
+                                                            children:
+                                                            - name: StreamHashJoin
+                                                              fields:
+                                                                predicate: t1.a = t2.c
+                                                                type: Inner
+                                                              children:
+                                                              - name: StreamExchange
+                                                                fields:
+                                                                  dist: HashShard(t1.a)
+                                                                children:
+                                                                - name: StreamHashJoin
+                                                                  fields:
+                                                                    predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
+                                                                    type: Inner
+                                                                  children:
+                                                                  - name: StreamExchange
+                                                                    fields:
+                                                                      dist: HashShard(t1.a, t1.b)
+                                                                    children:
+                                                                    - name: StreamHashJoin
+                                                                      fields:
+                                                                        predicate: t1.a = t2.c
+                                                                        type: Inner
+                                                                      children:
+                                                                      - name: StreamExchange
+                                                                        fields:
+                                                                          dist: HashShard(t1.a)
+                                                                        children:
+                                                                        - name: StreamHashJoin
+                                                                          fields:
+                                                                            predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
+                                                                            type: Inner
+                                                                          children:
+                                                                          - name: StreamExchange
+                                                                            fields:
+                                                                              dist: HashShard(t1.a, t1.b)
+                                                                            children:
+                                                                            - name: StreamHashJoin
+                                                                              fields:
+                                                                                predicate: t1.a = t2.c
+                                                                                type: Inner
+                                                                              children:
+                                                                              - name: StreamExchange
+                                                                                fields:
+                                                                                  dist: HashShard(t1.a)
+                                                                                children:
+                                                                                - name: StreamHashJoin
+                                                                                  fields:
+                                                                                    predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
+                                                                                    type: Inner
+                                                                                  children:
+                                                                                  - name: StreamExchange
+                                                                                    fields:
+                                                                                      dist: HashShard(t1.a, t1.b)
+                                                                                    children:
+                                                                                    - name: StreamHashJoin
+                                                                                      fields:
+                                                                                        predicate: t1.a = t2.c
+                                                                                        type: Inner
+                                                                                      children:
+                                                                                      - name: StreamExchange
+                                                                                        fields:
+                                                                                          dist: HashShard(t1.a)
+                                                                                        children:
+                                                                                        - name: StreamHashJoin
+                                                                                          fields:
+                                                                                            predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
+                                                                                            type: Inner
+                                                                                          children:
+                                                                                          - name: StreamExchange
+                                                                                            fields:
+                                                                                              dist: HashShard(t1.a, t1.b)
+                                                                                            children:
+                                                                                            - name: StreamHashJoin
+                                                                                              fields:
+                                                                                                predicate: t1.a = t2.c
+                                                                                                type: Inner
+                                                                                              children:
+                                                                                              - name: StreamExchange
+                                                                                                fields:
+                                                                                                  dist: HashShard(t1.a)
+                                                                                                children:
+                                                                                                - name: StreamHashJoin
+                                                                                                  fields:
+                                                                                                    predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
+                                                                                                    type: Inner
+                                                                                                  children:
+                                                                                                  - name: StreamExchange
+                                                                                                    fields:
+                                                                                                      dist: HashShard(t1.a, t1.b)
+                                                                                                    children:
+                                                                                                    - name: StreamHashJoin
+                                                                                                      fields:
+                                                                                                        predicate: t1.a = t2.c
+                                                                                                        type: Inner
+                                                                                                      children:
+                                                                                                      - name: StreamExchange
+                                                                                                        fields:
+                                                                                                          dist: HashShard(t1.a)
+                                                                                                        children:
+                                                                                                        - name: StreamHashJoin
+                                                                                                          fields:
+                                                                                                            predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
+                                                                                                            type: Inner
+                                                                                                          children:
+                                                                                                          - name: StreamExchange
+                                                                                                            fields:
+                                                                                                              dist: HashShard(t1.a, t1.b)
+                                                                                                            children:
+                                                                                                            - name: StreamHashJoin
+                                                                                                              fields:
+                                                                                                                predicate: t1.a = t2.c
+                                                                                                                type: Inner
+                                                                                                              children:
+                                                                                                              - name: StreamExchange
+                                                                                                                fields:
+                                                                                                                  dist: HashShard(t1.a)
+                                                                                                                children:
+                                                                                                                - name: StreamHashJoin
+                                                                                                                  fields:
+                                                                                                                    predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
+                                                                                                                    type: Inner
+                                                                                                                  children:
+                                                                                                                  - name: StreamExchange
+                                                                                                                    fields:
+                                                                                                                      dist: HashShard(t1.a, t1.b)
+                                                                                                                    children:
+                                                                                                                    - name: StreamHashJoin
+                                                                                                                      fields:
+                                                                                                                        predicate: t1.a = t2.c
+                                                                                                                        type: Inner
+                                                                                                                      children:
+                                                                                                                      - name: StreamExchange
+                                                                                                                        fields:
+                                                                                                                          dist: HashShard(t1.a)
+                                                                                                                        children:
+                                                                                                                        - name: StreamHashJoin
+                                                                                                                          fields:
+                                                                                                                            predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
+                                                                                                                            type: Inner
+                                                                                                                          children:
+                                                                                                                          - name: StreamExchange
+                                                                                                                            fields:
+                                                                                                                              dist: HashShard(t1.a, t1.b)
+                                                                                                                            children:
+                                                                                                                            - name: StreamHashJoin
+                                                                                                                              fields:
+                                                                                                                                predicate: t1.a = t2.c
+                                                                                                                                type: Inner
+                                                                                                                              children:
+                                                                                                                              - name: StreamExchange
+                                                                                                                                fields:
+                                                                                                                                  dist: HashShard(t1.a)
+                                                                                                                                children:
+                                                                                                                                - name: StreamHashJoin
+                                                                                                                                  fields:
+                                                                                                                                    predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
+                                                                                                                                    type: Inner
+                                                                                                                                  children:
+                                                                                                                                  - name: StreamExchange
+                                                                                                                                    fields:
+                                                                                                                                      dist: HashShard(t1.a, t1.b)
+                                                                                                                                    children:
+                                                                                                                                    - name: StreamHashJoin
+                                                                                                                                      fields:
+                                                                                                                                        predicate: t1.a = t2.c
+                                                                                                                                        type: Inner
+                                                                                                                                      children:
+                                                                                                                                      - name: StreamExchange
+                                                                                                                                        fields:
+                                                                                                                                          dist: HashShard(t1.a)
+                                                                                                                                        children:
+                                                                                                                                        - name: StreamHashJoin
+                                                                                                                                          fields:
+                                                                                                                                            predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
+                                                                                                                                            type: Inner
+                                                                                                                                          children:
+                                                                                                                                          - name: StreamExchange
+                                                                                                                                            fields:
+                                                                                                                                              dist: HashShard(t1.a, t1.b)
+                                                                                                                                            children:
+                                                                                                                                            - name: StreamHashJoin
+                                                                                                                                              fields:
+                                                                                                                                                predicate: t1.a = t2.c
+                                                                                                                                                type: Inner
+                                                                                                                                              children:
+                                                                                                                                              - name: StreamExchange
+                                                                                                                                                fields:
+                                                                                                                                                  dist: HashShard(t1.a)
+                                                                                                                                                children:
+                                                                                                                                                - name: StreamHashJoin
+                                                                                                                                                  fields:
+                                                                                                                                                    predicate: t1.a IS NOT DISTINCT FROM t1.a AND t1.b IS NOT DISTINCT FROM t1.b
+                                                                                                                                                    type: Inner
+                                                                                                                                                  children:
+                                                                                                                                                  - name: StreamExchange
+                                                                                                                                                    fields:
+                                                                                                                                                      dist: HashShard(t1.a, t1.b)
+                                                                                                                                                    children:
+                                                                                                                                                    - name: StreamHashJoin
+                                                                                                                                                      fields:
+                                                                                                                                                        predicate: t1.a = t2.c
+                                                                                                                                                        type: Inner
+                                                                                                                                                      children:
+                                                                                                                                                      - name: StreamExchange
+                                                                                                                                                        fields:
+                                                                                                                                                          dist: HashShard(t1.a)
+                                                                                                                                                        children:
+                                                                                                                                                        - name: StreamProject
+                                                                                                                                                          fields:
+                                                                                                                                                            exprs:
+                                                                                                                                                            - t1.a
+                                                                                                                                                            - t1.b
+                                                                                                                                                          children:
+                                                                                                                                                          - name: StreamHashAgg
+                                                                                                                                                            fields:
+                                                                                                                                                              aggs:
+                                                                                                                                                              - count
+                                                                                                                                                              group_key:
+                                                                                                                                                              - t1.a
+                                                                                                                                                              - t1.b
+                                                                                                                                                            children:
+                                                                                                                                                            - name: StreamExchange
+                                                                                                                                                              fields:
+                                                                                                                                                                dist: HashShard(t1.a, t1.b)
+                                                                                                                                                              children:
+                                                                                                                                                              - name: StreamTableScan
+                                                                                                                                                                fields:
+                                                                                                                                                                  columns:
+                                                                                                                                                                  - a
+                                                                                                                                                                  - b
+                                                                                                                                                                  - _row_id
+                                                                                                                                                                  table: t1
+                                                                                                                                                                children: []
+                                                                                                                                                      - name: StreamExchange
+                                                                                                                                                        fields:
+                                                                                                                                                          dist: HashShard(t2.c)
+                                                                                                                                                        children:
+                                                                                                                                                        - name: StreamTableScan
+                                                                                                                                                          fields:
+                                                                                                                                                            columns:
+                                                                                                                                                            - c
+                                                                                                                                                            table: t2
+                                                                                                                                                          children: []
+                                                                                                                                                  - name: StreamProject
+                                                                                                                                                    fields:
+                                                                                                                                                      exprs:
+                                                                                                                                                      - t1.a
+                                                                                                                                                      - t1.b
+                                                                                                                                                    children:
+                                                                                                                                                    - name: StreamHashAgg
+                                                                                                                                                      fields:
+                                                                                                                                                        aggs:
+                                                                                                                                                        - count
+                                                                                                                                                        group_key:
+                                                                                                                                                        - t1.a
+                                                                                                                                                        - t1.b
+                                                                                                                                                      children:
+                                                                                                                                                      - name: StreamExchange
+                                                                                                                                                        fields:
+                                                                                                                                                          dist: HashShard(t1.a, t1.b)
+                                                                                                                                                        children:
+                                                                                                                                                        - name: StreamTableScan
+                                                                                                                                                          fields:
+                                                                                                                                                            columns:
+                                                                                                                                                            - a
+                                                                                                                                                            - b
+                                                                                                                                                            - _row_id
+                                                                                                                                                            table: t1
+                                                                                                                                                          children: []
+                                                                                                                                              - name: StreamExchange
+                                                                                                                                                fields:
+                                                                                                                                                  dist: HashShard(t2.c)
+                                                                                                                                                children:
+                                                                                                                                                - name: StreamTableScan
+                                                                                                                                                  fields:
+                                                                                                                                                    columns:
+                                                                                                                                                    - c
+                                                                                                                                                    table: t2
+                                                                                                                                                  children: []
+                                                                                                                                          - name: StreamProject
+                                                                                                                                            fields:
+                                                                                                                                              exprs:
+                                                                                                                                              - t1.a
+                                                                                                                                              - t1.b
+                                                                                                                                            children:
+                                                                                                                                            - name: StreamHashAgg
+                                                                                                                                              fields:
+                                                                                                                                                aggs:
+                                                                                                                                                - count
+                                                                                                                                                group_key:
+                                                                                                                                                - t1.a
+                                                                                                                                                - t1.b
+                                                                                                                                              children:
+                                                                                                                                              - name: StreamExchange
+                                                                                                                                                fields:
+                                                                                                                                                  dist: HashShard(t1.a, t1.b)
+                                                                                                                                                children:
+                                                                                                                                                - name: StreamTableScan
+                                                                                                                                                  fields:
+                                                                                                                                                    columns:
+                                                                                                                                                    - a
+                                                                                                                                                    - b
+                                                                                                                                                    - _row_id
+                                                                                                                                                    table: t1
+                                                                                                                                                  children: []
+                                                                                                                                      - name: StreamExchange
+                                                                                                                                        fields:
+                                                                                                                                          dist: HashShard(t2.c)
+                                                                                                                                        children:
+                                                                                                                                        - name: StreamTableScan
+                                                                                                                                          fields:
+                                                                                                                                            columns:
+                                                                                                                                            - c
+                                                                                                                                            table: t2
+                                                                                                                                          children: []
+                                                                                                                                  - name: StreamProject
+                                                                                                                                    fields:
+                                                                                                                                      exprs:
+                                                                                                                                      - t1.a
+                                                                                                                                      - t1.b
+                                                                                                                                    children:
+                                                                                                                                    - name: StreamHashAgg
+                                                                                                                                      fields:
+                                                                                                                                        aggs:
+                                                                                                                                        - count
+                                                                                                                                        group_key:
+                                                                                                                                        - t1.a
+                                                                                                                                        - t1.b
+                                                                                                                                      children:
+                                                                                                                                      - name: StreamExchange
+                                                                                                                                        fields:
+                                                                                                                                          dist: HashShard(t1.a, t1.b)
+                                                                                                                                        children:
+                                                                                                                                        - name: StreamTableScan
+                                                                                                                                          fields:
+                                                                                                                                            columns:
+                                                                                                                                            - a
+                                                                                                                                            - b
+                                                                                                                                            - _row_id
+                                                                                                                                            table: t1
+                                                                                                                                          children: []
+                                                                                                                              - name: StreamExchange
+                                                                                                                                fields:
+                                                                                                                                  dist: HashShard(t2.c)
+                                                                                                                                children:
+                                                                                                                                - name: StreamTableScan
+                                                                                                                                  fields:
+                                                                                                                                    columns:
+                                                                                                                                    - c
+                                                                                                                                    table: t2
+                                                                                                                                  children: []
+                                                                                                                          - name: StreamProject
+                                                                                                                            fields:
+                                                                                                                              exprs:
+                                                                                                                              - t1.a
+                                                                                                                              - t1.b
+                                                                                                                            children:
+                                                                                                                            - name: StreamHashAgg
+                                                                                                                              fields:
+                                                                                                                                aggs:
+                                                                                                                                - count
+                                                                                                                                group_key:
+                                                                                                                                - t1.a
+                                                                                                                                - t1.b
+                                                                                                                              children:
+                                                                                                                              - name: StreamExchange
+                                                                                                                                fields:
+                                                                                                                                  dist: HashShard(t1.a, t1.b)
+                                                                                                                                children:
+                                                                                                                                - name: StreamTableScan
+                                                                                                                                  fields:
+                                                                                                                                    columns:
+                                                                                                                                    - a
+                                                                                                                                    - b
+                                                                                                                                    - _row_id
+                                                                                                                                    table: t1
+                                                                                                                                  children: []
+                                                                                                                      - name: StreamExchange
+                                                                                                                        fields:
+                                                                                                                          dist: HashShard(t2.c)
+                                                                                                                        children:
+                                                                                                                        - name: StreamTableScan
+                                                                                                                          fields:
+                                                                                                                            columns:
+                                                                                                                            - c
+                                                                                                                            table: t2
+                                                                                                                          children: []
+                                                                                                                  - name: StreamProject
+                                                                                                                    fields:
+                                                                                                                      exprs:
+                                                                                                                      - t1.a
+                                                                                                                      - t1.b
+                                                                                                                    children:
+                                                                                                                    - name: StreamHashAgg
+                                                                                                                      fields:
+                                                                                                                        aggs:
+                                                                                                                        - count
+                                                                                                                        group_key:
+                                                                                                                        - t1.a
+                                                                                                                        - t1.b
+                                                                                                                      children:
+                                                                                                                      - name: StreamExchange
+                                                                                                                        fields:
+                                                                                                                          dist: HashShard(t1.a, t1.b)
+                                                                                                                        children:
+                                                                                                                        - name: StreamTableScan
+                                                                                                                          fields:
+                                                                                                                            columns:
+                                                                                                                            - a
+                                                                                                                            - b
+                                                                                                                            - _row_id
+                                                                                                                            table: t1
+                                                                                                                          children: []
+                                                                                                              - name: StreamExchange
+                                                                                                                fields:
+                                                                                                                  dist: HashShard(t2.c)
+                                                                                                                children:
+                                                                                                                - name: StreamTableScan
+                                                                                                                  fields:
+                                                                                                                    columns:
+                                                                                                                    - c
+                                                                                                                    table: t2
+                                                                                                                  children: []
+                                                                                                          - name: StreamProject
+                                                                                                            fields:
+                                                                                                              exprs:
+                                                                                                              - t1.a
+                                                                                                              - t1.b
+                                                                                                            children:
+                                                                                                            - name: StreamHashAgg
+                                                                                                              fields:
+                                                                                                                aggs:
+                                                                                                                - count
+                                                                                                                group_key:
+                                                                                                                - t1.a
+                                                                                                                - t1.b
+                                                                                                              children:
+                                                                                                              - name: StreamExchange
+                                                                                                                fields:
+                                                                                                                  dist: HashShard(t1.a, t1.b)
+                                                                                                                children:
+                                                                                                                - name: StreamTableScan
+                                                                                                                  fields:
+                                                                                                                    columns:
+                                                                                                                    - a
+                                                                                                                    - b
+                                                                                                                    - _row_id
+                                                                                                                    table: t1
+                                                                                                                  children: []
+                                                                                                      - name: StreamExchange
+                                                                                                        fields:
+                                                                                                          dist: HashShard(t2.c)
+                                                                                                        children:
+                                                                                                        - name: StreamTableScan
+                                                                                                          fields:
+                                                                                                            columns:
+                                                                                                            - c
+                                                                                                            table: t2
+                                                                                                          children: []
+                                                                                                  - name: StreamProject
+                                                                                                    fields:
+                                                                                                      exprs:
+                                                                                                      - t1.a
+                                                                                                      - t1.b
+                                                                                                    children:
+                                                                                                    - name: StreamHashAgg
+                                                                                                      fields:
+                                                                                                        aggs:
+                                                                                                        - count
+                                                                                                        group_key:
+                                                                                                        - t1.a
+                                                                                                        - t1.b
+                                                                                                      children:
+                                                                                                      - name: StreamExchange
+                                                                                                        fields:
+                                                                                                          dist: HashShard(t1.a, t1.b)
+                                                                                                        children:
+                                                                                                        - name: StreamTableScan
+                                                                                                          fields:
+                                                                                                            columns:
+                                                                                                            - a
+                                                                                                            - b
+                                                                                                            - _row_id
+                                                                                                            table: t1
+                                                                                                          children: []
+                                                                                              - name: StreamExchange
+                                                                                                fields:
+                                                                                                  dist: HashShard(t2.c)
+                                                                                                children:
+                                                                                                - name: StreamTableScan
+                                                                                                  fields:
+                                                                                                    columns:
+                                                                                                    - c
+                                                                                                    table: t2
+                                                                                                  children: []
+                                                                                          - name: StreamProject
+                                                                                            fields:
+                                                                                              exprs:
+                                                                                              - t1.a
+                                                                                              - t1.b
+                                                                                            children:
+                                                                                            - name: StreamHashAgg
+                                                                                              fields:
+                                                                                                aggs:
+                                                                                                - count
+                                                                                                group_key:
+                                                                                                - t1.a
+                                                                                                - t1.b
+                                                                                              children:
+                                                                                              - name: StreamExchange
+                                                                                                fields:
+                                                                                                  dist: HashShard(t1.a, t1.b)
+                                                                                                children:
+                                                                                                - name: StreamTableScan
+                                                                                                  fields:
+                                                                                                    columns:
+                                                                                                    - a
+                                                                                                    - b
+                                                                                                    - _row_id
+                                                                                                    table: t1
+                                                                                                  children: []
+                                                                                      - name: StreamExchange
+                                                                                        fields:
+                                                                                          dist: HashShard(t2.c)
+                                                                                        children:
+                                                                                        - name: StreamTableScan
+                                                                                          fields:
+                                                                                            columns:
+                                                                                            - c
+                                                                                            table: t2
+                                                                                          children: []
+                                                                                  - name: StreamProject
+                                                                                    fields:
+                                                                                      exprs:
+                                                                                      - t1.a
+                                                                                      - t1.b
+                                                                                    children:
+                                                                                    - name: StreamHashAgg
+                                                                                      fields:
+                                                                                        aggs:
+                                                                                        - count
+                                                                                        group_key:
+                                                                                        - t1.a
+                                                                                        - t1.b
+                                                                                      children:
+                                                                                      - name: StreamExchange
+                                                                                        fields:
+                                                                                          dist: HashShard(t1.a, t1.b)
+                                                                                        children:
+                                                                                        - name: StreamTableScan
+                                                                                          fields:
+                                                                                            columns:
+                                                                                            - a
+                                                                                            - b
+                                                                                            - _row_id
+                                                                                            table: t1
+                                                                                          children: []
+                                                                              - name: StreamExchange
+                                                                                fields:
+                                                                                  dist: HashShard(t2.c)
+                                                                                children:
+                                                                                - name: StreamTableScan
+                                                                                  fields:
+                                                                                    columns:
+                                                                                    - c
+                                                                                    table: t2
+                                                                                  children: []
+                                                                          - name: StreamProject
+                                                                            fields:
+                                                                              exprs:
+                                                                              - t1.a
+                                                                              - t1.b
+                                                                            children:
+                                                                            - name: StreamHashAgg
+                                                                              fields:
+                                                                                aggs:
+                                                                                - count
+                                                                                group_key:
+                                                                                - t1.a
+                                                                                - t1.b
+                                                                              children:
+                                                                              - name: StreamExchange
+                                                                                fields:
+                                                                                  dist: HashShard(t1.a, t1.b)
+                                                                                children:
+                                                                                - name: StreamTableScan
+                                                                                  fields:
+                                                                                    columns:
+                                                                                    - a
+                                                                                    - b
+                                                                                    - _row_id
+                                                                                    table: t1
+                                                                                  children: []
+                                                                      - name: StreamExchange
+                                                                        fields:
+                                                                          dist: HashShard(t2.c)
+                                                                        children:
+                                                                        - name: StreamTableScan
+                                                                          fields:
+                                                                            columns:
+                                                                            - c
+                                                                            table: t2
+                                                                          children: []
+                                                                  - name: StreamProject
+                                                                    fields:
+                                                                      exprs:
+                                                                      - t1.a
+                                                                      - t1.b
+                                                                    children:
+                                                                    - name: StreamHashAgg
+                                                                      fields:
+                                                                        aggs:
+                                                                        - count
+                                                                        group_key:
+                                                                        - t1.a
+                                                                        - t1.b
+                                                                      children:
+                                                                      - name: StreamExchange
+                                                                        fields:
+                                                                          dist: HashShard(t1.a, t1.b)
+                                                                        children:
+                                                                        - name: StreamTableScan
+                                                                          fields:
+                                                                            columns:
+                                                                            - a
+                                                                            - b
+                                                                            - _row_id
+                                                                            table: t1
+                                                                          children: []
+                                                              - name: StreamExchange
+                                                                fields:
+                                                                  dist: HashShard(t2.c)
+                                                                children:
+                                                                - name: StreamTableScan
+                                                                  fields:
+                                                                    columns:
+                                                                    - c
+                                                                    table: t2
+                                                                  children: []
+                                                          - name: StreamProject
+                                                            fields:
+                                                              exprs:
+                                                              - t1.a
+                                                              - t1.b
+                                                            children:
+                                                            - name: StreamHashAgg
+                                                              fields:
+                                                                aggs:
+                                                                - count
+                                                                group_key:
+                                                                - t1.a
+                                                                - t1.b
+                                                              children:
+                                                              - name: StreamExchange
+                                                                fields:
+                                                                  dist: HashShard(t1.a, t1.b)
+                                                                children:
+                                                                - name: StreamTableScan
+                                                                  fields:
+                                                                    columns:
+                                                                    - a
+                                                                    - b
+                                                                    - _row_id
+                                                                    table: t1
+                                                                  children: []
+                                                      - name: StreamExchange
+                                                        fields:
+                                                          dist: HashShard(t2.c)
+                                                        children:
+                                                        - name: StreamTableScan
+                                                          fields:
+                                                            columns:
+                                                            - c
+                                                            table: t2
+                                                          children: []
+                                                  - name: StreamProject
+                                                    fields:
+                                                      exprs:
                                                       - t1.a
                                                       - t1.b
                                                     children:
-                                                    - name: StreamExchange
+                                                    - name: StreamHashAgg
                                                       fields:
-                                                        dist: HashShard(t1.a, t1.b)
+                                                        aggs:
+                                                        - count
+                                                        group_key:
+                                                        - t1.a
+                                                        - t1.b
                                                       children:
-                                                      - name: StreamTableScan
+                                                      - name: StreamExchange
                                                         fields:
-                                                          columns:
-                                                          - a
-                                                          - b
-                                                          - _row_id
-                                                          table: t1
-                                                        children: []
+                                                          dist: HashShard(t1.a, t1.b)
+                                                        children:
+                                                        - name: StreamTableScan
+                                                          fields:
+                                                            columns:
+                                                            - a
+                                                            - b
+                                                            - _row_id
+                                                            table: t1
+                                                          children: []
                                               - name: StreamExchange
                                                 fields:
                                                   dist: HashShard(t2.c)
@@ -397,126 +1124,6 @@
                                                     - c
                                                     table: t2
                                                   children: []
-                                        - name: StreamProject
-                                          fields:
-                                            exprs:
-                                            - t1.a
-                                            - t1.b
-                                            - t1.b
-                                          children:
-                                          - name: StreamHashJoin
-                                            fields:
-                                              predicate: t1.a = t2.c
-                                              type: Inner
-                                            children:
-                                            - name: StreamExchange
-                                              fields:
-                                                dist: HashShard(t1.a)
-                                              children:
-                                              - name: StreamProject
-                                                fields:
-                                                  exprs:
-                                                  - t1.a
-                                                  - t1.b
-                                                children:
-                                                - name: StreamHashAgg
-                                                  fields:
-                                                    aggs:
-                                                    - count
-                                                    group_key:
-                                                    - t1.a
-                                                    - t1.b
-                                                  children:
-                                                  - name: StreamExchange
-                                                    fields:
-                                                      dist: HashShard(t1.a, t1.b)
-                                                    children:
-                                                    - name: StreamTableScan
-                                                      fields:
-                                                        columns:
-                                                        - a
-                                                        - b
-                                                        - _row_id
-                                                        table: t1
-                                                      children: []
-                                            - name: StreamExchange
-                                              fields:
-                                                dist: HashShard(t2.c)
-                                              children:
-                                              - name: StreamTableScan
-                                                fields:
-                                                  columns:
-                                                  - c
-                                                  table: t2
-                                                children: []
-                                      - name: StreamProject
-                                        fields:
-                                          exprs:
-                                          - t1.a
-                                          - t1.b
-                                          - t1.b
-                                        children:
-                                        - name: StreamHashJoin
-                                          fields:
-                                            predicate: t1.a = t2.c
-                                            type: Inner
-                                          children:
-                                          - name: StreamExchange
-                                            fields:
-                                              dist: HashShard(t1.a)
-                                            children:
-                                            - name: StreamProject
-                                              fields:
-                                                exprs:
-                                                - t1.a
-                                                - t1.b
-                                              children:
-                                              - name: StreamHashAgg
-                                                fields:
-                                                  aggs:
-                                                  - count
-                                                  group_key:
-                                                  - t1.a
-                                                  - t1.b
-                                                children:
-                                                - name: StreamExchange
-                                                  fields:
-                                                    dist: HashShard(t1.a, t1.b)
-                                                  children:
-                                                  - name: StreamTableScan
-                                                    fields:
-                                                      columns:
-                                                      - a
-                                                      - b
-                                                      - _row_id
-                                                      table: t1
-                                                    children: []
-                                          - name: StreamExchange
-                                            fields:
-                                              dist: HashShard(t2.c)
-                                            children:
-                                            - name: StreamTableScan
-                                              fields:
-                                                columns:
-                                                - c
-                                                table: t2
-                                              children: []
-                                    - name: StreamProject
-                                      fields:
-                                        exprs:
-                                        - t1.a
-                                        - t1.b
-                                        - t1.b
-                                      children:
-                                      - name: StreamHashJoin
-                                        fields:
-                                          predicate: t1.a = t2.c
-                                          type: Inner
-                                        children:
-                                        - name: StreamExchange
-                                          fields:
-                                            dist: HashShard(t1.a)
-                                          children:
                                           - name: StreamProject
                                             fields:
                                               exprs:
@@ -543,58 +1150,6 @@
                                                     - _row_id
                                                     table: t1
                                                   children: []
-                                        - name: StreamExchange
-                                          fields:
-                                            dist: HashShard(t2.c)
-                                          children:
-                                          - name: StreamTableScan
-                                            fields:
-                                              columns:
-                                              - c
-                                              table: t2
-                                            children: []
-                                  - name: StreamProject
-                                    fields:
-                                      exprs:
-                                      - t1.a
-                                      - t1.b
-                                      - t1.b
-                                    children:
-                                    - name: StreamHashJoin
-                                      fields:
-                                        predicate: t1.a = t2.c
-                                        type: Inner
-                                      children:
-                                      - name: StreamExchange
-                                        fields:
-                                          dist: HashShard(t1.a)
-                                        children:
-                                        - name: StreamProject
-                                          fields:
-                                            exprs:
-                                            - t1.a
-                                            - t1.b
-                                          children:
-                                          - name: StreamHashAgg
-                                            fields:
-                                              aggs:
-                                              - count
-                                              group_key:
-                                              - t1.a
-                                              - t1.b
-                                            children:
-                                            - name: StreamExchange
-                                              fields:
-                                                dist: HashShard(t1.a, t1.b)
-                                              children:
-                                              - name: StreamTableScan
-                                                fields:
-                                                  columns:
-                                                  - a
-                                                  - b
-                                                  - _row_id
-                                                  table: t1
-                                                children: []
                                       - name: StreamExchange
                                         fields:
                                           dist: HashShard(t2.c)
@@ -605,126 +1160,6 @@
                                             - c
                                             table: t2
                                           children: []
-                                - name: StreamProject
-                                  fields:
-                                    exprs:
-                                    - t1.a
-                                    - t1.b
-                                    - t1.b
-                                  children:
-                                  - name: StreamHashJoin
-                                    fields:
-                                      predicate: t1.a = t2.c
-                                      type: Inner
-                                    children:
-                                    - name: StreamExchange
-                                      fields:
-                                        dist: HashShard(t1.a)
-                                      children:
-                                      - name: StreamProject
-                                        fields:
-                                          exprs:
-                                          - t1.a
-                                          - t1.b
-                                        children:
-                                        - name: StreamHashAgg
-                                          fields:
-                                            aggs:
-                                            - count
-                                            group_key:
-                                            - t1.a
-                                            - t1.b
-                                          children:
-                                          - name: StreamExchange
-                                            fields:
-                                              dist: HashShard(t1.a, t1.b)
-                                            children:
-                                            - name: StreamTableScan
-                                              fields:
-                                                columns:
-                                                - a
-                                                - b
-                                                - _row_id
-                                                table: t1
-                                              children: []
-                                    - name: StreamExchange
-                                      fields:
-                                        dist: HashShard(t2.c)
-                                      children:
-                                      - name: StreamTableScan
-                                        fields:
-                                          columns:
-                                          - c
-                                          table: t2
-                                        children: []
-                              - name: StreamProject
-                                fields:
-                                  exprs:
-                                  - t1.a
-                                  - t1.b
-                                  - t1.b
-                                children:
-                                - name: StreamHashJoin
-                                  fields:
-                                    predicate: t1.a = t2.c
-                                    type: Inner
-                                  children:
-                                  - name: StreamExchange
-                                    fields:
-                                      dist: HashShard(t1.a)
-                                    children:
-                                    - name: StreamProject
-                                      fields:
-                                        exprs:
-                                        - t1.a
-                                        - t1.b
-                                      children:
-                                      - name: StreamHashAgg
-                                        fields:
-                                          aggs:
-                                          - count
-                                          group_key:
-                                          - t1.a
-                                          - t1.b
-                                        children:
-                                        - name: StreamExchange
-                                          fields:
-                                            dist: HashShard(t1.a, t1.b)
-                                          children:
-                                          - name: StreamTableScan
-                                            fields:
-                                              columns:
-                                              - a
-                                              - b
-                                              - _row_id
-                                              table: t1
-                                            children: []
-                                  - name: StreamExchange
-                                    fields:
-                                      dist: HashShard(t2.c)
-                                    children:
-                                    - name: StreamTableScan
-                                      fields:
-                                        columns:
-                                        - c
-                                        table: t2
-                                      children: []
-                            - name: StreamProject
-                              fields:
-                                exprs:
-                                - t1.a
-                                - t1.b
-                                - t1.b
-                              children:
-                              - name: StreamHashJoin
-                                fields:
-                                  predicate: t1.a = t2.c
-                                  type: Inner
-                                children:
-                                - name: StreamExchange
-                                  fields:
-                                    dist: HashShard(t1.a)
-                                  children:
                                   - name: StreamProject
                                     fields:
                                       exprs:
@@ -751,58 +1186,6 @@
                                             - _row_id
                                             table: t1
                                           children: []
-                                - name: StreamExchange
-                                  fields:
-                                    dist: HashShard(t2.c)
-                                  children:
-                                  - name: StreamTableScan
-                                    fields:
-                                      columns:
-                                      - c
-                                      table: t2
-                                    children: []
-                          - name: StreamProject
-                            fields:
-                              exprs:
-                              - t1.a
-                              - t1.b
-                              - t1.b
-                            children:
-                            - name: StreamHashJoin
-                              fields:
-                                predicate: t1.a = t2.c
-                                type: Inner
-                              children:
-                              - name: StreamExchange
-                                fields:
-                                  dist: HashShard(t1.a)
-                                children:
-                                - name: StreamProject
-                                  fields:
-                                    exprs:
-                                    - t1.a
-                                    - t1.b
-                                  children:
-                                  - name: StreamHashAgg
-                                    fields:
-                                      aggs:
-                                      - count
-                                      group_key:
-                                      - t1.a
-                                      - t1.b
-                                    children:
-                                    - name: StreamExchange
-                                      fields:
-                                        dist: HashShard(t1.a, t1.b)
-                                      children:
-                                      - name: StreamTableScan
-                                        fields:
-                                          columns:
-                                          - a
-                                          - b
-                                          - _row_id
-                                          table: t1
-                                        children: []
                               - name: StreamExchange
                                 fields:
                                   dist: HashShard(t2.c)
@@ -813,126 +1196,6 @@
                                     - c
                                     table: t2
                                   children: []
-                        - name: StreamProject
-                          fields:
-                            exprs:
-                            - t1.a
-                            - t1.b
-                            - t1.b
-                          children:
-                          - name: StreamHashJoin
-                            fields:
-                              predicate: t1.a = t2.c
-                              type: Inner
-                            children:
-                            - name: StreamExchange
-                              fields:
-                                dist: HashShard(t1.a)
-                              children:
-                              - name: StreamProject
-                                fields:
-                                  exprs:
-                                  - t1.a
-                                  - t1.b
-                                children:
-                                - name: StreamHashAgg
-                                  fields:
-                                    aggs:
-                                    - count
-                                    group_key:
-                                    - t1.a
-                                    - t1.b
-                                  children:
-                                  - name: StreamExchange
-                                    fields:
-                                      dist: HashShard(t1.a, t1.b)
-                                    children:
-                                    - name: StreamTableScan
-                                      fields:
-                                        columns:
-                                        - a
-                                        - b
-                                        - _row_id
-                                        table: t1
-                                      children: []
-                            - name: StreamExchange
-                              fields:
-                                dist: HashShard(t2.c)
-                              children:
-                              - name: StreamTableScan
-                                fields:
-                                  columns:
-                                  - c
-                                  table: t2
-                                children: []
-                      - name: StreamProject
-                        fields:
-                          exprs:
-                          - t1.a
-                          - t1.b
-                          - t1.b
-                        children:
-                        - name: StreamHashJoin
-                          fields:
-                            predicate: t1.a = t2.c
-                            type: Inner
-                          children:
-                          - name: StreamExchange
-                            fields:
-                              dist: HashShard(t1.a)
-                            children:
-                            - name: StreamProject
-                              fields:
-                                exprs:
-                                - t1.a
-                                - t1.b
-                              children:
-                              - name: StreamHashAgg
-                                fields:
-                                  aggs:
-                                  - count
-                                  group_key:
-                                  - t1.a
-                                  - t1.b
-                                children:
-                                - name: StreamExchange
-                                  fields:
-                                    dist: HashShard(t1.a, t1.b)
-                                  children:
-                                  - name: StreamTableScan
-                                    fields:
-                                      columns:
-                                      - a
-                                      - b
-                                      - _row_id
-                                      table: t1
-                                    children: []
-                          - name: StreamExchange
-                            fields:
-                              dist: HashShard(t2.c)
-                            children:
-                            - name: StreamTableScan
-                              fields:
-                                columns:
-                                - c
-                                table: t2
-                              children: []
-                    - name: StreamProject
-                      fields:
-                        exprs:
-                        - t1.a
-                        - t1.b
-                        - t1.b
-                      children:
-                      - name: StreamHashJoin
-                        fields:
-                          predicate: t1.a = t2.c
-                          type: Inner
-                        children:
-                        - name: StreamExchange
-                          fields:
-                            dist: HashShard(t1.a)
-                          children:
                           - name: StreamProject
                             fields:
                               exprs:
@@ -959,58 +1222,6 @@
                                     - _row_id
                                     table: t1
                                   children: []
-                        - name: StreamExchange
-                          fields:
-                            dist: HashShard(t2.c)
-                          children:
-                          - name: StreamTableScan
-                            fields:
-                              columns:
-                              - c
-                              table: t2
-                            children: []
-                  - name: StreamProject
-                    fields:
-                      exprs:
-                      - t1.a
-                      - t1.b
-                      - t1.b
-                    children:
-                    - name: StreamHashJoin
-                      fields:
-                        predicate: t1.a = t2.c
-                        type: Inner
-                      children:
-                      - name: StreamExchange
-                        fields:
-                          dist: HashShard(t1.a)
-                        children:
-                        - name: StreamProject
-                          fields:
-                            exprs:
-                            - t1.a
-                            - t1.b
-                          children:
-                          - name: StreamHashAgg
-                            fields:
-                              aggs:
-                              - count
-                              group_key:
-                              - t1.a
-                              - t1.b
-                            children:
-                            - name: StreamExchange
-                              fields:
-                                dist: HashShard(t1.a, t1.b)
-                              children:
-                              - name: StreamTableScan
-                                fields:
-                                  columns:
-                                  - a
-                                  - b
-                                  - _row_id
-                                  table: t1
-                                children: []
                       - name: StreamExchange
                         fields:
                           dist: HashShard(t2.c)
@@ -1021,126 +1232,6 @@
                             - c
                             table: t2
                           children: []
-                - name: StreamProject
-                  fields:
-                    exprs:
-                    - t1.a
-                    - t1.b
-                    - t1.b
-                  children:
-                  - name: StreamHashJoin
-                    fields:
-                      predicate: t1.a = t2.c
-                      type: Inner
-                    children:
-                    - name: StreamExchange
-                      fields:
-                        dist: HashShard(t1.a)
-                      children:
-                      - name: StreamProject
-                        fields:
-                          exprs:
-                          - t1.a
-                          - t1.b
-                        children:
-                        - name: StreamHashAgg
-                          fields:
-                            aggs:
-                            - count
-                            group_key:
-                            - t1.a
-                            - t1.b
-                          children:
-                          - name: StreamExchange
-                            fields:
-                              dist: HashShard(t1.a, t1.b)
-                            children:
-                            - name: StreamTableScan
-                              fields:
-                                columns:
-                                - a
-                                - b
-                                - _row_id
-                                table: t1
-                              children: []
-                    - name: StreamExchange
-                      fields:
-                        dist: HashShard(t2.c)
-                      children:
-                      - name: StreamTableScan
-                        fields:
-                          columns:
-                          - c
-                          table: t2
-                        children: []
-              - name: StreamProject
-                fields:
-                  exprs:
-                  - t1.a
-                  - t1.b
-                  - t1.b
-                children:
-                - name: StreamHashJoin
-                  fields:
-                    predicate: t1.a = t2.c
-                    type: Inner
-                  children:
-                  - name: StreamExchange
-                    fields:
-                      dist: HashShard(t1.a)
-                    children:
-                    - name: StreamProject
-                      fields:
-                        exprs:
-                        - t1.a
-                        - t1.b
-                      children:
-                      - name: StreamHashAgg
-                        fields:
-                          aggs:
-                          - count
-                          group_key:
-                          - t1.a
-                          - t1.b
-                        children:
-                        - name: StreamExchange
-                          fields:
-                            dist: HashShard(t1.a, t1.b)
-                          children:
-                          - name: StreamTableScan
-                            fields:
-                              columns:
-                              - a
-                              - b
-                              - _row_id
-                              table: t1
-                            children: []
-                  - name: StreamExchange
-                    fields:
-                      dist: HashShard(t2.c)
-                    children:
-                    - name: StreamTableScan
-                      fields:
-                        columns:
-                        - c
-                        table: t2
-                      children: []
-            - name: StreamProject
-              fields:
-                exprs:
-                - t1.a
-                - t1.b
-                - t1.b
-              children:
-              - name: StreamHashJoin
-                fields:
-                  predicate: t1.a = t2.c
-                  type: Inner
-                children:
-                - name: StreamExchange
-                  fields:
-                    dist: HashShard(t1.a)
-                  children:
                   - name: StreamProject
                     fields:
                       exprs:
@@ -1167,58 +1258,6 @@
                             - _row_id
                             table: t1
                           children: []
-                - name: StreamExchange
-                  fields:
-                    dist: HashShard(t2.c)
-                  children:
-                  - name: StreamTableScan
-                    fields:
-                      columns:
-                      - c
-                      table: t2
-                    children: []
-          - name: StreamProject
-            fields:
-              exprs:
-              - t1.a
-              - t1.b
-              - t1.b
-            children:
-            - name: StreamHashJoin
-              fields:
-                predicate: t1.a = t2.c
-                type: Inner
-              children:
-              - name: StreamExchange
-                fields:
-                  dist: HashShard(t1.a)
-                children:
-                - name: StreamProject
-                  fields:
-                    exprs:
-                    - t1.a
-                    - t1.b
-                  children:
-                  - name: StreamHashAgg
-                    fields:
-                      aggs:
-                      - count
-                      group_key:
-                      - t1.a
-                      - t1.b
-                    children:
-                    - name: StreamExchange
-                      fields:
-                        dist: HashShard(t1.a, t1.b)
-                      children:
-                      - name: StreamTableScan
-                        fields:
-                          columns:
-                          - a
-                          - b
-                          - _row_id
-                          table: t1
-                        children: []
               - name: StreamExchange
                 fields:
                   dist: HashShard(t2.c)
@@ -1229,55 +1268,3 @@
                     - c
                     table: t2
                   children: []
-        - name: StreamProject
-          fields:
-            exprs:
-            - t1.a
-            - t1.b
-            - t1.b
-          children:
-          - name: StreamHashJoin
-            fields:
-              predicate: t1.a = t2.c
-              type: Inner
-            children:
-            - name: StreamExchange
-              fields:
-                dist: HashShard(t1.a)
-              children:
-              - name: StreamProject
-                fields:
-                  exprs:
-                  - t1.a
-                  - t1.b
-                children:
-                - name: StreamHashAgg
-                  fields:
-                    aggs:
-                    - count
-                    group_key:
-                    - t1.a
-                    - t1.b
-                  children:
-                  - name: StreamExchange
-                    fields:
-                      dist: HashShard(t1.a, t1.b)
-                    children:
-                    - name: StreamTableScan
-                      fields:
-                        columns:
-                        - a
-                        - b
-                        - _row_id
-                        table: t1
-                      children: []
-            - name: StreamExchange
-              fields:
-                dist: HashShard(t2.c)
-              children:
-              - name: StreamTableScan
-                fields:
-                  columns:
-                  - c
-                  table: t2
-                children: []
