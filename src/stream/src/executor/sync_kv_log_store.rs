@@ -755,7 +755,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                             new_seq_id,
                                             epoch,
                                             cardinality = chunk.cardinality(),
-                                            "received chunk"
+                                            "received chunk:\n{chunk:#?}"
                                         );
                                         if let Some(chunk_to_flush) = buffer.add_or_flush_chunk(
                                             start_seq_id,
