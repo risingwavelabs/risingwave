@@ -905,28 +905,6 @@ impl<S: StateStoreRead> ReadFuture<S> {
                         ..
                     } => {
                         metrics.buffer_read_count.inc_by(chunk.cardinality() as _);
-                        for (op, row) in chunk.rows() {
-                            for datum in row.iter() {
-                                if datum == Some(ScalarImpl::Int32(1176883).as_scalar_ref_impl()) {
-                                    tracing::trace!(
-                                        start_seq_id,
-                                        end_seq_id,
-                                        flushed,
-                                        ?op,
-                                        "read buffered row (1176883)"
-                                    );
-                                }
-                                if datum == Some(ScalarImpl::Int32(814261).as_scalar_ref_impl()) {
-                                    tracing::trace!(
-                                        start_seq_id,
-                                        end_seq_id,
-                                        flushed,
-                                        ?op,
-                                        "read buffered row (814261)"
-                                    );
-                                }
-                            }
-                        }
                         tracing::trace!(
                             start_seq_id,
                             end_seq_id,
