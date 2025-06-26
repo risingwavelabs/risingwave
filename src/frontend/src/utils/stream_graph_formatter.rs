@@ -192,7 +192,7 @@ impl StreamGraphFormatter {
 
         stream_graph_visitor::visit_stream_node_tables_inner(
             &mut node_copy,
-            false,
+            true,
             false,
             |table, table_name| {
                 tables.push((table_name.to_owned(), self.add_table(table)));
