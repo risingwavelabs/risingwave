@@ -79,7 +79,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction, bidder, price, date_time, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [Field(bid, 0:Int32) as $expr3, Field(bid, 1:Int32) as $expr4, (0.908:Decimal * Field(bid, 2:Int32)::Decimal) as $expr5, Field(bid, 5:Int32) as $expr6, _row_id] }
         └── StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [[$expr1]], output: [event_type, person, auction, bid, $expr1, _row_id], cleaned_by_watermark: true }
             ├── tables: [ DynamicFilterLeft: 0, DynamicFilterRight: 1 ]
@@ -130,7 +129,7 @@
             └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [auction, price, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck } { tables: [ Materialize: 4294967294 ] }
+    StreamMaterialize { columns: [auction, price, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
     └── StreamProject { exprs: [Field(bid, 0:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, _row_id] }
         └── StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [[$expr1]], output: [event_type, person, auction, bid, $expr1, _row_id], cleaned_by_watermark: true } { tables: [ DynamicFilterLeft: 0, DynamicFilterRight: 1 ] }
             ├── StreamFilter { predicate: ((((Field(bid, 0:Int32) = 1007:Int32) OR (Field(bid, 0:Int32) = 1020:Int32)) OR ((Field(bid, 0:Int32) = 2001:Int32) OR (Field(bid, 0:Int32) = 2019:Int32))) OR (Field(bid, 0:Int32) = 2087:Int32)) AND (event_type = 2:Int32) }
@@ -202,7 +201,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [category, avg], stream_key: [category], pk_columns: [category], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [$expr5, (sum(max($expr8)) / count(max($expr8))::Decimal) as $expr10] }
         └── StreamHashAgg { group_key: [$expr5], aggs: [sum(max($expr8)), count(max($expr8)), count] }
             ├── tables: [ HashAggState: 0 ]
@@ -367,7 +365,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], stream_key: [auction, window_start], pk_columns: [auction, window_start], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [$expr3, count, window_start, window_start] }
         └── StreamFilter { predicate: (count >= max(count)) }
             └── StreamHashJoin { type: Inner, predicate: window_start = window_start, output: all }
@@ -509,7 +506,7 @@
                                 └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [seller, avg, $expr2(hidden)], stream_key: [$expr2, seller], pk_columns: [$expr2, seller], pk_conflict: NoCheck } { tables: [ Materialize: 4294967294 ] }
+    StreamMaterialize { columns: [seller, avg, $expr2(hidden)], stream_key: [$expr2, seller], pk_columns: [$expr2, seller], pk_conflict: NoCheck }
     └── StreamProject { exprs: [$expr5, (sum / count::Decimal) as $expr10, $expr2] }
         └── StreamOverWindow { window_functions: [sum($expr8) OVER(PARTITION BY $expr5 ORDER BY $expr9 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), count($expr8) OVER(PARTITION BY $expr5 ORDER BY $expr9 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
             ├── tables: [ OverWindow: 0 ]
@@ -629,7 +626,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction, price, bidder, date_time, _row_id(hidden), $expr7(hidden)], stream_key: [_row_id, $expr7, price], pk_columns: [_row_id, $expr7, price], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [$expr3, $expr5, $expr4, $expr6, _row_id, $expr7] }
         └── StreamFilter { predicate: ($expr6 >= $expr8) AND ($expr6 <= $expr7) }
             └── StreamHashJoin { type: Inner, predicate: $expr5 = max($expr5), output: all } { tables: [ HashJoinLeft: 0, HashJoinDegreeLeft: 1, HashJoinRight: 2, HashJoinDegreeRight: 3 ] }
@@ -768,7 +764,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [id, name, starttime, $expr6(hidden), $expr8(hidden), $expr9(hidden), $expr10(hidden)], stream_key: [id, name, starttime, $expr6], pk_columns: [id, name, starttime, $expr6], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamExchange Hash([0, 1, 2, 3]) from 1
 
     Fragment 1
@@ -868,7 +863,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, auction, bidder, price, bid_date_time, _row_id(hidden), _row_id#1(hidden)], stream_key: [id], pk_columns: [id], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamGroupTopN { order: [$expr14 DESC, $expr15 ASC], limit: 1, offset: 0, group_key: [$expr2] } { tables: [ GroupTopN: 0 ] }
         └── StreamProject { exprs: [$expr2, $expr3, $expr4, $expr5, $expr6, $expr7, $expr8, $expr9, $expr10, $expr12, $expr13, $expr14, $expr15, _row_id, _row_id] }
             └── StreamFilter { predicate: ($expr15 >= $expr7) AND ($expr15 <= $expr8) }
@@ -1010,7 +1004,7 @@
               └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [auction, bidder, price, bidtimetype, date_time, extra, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck } { tables: [ Materialize: 4294967294 ] }
+    StreamMaterialize { columns: [auction, bidder, price, bidtimetype, date_time, extra, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
     └── StreamProject { exprs: [$expr3, $expr4, (0.908:Decimal * $expr5::Decimal) as $expr8, Case(((Extract('HOUR':Varchar, $expr6) >= 8:Decimal) AND (Extract('HOUR':Varchar, $expr6) <= 18:Decimal)), 'dayTime':Varchar, ((Extract('HOUR':Varchar, $expr6) <= 6:Decimal) OR (Extract('HOUR':Varchar, $expr6) >= 20:Decimal)), 'nightTime':Varchar, 'otherTime':Varchar) as $expr9, $expr6, $expr7, _row_id] }
         └── StreamProject { exprs: [Field(bid, 0:Int32) as $expr3, Field(bid, 1:Int32) as $expr4, Field(bid, 2:Int32) as $expr5, Field(bid, 5:Int32) as $expr6, Field(bid, 6:Int32) as $expr7, _row_id] }
             └── StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [[$expr1]], output: [event_type, person, auction, bid, $expr1, _row_id], cleaned_by_watermark: true } { tables: [ DynamicFilterLeft: 0, DynamicFilterRight: 1 ] }
@@ -1058,7 +1052,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [bidder, auction], pk_columns: [bidder, auction], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamGroupTopN { order: [$expr8 DESC], limit: 1, offset: 0, group_key: [$expr4, $expr3] } { tables: [ GroupTopN: 0 ] }
         └── StreamExchange Hash([1, 0]) from 1
 
@@ -1116,7 +1109,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [bidder, auction, _row_id], pk_columns: [bidder, auction, _row_id], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamGroupTopN { order: [$expr8 DESC], limit: 1, offset: 0, with_ties: true, group_key: [$expr4, $expr3] } { tables: [ GroupTopN: 0 ] }
         └── StreamExchange Hash([1, 0]) from 1
 
@@ -1179,7 +1171,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, p_time, _row_id(hidden), rank_number], stream_key: [auction, _row_id], pk_columns: [auction, _row_id], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY $expr3 ORDER BY $expr5 DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] } { tables: [ OverWindow: 0 ] }
         └── StreamGroupTopN { order: [$expr5 DESC], limit: 10, offset: 0, group_key: [$expr3] } { tables: [ GroupTopN: 1 ] }
             └── StreamExchange Hash([0]) from 1
@@ -1250,7 +1241,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_timeb, item_name, description, initial_bid, reserve, date_timea, expires, seller, category, _row_id(hidden), _row_id#1(hidden)], stream_key: [_row_id, _row_id#1, auction], pk_columns: [_row_id, _row_id#1, auction], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamExchange Hash([0, 14, 15]) from 1
 
     Fragment 1
@@ -1334,7 +1324,7 @@
               └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [auction, bidder, price, channel, channel_id, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck } { tables: [ Materialize: 4294967294 ] }
+    StreamMaterialize { columns: [auction, bidder, price, channel, channel_id, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
     └── StreamProject { exprs: [$expr3, $expr4, $expr5, $expr6, Case((Lower($expr6) = 'apple':Varchar), '0':Varchar, (Lower($expr6) = 'google':Varchar), '1':Varchar, (Lower($expr6) = 'facebook':Varchar), '2':Varchar, (Lower($expr6) = 'baidu':Varchar), '3':Varchar, ArrayAccess(RegexpMatch($expr7, '(&|^)channel_id=([^&]*)':Varchar), 2:Int32)) as $expr8, _row_id] }
         └── StreamProject { exprs: [Field(bid, 0:Int32) as $expr3, Field(bid, 1:Int32) as $expr4, Field(bid, 2:Int32) as $expr5, Field(bid, 3:Int32) as $expr6, Field(bid, 4:Int32) as $expr7, _row_id] }
             └── StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [[$expr1]], output: [event_type, person, auction, bid, $expr1, _row_id], cleaned_by_watermark: true } { tables: [ DynamicFilterLeft: 0, DynamicFilterRight: 1 ] }
@@ -1381,7 +1371,7 @@
               └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [auction, bidder, price, channel, dir1, dir2, dir3, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck } { tables: [ Materialize: 4294967294 ] }
+    StreamMaterialize { columns: [auction, bidder, price, channel, dir1, dir2, dir3, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
     └── StreamProject { exprs: [$expr3, $expr4, $expr5, $expr6, SplitPart($expr7, '/':Varchar, 4:Int32) as $expr8, SplitPart($expr7, '/':Varchar, 5:Int32) as $expr9, SplitPart($expr7, '/':Varchar, 6:Int32) as $expr10, _row_id] }
         └── StreamProject { exprs: [Field(bid, 0:Int32) as $expr3, Field(bid, 1:Int32) as $expr4, Field(bid, 2:Int32) as $expr5, Field(bid, 3:Int32) as $expr6, Field(bid, 4:Int32) as $expr7, _row_id] }
             └── StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [[$expr1]], output: [event_type, person, auction, bid, $expr1, _row_id], cleaned_by_watermark: true }
@@ -1462,7 +1452,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction_id, auction_item_name, current_highest_bid, _row_id(hidden), $expr5(hidden)], stream_key: [_row_id, auction_id], pk_columns: [_row_id, auction_id], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamExchange Hash([0, 3]) from 1
 
     Fragment 1
@@ -1594,7 +1583,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [auction_id, auction_item_name], pk_columns: [auction_id, auction_item_name], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamDynamicFilter { predicate: (count($expr5) >= $expr6), output: [$expr2, $expr3, count($expr5)] } { tables: [ DynamicFilterLeft: 0, DynamicFilterRight: 1 ] }
         ├── StreamProject { exprs: [$expr2, $expr3, count($expr5)] }
         │   └── StreamHashAgg { group_key: [$expr2, $expr3], aggs: [count($expr5), count] } { tables: [ HashAggState: 2 ] }
@@ -1742,7 +1730,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction_id, auction_item_name, _row_id(hidden)], stream_key: [_row_id, auction_id], pk_columns: [_row_id, auction_id], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamExchange Hash([0, 2]) from 1
 
     Fragment 1
@@ -1866,7 +1853,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction_id, auction_item_name, _row_id(hidden)], stream_key: [_row_id, auction_id], pk_columns: [_row_id, auction_id], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamExchange Hash([0, 2]) from 1
 
     Fragment 1
@@ -1992,7 +1978,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [auction_id, auction_item_name], pk_columns: [bid_count, auction_id, auction_item_name], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [$expr2, $expr3, count($expr5)] }
         └── StreamTopN { order: [count($expr5) DESC], limit: 1000, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
@@ -2134,7 +2119,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [min_final], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [min(min(max($expr7)))] }
         └── StreamSimpleAgg { aggs: [min(min(max($expr7))), count] }
             ├── tables: [ SimpleAggState: 1, SimpleAggCall0: 0 ]

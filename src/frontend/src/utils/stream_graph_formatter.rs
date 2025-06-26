@@ -29,19 +29,35 @@ use super::PrettySerde;
 use crate::TableCatalog;
 
 /// ice: in the future, we may allow configurable width, boundaries, etc.
-pub fn explain_stream_graph(graph: &StreamFragmentGraph, is_verbose: bool) -> String {
+pub fn explain_stream_graph(
+    graph: &StreamFragmentGraph,
+    table: Option<Table>,
+    is_verbose: bool,
+) -> String {
     let mut output = String::with_capacity(2048);
     let mut config = PrettyConfig {
         need_boundaries: false,
         width: 80,
         ..Default::default()
     };
-    StreamGraphFormatter::new(is_verbose).explain_graph(graph, &mut config, &mut output);
+    let mut fmt = StreamGraphFormatter::new(is_verbose);
+    if let Some(tb) = table {
+        fmt.add_table(&tb);
+    }
+    fmt.explain_graph(graph, &mut config, &mut output);
     output
 }
 
-pub fn explain_stream_graph_as_dot(sg: &StreamFragmentGraph, is_verbose: bool) -> String {
-    let graph = StreamGraphFormatter::new(is_verbose).explain_graph_as_dot(sg);
+pub fn explain_stream_graph_as_dot(
+    sg: &StreamFragmentGraph,
+    table: Option<Table>,
+    is_verbose: bool,
+) -> String {
+    let mut fmt = StreamGraphFormatter::new(is_verbose);
+    if let Some(tb) = table {
+        fmt.add_table(&tb);
+    }
+    let graph = fmt.explain_graph_as_dot(sg);
     let dot = Dot::new(&graph);
     dot.to_string()
 }
