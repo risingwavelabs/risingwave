@@ -327,6 +327,10 @@ pub struct MetaConfig {
     #[deprecated]
     pub cut_table_size_limit: u64,
 
+    /// Whether to protect dropping a table with incoming sink.
+    #[serde(default = "default::meta::protect_drop_table_with_incoming_sink")]
+    pub protect_drop_table_with_incoming_sink: bool,
+
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -1700,6 +1704,10 @@ pub mod default {
         // limit the size of group to trigger split by group_size and avoid too many small groups
         pub fn split_group_size_limit() -> u64 {
             64 * 1024 * 1024 * 1024 // 64GB
+        }
+
+        pub fn protect_drop_table_with_incoming_sink() -> bool {
+            false
         }
 
         pub fn partition_vnode_count() -> u32 {
