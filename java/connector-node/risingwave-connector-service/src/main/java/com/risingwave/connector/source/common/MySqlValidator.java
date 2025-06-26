@@ -324,6 +324,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             case "mediumblob":
             case "longblob":
             case "binary":
+            case "varbinary":
                 return val == Data.DataType.TypeName.BYTEA_VALUE;
             case "year":
                 return val == Data.DataType.TypeName.INT32_VALUE;
