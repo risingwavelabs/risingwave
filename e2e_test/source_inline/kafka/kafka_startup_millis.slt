@@ -1,0 +1,47 @@
+control substitution on
+
+system ok
+rpk topic create test_kafka_start_millis
+
+system ok
+cat <<EOF | rpk topic produce test_kafka_start_millis -f "%p %v\n" -p 0
+0 {"x":"a"}
+1 {"x":"b"}
+2 {"x":"c"}
+EOF
+
+sleep 1s
+
+system ok
+export CURRENT_TIMESTAMP=$(($(date +%s) * 1000))
+
+system ok
+cat <<EOF | rpk topic produce test_kafka_start_millis -f "%p %v\n" -p 0
+3 {"x":"d"}
+4 {"x":"e"}
+5 {"x":"f"}
+EOF
+
+statement ok
+CREATE TABLE kafkasource (
+    x varchar
+)
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'test_kafka_start_millis',
+    scan.startup.mode = 'timestamp',
+    scan.startup.timestamp.millis = ${CURRENT_TIMESTAMP}
+) FORMAT PLAIN ENCODE JSON;
+
+sleep 1s
+
+query I retry 3 backoff 2s
+select count(*) from kafkasource;
+----
+3
+
+statement ok
+drop table kafkasource;
+
+system ok
+rpk topic delete test_kafka_start_millis;
