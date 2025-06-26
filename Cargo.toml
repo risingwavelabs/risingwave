@@ -53,6 +53,7 @@ members = [
     "src/test_runner",
     "src/tests/compaction_test",
     "src/tests/e2e_extended_mode",
+    "src/tests/mysql_test",
     "src/tests/regress",
     "src/tests/simulation",
     "src/tests/sqlsmith",
