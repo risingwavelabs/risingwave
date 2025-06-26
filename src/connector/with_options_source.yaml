@@ -262,7 +262,7 @@ KafkaProperties:
     field_type: Duration
     required: false
     default: 'Duration :: from_secs (5)'
-    changeable: true
+    allow_alter_on_fly: true
   - name: properties.bootstrap.server
     field_type: String
     required: true

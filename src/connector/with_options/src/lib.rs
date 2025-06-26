@@ -43,17 +43,17 @@ use syn::{DeriveInput, parse_macro_input};
 ///
 /// ## Field Annotations
 ///
-/// ### Changeable fields
+/// ### Allow Alter On Fly fields (allowed in `alter table connector with`)
 ///
-/// Use `#[with_option(changeable)]` to mark fields that can be changed on the fly
+/// Use `#[with_option(allow_alter_on_fly)]` to mark fields that can be changed on the fly
 /// without requiring a restart or recreation of the connector:
 ///
 /// ```ignore
 /// #[derive(WithOptions)]
 /// struct MyConnectorConfig {
-///     #[with_option(changeable)]
+///     #[with_option(allow_alter_on_fly)]
 ///     pub rate_limit: Option<u32>,
-///     pub endpoint: String,  // not changeable
+///     pub endpoint: String,  // not allow_alter_on_fly
 /// }
 /// ```
 #[proc_macro_derive(WithOptions, attributes(with_option))]

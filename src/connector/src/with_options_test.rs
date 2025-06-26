@@ -60,14 +60,14 @@ pub fn generate_with_options_yaml_sink() -> String {
     generate_with_options_yaml_inner(&connector_crate_path().join("src").join("sink"))
 }
 
-pub fn generate_changeable_fields_combined() -> String {
-    let source_info = extract_changeable_fields_from_yaml(
+pub fn generate_allow_alter_on_fly_fields_combined() -> String {
+    let source_info = extract_allow_alter_on_fly_fields_from_yaml(
         &connector_crate_path().join("with_options_source.yaml"),
     );
     let sink_info =
-        extract_changeable_fields_from_yaml(&connector_crate_path().join("with_options_sink.yaml"));
+        extract_allow_alter_on_fly_fields_from_yaml(&connector_crate_path().join("with_options_sink.yaml"));
 
-    generate_rust_changeable_fields_code_separate(source_info, sink_info)
+    generate_rust_allow_alter_on_fly_fields_code_separate(source_info, sink_info)
 }
 
 /// Collect all structs with `#[derive(WithOptions)]` in the `.rs` files in `path` (plus `common.rs`),
@@ -129,7 +129,7 @@ fn generate_with_options_yaml_inner(path: &Path) -> String {
                     alias,
                 } = extract_serde_properties(&field);
 
-                let changeable = extract_with_option_changeable(&field);
+                let allow_alter_on_fly = extract_with_option_allow_alter_on_fly(&field);
 
                 let field_type = field.ty;
                 let mut required = match extract_type_name(&field_type).as_str() {
@@ -167,7 +167,7 @@ fn generate_with_options_yaml_inner(path: &Path) -> String {
                     required,
                     default,
                     alias,
-                    changeable,
+                    allow_alter_on_fly,
                 });
             } else {
                 panic!("Unexpected tuple struct: {}", struct_name);
@@ -211,7 +211,7 @@ struct FieldInfo {
     alias: Vec<String>,
 
     #[serde(skip_serializing_if = "std::ops::Not::not")]
-    changeable: bool,
+    allow_alter_on_fly: bool,
 }
 
 #[derive(Default)]
@@ -235,7 +235,7 @@ struct FunctionInfo {
 struct YamlFieldInfo {
     name: String,
     #[serde(default)]
-    changeable: bool,
+    allow_alter_on_fly: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -414,13 +414,13 @@ fn extract_function_body(func: ItemFn) -> (String, FunctionInfo) {
     (func.sig.ident.to_string(), FunctionInfo { body })
 }
 
-fn extract_with_option_changeable(field: &Field) -> bool {
+fn extract_with_option_allow_alter_on_fly(field: &Field) -> bool {
     field.attrs.iter().any(|attr| {
         if let Meta::List(meta_list) = &attr.meta {
             return meta_list.path.is_ident("with_option")
                 && meta_list.tokens.clone().into_iter().any(|token| {
                     if let TokenTree::Ident(ident) = token {
-                        ident == "changeable"
+                        ident == "allow_alter_on_fly"
                     } else {
                         false
                     }
@@ -430,33 +430,33 @@ fn extract_with_option_changeable(field: &Field) -> bool {
     })
 }
 
-fn extract_changeable_fields_from_yaml(yaml_path: &Path) -> BTreeMap<String, Vec<String>> {
+fn extract_allow_alter_on_fly_fields_from_yaml(yaml_path: &Path) -> BTreeMap<String, Vec<String>> {
     let content = fs::read_to_string(yaml_path)
         .unwrap_or_else(|_| panic!("Failed to read YAML file: {}", yaml_path.display()));
 
     let yaml_data: BTreeMap<String, YamlStructInfo> = serde_yaml::from_str(&content)
         .unwrap_or_else(|_| panic!("Failed to parse YAML file: {}", yaml_path.display()));
 
-    let mut changeable_fields: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut mutable_fields: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
     for (struct_name, struct_info) in yaml_data {
         let mut changeable_field_names = Vec::new();
 
         for field in struct_info.fields {
-            if field.changeable {
+            if field.allow_alter_on_fly {
                 changeable_field_names.push(field.name);
             }
         }
 
         if !changeable_field_names.is_empty() {
-            changeable_fields.insert(struct_name, changeable_field_names);
+            mutable_fields.insert(struct_name, changeable_field_names);
         }
     }
 
-    changeable_fields
+    mutable_fields
 }
 
-fn generate_rust_changeable_fields_code_separate(
+fn generate_rust_allow_alter_on_fly_fields_code_separate(
     source_info: BTreeMap<String, Vec<String>>,
     sink_info: BTreeMap<String, Vec<String>>,
 ) -> String {

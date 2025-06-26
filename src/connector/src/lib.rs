@@ -45,7 +45,7 @@ use serde::de;
 pub mod aws_utils;
 
 #[rustfmt::skip]
-pub mod changeable_fields;
+pub mod allow_alter_on_fly_fields;
 
 mod enforce_secret;
 pub mod error;
@@ -171,7 +171,7 @@ mod tests {
     use expect_test::expect_file;
 
     use crate::with_options_test::{
-        generate_changeable_fields_combined, generate_with_options_yaml_sink,
+        generate_allow_alter_on_fly_fields_combined, generate_with_options_yaml_sink,
         generate_with_options_yaml_source,
     };
 
@@ -185,11 +185,10 @@ mod tests {
         expect_file!("../with_options_sink.yaml").assert_eq(&generate_with_options_yaml_sink());
     }
 
-    /// This test ensures that the changeable fields Rust file is up-to-date.
+    /// This test ensures that the allow_alter_on_fly fields Rust file is up-to-date.
     #[test]
-    fn test_changeable_fields_rust_up_to_date() {
-        expect_file!("../src/changeable_fields.rs")
-            .assert_eq(&generate_changeable_fields_combined());
+    fn test_allow_alter_on_fly_fields_rust_up_to_date() {
+        expect_file!("../src/allow_alter_on_fly_fields.rs").assert_eq(&generate_allow_alter_on_fly_fields_combined());
     }
 
     /// Test some serde behavior we rely on.
