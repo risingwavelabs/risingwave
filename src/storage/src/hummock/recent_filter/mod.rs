@@ -86,12 +86,14 @@ impl RecentFilterMetrics {
 
 pub mod all;
 pub mod none;
+pub mod sharded;
 pub mod simple;
 
 pub enum RecentFilter<T> {
     All(all::AllRecentFilter<T>),
     Simple(simple::SimpleRecentFilter<T>),
     None(none::NoneRecentFilter<T>),
+    Sharded(sharded::ShardedRecentFilter<T>),
 }
 
 impl<T> Debug for RecentFilter<T> {
@@ -100,6 +102,7 @@ impl<T> Debug for RecentFilter<T> {
             RecentFilter::All(filter) => filter.fmt(f),
             RecentFilter::Simple(filter) => filter.fmt(f),
             RecentFilter::None(filter) => filter.fmt(f),
+            RecentFilter::Sharded(filter) => filter.fmt(f),
         }
     }
 }
@@ -110,6 +113,7 @@ impl<T> Clone for RecentFilter<T> {
             RecentFilter::All(filter) => RecentFilter::All(filter.clone()),
             RecentFilter::Simple(filter) => RecentFilter::Simple(filter.clone()),
             RecentFilter::None(filter) => RecentFilter::None(filter.clone()),
+            RecentFilter::Sharded(filter) => RecentFilter::Sharded(filter.clone()),
         }
     }
 }
@@ -132,6 +136,12 @@ impl<T> From<none::NoneRecentFilter<T>> for RecentFilter<T> {
     }
 }
 
+impl<T> From<sharded::ShardedRecentFilter<T>> for RecentFilter<T> {
+    fn from(filter: sharded::ShardedRecentFilter<T>) -> Self {
+        RecentFilter::Sharded(filter)
+    }
+}
+
 impl<T> RecentFilterTrait for RecentFilter<T>
 where
     T: Hash + Eq,
@@ -146,6 +156,7 @@ where
             RecentFilter::All(filter) => filter.insert(item),
             RecentFilter::Simple(filter) => filter.insert(item),
             RecentFilter::None(filter) => filter.insert(item),
+            RecentFilter::Sharded(filter) => filter.insert(item),
         }
     }
 
@@ -157,6 +168,7 @@ where
             RecentFilter::All(filter) => filter.extend(iter),
             RecentFilter::Simple(filter) => filter.extend(iter),
             RecentFilter::None(filter) => filter.extend(iter),
+            RecentFilter::Sharded(filter) => filter.extend(iter),
         }
     }
 
@@ -169,6 +181,7 @@ where
             RecentFilter::All(filter) => filter.contains(item),
             RecentFilter::Simple(filter) => filter.contains(item),
             RecentFilter::None(filter) => filter.contains(item),
+            RecentFilter::Sharded(filter) => filter.contains(item),
         }
     }
 
@@ -181,6 +194,7 @@ where
             RecentFilter::All(filter) => filter.contains_any(iter),
             RecentFilter::Simple(filter) => filter.contains_any(iter),
             RecentFilter::None(filter) => filter.contains_any(iter),
+            RecentFilter::Sharded(filter) => filter.contains_any(iter),
         }
     }
 }
