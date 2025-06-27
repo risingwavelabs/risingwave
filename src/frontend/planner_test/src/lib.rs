@@ -811,7 +811,7 @@ impl TestCase {
                     return Err(anyhow!("expect a query"));
                 };
 
-                let stream_plan = match create_mv::gen_create_mv_plan(
+                let (stream_plan, table) = match create_mv::gen_create_mv_plan(
                     &session,
                     context.clone(),
                     q,
@@ -819,7 +819,7 @@ impl TestCase {
                     vec![],
                     Some(emit_mode),
                 ) {
-                    Ok((stream_plan, _)) => stream_plan,
+                    Ok(r) => r,
                     Err(err) => {
                         *ret_error_str = Some(err.to_report_string_pretty());
                         continue;
@@ -834,7 +834,7 @@ impl TestCase {
                 // Only generate stream_dist_plan if it is specified in test case
                 if dist_plan {
                     let graph = build_graph(stream_plan.clone(), None)?;
-                    *ret_dist_plan_str = Some(explain_stream_graph(&graph, false));
+                    *ret_dist_plan_str = Some(explain_stream_graph(&graph, Some(table), false));
                 }
 
                 if self.expected_outputs.contains(&TestType::BackfillOrderPlan) {

@@ -444,7 +444,7 @@
   explain_output: |
     digraph {
         0 [ label = "Fragment 0\l" ]
-        1 [ label = "StreamMaterialize { columns: [approx_percentile], stream_key: [], pk_columns: [], pk_conflict: NoCheck }\ltables: [\"Materialize: 4294967294\"]\l" ]
+        1 [ label = "StreamMaterialize { columns: [approx_percentile], stream_key: [], pk_columns: [], pk_conflict: NoCheck }" ]
         2 [ label = "StreamGlobalApproxPercentile { quantile: 0.5:Float64, relative_error: 0.01:Float64 }\ltables: [\"GlobalApproxPercentileBucketState: 0\",\"GlobalApproxPercentileCountState: 1\"]\l" ]
         3 [ label = "StreamExchange Single from 1" ]
         4 [ label = "Fragment 1\l" ]

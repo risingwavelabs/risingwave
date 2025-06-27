@@ -235,7 +235,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [sum0(count)] }
         └── StreamSimpleAgg { aggs: [sum0(count), count] } { tables: [ SimpleAggState: 0 ] }
             └── StreamExchange Single from 1

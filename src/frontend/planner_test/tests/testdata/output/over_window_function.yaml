@@ -734,7 +734,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [z, t.x(hidden), t.y(hidden)], stream_key: [t.x, t.y], pk_columns: [t.x, t.y], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [t.z, t.x, t.y] }
         └── StreamGroupTopN { order: [t.x ASC], limit: 1, offset: 0, group_key: [t.x, t.y] } { tables: [ GroupTopN: 0 ] }
             └── StreamExchange Hash([0, 1]) from 1
