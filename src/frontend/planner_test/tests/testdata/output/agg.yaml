@@ -1689,7 +1689,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [first_value], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [first_value(t.x order_by(t.y ASC))] }
         └── StreamSimpleAgg { aggs: [first_value(t.x order_by(t.y ASC)), count] }
             ├── tables: [ SimpleAggState: 1, SimpleAggCall0: 0 ]
@@ -1721,7 +1720,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [first_value], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [first_value(distinct t.x order_by(t.x ASC))] }
         └── StreamSimpleAgg { aggs: [first_value(distinct t.x order_by(t.x ASC)), count] }
             ├── tables: [ SimpleAggState: 1, SimpleAggCall0: 0, SimpleAggDedupForCol0: 2 ]

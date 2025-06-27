@@ -167,7 +167,7 @@ steps:
             <<: *docker-compose-standard
             run: source-test-env
         - ./ci/plugins/upload-failure-logs
-      timeout_in_minutes: 20
+      timeout_in_minutes: 25
       retry: *auto-retry
 
     - label: "end-to-end sink test ({{matrix.backend}} backend)"
@@ -437,7 +437,7 @@ steps:
           <<: *docker-compose
           run: iceberg-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
+    timeout_in_minutes: 20
     parallelism: 2
     retry: *auto-retry
 

@@ -366,8 +366,9 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         input: vec![project_node],
         stream_key: vec![],
         node_body: Some(NodeBody::Materialize(Box::new(MaterializeNode {
-            table_id: 1,
-            table: Some(make_materialize_table(888)),
+            // `table_id` and `table` are left empty when generated from frontend.
+            table_id: TableId::placeholder().table_id(),
+            table: None,
             column_orders: vec![make_column_order(1), make_column_order(2)],
         }))),
         fields: vec![], // TODO: fill this later
