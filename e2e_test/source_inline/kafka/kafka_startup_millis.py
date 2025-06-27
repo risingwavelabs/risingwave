@@ -21,6 +21,7 @@ def main():
     parser = argparse.ArgumentParser(description='Test Kafka startup timestamp functionality')
     parser.add_argument('--db-name', required=True, help='RisingWave database name')
     parser.add_argument('--topic', required=True, help='Kafka topic name')
+    parser.add_argument('--produce-after-table', action='store_true', help='Produce more data after building table')
 
     args = parser.parse_args()
 
@@ -56,7 +57,10 @@ def main():
             {"id": i}
             for i in range(6, 9)
         ]
-        produce_records(producer, args.topic, additional_records)
+        
+        if not args.produce_after_table:
+            print("Producing more data before table is created")
+            produce_records(producer, args.topic, additional_records)
 
         # Connect to RisingWave
         try:
@@ -93,6 +97,10 @@ def main():
             cur.execute(create_table_sql)
             conn.commit()
             print(f"Created table {table_name} with startup timestamp {current_timestamp_millis}")
+            
+            if args.produce_after_table:
+                print("Producing more data after table is created")
+                produce_records(producer, args.topic, additional_records)
 
             # Wait a moment for the table to start consuming
             time.sleep(3)
