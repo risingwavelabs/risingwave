@@ -270,6 +270,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::MapFilter
             | Type::MapInsert
             | Type::MapLength
+            | Type::L2Distance
             | Type::VnodeUser
             | Type::RwEpochToTs
             | Type::CheckNotNull
