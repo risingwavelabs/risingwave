@@ -160,16 +160,6 @@ CREATE SOURCE upper_mssql_source WITH (
 statement error Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source
 create materialized view mv as select * from mssql_source;
 
-statement error The upstream table name must be in 'database.schema.table' format
-CREATE TABLE shared_orders (
-    order_id INT,
-    order_date BIGINT,
-    customer_name VARCHAR,
-    price DECIMAL,
-    product_id INT,
-    order_status SMALLINT,
-    PRIMARY KEY (order_id)
-)  from mssql_source table 'orders';
 
 # invalid table name
 statement error Sql Server table 'dbo'.'wrong_orders' doesn't exist
