@@ -178,7 +178,7 @@ impl PlanVisitor for CardinalityVisitor {
             // TODO: refine the cardinality of full outer join
             JoinType::FullOuter => {
                 if left.is_at_most(1) && right.is_at_most(1) {
-                    left.mul(right)
+                    Cardinality::new(0, 1)
                 } else {
                     Cardinality::unknown()
                 }
