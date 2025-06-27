@@ -18,7 +18,7 @@ use std::sync::Arc;
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use futures::StreamExt;
-use futures::stream::FuturesOrdered;
+use futures::stream::FuturesUnordered;
 use itertools::Itertools;
 use phf::phf_set;
 use risingwave_common::array::{Op, StreamChunk};
@@ -379,7 +379,7 @@ impl PostgresSinkWriter {
 
     async fn write_batch_append_only(&mut self, chunk: StreamChunk) -> Result<()> {
         let transaction = Arc::new(self.client.transaction().await?);
-        let mut insert_futures = FuturesOrdered::new();
+        let mut insert_futures = FuturesUnordered::new();
         for (op, row) in chunk.rows() {
             match op {
                 Op::Insert => {
@@ -398,7 +398,7 @@ impl PostgresSinkWriter {
                                 )
                             })
                     };
-                    insert_futures.push_back(future);
+                    insert_futures.push(future);
                 }
                 _ => {
                     tracing::error!(
@@ -422,8 +422,8 @@ impl PostgresSinkWriter {
 
     async fn write_batch_non_append_only(&mut self, chunk: StreamChunk) -> Result<()> {
         let transaction = Arc::new(self.client.transaction().await?);
-        let mut delete_futures = FuturesOrdered::new();
-        let mut upsert_futures = FuturesOrdered::new();
+        let mut delete_futures = FuturesUnordered::new();
+        let mut upsert_futures = FuturesUnordered::new();
         for (op, row) in chunk.rows() {
             match op {
                 Op::Delete | Op::UpdateDelete => {
@@ -443,7 +443,7 @@ impl PostgresSinkWriter {
                                 )
                             })
                     };
-                    delete_futures.push_back(future);
+                    delete_futures.push(future);
                 }
                 Op::Insert | Op::UpdateInsert => {
                     let pg_row = convert_row_to_pg_row(row, &self.schema_types);
@@ -461,7 +461,7 @@ impl PostgresSinkWriter {
                                 )
                             })
                     };
-                    upsert_futures.push_back(future);
+                    upsert_futures.push(future);
                 }
             }
         }
