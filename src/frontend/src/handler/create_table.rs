@@ -970,26 +970,46 @@ fn derive_with_options_for_cdc_table(
                 with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
             }
             SQL_SERVER_CDC_CONNECTOR => {
-                // SQL Server external table name is in 'databaseName.schemaName.tableName' pattern,
-                // we remove the database name prefix and split the schema name and table name
-                let (db_name, schema_table_name) =
-                    external_table_name.split_once('.').ok_or_else(|| {
-                        anyhow!("The upstream table name must be in 'database.schema.table' format")
-                    })?;
+                // SQL Server external table name can be in different formats:
+                // 1. 'databaseName.schemaName.tableName' (full format)
+                // 2. 'schemaName.tableName' (schema and table only)
+                // 3. 'tableName' (table only, will use default schema 'dbo')
+                // We will auto-fill missing parts from source configuration
+                let parts: Vec<&str> = external_table_name.split('.').collect();
+                let (_, schema_name, table_name) = match parts.len() {
+                    3 => {
+                        // Full format: database.schema.table
+                        let db_name = parts[0];
+                        let schema_name = parts[1];
+                        let table_name = parts[2];
 
-                // Currently SQL Server only supports single database name in the source definition
-                if db_name != source_database_name {
-                    return Err(anyhow!(
-                            "The database name `{}` in the FROM clause is not the same as the database name `{}` in source definition",
-                            db_name,
-                            source_database_name
+                        // Verify database name matches source configuration
+                        if db_name != source_database_name {
+                            return Err(anyhow!(
+                                "The database name `{}` in the FROM clause is not the same as the database name `{}` in source definition",
+                                db_name,
+                                source_database_name
+                            ).into());
+                        }
+                        (db_name, schema_name, table_name)
+                    }
+                    2 => {
+                        // Schema and table only: schema.table
+                        let schema_name = parts[0];
+                        let table_name = parts[1];
+                        (source_database_name, schema_name, table_name)
+                    }
+                    1 => {
+                        // Table only: table (use default schema 'dbo')
+                        let table_name = parts[0];
+                        (source_database_name, "dbo", table_name)
+                    }
+                    _ => {
+                        return Err(anyhow!(
+                            "The upstream table name must be in one of these formats: 'database.schema.table', 'schema.table', or 'table'"
                         ).into());
-                }
-
-                let (schema_name, table_name) =
-                    schema_table_name.split_once('.').ok_or_else(|| {
-                        anyhow!("The table name must contain schema name prefix, e.g. 'dbo.table'")
-                    })?;
+                    }
+                };
 
                 // insert 'schema.name' into connect properties
                 with_options.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
