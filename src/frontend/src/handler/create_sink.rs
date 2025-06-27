@@ -39,8 +39,8 @@ use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_SNAPSHOT_OPTION, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
     enforce_secret_sink,
 };
+use risingwave_pb::catalog::PbSink;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
-use risingwave_pb::catalog::{PbSink, PbSource, Table};
 use risingwave_pb::ddl_service::{ReplaceJobPlan, TableJobType, replace_job_plan};
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
 use risingwave_pb::stream_plan::{MergeNode, StreamFragmentGraph, StreamNode};
@@ -56,6 +56,7 @@ use super::create_source::{SqlColumnStrategy, UPSTREAM_SOURCE_KEY};
 use super::util::gen_query_from_table_name;
 use crate::binder::Binder;
 use crate::catalog::SinkId;
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef, rewrite_now_to_proctime};
 use crate::handler::HandlerArgs;
@@ -516,11 +517,7 @@ pub async fn handle_create_sink(
         let (mut graph, mut table, source, target_job_type) =
             reparse_table_for_sink(&session, &table_catalog).await?;
 
-        sink.original_target_columns = table
-            .columns
-            .iter()
-            .map(|col| ColumnCatalog::from(col.clone()))
-            .collect_vec();
+        sink.original_target_columns = table.columns.clone();
 
         table
             .incoming_sinks
@@ -545,8 +542,8 @@ pub async fn handle_create_sink(
         target_table_replace_plan = Some(ReplaceJobPlan {
             replace_job: Some(replace_job_plan::ReplaceJob::ReplaceTable(
                 replace_job_plan::ReplaceTable {
-                    table: Some(table),
-                    source,
+                    table: Some(table.to_prost()),
+                    source: source.map(|x| x.to_prost()),
                     job_type: target_job_type as _,
                 },
             )),
@@ -600,7 +597,12 @@ pub fn fetch_incoming_sinks(
 pub(crate) async fn reparse_table_for_sink(
     session: &Arc<SessionImpl>,
     table_catalog: &Arc<TableCatalog>,
-) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
+) -> Result<(
+    StreamFragmentGraph,
+    TableCatalog,
+    Option<SourceCatalog>,
+    TableJobType,
+)> {
     // Retrieve the original table definition and parse it to AST.
     let definition = table_catalog.create_sql_ast_purified()?;
     let Statement::CreateTable { name, .. } = &definition else {
