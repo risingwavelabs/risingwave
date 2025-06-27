@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::env;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::{env, thread};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 
 use super::{ExecuteContext, Task};
 use crate::DummyService;
@@ -61,6 +61,13 @@ pub trait DockerServiceConfig: Send + 'static {
     /// `Some` if the service is specified to persist data, `None` otherwise.
     fn data_path(&self) -> Option<String> {
         None
+    }
+
+    /// Network latency in milliseconds to add to the container.
+    ///
+    /// `Some` if latency should be added, `None` otherwise.
+    fn latency_ms(&self) -> u32 {
+        0
     }
 }
 
@@ -109,6 +116,11 @@ where
             .arg("--add-host")
             .arg("host.docker.internal:host-gateway");
 
+        // Add capabilities for traffic control if latency is configured
+        if self.config.latency_ms() > 0 {
+            cmd.arg("--cap-add=NET_ADMIN").arg("--cap-add=NET_RAW");
+        }
+
         for (k, v) in self.config.envs() {
             cmd.arg("-e").arg(format!("{k}={v}"));
         }
@@ -152,6 +164,41 @@ where
 
         ctx.pb.set_message("starting...");
         ctx.run_command(ctx.tmux_run(self.docker_run()?)?)?;
+
+        // If latency is configured, add it after the container starts
+        if self.config.latency_ms() > 0 {
+            ctx.pb.set_message("configuring network latency...");
+
+            // Wait a moment for the container to be ready
+            thread::sleep(std::time::Duration::from_secs(2));
+
+            // Add latency using docker exec
+            let mut tc_cmd = Command::new("docker");
+            tc_cmd
+                .arg("exec")
+                .arg(format!("risedev-{}", self.id()))
+                .arg("sh")
+                .arg("-c")
+                // add the `netem` queueing discipline to the network interface `eth0`` to emulate latency
+                .arg(format!(
+                    "apk add --no-cache iproute2 && tc qdisc add dev eth0 root netem delay {}ms",
+                    self.config.latency_ms()
+                ));
+
+            match tc_cmd.output() {
+                Ok(output) => {
+                    if !output.status.success() {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        return Err(
+                            anyhow!("{}", stderr).context("failed to configure network latency")
+                        );
+                    }
+                }
+                Err(e) => {
+                    return Err(anyhow!(e).context("failed to configure network latency"));
+                }
+            }
+        }
 
         ctx.pb.set_message("started");
 

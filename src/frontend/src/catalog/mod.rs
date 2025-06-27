@@ -21,6 +21,7 @@
 use risingwave_common::catalog::{
     ROW_ID_COLUMN_NAME, RW_RESERVED_COLUMN_NAME_PREFIX, is_system_schema,
 };
+use risingwave_common::error::code::PostgresErrorCode;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use thiserror::Error;
 
@@ -102,10 +103,14 @@ pub fn check_schema_writable(schema: &str) -> Result<()> {
 
 pub type CatalogResult<T> = std::result::Result<T, CatalogError>;
 
+// TODO(error-handling): provide more concrete error code for different object types.
 #[derive(Error, Debug)]
 pub enum CatalogError {
+    #[provide(PostgresErrorCode => PostgresErrorCode::UndefinedObject)]
     #[error("{0} not found: {1}")]
     NotFound(&'static str, String),
+
+    #[provide(PostgresErrorCode => PostgresErrorCode::DuplicateObject)]
     #[error(
         "{0} with name {1} exists{under_creation}", under_creation = (.2).then_some(" but under creation").unwrap_or("")
     )]

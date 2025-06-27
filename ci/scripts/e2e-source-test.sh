@@ -53,6 +53,19 @@ if [ "$profile" == "ci-dev" ]; then
 fi
 risedev slt './e2e_test/source_inline/**/*.slt' -j4
 risedev slt './e2e_test/source_inline/**/*.slt.serial'
+
+if [ "$profile" == "ci-release" ]; then
+    # NOTE(kwannoel): This test has an execution time in main-cron of about ~1 minute.
+    # It takes too long to run in pull-request workflow.
+    # Further, it involves waiting for backfill progress to tick up.
+    # Even with rate limit, the test time is not deterministic.
+    # It may take too long or too slow, since there are joins involved,
+    # and the performance varies between release and debug builds.
+    # it's simpler to keep it in release mode only
+    echo "--- Run release mode only tests"
+    risedev slt './e2e_test/backfill/backfill_progress/create_materialized_view_mix_source_and_normal.slt'
+fi
+
 echo "--- Kill cluster"
 risedev ci-kill
 

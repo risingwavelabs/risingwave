@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use pgwire::pg_response::StatementType;
-use risingwave_pb::user::grant_privilege::{Action, ActionWithGrantOption, Object};
-use risingwave_pb::user::{GrantPrivilege, UserInfo};
+use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
+use risingwave_pb::user::{Action, GrantPrivilege, UserInfo};
 use risingwave_sqlparser::ast::{CreateUserStatement, UserOption};
 
 use super::RwPgResponse;
