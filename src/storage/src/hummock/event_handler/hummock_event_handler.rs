@@ -51,9 +51,7 @@ use crate::hummock::event_handler::{
 };
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::recent_versions::RecentVersions;
-use crate::hummock::store::version::{
-    HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate,
-};
+use crate::hummock::store::version::{HummockReadVersion, StagingSstableInfo, VersionUpdate};
 use crate::hummock::{HummockResult, MemoryLimiter, SstableObjectIdManager, SstableStoreRef};
 use crate::mem_table::ImmutableMemtable;
 use crate::monitor::HummockStateStoreMetrics;
@@ -458,11 +456,7 @@ impl HummockEventHandler {
         trace!("data_flushed. SST size {}", staging_sstable_info.imm_size());
         self.for_each_read_version(
             staging_sstable_info.imm_ids().keys().cloned(),
-            |_, read_version| {
-                read_version.update(VersionUpdate::Staging(StagingData::Sst(
-                    staging_sstable_info.clone(),
-                )))
-            },
+            |_, read_version| read_version.update(VersionUpdate::Sst(staging_sstable_info.clone())),
         )
     }
 
@@ -693,14 +687,14 @@ impl HummockEventHandler {
                 self.uploader
                     .init_instance(instance_id, table_id, init_epoch);
             }
-            HummockEvent::ImmToUploader { instance_id, imm } => {
+            HummockEvent::ImmToUploader { instance_id, imms } => {
                 assert!(
                     self.local_read_version_mapping.contains_key(&instance_id),
-                    "add imm from non-existing read version instance: instance_id: {}, table_id {}",
+                    "add imm from non-existing read version instance: instance_id: {}, table_id {:?}",
                     instance_id,
-                    imm.table_id,
+                    imms.first().map(|imm| imm.table_id),
                 );
-                self.uploader.add_imm(instance_id, imm);
+                self.uploader.add_imms(instance_id, imms);
                 self.uploader.may_flush();
             }
 
@@ -898,7 +892,6 @@ mod tests {
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::local_version::pinned_version::PinnedVersion;
     use crate::hummock::local_version::recent_versions::RecentVersions;
-    use crate::hummock::store::version::{StagingData, VersionUpdate};
     use crate::hummock::test_utils::default_opts_for_test;
     use crate::mem_table::ImmutableMemtable;
     use crate::monitor::HummockStateStoreMetrics;
@@ -995,13 +988,11 @@ mod tests {
         });
 
         let imm1 = gen_imm(epoch1).await;
-        read_version
-            .write()
-            .update(VersionUpdate::Staging(StagingData::ImmMem(imm1.clone())));
+        read_version.write().add_imm(imm1.clone());
 
         send_event(HummockEvent::ImmToUploader {
             instance_id: guard.instance_id,
-            imm: imm1,
+            imms: read_version.write().start_upload_pending_imms(),
         });
 
         send_event(HummockEvent::StartEpoch {
@@ -1015,15 +1006,16 @@ mod tests {
             opts: SealCurrentEpochOptions::for_test(),
         });
 
-        let imm2 = gen_imm(epoch2).await;
-        read_version
-            .write()
-            .update(VersionUpdate::Staging(StagingData::ImmMem(imm2.clone())));
+        {
+            let imm2 = gen_imm(epoch2).await;
+            let mut read_version = read_version.write();
+            read_version.add_imm(imm2);
 
-        send_event(HummockEvent::ImmToUploader {
-            instance_id: guard.instance_id,
-            imm: imm2,
-        });
+            send_event(HummockEvent::ImmToUploader {
+                instance_id: guard.instance_id,
+                imms: read_version.start_upload_pending_imms(),
+            });
+        }
 
         let epoch3 = epoch2.next_epoch();
         send_event(HummockEvent::StartEpoch {
@@ -1148,13 +1140,12 @@ mod tests {
         let write_imm = |read_version: &HummockReadVersionRef,
                          instance: &LocalInstanceGuard,
                          imm: &ImmutableMemtable| {
-            read_version
-                .write()
-                .update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
+            let mut read_version = read_version.write();
+            read_version.add_imm(imm.clone());
 
             send_event(HummockEvent::ImmToUploader {
                 instance_id: instance.instance_id,
-                imm: imm.clone(),
+                imms: read_version.start_upload_pending_imms(),
             });
         };
         let seal_epoch = |instance: &LocalInstanceGuard, next_epoch| {
