@@ -21,7 +21,6 @@ use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::sink::catalog::SinkCatalog;
-use risingwave_pb::catalog::Source;
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ProjectNode, StreamFragmentGraph};
@@ -34,6 +33,7 @@ use super::create_table::{ColumnIdGenerator, generate_stream_graph_for_replace_t
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::purify::try_purify_table_source_create_sql_ast;
 use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, InputRef, Literal};
@@ -92,7 +92,7 @@ pub async fn get_replace_table_plan(
     old_catalog: &Arc<TableCatalog>,
     sql_column_strategy: SqlColumnStrategy,
 ) -> Result<(
-    Option<Source>,
+    Option<SourceCatalog>,
     TableCatalog,
     StreamFragmentGraph,
     TableJobType,
@@ -384,7 +384,12 @@ pub async fn handle_alter_table_column(
     let catalog_writer = session.catalog_writer()?;
 
     catalog_writer
-        .replace_table(source, table.to_prost(), graph, job_type)
+        .replace_table(
+            source.map(|x| x.to_prost()),
+            table.to_prost(),
+            graph,
+            job_type,
+        )
         .await?;
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))
 }

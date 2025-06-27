@@ -42,7 +42,6 @@ use risingwave_connector::source::cdc::external::{
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, source};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::ConnectionType;
-use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbWebhookSourceInfo, WatermarkDesc};
 use risingwave_pb::ddl_service::{PbTableJobType, TableJobType};
 use risingwave_pb::meta::PbThrottleTarget;
@@ -454,7 +453,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     include_column_options: IncludeOption,
     props: CreateTableProps,
     sql_column_strategy: SqlColumnStrategy,
-) -> Result<(PlanRef, Option<PbSource>, TableCatalog)> {
+) -> Result<(PlanRef, Option<SourceCatalog>, TableCatalog)> {
     if props.append_only
         && format_encode.format != Format::Plain
         && format_encode.format != Format::Native
@@ -496,7 +495,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     let overwrite_options = OverwriteOptions::new(&mut handler_args);
     let rate_limit = overwrite_options.source_rate_limit;
-    let source_catalog = bind_create_source_or_table_with_connector(
+    let source = bind_create_source_or_table_with_connector(
         handler_args.clone(),
         table_name,
         format_encode,
@@ -515,19 +514,17 @@ pub(crate) async fn gen_create_table_plan_with_source(
     )
     .await?;
 
-    let pb_source = source_catalog.to_prost();
-
     let context = OptimizerContext::new(handler_args, explain_options);
 
     let (plan, table) = gen_table_plan_with_source(
         context.into(),
         schema_name,
-        source_catalog,
+        source.clone(),
         col_id_gen.into_version(),
         props,
     )?;
 
-    Ok((plan, Some(pb_source), table))
+    Ok((plan, Some(source), table))
 }
 
 /// `gen_create_table_plan` generates the plan for creating a table without an external stream
@@ -1023,7 +1020,7 @@ pub(super) async fn handle_create_table_plan(
     include_column_options: IncludeOption,
     webhook_info: Option<WebhookSourceInfo>,
     engine: Engine,
-) -> Result<(PlanRef, Option<PbSource>, TableCatalog, TableJobType)> {
+) -> Result<(PlanRef, Option<SourceCatalog>, TableCatalog, TableJobType)> {
     let col_id_gen = ColumnIdGenerator::new_initial();
     let format_encode = check_create_table_with_source(
         &handler_args.with_options,
@@ -1424,7 +1421,7 @@ pub async fn handle_create_table(
             let catalog_writer = session.catalog_writer()?;
             catalog_writer
                 .create_table(
-                    source,
+                    source.map(|s| s.to_prost()),
                     hummock_table.to_prost(),
                     graph,
                     job_type,
@@ -1436,7 +1433,7 @@ pub async fn handle_create_table(
             create_iceberg_engine_table(
                 session,
                 handler_args,
-                source,
+                source.map(|s| s.to_prost()),
                 hummock_table,
                 graph,
                 table_name,
@@ -1966,7 +1963,7 @@ pub async fn generate_stream_graph_for_replace_table(
 ) -> Result<(
     StreamFragmentGraph,
     TableCatalog,
-    Option<PbSource>,
+    Option<SourceCatalog>,
     TableJobType,
 )> {
     let Statement::CreateTable {
@@ -2112,10 +2109,10 @@ pub async fn generate_stream_graph_for_replace_table(
     };
     if !is_drop_connector && let Some(source_id) = original_catalog.associated_source_id() {
         table.associated_source_id = Some(source_id);
-        source.as_mut().unwrap().id = source_id.table_id;
-        source.as_mut().unwrap().optional_associated_table_id = Some(
-            OptionalAssociatedTableId::AssociatedTableId(table.id().table_id),
-        )
+
+        let source = source.as_mut().unwrap();
+        source.id = source_id.table_id;
+        source.associated_table_id = Some(table.id());
     }
 
     Ok((graph, table, source, job_type))

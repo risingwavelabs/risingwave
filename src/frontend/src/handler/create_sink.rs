@@ -39,8 +39,8 @@ use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_SNAPSHOT_OPTION, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
     enforce_secret_sink,
 };
+use risingwave_pb::catalog::PbSink;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
-use risingwave_pb::catalog::{PbSink, PbSource};
 use risingwave_pb::ddl_service::{ReplaceJobPlan, TableJobType, replace_job_plan};
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
 use risingwave_pb::stream_plan::{MergeNode, StreamFragmentGraph, StreamNode};
@@ -56,6 +56,7 @@ use super::create_source::{SqlColumnStrategy, UPSTREAM_SOURCE_KEY};
 use super::util::gen_query_from_table_name;
 use crate::binder::Binder;
 use crate::catalog::SinkId;
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef, rewrite_now_to_proctime};
 use crate::handler::HandlerArgs;
@@ -542,7 +543,7 @@ pub async fn handle_create_sink(
             replace_job: Some(replace_job_plan::ReplaceJob::ReplaceTable(
                 replace_job_plan::ReplaceTable {
                     table: Some(table.to_prost()),
-                    source,
+                    source: source.map(|x| x.to_prost()),
                     job_type: target_job_type as _,
                 },
             )),
@@ -599,7 +600,7 @@ pub(crate) async fn reparse_table_for_sink(
 ) -> Result<(
     StreamFragmentGraph,
     TableCatalog,
-    Option<PbSource>,
+    Option<SourceCatalog>,
     TableJobType,
 )> {
     // Retrieve the original table definition and parse it to AST.
