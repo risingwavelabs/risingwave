@@ -1,0 +1,82 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (n varchar, a int);
+
+statement ok
+create materialized view mv as select n, a from t where a >= 18;
+
+statement ok
+create materialized view mv_count as select count(*) from mv;
+
+statement ok
+insert into t values ('Alice', 18), ('Bob', 19), ('Charlie', 17);
+
+query TI rowsort
+select * from mv;
+----
+Alice   18
+Bob	    19
+
+query I
+select * from mv_count;
+----
+2
+
+statement ok
+alter materialized view mv as select n, a from t where a >= 16;
+
+query TT
+show create materialized view mv;
+----
+public.mv CREATE MATERIALIZED VIEW mv AS SELECT n, a FROM t WHERE a >= 16
+
+# `Charlie` is historical data, so it should not appear in the altered MV.
+query TI rowsort
+select * from mv;
+----
+Alice   18
+Bob	    19
+
+statement ok
+insert into t values ('David', 17);
+
+# `David` is new data, so it should appear in the altered MV.
+query TI rowsort
+select * from mv;
+----
+Alice   18
+Bob	    19
+David   17
+
+query I
+select * from mv_count;
+----
+3
+
+statement ok
+delete from t where n = 'Charlie';
+
+# The delete record of `Charlie` should survive the filtering with `a >= 16`.
+# However, since it's not included in the altered MV, the change should not be propogated to downstream.
+# This is achieved by setting `conflict_behavior` to `Overwrite` after altering MV.
+query I
+select * from mv_count;
+----
+3
+
+statement ok
+delete from t;
+
+query TI
+select * from mv;
+----
+
+query I
+select * from mv_count;
+----
+0
+
+statement ok
+drop table t cascade;
