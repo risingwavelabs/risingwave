@@ -158,7 +158,7 @@ async fn handle_alter_mv_bound(
     };
 
     // After alter, the data of the MV is not guaranteed to be consistent.
-    // Forcely set the conflict behavior to avoid producing inconsistent changes to downstream.
+    // Always set the conflict handler to avoid producing inconsistent changes to downstream.
     table.conflict_behavior = ConflictBehavior::Overwrite;
 
     // Set some fields ourselves so that the meta service does not need to maintain them.
@@ -172,6 +172,8 @@ async fn handle_alter_mv_bound(
     // TODO(alter-mv): check changes on dependencies
 
     // Validate if the new table is compatible with the original one.
+    // Internal tables will be checked in the meta service.
+    // TODO(alter-mv): improve this to make it more robust and friendly.
     {
         let mut new_table = table.clone();
         let mut original_table = original_catalog.as_ref().clone();
