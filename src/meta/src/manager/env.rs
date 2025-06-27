@@ -150,7 +150,8 @@ pub struct MetaOpts {
     pub periodic_compaction_interval_sec: u64,
     /// Interval of reporting the number of nodes in the cluster.
     pub node_num_monitor_interval_sec: u64,
-
+    /// Whether to protect the drop table operation with incoming sink.
+    pub protect_drop_table_with_incoming_sink: bool,
     /// The Prometheus endpoint for Meta Dashboard Service.
     /// The Dashboard service uses this in the following ways:
     /// 1. Query Prometheus for relevant metrics to find Stream Graph Bottleneck, and display it.
@@ -310,6 +311,7 @@ impl MetaOpts {
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 60,
             node_num_monitor_interval_sec: 10,
+            protect_drop_table_with_incoming_sink: false,
             prometheus_endpoint: None,
             prometheus_selector: None,
             vpc_id: None,

@@ -1302,8 +1302,6 @@ impl Parser<'_> {
         let tok = self.next_token();
         debug!("parsing infix {:?}", tok.token);
         let regular_binary_operator = match &tok.token {
-            Token::Spaceship => Some(BinaryOperator::Spaceship),
-            Token::DoubleEq => Some(BinaryOperator::Eq),
             Token::Eq => Some(BinaryOperator::Eq),
             Token::Neq => Some(BinaryOperator::NotEq),
             Token::Gt => Some(BinaryOperator::Gt),
@@ -1317,32 +1315,16 @@ impl Parser<'_> {
             Token::Concat => Some(BinaryOperator::Concat),
             Token::Pipe => Some(BinaryOperator::BitwiseOr),
             Token::Caret => Some(BinaryOperator::BitwiseXor),
-            Token::Prefix => Some(BinaryOperator::Prefix),
             Token::Ampersand => Some(BinaryOperator::BitwiseAnd),
             Token::Div => Some(BinaryOperator::Divide),
             Token::ShiftLeft => Some(BinaryOperator::PGBitwiseShiftLeft),
             Token::ShiftRight => Some(BinaryOperator::PGBitwiseShiftRight),
             Token::Sharp => Some(BinaryOperator::PGBitwiseXor),
             Token::Tilde => Some(BinaryOperator::PGRegexMatch),
-            Token::TildeAsterisk => Some(BinaryOperator::PGRegexIMatch),
-            Token::ExclamationMarkTilde => Some(BinaryOperator::PGRegexNotMatch),
-            Token::ExclamationMarkTildeAsterisk => Some(BinaryOperator::PGRegexNotIMatch),
-            Token::DoubleTilde => Some(BinaryOperator::PGLikeMatch),
-            Token::DoubleTildeAsterisk => Some(BinaryOperator::PGILikeMatch),
-            Token::ExclamationMarkDoubleTilde => Some(BinaryOperator::PGNotLikeMatch),
-            Token::ExclamationMarkDoubleTildeAsterisk => Some(BinaryOperator::PGNotILikeMatch),
             Token::Arrow => Some(BinaryOperator::Arrow),
-            Token::LongArrow => Some(BinaryOperator::LongArrow),
-            Token::HashArrow => Some(BinaryOperator::HashArrow),
-            Token::HashLongArrow => Some(BinaryOperator::HashLongArrow),
-            Token::HashMinus => Some(BinaryOperator::HashMinus),
             Token::AtArrow => Some(BinaryOperator::Contains),
             Token::ArrowAt => Some(BinaryOperator::Contained),
-            Token::QuestionMark => Some(BinaryOperator::Exists),
-            Token::QuestionMarkPipe => Some(BinaryOperator::ExistsAny),
-            Token::QuestionMarkAmpersand => Some(BinaryOperator::ExistsAll),
-            Token::AtQuestionMark => Some(BinaryOperator::PathExists),
-            Token::AtAt => Some(BinaryOperator::PathMatch),
+            Token::Op(name) => Some(BinaryOperator::Custom(name.clone())),
             Token::Word(w) => match w.keyword {
                 Keyword::AND => Some(BinaryOperator::And),
                 Keyword::OR => Some(BinaryOperator::Or),
@@ -1716,14 +1698,9 @@ impl Parser<'_> {
             Token::Word(w) if w.keyword == Keyword::IS => Ok(P::Is),
             Token::Word(w) if w.keyword == Keyword::ISNULL => Ok(P::Is),
             Token::Word(w) if w.keyword == Keyword::NOTNULL => Ok(P::Is),
-            Token::Eq
-            | Token::Lt
-            | Token::LtEq
-            | Token::Neq
-            | Token::Gt
-            | Token::GtEq
-            | Token::DoubleEq
-            | Token::Spaceship => Ok(P::Cmp),
+            Token::Eq | Token::Lt | Token::LtEq | Token::Neq | Token::Gt | Token::GtEq => {
+                Ok(P::Cmp)
+            }
             Token::Word(w) if w.keyword == Keyword::IN => Ok(P::Between),
             Token::Word(w) if w.keyword == Keyword::BETWEEN => Ok(P::Between),
             Token::Word(w) if w.keyword == Keyword::LIKE => Ok(P::Like),
@@ -1733,27 +1710,11 @@ impl Parser<'_> {
             Token::Word(w) if w.keyword == Keyword::ANY => Ok(P::Other),
             Token::Word(w) if w.keyword == Keyword::SOME => Ok(P::Other),
             Token::Tilde
-            | Token::TildeAsterisk
-            | Token::ExclamationMarkTilde
-            | Token::ExclamationMarkTildeAsterisk
-            | Token::DoubleTilde
-            | Token::DoubleTildeAsterisk
-            | Token::ExclamationMarkDoubleTilde
-            | Token::ExclamationMarkDoubleTildeAsterisk
             | Token::Concat
-            | Token::Prefix
             | Token::Arrow
-            | Token::LongArrow
-            | Token::HashArrow
-            | Token::HashLongArrow
-            | Token::HashMinus
             | Token::AtArrow
             | Token::ArrowAt
-            | Token::QuestionMark
-            | Token::QuestionMarkPipe
-            | Token::QuestionMarkAmpersand
-            | Token::AtQuestionMark
-            | Token::AtAt => Ok(P::Other),
+            | Token::Op(_) => Ok(P::Other),
             Token::Word(w)
                 if w.keyword == Keyword::OPERATOR && self.peek_nth_token(1) == Token::LParen =>
             {
@@ -3375,9 +3336,15 @@ impl Parser<'_> {
         } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
             let target_table = self.parse_object_name()?;
             AlterTableOperation::SwapRenameTable { target_table }
+        } else if self.parse_keyword(Keyword::CONNECTOR) {
+            let with_options = self.parse_with_properties()?;
+            AlterTableOperation::AlterConnectorProps {
+                alter_props: with_options,
+            }
         } else {
-            return self
-                .expected("ADD or RENAME or OWNER TO or SET or DROP or SWAP after ALTER TABLE");
+            return self.expected(
+                "ADD or RENAME or OWNER TO or SET or DROP or SWAP or CONNECTOR after ALTER TABLE",
+            );
         };
         Ok(Statement::AlterTable {
             name: table_name,
@@ -3513,6 +3480,15 @@ impl Parser<'_> {
                 AlterViewOperation::SetSchema {
                     new_schema_name: schema_name,
                 }
+            } else if self.parse_word("STREAMING_ENABLE_UNALIGNED_JOIN") {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self
+                        .expected("TO or = after ALTER TABLE SET STREAMING_ENABLE_UNALIGNED_JOIN");
+                }
+                let value = self.parse_boolean()?;
+                AlterViewOperation::SetStreamingEnableUnalignedJoin { enable: value }
             } else if self.parse_keyword(Keyword::PARALLELISM) && materialized {
                 if self.expect_keyword(Keyword::TO).is_err()
                     && self.expect_token(&Token::Eq).is_err()
@@ -3616,6 +3592,10 @@ impl Parser<'_> {
                 AlterSinkOperation::SetSchema {
                     new_schema_name: schema_name,
                 }
+            } else if self.parse_word("STREAMING_ENABLE_UNALIGNED_JOIN") {
+                self.expect_keyword(Keyword::TO)?;
+                let value = self.parse_boolean()?;
+                AlterSinkOperation::SetStreamingEnableUnalignedJoin { enable: value }
             } else if self.parse_keyword(Keyword::PARALLELISM) {
                 if self.expect_keyword(Keyword::TO).is_err()
                     && self.expect_token(&Token::Eq).is_err()
@@ -3746,8 +3726,14 @@ impl Parser<'_> {
         } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
             let target_source = self.parse_object_name()?;
             AlterSourceOperation::SwapRenameSource { target_source }
+        } else if self.parse_keyword(Keyword::CONNECTOR) {
+            let with_options = self.parse_with_properties()?;
+            AlterSourceOperation::AlterConnectorProps {
+                alter_props: with_options,
+            }
         } else {
-            return self.expected("RENAME, ADD COLUMN, OWNER TO or SET after ALTER SOURCE");
+            return self
+                .expected("RENAME, ADD COLUMN, OWNER TO, CONNECTOR or SET after ALTER SOURCE");
         };
 
         Ok(Statement::AlterSource {
@@ -4371,16 +4357,20 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_optional_boolean(&mut self, default: bool) -> bool {
+    pub fn parse_boolean(&mut self) -> ModalResult<bool> {
         if let Some(keyword) = self.parse_one_of_keywords(&[Keyword::TRUE, Keyword::FALSE]) {
             match keyword {
-                Keyword::TRUE => true,
-                Keyword::FALSE => false,
+                Keyword::TRUE => Ok(true),
+                Keyword::FALSE => Ok(false),
                 _ => unreachable!(),
             }
         } else {
-            default
+            self.expected("TRUE or FALSE")
         }
+    }
+
+    pub fn parse_optional_boolean(&mut self, default: bool) -> bool {
+        self.parse_boolean().unwrap_or(default)
     }
 
     fn parse_explain_options(&mut self) -> ModalResult<(ExplainOptions, Option<u64>)> {

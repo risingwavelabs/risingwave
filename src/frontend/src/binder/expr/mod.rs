@@ -504,10 +504,10 @@ impl Binder {
             }
             // Use the `bind_binary_op` path to handle the ALL|ANY pattern.
             let op = match (expr_type, negated) {
-                (ExprType::Like, false) => BinaryOperator::PGLikeMatch,
-                (ExprType::Like, true) => BinaryOperator::PGNotLikeMatch,
-                (ExprType::ILike, false) => BinaryOperator::PGILikeMatch,
-                (ExprType::ILike, true) => BinaryOperator::PGNotILikeMatch,
+                (ExprType::Like, false) => BinaryOperator::Custom("~~".to_owned()),
+                (ExprType::Like, true) => BinaryOperator::Custom("!~~".to_owned()),
+                (ExprType::ILike, false) => BinaryOperator::Custom("~~*".to_owned()),
+                (ExprType::ILike, true) => BinaryOperator::Custom("!~~*".to_owned()),
                 _ => unreachable!(),
             };
             return self.bind_binary_op(expr, op, pattern);
