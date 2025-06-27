@@ -20,7 +20,6 @@ arc-swap = { workspace = true }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 await-tree = { workspace = true }
-bergloom-core = { git = "https://github.com/nimtable/BergLoom.git", rev = "1c293c099db9a2374018e60146d1472e55342a5e" }
 bytes = { version = "1", features = ["serde"] }
 derive_builder = "0.20"
 dyn-clone = "1.0.14"
@@ -32,6 +31,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
 iceberg = { workspace = true }
+iceberg-compaction-core = { git = "https://github.com/nimtable/iceberg-compaction.git", rev = "4cfd6d1abc32a66fd5ecc4fd506656fbd0c8ae9c" }
 itertools = { workspace = true }
 libc = "0.2"
 lz4 = "1.28.0"
@@ -63,7 +63,7 @@ sled = "0.34.7"
 spin = "0.10"
 sync-point = { path = "../utils/sync-point" }
 tempfile = "3"
-thiserror = "2"
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 # tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [

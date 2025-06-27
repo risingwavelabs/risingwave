@@ -70,12 +70,10 @@ pub enum BinaryOperator {
     Divide,
     Modulo,
     Concat,
-    Prefix,
     Gt,
     Lt,
     GtEq,
     LtEq,
-    Spaceship,
     Eq,
     NotEq,
     And,
@@ -92,33 +90,11 @@ pub enum BinaryOperator {
     PGBitwiseShiftRight,
     /// String matches regular expression (case sensitively), e.g. `a ~ b` (PostgreSQL-specific)
     PGRegexMatch,
-    /// String matches regular expression (case insensitively), e.g. `a ~* b` (PostgreSQL-specific)
-    PGRegexIMatch,
-    /// String does not match regular expression (case sensitively), e.g. `a !~ b` (PostgreSQL-specific)
-    PGRegexNotMatch,
-    /// String does not match regular expression (case insensitively), e.g. `a !~* b` (PostgreSQL-specific)
-    PGRegexNotIMatch,
-    /// String matches pattern (case sensitively), e.g. `a ~~ b` (PostgreSQL-specific)
-    PGLikeMatch,
-    /// String matches pattern (case insensitively), e.g. `a ~~* b` (PostgreSQL-specific)
-    PGILikeMatch,
-    /// String does not match pattern (case sensitively), e.g. `a !~~ b` (PostgreSQL-specific)
-    PGNotLikeMatch,
-    /// String does not match pattern (case insensitively), e.g. `a !~~* b` (PostgreSQL-specific)
-    PGNotILikeMatch,
     /// String "starts with", eg: `a ^@ b` (PostgreSQL-specific)
     Arrow,
-    LongArrow,
-    HashArrow,
-    HashLongArrow,
-    HashMinus,
     Contains,
     Contained,
-    Exists,
-    ExistsAny,
-    ExistsAll,
-    PathMatch,
-    PathExists,
+    Custom(String),
     PGQualified(Box<QualifiedOperator>),
 }
 
@@ -134,12 +110,10 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::Divide => "/",
             BinaryOperator::Modulo => "%",
             BinaryOperator::Concat => "||",
-            BinaryOperator::Prefix => "^@",
             BinaryOperator::Gt => ">",
             BinaryOperator::Lt => "<",
             BinaryOperator::GtEq => ">=",
             BinaryOperator::LtEq => "<=",
-            BinaryOperator::Spaceship => "<=>",
             BinaryOperator::Eq => "=",
             BinaryOperator::NotEq => "<>",
             BinaryOperator::And => "AND",
@@ -152,25 +126,10 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::PGBitwiseShiftLeft => "<<",
             BinaryOperator::PGBitwiseShiftRight => ">>",
             BinaryOperator::PGRegexMatch => "~",
-            BinaryOperator::PGRegexIMatch => "~*",
-            BinaryOperator::PGRegexNotMatch => "!~",
-            BinaryOperator::PGRegexNotIMatch => "!~*",
-            BinaryOperator::PGLikeMatch => "~~",
-            BinaryOperator::PGILikeMatch => "~~*",
-            BinaryOperator::PGNotLikeMatch => "!~~",
-            BinaryOperator::PGNotILikeMatch => "!~~*",
             BinaryOperator::Arrow => "->",
-            BinaryOperator::LongArrow => "->>",
-            BinaryOperator::HashArrow => "#>",
-            BinaryOperator::HashLongArrow => "#>>",
-            BinaryOperator::HashMinus => "#-",
             BinaryOperator::Contains => "@>",
             BinaryOperator::Contained => "<@",
-            BinaryOperator::Exists => "?",
-            BinaryOperator::ExistsAny => "?|",
-            BinaryOperator::ExistsAll => "?&",
-            BinaryOperator::PathMatch => "@@",
-            BinaryOperator::PathExists => "@?",
+            BinaryOperator::Custom(name) => name,
             BinaryOperator::PGQualified(_) => unreachable!(),
         })
     }

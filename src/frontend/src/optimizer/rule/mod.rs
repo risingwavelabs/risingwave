@@ -176,6 +176,7 @@ mod stream;
 pub use stream::bushy_tree_join_ordering_rule::*;
 pub use stream::filter_with_now_to_join_rule::*;
 pub use stream::generate_series_with_now_rule::*;
+pub use stream::separate_consecutive_join::*;
 pub use stream::split_now_and_rule::*;
 pub use stream::split_now_or_rule::*;
 pub use stream::stream_project_merge_rule::*;
@@ -248,6 +249,7 @@ mod source_to_iceberg_scan_rule;
 mod source_to_kafka_scan_rule;
 mod table_function_to_file_scan_rule;
 mod table_function_to_internal_backfill_progress;
+mod table_function_to_internal_source_backfill_progress;
 mod table_function_to_mysql_query_rule;
 mod table_function_to_postgres_query_rule;
 mod values_extract_project_rule;
@@ -261,6 +263,7 @@ pub use source_to_iceberg_scan_rule::*;
 pub use source_to_kafka_scan_rule::*;
 pub use table_function_to_file_scan_rule::*;
 pub use table_function_to_internal_backfill_progress::*;
+pub use table_function_to_internal_source_backfill_progress::*;
 pub use table_function_to_mysql_query_rule::*;
 pub use table_function_to_postgres_query_rule::*;
 pub use values_extract_project_rule::*;
@@ -310,6 +313,7 @@ macro_rules! for_all_rules {
             , { AlwaysFalseFilterRule }
             , { BushyTreeJoinOrderingRule }
             , { StreamProjectMergeRule }
+            , { SeparateConsecutiveJoinRule }
             , { LogicalFilterExpressionSimplifyRule }
             , { JoinProjectTransposeRule }
             , { LimitPushDownRule }
@@ -329,6 +333,7 @@ macro_rules! for_all_rules {
             , { TableFunctionToPostgresQueryRule }
             , { TableFunctionToMySqlQueryRule }
             , { TableFunctionToInternalBackfillProgressRule }
+            , { TableFunctionToInternalSourceBackfillProgressRule }
             , { ApplyLimitTransposeRule }
             , { CommonSubExprExtractRule }
             , { BatchProjectMergeRule }

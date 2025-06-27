@@ -37,7 +37,7 @@ use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::{CatalogError, DatabaseId, IndexCatalog, TableId};
 use crate::error::ErrorCode::PermissionDenied;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::user::UserId;
+use crate::handler::privilege::ObjectCheckItem;
 
 #[derive(Debug, Clone)]
 pub struct BoundBaseTable {
@@ -245,10 +245,8 @@ impl Binder {
 
     pub(crate) fn check_privilege(
         &self,
-        object: PbObject,
+        item: ObjectCheckItem,
         database_id: DatabaseId,
-        mode: AclMode,
-        owner: UserId,
     ) -> Result<()> {
         // security invoker is disabled for view, ignore privilege check.
         if self.context.disable_security_invoker {
@@ -260,28 +258,36 @@ impl Binder {
                 // reject sources for cross-db access
                 if matches!(self.bind_for, BindFor::Stream)
                     && self.database_id != database_id
-                    && matches!(object, PbObject::SourceId(_))
+                    && matches!(item.object, PbObject::SourceId(_))
                 {
-                    return Err(PermissionDenied(
-                        "SOURCE is not allowed for cross-db access".to_owned(),
-                    )
+                    return Err(PermissionDenied(format!(
+                        "SOURCE \"{}\" is not allowed for cross-db access",
+                        item.name
+                    ))
                     .into());
                 }
                 if let Some(user) = self.user.get_user_by_name(&self.auth_context.user_name) {
-                    if user.is_super || user.id == owner {
+                    if user.is_super || user.id == item.owner {
                         return Ok(());
                     }
-                    if !user.has_privilege(&object, mode) {
-                        return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
+                    if !user.has_privilege(&item.object, item.mode) {
+                        return Err(PermissionDenied(item.error_message()).into());
                     }
 
                     // check CONNECT privilege for cross-db access
                     if self.database_id != database_id
                         && !user.has_privilege(&PbObject::DatabaseId(database_id), AclMode::Connect)
                     {
-                        return Err(
-                            PermissionDenied("Do not have CONNECT privilege".to_owned()).into()
-                        );
+                        let db_name = self
+                            .catalog
+                            .get_database_by_id(&database_id)?
+                            .name
+                            .to_owned();
+
+                        return Err(PermissionDenied(format!(
+                            "permission denied for database \"{db_name}\""
+                        ))
+                        .into());
                     }
                 } else {
                     return Err(PermissionDenied("Session user is invalid".to_owned()).into());
@@ -307,10 +313,13 @@ impl Binder {
             .map(|c| (c.is_hidden, Field::from(&c.column_desc)))
             .collect_vec();
         self.check_privilege(
-            PbObject::TableId(table_id.table_id),
+            ObjectCheckItem::new(
+                table_catalog.owner,
+                AclMode::Select,
+                table_catalog.name.clone(),
+                PbObject::TableId(table_id.table_id),
+            ),
             table_catalog.database_id,
-            AclMode::Select,
-            table_catalog.owner,
         )?;
         self.included_relations.insert(table_id);
 
@@ -335,10 +344,13 @@ impl Binder {
         debug_assert_column_ids_distinct(&source_catalog.columns);
         if !is_temporary {
             self.check_privilege(
-                PbObject::SourceId(source_catalog.id),
+                ObjectCheckItem::new(
+                    source_catalog.owner,
+                    AclMode::Select,
+                    source_catalog.name.clone(),
+                    PbObject::SourceId(source_catalog.id),
+                ),
                 source_catalog.database_id,
-                AclMode::Select,
-                source_catalog.owner,
             )?;
         }
         self.included_relations.insert(source_catalog.id.into());
@@ -361,10 +373,13 @@ impl Binder {
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
         if !view_catalog.is_system_view() {
             self.check_privilege(
-                PbObject::ViewId(view_catalog.id),
+                ObjectCheckItem::new(
+                    view_catalog.owner,
+                    AclMode::Select,
+                    view_catalog.name.clone(),
+                    PbObject::ViewId(view_catalog.id),
+                ),
                 view_catalog.database_id,
-                AclMode::Select,
-                view_catalog.owner,
             )?;
         }
 

@@ -1302,8 +1302,6 @@ impl Parser<'_> {
         let tok = self.next_token();
         debug!("parsing infix {:?}", tok.token);
         let regular_binary_operator = match &tok.token {
-            Token::Spaceship => Some(BinaryOperator::Spaceship),
-            Token::DoubleEq => Some(BinaryOperator::Eq),
             Token::Eq => Some(BinaryOperator::Eq),
             Token::Neq => Some(BinaryOperator::NotEq),
             Token::Gt => Some(BinaryOperator::Gt),
@@ -1317,32 +1315,16 @@ impl Parser<'_> {
             Token::Concat => Some(BinaryOperator::Concat),
             Token::Pipe => Some(BinaryOperator::BitwiseOr),
             Token::Caret => Some(BinaryOperator::BitwiseXor),
-            Token::Prefix => Some(BinaryOperator::Prefix),
             Token::Ampersand => Some(BinaryOperator::BitwiseAnd),
             Token::Div => Some(BinaryOperator::Divide),
             Token::ShiftLeft => Some(BinaryOperator::PGBitwiseShiftLeft),
             Token::ShiftRight => Some(BinaryOperator::PGBitwiseShiftRight),
             Token::Sharp => Some(BinaryOperator::PGBitwiseXor),
             Token::Tilde => Some(BinaryOperator::PGRegexMatch),
-            Token::TildeAsterisk => Some(BinaryOperator::PGRegexIMatch),
-            Token::ExclamationMarkTilde => Some(BinaryOperator::PGRegexNotMatch),
-            Token::ExclamationMarkTildeAsterisk => Some(BinaryOperator::PGRegexNotIMatch),
-            Token::DoubleTilde => Some(BinaryOperator::PGLikeMatch),
-            Token::DoubleTildeAsterisk => Some(BinaryOperator::PGILikeMatch),
-            Token::ExclamationMarkDoubleTilde => Some(BinaryOperator::PGNotLikeMatch),
-            Token::ExclamationMarkDoubleTildeAsterisk => Some(BinaryOperator::PGNotILikeMatch),
             Token::Arrow => Some(BinaryOperator::Arrow),
-            Token::LongArrow => Some(BinaryOperator::LongArrow),
-            Token::HashArrow => Some(BinaryOperator::HashArrow),
-            Token::HashLongArrow => Some(BinaryOperator::HashLongArrow),
-            Token::HashMinus => Some(BinaryOperator::HashMinus),
             Token::AtArrow => Some(BinaryOperator::Contains),
             Token::ArrowAt => Some(BinaryOperator::Contained),
-            Token::QuestionMark => Some(BinaryOperator::Exists),
-            Token::QuestionMarkPipe => Some(BinaryOperator::ExistsAny),
-            Token::QuestionMarkAmpersand => Some(BinaryOperator::ExistsAll),
-            Token::AtQuestionMark => Some(BinaryOperator::PathExists),
-            Token::AtAt => Some(BinaryOperator::PathMatch),
+            Token::Op(name) => Some(BinaryOperator::Custom(name.clone())),
             Token::Word(w) => match w.keyword {
                 Keyword::AND => Some(BinaryOperator::And),
                 Keyword::OR => Some(BinaryOperator::Or),
@@ -1716,14 +1698,9 @@ impl Parser<'_> {
             Token::Word(w) if w.keyword == Keyword::IS => Ok(P::Is),
             Token::Word(w) if w.keyword == Keyword::ISNULL => Ok(P::Is),
             Token::Word(w) if w.keyword == Keyword::NOTNULL => Ok(P::Is),
-            Token::Eq
-            | Token::Lt
-            | Token::LtEq
-            | Token::Neq
-            | Token::Gt
-            | Token::GtEq
-            | Token::DoubleEq
-            | Token::Spaceship => Ok(P::Cmp),
+            Token::Eq | Token::Lt | Token::LtEq | Token::Neq | Token::Gt | Token::GtEq => {
+                Ok(P::Cmp)
+            }
             Token::Word(w) if w.keyword == Keyword::IN => Ok(P::Between),
             Token::Word(w) if w.keyword == Keyword::BETWEEN => Ok(P::Between),
             Token::Word(w) if w.keyword == Keyword::LIKE => Ok(P::Like),
@@ -1733,27 +1710,11 @@ impl Parser<'_> {
             Token::Word(w) if w.keyword == Keyword::ANY => Ok(P::Other),
             Token::Word(w) if w.keyword == Keyword::SOME => Ok(P::Other),
             Token::Tilde
-            | Token::TildeAsterisk
-            | Token::ExclamationMarkTilde
-            | Token::ExclamationMarkTildeAsterisk
-            | Token::DoubleTilde
-            | Token::DoubleTildeAsterisk
-            | Token::ExclamationMarkDoubleTilde
-            | Token::ExclamationMarkDoubleTildeAsterisk
             | Token::Concat
-            | Token::Prefix
             | Token::Arrow
-            | Token::LongArrow
-            | Token::HashArrow
-            | Token::HashLongArrow
-            | Token::HashMinus
             | Token::AtArrow
             | Token::ArrowAt
-            | Token::QuestionMark
-            | Token::QuestionMarkPipe
-            | Token::QuestionMarkAmpersand
-            | Token::AtQuestionMark
-            | Token::AtAt => Ok(P::Other),
+            | Token::Op(_) => Ok(P::Other),
             Token::Word(w)
                 if w.keyword == Keyword::OPERATOR && self.peek_nth_token(1) == Token::LParen =>
             {
@@ -3197,6 +3158,8 @@ impl Parser<'_> {
             self.parse_alter_secret()
         } else if self.parse_word("FRAGMENT") {
             self.parse_alter_fragment()
+        } else if self.parse_keywords(&[Keyword::DEFAULT, Keyword::PRIVILEGES]) {
+            self.parse_alter_default_privileges()
         } else {
             self.expected(
                 "DATABASE, FRAGMENT, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SUBSCRIPTION, SOURCE, FUNCTION, USER, SECRET or SYSTEM after ALTER"
@@ -3373,9 +3336,15 @@ impl Parser<'_> {
         } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
             let target_table = self.parse_object_name()?;
             AlterTableOperation::SwapRenameTable { target_table }
+        } else if self.parse_keyword(Keyword::CONNECTOR) {
+            let with_options = self.parse_with_properties()?;
+            AlterTableOperation::AlterConnectorProps {
+                alter_props: with_options,
+            }
         } else {
-            return self
-                .expected("ADD or RENAME or OWNER TO or SET or DROP or SWAP after ALTER TABLE");
+            return self.expected(
+                "ADD or RENAME or OWNER TO or SET or DROP or SWAP or CONNECTOR after ALTER TABLE",
+            );
         };
         Ok(Statement::AlterTable {
             name: table_name,
@@ -3511,6 +3480,15 @@ impl Parser<'_> {
                 AlterViewOperation::SetSchema {
                     new_schema_name: schema_name,
                 }
+            } else if self.parse_word("STREAMING_ENABLE_UNALIGNED_JOIN") {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self
+                        .expected("TO or = after ALTER TABLE SET STREAMING_ENABLE_UNALIGNED_JOIN");
+                }
+                let value = self.parse_boolean()?;
+                AlterViewOperation::SetStreamingEnableUnalignedJoin { enable: value }
             } else if self.parse_keyword(Keyword::PARALLELISM) && materialized {
                 if self.expect_keyword(Keyword::TO).is_err()
                     && self.expect_token(&Token::Eq).is_err()
@@ -3614,6 +3592,10 @@ impl Parser<'_> {
                 AlterSinkOperation::SetSchema {
                     new_schema_name: schema_name,
                 }
+            } else if self.parse_word("STREAMING_ENABLE_UNALIGNED_JOIN") {
+                self.expect_keyword(Keyword::TO)?;
+                let value = self.parse_boolean()?;
+                AlterSinkOperation::SetStreamingEnableUnalignedJoin { enable: value }
             } else if self.parse_keyword(Keyword::PARALLELISM) {
                 if self.expect_keyword(Keyword::TO).is_err()
                     && self.expect_token(&Token::Eq).is_err()
@@ -3638,7 +3620,9 @@ impl Parser<'_> {
             AlterSinkOperation::SwapRenameSink { target_sink }
         } else if self.parse_keyword(Keyword::CONNECTOR) {
             let changed_props = self.parse_with_properties()?;
-            AlterSinkOperation::SetSinkProps { changed_props }
+            AlterSinkOperation::AlterConnectorProps {
+                alter_props: changed_props,
+            }
         } else {
             return self.expected("RENAME or OWNER TO or SET or CONNECTOR WITH after ALTER SINK");
         };
@@ -3742,8 +3726,14 @@ impl Parser<'_> {
         } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
             let target_source = self.parse_object_name()?;
             AlterSourceOperation::SwapRenameSource { target_source }
+        } else if self.parse_keyword(Keyword::CONNECTOR) {
+            let with_options = self.parse_with_properties()?;
+            AlterSourceOperation::AlterConnectorProps {
+                alter_props: with_options,
+            }
         } else {
-            return self.expected("RENAME, ADD COLUMN, OWNER TO or SET after ALTER SOURCE");
+            return self
+                .expected("RENAME, ADD COLUMN, OWNER TO, CONNECTOR or SET after ALTER SOURCE");
         };
 
         Ok(Statement::AlterSource {
@@ -4367,16 +4357,20 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_optional_boolean(&mut self, default: bool) -> bool {
+    pub fn parse_boolean(&mut self) -> ModalResult<bool> {
         if let Some(keyword) = self.parse_one_of_keywords(&[Keyword::TRUE, Keyword::FALSE]) {
             match keyword {
-                Keyword::TRUE => true,
-                Keyword::FALSE => false,
+                Keyword::TRUE => Ok(true),
+                Keyword::FALSE => Ok(false),
                 _ => unreachable!(),
             }
         } else {
-            default
+            self.expected("TRUE or FALSE")
         }
+    }
+
+    pub fn parse_optional_boolean(&mut self, default: bool) -> bool {
+        self.parse_boolean().unwrap_or(default)
     }
 
     fn parse_explain_options(&mut self) -> ModalResult<(ExplainOptions, Option<u64>)> {
@@ -5361,7 +5355,7 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_grant_revoke_privileges_objects(&mut self) -> ModalResult<(Privileges, GrantObjects)> {
+    fn parse_privileges(&mut self) -> ModalResult<Privileges> {
         let privileges = if self.parse_keyword(Keyword::ALL) {
             Privileges::All {
                 with_privileges_keyword: self.parse_keyword(Keyword::PRIVILEGES),
@@ -5388,6 +5382,12 @@ impl Parser<'_> {
                     .collect(),
             )
         };
+
+        Ok(privileges)
+    }
+
+    fn parse_grant_revoke_privileges_objects(&mut self) -> ModalResult<(Privileges, GrantObjects)> {
+        let privileges = self.parse_privileges()?;
 
         self.expect_keyword(Keyword::ON)?;
 
@@ -5570,6 +5570,105 @@ impl Parser<'_> {
             revoke_grant_option,
             cascade,
         })
+    }
+
+    fn parse_privilege_object_types(&mut self) -> ModalResult<PrivilegeObjectType> {
+        let object_type = if self.parse_keyword(Keyword::TABLES) {
+            PrivilegeObjectType::Tables
+        } else if self.parse_keyword(Keyword::SOURCES) {
+            PrivilegeObjectType::Sources
+        } else if self.parse_keyword(Keyword::SINKS) {
+            PrivilegeObjectType::Sinks
+        } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEWS]) {
+            PrivilegeObjectType::Mviews
+        } else if self.parse_keyword(Keyword::VIEWS) {
+            PrivilegeObjectType::Views
+        } else if self.parse_keyword(Keyword::FUNCTIONS) {
+            PrivilegeObjectType::Functions
+        } else if self.parse_keyword(Keyword::SECRETS) {
+            PrivilegeObjectType::Secrets
+        } else if self.parse_keyword(Keyword::CONNECTIONS) {
+            PrivilegeObjectType::Connections
+        } else if self.parse_keyword(Keyword::SUBSCRIPTIONS) {
+            PrivilegeObjectType::Subscriptions
+        } else if self.parse_keyword(Keyword::SCHEMAS) {
+            PrivilegeObjectType::Schemas
+        } else {
+            return self.expected("TABLES, SOURCES, SINKS, MATERIALIZED VIEWS, VIEWS, FUNCTIONS, SECRETS, CONNECTIONS, SUBSCRIPTIONS or SCHEMAS");
+        };
+
+        Ok(object_type)
+    }
+
+    pub fn parse_alter_default_privileges(&mut self) -> ModalResult<Statement> {
+        // [ FOR USER target_user [, ...] ]
+        let target_users = if self.parse_keyword(Keyword::FOR) {
+            self.expect_keyword(Keyword::USER)?;
+            Some(self.parse_comma_separated(Parser::parse_identifier)?)
+        } else {
+            None
+        };
+
+        // [ IN SCHEMA schema_name [, ...] ]
+        let schema_names = if self.parse_keywords(&[Keyword::IN, Keyword::SCHEMA]) {
+            Some(self.parse_comma_separated(Parser::parse_object_name)?)
+        } else {
+            None
+        };
+        let keyword = self.expect_one_of_keywords(&[Keyword::GRANT, Keyword::REVOKE])?;
+        let for_grant = keyword == Keyword::GRANT;
+        if for_grant {
+            let privileges = self.parse_privileges()?;
+            self.expect_keyword(Keyword::ON)?;
+            let object_type = self.parse_privilege_object_types()?;
+            if schema_names.is_some() && object_type == PrivilegeObjectType::Schemas {
+                parser_err!("cannot use IN SCHEMA clause when using GRANT/REVOKE ON SCHEMAS");
+            }
+            self.expect_keyword(Keyword::TO)?;
+            let grantees = self.parse_comma_separated(Parser::parse_identifier)?;
+
+            let with_grant_option =
+                self.parse_keywords(&[Keyword::WITH, Keyword::GRANT, Keyword::OPTION]);
+
+            Ok(Statement::AlterDefaultPrivileges {
+                target_users,
+                schema_names,
+                operation: DefaultPrivilegeOperation::Grant {
+                    privileges,
+                    object_type,
+                    grantees,
+                    with_grant_option,
+                },
+            })
+        } else {
+            let revoke_grant_option =
+                self.parse_keywords(&[Keyword::GRANT, Keyword::OPTION, Keyword::FOR]);
+            let privileges = self.parse_privileges()?;
+            self.expect_keyword(Keyword::ON)?;
+            let object_type = self.parse_privilege_object_types()?;
+            if schema_names.is_some() && object_type == PrivilegeObjectType::Schemas {
+                parser_err!("cannot use IN SCHEMA clause when using GRANT/REVOKE ON SCHEMAS");
+            }
+            self.expect_keyword(Keyword::FROM)?;
+            let grantees = self.parse_comma_separated(Parser::parse_identifier)?;
+            let cascade = self.parse_keyword(Keyword::CASCADE);
+            let restrict = self.parse_keyword(Keyword::RESTRICT);
+            if cascade && restrict {
+                parser_err!("Cannot specify both CASCADE and RESTRICT in REVOKE");
+            }
+
+            Ok(Statement::AlterDefaultPrivileges {
+                target_users,
+                schema_names,
+                operation: DefaultPrivilegeOperation::Revoke {
+                    privileges,
+                    object_type,
+                    grantees,
+                    revoke_grant_option,
+                    cascade,
+                },
+            })
+        }
     }
 
     /// Parse an INSERT statement
@@ -5854,7 +5953,11 @@ impl Parser<'_> {
 
     fn parse_deallocate(&mut self) -> ModalResult<Statement> {
         let prepare = self.parse_keyword(Keyword::PREPARE);
-        let name = self.parse_identifier()?;
+        let name = if self.parse_keyword(Keyword::ALL) {
+            None
+        } else {
+            Some(self.parse_identifier()?)
+        };
         Ok(Statement::Deallocate { name, prepare })
     }
 

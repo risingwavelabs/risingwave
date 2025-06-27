@@ -18,10 +18,12 @@ use std::sync::Arc;
 
 use futures_util::FutureExt;
 use itertools::Itertools;
-use risingwave_common::array::{ArrayImpl, DataChunk, ListRef, ListValue, StructRef, StructValue};
+use risingwave_common::array::{
+    ArrayImpl, DataChunk, ListRef, ListValue, StructRef, StructValue, VectorVal,
+};
 use risingwave_common::cast;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{F64, Int256, JsonbRef, MapRef, MapValue, ToText};
+use risingwave_common::types::{DataType, F64, Int256, JsonbRef, MapRef, MapValue, ToText};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{Context, ExpressionBoxExt, InputRefExpression, build_func};
 use risingwave_expr::{ExprError, Result, function};
@@ -161,6 +163,7 @@ pub fn int_to_bool(input: i32) -> bool {
 #[function("cast(jsonb) -> varchar")]
 #[function("cast(bytea) -> varchar")]
 #[function("cast(anyarray) -> varchar")]
+#[function("cast(vector) -> varchar")]
 pub fn general_to_text(elem: impl ToText, mut writer: &mut impl Write) {
     elem.write(&mut writer).unwrap();
 }
@@ -193,6 +196,14 @@ pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>> {
 #[function("cast(varchar) -> anyarray", type_infer = "unreachable")]
 fn str_to_list(input: &str, ctx: &Context) -> Result<ListValue> {
     ListValue::from_str(input, &ctx.return_type).map_err(|err| ExprError::Parse(err.into()))
+}
+
+#[function("cast(varchar) -> vector", type_infer = "unreachable")]
+fn str_to_vector(input: &str, ctx: &Context) -> Result<VectorVal> {
+    let DataType::Vector(size) = &ctx.return_type else {
+        unreachable!()
+    };
+    VectorVal::from_text(input, *size).map_err(|err| ExprError::Parse(err.into()))
 }
 
 /// Cast array with `source_elem_type` into array with `target_elem_type` by casting each element.

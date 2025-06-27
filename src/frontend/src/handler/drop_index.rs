@@ -41,8 +41,12 @@ pub async fn handle_drop_index(
         let reader = session.env().catalog_reader().read_guard();
         match reader.get_index_by_name(db_name, schema_path, &index_name) {
             Ok((index, _)) => {
-                if session.user_id() != index.index_table.owner {
-                    return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
+                if !session.is_super_user() && session.user_id() != index.index_table.owner {
+                    return Err(PermissionDenied(format!(
+                        "must be owner of index \"{}\"",
+                        index.name
+                    ))
+                    .into());
                 }
 
                 index.id

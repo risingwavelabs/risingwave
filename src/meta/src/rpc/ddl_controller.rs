@@ -29,7 +29,7 @@ use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::{
-    visit_stream_node, visit_stream_node_cont_mut,
+    visit_stream_node, visit_stream_node_body, visit_stream_node_cont_mut,
 };
 use risingwave_common::{bail, bail_not_implemented, must_match};
 use risingwave_connector::WithOptionsSecResolved;
@@ -103,11 +103,19 @@ impl DropMode {
     }
 }
 
+#[derive(strum::AsRefStr)]
 pub enum StreamingJobId {
     MaterializedView(TableId),
     Sink(SinkId),
     Table(Option<SourceId>, TableId),
     Index(IndexId),
+}
+
+impl std::fmt::Display for StreamingJobId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_ref())?;
+        write!(f, "({})", self.id())
+    }
 }
 
 impl StreamingJobId {
@@ -336,6 +344,7 @@ impl DdlController {
 
     /// Obtains the next sequence number for DDL commands, for observability and debugging purposes.
     pub fn next_seq(&self) -> u64 {
+        // This is a simple atomic increment operation.
         self.seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }
 
@@ -453,10 +462,20 @@ impl DdlController {
     }
 
     async fn create_database(&self, database: Database) -> MetaResult<NotificationVersion> {
-        self.metadata_manager
+        let (version, updated_db) = self
+            .metadata_manager
             .catalog_controller
             .create_database(database)
-            .await
+            .await?;
+        // If persistent successfully, notify `GlobalBarrierManager` to create database asynchronously.
+        self.barrier_manager
+            .update_database_barrier(
+                updated_db.database_id,
+                updated_db.barrier_interval_ms.map(|v| v as u32),
+                updated_db.checkpoint_frequency.map(|v| v as u64),
+            )
+            .await?;
+        Ok(version)
     }
 
     #[tracing::instrument(skip(self), level = "debug")]
@@ -599,10 +618,20 @@ impl DdlController {
         database_id: DatabaseId,
         param: AlterDatabaseParam,
     ) -> MetaResult<NotificationVersion> {
-        self.metadata_manager
+        let (version, updated_db) = self
+            .metadata_manager
             .catalog_controller
             .alter_database_param(database_id, param)
-            .await
+            .await?;
+        // If persistent successfully, notify `GlobalBarrierManager` to update param asynchronously.
+        self.barrier_manager
+            .update_database_barrier(
+                database_id,
+                updated_db.barrier_interval_ms.map(|v| v as u32),
+                updated_db.checkpoint_frequency.map(|v| v as u64),
+            )
+            .await?;
+        Ok(version)
     }
 
     // The 'secret' part of the request we receive from the frontend is in plaintext;
@@ -863,7 +892,7 @@ impl DdlController {
         for fragment in stream_job_fragments.fragments.values() {
             {
                 {
-                    visit_stream_node(&fragment.nodes, |node| {
+                    visit_stream_node_body(&fragment.nodes, |node| {
                         if let NodeBody::Merge(merge_node) = node {
                             let upstream_fragment_id = merge_node.upstream_fragment_id;
                             if let Some(external_upstream_fragment_downstreams) = replace_table_ctx
@@ -938,6 +967,12 @@ impl DdlController {
 
         let upstream_fragment_id = sink_fragment.fragment_id;
 
+        let mut max_operator_id = 0;
+
+        visit_stream_node(&union_fragment.nodes, |node| {
+            max_operator_id = max_operator_id.max(node.operator_id);
+        });
+
         {
             {
                 visit_stream_node_cont_mut(&mut union_fragment.nodes, |node| {
@@ -961,9 +996,11 @@ impl DdlController {
                                     {
                                         merge_stream_node.identity =
                                             format!("MergeExecutor(from sink {})", sink_id);
+                                        merge_stream_node.operator_id = max_operator_id + 1;
 
                                         input_project_node.identity =
                                             format!("ProjectExecutor(from sink {})", sink_id);
+                                        input_project_node.operator_id = max_operator_id + 2;
                                     }
 
                                     **merge_node = {
@@ -991,6 +1028,7 @@ impl DdlController {
 
     /// For [`CreateType::Foreground`], the function will only return after backfilling finishes
     /// ([`crate::manager::MetadataManager::wait_streaming_job_finished`]).
+    #[await_tree::instrument(boxed, "create_streaming_job({streaming_job})")]
     pub async fn create_streaming_job(
         &self,
         mut streaming_job: StreamingJob,
@@ -1469,6 +1507,7 @@ impl DdlController {
     }
 
     /// This is used for `ALTER TABLE ADD/DROP COLUMN` / `ALTER SOURCE ADD COLUMN`.
+    #[await_tree::instrument(boxed, "replace_streaming_job({streaming_job})")]
     pub async fn replace_job(
         &self,
         mut streaming_job: StreamingJob,
@@ -1611,6 +1650,7 @@ impl DdlController {
         }
     }
 
+    #[await_tree::instrument(boxed, "drop_streaming_job{}({job_id})", if let DropMode::Cascade = drop_mode { "_cascade" } else { "" })]
     async fn drop_streaming_job(
         &self,
         job_id: StreamingJobId,

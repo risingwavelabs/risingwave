@@ -57,7 +57,7 @@ impl CatalogController {
                     Default::default()
                 }
                 ObjectType::Table => {
-                    ensure_object_not_refer(object_type, object_id, &txn).await?;
+                    check_object_refer_for_drop(object_type, object_id, &txn).await?;
                     let indexes = get_referring_objects(object_id, &txn).await?;
                     for obj in indexes.iter().filter(|object| {
                         object.obj_type == ObjectType::Source || object.obj_type == ObjectType::Sink
@@ -71,7 +71,7 @@ impl CatalogController {
                     indexes
                 }
                 object_type @ (ObjectType::Source | ObjectType::Sink) => {
-                    ensure_object_not_refer(object_type, object_id, &txn).await?;
+                    check_object_refer_for_drop(object_type, object_id, &txn).await?;
                     report_drop_object(object_type, object_id, &txn).await;
                     vec![]
                 }
@@ -82,7 +82,7 @@ impl CatalogController {
                 | ObjectType::Connection
                 | ObjectType::Subscription
                 | ObjectType::Secret => {
-                    ensure_object_not_refer(object_type, object_id, &txn).await?;
+                    check_object_refer_for_drop(object_type, object_id, &txn).await?;
                     vec![]
                 }
             },
@@ -101,14 +101,28 @@ impl CatalogController {
             .all(&txn)
             .await?;
         if !removed_incoming_sinks.is_empty() {
+            let incoming_sink_ids = removed_incoming_sinks
+                .into_iter()
+                .flat_map(|arr| arr.into_inner().into_iter())
+                .collect_vec();
+
+            if self.env.opts.protect_drop_table_with_incoming_sink {
+                let sink_names: Vec<String> = Sink::find()
+                    .select_only()
+                    .column(sink::Column::Name)
+                    .filter(sink::Column::SinkId.is_in(incoming_sink_ids.clone()))
+                    .into_tuple()
+                    .all(&txn)
+                    .await?;
+
+                return Err(MetaError::permission_denied(format!(
+                    "Table used by incoming sinks: {:?}, please drop them manually",
+                    sink_names
+                )));
+            }
+
             let removed_sink_objs: Vec<PartialObject> = Object::find()
-                .filter(
-                    object::Column::Oid.is_in(
-                        removed_incoming_sinks
-                            .into_iter()
-                            .flat_map(|arr| arr.into_inner().into_iter()),
-                    ),
-                )
+                .filter(object::Column::Oid.is_in(incoming_sink_ids))
                 .into_partial_model()
                 .all(&txn)
                 .await?;
@@ -371,17 +385,23 @@ async fn report_drop_object(
     let connector_name = {
         match object_type {
             ObjectType::Sink => Sink::find_by_id(object_id)
+                .select_only()
+                .column(sink::Column::Properties)
+                .into_tuple::<Property>()
                 .one(txn)
                 .await
                 .ok()
                 .flatten()
-                .and_then(|sink| sink.properties.inner_ref().get("connector").cloned()),
+                .and_then(|properties| properties.inner_ref().get("connector").cloned()),
             ObjectType::Source => Source::find_by_id(object_id)
+                .select_only()
+                .column(source::Column::WithProperties)
+                .into_tuple::<Property>()
                 .one(txn)
                 .await
                 .ok()
                 .flatten()
-                .and_then(|source| source.with_properties.inner_ref().get("connector").cloned()),
+                .and_then(|properties| properties.inner_ref().get("connector").cloned()),
             _ => unreachable!(),
         }
     };

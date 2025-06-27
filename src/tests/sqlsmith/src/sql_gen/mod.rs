@@ -31,7 +31,7 @@ mod cast;
 mod expr;
 pub use expr::print_function_table;
 
-use crate::config::{Configuration, Feature};
+use crate::config::{Configuration, Feature, GenerateItem};
 
 mod dml;
 mod functions;
@@ -85,9 +85,13 @@ impl Table {
     pub fn get_qualified_columns(&self) -> Vec<Column> {
         self.columns
             .iter()
-            .map(|c| Column {
-                name: format!("{}.{}", self.name, c.name),
-                data_type: c.data_type.clone(),
+            .map(|c| {
+                let mut name = c.name.clone();
+                name.0.insert(0, Ident::new_unchecked(&self.name));
+                Column {
+                    name,
+                    data_type: c.data_type.clone(),
+                }
             })
             .collect()
     }
@@ -96,31 +100,55 @@ impl Table {
 /// Sqlsmith Column definition
 #[derive(Clone, Debug)]
 pub struct Column {
-    pub(crate) name: String,
+    pub(crate) name: ObjectName,
     pub(crate) data_type: DataType,
 }
 
 impl From<ColumnDef> for Column {
     fn from(c: ColumnDef) -> Self {
         Self {
-            name: c.name.real_value(),
+            name: ObjectName(vec![c.name]),
             data_type: bind_data_type(&c.data_type.expect("data type should not be none")).unwrap(),
         }
     }
 }
 
+impl Column {
+    pub fn name_expr(&self) -> Expr {
+        if self.name.0.len() == 1 {
+            Expr::Identifier(self.name.0[0].clone())
+        } else {
+            Expr::CompoundIdentifier(self.name.0.clone())
+        }
+    }
+
+    pub fn base_name(&self) -> Ident {
+        self.name.0.last().unwrap().clone()
+    }
+}
+
 #[derive(Copy, Clone)]
 pub(crate) struct SqlGeneratorContext {
+    can_agg: bool, // This is used to disable agg expr totally,
+    // Used in top level, where we want to test queries
+    // without aggregates.
     inside_agg: bool,
 }
 
 impl SqlGeneratorContext {
-    pub fn new(inside_agg: bool) -> Self {
-        SqlGeneratorContext { inside_agg }
+    pub fn new(can_agg: bool, inside_agg: bool) -> Self {
+        SqlGeneratorContext {
+            can_agg,
+            inside_agg,
+        }
     }
 
     pub fn is_inside_agg(self) -> bool {
         self.inside_agg
+    }
+
+    pub fn can_gen_agg(self) -> bool {
+        self.can_agg && !self.inside_agg
     }
 }
 
@@ -245,7 +273,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         columns
             .iter()
-            .filter(|c| watermark_names.contains(&c.name))
+            .filter(|c| watermark_names.contains(&c.name.base_name()))
             .cloned()
             .collect()
     }
@@ -259,7 +287,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     /// Decide whether to generate on config.
-    pub(crate) fn should_generate(&mut self, feature: Feature) -> bool {
-        self.config.should_generate(feature, self.rng)
+    pub(crate) fn should_generate<T: Into<GenerateItem>>(&mut self, item: T) -> bool {
+        self.config.should_generate(item, self.rng)
     }
 }

@@ -231,6 +231,15 @@ pub enum TrackingJob {
     Recovered(RecoveredTrackingJob),
 }
 
+impl std::fmt::Display for TrackingJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TrackingJob::New(command) => write!(f, "{}", command.job_id),
+            TrackingJob::Recovered(recovered) => write!(f, "{}<recovered>", recovered.id),
+        }
+    }
+}
+
 impl TrackingJob {
     /// Notify metadata manager that the job is finished.
     pub(crate) async fn finish(self, metadata_manager: &MetadataManager) -> MetaResult<()> {
@@ -318,12 +327,12 @@ impl CreateMviewProgressTracker {
     /// 1. `CreateMviewProgress`.
     /// 2. `Backfill` position.
     pub fn recover(
-        mviews: impl IntoIterator<Item = (TableId, (String, &StreamJobFragments))>,
+        mviews: impl IntoIterator<Item = (TableId, (String, &StreamJobFragments, BackfillOrderState))>,
         version_stats: &HummockVersionStats,
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
-        for (creating_table_id, (definition, table_fragments)) in mviews {
+        for (creating_table_id, (definition, table_fragments, backfill_order_state)) in mviews {
             let mut states = HashMap::new();
             let mut backfill_upstream_types = HashMap::new();
             let actors = table_fragments.tracking_progress_actor_ids();
@@ -339,6 +348,7 @@ impl CreateMviewProgressTracker {
                 table_fragments.upstream_table_counts(),
                 definition,
                 version_stats,
+                backfill_order_state,
             );
             let tracking_job = TrackingJob::Recovered(RecoveredTrackingJob {
                 id: creating_table_id.table_id as i32,
@@ -364,12 +374,13 @@ impl CreateMviewProgressTracker {
         upstream_mv_count: HashMap<TableId, usize>,
         definition: String,
         version_stats: &HummockVersionStats,
+        backfill_order_state: BackfillOrderState,
     ) -> Progress {
         let upstream_mvs_total_key_count =
             calculate_total_key_count(&upstream_mv_count, version_stats);
         Progress {
             states,
-            backfill_order_state: Default::default(),
+            backfill_order_state,
             backfill_upstream_types,
             done_count: 0, // Fill only after first barrier pass
             upstream_mv_count,

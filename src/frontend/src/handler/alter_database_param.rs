@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pgwire::pg_response::{PgResponse, StatementType};
+use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::AlterDatabaseParam;
+use risingwave_common::system_param::{NOTICE_BARRIER_INTERVAL_MS, NOTICE_CHECKPOINT_FREQUENCY};
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::{HandlerArgs, RwPgResponse};
@@ -25,6 +26,8 @@ pub async fn handle_alter_database_param(
     database_name: ObjectName,
     param: AlterDatabaseParam,
 ) -> Result<RwPgResponse> {
+    let mut builder = RwPgResponse::builder(StatementType::ALTER_DATABASE);
+
     let session = handler_args.session;
 
     let database_name = Binder::resolve_database_name(database_name)?;
@@ -38,12 +41,30 @@ pub async fn handle_alter_database_param(
         database.id()
     };
 
+    match param {
+        AlterDatabaseParam::BarrierIntervalMs(Some(interval)) => {
+            if interval >= NOTICE_BARRIER_INTERVAL_MS {
+                builder = builder.notice(
+                    format!("Barrier interval is set to {} ms >= {} ms. This can hurt freshness and potentially cause OOM.",
+                             interval, NOTICE_BARRIER_INTERVAL_MS));
+            }
+        }
+        AlterDatabaseParam::CheckpointFrequency(Some(frequency)) => {
+            if frequency >= NOTICE_CHECKPOINT_FREQUENCY {
+                builder = builder.notice(
+                    format!("Checkpoint frequency is set to {} >= {}. This can hurt freshness and potentially cause OOM.",
+                             frequency, NOTICE_CHECKPOINT_FREQUENCY));
+            }
+        }
+        _ => {}
+    }
+
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .alter_database_param(database_id, param)
         .await?;
 
-    Ok(PgResponse::empty_result(StatementType::ALTER_DATABASE))
+    Ok(builder.into())
 }
 
 #[cfg(test)]

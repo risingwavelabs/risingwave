@@ -67,6 +67,7 @@ export interface Relation {
   ownerName?: string
   schemaName?: string
   databaseName?: string
+  totalSizeBytes?: number
 }
 
 export class StreamingJob {
@@ -166,10 +167,23 @@ export async function getFragmentToRelationMap() {
   return fragmentVertexToRelationMap
 }
 
+interface ExtendedTable extends Table {
+  totalSizeBytes?: number
+}
+
+// Extended conversion function for Table with extra fields
+function extendedTableFromJSON(json: any): ExtendedTable {
+  const table = Table.fromJSON(json)
+  return {
+    ...table,
+    totalSizeBytes: json.total_size_bytes,
+  }
+}
+
 async function getTableCatalogsInner(
   path: "tables" | "materialized_views" | "indexes" | "internal_tables"
-) {
-  let list: Table[] = (await api.get(`/${path}`)).map(Table.fromJSON)
+): Promise<ExtendedTable[]> {
+  let list = (await api.get(`/${path}`)).map(extendedTableFromJSON)
   list = sortBy(list, (x) => x.id)
   return list
 }
