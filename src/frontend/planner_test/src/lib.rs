@@ -834,7 +834,8 @@ impl TestCase {
                 // Only generate stream_dist_plan if it is specified in test case
                 if dist_plan {
                     let graph = build_graph(stream_plan.clone(), None)?;
-                    *ret_dist_plan_str = Some(explain_stream_graph(&graph, Some(table), false));
+                    *ret_dist_plan_str =
+                        Some(explain_stream_graph(&graph, Some(table.to_prost()), false));
                 }
 
                 if self.expected_outputs.contains(&TestType::BackfillOrderPlan) {

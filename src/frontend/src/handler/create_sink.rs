@@ -40,7 +40,7 @@ use risingwave_connector::sink::{
     enforce_secret_sink,
 };
 use risingwave_pb::catalog::connection_params::PbConnectionType;
-use risingwave_pb::catalog::{PbSink, PbSource, Table};
+use risingwave_pb::catalog::{PbSink, PbSource};
 use risingwave_pb::ddl_service::{ReplaceJobPlan, TableJobType, replace_job_plan};
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
 use risingwave_pb::stream_plan::{MergeNode, StreamFragmentGraph, StreamNode};
@@ -516,11 +516,7 @@ pub async fn handle_create_sink(
         let (mut graph, mut table, source, target_job_type) =
             reparse_table_for_sink(&session, &table_catalog).await?;
 
-        sink.original_target_columns = table
-            .columns
-            .iter()
-            .map(|col| ColumnCatalog::from(col.clone()))
-            .collect_vec();
+        sink.original_target_columns = table.columns.clone();
 
         table
             .incoming_sinks
@@ -545,7 +541,7 @@ pub async fn handle_create_sink(
         target_table_replace_plan = Some(ReplaceJobPlan {
             replace_job: Some(replace_job_plan::ReplaceJob::ReplaceTable(
                 replace_job_plan::ReplaceTable {
-                    table: Some(table),
+                    table: Some(table.to_prost()),
                     source,
                     job_type: target_job_type as _,
                 },
@@ -600,7 +596,12 @@ pub fn fetch_incoming_sinks(
 pub(crate) async fn reparse_table_for_sink(
     session: &Arc<SessionImpl>,
     table_catalog: &Arc<TableCatalog>,
-) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
+) -> Result<(
+    StreamFragmentGraph,
+    TableCatalog,
+    Option<PbSource>,
+    TableJobType,
+)> {
     // Retrieve the original table definition and parse it to AST.
     let definition = table_catalog.create_sql_ast_purified()?;
     let Statement::CreateTable { name, .. } = &definition else {

@@ -97,7 +97,7 @@ pub async fn handle_drop_sink(
         affected_table_change = Some(ReplaceJobPlan {
             replace_job: Some(replace_job_plan::ReplaceJob::ReplaceTable(
                 replace_job_plan::ReplaceTable {
-                    table: Some(table),
+                    table: Some(table.to_prost()),
                     source,
                     job_type: target_job_type as _,
                 },

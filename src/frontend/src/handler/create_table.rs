@@ -43,7 +43,7 @@ use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, source};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::ConnectionType;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
-use risingwave_pb::catalog::{PbSource, PbTable, PbWebhookSourceInfo, Table, WatermarkDesc};
+use risingwave_pb::catalog::{PbSource, PbWebhookSourceInfo, WatermarkDesc};
 use risingwave_pb::ddl_service::{PbTableJobType, TableJobType};
 use risingwave_pb::meta::PbThrottleTarget;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
@@ -454,7 +454,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     include_column_options: IncludeOption,
     props: CreateTableProps,
     sql_column_strategy: SqlColumnStrategy,
-) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
+) -> Result<(PlanRef, Option<PbSource>, TableCatalog)> {
     if props.append_only
         && format_encode.format != Format::Plain
         && format_encode.format != Format::Native
@@ -542,7 +542,7 @@ pub(crate) fn gen_create_table_plan(
     source_watermarks: Vec<SourceWatermark>,
     props: CreateTableProps,
     is_for_replace_plan: bool,
-) -> Result<(PlanRef, PbTable)> {
+) -> Result<(PlanRef, TableCatalog)> {
     let mut columns = bind_sql_columns(&column_defs, is_for_replace_plan)?;
     for c in &mut columns {
         col_id_gen.generate(c)?;
@@ -575,7 +575,7 @@ pub(crate) fn gen_create_table_plan_without_source(
     source_watermarks: Vec<SourceWatermark>,
     version: TableVersion,
     props: CreateTableProps,
-) -> Result<(PlanRef, PbTable)> {
+) -> Result<(PlanRef, TableCatalog)> {
     // XXX: Why not bind outside?
     let pk_names = bind_sql_pk_names(&column_defs, bind_table_constraints(&constraints)?)?;
     let (mut columns, pk_column_ids, row_id_index) =
@@ -618,7 +618,7 @@ fn gen_table_plan_with_source(
     source_catalog: SourceCatalog,
     version: TableVersion,
     props: CreateTableProps,
-) -> Result<(PlanRef, PbTable)> {
+) -> Result<(PlanRef, TableCatalog)> {
     let table_name = source_catalog.name.clone();
 
     let info = CreateTableInfo {
@@ -724,7 +724,7 @@ fn gen_table_plan_inner(
     table_name: String,
     info: CreateTableInfo,
     props: CreateTableProps,
-) -> Result<(PlanRef, PbTable)> {
+) -> Result<(PlanRef, TableCatalog)> {
     let CreateTableInfo {
         ref columns,
         row_id_index,
@@ -779,9 +779,9 @@ fn gen_table_plan_inner(
     let materialize =
         plan_root.gen_table_plan(context, table_name, database_id, schema_id, info, props)?;
 
-    let mut table = materialize.table().to_prost();
-
+    let mut table = materialize.table().clone();
     table.owner = session.user_id();
+
     Ok((materialize.into(), table))
 }
 
@@ -807,7 +807,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     schema_id: SchemaId,
     table_id: TableId,
     engine: Engine,
-) -> Result<(PlanRef, PbTable)> {
+) -> Result<(PlanRef, TableCatalog)> {
     let session = context.session_ctx().clone();
 
     // append additional columns to the end
@@ -918,10 +918,10 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         },
     )?;
 
-    let mut table = materialize.table().to_prost();
+    let mut table = materialize.table().clone();
     table.owner = session.user_id();
     table.cdc_table_id = Some(cdc_table_id);
-    table.dependent_relations = vec![source.id];
+    table.dependent_relations = vec![source.id.into()];
 
     Ok((materialize.into(), table))
 }
@@ -1023,7 +1023,7 @@ pub(super) async fn handle_create_table_plan(
     include_column_options: IncludeOption,
     webhook_info: Option<WebhookSourceInfo>,
     engine: Engine,
-) -> Result<(PlanRef, Option<PbSource>, PbTable, TableJobType)> {
+) -> Result<(PlanRef, Option<PbSource>, TableCatalog, TableJobType)> {
     let col_id_gen = ColumnIdGenerator::new_initial();
     let format_encode = check_create_table_with_source(
         &handler_args.with_options,
@@ -1423,7 +1423,13 @@ pub async fn handle_create_table(
         Engine::Hummock => {
             let catalog_writer = session.catalog_writer()?;
             catalog_writer
-                .create_table(source, hummock_table, graph, job_type, if_not_exists)
+                .create_table(
+                    source,
+                    hummock_table.to_prost(),
+                    graph,
+                    job_type,
+                    if_not_exists,
+                )
                 .await?;
         }
         Engine::Iceberg => {
@@ -1457,7 +1463,7 @@ pub async fn create_iceberg_engine_table(
     session: Arc<SessionImpl>,
     handler_args: HandlerArgs,
     mut source: Option<PbSource>,
-    table: PbTable,
+    table: TableCatalog,
     graph: StreamFragmentGraph,
     table_name: ObjectName,
     job_type: PbTableJobType,
@@ -1606,11 +1612,9 @@ pub async fn create_iceberg_engine_table(
         }
     };
 
-    let table_catalog = TableCatalog::from(table.clone());
-
     // Iceberg sinks require a primary key, if none is provided, we will use the _row_id column
     // Fetch primary key from columns
-    let mut pks = table_catalog
+    let mut pks = table
         .pk_column_names()
         .iter()
         .map(|c| c.to_string())
@@ -1813,7 +1817,7 @@ pub async fn create_iceberg_engine_table(
     if let Some(partition_by) = &partition_by {
         let mut partition_columns = vec![];
         for (column, _) in parse_partition_by_exprs(partition_by.clone())? {
-            table_catalog
+            table
                 .columns()
                 .iter()
                 .find(|col| col.name().eq_ignore_ascii_case(&column))
@@ -1876,7 +1880,7 @@ pub async fn create_iceberg_engine_table(
     // TODO(iceberg): make iceberg engine table creation ddl atomic
     let has_connector = source.is_some();
     catalog_writer
-        .create_table(source, table, graph, job_type, if_not_exists)
+        .create_table(source, table.to_prost(), graph, job_type, if_not_exists)
         .await?;
     let res = create_sink::handle_create_sink(sink_handler_args, create_sink_stmt, true).await;
     if res.is_err() {
@@ -1959,9 +1963,12 @@ pub async fn generate_stream_graph_for_replace_table(
     statement: Statement,
     col_id_gen: ColumnIdGenerator,
     sql_column_strategy: SqlColumnStrategy,
-) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
-    use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-
+) -> Result<(
+    StreamFragmentGraph,
+    TableCatalog,
+    Option<PbSource>,
+    TableJobType,
+)> {
     let Statement::CreateTable {
         columns,
         constraints,
@@ -2090,8 +2097,7 @@ pub async fn generate_stream_graph_for_replace_table(
         }
     };
 
-    // TODO: avoid this backward conversion.
-    if TableCatalog::from(&table).pk_column_ids() != original_catalog.pk_column_ids() {
+    if table.pk_column_ids() != original_catalog.pk_column_ids() {
         Err(ErrorCode::InvalidInputSyntax(
             "alter primary key of table is not supported".to_owned(),
         ))?
@@ -2100,17 +2106,16 @@ pub async fn generate_stream_graph_for_replace_table(
     let graph = build_graph(plan, Some(GraphJobType::Table))?;
 
     // Fill the original table ID.
-    let mut table = Table {
-        id: original_catalog.id().table_id(),
+    let mut table = TableCatalog {
+        id: original_catalog.id(),
         ..table
     };
     if !is_drop_connector && let Some(source_id) = original_catalog.associated_source_id() {
-        table.optional_associated_source_id = Some(OptionalAssociatedSourceId::AssociatedSourceId(
-            source_id.table_id,
-        ));
+        table.associated_source_id = Some(source_id);
         source.as_mut().unwrap().id = source_id.table_id;
-        source.as_mut().unwrap().optional_associated_table_id =
-            Some(OptionalAssociatedTableId::AssociatedTableId(table.id))
+        source.as_mut().unwrap().optional_associated_table_id = Some(
+            OptionalAssociatedTableId::AssociatedTableId(table.id().table_id),
+        )
     }
 
     Ok((graph, table, source, job_type))

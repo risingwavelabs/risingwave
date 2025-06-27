@@ -93,7 +93,7 @@ pub async fn handle_refresh_schema(
     let catalog_writer = session.catalog_writer()?;
 
     catalog_writer
-        .replace_table(source, table, graph, job_type)
+        .replace_table(source, table.to_prost(), graph, job_type)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))
