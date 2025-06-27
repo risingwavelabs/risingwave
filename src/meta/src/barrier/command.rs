@@ -32,6 +32,7 @@ use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::CreateType;
+use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
@@ -769,6 +770,7 @@ impl CommandContext {
                     match node.node_body.as_ref().unwrap() {
                         NodeBody::VectorIndexWrite(vector_index_write) => {
                             let index_table = vector_index_write.table.as_ref().unwrap();
+                            assert_eq!(index_table.table_type, PbTableType::VectorIndex as i32);
                             info.vector_index_delta
                                 .try_insert(
                                     index_table.id.into(),

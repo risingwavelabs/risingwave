@@ -652,6 +652,7 @@ pub async fn handle(
         Statement::CreateIndex {
             name,
             table_name,
+            method,
             columns,
             include,
             distributed_by,
@@ -667,6 +668,7 @@ pub async fn handle(
                 if_not_exists,
                 name,
                 table_name,
+                method,
                 columns.to_vec(),
                 include,
                 distributed_by,
