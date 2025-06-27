@@ -207,8 +207,8 @@ async fn handle_alter_mv_bound(
             return Err(ErrorCode::NotSupported(
                 "incompatible alter".to_owned(),
                 format!(
-                    "diff between the new and the original materialized view:\n{}",
-                    pretty_assertions::Comparison::new(&new_table, &original_table)
+                    "diff between the original and the new materialized view:\n{}",
+                    pretty_assertions::Comparison::new(&original_table, &new_table)
                 ),
             )
             .into());
