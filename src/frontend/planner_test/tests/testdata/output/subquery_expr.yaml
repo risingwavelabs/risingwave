@@ -126,7 +126,7 @@
     LogicalProject { exprs: [t.x, 1:Int32] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
       ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-      └─LogicalJoin { type: Inner, on: true, output: all }
+      └─LogicalJoin { type: FullOuter, on: true, output: all }
         ├─LogicalProject { exprs: [t.x] }
         │ └─LogicalScan { table: t, columns: [t.x, t._row_id, t._rw_timestamp] }
         └─LogicalProject { exprs: [1:Int32] }
@@ -135,14 +135,14 @@
     LogicalJoin { type: LeftOuter, on: true, output: all }
     ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
     └─LogicalMaxOneRow
-      └─LogicalJoin { type: Inner, on: true, output: all }
+      └─LogicalJoin { type: FullOuter, on: true, output: all }
         ├─LogicalScan { table: t, columns: [t.x] }
         └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
   batch_plan: |-
     BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
     ├─BatchValues { rows: [[]] }
     └─BatchMaxOneRow
-      └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+      └─BatchNestedLoopJoin { type: FullOuter, predicate: true, output: all }
         ├─BatchExchange { order: [], dist: Single }
         │ └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
         └─BatchValues { rows: [[1:Int32]] }
@@ -387,7 +387,7 @@
     LogicalProject { exprs: [1:Int32, 1:Int32] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
       ├─LogicalScan { table: dl, columns: [dl.c1, dl.c2, dl._row_id, dl._rw_timestamp] }
-      └─LogicalJoin { type: Inner, on: true, output: all }
+      └─LogicalJoin { type: FullOuter, on: true, output: all }
         ├─LogicalLimit { limit: 1, offset: 0 }
         │ └─LogicalProject { exprs: [1:Int32] }
         │   └─LogicalFilter { predicate: (t.a = CorrelatedInputRef { index: 0, correlated_id: 1 }) }

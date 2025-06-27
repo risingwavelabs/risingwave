@@ -451,7 +451,7 @@ impl Planner {
     ///                         /   \
     ///                 Subquery2   Subquery3
     /// ```
-    /// Typically, this is used for scalar subqueries in select clauses, because users might write subqueries in a case-when exprs multiple times.
+    /// Typically, this is used for scalar subqueries in select clauses, because users might write subqueries in exprs multiple times.
     /// If we use the left-deep tree way, it will generate a lot of `Apply` nodes, which is not efficient.
     pub(super) fn substitute_subqueries_in_cross_join_way(
         &mut self,
@@ -532,7 +532,7 @@ impl Planner {
                 right = Some(LogicalJoin::create(
                     right.clone().unwrap(),
                     subplan,
-                    JoinType::Inner,
+                    JoinType::FullOuter,
                     ExprImpl::literal_bool(true),
                 ));
             }
