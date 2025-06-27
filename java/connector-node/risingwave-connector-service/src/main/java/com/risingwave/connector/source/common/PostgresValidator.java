@@ -212,7 +212,6 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             stmt.setString(2, this.tableName);
             var res = stmt.executeQuery();
 
-            // 字段名（小写） -> [数据类型, character_maximum_length]
             class ColumnInfo {
                 String dataType;
                 Long charMaxLength;
