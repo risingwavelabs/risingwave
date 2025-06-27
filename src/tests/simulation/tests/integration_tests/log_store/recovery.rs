@@ -73,7 +73,7 @@ async fn test_recover_synced_log_store() -> Result<()> {
             .await;
         tracing::info!("killed compute nodes");
         cluster.wait_for_recovery().await?;
-        wait_unaligned_join(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
+        realign_join(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
     }
 
     // aligned join workload
