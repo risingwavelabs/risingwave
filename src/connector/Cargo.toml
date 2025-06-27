@@ -100,8 +100,8 @@ phf = { version = "0.11", features = ["macros"] }
 postgres-openssl = "0.5.0"
 prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true, features = ["no-recursion-limit"] }
-prost-reflect = { version = "0.15", features = ["serde"] }
-prost-types = "0.13"
+prost-reflect = { version = "0.16", features = ["serde"] }
+prost-types = "0.14"
 pulsar = { version = "6.3", default-features = false, features = [
     "tokio-runtime",
     "telemetry",
