@@ -677,17 +677,17 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 // BOOLEAN -> BOOLEAN
                 return val == Data.DataType.TypeName.BOOLEAN_VALUE;
             case "bit":
-                // bit类型需要结合character_maximum_length判断
+                // The bit type needs to be judged together with character_maximum_length
                 if (charMaxLength == null || charMaxLength == 1) {
-                    // bit(1) 可以匹配 BOOLEAN 或 BYTEA
+                    // bit(1) can match BOOLEAN or BYTEA
                     return val == Data.DataType.TypeName.BOOLEAN_VALUE
                             || val == Data.DataType.TypeName.BYTEA_VALUE;
                 } else {
-                    // bit(n>1) 只能匹配 BYTEA
+                    // bit(n>1) can only match BYTEA
                     return val == Data.DataType.TypeName.BYTEA_VALUE;
                 }
             case "bit(1)":
-                // 兼容历史写法，bit(1) 可以匹配 BOOLEAN 或 BYTEA
+                // For compatibility with historical usage, bit(1) can match BOOLEAN or BYTEA
                 return val == Data.DataType.TypeName.BOOLEAN_VALUE
                         || val == Data.DataType.TypeName.BYTEA_VALUE;
             case "smallint":
