@@ -35,12 +35,14 @@ CREATE TABLE test (
     v23 int,
     v24 bit(1),
     v25 year,
+    v26 bit(1),
     v27 enum('a', 'b', 'c'),
     v28 varbinary(10),
     v29 text,
     v30 tinytext,
     v31 mediumtext,
-    v32 longtext
+    v32 longtext,
+    v33 datetime
 );
 INSERT INTO test SELECT
   1 as id,
@@ -70,12 +72,14 @@ INSERT INTO test SELECT
   null as v23,
   true as v24,
   2023 as v25,
+  x'01' as v26,
   'b' as v27,
   x'3132333435' as v28,
   'text' as v29,
   'tinytext' as v30,
   'mediumtext' as v31,
-  'longtext' as v32;
+  'longtext' as v32,
+  '2021-01-01 12:34:56' as v33;
 "
 
 statement ok
@@ -89,12 +93,12 @@ create source mysql_cdc_source with (
 query
 select * from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'tvf', 'select * from test;');
 ----
-1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 b 12345 \x74657874 \x74696e7974657874 \x6d656469756d74657874 \x6c6f6e6774657874
+1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 \x01 b 12345 \x74657874 \x74696e7974657874 \x6d656469756d74657874 \x6c6f6e6774657874 2021-01-01 12:34:56 2021-01-01 12:34:56
 
 query
 select * from mysql_query('mysql_cdc_source', 'select * from test;');
 ----
-1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 b 12345 \x74657874 \x74696e7974657874 \x6d656469756d74657874 \x6c6f6e6774657874
+1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 \x01 b 12345 \x74657874 \x74696e7974657874 \x6d656469756d74657874 \x6c6f6e6774657874 2021-01-01 12:34:56 2021-01-01 12:34:56
 
 
 system ok
@@ -129,12 +133,14 @@ INSERT INTO test SELECT
   null as v23,
   false as v24,
   2022 as v25,
+  x'00' as v26,
   'c' as v27,
   x'6162636465' as v28,
   'text2' as v29,
   'tinytext2' as v30,
   'mediumtext2' as v31,
-  'longtext2' as v32;
+  'longtext2' as v32,
+  '2021-01-01 12:34:56' as v33;
 "
 
 statement error db error: ERROR: Failed to run the query
@@ -177,13 +183,16 @@ create table test (
     v23 int,
     v24 bool,
     v25 int,
+    v26 bytea,
     v27 varchar,
     v28 bytea,
     v29 varchar,
     v30 varchar,
     v31 varchar,
-    v32 varchar
-) with (
+    v32 varchar,
+    v33 timestamp
+)
+with (
  connector = 'mysql-cdc',
  hostname = '$MYSQL_HOST',
  port = '$MYSQL_TCP_PORT',
@@ -198,8 +207,8 @@ sleep 5s
 query I
 select * from test order by id;
 ----
-1 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 b \x3132333435 text tinytext mediumtext longtext
-2 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 NULL {"key1": 1, "key2": "abc"} NULL f 2022 c \x6162636465 text2 tinytext2 mediumtext2 longtext2
+1 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 \x01 b \x3132333435 text tinytext mediumtext longtext 2021-01-01 12:34:56
+2 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 NULL {"key1": 1, "key2": "abc"} NULL f 2022 \x00 c \x6162636465 text2 tinytext2 mediumtext2 longtext2 2021-01-01 12:34:56
 
 system ok
 mysql -e "

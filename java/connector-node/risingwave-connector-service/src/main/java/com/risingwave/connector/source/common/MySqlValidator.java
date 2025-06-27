@@ -316,6 +316,8 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 return val == Data.DataType.TypeName.BOOLEAN_VALUE;
             case "enum":
                 return val == Data.DataType.TypeName.VARCHAR_VALUE;
+            case "char":
+            case "varchar":
             case "text":
             case "tinytext":
             case "mediumtext":
@@ -329,11 +331,9 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                         || val == Data.DataType.TypeName.DOUBLE_VALUE;
             case "double":
                 return val == Data.DataType.TypeName.DOUBLE_VALUE;
+            case "numeric":
             case "decimal":
                 return val == Data.DataType.TypeName.DECIMAL_VALUE;
-            case "char":
-            case "varchar":
-                return val == Data.DataType.TypeName.VARCHAR_VALUE;
             case "date":
                 return val == Data.DataType.TypeName.DATE_VALUE;
             case "time":
