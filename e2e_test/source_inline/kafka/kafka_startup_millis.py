@@ -57,7 +57,7 @@ def main():
             {"id": i}
             for i in range(6, 9)
         ]
-        
+
         if not args.produce_after_table:
             print("Producing more data before table is created")
             produce_records(producer, args.topic, additional_records)
@@ -97,7 +97,7 @@ def main():
             cur.execute(create_table_sql)
             conn.commit()
             print(f"Created table {table_name} with startup timestamp {current_timestamp_millis}")
-            
+
             if args.produce_after_table:
                 print("Producing more data after table is created")
                 produce_records(producer, args.topic, additional_records)
