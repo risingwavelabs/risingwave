@@ -34,7 +34,7 @@ use crate::ast::*;
 use crate::keywords::{self, Keyword};
 use crate::parser_v2::{
     ParserExt as _, dollar_quoted_string, keyword, literal_i64, literal_u32, literal_u64,
-    single_quoted_string, token_number,
+    single_quoted_string,
 };
 use crate::tokenizer::*;
 use crate::{impl_parse_to, parser_v2};
@@ -4057,17 +4057,6 @@ impl Parser<'_> {
             Token::SingleQuotedString(s) => Ok(s),
             _ => self.expected_at(checkpoint, "literal string"),
         }
-    }
-
-    /// Parse a map key string
-    pub fn parse_map_key(&mut self) -> ModalResult<Expr> {
-        alt((
-            Self::parse_function,
-            single_quoted_string.map(|s| Expr::Value(Value::SingleQuotedString(s))),
-            token_number.map(|s| Expr::Value(Value::Number(s))),
-            fail.expect("literal string, number or function"),
-        ))
-        .parse_next(self)
     }
 
     /// Parse a SQL datatype (in the context of a CREATE TABLE statement for example)
