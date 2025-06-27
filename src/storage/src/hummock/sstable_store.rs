@@ -54,7 +54,9 @@ static MISSED: LazyLock<BatchLogger<SstableBlockIndex>> = LazyLock::new(|| {
         tracing::Level::INFO,
         "========== MISSED DATA BLOCKS ==========",
         std::time::Duration::from_secs(10),
-        1000,
+        std::env::var("RW_LOG_BATCH")
+            .map(|s| s.parse().unwrap_or(1000))
+            .unwrap_or(1000),
     )
 });
 
@@ -63,7 +65,9 @@ static EVICTED: LazyLock<BatchLogger<SstableBlockIndex>> = LazyLock::new(|| {
         tracing::Level::INFO,
         "========== EVICTED DATA BLOCKS ==========",
         std::time::Duration::from_secs(10),
-        1000,
+        std::env::var("RW_LOG_BATCH")
+            .map(|s| s.parse().unwrap_or(1000))
+            .unwrap_or(1000),
     )
 });
 

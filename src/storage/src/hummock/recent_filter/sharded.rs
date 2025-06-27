@@ -64,7 +64,7 @@ impl<T> ShardedRecentFilter<T> {
         T: Borrow<Q>,
         Q: Hash + Eq,
     {
-        self.inner.build_hasher.hash_one(item) as usize & self.inner.shards.len()
+        self.inner.build_hasher.hash_one(item) as usize % self.inner.shards.len()
     }
 }
 
