@@ -241,7 +241,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                     throw ValidatorUtils.invalidArgument(
                             "Column '" + e.getKey() + "' not found in the upstream database");
                 }
-                if (!isDataTypeCompatible(colInfo.dataType, e.getValue())) {
+                if (!isDataTypeCompatible(colInfo.dataType, e.getValue(), colInfo.charMaxLength)) {
                     throw ValidatorUtils.invalidArgument(
                             "Incompatible data type of column " + e.getKey());
                 }
@@ -663,7 +663,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         }
     }
 
-    private boolean isDataTypeCompatible(String pgDataType, Data.DataType.TypeName typeName) {
+    private boolean isDataTypeCompatible(String pgDataType, Data.DataType.TypeName typeName, Long charMaxLength) {
         System.out.println(
                 "PostgresValidator: pgDataType = "
                         + pgDataType
