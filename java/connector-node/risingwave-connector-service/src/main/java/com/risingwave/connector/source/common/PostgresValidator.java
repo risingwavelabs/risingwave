@@ -212,12 +212,23 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             stmt.setString(2, this.tableName);
             var res = stmt.executeQuery();
 
-            // Field names in lower case -> data type
-            Map<String, String> schema = new HashMap<>();
+            // 字段名（小写） -> [数据类型, character_maximum_length]
+            class ColumnInfo {
+                String dataType;
+                Long charMaxLength;
+
+                ColumnInfo(String dataType, Long charMaxLength) {
+                    this.dataType = dataType;
+                    this.charMaxLength = charMaxLength;
+                }
+            }
+            Map<String, ColumnInfo> schema = new HashMap<>();
             while (res.next()) {
                 var field = res.getString(1);
                 var dataType = res.getString(2);
-                schema.put(field.toLowerCase(), dataType);
+                Long charMaxLength =
+                        res.getObject(3) == null ? null : ((Number) res.getObject(3)).longValue();
+                schema.put(field.toLowerCase(), new ColumnInfo(dataType, charMaxLength));
             }
 
             for (var e : tableSchema.getColumnTypes().entrySet()) {
@@ -225,12 +236,12 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 if (e.getKey().startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
                     continue;
                 }
-                var dataType = schema.get(e.getKey().toLowerCase());
-                if (dataType == null) {
+                var colInfo = schema.get(e.getKey().toLowerCase());
+                if (colInfo == null) {
                     throw ValidatorUtils.invalidArgument(
                             "Column '" + e.getKey() + "' not found in the upstream database");
                 }
-                if (!isDataTypeCompatible(dataType, e.getValue())) {
+                if (!isDataTypeCompatible(colInfo.dataType, e.getValue())) {
                     throw ValidatorUtils.invalidArgument(
                             "Incompatible data type of column " + e.getKey());
                 }
@@ -653,52 +664,125 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     }
 
     private boolean isDataTypeCompatible(String pgDataType, Data.DataType.TypeName typeName) {
+        System.out.println(
+                "PostgresValidator: pgDataType = "
+                        + pgDataType
+                        + ", typeName = "
+                        + typeName
+                        + ", charMaxLength = "
+                        + charMaxLength);
         int val = typeName.getNumber();
         switch (pgDataType) {
-            case "smallint":
-                return Data.DataType.TypeName.INT16_VALUE <= val
-                        && val <= Data.DataType.TypeName.INT64_VALUE;
-            case "integer":
-                return Data.DataType.TypeName.INT32_VALUE <= val
-                        && val <= Data.DataType.TypeName.INT64_VALUE;
-            case "bigint":
-                return val == Data.DataType.TypeName.INT64_VALUE;
-            case "float":
-            case "real":
-                return val == Data.DataType.TypeName.FLOAT_VALUE;
             case "boolean":
+                // BOOLEAN -> BOOLEAN
                 return val == Data.DataType.TypeName.BOOLEAN_VALUE;
+            case "bit":
+                // bit类型需要结合character_maximum_length判断
+                if (charMaxLength == null || charMaxLength == 1) {
+                    // bit(1) 可以匹配 BOOLEAN 或 BYTEA
+                    return val == Data.DataType.TypeName.BOOLEAN_VALUE
+                            || val == Data.DataType.TypeName.BYTEA_VALUE;
+                } else {
+                    // bit(n>1) 只能匹配 BYTEA
+                    return val == Data.DataType.TypeName.BYTEA_VALUE;
+                }
+            case "bit(1)":
+                // 兼容历史写法，bit(1) 可以匹配 BOOLEAN 或 BYTEA
+                return val == Data.DataType.TypeName.BOOLEAN_VALUE
+                        || val == Data.DataType.TypeName.BYTEA_VALUE;
+            case "smallint":
+            case "smallserial":
+                // SMALLINT, SMALLSERIAL -> SMALLINT
+                // BOOLEAN, BIT(1) -> BOOLEAN
+                return val == Data.DataType.TypeName.BOOLEAN_VALUE;
+                return val == Data.DataType.TypeName.INT32_VALUE;
+            case "bigint":
+            case "bigserial":
+            case "oid":
+                // BIGINT, BIGSERIAL, OID -> BIGINT
+                return val == Data.DataType.TypeName.INT64_VALUE;
+            case "real":
+                // REAL -> REAL
+                return val == Data.DataType.TypeName.FLOAT_VALUE;
             case "double":
             case "double precision":
+                // DOUBLE PRECISION -> DOUBLE PRECISION
                 return val == Data.DataType.TypeName.DOUBLE_VALUE;
-            case "decimal":
-            case "numeric":
-                return val == Data.DataType.TypeName.DECIMAL_VALUE
-                        // We allow user to map numeric into rw_int256 or varchar to avoid precision
-                        // loss in the conversion from pg-numeric to rw-numeric
-                        || val == Data.DataType.TypeName.INT256_VALUE
-                        || val == Data.DataType.TypeName.VARCHAR_VALUE;
+            case "char":
+            case "character":
             case "varchar":
             case "character varying":
+            case "xml":
             case "uuid":
+            case "text":
+            case "inet":
+            case "cidr":
+            case "macaddr":
+            case "macaddr8":
+            case "int4range":
+            case "int8range":
+            case "numrange":
+            case "tsrange":
+            case "tstzrange":
+            case "daterange":
             case "enum":
+                // CHARACTER, CHARACTER VARYING, VARCHAR, CHAR, XML, UUID, CITEXT, INET, CIDR,
+                // MACADDR, MACADDR8, INT4RANGE, INT8RANGE, NUMRANGE, TSRANGE, TSTZRANGE, DATERANGE,
+                // ENUM -> CHARACTER VARYING
                 return val == Data.DataType.TypeName.VARCHAR_VALUE;
+            case "timestamptz":
+            case "timestamp with time zone":
+                // TIMESTAMPTZ, TIMESTAMP WITH TIME ZONE -> TIMESTAMP WITH TIME ZONE
+                return val == Data.DataType.TypeName.TIMESTAMPTZ_VALUE;
+            case "timetz":
+            case "time with time zone":
+            case "time without time zone":
+                // TIMETZ, TIME WITH TIME ZONE -> TIME WITHOUT TIME ZONE (assume UTC)
+                return val == Data.DataType.TypeName.TIME_VALUE;
+            case "interval":
+                // INTERVAL [P] -> INTERVAL
+                return val == Data.DataType.TypeName.INTERVAL_VALUE;
             case "bytea":
+                // BYTEA -> BYTEA
                 return val == Data.DataType.TypeName.BYTEA_VALUE;
+            case "json":
+            case "jsonb":
+                // JSON, JSONB -> JSONB
+                return val == Data.DataType.TypeName.JSONB_VALUE;
             case "date":
+                // DATE -> DATE
                 return val == Data.DataType.TypeName.DATE_VALUE;
             case "time":
+            case "time(1)":
+            case "time(2)":
+            case "time(3)":
+            case "time(4)":
+            case "time(5)":
+            case "time(6)":
+                // TIME(N) -> TIME WITHOUT TIME ZONE
                 return val == Data.DataType.TypeName.TIME_VALUE;
             case "timestamp":
             case "timestamp without time zone":
+            case "timestamp(1)":
+            case "timestamp(2)":
+            case "timestamp(3)":
+            case "timestamp(4)":
+            case "timestamp(5)":
+            case "timestamp(6)":
+                // TIMESTAMP(N) -> TIMESTAMP WITHOUT TIME ZONE
                 return val == Data.DataType.TypeName.TIMESTAMP_VALUE;
-            case "timestamptz":
-            case "timestamp with time zone":
-                return val == Data.DataType.TypeName.TIMESTAMPTZ_VALUE;
-            case "interval":
-                return val == Data.DataType.TypeName.INTERVAL_VALUE;
-            case "jsonb":
-                return val == Data.DataType.TypeName.JSONB_VALUE;
+            case "numeric":
+            case "decimal":
+                // NUMERIC, DECIMAL -> DECIMAL, INT256, VARCHAR
+                return val == Data.DataType.TypeName.DECIMAL_VALUE
+                        || val == Data.DataType.TypeName.INT256_VALUE
+                        || val == Data.DataType.TypeName.VARCHAR_VALUE;
+            case "money":
+                // MONEY -> NUMERIC
+                return val == Data.DataType.TypeName.DECIMAL_VALUE;
+            case "point":
+                // POINT -> STRUCT (not supported, return false)
+                return false;
             default:
                 return false; // false for other uncovered types
         }
