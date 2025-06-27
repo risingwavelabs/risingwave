@@ -82,7 +82,7 @@ use crate::handler::create_table::{CreateTableInfo, CreateTableProps};
 use crate::optimizer::plan_node::generic::{SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive, StreamExchange, StreamUnion,
-    ToStream, VisitExprsRecursive,
+    StreamVectorIndexWrite, ToStream, VisitExprsRecursive,
 };
 use crate::optimizer::plan_visitor::{RwTimestampValidator, TemporalJoinValidator};
 use crate::optimizer::property::Distribution;
@@ -1009,6 +1009,35 @@ impl LogicalPlanRoot {
             schema_id,
             definition,
             TableType::Index,
+            cardinality,
+            retention_seconds,
+        )
+    }
+
+    pub fn gen_vector_index_plan(
+        mut self,
+        index_name: String,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
+        definition: String,
+        retention_seconds: Option<NonZeroU32>,
+    ) -> Result<StreamVectorIndexWrite> {
+        let cardinality = self.compute_cardinality();
+        assert_eq!(self.phase, PlanPhase::Logical);
+        assert_eq!(self.plan.convention(), Convention::Logical);
+        let stream_plan = self.gen_optimized_stream_plan(false, false)?;
+        assert_eq!(self.phase, PlanPhase::Stream);
+        assert_eq!(stream_plan.convention(), Convention::Stream);
+
+        StreamVectorIndexWrite::create(
+            stream_plan,
+            index_name,
+            database_id,
+            schema_id,
+            self.required_order.clone(),
+            self.out_fields.clone(),
+            self.out_names.clone(),
+            definition,
             cardinality,
             retention_seconds,
         )
