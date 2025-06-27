@@ -23,7 +23,7 @@ use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::executor::asof_join::*;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{ActorContextRef, AsOfDesc, AsOfJoinType, JoinType};
+use crate::executor::{ActorContextRef, AsOfDesc, AsOfJoinType, JoinEncoding, JoinType};
 use crate::task::AtomicU64Ref;
 
 pub struct AsOfJoinExecutorBuilder;
@@ -145,7 +145,12 @@ impl<S: StateStore> HashKeyDispatcher for AsOfJoinExecutorDispatcherArgs<S> {
         /// This macro helps to fill the const generic type parameter.
         macro_rules! build {
             ($join_type:ident) => {
-                Ok(AsOfJoinExecutor::<K, S, { AsOfJoinType::$join_type }>::new(
+                Ok(AsOfJoinExecutor::<
+                    K,
+                    S,
+                    { AsOfJoinType::$join_type },
+                    { JoinEncoding::MemoryOptimized },
+                >::new(
                     self.ctx,
                     self.info,
                     self.source_l,

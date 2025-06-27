@@ -457,6 +457,13 @@ message InequalityPair {
 }
 
 message HashJoinNode {
+
+  enum JoinEncodingType {
+    UNSPECIFIED = 0;
+    MEMORY_OPTIMIZED= 1;
+    CPU_OPTIMIZED = 2;
+  }
+
   plan_common.JoinType join_type = 1;
   repeated int32 left_key = 2;
   repeated int32 right_key = 3;
@@ -487,6 +494,9 @@ message HashJoinNode {
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 14;
+
+  // Which encoding will be used to encode join rows in operator cache.
+  JoinEncodingType join_encoding_type = 15;
 }
 
 message AsOfJoinNode {

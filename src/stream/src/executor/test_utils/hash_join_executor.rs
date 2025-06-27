@@ -29,7 +29,9 @@ use crate::common::table::test_utils::gen_pbtable;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::prelude::StateTable;
 use crate::executor::test_utils::{MessageSender, MockSource};
-use crate::executor::{ActorContext, HashJoinExecutor, JoinParams, JoinType as ConstJoinType};
+use crate::executor::{
+    ActorContext, HashJoinExecutor, JoinEncoding, JoinParams, JoinType as ConstJoinType,
+};
 
 #[derive(Clone, Copy, Debug, Display)]
 pub enum HashJoinWorkload {
@@ -150,58 +152,63 @@ pub async fn setup_bench_stream_hash_join(
 
     match join_type {
         JoinType::Inner => {
-            let executor =
-                    HashJoinExecutor::<Key128, MemoryStateStore, { ConstJoinType::Inner }>::new_with_cache_size(
-                        ActorContext::for_test(123),
-                        info,
-                        source_l,
-                        source_r,
-                        params_l,
-                        params_r,
-                        vec![false], // null-safe
-                        (0..schema_len).collect_vec(),
-                        None,   // condition, it is an eq join, we have no condition
-                        vec![], // ineq pairs
-                        lhs_state_table,
-                        lhs_degree_state_table,
-                        rhs_state_table,
-                        rhs_degree_state_table,
-                        Arc::new(AtomicU64::new(0)), // watermark epoch
-                        false,                       // is_append_only
-                        Arc::new(StreamingMetrics::unused()),
-                        1024, // chunk_size
-                        2048, // high_join_amplification_threshold
-                        cache_size,
-                    );
+            let executor = HashJoinExecutor::<
+                Key128,
+                MemoryStateStore,
+                { ConstJoinType::Inner },
+                { JoinEncoding::MemoryOptimized },
+            >::new_with_cache_size(
+                ActorContext::for_test(123),
+                info,
+                source_l,
+                source_r,
+                params_l,
+                params_r,
+                vec![false], // null-safe
+                (0..schema_len).collect_vec(),
+                None,   // condition, it is an eq join, we have no condition
+                vec![], // ineq pairs
+                lhs_state_table,
+                lhs_degree_state_table,
+                rhs_state_table,
+                rhs_degree_state_table,
+                Arc::new(AtomicU64::new(0)), // watermark epoch
+                false,                       // is_append_only
+                Arc::new(StreamingMetrics::unused()),
+                1024, // chunk_size
+                2048, // high_join_amplification_threshold
+                cache_size,
+            );
             (tx_l, tx_r, executor.boxed().execute())
         }
         JoinType::LeftOuter => {
             let executor = HashJoinExecutor::<
-                    Key128,
-                    MemoryStateStore,
-                    { ConstJoinType::LeftOuter },
-                >::new_with_cache_size(
-                    ActorContext::for_test(123),
-                    info,
-                    source_l,
-                    source_r,
-                    params_l,
-                    params_r,
-                    vec![false], // null-safe
-                    (0..schema_len).collect_vec(),
-                    None,   // condition, it is an eq join, we have no condition
-                    vec![], // ineq pairs
-                    lhs_state_table,
-                    lhs_degree_state_table,
-                    rhs_state_table,
-                    rhs_degree_state_table,
-                    Arc::new(AtomicU64::new(0)), // watermark epoch
-                    false,                       // is_append_only
-                    Arc::new(StreamingMetrics::unused()),
-                    1024, // chunk_size
-                    2048, // high_join_amplification_threshold
-                    cache_size,
-                );
+                Key128,
+                MemoryStateStore,
+                { ConstJoinType::LeftOuter },
+                { JoinEncoding::MemoryOptimized },
+            >::new_with_cache_size(
+                ActorContext::for_test(123),
+                info,
+                source_l,
+                source_r,
+                params_l,
+                params_r,
+                vec![false], // null-safe
+                (0..schema_len).collect_vec(),
+                None,   // condition, it is an eq join, we have no condition
+                vec![], // ineq pairs
+                lhs_state_table,
+                lhs_degree_state_table,
+                rhs_state_table,
+                rhs_degree_state_table,
+                Arc::new(AtomicU64::new(0)), // watermark epoch
+                false,                       // is_append_only
+                Arc::new(StreamingMetrics::unused()),
+                1024, // chunk_size
+                2048, // high_join_amplification_threshold
+                cache_size,
+            );
             (tx_l, tx_r, executor.boxed().execute())
         }
         _ => panic!("Unsupported join type"),

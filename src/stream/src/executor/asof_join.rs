@@ -55,9 +55,9 @@ impl JoinParams {
     }
 }
 
-struct JoinSide<K: HashKey, S: StateStore> {
+struct JoinSide<K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> {
     /// Store all data from a one side stream
-    ht: JoinHashMap<K, S>,
+    ht: JoinHashMap<K, S, E>,
     /// Indices of the join key columns
     join_key_indices: Vec<usize>,
     /// The data type of all columns without degree.
@@ -71,7 +71,9 @@ struct JoinSide<K: HashKey, S: StateStore> {
     need_degree_table: bool,
 }
 
-impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
+impl<K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> std::fmt::Debug
+    for JoinSide<K, S, E>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JoinSide")
             .field("join_key_indices", &self.join_key_indices)
@@ -83,7 +85,7 @@ impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
     }
 }
 
-impl<K: HashKey, S: StateStore> JoinSide<K, S> {
+impl<K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> JoinSide<K, S, E> {
     // WARNING: Please do not call this until we implement it.
     fn is_dirty(&self) -> bool {
         unimplemented!()
@@ -107,7 +109,12 @@ impl<K: HashKey, S: StateStore> JoinSide<K, S> {
 
 /// `AsOfJoinExecutor` takes two input streams and runs equal hash join on them.
 /// The output columns are the concatenation of left and right columns.
-pub struct AsOfJoinExecutor<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> {
+pub struct AsOfJoinExecutor<
+    K: HashKey,
+    S: StateStore,
+    const T: AsOfJoinTypePrimitive,
+    const E: JoinEncodingPrimitive,
+> {
     ctx: ActorContextRef,
     info: ExecutorInfo,
 
@@ -118,9 +125,9 @@ pub struct AsOfJoinExecutor<K: HashKey, S: StateStore, const T: AsOfJoinTypePrim
     /// The data types of the formed new columns
     actual_output_data_types: Vec<DataType>,
     /// The parameters of the left join executor
-    side_l: JoinSide<K, S>,
+    side_l: JoinSide<K, S, E>,
     /// The parameters of the right join executor
-    side_r: JoinSide<K, S>,
+    side_r: JoinSide<K, S, E>,
 
     metrics: Arc<StreamingMetrics>,
     /// The maximum size of the chunk produced by executor at a time
@@ -136,8 +143,8 @@ pub struct AsOfJoinExecutor<K: HashKey, S: StateStore, const T: AsOfJoinTypePrim
     asof_desc: AsOfDesc,
 }
 
-impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> std::fmt::Debug
-    for AsOfJoinExecutor<K, S, T>
+impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, const E: JoinEncodingPrimitive>
+    std::fmt::Debug for AsOfJoinExecutor<K, S, T, E>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AsOfJoinExecutor")
@@ -153,18 +160,18 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> std::fmt::Debug
     }
 }
 
-impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> Execute
-    for AsOfJoinExecutor<K, S, T>
+impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, const E: JoinEncodingPrimitive>
+    Execute for AsOfJoinExecutor<K, S, T, E>
 {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
     }
 }
 
-struct EqJoinArgs<'a, K: HashKey, S: StateStore> {
+struct EqJoinArgs<'a, K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> {
     ctx: &'a ActorContextRef,
-    side_l: &'a mut JoinSide<K, S>,
-    side_r: &'a mut JoinSide<K, S>,
+    side_l: &'a mut JoinSide<K, S, E>,
+    side_r: &'a mut JoinSide<K, S, E>,
     asof_desc: &'a AsOfDesc,
     actual_output_data_types: &'a [DataType],
     // inequality_watermarks: &'a Watermark,
@@ -174,7 +181,9 @@ struct EqJoinArgs<'a, K: HashKey, S: StateStore> {
     high_join_amplification_threshold: usize,
 }
 
-impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor<K, S, T> {
+impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, const E: JoinEncodingPrimitive>
+    AsOfJoinExecutor<K, S, T, E>
+{
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
@@ -512,8 +521,8 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
 
     // We need to manually evict the cache.
     fn evict_cache(
-        side_update: &mut JoinSide<K, S>,
-        side_match: &mut JoinSide<K, S>,
+        side_update: &mut JoinSide<K, S, E>,
+        side_match: &mut JoinSide<K, S, E>,
         cnt_rows_received: &mut u32,
     ) {
         *cnt_rows_received += 1;
@@ -576,7 +585,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
     /// data chunk with the executor state
     async fn hash_eq_match(
         key: &K,
-        ht: &mut JoinHashMap<K, S>,
+        ht: &mut JoinHashMap<K, S, E>,
     ) -> StreamExecutorResult<Option<HashValueType>> {
         if !key.null_bitmap().is_subset(ht.null_matched()) {
             Ok(None)
@@ -586,7 +595,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
     }
 
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    async fn eq_join_left(args: EqJoinArgs<'_, K, S>) {
+    async fn eq_join_left(args: EqJoinArgs<'_, K, S, E>) {
         let EqJoinArgs {
             ctx: _,
             side_l,
@@ -706,7 +715,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
     }
 
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    async fn eq_join_right(args: EqJoinArgs<'_, K, S>) {
+    async fn eq_join_right(args: EqJoinArgs<'_, K, S, E>) {
         let EqJoinArgs {
             ctx,
             side_l,
@@ -1030,23 +1039,24 @@ mod tests {
         let schema_len = schema.len();
         let info = ExecutorInfo::new(schema, vec![1], "HashJoinExecutor".to_owned(), 0);
 
-        let executor = AsOfJoinExecutor::<Key64, MemoryStateStore, T>::new(
-            ActorContext::for_test(123),
-            info,
-            source_l,
-            source_r,
-            params_l,
-            params_r,
-            vec![false],
-            (0..schema_len).collect_vec(),
-            state_l,
-            state_r,
-            Arc::new(AtomicU64::new(0)),
-            Arc::new(StreamingMetrics::unused()),
-            1024,
-            2048,
-            asof_desc,
-        );
+        let executor =
+            AsOfJoinExecutor::<Key64, MemoryStateStore, T, { JoinEncoding::MemoryOptimized }>::new(
+                ActorContext::for_test(123),
+                info,
+                source_l,
+                source_r,
+                params_l,
+                params_r,
+                vec![false],
+                (0..schema_len).collect_vec(),
+                state_l,
+                state_r,
+                Arc::new(AtomicU64::new(0)),
+                Arc::new(StreamingMetrics::unused()),
+                1024,
+                2048,
+                asof_desc,
+            );
         (tx_l, tx_r, executor.boxed().execute())
     }
 

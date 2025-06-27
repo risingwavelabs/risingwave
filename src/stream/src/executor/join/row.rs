@@ -17,6 +17,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common_estimate_size::EstimateSize;
 
 use crate::executor::StreamExecutorResult;
+use crate::executor::join::JoinEncodingPrimitive;
 
 /// This is a row with a match degree
 #[derive(Clone, Debug)]
@@ -47,10 +48,16 @@ impl<R: Row> JoinRow<R> {
         (&self.row, degree)
     }
 
-    pub fn encode(&self) -> EncodedJoinRow {
-        EncodedJoinRow {
-            compacted_row: (&self.row).into(),
-            degree: self.degree,
+    pub fn encode<const N: JoinEncodingPrimitive>(&self) -> CachedJoinRow {
+        if N == 0 {
+            CachedJoinRow::Encoded(EncodedJoinRow {
+                compacted_row: (&self.row).into(),
+                degree: self.degree,
+            })
+        } else if N == 1 {
+            CachedJoinRow::Unencoded(JoinRow::new(self.row.to_owned_row(), self.degree))
+        } else {
+            unreachable!()
         }
     }
 }
@@ -59,6 +66,44 @@ pub type DegreeType = u64;
 
 fn build_degree_row(order_key: impl Row, degree: DegreeType) -> impl Row {
     order_key.chain(row::once(Some(ScalarImpl::Int64(degree as i64))))
+}
+
+#[derive(Clone, Debug)]
+pub enum CachedJoinRow {
+    Encoded(EncodedJoinRow),
+    Unencoded(JoinRow<OwnedRow>),
+}
+
+impl CachedJoinRow {
+    pub fn decode(&self, data_types: &[DataType]) -> StreamExecutorResult<JoinRow<OwnedRow>> {
+        match self {
+            Self::Encoded(join_row) => join_row.decode(data_types),
+            Self::Unencoded(join_row) => Ok(join_row.clone()),
+        }
+    }
+
+    pub fn increase_degree(&mut self) {
+        match self {
+            Self::Encoded(join_row) => join_row.degree += 1,
+            Self::Unencoded(join_row) => join_row.degree += 1,
+        }
+    }
+
+    pub fn decrease_degree(&mut self) {
+        match self {
+            Self::Encoded(join_row) => join_row.degree -= 1,
+            Self::Unencoded(join_row) => join_row.degree -= 1,
+        }
+    }
+}
+
+impl EstimateSize for CachedJoinRow {
+    fn estimated_heap_size(&self) -> usize {
+        match self {
+            Self::Encoded(join_row) => join_row.estimated_heap_size(),
+            Self::Unencoded(join_row) => join_row.row.estimated_heap_size(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, EstimateSize)]

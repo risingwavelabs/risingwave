@@ -14,6 +14,7 @@
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::session_config::join_encoding_type::JoinEncodingType;
 use risingwave_common::util::functional::SameOrElseExt;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -61,6 +62,9 @@ pub struct StreamHashJoin {
     /// `HashJoinExecutor`. If any equal condition is able to clean state table, this field
     /// will always be `None`.
     clean_right_state_conjunction_idx: Option<usize>,
+
+    /// Determine which encoding will be used to encode join rows in operator cache.
+    join_encoding_type: JoinEncodingType,
 }
 
 impl StreamHashJoin {
@@ -220,6 +224,7 @@ impl StreamHashJoin {
             is_append_only: append_only,
             clean_left_state_conjunction_idx,
             clean_right_state_conjunction_idx,
+            join_encoding_type: ctx.session_ctx().config().streaming_join_encoding_type(),
         }
     }
 
@@ -412,6 +417,7 @@ impl StreamNode for StreamHashJoin {
             right_deduped_input_pk_indices,
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
             is_append_only: self.is_append_only,
+            join_encoding_type: self.join_encoding_type as i32,
         }))
     }
 }
