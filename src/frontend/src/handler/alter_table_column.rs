@@ -114,11 +114,9 @@ pub async fn get_replace_table_plan(
 
     let incoming_sink_ids: HashSet<_> = old_catalog.incoming_sinks.iter().copied().collect();
 
-    let target_columns = table
-        .columns
-        .iter()
-        .map(|col| ColumnCatalog::from(col.clone()))
+    let target_columns = (table.columns.iter())
         .filter(|col| !col.is_rw_timestamp_column())
+        .cloned()
         .collect_vec();
 
     for sink in fetch_incoming_sinks(session, &incoming_sink_ids)? {
