@@ -1368,6 +1368,7 @@ pub enum Statement {
         name: ObjectName,
         table_name: ObjectName,
         columns: Vec<OrderByExpr>,
+        method: Option<Ident>,
         include: Vec<Ident>,
         distributed_by: Vec<Expr>,
         unique: bool,
@@ -2120,17 +2121,23 @@ impl Statement {
                 name,
                 table_name,
                 columns,
+                method,
                 include,
                 distributed_by,
                 unique,
                 if_not_exists,
             } => write!(
                 f,
-                "CREATE {unique}INDEX {if_not_exists}{name} ON {table_name}({columns}){include}{distributed_by}",
+                "CREATE {unique}INDEX {if_not_exists}{name} ON {table_name}{method}({columns}){include}{distributed_by}",
                 unique = if *unique { "UNIQUE " } else { "" },
                 if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
                 name = name,
                 table_name = table_name,
+                method = if let Some(method) = method {
+                    format!(" USING {}", method)
+                } else {
+                    "".to_owned()
+                },
                 columns = display_comma_separated(columns),
                 include = if include.is_empty() {
                     "".to_owned()
