@@ -286,7 +286,7 @@ impl LogicalJoin {
             result_plan = Some(lookup_join);
         }
 
-        let indexes = logical_scan.indexes();
+        let indexes = logical_scan.table_indexes();
         for index in indexes {
             if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
                 let index_scan: PlanRef = index_scan.into();
@@ -1032,7 +1032,7 @@ impl LogicalJoin {
         {
             return result_plan.map(|x| x.into());
         }
-        let indexes = logical_scan.indexes();
+        let indexes = logical_scan.table_indexes();
         for index in indexes {
             // Use index table
             if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {

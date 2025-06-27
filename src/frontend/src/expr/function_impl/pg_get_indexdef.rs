@@ -51,7 +51,7 @@ fn pg_get_indexdef_impl(
                 name: "oid",
                 reason: e.to_report_string().into(),
             })?
-            .index_table
+            .index_table()
             .create_sql()
     } else {
         catalog
