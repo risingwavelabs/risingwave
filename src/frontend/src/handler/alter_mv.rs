@@ -175,7 +175,9 @@ async fn handle_alter_mv_bound(
     // Internal tables will be checked in the meta service.
     // TODO(alter-mv): improve this to make it more robust and friendly.
     {
-        let mut new_table = table.clone();
+        // Convert back and forth to normalize the `rw_timestamp` column.
+        // TODO: make `rw_timestamp` fully virtual to avoid this workaround.
+        let mut new_table = TableCatalog::from(table.to_prost());
         let mut original_table = original_catalog.as_ref().clone();
 
         macro_rules! ignore_field {
