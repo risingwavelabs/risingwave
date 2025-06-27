@@ -16,6 +16,7 @@ use std::collections::VecDeque;
 use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
+use std::time::SystemTime;
 
 use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
@@ -49,7 +50,7 @@ use crate::monitor::{HummockStateStoreMetrics, StoreLocalStatistic};
 
 pub type TableHolder = HybridCacheEntry<HummockSstableObjectId, Box<Sstable>>;
 
-static MISSED: LazyLock<BatchLogger<SstableBlockIndex>> = LazyLock::new(|| {
+static MISSED: LazyLock<BatchLogger<(SstableBlockIndex, SystemTime)>> = LazyLock::new(|| {
     BatchLogger::new(
         tracing::Level::INFO,
         "========== MISSED DATA BLOCKS ==========",
@@ -60,7 +61,7 @@ static MISSED: LazyLock<BatchLogger<SstableBlockIndex>> = LazyLock::new(|| {
     )
 });
 
-static EVICTED: LazyLock<BatchLogger<SstableBlockIndex>> = LazyLock::new(|| {
+static EVICTED: LazyLock<BatchLogger<(SstableBlockIndex, SystemTime)>> = LazyLock::new(|| {
     BatchLogger::new(
         tracing::Level::INFO,
         "========== EVICTED DATA BLOCKS ==========",
@@ -99,7 +100,7 @@ impl EventListener for BlockCacheEventListener {
         self.metrics
             .block_efficiency_histogram
             .observe(value.efficiency());
-        EVICTED.log(*key);
+        EVICTED.log((*key, SystemTime::now()));
     }
 }
 
@@ -475,7 +476,7 @@ impl SstableStore {
                 );
                 if matches!(entry.state(), FetchState::Miss) {
                     stats.cache_data_block_miss += 1;
-                    MISSED.log(idx);
+                    MISSED.log((idx, SystemTime::now()));
                 }
                 Ok(BlockResponse::Entry(entry))
             }
