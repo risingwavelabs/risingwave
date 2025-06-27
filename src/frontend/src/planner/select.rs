@@ -222,7 +222,7 @@ impl Planner {
     /// For `(NOT) EXISTS subquery` or `(NOT) IN subquery`, we can plan it as
     /// `LeftSemi/LeftAnti` [`LogicalApply`]
     /// For other subqueries, we plan it as `LeftOuter` [`LogicalApply`] using
-    /// [`Self::substitute_subqueries`].
+    /// [`Self::substitute_subqueries_in_left_deep_tree_way`].
     pub(super) fn plan_where(
         &mut self,
         mut input: PlanRef,
@@ -320,7 +320,7 @@ impl Planner {
         Ok(())
     }
 
-    /// Substitutes all [`Subquery`] in `exprs`.
+    /// Substitutes all [`Subquery`] in `exprs` in a left deep tree way.
     ///
     /// Each time a [`Subquery`] is found, it is replaced by a new [`InputRef`]. And `root` is
     /// replaced by a new `LeftOuter` [`LogicalApply`] whose left side is `root` and right side is
@@ -331,6 +331,7 @@ impl Planner {
     ///
     /// The left-deep tree way only meaningful when there are multiple subqueries
     ///
+    /// ```text
     ///             Apply
     ///            /    \
     ///          Apply  Subquery3
@@ -338,6 +339,7 @@ impl Planner {
     ///     Apply    Subquery2
     ///     /   \
     ///   left  Subquery1
+    /// ```
     ///
     /// Typically, this is used for subqueries in `WHERE` clause, because it is unlikely that users would write subqueries in the same where clause multiple times.
     /// But our dynamic filter sometimes generates subqueries in the same where clause multiple times (which couldn't work in the cross join way), so we need to support this case.
@@ -428,7 +430,7 @@ impl Planner {
         Ok((root, exprs))
     }
 
-    /// Substitutes all [`Subquery`] in `exprs`.
+    /// Substitutes all [`Subquery`] in `exprs` in a cross join way.
     ///
     /// Each time a [`Subquery`] is found, it is replaced by a new [`InputRef`]. And `root` is
     /// replaced by a new `LeftOuter` [`LogicalApply`] whose left side is `root` and right side is
@@ -440,6 +442,7 @@ impl Planner {
     ///
     /// The cross join way only meaningful when there are multiple subqueries
     ///
+    /// ```text
     ///            Apply
     ///           /    \
     ///         left   CrossJoin
@@ -447,7 +450,7 @@ impl Planner {
     ///           Subquery1   CrossJoin
     ///                         /   \
     ///                 Subquery2   Subquery3
-    ///
+    /// ```
     /// Typically, this is used for scalar subqueries in select clauses, because users might write subqueries in a case-when exprs multiple times.
     /// If we use the left-deep tree way, it will generate a lot of `Apply` nodes, which is not efficient.
     pub(super) fn substitute_subqueries_in_cross_join_way(
