@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::future::pending;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use futures::StreamExt;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::util::epoch::test_epoch;
@@ -113,7 +114,7 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
     async fn reload_runtime_info(&self) -> MetaResult<BarrierWorkerRuntimeInfoSnapshot> {
         let (tx, rx) = oneshot::channel();
         self.0.send(ContextRequest::ReloadRuntimeInfo(tx)).unwrap();
-        Ok(rx.await.unwrap())
+        Ok(rx.await.map_err(|_| anyhow!("finish"))?)
     }
 
     async fn reload_database_runtime_info(
