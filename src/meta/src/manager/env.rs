@@ -523,13 +523,18 @@ impl MetaSrvEnv {
 impl MetaSrvEnv {
     // Instance for test.
     pub async fn for_test() -> Self {
-        Self::for_test_opts(MetaOpts::test(false)).await
+        Self::for_test_opts(MetaOpts::test(false), |_| ()).await
     }
 
-    pub async fn for_test_opts(opts: MetaOpts) -> Self {
+    pub async fn for_test_opts(
+        opts: MetaOpts,
+        on_test_system_params: impl FnOnce(&mut risingwave_pb::meta::PbSystemParams),
+    ) -> Self {
+        let mut system_params = risingwave_common::system_param::system_params_for_test();
+        on_test_system_params(&mut system_params);
         Self::new(
             opts,
-            risingwave_common::system_param::system_params_for_test(),
+            system_params,
             Default::default(),
             SqlMetaStore::for_test().await,
         )
