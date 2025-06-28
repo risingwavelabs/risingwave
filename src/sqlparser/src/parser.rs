@@ -3519,6 +3519,15 @@ impl Parser<'_> {
                 AlterViewOperation::SetSchema {
                     new_schema_name: schema_name,
                 }
+            } else if self.parse_word("STREAMING_ENABLE_UNALIGNED_JOIN") {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self
+                        .expected("TO or = after ALTER TABLE SET STREAMING_ENABLE_UNALIGNED_JOIN");
+                }
+                let value = self.parse_boolean()?;
+                AlterViewOperation::SetStreamingEnableUnalignedJoin { enable: value }
             } else if self.parse_keyword(Keyword::PARALLELISM) && materialized {
                 if self.expect_keyword(Keyword::TO).is_err()
                     && self.expect_token(&Token::Eq).is_err()
@@ -3622,6 +3631,10 @@ impl Parser<'_> {
                 AlterSinkOperation::SetSchema {
                     new_schema_name: schema_name,
                 }
+            } else if self.parse_word("STREAMING_ENABLE_UNALIGNED_JOIN") {
+                self.expect_keyword(Keyword::TO)?;
+                let value = self.parse_boolean()?;
+                AlterSinkOperation::SetStreamingEnableUnalignedJoin { enable: value }
             } else if self.parse_keyword(Keyword::PARALLELISM) {
                 if self.expect_keyword(Keyword::TO).is_err()
                     && self.expect_token(&Token::Eq).is_err()
@@ -4383,16 +4396,20 @@ impl Parser<'_> {
         })
     }
 
-    pub fn parse_optional_boolean(&mut self, default: bool) -> bool {
+    pub fn parse_boolean(&mut self) -> ModalResult<bool> {
         if let Some(keyword) = self.parse_one_of_keywords(&[Keyword::TRUE, Keyword::FALSE]) {
             match keyword {
-                Keyword::TRUE => true,
-                Keyword::FALSE => false,
+                Keyword::TRUE => Ok(true),
+                Keyword::FALSE => Ok(false),
                 _ => unreachable!(),
             }
         } else {
-            default
+            self.expected("TRUE or FALSE")
         }
+    }
+
+    pub fn parse_optional_boolean(&mut self, default: bool) -> bool {
+        self.parse_boolean().unwrap_or(default)
     }
 
     fn parse_explain_options(&mut self) -> ModalResult<(ExplainOptions, Option<u64>)> {
