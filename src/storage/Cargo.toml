@@ -26,6 +26,7 @@ dyn-clone = "1.0.14"
 either = "1"
 enum-as-inner = "0.6"
 fail = "0.5"
+faiss = { version = "0.12.2-alpha.0", features = ["static"] }
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }

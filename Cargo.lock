@@ -5273,6 +5273,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "faiss"
+version = "0.12.2-alpha.0"
+source = "git+https://github.com/risingwavelabs/faiss-rs.git?rev=6d91517#6d9151786bda100674a501eea4840af04e711515"
+dependencies = [
+ "faiss-sys",
+]
+
+[[package]]
+name = "faiss-sys"
+version = "0.6.3-alpha.0"
+source = "git+https://github.com/risingwavelabs/faiss-rs.git?rev=6d91517#6d9151786bda100674a501eea4840af04e711515"
+dependencies = [
+ "cmake",
+]
+
+[[package]]
 name = "fallible-iterator"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12798,6 +12814,7 @@ dependencies = [
  "enum-as-inner",
  "expect-test",
  "fail",
+ "faiss",
  "fiemap",
  "foyer",
  "futures",
