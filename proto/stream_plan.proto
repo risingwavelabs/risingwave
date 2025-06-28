@@ -457,10 +457,9 @@ message InequalityPair {
 }
 
 message HashJoinNode {
-
   enum JoinEncodingType {
     UNSPECIFIED = 0;
-    MEMORY_OPTIMIZED= 1;
+    MEMORY_OPTIMIZED = 1;
     CPU_OPTIMIZED = 2;
   }
 

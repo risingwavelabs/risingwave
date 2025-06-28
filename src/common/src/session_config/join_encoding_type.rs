@@ -19,7 +19,7 @@ use std::str::FromStr;
 pub enum JoinEncodingType {
     #[default]
     MemoryOptimized = 1,
-    CPUOptimized = 2,
+    CpuOptimized = 2,
 }
 
 impl FromStr for JoinEncodingType {
@@ -29,7 +29,7 @@ impl FromStr for JoinEncodingType {
         if s.eq_ignore_ascii_case("memoryoptimized") {
             Ok(Self::MemoryOptimized)
         } else if s.eq_ignore_ascii_case("cpuoptimized") {
-            Ok(Self::CPUOptimized)
+            Ok(Self::CpuOptimized)
         } else {
             Err("expect one of [MemoryOptimized, CPUOptimized]")
         }
@@ -40,7 +40,7 @@ impl std::fmt::Display for JoinEncodingType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::MemoryOptimized => write!(f, "MemoryOptimized"),
-            Self::CPUOptimized => write!(f, "CPUOptimized"),
+            Self::CpuOptimized => write!(f, "CPUOptimized"),
         }
     }
 }
