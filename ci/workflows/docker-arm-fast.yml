@@ -9,7 +9,7 @@ auto-retry: &auto-retry
 steps:
   - label: "docker-build-push: aarch64"
     if: build.env("SKIP_TARGET_AARCH64") != "true"
-    command: "CARGO_PROFILE=patch-production ci/scripts/docker.sh"
+    command: "CARGO_PROFILE=release ci/scripts/docker.sh"
     key: "build-aarch64"
     plugins:
       - seek-oss/aws-sm#v2.3.2:
