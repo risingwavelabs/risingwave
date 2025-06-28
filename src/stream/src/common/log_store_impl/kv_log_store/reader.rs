@@ -765,12 +765,13 @@ impl<S: StateStoreRead> LogStoreReadState<S> {
             }
         }));
 
+        let chunk_size = self.chunk_size;
         streams_future.map_err(Into::into).map_ok(move |streams| {
             // TODO: set chunk size by config
             Box::pin(merge_log_store_item_stream(
                 streams,
                 serde,
-                1024,
+                chunk_size,
                 read_metrics,
             ))
         })

@@ -51,7 +51,9 @@ mod alter_secret;
 mod alter_set_schema;
 mod alter_sink_props;
 mod alter_source_column;
+mod alter_source_props;
 mod alter_source_with_sr;
+mod alter_streaming_enable_unaligned_join;
 mod alter_streaming_rate_limit;
 mod alter_swap_rename;
 mod alter_system;
@@ -101,6 +103,7 @@ pub mod fetch_cursor;
 mod flush;
 pub mod handle_privilege;
 pub mod kill_process;
+mod prepared_statement;
 pub mod privilege;
 pub mod query;
 mod recover;
@@ -639,7 +642,7 @@ pub async fn handle(
         Statement::SetTimeZone { local: _, value } => {
             variable::handle_set_time_zone(handler_args, value)
         }
-        Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable).await,
+        Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable),
         Statement::CreateIndex {
             name,
             table_name,
@@ -854,6 +857,15 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterTableOperation::AlterConnectorProps { alter_props } => {
+                // If exists a associated source, it should be of the same name.
+                crate::handler::alter_source_props::handle_alter_table_connector_props(
+                    handler_args,
+                    name,
+                    alter_props,
+                )
+                .await
+            }
             AlterTableOperation::AddConstraint { .. }
             | AlterTableOperation::DropConstraint { .. }
             | AlterTableOperation::RenameColumn { .. }
@@ -979,13 +991,21 @@ pub async fn handle(
                     )
                     .await
                 }
+                AlterViewOperation::SetStreamingEnableUnalignedJoin { enable } => {
+                    if !materialized {
+                        bail!(
+                            "ALTER VIEW SET STREAMING_ENABLE_UNALIGNED_JOIN is not supported. Only supported for materialized views"
+                        );
+                    }
+                    alter_streaming_enable_unaligned_join::handle_alter_streaming_enable_unaligned_join(handler_args, name, enable).await
+                }
             }
         }
 
         Statement::AlterSink { name, operation } => match operation {
-            AlterSinkOperation::SetSinkProps { changed_props } => {
-                alter_sink_props::handle_alter_sink_props(handler_args, name, changed_props).await
-            }
+            AlterSinkOperation::AlterConnectorProps {
+                alter_props: changed_props,
+            } => alter_sink_props::handle_alter_sink_props(handler_args, name, changed_props).await,
             AlterSinkOperation::RenameSink { sink_name } => {
                 alter_rename::handle_rename_sink(handler_args, name, sink_name).await
             }
@@ -1039,6 +1059,14 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterSinkOperation::SetStreamingEnableUnalignedJoin { enable } => {
+                alter_streaming_enable_unaligned_join::handle_alter_streaming_enable_unaligned_join(
+                    handler_args,
+                    name,
+                    enable,
+                )
+                .await
+            }
         },
         Statement::AlterSubscription { name, operation } => match operation {
             AlterSubscriptionOperation::RenameSubscription { subscription_name } => {
@@ -1077,6 +1105,14 @@ pub async fn handle(
             }
         },
         Statement::AlterSource { name, operation } => match operation {
+            AlterSourceOperation::AlterConnectorProps { alter_props } => {
+                alter_source_props::handle_alter_source_connector_props(
+                    handler_args,
+                    name,
+                    alter_props,
+                )
+                .await
+            }
             AlterSourceOperation::RenameSource { source_name } => {
                 alter_rename::handle_rename_source(handler_args, name, source_name).await
             }
@@ -1199,6 +1235,9 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterDefaultPrivileges { .. } => {
+            handle_privilege::handle_alter_default_privileges(handler_args, stmt).await
+        }
         Statement::StartTransaction { modes } => {
             transaction::handle_begin(handler_args, START_TRANSACTION, modes).await
         }
@@ -1223,6 +1262,14 @@ pub async fn handle(
             comment,
         } => comment::handle_comment(handler_args, object_type, object_name, comment).await,
         Statement::Use { db_name } => use_db::handle_use_db(handler_args, db_name),
+        Statement::Prepare {
+            name,
+            data_types,
+            statement,
+        } => prepared_statement::handle_prepare(name, data_types, statement).await,
+        Statement::Deallocate { name, prepare } => {
+            prepared_statement::handle_deallocate(name, prepare).await
+        }
         _ => bail_not_implemented!("Unhandled statement: {}", stmt),
     }
 }

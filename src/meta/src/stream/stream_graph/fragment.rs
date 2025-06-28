@@ -138,14 +138,11 @@ impl BuildingFragment {
             NodeBody::Materialize(materialize_node) => {
                 materialize_node.table_id = job_id;
 
-                // Fill the ID of the `Table`.
-                let table = materialize_node.table.as_mut().unwrap();
-                table.id = job_id;
-                table.database_id = job.database_id();
-                table.schema_id = job.schema_id();
-                table.fragment_id = fragment_id;
-                #[cfg(not(debug_assertions))]
-                {
+                // Fill the table field of `MaterializeNode` from the job.
+                let table = materialize_node.table.insert(job.table().unwrap().clone());
+                table.fragment_id = fragment_id; // this will later be synced back to `job.table` with `set_info_from_graph`
+                // In production, do not include full definition in the table in plan node.
+                if cfg!(not(debug_assertions)) {
                     table.definition = job.name();
                 }
 
@@ -697,8 +694,7 @@ impl StreamFragmentGraph {
         for (fragment_id, fragment) in &self.fragments {
             let fragment_id = fragment_id.as_global_id();
             let fragment_mask = fragment.fragment_type_mask;
-            // TODO(kwannoel): Support source scan
-            let candidates = [FragmentTypeFlag::StreamScan];
+            let candidates = [FragmentTypeFlag::StreamScan, FragmentTypeFlag::SourceScan];
             let has_some_scan = candidates
                 .into_iter()
                 .any(|flag| (fragment_mask & flag as u32) > 0);
@@ -712,7 +708,13 @@ impl StreamFragmentGraph {
                             // each fragment should have only 1 scan node.
                             false
                         }
-                        // TODO(kwannoel): Support source scan
+                        Some(NodeBody::SourceBackfill(source_backfill)) => {
+                            let source_id = source_backfill.upstream_source_id;
+                            let fragments: &mut Vec<_> = mapping.entry(source_id).or_default();
+                            fragments.push(fragment_id);
+                            // each fragment should have only 1 scan node.
+                            false
+                        }
                         _ => true,
                     }
                 })
@@ -1112,7 +1114,7 @@ impl CompleteStreamFragmentGraph {
                 let output_columns = {
                     let mut res = None;
 
-                    stream_graph_visitor::visit_stream_node(&fragment.nodes, |node_body| {
+                    stream_graph_visitor::visit_stream_node_body(&fragment.nodes, |node_body| {
                         let columns = match node_body {
                             NodeBody::StreamScan(stream_scan) => stream_scan.upstream_columns(),
                             NodeBody::SourceBackfill(source_backfill) => {

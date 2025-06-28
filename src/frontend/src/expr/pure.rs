@@ -270,6 +270,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::MapFilter
             | Type::MapInsert
             | Type::MapLength
+            | Type::L2Distance
             | Type::VnodeUser
             | Type::RwEpochToTs
             | Type::CheckNotNull
@@ -305,7 +306,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::PgIsInRecovery
             | Type::RwRecoveryStatus
             | Type::PgTableIsVisible
-            | Type::HasFunctionPrivilege => self.impure = true,
+            | Type::HasFunctionPrivilege
+            | Type::OpenaiEmbedding => self.impure = true,
         }
     }
 }

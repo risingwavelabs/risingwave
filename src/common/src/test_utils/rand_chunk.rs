@@ -43,6 +43,7 @@ pub fn gen_chunk(data_types: &[DataType], size: usize, seed: u64, null_ratio: f6
             }
             DataType::Interval => seed_rand_array_ref::<IntervalArray>(size, seed, null_ratio),
             DataType::Int256 => seed_rand_array_ref::<Int256Array>(size, seed, null_ratio),
+            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
             DataType::Struct(_)
             | DataType::Bytea
             | DataType::Jsonb

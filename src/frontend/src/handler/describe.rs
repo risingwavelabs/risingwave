@@ -264,7 +264,8 @@ pub async fn handle_describe_fragments(
         Binder::validate_cross_db_reference(&session.database(), &object_name)?;
         let not_found_err = CatalogError::NotFound("stream job", object_name.to_string());
 
-        if let Ok(relation) = binder.bind_relation_by_name(object_name.clone(), None, None, false) {
+        if let Ok(relation) = binder.bind_catalog_relation_by_object_name(object_name.clone(), true)
+        {
             match relation {
                 Relation::Source(s) => {
                     if s.is_shared() {
@@ -272,7 +273,7 @@ pub async fn handle_describe_fragments(
                     } else {
                         bail!(ErrorCode::NotSupported(
                             "non shared source has no fragments to describe".to_owned(),
-                            "Use `DESCRIBE` instead.".to_owned(),
+                            "Use `DESCRIBE` instead of `DESCRIBE FRAGMENTS`".to_owned(),
                         ));
                     }
                 }
@@ -280,13 +281,13 @@ pub async fn handle_describe_fragments(
                 Relation::SystemTable(_t) => {
                     bail!(ErrorCode::NotSupported(
                         "system table has no fragments to describe".to_owned(),
-                        "Use `DESCRIBE` instead.".to_owned(),
+                        "Use `DESCRIBE` instead of `DESCRIBE FRAGMENTS`".to_owned(),
                     ));
                 }
                 Relation::Share(_s) => {
                     bail!(ErrorCode::NotSupported(
                         "view has no fragments to describe".to_owned(),
-                        "Use `DESCRIBE` instead.".to_owned(),
+                        "Use `DESCRIBE` instead of `DESCRIBE FRAGMENTS`".to_owned(),
                     ));
                 }
                 _ => {

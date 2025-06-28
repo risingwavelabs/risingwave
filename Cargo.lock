@@ -764,7 +764,7 @@ dependencies = [
  "rquickjs",
  "serde_json",
  "tempfile",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio",
  "tonic",
  "tracing",
@@ -925,6 +925,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-openai"
+version = "0.28.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4df839a6643e1e3248733b01f229dc4f462d7256f808bbaf04cac40739b345c2"
+dependencies = [
+ "async-openai-macros",
+ "backoff",
+ "base64 0.22.1",
+ "bytes",
+ "derive_builder",
+ "eventsource-stream",
+ "futures",
+ "rand 0.8.5",
+ "reqwest 0.12.15",
+ "reqwest-eventsource",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tokio",
+ "tokio-stream 0.1.17",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "async-openai-macros"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0289cba6d5143bfe8251d57b4a8cac036adf158525a76533a7082ba65ec76398"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.101",
+]
+
+[[package]]
 name = "async-recursion"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1075,10 +1112,11 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
 name = "await-tree"
-version = "0.3.0-alpha.3"
+version = "0.3.2-alpha.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd6f3024942b436658bb064b41f05a0732b0ab5850ed6e9857da321aa9f128aa"
+checksum = "d10541d47b12e1441e23da6faf33a6f81950b59a0849b00d62fdd911f0fc1a3c"
 dependencies = [
+ "await-tree-attributes",
  "coarsetime",
  "derive_builder",
  "easy-ext",
@@ -1091,6 +1129,17 @@ dependencies = [
  "task-local",
  "tracing",
  "weak-table",
+]
+
+[[package]]
+name = "await-tree-attributes"
+version = "0.1.0-alpha.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d69350b3e60f7ab6dd1ddc450decb97d5dea7cb2e58ca1fa6d470c533921cda"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.101",
 ]
 
 [[package]]
@@ -1690,6 +1739,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "backoff"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b62ddb9cb1ec0a098ad4bbf9344d0713fa193ae1a80af55febcff2627b6a00c1"
+dependencies = [
+ "futures-core",
+ "getrandom 0.2.11",
+ "instant",
+ "pin-project-lite",
+ "rand 0.8.5",
+ "tokio",
+]
+
+[[package]]
 name = "backon"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1800,42 +1863,6 @@ name = "beef"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a8241f3ebb85c056b509d4327ad0358fbbba6ffb340bf388f26350aeda225b1"
-
-[[package]]
-name = "bergloom-codegen"
-version = "0.1.0"
-source = "git+https://github.com/nimtable/BergLoom.git?rev=88cafc208ee7a90d1f0c2a72078de05172801e73#88cafc208ee7a90d1f0c2a72078de05172801e73"
-dependencies = [
- "prost 0.13.4",
- "prost-build 0.13.4",
- "tonic",
- "tonic-build",
-]
-
-[[package]]
-name = "bergloom-core"
-version = "0.1.0"
-source = "git+https://github.com/nimtable/BergLoom.git?rev=88cafc208ee7a90d1f0c2a72078de05172801e73#88cafc208ee7a90d1f0c2a72078de05172801e73"
-dependencies = [
- "async-stream",
- "async-trait",
- "bergloom-codegen",
- "datafusion 45.0.0",
- "futures",
- "futures-async-stream",
- "iceberg",
- "iceberg-catalog-sql",
- "iceberg-datafusion",
- "parquet 54.2.0",
- "prost 0.13.4",
- "serde",
- "serde_json",
- "serde_with",
- "sqlx",
- "thiserror 2.0.12",
- "tokio",
- "url",
-]
 
 [[package]]
 name = "bigdecimal"
@@ -2664,7 +2691,7 @@ dependencies = [
  "serde_json",
  "thread_local",
  "tokio",
- "tokio-stream 0.1.16",
+ "tokio-stream 0.1.17",
  "tonic",
  "tracing",
  "tracing-core",
@@ -2678,7 +2705,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4a16ff120e0b2d07fdcfda1cc2c1c72b76d3b2fe7cc5ec82bf7b42769b2e73c"
 dependencies = [
  "auto_enums",
- "darling 0.20.9",
+ "darling 0.20.11",
  "itertools 0.12.1",
  "proc-macro2",
  "quote",
@@ -3198,12 +3225,12 @@ dependencies = [
 
 [[package]]
 name = "darling"
-version = "0.20.9"
+version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83b2eb4d90d12bdda5ed17de686c2acb4c57914f8f921b8da7e112b5a36f3fe1"
+checksum = "fc7f46116c46ff9ab3eb1597a45688b6715c6e628b5c133e288e709a29bcb4ee"
 dependencies = [
- "darling_core 0.20.9",
- "darling_macro 0.20.9",
+ "darling_core 0.20.11",
+ "darling_macro 0.20.11",
 ]
 
 [[package]]
@@ -3222,9 +3249,9 @@ dependencies = [
 
 [[package]]
 name = "darling_core"
-version = "0.20.9"
+version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "622687fe0bac72a04e5599029151f5796111b90f1baaa9b544d807a5e31cd120"
+checksum = "0d00b9596d185e565c2207a0b01f8bd1a135483d02d9b7b0a54b11da8d53412e"
 dependencies = [
  "fnv",
  "ident_case",
@@ -3247,11 +3274,11 @@ dependencies = [
 
 [[package]]
 name = "darling_macro"
-version = "0.20.9"
+version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "733cabb43482b1a1b53eee8583c2b9e8684d592215ea83efd305dd31bc2f0178"
+checksum = "fc34b93ccb385b40dc71c6fceac4b2ad23662c7eeb248cf10d529b7e055b6ead"
 dependencies = [
- "darling_core 0.20.9",
+ "darling_core 0.20.11",
  "quote",
  "syn 2.0.101",
 ]
@@ -4400,7 +4427,7 @@ dependencies = [
 
 [[package]]
 name = "delta_btree_map"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "educe",
  "enum-as-inner",
@@ -4427,7 +4454,7 @@ dependencies = [
  "serde",
  "serde_json",
  "strum 0.27.1",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio",
  "tracing",
  "url",
@@ -4477,7 +4504,7 @@ dependencies = [
  "maplit",
  "object_store 0.12.1",
  "regex",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio",
  "tracing",
  "url",
@@ -4538,7 +4565,7 @@ dependencies = [
  "serde_json",
  "sqlparser 0.56.0",
  "strum 0.27.1",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio",
  "tracing",
  "url",
@@ -4572,7 +4599,7 @@ dependencies = [
  "futures",
  "object_store 0.12.1",
  "regex",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio",
  "tracing",
  "url",
@@ -4633,20 +4660,20 @@ dependencies = [
 
 [[package]]
 name = "derive_builder"
-version = "0.20.0"
+version = "0.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0350b5cb0331628a5916d6c5c0b72e97393b8b6b03b47a9284f4e7f5a405ffd7"
+checksum = "507dfb09ea8b7fa618fcf76e953f4f5e192547945816d5358edffe39f6f94947"
 dependencies = [
  "derive_builder_macro",
 ]
 
 [[package]]
 name = "derive_builder_core"
-version = "0.20.0"
+version = "0.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d48cda787f839151732d396ac69e3473923d54312c070ee21e9effcaa8ca0b1d"
+checksum = "2d5bcf7b024d6835cfb3d473887cd966994907effbe9227e8c8219824d06c4e8"
 dependencies = [
- "darling 0.20.9",
+ "darling 0.20.11",
  "proc-macro2",
  "quote",
  "syn 2.0.101",
@@ -4654,9 +4681,9 @@ dependencies = [
 
 [[package]]
 name = "derive_builder_macro"
-version = "0.20.0"
+version = "0.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "206868b8242f27cecce124c19fd88157fbd0dd334df2587f36417bafbc85097b"
+checksum = "ab63b0e2bf4d5928aff72e83a7dace85d7bba5fe12dcc3c5a572d78caffd3f3c"
 dependencies = [
  "derive_builder_core",
  "syn 2.0.101",
@@ -4857,7 +4884,7 @@ dependencies = [
  "chrono",
  "rust_decimal",
  "serde",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "time",
  "winnow 0.7.4",
 ]
@@ -5214,6 +5241,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "eventsource-stream"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74fef4569247a5f429d9156b9d0a2599914385dd189c539334c625d8099d90ab"
+dependencies = [
+ "futures-core",
+ "nom",
+ "pin-project-lite",
+]
+
+[[package]]
 name = "expect-test"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5519,8 +5557,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.17.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "635c7077026867cb5e5ea576c461f29b1c4151fce7a9d7cc3a1b1a9902d95c65"
+source = "git+http://github.com/foyer-rs/foyer?rev=77eef58d1f231ee50cd601f9ad69c5e3db3415f9#77eef58d1f231ee50cd601f9ad69c5e3db3415f9"
 dependencies = [
  "anyhow",
  "equivalent",
@@ -5539,8 +5576,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.17.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ed2316785e80137c7b91bb74dab1dc1967c3272df05825397b73ae8fc527041"
+source = "git+http://github.com/foyer-rs/foyer?rev=77eef58d1f231ee50cd601f9ad69c5e3db3415f9#77eef58d1f231ee50cd601f9ad69c5e3db3415f9"
 dependencies = [
  "ahash 0.8.11",
  "bincode 1.3.3",
@@ -5553,7 +5589,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "pin-project",
  "serde",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio",
 ]
 
@@ -5569,8 +5605,7 @@ dependencies = [
 [[package]]
 name = "foyer-memory"
 version = "0.17.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "090cf5b89d49fd61e7da9bfae3a1aef605f03196d542b2f8171c74f3add013f4"
+source = "git+http://github.com/foyer-rs/foyer?rev=77eef58d1f231ee50cd601f9ad69c5e3db3415f9#77eef58d1f231ee50cd601f9ad69c5e3db3415f9"
 dependencies = [
  "ahash 0.8.11",
  "arc-swap",
@@ -5587,7 +5622,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "pin-project",
  "serde",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio",
  "tracing",
 ]
@@ -5595,16 +5630,13 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.17.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "095e857c97d6339d4a4a6424b88d08fe08ad0366bfbfaf65d6ddf55baf3d2a38"
+source = "git+http://github.com/foyer-rs/foyer?rev=77eef58d1f231ee50cd601f9ad69c5e3db3415f9#77eef58d1f231ee50cd601f9ad69c5e3db3415f9"
 dependencies = [
- "ahash 0.8.11",
  "allocator-api2",
  "anyhow",
  "array-util",
  "auto_enums",
  "bytes",
- "clap",
  "equivalent",
  "fastrace",
  "flume",
@@ -5623,7 +5655,7 @@ dependencies = [
  "pin-project",
  "rand 0.9.0",
  "serde",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio",
  "tracing",
  "twox-hash 2.1.0",
@@ -5751,9 +5783,9 @@ checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
 
 [[package]]
 name = "futures"
-version = "0.3.28"
+version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23342abe12aba583913b2e62f22225ff9c950774065e4bfb61a19cd9770fec40"
+checksum = "65bc07b1a8bc7c85c5f2e110c476c7389b4554ba72af57d8445ea63a576b0876"
 dependencies = [
  "futures-channel",
  "futures-core",
@@ -5804,9 +5836,9 @@ checksum = "05f29059c0c2090612e8d742178b0580d2dc940c837851ad723096f87af6663e"
 
 [[package]]
 name = "futures-executor"
-version = "0.3.28"
+version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ccecee823288125bd88b4d7f565c9e58e41858e47ab72e8ea2d64e93624386e0"
+checksum = "1e28d1d997f585e54aebc3f97d39e72338912123a67330d723fdbb564d646c9f"
 dependencies = [
  "futures-core",
  "futures-task",
@@ -6047,7 +6079,7 @@ dependencies = [
  "thiserror 1.0.63",
  "time",
  "tokio",
- "tokio-stream 0.1.16",
+ "tokio-stream 0.1.17",
  "url",
  "yup-oauth2",
 ]
@@ -6736,7 +6768,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e026f860432bbdacfa282b9d72b501230ce5ea22#e026f860432bbdacfa282b9d72b501230ce5ea22"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=15a4686b911d8a0847347342eda4e77f9057d29b#15a4686b911d8a0847347342eda4e77f9057d29b"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0",
@@ -6788,7 +6820,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e026f860432bbdacfa282b9d72b501230ce5ea22#e026f860432bbdacfa282b9d72b501230ce5ea22"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=15a4686b911d8a0847347342eda4e77f9057d29b#15a4686b911d8a0847347342eda4e77f9057d29b"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6803,9 +6835,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "iceberg-catalog-memory"
+version = "0.4.0"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=15a4686b911d8a0847347342eda4e77f9057d29b#15a4686b911d8a0847347342eda4e77f9057d29b"
+dependencies = [
+ "async-trait",
+ "futures",
+ "iceberg",
+ "itertools 0.13.0",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "iceberg-catalog-rest"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e026f860432bbdacfa282b9d72b501230ce5ea22#e026f860432bbdacfa282b9d72b501230ce5ea22"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=15a4686b911d8a0847347342eda4e77f9057d29b#15a4686b911d8a0847347342eda4e77f9057d29b"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6823,22 +6868,39 @@ dependencies = [
 ]
 
 [[package]]
-name = "iceberg-catalog-sql"
-version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e026f860432bbdacfa282b9d72b501230ce5ea22#e026f860432bbdacfa282b9d72b501230ce5ea22"
+name = "iceberg-compaction-core"
+version = "0.1.0"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=4cfd6d1abc32a66fd5ecc4fd506656fbd0c8ae9c#4cfd6d1abc32a66fd5ecc4fd506656fbd0c8ae9c"
 dependencies = [
+ "async-stream",
  "async-trait",
+ "backon 1.2.0",
+ "datafusion 45.0.0",
+ "derive_builder",
+ "futures",
+ "futures-async-stream",
  "iceberg",
+ "iceberg-catalog-memory",
+ "iceberg-datafusion",
+ "itertools 0.13.0",
+ "mixtrics",
+ "parquet 54.2.0",
+ "serde",
  "serde_json",
+ "serde_with",
  "sqlx",
- "typed-builder 0.20.1",
+ "tempfile",
+ "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tokio",
+ "tracing",
+ "url",
  "uuid",
 ]
 
 [[package]]
 name = "iceberg-datafusion"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=e026f860432bbdacfa282b9d72b501230ce5ea22#e026f860432bbdacfa282b9d72b501230ce5ea22"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=15a4686b911d8a0847347342eda4e77f9057d29b#15a4686b911d8a0847347342eda4e77f9057d29b"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7557,7 +7619,7 @@ checksum = "fe7db12097d22ec582439daf8618b8fdd1a7bef6270e9af3b1ebcd30893cf413"
 
 [[package]]
 name = "local_stats_alloc"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "workspace-hack",
 ]
@@ -7813,9 +7875,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-rdkafka"
-version = "0.4.3+0.34.0"
+version = "0.4.4+0.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2685d6c4b7aa4a82b407cecaeaf623901d34800630b4a24190a0f3f7d1b66c88"
+checksum = "2490d64ab39a227e00ea40aa9eec250061f282a3c95e5a8528b3f19881d9f12e"
 dependencies = [
  "async-channel 1.9.0",
  "async-trait",
@@ -8066,9 +8128,9 @@ dependencies = [
 
 [[package]]
 name = "mixtrics"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "749ed12bab176c8a42c13a679dd2de12876d5ad4abe7525548e31ae001a9ebbf"
+checksum = "adbcddf5a90b959eea97ae505e0391f5c6dd411fbf546d43b9c59ad1c3bd4391"
 dependencies = [
  "itertools 0.14.0",
  "parking_lot 0.12.1",
@@ -8218,7 +8280,7 @@ version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c60492b5eb751e55b42d716b6b26dceb66767996cd7a5560a842fbf613ca2e92"
 dependencies = [
- "darling 0.20.9",
+ "darling 0.20.11",
  "heck 0.4.1",
  "num-bigint",
  "proc-macro-crate 3.1.0",
@@ -8751,7 +8813,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio",
  "tracing",
  "url",
@@ -8949,7 +9011,7 @@ dependencies = [
  "futures-sink",
  "js-sys",
  "pin-project-lite",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "tracing",
 ]
 
@@ -8981,7 +9043,7 @@ dependencies = [
  "opentelemetry_sdk",
  "prost 0.13.4",
  "reqwest 0.12.15",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio",
  "tonic",
  "tracing",
@@ -9019,9 +9081,9 @@ dependencies = [
  "percent-encoding",
  "rand 0.9.0",
  "serde_json",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio",
- "tokio-stream 0.1.16",
+ "tokio-stream 0.1.17",
 ]
 
 [[package]]
@@ -9508,7 +9570,7 @@ dependencies = [
 
 [[package]]
 name = "pgwire"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "auto_enums",
@@ -9530,7 +9592,7 @@ dependencies = [
  "serde_json",
  "socket2 0.5.9",
  "tempfile",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
  "tokio-openssl",
  "tokio-postgres",
@@ -9839,7 +9901,7 @@ dependencies = [
  "spin 0.10.0",
  "symbolic-demangle",
  "tempfile",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -10084,7 +10146,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "procfs",
  "protobuf",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -10263,7 +10325,7 @@ dependencies = [
  "prost-reflect",
  "prost-types 0.13.4",
  "protox-parse",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -10275,7 +10337,7 @@ dependencies = [
  "logos",
  "miette",
  "prost-types 0.13.4",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -10484,7 +10546,7 @@ dependencies = [
  "rustc-hash 2.1.0",
  "rustls 0.23.5",
  "socket2 0.5.9",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio",
  "tracing",
  "web-time",
@@ -10504,7 +10566,7 @@ dependencies = [
  "rustls 0.23.5",
  "rustls-pki-types",
  "slab",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "tinyvec",
  "tracing",
  "web-time",
@@ -10980,6 +11042,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "reqwest-eventsource"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "632c55746dbb44275691640e7b40c907c16a2dc1a5842aa98aaec90da6ec6bde"
+dependencies = [
+ "eventsource-stream",
+ "futures-core",
+ "futures-timer",
+ "mime",
+ "nom",
+ "pin-project-lite",
+ "reqwest 0.12.15",
+ "thiserror 1.0.63",
+]
+
+[[package]]
 name = "reqwest-middleware"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11049,7 +11127,7 @@ dependencies = [
 
 [[package]]
 name = "risedev"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
@@ -11080,7 +11158,7 @@ dependencies = [
 
 [[package]]
 name = "risedev-config"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
@@ -11093,7 +11171,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave-fields-derive"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "expect-test",
  "indoc",
@@ -11105,7 +11183,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_backup"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11120,13 +11198,13 @@ dependencies = [
  "risingwave_pb",
  "serde",
  "serde_json",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "twox-hash 2.1.0",
 ]
 
 [[package]]
 name = "risingwave_batch"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -11160,7 +11238,7 @@ dependencies = [
  "scopeguard",
  "serde_json",
  "tempfile",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
  "tokio-postgres",
  "tokio-stream 0.1.15",
@@ -11171,7 +11249,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_batch_executors"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -11215,7 +11293,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_bench"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
@@ -11237,7 +11315,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_cmd"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "clap",
  "madsim-tokio",
@@ -11257,7 +11335,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_cmd_all"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "clap",
  "console",
@@ -11289,7 +11367,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -11388,7 +11466,7 @@ dependencies = [
  "strum_macros 0.27.1",
  "sysinfo",
  "tempfile",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
  "tinyvec",
  "tokio-retry",
@@ -11408,7 +11486,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_estimate_size"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "bytes",
  "educe",
@@ -11422,13 +11500,13 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_heap_profiling"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "chrono",
  "madsim-tokio",
  "parking_lot 0.12.1",
  "risingwave_common",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
  "tikv-jemalloc-ctl",
  "tracing",
@@ -11436,7 +11514,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_metrics"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "auto_impl",
  "bytes",
@@ -11473,7 +11551,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_proc_macro"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "bae",
  "itertools 0.14.0",
@@ -11485,7 +11563,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_rate_limit"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "arc-swap",
  "madsim-tokio",
@@ -11499,7 +11577,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_secret"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "aws-lc-rs",
@@ -11509,14 +11587,14 @@ dependencies = [
  "prost 0.13.4",
  "risingwave_pb",
  "serde",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
  "tracing",
 ]
 
 [[package]]
 name = "risingwave_common_service"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "async-trait",
  "axum",
@@ -11530,7 +11608,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "serde",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
  "tower 0.5.2",
  "tower-http",
@@ -11540,7 +11618,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compaction_test"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "bytes",
@@ -11561,7 +11639,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compactor"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "async-trait",
  "await-tree",
@@ -11585,7 +11663,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compute"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11633,7 +11711,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_connector"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "apache-avro 0.16.0",
@@ -11747,7 +11825,7 @@ dependencies = [
  "strum_macros 0.27.1",
  "syn 2.0.101",
  "tempfile",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
  "tiberius",
  "time",
@@ -11770,7 +11848,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_connector_codec"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "apache-avro 0.16.0",
@@ -11795,7 +11873,7 @@ dependencies = [
  "risingwave_pb",
  "rust_decimal",
  "serde_json",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
  "time",
  "tracing",
@@ -11805,7 +11883,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_ctl"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "bytes",
@@ -11846,7 +11924,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_dml"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "assert_matches",
  "futures",
@@ -11857,14 +11935,14 @@ dependencies = [
  "paste",
  "risingwave_common",
  "tempfile",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "tracing",
  "workspace-hack",
 ]
 
 [[package]]
 name = "risingwave_e2e_extended_mode_test"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
@@ -11879,7 +11957,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_error"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "bincode 1.3.3",
@@ -11888,14 +11966,14 @@ dependencies = [
  "madsim-tonic",
  "serde",
  "serde-error",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
  "tracing",
 ]
 
 [[package]]
 name = "risingwave_expr"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11925,7 +12003,7 @@ dependencies = [
  "risingwave_pb",
  "smallvec",
  "static_assertions",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
  "tracing",
  "workspace-hack",
@@ -11933,11 +12011,12 @@ dependencies = [
 
 [[package]]
 name = "risingwave_expr_impl"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "aho-corasick",
  "anyhow",
  "arrow-udf-runtime",
+ "async-openai",
  "async-trait",
  "auto_enums",
  "bytes",
@@ -11977,7 +12056,7 @@ dependencies = [
  "sha2",
  "smallvec",
  "sql-json-path",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
  "tonic",
  "tracing",
@@ -11997,7 +12076,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_frontend"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -12073,7 +12152,7 @@ dependencies = [
  "smallvec",
  "speedate",
  "tempfile",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
  "tokio-postgres",
  "tokio-stream 0.1.15",
@@ -12087,7 +12166,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_frontend_macro"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -12096,7 +12175,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_hummock_sdk"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "bytes",
  "hex",
@@ -12112,7 +12191,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_hummock_test"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "async-trait",
  "bytes",
@@ -12144,7 +12223,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_hummock_trace"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "async-trait",
  "bincode 2.0.0-rc.3",
@@ -12161,7 +12240,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_pb",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "tracing",
 ]
 
@@ -12207,14 +12286,14 @@ dependencies = [
  "prost 0.13.4",
  "risingwave_common",
  "risingwave_pb",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
  "tracing",
 ]
 
 [[package]]
 name = "risingwave_license"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "expect-test",
  "jsonbb",
@@ -12222,14 +12301,14 @@ dependencies = [
  "risingwave_pb",
  "risingwave_telemetry_event",
  "serde",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
  "tracing",
 ]
 
 [[package]]
 name = "risingwave_mem_table_spill_test"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "madsim-tokio",
  "risingwave_common",
@@ -12240,7 +12319,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -12301,7 +12380,7 @@ dependencies = [
  "strum 0.27.1",
  "sync-point",
  "tempfile",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
  "tokio-retry",
  "tokio-stream 0.1.15",
@@ -12309,13 +12388,14 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "twox-hash 1.6.3",
  "uuid",
  "workspace-hack",
 ]
 
 [[package]]
 name = "risingwave_meta_dashboard"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "axum",
@@ -12336,7 +12416,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta_model"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "prost 0.13.4",
  "risingwave_common",
@@ -12348,7 +12428,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta_model_migration"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "async-std",
  "easy-ext",
@@ -12361,7 +12441,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta_node"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "clap",
  "educe",
@@ -12388,7 +12468,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta_service"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12414,8 +12494,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_mysql_test"
+version = "2.6.0-alpha"
+dependencies = [
+ "futures",
+ "madsim-tokio",
+ "mysql_async",
+]
+
+[[package]]
 name = "risingwave_object_store"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "async-trait",
  "await-tree",
@@ -12441,7 +12530,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_jni_core",
  "spin 0.10.0",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
  "tokio-retry",
  "tracing",
@@ -12449,7 +12538,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_pb"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "enum-as-inner",
  "fs-err",
@@ -12464,14 +12553,14 @@ dependencies = [
  "serde",
  "static_assertions",
  "strum 0.27.1",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "walkdir",
  "workspace-hack",
 ]
 
 [[package]]
 name = "risingwave_planner_test"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "expect-test",
@@ -12493,7 +12582,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_regress_test"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
@@ -12507,7 +12596,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_rpc_client"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12527,7 +12616,7 @@ dependencies = [
  "risingwave_pb",
  "rw_futures_util",
  "static_assertions",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
  "tokio-retry",
  "tokio-stream 0.1.15",
@@ -12538,7 +12627,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_rt"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "await-tree",
  "console",
@@ -12623,7 +12712,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_sqlparser"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "console",
@@ -12634,7 +12723,7 @@ dependencies = [
  "serde_with",
  "serde_yaml",
  "task-local",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "tracing",
  "tracing-subscriber",
  "walkdir",
@@ -12644,7 +12733,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_sqlsmith"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
@@ -12673,7 +12762,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_state_cleaning_test"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
@@ -12692,18 +12781,18 @@ dependencies = [
 
 [[package]]
 name = "risingwave_storage"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "arc-swap",
  "async-trait",
  "auto_enums",
  "await-tree",
- "bergloom-core",
  "bincode 1.3.3",
  "bytes",
  "criterion",
  "darwin-libproc",
+ "derive_builder",
  "dyn-clone",
  "either",
  "enum-as-inner",
@@ -12715,6 +12804,7 @@ dependencies = [
  "futures-async-stream",
  "hex",
  "iceberg",
+ "iceberg-compaction-core",
  "itertools 0.14.0",
  "libc",
  "lz4",
@@ -12728,6 +12818,7 @@ dependencies = [
  "nix 0.30.1",
  "num-integer",
  "parking_lot 0.12.1",
+ "parquet 54.2.0",
  "procfs",
  "prometheus",
  "prost 0.13.4",
@@ -12751,7 +12842,7 @@ dependencies = [
  "spin 0.10.0",
  "sync-point",
  "tempfile",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
  "tokio-retry",
  "tracing",
@@ -12764,7 +12855,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_stream"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -12823,7 +12914,7 @@ dependencies = [
  "smallvec",
  "static_assertions",
  "strum_macros 0.27.1",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
  "tokio-metrics",
  "tokio-retry",
@@ -12837,7 +12928,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_telemetry_event"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "jsonbb",
  "madsim-tokio",
@@ -12850,7 +12941,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_test_runner"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "fail",
  "sync-point",
@@ -12859,7 +12950,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_variables"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "chrono",
  "workspace-hack",
@@ -13566,7 +13657,7 @@ version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9834af2c4bd8c5162f00c89f1701fb6886119a88062cf76fe842ea9e232b9839"
 dependencies = [
- "darling 0.20.9",
+ "darling 0.20.11",
  "heck 0.4.1",
  "proc-macro2",
  "quote",
@@ -13641,6 +13732,16 @@ dependencies = [
  "generic-array",
  "pkcs8 0.10.2",
  "subtle",
+ "zeroize",
+]
+
+[[package]]
+name = "secrecy"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e891af845473308773346dc847b2c23ee78fe442e0472ac50e22a18a93d3ae5a"
+dependencies = [
+ "serde",
  "zeroize",
 ]
 
@@ -13731,7 +13832,7 @@ version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "486b028b311aaaea83e0ba65a3e6e3cbef381e74e9d0bd6263faefd1fb503c1d"
 dependencies = [
- "darling 0.20.9",
+ "darling 0.20.11",
  "proc-macro2",
  "quote",
  "syn 2.0.101",
@@ -13868,7 +13969,7 @@ version = "3.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d00caa5193a3c8362ac2b73be6b9e768aa5a4b2f721d8f4b339600c3cb51f8e"
 dependencies = [
- "darling 0.20.9",
+ "darling 0.20.11",
  "proc-macro2",
  "quote",
  "syn 2.0.101",
@@ -14329,7 +14430,7 @@ dependencies = [
  "similar",
  "subst",
  "tempfile",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "tracing",
 ]
 
@@ -14425,7 +14526,7 @@ dependencies = [
  "sqlformat",
  "thiserror 1.0.63",
  "time",
- "tokio-stream 0.1.16",
+ "tokio-stream 0.1.17",
  "tracing",
  "url",
  "uuid",
@@ -14823,7 +14924,7 @@ dependencies = [
  "futures-util",
  "madsim-tokio",
  "spin 0.10.0",
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
 ]
 
 [[package]]
@@ -14974,7 +15075,15 @@ version = "2.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "567b8a2dae586314f7be2a752ec7474332959c6460e02bde30d702a66d488708"
 dependencies = [
- "thiserror-impl 2.0.12",
+ "thiserror-impl 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "thiserror"
+version = "2.0.12"
+source = "git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3#22af4a5865e9d796b68f3a144be15a29b86f2ef3"
+dependencies = [
+ "thiserror-impl 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
 ]
 
 [[package]]
@@ -14983,7 +15092,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5fb7e61141f4141832ca9aad63c3c90023843f944a1975460abdacc64d03f534"
 dependencies = [
- "thiserror 2.0.12",
+ "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "thiserror-ext-derive",
 ]
 
@@ -15015,6 +15124,16 @@ name = "thiserror-impl"
 version = "2.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f7cf42b4507d8ea322120659672cf1b9dbb93f8f2d4ecfd6e51350ff5b17a1d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.101",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "2.0.12"
+source = "git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3#22af4a5865e9d796b68f3a144be15a29b86f2ef3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -15244,7 +15363,7 @@ dependencies = [
  "futures-util",
  "pin-project-lite",
  "tokio",
- "tokio-stream 0.1.16",
+ "tokio-stream 0.1.17",
 ]
 
 [[package]]
@@ -15358,9 +15477,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-stream"
-version = "0.1.16"
+version = "0.1.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f4e6ce100d0eb49a2734f8c0812bcd324cf357d21810932c5df6b96ef2b86f1"
+checksum = "eca58d7bba4a75707817a2c44174253f9236b2d5fbd055602e9d5c07c139a047"
 dependencies = [
  "futures-core",
  "pin-project-lite",
@@ -15484,7 +15603,7 @@ dependencies = [
  "socket2 0.5.9",
  "tokio",
  "tokio-rustls 0.26.0",
- "tokio-stream 0.1.16",
+ "tokio-stream 0.1.17",
  "tower 0.4.13",
  "tower-layer",
  "tower-service",
@@ -15582,9 +15701,9 @@ checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
 
 [[package]]
 name = "tracing"
-version = "0.1.40"
+version = "0.1.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3523ab5a71916ccf420eebdf5521fcef02141234bbc0b8a49f2fdc4544364ef"
+checksum = "784e0ac535deb450455cbfa28a6f0df145ea1bb7ae51b821cf5e7927fdcfbdd0"
 dependencies = [
  "log",
  "pin-project-lite",
@@ -15594,9 +15713,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-attributes"
-version = "0.1.27"
+version = "0.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34704c8d6ebcbc939824180af020566b01a7c01f80641264eba0999f6c2b6be7"
+checksum = "1b1ffbcf9c6f6b99d386e7444eb608ba646ae452a36b39737deb9663b610f662"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -15605,9 +15724,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-core"
-version = "0.1.32"
+version = "0.1.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c06d3da6113f116aaee68e4d601191614c9053067f9ab7f6edbcb161237daa54"
+checksum = "b9d12581f227e93f094d3af2ae690a574abb8a2b9b7a96e7cfe9647b2b617678"
 dependencies = [
  "once_cell",
  "valuable",
@@ -17249,7 +17368,7 @@ dependencies = [
 
 [[package]]
 name = "with_options"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "quote",
  "syn 2.0.101",
@@ -17269,7 +17388,7 @@ dependencies = [
 
 [[package]]
 name = "workspace-config"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 dependencies = [
  "aws-lc-rs",
  "libz-sys",
@@ -17283,7 +17402,7 @@ dependencies = [
 
 [[package]]
 name = "workspace-hack"
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 
 [[package]]
 name = "wyz"

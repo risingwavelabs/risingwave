@@ -1067,6 +1067,10 @@ NatsConfig:
   - name: max_message_size
     field_type: i32
     required: false
+  - name: allow_create_stream
+    field_type: bool
+    required: false
+    default: Default::default
   - name: r#type
     field_type: String
     required: true
@@ -1187,6 +1191,11 @@ S3Config:
     default: Default::default
     alias:
     - snowflake.s3_path
+  - name: enable_config_load
+    field_type: bool
+    comments: Enable config load. This parameter set to true will load s3 credentials from the environment. Only allowed to be used in a self-hosted environment.
+    required: false
+    default: Default::default
   - name: s3.credentials.access
     field_type: String
     required: false
