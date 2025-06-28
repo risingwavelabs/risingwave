@@ -38,7 +38,8 @@ use tokio::task::JoinHandle;
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::{
-    Block, HummockError, HummockResult, Sstable, SstableBlockIndex, SstableStoreRef, TableHolder,
+    Block, HummockError, HummockResult, RecentFilterTrait, Sstable, SstableBlockIndex,
+    SstableStoreRef, TableHolder,
 };
 use crate::monitor::StoreLocalStatistic;
 use crate::opts::StorageOpts;
@@ -197,6 +198,9 @@ pub struct CacheRefillConfig {
     ///
     /// Only units whose admit rate > threshold will be refilled.
     pub threshold: f64,
+
+    /// Skip recent filter.
+    pub skip_recent_filter: bool,
 }
 
 impl CacheRefillConfig {
@@ -219,6 +223,7 @@ impl CacheRefillConfig {
             concurrency: options.cache_refill_concurrency,
             unit: options.cache_refill_unit,
             threshold: options.cache_refill_threshold,
+            skip_recent_filter: options.cache_refill_skip_recent_filter,
         }
     }
 }
@@ -385,9 +390,7 @@ impl CacheRefillTask {
     ) -> HashSet<SstableUnit> {
         let mut res = HashSet::default();
 
-        let Some(filter) = context.sstable_store.data_recent_filter() else {
-            return res;
-        };
+        let recent_filter = context.sstable_store.recent_filter();
 
         let units = {
             let unit = context.config.unit;
@@ -439,7 +442,8 @@ impl CacheRefillTask {
                     if res.contains(&unit) {
                         continue;
                     }
-                    if filter.contains(&(psst.id, pblk)) {
+                    if context.config.skip_recent_filter || recent_filter.contains(&(psst.id, pblk))
+                    {
                         res.insert(unit);
                     }
                 }
@@ -469,27 +473,32 @@ impl CacheRefillTask {
             return;
         }
 
-        // return if no data to refill
+        // Return if no data to refill.
         if delta.insert_sst_infos.is_empty() || delta.delete_sst_object_ids.is_empty() {
             return;
         }
 
-        // return if data file cache is disabled
-        let Some(filter) = context.sstable_store.data_recent_filter() else {
-            return;
-        };
-
-        // return if recent filter miss
+        // Return if the target level is not in the refill levels
         if !context
             .config
             .data_refill_levels
             .contains(&delta.insert_sst_level)
-            || !delta
-                .delete_sst_object_ids
-                .iter()
-                .any(|&id| filter.contains(&(id, usize::MAX)))
         {
-            GLOBAL_CACHE_REFILL_METRICS.data_refill_filtered_total.inc();
+            return;
+        }
+
+        let recent_filter = context.sstable_store.recent_filter();
+
+        // Return if recent filter is required and no deleted sst ids are in the recent filter.
+        let targets = delta
+            .delete_sst_object_ids
+            .iter()
+            .map(|id| (*id, usize::MAX))
+            .collect_vec();
+        if !context.config.skip_recent_filter && !recent_filter.contains_any(targets.iter()) {
+            GLOBAL_CACHE_REFILL_METRICS
+                .data_refill_filtered_total
+                .inc_by(delta.delete_sst_object_ids.len() as _);
             return;
         }
 
@@ -502,14 +511,14 @@ impl CacheRefillTask {
                     .sum::<u64>(),
             );
 
-        if delta.insert_sst_level == 0 {
-            Self::data_file_cache_refill_l0_impl(context, delta, holders).await;
+        if delta.insert_sst_level == 0 || context.config.skip_recent_filter {
+            Self::data_file_cache_refill_full_impl(context, delta, holders).await;
         } else {
             Self::data_file_cache_impl(context, delta, holders).await;
         }
     }
 
-    async fn data_file_cache_refill_l0_impl(
+    async fn data_file_cache_refill_full_impl(
         context: &CacheRefillContext,
         _delta: &SstDeltaInfo,
         holders: Vec<TableHolder>,
@@ -584,11 +593,10 @@ impl CacheRefillTask {
     ) -> HummockResult<()> {
         let sstable_store = &context.sstable_store;
         let threshold = context.config.threshold;
+        let recent_filter = sstable_store.recent_filter();
 
         // update filter for sst id only
-        if let Some(filter) = sstable_store.data_recent_filter() {
-            filter.insert((sst.id, usize::MAX));
-        }
+        recent_filter.insert((sst.id, usize::MAX));
 
         let blocks = unit.blks.size().unwrap();
 

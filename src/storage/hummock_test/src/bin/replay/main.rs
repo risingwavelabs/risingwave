@@ -43,6 +43,7 @@ use risingwave_object_store::object::build_remote_object_store;
 use risingwave_storage::compaction_catalog_manager::{
     CompactionCatalogManager, FakeRemoteTableAccessor,
 };
+use risingwave_storage::hummock::none::NoneRecentFilter;
 use risingwave_storage::hummock::{HummockStorage, SstableStore, SstableStoreConfig};
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics, ObjectStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
@@ -132,7 +133,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         path: storage_opts.data_directory.clone(),
         prefetch_buffer_capacity: storage_opts.prefetch_buffer_capacity_mb * (1 << 20),
         max_prefetch_block_number: storage_opts.max_prefetch_block_number,
-        recent_filter: None,
+        recent_filter: Arc::new(NoneRecentFilter::default().into()),
         state_store_metrics: state_store_metrics.clone(),
         use_new_object_prefix_strategy: args.use_new_object_prefix_strategy,
         meta_cache,

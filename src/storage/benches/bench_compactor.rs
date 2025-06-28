@@ -44,6 +44,7 @@ use risingwave_storage::hummock::iterator::{
 use risingwave_storage::hummock::multi_builder::{
     CapacitySplitTableBuilder, LocalTableBuilderFactory,
 };
+use risingwave_storage::hummock::none::NoneRecentFilter;
 use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
@@ -82,7 +83,7 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
 
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
-        recent_filter: None,
+        recent_filter: Arc::new(NoneRecentFilter::default().into()),
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
         use_new_object_prefix_strategy: true,
 

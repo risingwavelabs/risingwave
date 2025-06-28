@@ -100,10 +100,12 @@ pub struct StorageOpts {
     pub cache_refill_data_refill_levels: Vec<u32>,
     pub cache_refill_timeout_ms: u64,
     pub cache_refill_concurrency: usize,
+    pub cache_refill_recent_filter_shards: usize,
     pub cache_refill_recent_filter_layers: usize,
     pub cache_refill_recent_filter_rotate_interval_ms: usize,
     pub cache_refill_unit: usize,
     pub cache_refill_threshold: f64,
+    pub cache_refill_skip_recent_filter: bool,
 
     pub meta_file_cache_dir: String,
     pub meta_file_cache_capacity_mb: usize,
@@ -242,11 +244,13 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             cache_refill_data_refill_levels: c.storage.cache_refill.data_refill_levels.clone(),
             cache_refill_timeout_ms: c.storage.cache_refill.timeout_ms,
             cache_refill_concurrency: c.storage.cache_refill.concurrency,
+            cache_refill_recent_filter_shards: c.storage.cache_refill.recent_filter_shards,
             cache_refill_recent_filter_layers: c.storage.cache_refill.recent_filter_layers,
             cache_refill_recent_filter_rotate_interval_ms: c
                 .storage
                 .cache_refill
                 .recent_filter_rotate_interval_ms,
+            cache_refill_skip_recent_filter: c.storage.cache_refill.skip_recent_filter,
             cache_refill_unit: c.storage.cache_refill.unit,
             cache_refill_threshold: c.storage.cache_refill.threshold,
             max_preload_wait_time_mill: c.storage.max_preload_wait_time_mill,

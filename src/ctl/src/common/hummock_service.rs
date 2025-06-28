@@ -22,6 +22,7 @@ use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
+use risingwave_storage::hummock::none::NoneRecentFilter;
 use risingwave_storage::hummock::{HummockStorage, SstableStore, SstableStoreConfig};
 use risingwave_storage::monitor::{
     CompactorMetrics, HummockMetrics, HummockStateStoreMetrics, MonitoredStateStore,
@@ -194,7 +195,7 @@ impl HummockServiceOpts {
             path: opts.data_directory,
             prefetch_buffer_capacity: opts.block_cache_capacity_mb * (1 << 20),
             max_prefetch_block_number: opts.max_prefetch_block_number,
-            recent_filter: None,
+            recent_filter: Arc::new(NoneRecentFilter::default().into()),
             state_store_metrics: Arc::new(global_hummock_state_store_metrics(
                 MetricLevel::Disabled,
             )),
