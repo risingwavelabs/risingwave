@@ -33,6 +33,7 @@
 #![feature(register_tool)]
 #![feature(assert_matches)]
 #![feature(never_type)]
+#![feature(map_try_insert)]
 #![register_tool(rw)]
 #![recursion_limit = "256"]
 #![feature(min_specialization)]
@@ -43,6 +44,10 @@ use duration_str::parse_std;
 use serde::de;
 
 pub mod aws_utils;
+
+#[rustfmt::skip]
+pub mod allow_alter_on_fly_fields;
+
 mod enforce_secret;
 pub mod error;
 mod macros;
@@ -167,7 +172,8 @@ mod tests {
     use expect_test::expect_file;
 
     use crate::with_options_test::{
-        generate_with_options_yaml_sink, generate_with_options_yaml_source,
+        generate_allow_alter_on_fly_fields_combined, generate_with_options_yaml_sink,
+        generate_with_options_yaml_source,
     };
 
     /// This test ensures that `src/connector/with_options.yaml` is up-to-date with the default values specified
@@ -178,6 +184,13 @@ mod tests {
         expect_file!("../with_options_source.yaml").assert_eq(&generate_with_options_yaml_source());
 
         expect_file!("../with_options_sink.yaml").assert_eq(&generate_with_options_yaml_sink());
+    }
+
+    /// This test ensures that the `allow_alter_on_fly` fields Rust file is up-to-date.
+    #[test]
+    fn test_allow_alter_on_fly_fields_rust_up_to_date() {
+        expect_file!("../src/allow_alter_on_fly_fields.rs")
+            .assert_eq(&generate_allow_alter_on_fly_fields_combined());
     }
 
     /// Test some serde behavior we rely on.
