@@ -135,8 +135,6 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         let degree_state_table_r =
             StateTable::from_table_catalog(degree_table_r, store, Some(vnodes)).await;
 
-        println!("join_encoding_type:{}", node.join_encoding_type);
-
         let args = HashJoinExecutorDispatcherArgs {
             ctx: params.actor_context,
             info: params.info.clone(),
