@@ -45,7 +45,7 @@ use tokio::sync::{oneshot, watch};
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
 
-use crate::common::compact_chunk::StreamChunkCompactor;
+use crate::common::compact_chunk::merge_chunk_row;
 use crate::common::log_store_impl::kv_log_store::buffer::{
     LogStoreBufferItem, LogStoreBufferReceiver,
 };
@@ -473,14 +473,11 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                         }
                         let item = match item {
                             KvLogStoreItem::StreamChunk { chunk, .. } => {
-                                let compactor = StreamChunkCompactor::new(
-                                    self.downstream_pk_indices.clone(),
-                                    vec![chunk],
-                                );
-                                let mut compacted_chunks = compactor.into_compacted_chunks();
-                                let chunk = compacted_chunks
-                                    .next()
-                                    .expect("single compacted chunk expected");
+                                let chunk = if self.downstream_pk_indices.is_empty() {
+                                    chunk
+                                } else {
+                                    merge_chunk_row(chunk, &self.downstream_pk_indices)
+                                };
                                 let chunk_id = if let Some(latest_offset) = self.latest_offset {
                                     latest_offset.next_chunk_id()
                                 } else {
