@@ -21,8 +21,7 @@ use risingwave_expr::expr::{
     InputRefExpression, NonStrictExpression, build_func_non_strict, build_non_strict_from_prost,
 };
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
-use risingwave_pb::stream_plan::hash_join_node::JoinEncodingType as JoinEncodingTypeProto;
-use risingwave_pb::stream_plan::{HashJoinNode, hash_join_node};
+use risingwave_pb::stream_plan::{HashJoinNode, JoinEncodingType as JoinEncodingTypeProto};
 
 use super::*;
 use crate::common::table::state_table::StateTable;
@@ -231,18 +230,16 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
             };
         }
 
-        use hash_join_node::JoinEncodingType;
-
         macro_rules! build_match {
             ($(($proto:ident, $join_type:ident)),*) => {
                 match (self.join_type_proto, self.join_encoding_type) {
                     (JoinTypeProto::AsofInner, _)
                     | (JoinTypeProto::AsofLeftOuter, _)
                     | (JoinTypeProto::Unspecified, _)
-                    | (_, JoinEncodingType::Unspecified ) => unreachable!(),
+                    | (_, JoinEncodingTypeProto::Unspecified ) => unreachable!(),
                     $(
-                        (JoinTypeProto::$proto, JoinEncodingType::MemoryOptimized) => build!($join_type, MemoryOptimized),
-                        (JoinTypeProto::$proto, JoinEncodingType::CpuOptimized) => build!($join_type, CPUOptimized),
+                        (JoinTypeProto::$proto, JoinEncodingTypeProto::MemoryOptimized) => build!($join_type, MemoryOptimized),
+                        (JoinTypeProto::$proto, JoinEncodingTypeProto::CpuOptimized) => build!($join_type, CPUOptimized),
                     )*
                 }
             };

@@ -50,16 +50,14 @@ impl<R: Row> JoinRow<R> {
 
     pub fn encode<const N: JoinEncodingPrimitive>(&self) -> CachedJoinRow {
         match N {
-            super::JoinEncoding::MemoryOptimized => {
-                CachedJoinRow::Encoded(EncodedJoinRow {
-                    compacted_row: (&self.row).into(),
-                    degree: self.degree,
-                })
-            }
+            super::JoinEncoding::MemoryOptimized => CachedJoinRow::Encoded(EncodedJoinRow {
+                compacted_row: (&self.row).into(),
+                degree: self.degree,
+            }),
             super::JoinEncoding::CPUOptimized => {
                 CachedJoinRow::Unencoded(JoinRow::new(self.row.to_owned_row(), self.degree))
             }
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
 }

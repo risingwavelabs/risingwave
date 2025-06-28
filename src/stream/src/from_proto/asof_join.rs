@@ -17,7 +17,7 @@ use std::sync::Arc;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::AsOfJoinType as JoinTypeProto;
-use risingwave_pb::stream_plan::AsOfJoinNode;
+use risingwave_pb::stream_plan::{AsOfJoinNode, JoinEncodingType as JoinEncodingTypeProto};
 
 use super::*;
 use crate::common::table::state_table::StateTable;
@@ -111,6 +111,7 @@ impl ExecutorBuilder for AsOfJoinExecutorBuilder {
                 .developer
                 .high_join_amplification_threshold,
             asof_desc,
+            join_encoding_type: node.get_join_encoding_type()?,
         };
 
         let exec = args.dispatch()?;
@@ -136,6 +137,7 @@ struct AsOfJoinExecutorDispatcherArgs<S: StateStore> {
     chunk_size: usize,
     high_join_amplification_threshold: usize,
     asof_desc: AsOfDesc,
+    join_encoding_type: JoinEncodingTypeProto,
 }
 
 impl<S: StateStore> HashKeyDispatcher for AsOfJoinExecutorDispatcherArgs<S> {
@@ -144,12 +146,12 @@ impl<S: StateStore> HashKeyDispatcher for AsOfJoinExecutorDispatcherArgs<S> {
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         /// This macro helps to fill the const generic type parameter.
         macro_rules! build {
-            ($join_type:ident) => {
+            ($join_type:ident, $join_encoding:ident) => {
                 Ok(AsOfJoinExecutor::<
                     K,
                     S,
                     { AsOfJoinType::$join_type },
-                    { JoinEncoding::MemoryOptimized },
+                    { JoinEncoding::$join_encoding },
                 >::new(
                     self.ctx,
                     self.info,
@@ -170,10 +172,22 @@ impl<S: StateStore> HashKeyDispatcher for AsOfJoinExecutorDispatcherArgs<S> {
                 .boxed())
             };
         }
-        match self.join_type_proto {
-            JoinTypeProto::Unspecified => unreachable!(),
-            JoinTypeProto::Inner => build!(Inner),
-            JoinTypeProto::LeftOuter => build!(LeftOuter),
+
+        macro_rules! build_match {
+            ($(($proto:ident, $join_type:ident)),*) => {
+                match (self.join_type_proto, self.join_encoding_type) {
+                    (JoinTypeProto::Unspecified, _) | (_, JoinEncodingTypeProto::Unspecified) => unreachable!(),
+                    $(
+                        (JoinTypeProto::$proto, JoinEncodingTypeProto::MemoryOptimized) => build!($join_type, MemoryOptimized),
+                        (JoinTypeProto::$proto, JoinEncodingTypeProto::CpuOptimized) => build!($join_type, CPUOptimized),
+                    )*
+                }
+            };
+        }
+
+        build_match! {
+            (Inner, Inner),
+            (LeftOuter, LeftOuter)
         }
     }
 
