@@ -125,3 +125,19 @@ impl EncodedJoinRow {
         Ok(row)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cached_join_row_sizes() {
+        let enum_size = size_of::<CachedJoinRow>();
+        let encoded_size = size_of::<EncodedJoinRow>();
+        let unencoded_size = size_of::<JoinRow<OwnedRow>>();
+
+        assert_eq!(enum_size, 40);
+        assert_eq!(encoded_size, 40);
+        assert_eq!(unencoded_size, 24);
+    }
+}
