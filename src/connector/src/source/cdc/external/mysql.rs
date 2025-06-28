@@ -344,13 +344,12 @@ pub fn mysql_type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType>
 pub struct MySqlExternalTableReader {
     rw_schema: Schema,
     field_names: String,
-    // use mutex to provide shared mutable access to the connection
-    conn: tokio::sync::Mutex<mysql_async::Conn>,
+    pool: mysql_async::Pool,
 }
 
 impl ExternalTableReader for MySqlExternalTableReader {
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
-        let mut conn = self.conn.lock().await;
+        let mut conn = self.pool.get_conn().await?;
 
         let sql = "SHOW MASTER STATUS".to_owned();
         let mut rs = conn.query::<mysql_async::Row, _>(sql).await?;
@@ -359,7 +358,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
             .exactly_one()
             .ok()
             .context("expect exactly one row when reading binlog offset")?;
-
+        drop(conn);
         Ok(CdcOffset::MySql(MySqlOffset {
             filename: row.take("File").unwrap(),
             position: row.take("Position").unwrap(),
@@ -375,10 +374,14 @@ impl ExternalTableReader for MySqlExternalTableReader {
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
         self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
     }
+
+    async fn disconnect(self) -> ConnectorResult<()> {
+        self.pool.disconnect().await.map_err(|e| e.into())
+    }
 }
 
 impl MySqlExternalTableReader {
-    pub async fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
+    pub fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
         let mut opts_builder = mysql_async::OptsBuilder::default()
             .user(Some(config.username))
             .pass(Some(config.password))
@@ -396,8 +399,7 @@ impl MySqlExternalTableReader {
                 opts_builder.ssl_opts(Some(ssl_without_verify))
             }
         };
-
-        let conn = mysql_async::Conn::new(mysql_async::Opts::from(opts_builder)).await?;
+        let pool = mysql_async::Pool::new(opts_builder);
 
         let field_names = rw_schema
             .fields
@@ -409,7 +411,7 @@ impl MySqlExternalTableReader {
         Ok(Self {
             rw_schema,
             field_names,
-            conn: tokio::sync::Mutex::new(conn),
+            pool,
         })
     }
 
@@ -456,19 +458,17 @@ impl MySqlExternalTableReader {
             )
         };
 
-        let mut conn = self.conn.lock().await;
-
+        let mut conn = self.pool.get_conn().await?;
         // Set session timezone to UTC
         conn.exec_drop("SET time_zone = \"+00:00\"", ()).await?;
 
         if start_pk_row.is_none() {
-            let rs_stream = sql.stream::<mysql_async::Row, _>(&mut *conn).await?;
+            let rs_stream = sql.stream::<mysql_async::Row, _>(&mut conn).await?;
             let row_stream = rs_stream.map(|row| {
                 // convert mysql row into OwnedRow
                 let mut row = row?;
                 Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
             });
-
             pin_mut!(row_stream);
             #[for_await]
             for row in row_stream {
@@ -513,7 +513,7 @@ impl MySqlExternalTableReader {
             tracing::debug!("snapshot read params: {:?}", &params);
             let rs_stream = sql
                 .with(Params::from(params))
-                .stream::<mysql_async::Row, _>(&mut *conn)
+                .stream::<mysql_async::Row, _>(&mut conn)
                 .await?;
 
             let row_stream = rs_stream.map(|row| {
@@ -521,7 +521,6 @@ impl MySqlExternalTableReader {
                 let mut row = row?;
                 Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
             });
-
             pin_mut!(row_stream);
             #[for_await]
             for row in row_stream {
@@ -529,6 +528,7 @@ impl MySqlExternalTableReader {
                 yield row;
             }
         };
+        drop(conn);
     }
 
     // mysql cannot leverage the given key to narrow down the range of scan,
@@ -583,10 +583,12 @@ impl MySqlExternalTableReader {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::time::Duration;
 
-    use futures::pin_mut;
+    use futures::{StreamExt, pin_mut};
     use futures_async_stream::for_await;
     use maplit::{convert_args, hashmap};
+    use mysql_async::prelude::*;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
     use risingwave_common::types::DataType;
 
@@ -676,9 +678,7 @@ mod tests {
         let config =
             serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
                 .unwrap();
-        let reader = MySqlExternalTableReader::new(config, rw_schema)
-            .await
-            .unwrap();
+        let reader = MySqlExternalTableReader::new(config, rw_schema).unwrap();
         let offset = reader.current_cdc_offset().await.unwrap();
         println!("BinlogOffset: {:?}", offset);
 
@@ -696,5 +696,108 @@ mod tests {
         for row in stream {
             println!("OwnedRow: {:?}", row);
         }
+    }
+
+    /// To run this test(this test will be executed in `e2e-source-test.sh`):
+    ///
+    /// ```bash
+    /// cargo test --package risingwave_connector --lib -- --ignored test_mysql_async_with_connection_pool
+    /// ```
+    #[ignore]
+    #[tokio::test]
+    async fn test_mysql_async_with_connection_pool() {
+        let opts_builder = mysql_async::OptsBuilder::default()
+            .user(Some("root"))
+            .pass(Some("123456"))
+            .ip_or_hostname("mysql")
+            .tcp_port(3306)
+            .db_name(Some("unittest"));
+        let pool = mysql_async::Pool::new(opts_builder);
+        let mut conn = pool.get_conn().await.unwrap();
+        conn.exec_drop("DROP TABLE IF EXISTS test_table", ())
+            .await
+            .unwrap();
+        conn.exec_drop(
+            "CREATE TABLE test_table (id INT PRIMARY KEY, value VARCHAR(255))",
+            (),
+        )
+        .await
+        .unwrap();
+
+        for i in 1..20000 {
+            conn.exec_drop(
+                "INSERT INTO test_table VALUES (?, ?) ON DUPLICATE KEY UPDATE value=?",
+                (i, format!("value_{}", i), format!("value_{}", i)),
+            )
+            .await
+            .unwrap();
+        }
+        {
+            let rs_stream0 = conn
+                .exec_stream::<mysql_async::Row, _, _>(
+                    "SELECT * FROM test_table where id>100 LIMIT 10",
+                    (),
+                )
+                .await
+                .unwrap();
+            pin_mut!(rs_stream0);
+            let mut rows = Vec::new();
+            while let Some(rs) = rs_stream0.next().await {
+                let row = rs.unwrap();
+                rows.push(row);
+            }
+            assert_eq!(rows.len(), 10);
+        }
+        {
+            let q1 = conn.exec_drop("SET time_zone = if(not sleep(2), \"+00:00\", \"\")", ());
+            print!("set time_zone start");
+
+            match tokio::time::timeout(Duration::from_secs(1), q1).await {
+                Ok(result) => {
+                    println!("Operation completed: {:?}", result);
+                }
+                Err(_) => {
+                    println!("Operation timed out");
+                }
+            };
+        }
+        {
+            let rs_stream1 = conn
+                .exec_stream::<mysql_async::Row, _, _>(
+                    "SELECT * FROM test_table where id>100 LIMIT 10",
+                    (),
+                )
+                .await
+                .unwrap();
+            pin_mut!(rs_stream1);
+            let mut rows_err = Vec::new();
+            while let Some(rs) = rs_stream1.next().await {
+                let row = rs.unwrap();
+                rows_err.push(row);
+            }
+
+            assert_eq!(rows_err.len(), 0);
+        }
+        drop(conn);
+        let mut new_conn = pool.get_conn().await.unwrap();
+        {
+            let rs_stream2 = new_conn
+                .exec_stream::<mysql_async::Row, _, _>(
+                    "SELECT * FROM test_table where id>100 LIMIT 10",
+                    (),
+                )
+                .await
+                .unwrap();
+            pin_mut!(rs_stream2);
+            let mut rows_new_conn = Vec::new();
+            while let Some(rs) = rs_stream2.next().await {
+                let row = rs.unwrap();
+                rows_new_conn.push(row);
+            }
+
+            assert_eq!(rows_new_conn.len(), 10);
+        }
+        drop(new_conn);
+        pool.disconnect().await.unwrap();
     }
 }
