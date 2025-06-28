@@ -61,9 +61,9 @@ impl JoinParams {
     }
 }
 
-struct JoinSide<K: HashKey, S: StateStore> {
+struct JoinSide<K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> {
     /// Store all data from a one side stream
-    ht: JoinHashMap<K, S>,
+    ht: JoinHashMap<K, S, E>,
     /// Indices of the join key columns
     join_key_indices: Vec<usize>,
     /// The data type of all columns without degree.
@@ -90,7 +90,9 @@ struct JoinSide<K: HashKey, S: StateStore> {
     need_degree_table: bool,
 }
 
-impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
+impl<K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> std::fmt::Debug
+    for JoinSide<K, S, E>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JoinSide")
             .field("join_key_indices", &self.join_key_indices)
@@ -102,7 +104,7 @@ impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
     }
 }
 
-impl<K: HashKey, S: StateStore> JoinSide<K, S> {
+impl<K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> JoinSide<K, S, E> {
     // WARNING: Please do not call this until we implement it.
     fn is_dirty(&self) -> bool {
         unimplemented!()
@@ -126,7 +128,12 @@ impl<K: HashKey, S: StateStore> JoinSide<K, S> {
 
 /// `HashJoinExecutor` takes two input streams and runs equal hash join on them.
 /// The output columns are the concatenation of left and right columns.
-pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitive> {
+pub struct HashJoinExecutor<
+    K: HashKey,
+    S: StateStore,
+    const T: JoinTypePrimitive,
+    const E: JoinEncodingPrimitive,
+> {
     ctx: ActorContextRef,
     info: ExecutorInfo,
 
@@ -137,9 +144,9 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     /// The data types of the formed new columns
     actual_output_data_types: Vec<DataType>,
     /// The parameters of the left join executor
-    side_l: JoinSide<K, S>,
+    side_l: JoinSide<K, S, E>,
     /// The parameters of the right join executor
-    side_r: JoinSide<K, S>,
+    side_r: JoinSide<K, S, E>,
     /// Optional non-equi join conditions
     cond: Option<NonStrictExpression>,
     /// Column indices of watermark output and offset expression of each inequality, respectively.
@@ -168,8 +175,8 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     entry_state_max_rows: usize,
 }
 
-impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug
-    for HashJoinExecutor<K, S, T>
+impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const E: JoinEncodingPrimitive>
+    std::fmt::Debug for HashJoinExecutor<K, S, T, E>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HashJoinExecutor")
@@ -185,16 +192,18 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug
     }
 }
 
-impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> Execute for HashJoinExecutor<K, S, T> {
+impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const E: JoinEncodingPrimitive> Execute
+    for HashJoinExecutor<K, S, T, E>
+{
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
     }
 }
 
-struct EqJoinArgs<'a, K: HashKey, S: StateStore> {
+struct EqJoinArgs<'a, K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> {
     ctx: &'a ActorContextRef,
-    side_l: &'a mut JoinSide<K, S>,
-    side_r: &'a mut JoinSide<K, S>,
+    side_l: &'a mut JoinSide<K, S, E>,
+    side_r: &'a mut JoinSide<K, S, E>,
     actual_output_data_types: &'a [DataType],
     cond: &'a mut Option<NonStrictExpression>,
     inequality_watermarks: &'a [Option<Watermark>],
@@ -206,7 +215,9 @@ struct EqJoinArgs<'a, K: HashKey, S: StateStore> {
     entry_state_max_rows: usize,
 }
 
-impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, S, T> {
+impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const E: JoinEncodingPrimitive>
+    HashJoinExecutor<K, S, T, E>
+{
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
@@ -712,8 +723,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
     // We need to manually evict the cache.
     fn evict_cache(
-        side_update: &mut JoinSide<K, S>,
-        side_match: &mut JoinSide<K, S>,
+        side_update: &mut JoinSide<K, S, E>,
+        side_match: &mut JoinSide<K, S, E>,
         cnt_rows_received: &mut u32,
     ) {
         *cnt_rows_received += 1;
@@ -825,20 +836,20 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
     /// Used to forward `eq_join_oneside` to show join side in stack.
     fn eq_join_left(
-        args: EqJoinArgs<'_, K, S>,
+        args: EqJoinArgs<'_, K, S, E>,
     ) -> impl Stream<Item = Result<StreamChunk, StreamExecutorError>> + '_ {
         Self::eq_join_oneside::<{ SideType::Left }>(args)
     }
 
     /// Used to forward `eq_join_oneside` to show join side in stack.
     fn eq_join_right(
-        args: EqJoinArgs<'_, K, S>,
+        args: EqJoinArgs<'_, K, S, E>,
     ) -> impl Stream<Item = Result<StreamChunk, StreamExecutorError>> + '_ {
         Self::eq_join_oneside::<{ SideType::Right }>(args)
     }
 
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    async fn eq_join_oneside<const SIDE: SideTypePrimitive>(args: EqJoinArgs<'_, K, S>) {
+    async fn eq_join_oneside<const SIDE: SideTypePrimitive>(args: EqJoinArgs<'_, K, S, E>) {
         let EqJoinArgs {
             ctx,
             side_l,
@@ -988,8 +999,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         row: RowRef<'a>,
         key: &'a K,
         hashjoin_chunk_builder: &'a mut JoinChunkBuilder<T, SIDE>,
-        side_match: &'a mut JoinSide<K, S>,
-        side_update: &'a mut JoinSide<K, S>,
+        side_match: &'a mut JoinSide<K, S, E>,
+        side_update: &'a mut JoinSide<K, S, E>,
         useful_state_clean_columns: &'a [(usize, &'a Watermark)],
         cond: &'a mut Option<NonStrictExpression>,
         append_only_optimize: bool,
@@ -1080,7 +1091,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     // cache refill
                     if entry_state_count <= entry_state_max_rows {
                         let row_ref = entry_state
-                            .insert(encoded_pk, matched_row.encode(), None) // TODO(kwannoel): handle ineq key for asof join.
+                            .insert(encoded_pk, matched_row.encode::<0>(), None) // TODO(kwannoel): handle ineq key for asof join.
                             .with_context(|| format!("row: {}", row.display(),))?;
                         matched_row_ref = Some(row_ref);
                         entry_state_count += 1;
@@ -1209,12 +1220,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 if MATCHED_ROWS_FROM_CACHE || matched_row_cache_ref.is_some() {
                     // update matched row in cache
                     match JOIN_OP {
-                        JoinOp::Insert => {
-                            matched_row_cache_ref.as_mut().unwrap().degree += 1;
-                        }
-                        JoinOp::Delete => {
-                            matched_row_cache_ref.as_mut().unwrap().degree -= 1;
-                        }
+                        JoinOp::Insert => matched_row_cache_ref.as_mut().unwrap().increase_degree(),
+                        JoinOp::Delete => matched_row_cache_ref.as_mut().unwrap().decrease_degree(),
                     }
                 }
             }
@@ -1418,27 +1425,28 @@ mod tests {
         let schema_len = schema.len();
         let info = ExecutorInfo::new(schema, vec![1], "HashJoinExecutor".to_owned(), 0);
 
-        let executor = HashJoinExecutor::<Key64, MemoryStateStore, T>::new(
-            ActorContext::for_test(123),
-            info,
-            source_l,
-            source_r,
-            params_l,
-            params_r,
-            vec![null_safe],
-            (0..schema_len).collect_vec(),
-            cond,
-            inequality_pairs,
-            state_l,
-            degree_state_l,
-            state_r,
-            degree_state_r,
-            Arc::new(AtomicU64::new(0)),
-            false,
-            Arc::new(StreamingMetrics::unused()),
-            1024,
-            2048,
-        );
+        let executor =
+            HashJoinExecutor::<Key64, MemoryStateStore, T, { JoinEncoding::MemoryOptimized }>::new(
+                ActorContext::for_test(123),
+                info,
+                source_l,
+                source_r,
+                params_l,
+                params_r,
+                vec![null_safe],
+                (0..schema_len).collect_vec(),
+                cond,
+                inequality_pairs,
+                state_l,
+                degree_state_l,
+                state_r,
+                degree_state_r,
+                Arc::new(AtomicU64::new(0)),
+                false,
+                Arc::new(StreamingMetrics::unused()),
+                1024,
+                2048,
+            );
         (tx_l, tx_r, executor.boxed().execute())
     }
 
@@ -1507,7 +1515,12 @@ mod tests {
         let schema_len = schema.len();
         let info = ExecutorInfo::new(schema, vec![1], "HashJoinExecutor".to_owned(), 0);
 
-        let executor = HashJoinExecutor::<Key128, MemoryStateStore, T>::new(
+        let executor = HashJoinExecutor::<
+            Key128,
+            MemoryStateStore,
+            T,
+            { JoinEncoding::MemoryOptimized },
+        >::new(
             ActorContext::for_test(123),
             info,
             source_l,
