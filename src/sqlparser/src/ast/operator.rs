@@ -24,18 +24,7 @@ pub enum UnaryOperator {
     Plus,
     Minus,
     Not,
-    /// Bitwise Not, e.g. `~9` (PostgreSQL-specific)
-    PGBitwiseNot,
-    /// Square root, e.g. `|/9` (PostgreSQL-specific)
-    PGSquareRoot,
-    /// Cube root, e.g. `||/27` (PostgreSQL-specific)
-    PGCubeRoot,
-    /// Factorial, e.g. `9!` (PostgreSQL-specific)
-    PGPostfixFactorial,
-    /// Factorial, e.g. `!!9` (PostgreSQL-specific)
-    PGPrefixFactorial,
-    /// Absolute value, e.g. `@ -9` (PostgreSQL-specific)
-    PGAbs,
+    Custom(String),
     /// Qualified, e.g. `OPERATOR(pg_catalog.+) 9` (PostgreSQL-specific)
     PGQualified(Box<QualifiedOperator>),
 }
@@ -49,12 +38,7 @@ impl fmt::Display for UnaryOperator {
             UnaryOperator::Plus => "+",
             UnaryOperator::Minus => "-",
             UnaryOperator::Not => "NOT",
-            UnaryOperator::PGBitwiseNot => "~",
-            UnaryOperator::PGSquareRoot => "|/",
-            UnaryOperator::PGCubeRoot => "||/",
-            UnaryOperator::PGPostfixFactorial => "!",
-            UnaryOperator::PGPrefixFactorial => "!!",
-            UnaryOperator::PGAbs => "@",
+            UnaryOperator::Custom(name) => name,
             UnaryOperator::PGQualified(_) => unreachable!(),
         })
     }
@@ -69,7 +53,6 @@ pub enum BinaryOperator {
     Multiply,
     Divide,
     Modulo,
-    Concat,
     Gt,
     Lt,
     GtEq,
@@ -79,21 +62,7 @@ pub enum BinaryOperator {
     And,
     Or,
     Xor,
-    BitwiseOr,
-    BitwiseAnd,
-    BitwiseXor,
-    /// Bitwise XOR, e.g. `a # b` (PostgreSQL-specific)
-    PGBitwiseXor,
-    /// Bitwise shift left, e.g. `a << b` (PostgreSQL-specific)
-    PGBitwiseShiftLeft,
-    /// Bitwise shift right, e.g. `a >> b` (PostgreSQL-specific)
-    PGBitwiseShiftRight,
-    /// String matches regular expression (case sensitively), e.g. `a ~ b` (PostgreSQL-specific)
-    PGRegexMatch,
-    /// String "starts with", eg: `a ^@ b` (PostgreSQL-specific)
-    Arrow,
-    Contains,
-    Contained,
+    Pow,
     Custom(String),
     PGQualified(Box<QualifiedOperator>),
 }
@@ -109,7 +78,6 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::Multiply => "*",
             BinaryOperator::Divide => "/",
             BinaryOperator::Modulo => "%",
-            BinaryOperator::Concat => "||",
             BinaryOperator::Gt => ">",
             BinaryOperator::Lt => "<",
             BinaryOperator::GtEq => ">=",
@@ -119,16 +87,7 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::And => "AND",
             BinaryOperator::Or => "OR",
             BinaryOperator::Xor => "XOR",
-            BinaryOperator::BitwiseOr => "|",
-            BinaryOperator::BitwiseAnd => "&",
-            BinaryOperator::BitwiseXor => "^",
-            BinaryOperator::PGBitwiseXor => "#",
-            BinaryOperator::PGBitwiseShiftLeft => "<<",
-            BinaryOperator::PGBitwiseShiftRight => ">>",
-            BinaryOperator::PGRegexMatch => "~",
-            BinaryOperator::Arrow => "->",
-            BinaryOperator::Contains => "@>",
-            BinaryOperator::Contained => "<@",
+            BinaryOperator::Pow => "^",
             BinaryOperator::Custom(name) => name,
             BinaryOperator::PGQualified(_) => unreachable!(),
         })
