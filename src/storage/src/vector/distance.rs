@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::hummock::PbDistanceType;
+
 use crate::vector::{
     MeasureDistance, MeasureDistanceBuilder, VectorDistance, VectorItem, VectorRef,
 };
@@ -37,6 +39,21 @@ macro_rules! define_measure {
     }) => {
         pub enum DistanceMeasurement {
             $($distance_name),+
+        }
+
+        impl From<PbDistanceType> for DistanceMeasurement {
+            fn from(value: PbDistanceType) -> Self {
+                match value {
+                    PbDistanceType::Unspecified => {
+                        unreachable!()
+                    }
+                    $(
+                        PbDistanceType::$distance_name => {
+                            DistanceMeasurement::$distance_name
+                        }
+                    ),+
+                }
+            }
         }
     };
     () => {
