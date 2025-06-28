@@ -3,7 +3,7 @@ extend = "common.toml"
 [env]
 # Look at the index for latest versions:
 # https://downloads.apache.org/maven/maven-3/
-MAVEN_VERSION = "3.9.6"
+MAVEN_VERSION = "3.9.10"
 MAVEN_DOWNLOAD_PATH = "${PREFIX_TMP}/maven.tar.gz"
 
 [tasks.download-maven]
