@@ -293,11 +293,14 @@ impl KafkaSplitEnumerator {
             )
         })?;
 
+        // Watermark here has nothing to do with watermark in streaming processing. Watermark
+        // here means smallest/largest offset available for reading.
+        let mut watermarks = self.get_watermarks(topic_partitions.as_ref()).await?;
+
         // here we are getting the start offset and end offset for each partition with the given
         // timestamp if the timestamp is None, we will use the low watermark and high
         // watermark as the start and end offset if the timestamp is provided, we will use
         // the watermark to narrow down the range
-        let watermarks = self.get_watermarks(topic_partitions.as_ref()).await?;
         let mut expect_start_offset = if let Some(ts) = expect_start_timestamp_millis {
             Some(
                 self.fetch_offset_for_time(topic_partitions.as_ref(), ts, &watermarks)
@@ -316,30 +319,17 @@ impl KafkaSplitEnumerator {
             None
         };
 
-        // Watermark here has nothing to do with watermark in streaming processing. Watermark
-        // here means smallest/largest offset available for reading.
-        let mut watermarks = {
-            let mut ret = HashMap::new();
-            for partition in &topic_partitions {
-                let (low, high) = self
-                    .client
-                    .fetch_watermarks(self.topic.as_str(), *partition, self.sync_call_timeout)
-                    .await?;
-                ret.insert(partition, (low - 1, high));
-            }
-            ret
-        };
-
         Ok(topic_partitions
             .iter()
             .map(|partition| {
-                let (low, high) = watermarks.remove(&partition).unwrap();
+                let (low, high) = watermarks.remove(partition).unwrap();
                 let start_offset = {
+                    let earliest_offset = low - 1;
                     let start = expect_start_offset
                         .as_mut()
-                        .map(|m| m.remove(partition).flatten().map(|t| t-1).unwrap_or(low))
-                        .unwrap_or(low);
-                    i64::max(start, low)
+                        .map(|m| m.remove(partition).flatten().unwrap_or(earliest_offset))
+                        .unwrap_or(earliest_offset);
+                    i64::max(start, earliest_offset)
                 };
                 let stop_offset = {
                     let stop = expect_stop_offset
