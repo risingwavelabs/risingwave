@@ -45,6 +45,7 @@ use tokio::sync::{oneshot, watch};
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
 
+use crate::common::compact_chunk::merge_chunk_row;
 use crate::common::log_store_impl::kv_log_store::buffer::{
     LogStoreBufferItem, LogStoreBufferReceiver,
 };
@@ -190,9 +191,12 @@ pub struct KvLogStoreReader<S: StateStoreRead> {
     identity: String,
 
     rewind_delay: RewindDelay,
+
+    downstream_pk_indices: Vec<usize>,
 }
 
 impl<S: StateStoreRead> KvLogStoreReader<S> {
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         state: LogStoreReadState<S>,
         rx: LogStoreBufferReceiver,
@@ -201,6 +205,7 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
         metrics: KvLogStoreMetrics,
         is_paused: watch::Receiver<bool>,
         identity: String,
+        downstream_pk_indices: Vec<usize>,
     ) -> Self {
         let rewind_delay = RewindDelay::new(&metrics);
         Self {
@@ -216,6 +221,7 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
             is_paused,
             identity,
             rewind_delay,
+            downstream_pk_indices,
         }
     }
 }
@@ -467,6 +473,11 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                         }
                         let item = match item {
                             KvLogStoreItem::StreamChunk { chunk, .. } => {
+                                let chunk = if self.downstream_pk_indices.is_empty() {
+                                    chunk
+                                } else {
+                                    merge_chunk_row(chunk, &self.downstream_pk_indices)
+                                };
                                 let chunk_id = if let Some(latest_offset) = self.latest_offset {
                                     latest_offset.next_chunk_id()
                                 } else {
