@@ -68,14 +68,9 @@ impl Expression for InExpression {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let input_array = self.left.eval(input).await?;
         let mut output_array = BoolArrayBuilder::new(input_array.len());
-        for (data, vis) in input_array.iter().zip_eq_fast(input.visibility().iter()) {
-            if vis {
-                // TODO: avoid `to_owned_datum()`
-                let ret = self.exists(&data.to_owned_datum());
-                output_array.append(ret);
-            } else {
-                output_array.append(None);
-            }
+        for idx in input.visibility().iter_ones() {
+            let ret = self.exists(&input_array.datum_at(idx));
+            output_array.append(ret);
         }
         Ok(Arc::new(output_array.finish().into()))
     }
