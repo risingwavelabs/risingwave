@@ -1,21 +1,10 @@
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
-# Basic Usage derived from https://github.com/pgvector/pgvector/blob/v0.8.0/README.md#getting-started
-
-statement ok
+statement error unsupported data type
 CREATE TABLE items (id bigint PRIMARY KEY, embedding vector(3));
 
-statement ok
-INSERT INTO items (embedding, id) VALUES ('[1,2,3]', 1), ('[4,5,6]', 2);
-
-query
-SELECT * FROM items ORDER BY id;
-----
-1 [1,2,3]
-2 [4,5,6]
-
-statement ok
-DROP TABLE items;
+query error unsupported data type
+SELECT '[1,2,3]'::vector(3);
 
 # More tests

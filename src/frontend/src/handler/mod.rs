@@ -51,6 +51,7 @@ mod alter_secret;
 mod alter_set_schema;
 mod alter_sink_props;
 mod alter_source_column;
+mod alter_source_props;
 mod alter_source_with_sr;
 mod alter_streaming_rate_limit;
 mod alter_swap_rename;
@@ -855,6 +856,15 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterTableOperation::AlterConnectorProps { alter_props } => {
+                // If exists a associated source, it should be of the same name.
+                crate::handler::alter_source_props::handle_alter_table_connector_props(
+                    handler_args,
+                    name,
+                    alter_props,
+                )
+                .await
+            }
             AlterTableOperation::AddConstraint { .. }
             | AlterTableOperation::DropConstraint { .. }
             | AlterTableOperation::RenameColumn { .. }
@@ -1078,6 +1088,14 @@ pub async fn handle(
             }
         },
         Statement::AlterSource { name, operation } => match operation {
+            AlterSourceOperation::AlterConnectorProps { alter_props } => {
+                alter_source_props::handle_alter_source_connector_props(
+                    handler_args,
+                    name,
+                    alter_props,
+                )
+                .await
+            }
             AlterSourceOperation::RenameSource { source_name } => {
                 alter_rename::handle_rename_source(handler_args, name, source_name).await
             }
