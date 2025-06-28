@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{ConfigParam, FormatEncodeOptions, SqlOption};
 use crate::ast::{
-    DataType, Expr, Ident, ObjectName, SecretRefValue, SetVariableValue, Value,
+    DataType, Expr, Ident, ObjectName, Query, SecretRefValue, SetVariableValue, Value,
     display_comma_separated, display_separated,
 };
 use crate::tokenizer::Token;
@@ -175,6 +175,10 @@ pub enum AlterViewOperation {
     },
     SetStreamingEnableUnalignedJoin {
         enable: bool,
+    },
+    /// `AS <query>`
+    AsQuery {
+        query: Box<Query>,
     },
 }
 
@@ -470,6 +474,9 @@ impl fmt::Display for AlterViewOperation {
             }
             AlterViewOperation::SetStreamingEnableUnalignedJoin { enable } => {
                 write!(f, "SET STREAMING_ENABLE_UNALIGNED_JOIN TO {}", enable)
+            }
+            AlterViewOperation::AsQuery { query } => {
+                write!(f, "AS {}", query)
             }
         }
     }
