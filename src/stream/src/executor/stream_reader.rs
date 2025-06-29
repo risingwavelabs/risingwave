@@ -106,6 +106,16 @@ impl<const BIASED: bool, M: Send + 'static> StreamReaderWithPause<BIASED, M> {
         );
     }
 
+    pub fn drop_data_stream(&mut self) {
+        // Take the barrier receiver arm.
+        let data_receiver_arm = std::mem::replace(
+            self.inner.get_mut().1,
+            futures::stream::once(async { unreachable!("placeholder") }).boxed(),
+        );
+
+        std::mem::drop(data_receiver_arm);
+    }
+
     /// Pause the data stream.
     pub fn pause_stream(&mut self) {
         if self.paused {

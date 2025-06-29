@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
+use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -291,6 +292,7 @@ pub struct SourceContext {
     // source parser put schema change event into this channel
     pub schema_change_tx:
         Option<mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>>,
+    pub source_info: Option<PbStreamSourceInfo>,
 }
 
 impl SourceContext {
@@ -305,6 +307,7 @@ impl SourceContext {
         schema_change_channel: Option<
             mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>,
         >,
+        source_info: Option<PbStreamSourceInfo>,
     ) -> Self {
         Self {
             actor_id,
@@ -315,6 +318,7 @@ impl SourceContext {
             source_ctrl_opts,
             connector_props,
             schema_change_tx: schema_change_channel,
+            source_info,
         }
     }
 
@@ -332,6 +336,7 @@ impl SourceContext {
                 split_txn: false,
             },
             ConnectorProperties::default(),
+            None,
             None,
         )
     }
@@ -470,6 +475,33 @@ impl<T> SourceChunkStream for T where
 }
 
 pub type BoxTryStream<M> = BoxStream<'static, crate::error::ConnectorResult<M>>;
+
+type CleanupFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+
+#[derive(Default)]
+/// A generic handle that can perform async cleanup once.
+pub struct ReleaseHandle {
+    task: Option<CleanupFuture>,
+}
+
+impl ReleaseHandle {
+    pub fn noop() -> Self {
+        Self { task: None }
+    }
+
+    pub fn new<Fut>(fut: Fut) -> Self
+    where
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        Self {
+            task: Some(Box::pin(fut)),
+        }
+    }
+
+    pub(crate) fn into_future(mut self) -> Option<Pin<Box<dyn Future<Output = ()> + Send>>> {
+        self.task.take()
+    }
+}
 
 /// [`SplitReader`] is a new abstraction of the external connector read interface which is
 /// responsible for parsing, it is used to read messages from the outside and transform them into a
@@ -615,6 +647,22 @@ impl ConnectorProperties {
             || matches!(self, ConnectorProperties::OpendalS3(_))
             || matches!(self, ConnectorProperties::Gcs(_))
             || matches!(self, ConnectorProperties::Azblob(_))
+    }
+
+    pub fn enable_mux_reader(&self) -> bool {
+        if let ConnectorProperties::Kafka(k) = self {
+            return k.enable_mux_reader.unwrap_or(false);
+        }
+
+        false
+    }
+
+    pub fn unique_key_under_connection(&self) -> Option<String> {
+        if let ConnectorProperties::Kafka(k) = self {
+            Some(k.common.topic.clone())
+        } else {
+            None
+        }
     }
 
     pub async fn create_split_enumerator(
