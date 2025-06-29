@@ -327,6 +327,10 @@ pub struct MetaConfig {
     #[deprecated]
     pub cut_table_size_limit: u64,
 
+    /// Whether to protect dropping a table with incoming sink.
+    #[serde(default = "default::meta::protect_drop_table_with_incoming_sink")]
+    pub protect_drop_table_with_incoming_sink: bool,
+
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -968,6 +972,9 @@ pub struct StorageConfig {
     /// This is to prevent the compactor from consuming too much memory, but it may cause the compactor to be less efficient.
     #[serde(default = "default::storage::compactor_max_preload_meta_file_count")]
     pub compactor_max_preload_meta_file_count: usize,
+
+    #[serde(default = "default::storage::vector_file_block_size_kb")]
+    pub vector_file_block_size_kb: usize,
 
     /// Object storage configuration
     /// 1. General configuration
@@ -1693,6 +1700,10 @@ pub mod default {
             64 * 1024 * 1024 * 1024 // 64GB
         }
 
+        pub fn protect_drop_table_with_incoming_sink() -> bool {
+            false
+        }
+
         pub fn partition_vnode_count() -> u32 {
             16
         }
@@ -1978,6 +1989,10 @@ pub mod default {
 
         pub fn compactor_max_preload_meta_file_count() -> usize {
             32
+        }
+
+        pub fn vector_file_block_size_kb() -> usize {
+            1024
         }
 
         // deprecated

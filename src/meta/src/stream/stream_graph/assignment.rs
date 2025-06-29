@@ -634,6 +634,7 @@ pub enum VnodeChunkingStrategy {
 }
 
 /// Core assigner with configurable strategies.
+#[derive(Debug, Clone)]
 pub struct Assigner<S> {
     salt: S,
     actor_capacity: CapacityMode,

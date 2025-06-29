@@ -321,6 +321,8 @@ pub struct SyncedKvLogStoreExecutor<S: StateStore> {
     chunk_size: usize,
 
     pause_duration_ms: Duration,
+
+    aligned: bool,
 }
 // Stream interface
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
@@ -335,6 +337,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         chunk_size: usize,
         upstream: Executor,
         pause_duration_ms: Duration,
+        aligned: bool,
     ) -> Self {
         Self {
             actor_context,
@@ -346,6 +349,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             max_buffer_size: buffer_size,
             chunk_size,
             pause_duration_ms,
+            aligned,
         }
     }
 }
@@ -536,6 +540,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                 },
                 is_replicated: false,
                 vnodes: self.serde.vnodes().clone(),
+                upload_on_flush: false,
             })
             .await;
 
@@ -549,6 +554,63 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
 
         let mut pause_stream = first_barrier.is_pause_on_startup();
         let mut initial_write_epoch = first_write_epoch;
+
+        if self.aligned {
+            tracing::info!("aligned mode");
+            // We want to realign the buffer and the stream.
+            // We just block the upstream input stream,
+            // and wait until the persisted logstore is empty.
+            // Then after that we can consume the input stream.
+            let log_store_stream = read_state
+                .read_persisted_log_store(
+                    self.metrics.persistent_log_read_metrics.clone(),
+                    initial_write_epoch.curr,
+                    LogStoreReadStateStreamRangeStart::Unbounded,
+                )
+                .await?;
+
+            #[for_await]
+            for message in log_store_stream {
+                let (_epoch, message) = message?;
+                match message {
+                    KvLogStoreItem::Barrier { .. } => {
+                        continue;
+                    }
+                    KvLogStoreItem::StreamChunk { chunk, .. } => {
+                        yield Message::Chunk(chunk);
+                    }
+                }
+            }
+
+            #[for_await]
+            for message in input {
+                match message? {
+                    Message::Barrier(barrier) => {
+                        let mut progress = LogStoreVnodeProgress::None;
+                        progress.apply_aligned(
+                            read_state.vnodes().clone(),
+                            barrier.epoch.prev,
+                            None,
+                        );
+                        // Truncate the logstore
+                        let post_seal = initial_write_state
+                            .seal_current_epoch(barrier.epoch.curr, progress.take());
+                        let update_vnode_bitmap =
+                            barrier.as_update_vnode_bitmap(self.actor_context.id);
+                        yield Message::Barrier(barrier);
+                        post_seal.post_yield_barrier(update_vnode_bitmap).await?;
+                    }
+                    Message::Chunk(chunk) => {
+                        yield Message::Chunk(chunk);
+                    }
+                    Message::Watermark(watermark) => {
+                        yield Message::Watermark(watermark);
+                    }
+                }
+            }
+
+            return Ok(());
+        }
 
         // We only recreate the consume stream when:
         // 1. On bootstrap
@@ -1194,6 +1256,7 @@ mod tests {
             256,
             source,
             Duration::from_millis(256),
+            false,
         )
         .boxed();
 
@@ -1288,6 +1351,7 @@ mod tests {
             256,
             source,
             Duration::from_millis(256),
+            false,
         )
         .boxed();
 
@@ -1379,6 +1443,7 @@ mod tests {
             256,
             source,
             Duration::from_millis(256),
+            false,
         )
         .boxed();
 

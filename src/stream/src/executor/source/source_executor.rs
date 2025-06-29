@@ -18,9 +18,10 @@ use std::time::Duration;
 use anyhow::anyhow;
 use either::Either;
 use itertools::Itertools;
+use prometheus::core::{AtomicU64, GenericCounter};
 use risingwave_common::array::ArrayRef;
 use risingwave_common::catalog::{ColumnId, TableId};
-use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedIntCounter};
+use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedMetric};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
@@ -240,16 +241,30 @@ impl<S: StateStore> SourceExecutor<S> {
         barrier_epoch: EpochPair,
         source_desc: &SourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
-        target_splits: Vec<SplitImpl>,
-        should_trim_state: bool,
-        source_split_change_count_metrics: &LabelGuardedIntCounter,
+        apply_mutation: ApplyMutationAfterBarrier<'_>,
     ) -> StreamExecutorResult<()> {
         {
-            source_split_change_count_metrics.inc();
-            if self
-                .update_state_if_changed(barrier_epoch, target_splits, should_trim_state)
-                .await?
-            {
+            let mut should_rebuild_stream = false;
+            match apply_mutation {
+                ApplyMutationAfterBarrier::SplitChange {
+                    target_splits,
+                    should_trim_state,
+                    split_change_count,
+                } => {
+                    split_change_count.inc();
+                    if self
+                        .update_state_if_changed(barrier_epoch, target_splits, should_trim_state)
+                        .await?
+                    {
+                        should_rebuild_stream = true;
+                    }
+                }
+                ApplyMutationAfterBarrier::ConnectorPropsChange => {
+                    should_rebuild_stream = true;
+                }
+            }
+
+            if should_rebuild_stream {
                 self.rebuild_stream_reader(source_desc, stream)?;
             }
         }
@@ -462,7 +477,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // Build source description from the builder.
         let source_desc_builder: SourceDescBuilder = core.source_desc_builder.take().unwrap();
-        let source_desc = source_desc_builder
+        let mut source_desc = source_desc_builder
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
@@ -605,12 +620,32 @@ impl<S: StateStore> SourceExecutor<S> {
                                         (
                                             &source_desc,
                                             &mut stream,
-                                            target_splits,
-                                            true,
-                                            &source_split_change_count,
+                                            ApplyMutationAfterBarrier::SplitChange {
+                                                target_splits,
+                                                should_trim_state: true,
+                                                split_change_count: &source_split_change_count,
+                                            },
                                         )
                                     },
                                 );
+                            }
+
+                            Mutation::ConnectorPropsChange(maybe_mutation) => {
+                                if let Some(new_props) = maybe_mutation.get(&source_id.table_id()) {
+                                    // rebuild the stream reader with new props
+                                    tracing::info!(
+                                        "updating source properties from {:?} to {:?}",
+                                        source_desc.source.config,
+                                        new_props
+                                    );
+                                    source_desc.update_reader(new_props.clone())?;
+                                    // suppose the connector props change will not involve state change
+                                    split_change = Some((
+                                        &source_desc,
+                                        &mut stream,
+                                        ApplyMutationAfterBarrier::ConnectorPropsChange,
+                                    ));
+                                }
                             }
 
                             Mutation::Update(UpdateMutation { actor_splits, .. }) => {
@@ -619,9 +654,11 @@ impl<S: StateStore> SourceExecutor<S> {
                                         (
                                             &source_desc,
                                             &mut stream,
-                                            target_splits,
-                                            false,
-                                            &source_split_change_count,
+                                            ApplyMutationAfterBarrier::SplitChange {
+                                                target_splits,
+                                                should_trim_state: false,
+                                                split_change_count: &source_split_change_count,
+                                            },
                                         )
                                     },
                                 );
@@ -659,21 +696,12 @@ impl<S: StateStore> SourceExecutor<S> {
                     let barrier_epoch = barrier.epoch;
                     yield Message::Barrier(barrier);
 
-                    if let Some((
-                        source_desc,
-                        stream,
-                        target_splits,
-                        should_trim_state,
-                        source_split_change_count,
-                    )) = split_change
-                    {
+                    if let Some((source_desc, stream, to_apply_mutation)) = split_change {
                         self.apply_split_change_after_yield_barrier(
                             barrier_epoch,
                             source_desc,
                             stream,
-                            target_splits,
-                            should_trim_state,
-                            source_split_change_count,
+                            to_apply_mutation,
                         )
                         .await?;
                     }
@@ -784,6 +812,16 @@ impl<S: StateStore> SourceExecutor<S> {
             yield Message::Barrier(barrier);
         }
     }
+}
+
+#[derive(Debug, Clone)]
+enum ApplyMutationAfterBarrier<'a> {
+    SplitChange {
+        target_splits: Vec<SplitImpl>,
+        should_trim_state: bool,
+        split_change_count: &'a LabelGuardedMetric<GenericCounter<AtomicU64>>,
+    },
+    ConnectorPropsChange,
 }
 
 impl<S: StateStore> Execute for SourceExecutor<S> {

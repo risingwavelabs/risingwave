@@ -1313,12 +1313,14 @@ impl HummockUploader {
         &self.context.pinned_version
     }
 
-    pub(super) fn add_imm(&mut self, instance_id: LocalInstanceId, imm: ImmutableMemtable) {
+    pub(super) fn add_imms(&mut self, instance_id: LocalInstanceId, imms: Vec<ImmutableMemtable>) {
         let UploaderState::Working(data) = &mut self.state else {
             return;
         };
-        let imm = UploaderImm::new(imm, &self.context);
-        data.unsync_data.add_imm(instance_id, imm);
+        for imm in imms {
+            let imm = UploaderImm::new(imm, &self.context);
+            data.unsync_data.add_imm(instance_id, imm);
+        }
     }
 
     pub(super) fn init_instance(
@@ -1677,14 +1679,19 @@ pub(crate) mod tests {
     use tokio::sync::oneshot;
 
     use super::test_utils::*;
-    use crate::hummock::event_handler::TEST_LOCAL_INSTANCE_ID;
     use crate::hummock::event_handler::uploader::{
         HummockUploader, SyncedData, UploadingTask, get_payload_imm_ids,
     };
+    use crate::hummock::event_handler::{LocalInstanceId, TEST_LOCAL_INSTANCE_ID};
     use crate::hummock::{HummockError, HummockResult};
+    use crate::mem_table::ImmutableMemtable;
     use crate::opts::StorageOpts;
 
     impl HummockUploader {
+        pub(super) fn add_imm(&mut self, instance_id: LocalInstanceId, imm: ImmutableMemtable) {
+            self.add_imms(instance_id, vec![imm]);
+        }
+
         pub(super) fn start_single_epoch_sync(
             &mut self,
             epoch: HummockEpoch,

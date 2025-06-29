@@ -31,4 +31,4 @@ echo "Installing codecov CLI..."
 curl -Os https://uploader.codecov.io/latest/linux/codecov && chmod +x codecov
 
 echo "Uploading coverage reports to codecov..."
-./codecov -t "$CODECOV_TOKEN" -s . -F ci
+./codecov -t "$CODECOV_TOKEN" -s . -F "ci-${BUILDKITE_PIPELINE_SLUG}"

@@ -160,7 +160,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order], stream_key: [], pk_columns: [l_returnflag, l_linestatus], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), $expr3, $expr4, $expr5, count] }
         └── StreamTopN { order: [lineitem.l_returnflag ASC, lineitem.l_linestatus ASC], limit: 1, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
@@ -362,7 +361,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, min(partsupp.ps_supplycost)(hidden), partsupp.ps_partkey(hidden), region.r_regionkey(hidden), nation.n_nationkey(hidden), supplier.s_suppkey(hidden), partsupp.ps_partkey#1(hidden)], stream_key: [p_partkey, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, min(partsupp.ps_supplycost), partsupp.ps_partkey], pk_columns: [s_acctbal, n_name, s_name, p_partkey, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, min(partsupp.ps_supplycost), partsupp.ps_partkey], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, min(partsupp.ps_supplycost), partsupp.ps_partkey, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, partsupp.ps_partkey] }
         └── StreamTopN { order: [supplier.s_acctbal DESC, nation.n_name ASC, supplier.s_name ASC, part.p_partkey ASC], limit: 100, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
@@ -652,7 +650,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [l_orderkey, revenue, o_orderdate, o_shippriority], stream_key: [l_orderkey, o_orderdate, o_shippriority], pk_columns: [revenue, o_orderdate, l_orderkey, o_shippriority], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [lineitem.l_orderkey, sum($expr1), orders.o_orderdate, orders.o_shippriority] }
         └── StreamTopN { order: [sum($expr1) DESC, orders.o_orderdate ASC], limit: 10, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
@@ -807,7 +804,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [o_orderpriority, order_count], stream_key: [], pk_columns: [o_orderpriority], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [orders.o_orderpriority, count] }
         └── StreamTopN { order: [orders.o_orderpriority ASC], limit: 1, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
@@ -986,7 +982,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [n_name, revenue], stream_key: [], pk_columns: [revenue], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [nation.n_name, sum($expr1)] }
         └── StreamTopN { order: [sum($expr1) DESC], limit: 1, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
@@ -1170,7 +1165,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [revenue], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [sum(sum($expr1))] }
         └── StreamSimpleAgg { aggs: [sum(sum($expr1)), count] } { tables: [ SimpleAggState: 0 ] }
             └── StreamExchange Single from 1
@@ -1324,7 +1318,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [supp_nation, cust_nation, l_year, revenue], stream_key: [], pk_columns: [supp_nation, cust_nation, l_year], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [nation.n_name, nation.n_name, $expr1, sum($expr2)] }
         └── StreamTopN { order: [nation.n_name ASC, nation.n_name ASC, $expr1 ASC], limit: 1, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
@@ -1616,7 +1609,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [o_year, mkt_share], stream_key: [], pk_columns: [o_year], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [$expr1, $expr4] }
         └── StreamTopN { order: [$expr1 ASC], limit: 1, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
@@ -1929,7 +1921,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [nation, o_year, sum_profit], stream_key: [], pk_columns: [nation, o_year], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [nation.n_name, $expr1, sum($expr2)] }
         └── StreamTopN { order: [nation.n_name ASC, $expr1 DESC], limit: 1, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
@@ -2172,7 +2163,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [c_custkey, c_name, revenue, c_acctbal, n_name, c_address, c_phone, c_comment], stream_key: [c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment], pk_columns: [revenue, c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [customer.c_custkey, customer.c_name, sum($expr1), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment] }
         └── StreamTopN { order: [sum($expr1) DESC], limit: 20, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
@@ -2414,7 +2404,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [ps_partkey, value], stream_key: [], pk_columns: [value], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [partsupp.ps_partkey, sum($expr1)] }
         └── StreamTopN { order: [sum($expr1) DESC], limit: 1, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
@@ -2594,7 +2583,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [l_shipmode, high_line_count, low_line_count], stream_key: [], pk_columns: [l_shipmode], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [lineitem.l_shipmode, sum($expr1), sum($expr2)] }
         └── StreamTopN { order: [lineitem.l_shipmode ASC], limit: 1, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
@@ -2722,7 +2710,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [c_count, custdist], stream_key: [], pk_columns: [custdist, c_count], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [count(orders.o_orderkey), count] }
         └── StreamTopN { order: [count DESC, count(orders.o_orderkey) DESC], limit: 1, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
@@ -2838,7 +2825,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [promo_revenue], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [((100.00:Decimal * sum(sum($expr1))) / sum(sum($expr2))) as $expr3] }
         └── StreamSimpleAgg { aggs: [sum(sum($expr1)), sum(sum($expr2)), count] }
             ├── tables: [ SimpleAggState: 0 ]
@@ -2986,7 +2972,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue], stream_key: [], pk_columns: [s_suppkey], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1)] }
         └── StreamTopN { order: [supplier.s_suppkey ASC], limit: 1, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
@@ -3163,7 +3148,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [p_brand, p_type, p_size, supplier_cnt], stream_key: [], pk_columns: [supplier_cnt, p_brand, p_type, p_size], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, count(distinct partsupp.ps_suppkey)] }
         └── StreamTopN { order: [count(distinct partsupp.ps_suppkey) DESC, part.p_brand ASC, part.p_type ASC, part.p_size ASC], limit: 1, offset: 0 }
             ├── tables: [ TopN: 0 ]
@@ -3329,7 +3313,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [avg_yearly], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [(sum(sum(lineitem.l_extendedprice)) / 7.0:Decimal) as $expr2] }
         └── StreamSimpleAgg { aggs: [sum(sum(lineitem.l_extendedprice)), count] }
             ├── tables: [ SimpleAggState: 0 ]
@@ -3515,7 +3498,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, quantity], stream_key: [c_custkey, c_name, o_orderkey, o_totalprice, o_orderdate], pk_columns: [o_totalprice, o_orderdate, c_custkey, c_name, o_orderkey], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity)] }
         └── StreamTopN { order: [orders.o_totalprice DESC, orders.o_orderdate ASC], limit: 100, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
@@ -3705,7 +3687,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [revenue], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [sum(sum($expr1))] }
         └── StreamSimpleAgg { aggs: [sum(sum($expr1)), count] } { tables: [ SimpleAggState: 0 ] }
             └── StreamExchange Single from 1
@@ -3846,7 +3827,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [s_name, s_address, supplier.s_suppkey(hidden), supplier.s_nationkey(hidden)], stream_key: [], pk_columns: [s_name], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [supplier.s_name, supplier.s_address, supplier.s_suppkey, supplier.s_nationkey] }
         └── StreamTopN { order: [supplier.s_name ASC], limit: 1, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
@@ -4109,7 +4089,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [s_name, numwait], stream_key: [s_name], pk_columns: [numwait, s_name], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [supplier.s_name, count] }
         └── StreamTopN { order: [count DESC, supplier.s_name ASC], limit: 100, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1

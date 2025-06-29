@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::bail;
@@ -37,9 +38,30 @@ pub const DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE: usize = 16;
 /// `SourceDesc` describes a stream source.
 #[derive(Debug, Clone)]
 pub struct SourceDesc {
+    pub source_info: PbStreamSourceInfo,
     pub source: SourceReader,
     pub columns: Vec<SourceColumnDesc>,
     pub metrics: Arc<SourceMetrics>,
+}
+
+impl SourceDesc {
+    pub fn update_reader(
+        &mut self,
+        props_plaintext: HashMap<String, String>,
+    ) -> ConnectorResult<()> {
+        let props_wrapper =
+            WithOptionsSecResolved::without_secrets(props_plaintext.into_iter().collect());
+        let parser_config = SpecificParserConfig::new(&self.source_info, &props_wrapper)?;
+
+        let reader = SourceReader::new(
+            props_wrapper,
+            self.columns.clone(),
+            self.source.connector_message_buffer_size,
+            parser_config,
+        )?;
+        self.source = reader;
+        Ok(())
+    }
 }
 
 /// `FsSourceDesc` describes a stream source.
@@ -148,6 +170,7 @@ impl SourceDescBuilder {
             source,
             columns,
             metrics: self.metrics,
+            source_info: self.source_info,
         })
     }
 

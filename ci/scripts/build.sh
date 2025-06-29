@@ -4,7 +4,6 @@
 set -euo pipefail
 
 source ci/scripts/common.sh
-export RW_BUILD_INSTRUMENT_COVERAGE=1 # enable coverage instrument
 
 while getopts 'p:' opt; do
     case ${opt} in
@@ -27,6 +26,9 @@ if [[ "$profile" != "ci-dev" ]] && [[ "$profile" != "ci-release" ]]; then
     echo "Invalid option: profile must be either ci-dev or ci-release" 1>&2
     exit 1
 fi
+
+# Enable coverage instrumentation.
+export RW_BUILD_INSTRUMENT_COVERAGE=1
 
 echo "--- Build Rust components"
 
