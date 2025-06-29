@@ -20,10 +20,8 @@ use either::Either;
 use itertools::Itertools;
 use prometheus::core::{AtomicU64, GenericCounter};
 use risingwave_common::array::ArrayRef;
-use risingwave_common::catalog::{ColumnId, TableId};
-use risingwave_common::metrics::{
-    GLOBAL_ERROR_METRICS, LabelGuardedIntCounter, LabelGuardedMetric,
-};
+use risingwave_common::catalog::TableId;
+use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedMetric};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
