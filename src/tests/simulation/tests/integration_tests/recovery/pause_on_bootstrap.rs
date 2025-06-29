@@ -67,6 +67,8 @@ async fn test_impl(resume_by: ResumeBy) -> Result<()> {
     cluster.run(CREATE).await?;
     cluster.run(CREATE_TABLE).await?;
 
+    println!("000000000");
+
     // Run for a while.
     sleep(Duration::from_secs(10)).await;
 
@@ -87,13 +89,14 @@ async fn test_impl(resume_by: ResumeBy) -> Result<()> {
         .await?;
     sleep(Duration::from_secs(10)).await;
     cluster.run(SELECT).await?.assert_result_eq(&count);
-
+    println!("aaaaaaaaaa");
     // New streaming jobs should also start from paused.
     cluster.run(CREATE_2).await?;
     sleep(Duration::from_secs(10)).await;
     cluster.run(SELECT_2).await?.assert_result_eq("0"); // even there's no data from source, the aggregation
     // result will be 0 instead of empty or NULL
 
+    println!("xxxxxxxxxxx");
     // `VALUES` should also be paused.
     tokio::time::timeout(Duration::from_secs(10), cluster.run(CREATE_VALUES))
         .await
@@ -103,14 +106,18 @@ async fn test_impl(resume_by: ResumeBy) -> Result<()> {
     let result = timeout(Duration::from_secs(10), cluster.run(INSERT_INTO_TABLE)).await;
     assert!(result.is_err());
     cluster.run(SELECT_COUNT_TABLE).await?.assert_result_eq("0");
+    println!("bbbbbbbbbb");
 
     // Resume the cluster.
     resume_by.resume(&mut cluster).await?;
     sleep(Duration::from_secs(10)).await;
 
+    println!("?????????????");
     // The source should be resumed.
     let new_count = cluster.run(SELECT).await?;
     assert_ne!(count, new_count);
+
+    println!("111111111");
 
     // DML on tables should be allowed. However, we're uncertain whether the previous blocked DML is
     // executed or not. So we just check the count difference.
