@@ -17,7 +17,7 @@ use anyhow::Context;
 use bytes::Bytes;
 use reqwest::Url;
 use risingwave_common::bail;
-use risingwave_common::types::{Datum, DatumCow, DatumRef};
+use risingwave_common::types::{Datum, DatumCow, DatumRef, ScalarRefImpl};
 use risingwave_pb::data::DataType as PbDataType;
 
 use crate::aws_utils::load_file_descriptor_from_s3;
@@ -143,6 +143,16 @@ pub fn extract_cdc_meta_column<'a>(
 pub fn extract_headers_from_meta(meta: &SourceMeta) -> Option<Datum> {
     match meta {
         SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_headers(), /* expect output of type `array[struct<varchar, bytea>]` */
+        _ => None,
+    }
+}
+
+pub fn extract_pulsar_message_id_data_from_meta(meta: &SourceMeta) -> Option<DatumRef<'_>> {
+    match meta {
+        SourceMeta::Pulsar(pulsar_meta) => pulsar_meta
+            .ack_message_id
+            .as_ref()
+            .map(|message_id| Some(ScalarRefImpl::Bytea(message_id))),
         _ => None,
     }
 }
