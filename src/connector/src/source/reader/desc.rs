@@ -40,7 +40,6 @@ pub struct SourceDesc {
     pub source: SourceReader,
     pub columns: Vec<SourceColumnDesc>,
     pub metrics: Arc<SourceMetrics>,
-    pub info: PbStreamSourceInfo,
 }
 
 impl SourceDesc {
@@ -156,7 +155,6 @@ impl SourceDescBuilder {
         Ok(SourceDesc {
             source,
             columns,
-            info: self.source_info,
             metrics: self.metrics,
             source_info: self.source_info,
         })
