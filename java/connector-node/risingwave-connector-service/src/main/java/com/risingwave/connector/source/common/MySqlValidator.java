@@ -346,12 +346,10 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 return val == Data.DataType.TypeName.JSONB_VALUE;
                 // For 'bit' type, compatibility depends on charMaxLength
             case "bit":
+                // bit(1) matches bool, bit(n>1) matches bytea
                 if (charMaxLength == 1) {
-                    // bit(1) allows both boolean and bytea
-                    return val == Data.DataType.TypeName.BOOLEAN_VALUE
-                            || val == Data.DataType.TypeName.BYTEA_VALUE;
+                    return val == Data.DataType.TypeName.BOOLEAN_VALUE;
                 } else {
-                    // bit(n>1) only allows bytea
                     return val == Data.DataType.TypeName.BYTEA_VALUE;
                 }
             case "tinyblob":
