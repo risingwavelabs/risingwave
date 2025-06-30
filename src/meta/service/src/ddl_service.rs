@@ -28,7 +28,7 @@ use risingwave_meta::rpc::metrics::MetaMetrics;
 use risingwave_meta::stream::{JobParallelismTarget, JobRescheduleTarget, JobResourceGroupTarget};
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
-use risingwave_pb::catalog::{Comment, Connection, CreateType, Secret, Table};
+use risingwave_pb::catalog::{Comment, Connection, Secret, Table};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
@@ -267,7 +267,6 @@ impl DdlService for DdlServiceImpl {
                     .run_command(DdlCommand::CreateStreamingJob {
                         stream_job,
                         fragment_graph,
-                        create_type: CreateType::Foreground,
                         affected_table_replace_info: None,
                         dependencies: HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbSource`
                         specific_resource_group: None,
@@ -336,7 +335,6 @@ impl DdlService for DdlServiceImpl {
         let command = DdlCommand::CreateStreamingJob {
             stream_job,
             fragment_graph,
-            create_type: CreateType::Foreground,
             affected_table_replace_info: affected_table_change,
             dependencies,
             specific_resource_group: None,
@@ -424,7 +422,6 @@ impl DdlService for DdlServiceImpl {
 
         let req = request.into_inner();
         let mview = req.get_materialized_view()?.clone();
-        let create_type = mview.get_create_type().unwrap_or(CreateType::Foreground);
         let specific_resource_group = req.specific_resource_group.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
         let dependencies = req
@@ -439,7 +436,6 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::CreateStreamingJob {
                 stream_job,
                 fragment_graph,
-                create_type,
                 affected_table_replace_info: None,
                 dependencies,
                 specific_resource_group,
@@ -495,7 +491,6 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::CreateStreamingJob {
                 stream_job,
                 fragment_graph,
-                create_type: CreateType::Foreground,
                 affected_table_replace_info: None,
                 dependencies: HashSet::new(),
                 specific_resource_group: None,
@@ -584,7 +579,6 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::CreateStreamingJob {
                 stream_job,
                 fragment_graph,
-                create_type: CreateType::Foreground,
                 affected_table_replace_info: None,
                 dependencies: HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbTable`
                 specific_resource_group: None,

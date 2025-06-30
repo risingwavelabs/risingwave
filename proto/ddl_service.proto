@@ -423,7 +423,8 @@ message GetDdlProgressRequest {}
 message DdlProgress {
   uint64 id = 1;
   string statement = 2;
-  string progress = 3;
+  string create_type = 3;
+  string progress = 4;
 }
 
 message GetDdlProgressResponse {

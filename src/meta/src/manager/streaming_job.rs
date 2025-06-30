@@ -32,7 +32,7 @@ use super::{
 use crate::stream::StreamFragmentGraph;
 use crate::{MetaError, MetaResult};
 
-// This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
+// This enum is used to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
 #[derive(Debug, Clone, EnumIs, EnumTryAs)]
 pub enum StreamingJob {

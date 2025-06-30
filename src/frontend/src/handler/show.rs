@@ -340,6 +340,7 @@ struct ShowClusterRow {
 struct ShowJobRow {
     id: i64,
     statement: String,
+    create_type: String,
     progress: String,
 }
 
@@ -649,6 +650,7 @@ pub async fn handle_show_object(
             let rows = resp.into_iter().map(|job| ShowJobRow {
                 id: job.id as i64,
                 statement: job.statement,
+                create_type: job.create_type,
                 progress: job.progress,
             });
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
