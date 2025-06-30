@@ -43,6 +43,7 @@ mod m20250522_074525_iceberg_tables;
 mod m20250522_074947_iceberg_namespace_properties;
 mod m20250528_064717_barrier_interval_per_database;
 mod m20250603_084830_default_privilege;
+mod m20250702_062029_cdc_table_snapshot_splits;
 mod utils;
 
 pub struct Migrator;
@@ -124,6 +125,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250522_074947_iceberg_namespace_properties::Migration),
             Box::new(m20250528_064717_barrier_interval_per_database::Migration),
             Box::new(m20250603_084830_default_privilege::Migration),
+            Box::new(m20250702_062029_cdc_table_snapshot_splits::Migration),
         ]
     }
 }

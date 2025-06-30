@@ -29,6 +29,7 @@ use crate::source::{SplitId, SplitMetaData};
 pub struct CdcSplitBase {
     pub split_id: u32,
     pub start_offset: Option<String>,
+    /// For a shared sources, this field is always false.
     pub snapshot_done: bool,
 }
 

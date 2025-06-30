@@ -17,10 +17,11 @@ use std::cmp::Ordering;
 use anyhow::Context;
 use futures::stream::BoxStream;
 use futures::{StreamExt, pin_mut};
-use futures_async_stream::try_stream;
+use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::types::{Datum, ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
 use serde_derive::{Deserialize, Serialize};
 use tokio_postgres::types::PgLsn;
@@ -29,9 +30,10 @@ use crate::connector_common::create_pg_client;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::postgres_row_to_owned_row;
 use crate::parser::scalar_adapter::ScalarAdapter;
+use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
-    CdcOffset, CdcOffsetParseFunc, DebeziumOffset, ExternalTableConfig, ExternalTableReader,
-    SchemaTableName,
+    CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, DebeziumOffset,
+    ExternalTableConfig, ExternalTableReader, SchemaTableName,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -72,6 +74,8 @@ pub struct PostgresExternalTableReader {
     field_names: String,
     pk_indices: Vec<usize>,
     client: tokio::sync::Mutex<tokio_postgres::Client>,
+    split_column: Field,
+    schema_table_name: SchemaTableName,
 }
 
 impl ExternalTableReader for PostgresExternalTableReader {
@@ -104,6 +108,92 @@ impl ExternalTableReader for PostgresExternalTableReader {
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
         self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
     }
+
+    #[try_stream(boxed, ok = CdcTableSnapshotSplit, error = ConnectorError)]
+    async fn get_parallel_cdc_splits(&self, options: CdcTableSnapshotSplitOption) {
+        let mut split_id = 1;
+        let Some(backfill_num_rows_per_split) = options.backfill_num_rows_per_split else {
+            // No parallel cdc splits.
+            return Ok(());
+        };
+        if backfill_num_rows_per_split == 0 {
+            // No parallel cdc splits.
+            return Ok(());
+        }
+        // TODO: for numeric types, use evenly-sized partition to optimize performance.
+        let Some((min_value, max_value)) = self.min_and_max().await? else {
+            return Ok(());
+        };
+        tracing::debug!(?self.schema_table_name, ?self.rw_schema, ?self.pk_indices, ?self.split_column, "get parallel cdc table snapshot splits");
+        // left bound will never be NULL value.
+        let mut next_left_bound_inclusive = min_value.clone();
+        loop {
+            let left_bound_inclusive: Datum = if next_left_bound_inclusive == min_value {
+                None
+            } else {
+                Some(next_left_bound_inclusive.clone())
+            };
+            let right_bound_exclusive;
+            let mut next_right = self
+                .next_split_right_bound_exclusive(
+                    &next_left_bound_inclusive,
+                    &max_value,
+                    backfill_num_rows_per_split,
+                )
+                .await?;
+            if let Some(Some(ref inner)) = next_right
+                && *inner == next_left_bound_inclusive
+            {
+                next_right = self
+                    .next_greater_bound(&next_left_bound_inclusive, &max_value)
+                    .await?;
+            }
+            if let Some(next_right) = next_right {
+                match next_right {
+                    None => {
+                        // NULL found.
+                        right_bound_exclusive = None;
+                    }
+                    Some(next_right) => {
+                        next_left_bound_inclusive = next_right.to_owned();
+                        right_bound_exclusive = Some(next_right);
+                    }
+                }
+            } else {
+                // Not found.
+                right_bound_exclusive = None;
+            };
+            let is_completed = right_bound_exclusive.is_none();
+            if is_completed && left_bound_inclusive.is_none() {
+                // Corner case: (Null, Null) is not a valid split.
+                assert_eq!(split_id, 1);
+                break;
+            }
+            tracing::debug!(
+                split_id,
+                ?left_bound_inclusive,
+                ?right_bound_exclusive,
+                "New CDC table snapshot split."
+            );
+            let left_bound_row = OwnedRow::new(vec![left_bound_inclusive]);
+            let right_bound_row = OwnedRow::new(vec![right_bound_exclusive]);
+            let split = CdcTableSnapshotSplit {
+                split_id,
+                left_bound_inclusive: left_bound_row,
+                right_bound_exclusive: right_bound_row,
+            };
+            match split_id.checked_add(1) {
+                Some(s) => {
+                    split_id = s;
+                }
+                None => return Err(anyhow::anyhow!("too many CDC snapshot splits").into()),
+            }
+            yield split;
+            if is_completed {
+                break;
+            }
+        }
+    }
 }
 
 impl PostgresExternalTableReader {
@@ -111,6 +201,7 @@ impl PostgresExternalTableReader {
         config: ExternalTableConfig,
         rw_schema: Schema,
         pk_indices: Vec<usize>,
+        schema_table_name: SchemaTableName,
     ) -> ConnectorResult<Self> {
         tracing::info!(
             ?rw_schema,
@@ -135,11 +226,14 @@ impl PostgresExternalTableReader {
             .map(|f| Self::quote_column(&f.name))
             .join(",");
 
+        let split_column = split_column(&rw_schema, &pk_indices);
         Ok(Self {
             rw_schema,
             field_names,
             pk_indices,
             client: tokio::sync::Mutex::new(client),
+            split_column,
+            schema_table_name,
         })
     }
 
@@ -254,6 +348,119 @@ impl PostgresExternalTableReader {
     fn quote_column(column: &str) -> String {
         format!("\"{}\"", column)
     }
+
+    async fn min_and_max(&self) -> ConnectorResult<Option<(ScalarImpl, ScalarImpl)>> {
+        let sql = format!(
+            "SELECT MIN({}), MAX({}) FROM {}",
+            self.split_column.name,
+            self.split_column.name,
+            Self::get_normalized_table_name(&self.schema_table_name),
+        );
+        let client = self.client.lock().await;
+        let mut rows = client.query(&sql, &[]).await?;
+        if rows.is_empty() {
+            Ok(None)
+        } else {
+            let row = postgres_row_to_owned_row(rows.swap_remove(0), &self.rw_schema);
+            let min = row.datum_at(0);
+            let max = row.datum_at(1);
+            if min.is_none() || max.is_none() {
+                Ok(None)
+            } else {
+                Ok(Some((
+                    min.to_owned_datum().unwrap(),
+                    max.to_owned_datum().unwrap(),
+                )))
+            }
+        }
+    }
+
+    async fn next_split_right_bound_exclusive(
+        &self,
+        left_value: &ScalarImpl,
+        max_value: &ScalarImpl,
+        max_split_size: u64,
+    ) -> ConnectorResult<Option<Datum>> {
+        let sql = format!(
+            "WITH t as (SELECT {} FROM {} WHERE {} >= $1 ORDER BY {} ASC LIMIT {}) SELECT CASE WHEN MAX({}) < $2 THEN MAX({}) ELSE NULL END FROM t",
+            Self::quote_column(&self.split_column.name),
+            Self::get_normalized_table_name(&self.schema_table_name),
+            Self::quote_column(&self.split_column.name),
+            Self::quote_column(&self.split_column.name),
+            max_split_size,
+            Self::quote_column(&self.split_column.name),
+            Self::quote_column(&self.split_column.name),
+        );
+        let client = self.client.lock().await;
+        let prepared_stmt = client.prepare(&sql).await?;
+        let params: Vec<Option<ScalarAdapter>> = vec![
+            Some(ScalarAdapter::from_scalar(
+                left_value.as_scalar_ref_impl(),
+                &prepared_stmt.params()[0],
+            )?),
+            Some(ScalarAdapter::from_scalar(
+                max_value.as_scalar_ref_impl(),
+                &prepared_stmt.params()[1],
+            )?),
+        ];
+        let stream = client.query_raw(&prepared_stmt, &params).await?;
+        let row_stream = stream.map(|row| {
+            let row = row?;
+            Ok::<_, ConnectorError>(postgres_row_to_owned_row(row, &self.rw_schema))
+        });
+        pin_mut!(row_stream);
+        #[for_await]
+        for row in row_stream {
+            let row = row?;
+            let right = row.datum_at(0);
+            return Ok(Some(right.to_owned_datum()));
+        }
+        Ok(None)
+    }
+
+    async fn next_greater_bound(
+        &self,
+        start_offset: &ScalarImpl,
+        max_value: &ScalarImpl,
+    ) -> ConnectorResult<Option<Datum>> {
+        let sql = format!(
+            "SELECT MIN({}) FROM {} WHERE {} > $1 AND {} <$2",
+            Self::quote_column(&self.split_column.name),
+            Self::get_normalized_table_name(&self.schema_table_name),
+            Self::quote_column(&self.split_column.name),
+            Self::quote_column(&self.split_column.name),
+        );
+        let client = self.client.lock().await;
+        let prepared_stmt = client.prepare(&sql).await?;
+        let params: Vec<Option<ScalarAdapter>> = vec![
+            Some(ScalarAdapter::from_scalar(
+                start_offset.as_scalar_ref_impl(),
+                &prepared_stmt.params()[0],
+            )?),
+            Some(ScalarAdapter::from_scalar(
+                max_value.as_scalar_ref_impl(),
+                &prepared_stmt.params()[1],
+            )?),
+        ];
+        let stream = client.query_raw(&prepared_stmt, &params).await?;
+        let row_stream = stream.map(|row| {
+            let row = row?;
+            Ok::<_, ConnectorError>(postgres_row_to_owned_row(row, &self.rw_schema))
+        });
+        pin_mut!(row_stream);
+        #[for_await]
+        for row in row_stream {
+            let row = row?;
+            let right = row.datum_at(0);
+            return Ok(Some(right.to_owned_datum()));
+        }
+        Ok(None)
+    }
+}
+
+/// Use the first column of primary keys to split table.
+fn split_column(rw_schema: &Schema, pk_indices: &[usize]) -> Field {
+    rw_schema.fields[pk_indices[0]].clone()
 }
 
 #[cfg(test)]
@@ -359,19 +566,25 @@ mod tests {
         let config =
             serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
                 .unwrap();
-        let reader = PostgresExternalTableReader::new(config, rw_schema, vec![0, 1])
-            .await
-            .unwrap();
+        let schema_table_name = SchemaTableName {
+            schema_name: "public".to_owned(),
+            table_name: "t1".to_owned(),
+        };
+        let reader = PostgresExternalTableReader::new(
+            config,
+            rw_schema,
+            vec![0, 1],
+            schema_table_name.clone(),
+        )
+        .await
+        .unwrap();
 
         let offset = reader.current_cdc_offset().await.unwrap();
         println!("CdcOffset: {:?}", offset);
 
         let start_pk = OwnedRow::new(vec![Some(ScalarImpl::from(3)), Some(ScalarImpl::from("c"))]);
         let stream = reader.snapshot_read(
-            SchemaTableName {
-                schema_name: "public".to_owned(),
-                table_name: "t1".to_owned(),
-            },
+            schema_table_name,
             Some(start_pk),
             vec!["v1".to_owned(), "v2".to_owned()],
             1000,

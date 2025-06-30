@@ -18,3 +18,13 @@ message SourceActorInfo {
   uint32 actor_id = 1;
   ConnectorSplits splits = 2;
 }
+
+message CdcTableSnapshotSplits {
+  repeated CdcTableSnapshotSplit splits = 1;
+}
+
+message CdcTableSnapshotSplit {
+  int64 split_id = 1;
+  bytes left = 2;
+  bytes right = 3;
+}

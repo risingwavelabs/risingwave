@@ -27,12 +27,13 @@ use risingwave_pb::catalog::PbSource;
 use risingwave_pb::connector_service::{PbSourceType, PbTableSchema, SourceType, TableSchema};
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
+use risingwave_pb::source::{PbCdcTableSnapshotSplit, PbCdcTableSnapshotSplits};
 use simd_json::prelude::ArrayTrait;
 pub use source::*;
 
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
-use crate::source::{SourceProperties, SplitImpl, TryFromBTreeMap};
+use crate::source::{CdcTableSnapshotSplitRaw, SourceProperties, SplitImpl, TryFromBTreeMap};
 use crate::{for_all_classified_sources, impl_cdc_source_type};
 
 pub const CDC_CONNECTOR_NAME_SUFFIX: &str = "-cdc";
@@ -43,6 +44,8 @@ pub const CDC_SHARING_MODE_KEY: &str = "rw.sharing.mode.enable";
 pub const CDC_BACKFILL_ENABLE_KEY: &str = "snapshot";
 pub const CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY: &str = "snapshot.interval";
 pub const CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY: &str = "snapshot.batch_size";
+pub const CDC_BACKFILL_PARALLELISM: &str = "backfill.parallelism";
+pub const CDC_BACKFILL_NUM_ROWS_PER_SPLIT: &str = "backfill.num_rows_per_split";
 // We enable transaction for shared cdc source by default
 pub const CDC_TRANSACTIONAL_KEY: &str = "transactional";
 pub const CDC_WAIT_FOR_STREAMING_START_TIMEOUT: &str = "cdc.source.wait.streaming.start.timeout";
@@ -227,4 +230,47 @@ impl<T: CdcSourceTypeTrait> CdcProperties<T> {
     pub fn get_source_type_pb(&self) -> SourceType {
         SourceType::from(T::source_type())
     }
+}
+
+pub type CdcTableSnapshotSplitAssignment = HashMap<u32, Vec<CdcTableSnapshotSplitRaw>>;
+
+pub fn build_pb_actor_cdc_table_snapshot_splits(
+    cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignment,
+) -> HashMap<u32, PbCdcTableSnapshotSplits> {
+    cdc_table_snapshot_split_assignment
+        .into_iter()
+        .map(|(actor_id, splits)| {
+            let splits = PbCdcTableSnapshotSplits {
+                splits: splits
+                    .into_iter()
+                    .map(|s| PbCdcTableSnapshotSplit {
+                        split_id: s.split_id,
+                        left: s.left_bound_inclusive,
+                        right: s.right_bound_exclusive,
+                    })
+                    .collect(),
+            };
+            (actor_id, splits)
+        })
+        .collect()
+}
+
+pub fn build_actor_cdc_table_snapshot_splits(
+    pb_cdc_table_snapshot_split_assignment: HashMap<u32, PbCdcTableSnapshotSplits>,
+) -> CdcTableSnapshotSplitAssignment {
+    pb_cdc_table_snapshot_split_assignment
+        .into_iter()
+        .map(|(actor_id, splits)| {
+            let splits = splits
+                .splits
+                .into_iter()
+                .map(|s| CdcTableSnapshotSplitRaw {
+                    split_id: s.split_id,
+                    left_bound_inclusive: s.left,
+                    right_bound_exclusive: s.right,
+                })
+                .collect();
+            (actor_id, splits)
+        })
+        .collect()
 }
