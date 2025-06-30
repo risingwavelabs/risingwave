@@ -450,6 +450,20 @@ impl KafkaSplitEnumerator {
                     );
                     result.insert(elem.partition(), Some(high_watermark - 1)); // align to Latest
                 }
+                Offset::Invalid => {
+                    // special case for madsim test
+                    // For a read Kafka, it returns `Offset::Latest` when the timestamp is later than the latest message in the partition
+                    // But in madsim, it returns `Offset::Invalid`
+                    // So we align to Latest here
+                    tracing::info!(
+                        source_id = self.context.info.source_id,
+                        "got invalid offset for partition  {} at timestamp {}, align to latest",
+                        elem.partition(),
+                        time
+                    );
+                    let (_, high_watermark) = watermarks.get(&elem.partition()).unwrap();
+                    result.insert(elem.partition(), Some(high_watermark - 1)); // align to Latest
+                }
                 Offset::Beginning => {
                     let (low, _) = watermarks.get(&elem.partition()).unwrap();
                     tracing::info!(
@@ -460,9 +474,7 @@ impl KafkaSplitEnumerator {
                     );
                     result.insert(elem.partition(), Some(low - 1)); // align to Earliest
                 }
-                err_offset @ Offset::Invalid
-                | err_offset @ Offset::Stored
-                | err_offset @ Offset::OffsetTail(_) => {
+                err_offset @ Offset::Stored | err_offset @ Offset::OffsetTail(_) => {
                     tracing::error!(
                         source_id = self.context.info.source_id,
                         "got invalid offset for partition {}: {err_offset:?}",
