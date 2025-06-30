@@ -157,6 +157,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn get_fragment_by_id(&self, fragment_id: u32) -> Result<Option<FragmentDistribution>>;
 
     fn worker_id(&self) -> u32;
+
+    async fn set_sync_log_store_aligned(&self, job_id: u32, aligned: bool) -> Result<()>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -389,5 +391,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     fn worker_id(&self) -> u32 {
         self.0.worker_id()
+    }
+
+    async fn set_sync_log_store_aligned(&self, job_id: u32, aligned: bool) -> Result<()> {
+        self.0.set_sync_log_store_aligned(job_id, aligned).await
     }
 }
