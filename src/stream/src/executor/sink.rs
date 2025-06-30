@@ -563,8 +563,15 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             log_store_reader_wait_new_future_duration_ns,
         };
 
+        let downstream_pk = sink_param.downstream_pk.clone();
+
         let mut log_reader = log_reader
             .transform_chunk(move |chunk| {
+                let chunk = if downstream_pk.is_empty() {
+                    chunk
+                } else {
+                    merge_chunk_row(chunk, &downstream_pk)
+                };
                 if visible_columns.len() != columns.len() {
                     // Do projection here because we may have columns that aren't visible to
                     // the downstream.
