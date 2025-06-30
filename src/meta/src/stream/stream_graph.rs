@@ -17,7 +17,7 @@ mod assignment;
 mod fragment;
 mod id;
 mod schedule;
-mod state;
+pub mod state;
 
 pub use actor::{ActorGraphBuildResult, ActorGraphBuilder};
 pub use assignment::*;
