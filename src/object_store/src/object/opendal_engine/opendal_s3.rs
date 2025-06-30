@@ -43,6 +43,13 @@ impl OpendalObjectStore {
             builder = builder.enable_virtual_host_style();
         }
 
+        let is_express_onezone = std::env::var("RW_S3_USE_EXPRESS_ONEZONE")
+            .map(|val| val == "true")
+            .unwrap_or(false);
+        if is_express_onezone {
+            builder = builder.default_storage_class("EXPRESS_ONEZONE");
+        }
+
         let http_client = Self::new_http_client(&config)?;
         builder = builder.http_client(http_client);
 
