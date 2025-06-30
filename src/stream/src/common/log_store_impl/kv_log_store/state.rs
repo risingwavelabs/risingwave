@@ -330,6 +330,7 @@ mod tests {
                         table_option: Default::default(),
                         is_replicated: false,
                         vnodes: vnodes.clone(),
+                        upload_on_flush: false,
                     })
                     .await,
                 serde.clone(),
