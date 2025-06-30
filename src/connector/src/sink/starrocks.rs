@@ -104,7 +104,7 @@ pub struct StarrocksConfig {
     /// to Starrocks at every n checkpoints by leveraging the
     /// [StreamLoad Transaction API](https://docs.starrocks.io/docs/loading/Stream_Load_transaction_interface/),
     /// also, in this time, the `sink_decouple` option should be enabled as well.
-    /// Defaults to 10 if commit_checkpoint_interval <= 0
+    /// Defaults to 10 if `commit_checkpoint_interval` <= 0
     #[serde(default = "default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
     pub commit_checkpoint_interval: u64,
@@ -593,8 +593,8 @@ impl SinkWriter for StarrocksSinkWriter {
             client.finish().await?;
         }
 
-        if is_checkpoint && let Some(txn_label) = self.curr_txn_label.take() {
-            if let Err(err) = self.prepare_and_commit(txn_label.clone()).await {
+        if is_checkpoint && let Some(txn_label) = self.curr_txn_label.take()
+            && let Err(err) = self.prepare_and_commit(txn_label.clone()).await {
                 match self.txn_client.rollback(txn_label.clone()).await {
                     Ok(_) => tracing::warn!(
                         ?txn_label,
@@ -607,7 +607,6 @@ impl SinkWriter for StarrocksSinkWriter {
 
                 return Err(err);
             }
-        }
         Ok(())
     }
 

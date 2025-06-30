@@ -135,12 +135,11 @@ impl Rule for IndexSelectionRule {
             }
         }
 
-        if let Some((merge_index, merge_index_cost)) = self.index_merge_selection(logical_scan) {
-            if merge_index_cost.le(&min_cost) {
+        if let Some((merge_index, merge_index_cost)) = self.index_merge_selection(logical_scan)
+            && merge_index_cost.le(&min_cost) {
                 min_cost = merge_index_cost;
                 final_plan = merge_index;
             }
-        }
 
         if min_cost == primary_cost {
             None

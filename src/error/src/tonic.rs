@@ -154,8 +154,8 @@ impl TonicStatusWrapper {
     /// Create a new [`TonicStatusWrapper`] from the given [`tonic::Status`] and extract
     /// the source chain from its `details` field.
     pub fn new(mut status: tonic::Status) -> Self {
-        if status.source().is_none() {
-            if let Some(value) = status.metadata().get_bin(ERROR_KEY) {
+        if status.source().is_none()
+            && let Some(value) = status.metadata().get_bin(ERROR_KEY) {
                 if let Some(e) = value.to_bytes().ok().and_then(|serialized| {
                     bincode::deserialize::<ServerError>(serialized.as_ref()).ok()
                 }) {
@@ -164,7 +164,6 @@ impl TonicStatusWrapper {
                     tracing::warn!("failed to deserialize error from gRPC metadata");
                 }
             }
-        }
 
         let call = status
             .metadata()

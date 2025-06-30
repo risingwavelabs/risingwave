@@ -27,7 +27,6 @@
 #![feature(let_chains)]
 #![feature(portable_simd)]
 #![feature(array_chunks)]
-#![feature(inline_const_pat)]
 #![allow(incomplete_features)]
 #![feature(iterator_try_collect)]
 #![feature(iter_order_by)]

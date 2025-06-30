@@ -328,7 +328,7 @@ impl CatalogController {
             property
                 .0
                 .get(UPSTREAM_SOURCE_KEY)
-                .map(|v| v.to_string())
+                .cloned()
                 .unwrap_or_default()
         };
 

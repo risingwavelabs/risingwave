@@ -1081,10 +1081,10 @@ impl Parser<'_> {
     pub fn parse_trim_expr(&mut self) -> ModalResult<Expr> {
         self.expect_token(&Token::LParen)?;
         let mut trim_where = None;
-        if let Token::Word(word) = self.peek_token().token {
-            if [Keyword::BOTH, Keyword::LEADING, Keyword::TRAILING].contains(&word.keyword) {
-                trim_where = Some(self.parse_trim_where()?);
-            }
+        if let Token::Word(word) = self.peek_token().token
+            && [Keyword::BOTH, Keyword::LEADING, Keyword::TRAILING].contains(&word.keyword)
+        {
+            trim_where = Some(self.parse_trim_where()?);
         }
 
         let (mut trim_what, expr) = if self.parse_keyword(Keyword::FROM) {
@@ -3888,10 +3888,10 @@ impl Parser<'_> {
                     if self.consume_token(&Token::Period) {
                         return values;
                     }
-                    if let Token::Word(w) = self.next_token().token {
-                        if w.value == "N" {
-                            values.push(None);
-                        }
+                    if let Token::Word(w) = self.next_token().token
+                        && w.value == "N"
+                    {
+                        values.push(None);
                     }
                 }
                 _ => {
@@ -3940,13 +3940,13 @@ impl Parser<'_> {
                 _ => self.expected_at(checkpoint, "a concrete value"),
             },
             Token::Number(ref n) => Ok(Value::Number(n.clone()).into()),
-            Token::SingleQuotedString(ref s) => Ok(Value::SingleQuotedString(s.to_string()).into()),
+            Token::SingleQuotedString(ref s) => Ok(Value::SingleQuotedString(s.clone()).into()),
             Token::DollarQuotedString(ref s) => Ok(Value::DollarQuotedString(s.clone()).into()),
             Token::CstyleEscapesString(ref s) => Ok(Value::CstyleEscapedString(s.clone()).into()),
             Token::NationalStringLiteral(ref s) => {
-                Ok(Value::NationalStringLiteral(s.to_string()).into())
+                Ok(Value::NationalStringLiteral(s.clone()).into())
             }
-            Token::HexStringLiteral(ref s) => Ok(Value::HexStringLiteral(s.to_string()).into()),
+            Token::HexStringLiteral(ref s) => Ok(Value::HexStringLiteral(s.clone()).into()),
             _ => self.expected_at(checkpoint, "a value"),
         }
     }

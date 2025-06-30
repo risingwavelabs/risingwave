@@ -402,11 +402,9 @@ impl stream_plan::StreamNode {
     pub fn find_stream_source(&self) -> Option<u32> {
         if let Some(crate::stream_plan::stream_node::NodeBody::Source(source)) =
             self.node_body.as_ref()
-        {
-            if let Some(inner) = &source.source_inner {
+            && let Some(inner) = &source.source_inner {
                 return Some(inner.source_id);
             }
-        }
 
         for child in &self.input {
             if let Some(source) = child.find_stream_source() {

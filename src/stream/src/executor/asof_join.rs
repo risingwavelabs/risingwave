@@ -879,26 +879,24 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                             {
                                 yield chunk;
                             }
-                        } else if is_as_of_left_outer(T) {
-                            if let Some(chunk) =
+                        } else if is_as_of_left_outer(T)
+                            && let Some(chunk) =
                                 join_chunk_builder.append_row_matched(Op::Delete, &row_l)
                             {
                                 yield chunk;
                             }
-                        }
                         if let Some(row_to_insert_r) = &row_to_insert_r {
                             if let Some(chunk) =
                                 join_chunk_builder.append_row(Op::Insert, row_to_insert_r, &row_l)
                             {
                                 yield chunk;
                             }
-                        } else if is_as_of_left_outer(T) {
-                            if let Some(chunk) =
+                        } else if is_as_of_left_outer(T)
+                            && let Some(chunk) =
                                 join_chunk_builder.append_row_matched(Op::Insert, &row_l)
                             {
                                 yield chunk;
                             }
-                        }
                     }
                 }
                 // Insert back the state taken from ht.

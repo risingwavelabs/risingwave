@@ -812,7 +812,7 @@ mod tests {
         // ROOT grant CONN with grant option to user_1.
         mgr.grant_privilege(
             vec![user_1.user_id],
-            &[conn_with_option.clone()],
+            std::slice::from_ref(&conn_with_option),
             TEST_ROOT_USER_ID,
             true,
         )

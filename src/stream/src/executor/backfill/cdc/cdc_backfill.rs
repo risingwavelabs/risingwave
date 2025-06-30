@@ -496,8 +496,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     // Since we don't need changelog before the
                                     // `last_binlog_offset`, skip the chunk that *only* contains
                                     // events before `last_binlog_offset`.
-                                    if let Some(last_binlog_offset) = last_binlog_offset.as_ref() {
-                                        if let Some(chunk_offset) = chunk_binlog_offset
+                                    if let Some(last_binlog_offset) = last_binlog_offset.as_ref()
+                                        && let Some(chunk_offset) = chunk_binlog_offset
                                             && chunk_offset < *last_binlog_offset
                                         {
                                             tracing::trace!(
@@ -507,7 +507,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                             );
                                             continue;
                                         }
-                                    }
                                     // Buffer the upstream chunk.
                                     upstream_chunk_buffer.push(chunk.compact());
                                 }

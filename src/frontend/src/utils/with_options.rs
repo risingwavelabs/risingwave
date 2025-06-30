@@ -166,11 +166,10 @@ impl WithOptions {
     }
 
     pub fn value_eq_ignore_case(&self, key: &str, val: &str) -> bool {
-        if let Some(inner_val) = self.inner.get(key) {
-            if inner_val.eq_ignore_ascii_case(val) {
+        if let Some(inner_val) = self.inner.get(key)
+            && inner_val.eq_ignore_ascii_case(val) {
                 return true;
             }
-        }
         false
     }
 
@@ -306,16 +305,14 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
         if let Some(broker_rewrite_map) = connection_params
             .get_properties()
             .get(PRIVATE_LINK_BROKER_REWRITE_MAP_KEY)
-        {
-            if options.contains_key(PRIVATE_LINK_TARGETS_KEY)
-                || options.contains_key(PRIVATELINK_ENDPOINT_KEY)
+            && (options.contains_key(PRIVATE_LINK_TARGETS_KEY)
+                || options.contains_key(PRIVATELINK_ENDPOINT_KEY))
             {
                 return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
                     "PrivateLink related options already defined in Connection (rewrite map: {}), please remove {} and {} from WITH clause",
                     broker_rewrite_map, PRIVATE_LINK_TARGETS_KEY, PRIVATELINK_ENDPOINT_KEY
                 ))));
             }
-        }
 
         // Extract connection type and merge properties
         connection_type = connection_params.connection_type();

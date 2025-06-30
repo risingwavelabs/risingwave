@@ -193,8 +193,8 @@ impl CompletingTask {
     ) -> impl Future<Output = MetaResult<BarrierCompleteOutput>> + 'a {
         // If there is no completing barrier, try to start completing the earliest barrier if
         // it has been collected.
-        if let CompletingTask::None = self {
-            if let Some(task) = checkpoint_control
+        if let CompletingTask::None = self
+            && let Some(task) = checkpoint_control
                 .next_complete_barrier_task(Some((periodic_barriers, control_stream_manager)))
             {
                 {
@@ -215,7 +215,6 @@ impl CompletingTask {
                     };
                 }
             }
-        }
 
         async move {
             if !matches!(self, CompletingTask::Completing { .. }) {

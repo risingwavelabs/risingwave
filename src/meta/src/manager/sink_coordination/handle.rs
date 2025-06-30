@@ -123,15 +123,14 @@ impl SinkWriterCoordinationHandle {
                 | coordinate_request::Msg::Stop(_)
                 | coordinate_request::Msg::AlignInitialEpochRequest(_) => {}
                 coordinate_request::Msg::CommitRequest(request) => {
-                    if let Some(prev_epoch) = self.prev_epoch {
-                        if request.epoch < prev_epoch {
+                    if let Some(prev_epoch) = self.prev_epoch
+                        && request.epoch < prev_epoch {
                             return Poll::Ready(Err(anyhow!(
                                 "invalid commit epoch {}, prev_epoch {}",
                                 request.epoch,
                                 prev_epoch
                             )));
                         }
-                    }
                     if request.metadata.is_none() {
                         return Poll::Ready(Err(anyhow!("empty commit metadata")));
                     };

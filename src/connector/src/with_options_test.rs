@@ -236,17 +236,15 @@ fn extract_comments(attrs: &[Attribute]) -> String {
     attrs
         .iter()
         .filter_map(|attr| {
-            if let Meta::NameValue(mnv) = &attr.meta {
-                if mnv.path.is_ident("doc") {
-                    if let syn::Expr::Lit(syn::ExprLit {
+            if let Meta::NameValue(mnv) = &attr.meta
+                && mnv.path.is_ident("doc")
+                    && let syn::Expr::Lit(syn::ExprLit {
                         lit: Lit::Str(lit_str),
                         ..
                     }) = &mnv.value
                     {
                         return Some(lit_str.value().trim().to_owned());
                     }
-                }
-            }
             None
         })
         .collect::<Vec<_>>()
@@ -257,8 +255,8 @@ fn extract_comments(attrs: &[Attribute]) -> String {
 
 fn extract_serde_properties(field: &Field) -> SerdeProperties {
     for attr in &field.attrs {
-        if let Meta::List(meta_list) = &attr.meta {
-            if meta_list.path.is_ident("serde") {
+        if let Meta::List(meta_list) = &attr.meta
+            && meta_list.path.is_ident("serde") {
                 // Initialize the values to be extracted
                 let mut serde_props = SerdeProperties::default();
 
@@ -297,7 +295,6 @@ fn extract_serde_properties(field: &Field) -> SerdeProperties {
                 // Return the extracted values
                 return serde_props;
             }
-        }
     }
     SerdeProperties::default()
 }
@@ -362,11 +359,10 @@ fn flatten_struct(
 // If the type is Option<T>, return Option.
 // For HashMap<K, V>, return HashMap.
 fn extract_type_name(ty: &Type) -> String {
-    if let Type::Path(typepath) = ty {
-        if let Some(segment) = typepath.path.segments.last() {
+    if let Type::Path(typepath) = ty
+        && let Some(segment) = typepath.path.segments.last() {
             return segment.ident.to_string();
         }
-    }
     panic!("Failed to extract type name: {}", quote::quote!(#ty));
 }
 

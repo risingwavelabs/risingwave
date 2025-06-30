@@ -1736,11 +1736,9 @@ impl Session for SessionImpl {
                     // Idle timeout.
                     if let Some(elapse_since_last_idle_instant) =
                         self.elapse_since_last_idle_instant()
-                    {
-                        if elapse_since_last_idle_instant > idle_in_transaction_session_timeout {
+                        && elapse_since_last_idle_instant > idle_in_transaction_session_timeout {
                             return Err(PsqlError::IdleInTxnTimeout);
                         }
-                    }
                 }
             }
         }

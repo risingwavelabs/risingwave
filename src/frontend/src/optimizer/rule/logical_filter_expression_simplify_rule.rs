@@ -181,17 +181,15 @@ fn check_special_pattern(e1: ExprImpl, e2: ExprImpl, op: ExprType) -> Option<boo
         }
     }
 
-    if e1.is_const() {
-        if let Some(res) = check_special_pattern_inner(e1, op) {
+    if e1.is_const()
+        && let Some(res) = check_special_pattern_inner(e1, op) {
             return Some(res);
         }
-    }
 
-    if e2.is_literal() {
-        if let Some(res) = check_special_pattern_inner(e2, op) {
+    if e2.is_literal()
+        && let Some(res) = check_special_pattern_inner(e2, op) {
             return Some(res);
         }
-    }
 
     None
 }

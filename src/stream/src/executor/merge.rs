@@ -270,8 +270,7 @@ impl MergeExecutor {
 
                     if let Some(Mutation::Update(UpdateMutation { dispatchers, .. })) =
                         barrier.mutation.as_deref()
-                    {
-                        if select_all
+                        && select_all
                             .upstream_actor_ids()
                             .iter()
                             .any(|actor_id| dispatchers.contains_key(actor_id))
@@ -282,7 +281,6 @@ impl MergeExecutor {
                                 .values_mut()
                                 .for_each(|buffers| buffers.clear());
                         }
-                    }
 
                     if let Some(update) =
                         barrier.as_update_merge(self.actor_context.id, self.upstream_fragment_id)

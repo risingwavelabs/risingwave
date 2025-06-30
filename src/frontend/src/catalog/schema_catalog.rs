@@ -243,15 +243,14 @@ impl SchemaCatalog {
     pub fn drop_source(&mut self, id: SourceId) {
         let source_ref = self.source_by_id.remove(&id).unwrap();
         self.source_by_name.remove(&source_ref.name).unwrap();
-        if let Some(connection_id) = source_ref.connection_id {
-            if let Occupied(mut e) = self.connection_source_ref.entry(connection_id) {
+        if let Some(connection_id) = source_ref.connection_id
+            && let Occupied(mut e) = self.connection_source_ref.entry(connection_id) {
                 let source_ids = e.get_mut();
                 source_ids.retain_mut(|sid| *sid != id);
                 if source_ids.is_empty() {
                     e.remove_entry();
                 }
             }
-        }
     }
 
     pub fn update_source(&mut self, prost: &PbSource) {
@@ -295,15 +294,14 @@ impl SchemaCatalog {
     pub fn drop_sink(&mut self, id: SinkId) {
         let sink_ref = self.sink_by_id.remove(&id).unwrap();
         self.sink_by_name.remove(&sink_ref.name).unwrap();
-        if let Some(connection_id) = sink_ref.connection_id {
-            if let Occupied(mut e) = self.connection_sink_ref.entry(connection_id.0) {
+        if let Some(connection_id) = sink_ref.connection_id
+            && let Occupied(mut e) = self.connection_sink_ref.entry(connection_id.0) {
                 let sink_ids = e.get_mut();
                 sink_ids.retain_mut(|sid| *sid != id);
                 if sink_ids.is_empty() {
                     e.remove_entry();
                 }
             }
-        }
     }
 
     pub fn update_sink(&mut self, prost: &PbSink) {

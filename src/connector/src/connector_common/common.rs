@@ -196,7 +196,7 @@ pub struct KafkaConnectionProps {
     pub brokers: String,
 
     /// Security protocol used for RisingWave to communicate with Kafka brokers. Could be
-    /// PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
+    /// PLAINTEXT, SSL, `SASL_PLAINTEXT` or `SASL_SSL`.
     #[serde(rename = "properties.security.protocol")]
     security_protocol: Option<String>,
 
@@ -232,7 +232,7 @@ pub struct KafkaConnectionProps {
     #[serde(rename = "properties.ssl.key.password")]
     ssl_key_password: Option<String>,
 
-    /// SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and AWS_MSK_IAM.
+    /// SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and `AWS_MSK_IAM`.
     #[serde(rename = "properties.sasl.mechanism")]
     sasl_mechanism: Option<String>,
 
@@ -314,7 +314,7 @@ const fn default_socket_keepalive_enable() -> bool {
 pub struct RdKafkaPropertiesCommon {
     /// Maximum Kafka protocol request message size. Due to differing framing overhead between
     /// protocol versions the producer is unable to reliably enforce a strict max message limit at
-    /// produce time and may exceed the maximum size by one message in protocol ProduceRequests,
+    /// produce time and may exceed the maximum size by one message in protocol `ProduceRequests`,
     /// the broker will enforce the topic's max.message.bytes limit
     #[serde(rename = "properties.message.max.bytes")]
     #[serde_as(as = "Option<DisplayFromStr>")]
@@ -1052,7 +1052,7 @@ pub(crate) fn load_private_key(
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct MongodbCommon {
-    /// The URL of MongoDB
+    /// The URL of `MongoDB`
     #[serde(rename = "mongodb.url")]
     pub connect_uri: String,
     /// The collection name where data should be written to or read from. For sinks, the format is

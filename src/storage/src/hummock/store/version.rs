@@ -944,8 +944,8 @@ impl HummockVersionReader {
                 .sstable(sstable_info, local_stats)
                 .await?;
 
-            if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
-                if !hit_sstable_bloom_filter(
+            if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref()
+                && !hit_sstable_bloom_filter(
                     &table_holder,
                     &user_key_range_ref,
                     *prefix_hash,
@@ -953,7 +953,6 @@ impl HummockVersionReader {
                 ) {
                     continue;
                 }
-            }
 
             staging_sst_iter_count += 1;
             factory.add_staging_sst_iter(F::SstableIteratorType::create(
@@ -997,8 +996,8 @@ impl HummockVersionReader {
                         .sstable(&sstable_infos[0], local_stats)
                         .await?;
 
-                    if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
-                        if !hit_sstable_bloom_filter(
+                    if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref()
+                        && !hit_sstable_bloom_filter(
                             &sstable,
                             &user_key_range_ref,
                             *dist_hash,
@@ -1006,7 +1005,6 @@ impl HummockVersionReader {
                         ) {
                             continue;
                         }
-                    }
                     // Since there is only one sst to be included for the current non-overlapping
                     // level, there is no need to create a ConcatIterator on it.
                     // We put the SstableIterator in `overlapping_iters` just for convenience since
@@ -1034,8 +1032,8 @@ impl HummockVersionReader {
                         .sstable(sstable_info, local_stats)
                         .await?;
                     assert_eq!(sstable_info.object_id, sstable.id);
-                    if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
-                        if !hit_sstable_bloom_filter(
+                    if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref()
+                        && !hit_sstable_bloom_filter(
                             &sstable,
                             &user_key_range_ref,
                             *dist_hash,
@@ -1043,7 +1041,6 @@ impl HummockVersionReader {
                         ) {
                             continue;
                         }
-                    }
                     factory.add_overlapping_sst_iter(F::SstableIteratorType::create(
                         sstable,
                         self.sstable_store.clone(),

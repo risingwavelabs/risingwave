@@ -228,8 +228,7 @@ impl LogReader for BoundedInMemLogStoreReader {
             sealed_epoch,
             next_epoch,
         } = &self.epoch_progress
-        {
-            if let TruncateOffset::Barrier { epoch } = offset
+            && let TruncateOffset::Barrier { epoch } = offset
                 && epoch == *sealed_epoch
             {
                 let sealed_epoch = *sealed_epoch;
@@ -238,7 +237,6 @@ impl LogReader for BoundedInMemLogStoreReader {
                     .send(sealed_epoch)
                     .map_err(|_| anyhow!("unable to send sealed epoch"))?;
             }
-        }
         self.truncate_offset = offset;
         Ok(())
     }

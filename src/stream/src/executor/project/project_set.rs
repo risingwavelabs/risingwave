@@ -268,8 +268,8 @@ impl Inner {
         last_nondec_expr_values: &mut [Datum],
         chunk: &StreamChunk,
     ) {
-        if !self.nondecreasing_expr_indices.is_empty() {
-            if let Some((_, first_visible_row)) = chunk.rows().next() {
+        if !self.nondecreasing_expr_indices.is_empty()
+            && let Some((_, first_visible_row)) = chunk.rows().next() {
                 // it's ok to use the first row here, just one chunk delay
                 first_visible_row
                     .project(&self.nondecreasing_expr_indices)
@@ -283,7 +283,6 @@ impl Inner {
                         );
                     });
             }
-        }
     }
 
     async fn handle_watermark(&self, watermark: Watermark) -> StreamExecutorResult<Vec<Watermark>> {

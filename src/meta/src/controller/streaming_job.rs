@@ -204,8 +204,8 @@ impl CatalogController {
                 Table::insert(table_model).exec(&txn).await?;
             }
             StreamingJob::Sink(sink, _) => {
-                if let Some(target_table_id) = sink.target_table {
-                    if check_sink_into_table_cycle(
+                if let Some(target_table_id) = sink.target_table
+                    && check_sink_into_table_cycle(
                         target_table_id as ObjectId,
                         dependencies.iter().cloned().collect(),
                         &txn,
@@ -214,7 +214,6 @@ impl CatalogController {
                     {
                         bail!("Creating such a sink will result in circular dependency.");
                     }
-                }
 
                 let job_id = Self::create_streaming_job_obj(
                     &txn,
@@ -1436,14 +1435,13 @@ impl CatalogController {
             let mut found = false;
             if *fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0 {
                 visit_stream_node_mut(stream_node, |node| {
-                    if let PbNodeBody::Source(node) = node {
-                        if let Some(node_inner) = &mut node.source_inner
+                    if let PbNodeBody::Source(node) = node
+                        && let Some(node_inner) = &mut node.source_inner
                             && node_inner.source_id == source_id as u32
                         {
                             node_inner.rate_limit = rate_limit;
                             found = true;
                         }
-                    }
                 });
             }
             if is_fs_source {

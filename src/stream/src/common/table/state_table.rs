@@ -1098,8 +1098,8 @@ where
         self.epoch = Some(new_epoch);
 
         // Refresh watermark cache if it is out of sync.
-        if USE_WATERMARK_CACHE && !self.watermark_cache.is_synced() {
-            if let Some(ref watermark) = self.committed_watermark {
+        if USE_WATERMARK_CACHE && !self.watermark_cache.is_synced()
+            && let Some(ref watermark) = self.committed_watermark {
                 let range: (Bound<Once<Datum>>, Bound<Once<Datum>>) =
                     (Included(once(Some(watermark.clone()))), Unbounded);
                 // NOTE(kwannoel): We buffer `pks` before inserting into watermark cache
@@ -1144,7 +1144,6 @@ where
                     self.watermark_cache.set_table_row_count(n_cache_entries);
                 }
             }
-        }
 
         self.on_post_commit = true;
         Ok(StateTablePostCommit { inner: self })

@@ -215,7 +215,7 @@ fn generator_from_data_type(
     let random_seed_key = format!("fields.{}.seed", name);
     let random_seed: u64 = match fields_option_map
         .get(&random_seed_key)
-        .map(|s| s.to_string())
+        .cloned()
     {
         Some(seed) => {
             match seed.parse::<u64>() {
@@ -300,7 +300,7 @@ fn generator_from_data_type(
         }
         DataType::List(datatype) => {
             let length_key = format!("fields.{}.length", name);
-            let length_value = fields_option_map.get(&length_key).map(|s| s.to_string());
+            let length_value = fields_option_map.get(&length_key).cloned();
             let generator = generator_from_data_type(
                 *datatype,
                 fields_option_map,
@@ -318,8 +318,8 @@ fn generator_from_data_type(
             {
                 let start_key = format!("fields.{}.start", name);
                 let end_key = format!("fields.{}.end", name);
-                let start_value = fields_option_map.get(&start_key).map(|s| s.to_string());
-                let end_value = fields_option_map.get(&end_key).map(|s| s.to_string());
+                let start_value = fields_option_map.get(&start_key).cloned();
+                let end_value = fields_option_map.get(&end_key).cloned();
                 FieldGeneratorImpl::with_number_sequence(
                     data_type,
                     start_value,
@@ -332,8 +332,8 @@ fn generator_from_data_type(
             } else {
                 let min_key = format!("fields.{}.min", name);
                 let max_key = format!("fields.{}.max", name);
-                let min_value = fields_option_map.get(&min_key).map(|s| s.to_string());
-                let max_value = fields_option_map.get(&max_key).map(|s| s.to_string());
+                let min_value = fields_option_map.get(&min_key).cloned();
+                let max_value = fields_option_map.get(&max_key).cloned();
                 FieldGeneratorImpl::with_number_random(data_type, min_value, max_value, random_seed)
                     .map_err(Into::into)
             }

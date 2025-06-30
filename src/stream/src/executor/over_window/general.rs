@@ -674,12 +674,10 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
                     if let Some((_, cache_may_stale)) =
                         post_commit.post_yield_barrier(update_vnode_bitmap).await?
-                    {
-                        if cache_may_stale {
+                        && cache_may_stale {
                             vars.cached_partitions.clear();
                             vars.recently_accessed_ranges.clear();
                         }
-                    }
 
                     if !this.cache_policy.is_full() {
                         for (part_key, recently_accessed_range) in

@@ -238,15 +238,14 @@ impl HummockManager {
         drop(versioning_guard);
         // 2. persist the new checkpoint without holding lock
         self.write_checkpoint(&new_checkpoint).await?;
-        if let Some(archive) = archive {
-            if let Err(e) = self.write_version_archive(&archive).await {
+        if let Some(archive) = archive
+            && let Err(e) = self.write_version_archive(&archive).await {
                 tracing::warn!(
                     error = %e.as_report(),
                     "failed to write version archive {}",
                     archive.version.as_ref().unwrap().id
                 );
             }
-        }
         // 3. hold write lock and update in memory state
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();

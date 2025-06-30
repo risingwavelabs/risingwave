@@ -206,12 +206,11 @@ pub fn trigger_sst_stat(
             .set(*compacting_task_count as _);
     }
 
-    if compacting_task_stat.is_empty() {
-        if let Some(levels) = current_version.levels.get(&compaction_group_id) {
+    if compacting_task_stat.is_empty()
+        && let Some(levels) = current_version.levels.get(&compaction_group_id) {
             let max_level = levels.levels.len();
             remove_compacting_task_stat(metrics, compaction_group_id, max_level);
         }
-    }
 
     {
         // sub level stat
@@ -294,8 +293,7 @@ pub fn trigger_sst_stat(
                 Ordering::Relaxed,
             )
             .is_ok()
-    {
-        if let Some(compact_status) = compact_status {
+        && let Some(compact_status) = compact_status {
             for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
                 let sst_num = level_sst_cnt(idx);
                 let sst_size = level_sst_size(idx);
@@ -309,7 +307,6 @@ pub fn trigger_sst_stat(
                 );
             }
         }
-    }
 }
 
 pub fn trigger_epoch_stat(metrics: &MetaMetrics, version: &HummockVersion) {

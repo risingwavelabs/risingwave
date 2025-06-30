@@ -719,8 +719,8 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     // yield barrier after reporting progress
                                     yield Message::Barrier(barrier);
 
-                                    if let Some(to_apply_mutation) = maybe_muatation {
-                                        if self
+                                    if let Some(to_apply_mutation) = maybe_muatation
+                                        && self
                                             .apply_split_change_after_yield_barrier(
                                                 barrier_epoch,
                                                 &mut backfill_stage,
@@ -741,7 +741,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                                 select_strategy,
                                             );
                                         }
-                                    }
                                 }
                             }
                             Message::Chunk(chunk) => {

@@ -342,16 +342,15 @@ impl HummockMetaClient for MockHummockMetaClient {
         let report_handle = tokio::spawn(async move {
             tracing::info!("report_handle start");
             loop {
-                if let Some(item) = request_receiver.recv().await {
-                    if let Event::ReportTask(ReportTask {
+                if let Some(item) = request_receiver.recv().await
+                    && let Event::ReportTask(ReportTask {
                         task_id,
                         task_status,
                         sorted_output_ssts,
                         table_stats_change,
                         object_timestamps,
                     }) = item.event.unwrap()
-                    {
-                        if let Err(e) = hummock_manager_compact
+                        && let Err(e) = hummock_manager_compact
                             .report_compact_task(
                                 task_id,
                                 TaskStatus::try_from(task_status).unwrap(),
@@ -369,8 +368,6 @@ impl HummockMetaClient for MockHummockMetaClient {
                         {
                             tracing::error!(error = %e.as_report(), "report compact_tack fail");
                         }
-                    }
-                }
             }
         });
 

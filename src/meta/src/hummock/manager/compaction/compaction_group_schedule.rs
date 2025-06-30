@@ -531,8 +531,7 @@ impl HummockManager {
                 if let Some(partition_vnode_count) = partition_vnode_count
                     && table_ids.len() == 1
                     && table_ids == split_table_ids
-                {
-                    if let Err(err) = compaction_groups_txn.update_compaction_config(
+                    && let Err(err) = compaction_groups_txn.update_compaction_config(
                         &[*cg_id],
                         &[MutableConfig::SplitWeightByVnode(partition_vnode_count)],
                     ) {
@@ -542,7 +541,6 @@ impl HummockManager {
                             cg_id
                         );
                     }
-                }
             }
 
             new_version_delta.pre_apply();

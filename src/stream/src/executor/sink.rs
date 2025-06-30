@@ -379,8 +379,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 }
                             }
                             Mutation::ConnectorPropsChange(config) => {
-                                if let Some(map) = config.get(&sink_id.sink_id) {
-                                    if let Err(e) = rebuild_sink_tx
+                                if let Some(map) = config.get(&sink_id.sink_id)
+                                    && let Err(e) = rebuild_sink_tx
                                         .send(RebuildSinkMessage::UpdateConfig(map.clone()))
                                     {
                                         error!(
@@ -391,7 +391,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                             e.to_report_string(),
                                         ));
                                     }
-                                }
                             }
                             _ => (),
                         }
