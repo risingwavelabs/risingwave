@@ -510,16 +510,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 // the frontend derivation result.
                                 yield Message::Chunk(force_append_only(chunk))
                             }
-                            SinkType::Upsert => {
-                                // Making sure the optimization in https://github.com/risingwavelabs/risingwave/pull/12250 is correct,
-                                // it is needed to do the compaction here.
-                                for chunk in
-                                    StreamChunkCompactor::new(stream_key.clone(), vec![chunk])
-                                        .into_compacted_chunks()
-                                {
-                                    yield Message::Chunk(chunk)
-                                }
-                            }
+                            SinkType::Upsert => {}
                         }
                     }
                     Message::Barrier(barrier) => {
