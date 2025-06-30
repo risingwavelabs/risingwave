@@ -259,3 +259,6 @@
     sql parser error: expected end of statement, found: OFFSET
     LINE 1: SELECT * FROM t OFFSET 1 OFFSET 2
                                      ^
+- input: select aggregate:array_sum(v) from (values (3), (2), (1)) as t(v);
+  formatted_sql: SELECT AGGREGATE:array_sum(v) FROM (VALUES (3), (2), (1)) AS t (v)
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Function(Function { scalar_as_agg: true, name: ObjectName([Ident { value: "array_sum", quote_style: None }]), arg_list: FunctionArgList { distinct: false, args: [Unnamed(Expr(Identifier(Ident { value: "v", quote_style: None })))], variadic: false, order_by: [], ignore_nulls: false }, within_group: None, filter: None, over: None }))], from: [TableWithJoins { relation: Derived { lateral: false, subquery: Query { with: None, body: Values(Values([[Value(Number("3"))], [Value(Number("2"))], [Value(Number("1"))]])), order_by: [], limit: None, offset: None, fetch: None }, alias: Some(TableAlias { name: Ident { value: "t", quote_style: None }, columns: [Ident { value: "v", quote_style: None }] }) }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None, window: [] }), order_by: [], limit: None, offset: None, fetch: None })'

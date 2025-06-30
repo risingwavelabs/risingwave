@@ -205,6 +205,8 @@ impl Binder {
                 "?" => ExprType::JsonbExists,
                 "?|" => ExprType::JsonbExistsAny,
                 "?&" => ExprType::JsonbExistsAll,
+                // vector
+                "<->" => ExprType::L2Distance,
                 _ => bail_not_implemented!(issue = 112, "binary op: {:?}", name),
             },
             _ => bail_not_implemented!(issue = 112, "binary op: {:?}", op),

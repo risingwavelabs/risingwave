@@ -17,7 +17,6 @@ use std::collections::HashSet;
 use either::Either;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{FunctionId, ObjectId, TableId};
-use risingwave_pb::catalog::PbTable;
 use risingwave_pb::serverless_backfill_controller::{
     ProvisionRequest, node_group_controller_service_client,
 };
@@ -25,7 +24,6 @@ use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
-use crate::WithOptions;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::catalog::check_column_name_not_reserved;
 use crate::error::ErrorCode::{InvalidInputSyntax, ProtocolError};
@@ -40,6 +38,7 @@ use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::{SESSION_MANAGER, SessionImpl};
 use crate::stream_fragmenter::{GraphJobType, build_graph_with_strategy};
 use crate::utils::ordinal;
+use crate::{TableCatalog, WithOptions};
 
 pub const RESOURCE_GROUP_KEY: &str = "resource_group";
 pub const CLOUD_SERVERLESS_BACKFILL_ENABLED: &str = "cloud.serverless_backfill_enabled";
@@ -89,7 +88,7 @@ pub fn gen_create_mv_plan(
     name: ObjectName,
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
-) -> Result<(PlanRef, PbTable)> {
+) -> Result<(PlanRef, TableCatalog)> {
     let mut binder = Binder::new_for_stream(session);
     let bound = binder.bind_query(query)?;
     gen_create_mv_plan_bound(session, context, bound, name, columns, emit_mode)
@@ -103,7 +102,7 @@ pub fn gen_create_mv_plan_bound(
     name: ObjectName,
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
-) -> Result<(PlanRef, PbTable)> {
+) -> Result<(PlanRef, TableCatalog)> {
     if session.config().create_compaction_group_for_mv() {
         context.warn_to_user("The session variable CREATE_COMPACTION_GROUP_FOR_MV has been deprecated. It will not take effect.");
     }
@@ -136,11 +135,11 @@ pub fn gen_create_mv_plan_bound(
         definition,
         emit_on_window_close,
     )?;
-    let mut table = materialize.table().to_prost();
+
+    let mut table = materialize.table().clone();
+    table.owner = session.user_id();
 
     let plan: PlanRef = materialize.into();
-
-    table.owner = session.user_id();
 
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();
@@ -359,7 +358,13 @@ It only indicates the physical clustering of the data, which may improve the per
     let session = session.clone();
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_materialized_view(table, graph, dependencies, resource_group, if_not_exists)
+        .create_materialized_view(
+            table.to_prost(),
+            graph,
+            dependencies,
+            resource_group,
+            if_not_exists,
+        )
         .await?;
 
     Ok(PgResponse::empty_result(
