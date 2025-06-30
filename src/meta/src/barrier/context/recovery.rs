@@ -35,6 +35,7 @@ use crate::barrier::info::InflightStreamingJobInfo;
 use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor, StreamJobFragments, TableParallelism};
+use crate::stream::cdc::assign_cdc_table_snapshot_splits;
 use crate::stream::{
     JobParallelismTarget, JobReschedulePolicy, JobRescheduleTarget, JobResourceGroupTarget,
     RescheduleOptions, SourceChange, StreamFragmentGraph,
@@ -434,6 +435,17 @@ impl GlobalBarrierWorkerContextImpl {
 
                     // get split assignments for all actors
                     let source_splits = self.source_manager.list_assignments().await;
+                    // TODO(zw): optimize this heavy method
+                    let all_table_fragments = self
+                        .metadata_manager
+                        .catalog_controller
+                        .table_fragments()
+                        .await?;
+                    let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits(
+                        all_table_fragments.values(),
+                        self.env.meta_store_ref(),
+                    )
+                    .await?;
                     Ok(BarrierWorkerRuntimeInfoSnapshot {
                         active_streaming_nodes,
                         database_job_infos: info,
@@ -446,6 +458,7 @@ impl GlobalBarrierWorkerContextImpl {
                         background_jobs,
                         hummock_version_stats: self.hummock_manager.get_version_stats().await,
                         database_infos,
+                        cdc_table_snapshot_split_assignment,
                     })
                 }
             }
@@ -560,6 +573,18 @@ impl GlobalBarrierWorkerContextImpl {
 
         // get split assignments for all actors
         let source_splits = self.source_manager.list_assignments().await;
+
+        // TODO(zw): optimize this heavy method
+        let all_table_fragments = self
+            .metadata_manager
+            .catalog_controller
+            .table_fragments()
+            .await?;
+        let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits(
+            all_table_fragments.values(),
+            self.env.meta_store_ref(),
+        )
+        .await?;
         Ok(Some(DatabaseRuntimeInfoSnapshot {
             job_infos: info,
             state_table_committed_epochs,
@@ -569,6 +594,7 @@ impl GlobalBarrierWorkerContextImpl {
             fragment_relations,
             source_splits,
             background_jobs,
+            cdc_table_snapshot_split_assignment,
         }))
     }
 }

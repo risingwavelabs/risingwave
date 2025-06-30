@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub(crate) mod cdc;
 mod scale;
 mod sink;
 mod source_manager;

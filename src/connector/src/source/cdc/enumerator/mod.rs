@@ -127,6 +127,7 @@ where
 
 pub trait ListCdcSplits {
     type CdcSourceType: CdcSourceTypeTrait;
+    /// Generates a single split for shared source.
     fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>>;
 }
 

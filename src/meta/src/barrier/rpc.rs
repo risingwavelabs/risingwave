@@ -30,6 +30,9 @@ use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_connector::source::SplitImpl;
+use risingwave_connector::source::cdc::{
+    CdcTableSnapshotSplitAssignment, build_pb_actor_cdc_table_snapshot_splits,
+};
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{HostAddress, WorkerNode};
 use risingwave_pb::hummock::HummockVersionStats;
@@ -466,6 +469,7 @@ impl ControlStreamManager {
         mut subscription_info: InflightSubscriptionInfo,
         is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
+        cdc_table_snapshot_split_assignment: &mut CdcTableSnapshotSplitAssignment,
     ) -> MetaResult<DatabaseInitialBarrierCollector> {
         self.add_partial_graph(database_id, None);
         let source_split_assignments = jobs
@@ -479,11 +483,25 @@ impl ControlStreamManager {
                     .map(|splits| (actor_id, splits))
             })
             .collect();
+        let database_cdc_table_snapshot_split_assignment = jobs
+            .values()
+            .flat_map(|job| job.fragment_infos())
+            .flat_map(|info| info.actors.keys())
+            .filter_map(|actor_id| {
+                let actor_id = *actor_id as ActorId;
+                cdc_table_snapshot_split_assignment
+                    .remove(&actor_id)
+                    .map(|splits| (actor_id, splits))
+            })
+            .collect();
         let mutation = Mutation::Add(AddMutation {
             // Actors built during recovery is not treated as newly added actors.
             actor_dispatchers: Default::default(),
             added_actors: Default::default(),
             actor_splits: build_actor_connector_splits(&source_split_assignments),
+            actor_cdc_table_snapshot_splits: build_pb_actor_cdc_table_snapshot_splits(
+                database_cdc_table_snapshot_split_assignment,
+            ),
             pause: is_paused,
             subscriptions_to_add: Default::default(),
             // TODO(kwannoel): recover using backfill order plan

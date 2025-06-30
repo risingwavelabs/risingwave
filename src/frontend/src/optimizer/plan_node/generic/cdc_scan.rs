@@ -22,8 +22,8 @@ use risingwave_common::catalog::{CdcTableDesc, ColumnDesc, Field, Schema};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_connector::source::cdc::{
-    CDC_BACKFILL_ENABLE_KEY, CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY,
-    CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY,
+    CDC_BACKFILL_ENABLE_KEY, CDC_BACKFILL_NUM_ROWS_PER_SPLIT, CDC_BACKFILL_PARALLELISM,
+    CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY, CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY,
 };
 use risingwave_pb::stream_plan::StreamCdcScanOptions;
 
@@ -56,6 +56,8 @@ pub struct CdcScanOptions {
     pub disable_backfill: bool,
     pub snapshot_barrier_interval: u32,
     pub snapshot_batch_size: u32,
+    pub backfill_parallelism: u32,
+    pub backfill_num_rows_per_split: u64,
 }
 
 impl Default for CdcScanOptions {
@@ -64,6 +66,8 @@ impl Default for CdcScanOptions {
             disable_backfill: false,
             snapshot_barrier_interval: 1,
             snapshot_batch_size: 1000,
+            backfill_parallelism: 0,
+            backfill_num_rows_per_split: 0,
         }
     }
 }
@@ -91,6 +95,19 @@ impl CdcScanOptions {
                 })?;
         };
 
+        if let Some(backfill_parallelism) = with_options.get(CDC_BACKFILL_PARALLELISM) {
+            scan_options.backfill_parallelism = u32::from_str(backfill_parallelism)
+                .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_PARALLELISM))?;
+        }
+
+        if let Some(backfill_num_rows_per_split) = with_options.get(CDC_BACKFILL_NUM_ROWS_PER_SPLIT)
+        {
+            scan_options.backfill_num_rows_per_split = u64::from_str(backfill_num_rows_per_split)
+                .map_err(|_| {
+                anyhow!("Invalid value for {}", CDC_BACKFILL_NUM_ROWS_PER_SPLIT)
+            })?;
+        }
+
         Ok(scan_options)
     }
 
@@ -99,6 +116,8 @@ impl CdcScanOptions {
             disable_backfill: self.disable_backfill,
             snapshot_barrier_interval: self.snapshot_barrier_interval,
             snapshot_batch_size: self.snapshot_batch_size,
+            backfill_parallelism: self.backfill_parallelism,
+            backfill_num_rows_per_split: self.backfill_num_rows_per_split,
         }
     }
 }

@@ -165,6 +165,10 @@ pub type DispatcherMessageStreamItem = StreamExecutorResult<DispatcherMessage>;
 pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 
 pub use risingwave_common::util::epoch::task_local::{curr_epoch, epoch, prev_epoch};
+use risingwave_connector::source::cdc::{
+    CdcTableSnapshotSplitAssignment, build_actor_cdc_table_snapshot_splits,
+    build_pb_actor_cdc_table_snapshot_splits,
+};
 use risingwave_pb::stream_plan::stream_message_batch::{BarrierBatch, StreamMessageBatch};
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 
@@ -301,6 +305,7 @@ pub struct AddMutation {
     pub subscriptions_to_add: Vec<(TableId, u32)>,
     /// nodes which should start backfill
     pub backfill_nodes_to_pause: HashSet<FragmentId>,
+    pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignment,
 }
 
 /// See [`PbMutation`] for the semantics of each mutation.
@@ -710,6 +715,7 @@ impl Mutation {
                 pause,
                 subscriptions_to_add,
                 backfill_nodes_to_pause,
+                actor_cdc_table_snapshot_splits,
             }) => PbMutation::Add(PbAddMutation {
                 actor_dispatchers: adds
                     .iter()
@@ -733,6 +739,9 @@ impl Mutation {
                     })
                     .collect(),
                 backfill_nodes_to_pause: backfill_nodes_to_pause.iter().copied().collect(),
+                actor_cdc_table_snapshot_splits: build_pb_actor_cdc_table_snapshot_splits(
+                    actor_cdc_table_snapshot_splits.clone(),
+                ),
             }),
             Mutation::SourceChangeSplit(changes) => PbMutation::Splits(SourceChangeSplitMutation {
                 actor_splits: changes
@@ -886,6 +895,9 @@ impl Mutation {
                     )
                     .collect(),
                 backfill_nodes_to_pause: add.backfill_nodes_to_pause.iter().copied().collect(),
+                actor_cdc_table_snapshot_splits: build_actor_cdc_table_snapshot_splits(
+                    add.actor_cdc_table_snapshot_splits.clone(),
+                ),
             }),
 
             PbMutation::Splits(s) => {

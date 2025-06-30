@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use anyhow::{Context, anyhow};
 use chrono::{DateTime, NaiveDateTime};
 use futures::stream::BoxStream;
-use futures::{StreamExt, pin_mut};
+use futures::{StreamExt, pin_mut, stream};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use mysql_async::prelude::*;
@@ -38,9 +38,10 @@ use sqlx::mysql::MySqlConnectOptions;
 use thiserror_ext::AsReport;
 
 use crate::error::{ConnectorError, ConnectorResult};
+use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
-    CdcOffset, CdcOffsetParseFunc, DebeziumOffset, ExternalTableConfig, ExternalTableReader,
-    SchemaTableName, SslMode, mysql_row_to_owned_row,
+    CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, DebeziumOffset,
+    ExternalTableConfig, ExternalTableReader, SchemaTableName, SslMode, mysql_row_to_owned_row,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -377,6 +378,14 @@ impl ExternalTableReader for MySqlExternalTableReader {
 
     async fn disconnect(self) -> ConnectorResult<()> {
         self.pool.disconnect().await.map_err(|e| e.into())
+    }
+
+    fn get_parallel_cdc_splits(
+        &self,
+        _options: CdcTableSnapshotSplitOption,
+    ) -> BoxStream<'_, ConnectorResult<CdcTableSnapshotSplit>> {
+        // TODO(zw): impl
+        stream::empty::<ConnectorResult<CdcTableSnapshotSplit>>().boxed()
     }
 }
 
