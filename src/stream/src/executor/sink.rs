@@ -567,6 +567,14 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         let mut log_reader = log_reader
             .transform_chunk(move |chunk| {
+                // NOTE(kwannoel):
+                // After the optimization in https://github.com/risingwavelabs/risingwave/pull/12250,
+                // DELETEs will be sequenced before INSERTs in JDBC sinks and PG rust sink.
+                // This is because there's a risk that adjacent chunks with DELETEs on the same PK
+                // will get merged into a single chunk, since the logstore format doesn't preserve
+                // chunk boundaries.
+                // Then we will have double DELETEs followed by unspecified sequence of INSERTs,
+                // and lead to inconsistent data downstream.
                 let chunk = if downstream_pk.is_empty() {
                     chunk
                 } else {
