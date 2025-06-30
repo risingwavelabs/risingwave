@@ -2315,78 +2315,54 @@ impl CatalogController {
         let mut rate_limits = Vec::new();
         for (fragment_id, job_id, fragment_type_mask, stream_node) in fragments {
             let stream_node = stream_node.to_protobuf();
-            let mut rate_limit = None;
-            let mut node_name = None;
-
             visit_stream_node_body(&stream_node, |node| {
+                let mut rate_limit = None;
+                let mut node_name = None;
+
                 match node {
                     // source rate limit
                     PbNodeBody::Source(node) => {
                         if let Some(node_inner) = &node.source_inner {
-                            debug_assert!(
-                                rate_limit.is_none(),
-                                "one fragment should only have 1 rate limit node"
-                            );
                             rate_limit = node_inner.rate_limit;
                             node_name = Some("SOURCE");
                         }
                     }
                     PbNodeBody::StreamFsFetch(node) => {
                         if let Some(node_inner) = &node.node_inner {
-                            debug_assert!(
-                                rate_limit.is_none(),
-                                "one fragment should only have 1 rate limit node"
-                            );
                             rate_limit = node_inner.rate_limit;
                             node_name = Some("FS_FETCH");
                         }
                     }
                     // backfill rate limit
                     PbNodeBody::SourceBackfill(node) => {
-                        debug_assert!(
-                            rate_limit.is_none(),
-                            "one fragment should only have 1 rate limit node"
-                        );
                         rate_limit = node.rate_limit;
                         node_name = Some("SOURCE_BACKFILL");
                     }
                     PbNodeBody::StreamScan(node) => {
-                        debug_assert!(
-                            rate_limit.is_none(),
-                            "one fragment should only have 1 rate limit node"
-                        );
                         rate_limit = node.rate_limit;
                         node_name = Some("STREAM_SCAN");
                     }
                     PbNodeBody::StreamCdcScan(node) => {
-                        debug_assert!(
-                            rate_limit.is_none(),
-                            "one fragment should only have 1 rate limit node"
-                        );
                         rate_limit = node.rate_limit;
                         node_name = Some("STREAM_CDC_SCAN");
                     }
                     PbNodeBody::Sink(node) => {
-                        debug_assert!(
-                            rate_limit.is_none(),
-                            "one fragment should only have 1 rate limit node"
-                        );
                         rate_limit = node.rate_limit;
                         node_name = Some("SINK");
                     }
                     _ => {}
                 }
-            });
 
-            if let Some(rate_limit) = rate_limit {
-                rate_limits.push(RateLimitInfo {
-                    fragment_id: fragment_id as u32,
-                    job_id: job_id as u32,
-                    fragment_type_mask: fragment_type_mask as u32,
-                    rate_limit,
-                    node_name: node_name.unwrap().to_owned(),
-                });
-            }
+                if let Some(rate_limit) = rate_limit {
+                    rate_limits.push(RateLimitInfo {
+                        fragment_id: fragment_id as u32,
+                        job_id: job_id as u32,
+                        fragment_type_mask: fragment_type_mask as u32,
+                        rate_limit,
+                        node_name: node_name.unwrap().to_owned(),
+                    });
+                }
+            });
         }
 
         Ok(rate_limits)
