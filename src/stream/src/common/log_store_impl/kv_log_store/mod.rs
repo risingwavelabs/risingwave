@@ -496,8 +496,6 @@ pub struct KvLogStoreFactory<S: StateStore> {
     identity: String,
 
     pk_info: &'static KvLogStorePkInfo,
-
-    downstream_pk_indices: Vec<usize>,
 }
 
 impl<S: StateStore> KvLogStoreFactory<S> {
@@ -511,7 +509,6 @@ impl<S: StateStore> KvLogStoreFactory<S> {
         metrics: KvLogStoreMetrics,
         identity: impl Into<String>,
         pk_info: &'static KvLogStorePkInfo,
-        downstream_pk_indices: Vec<usize>,
     ) -> Self {
         Self {
             state_store,
@@ -522,7 +519,6 @@ impl<S: StateStore> KvLogStoreFactory<S> {
             metrics,
             identity: identity.into(),
             pk_info,
-            downstream_pk_indices,
         }
     }
 }
@@ -572,7 +568,6 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
             self.metrics.clone(),
             pause_rx,
             self.identity.clone(),
-            self.downstream_pk_indices.clone(),
         );
 
         let writer = KvLogStoreWriter::new(
@@ -652,7 +647,6 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            vec![],
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -771,7 +765,6 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            vec![],
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -868,7 +861,6 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            vec![],
         );
         let (mut reader, mut writer) = factory.build().await;
         test_env
@@ -965,7 +957,6 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            vec![],
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -1088,7 +1079,6 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            vec![],
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -1188,7 +1178,6 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            vec![],
         );
         let factory2 = KvLogStoreFactory::new(
             test_env.storage.clone(),
@@ -1199,7 +1188,6 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            vec![],
         );
         let (mut reader1, mut writer1) = factory1.build().await;
         let (mut reader2, mut writer2) = factory2.build().await;
@@ -1338,7 +1326,6 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            vec![],
         );
         let (mut reader, mut writer) = factory.build().await;
         test_env
@@ -1411,7 +1398,6 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            vec![],
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -1561,7 +1547,6 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            vec![],
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -1681,7 +1666,6 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            vec![],
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -1752,7 +1736,6 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            vec![],
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -1926,7 +1909,6 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            vec![],
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -2015,7 +1997,6 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            vec![],
         );
         let (mut reader, mut writer) = factory.build().await;
         test_env
@@ -2089,7 +2070,6 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            vec![],
         );
         let (mut reader, mut writer) = factory.build().await;
         test_env

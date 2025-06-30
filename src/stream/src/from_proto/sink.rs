@@ -214,7 +214,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 .filter(|col| !col.is_hidden)
                 .map(|col| col.column_desc.clone())
                 .collect(),
-            downstream_pk: downstream_pk.clone(),
+            downstream_pk,
             sink_type,
             format_desc: format_desc_with_secret,
             db_name,
@@ -285,7 +285,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     metrics,
                     log_store_identity,
                     pk_info,
-                    downstream_pk,
                 );
 
                 SinkExecutor::new(

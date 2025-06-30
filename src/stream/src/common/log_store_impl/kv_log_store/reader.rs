@@ -45,7 +45,6 @@ use tokio::sync::{oneshot, watch};
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
 
-use crate::common::compact_chunk::merge_chunk_row;
 use crate::common::log_store_impl::kv_log_store::buffer::{
     LogStoreBufferItem, LogStoreBufferReceiver,
 };
@@ -191,12 +190,9 @@ pub struct KvLogStoreReader<S: StateStoreRead> {
     identity: String,
 
     rewind_delay: RewindDelay,
-
-    downstream_pk_indices: Vec<usize>,
 }
 
 impl<S: StateStoreRead> KvLogStoreReader<S> {
-    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         state: LogStoreReadState<S>,
         rx: LogStoreBufferReceiver,
@@ -205,7 +201,6 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
         metrics: KvLogStoreMetrics,
         is_paused: watch::Receiver<bool>,
         identity: String,
-        downstream_pk_indices: Vec<usize>,
     ) -> Self {
         let rewind_delay = RewindDelay::new(&metrics);
         Self {
@@ -221,7 +216,6 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
             is_paused,
             identity,
             rewind_delay,
-            downstream_pk_indices,
         }
     }
 }
@@ -376,8 +370,82 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
             range_start,
         )
     }
+}
 
-    async fn next_item_inner(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
+impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
+    async fn start_from(&mut self, start_offset: Option<u64>) -> LogStoreResult<()> {
+        // init or rewind must be executed before start_from.
+        let aligned_range_start =
+            if let KvLogStoreReaderFutureState::Reset(aligned_range_start) = &self.future_state {
+                aligned_range_start
+            } else {
+                panic!("future state is not Reset");
+            };
+
+        // Construct the log reader's read stream based on start_offset, aligned_range_start or persisted_epoch.
+        let range_start = match (start_offset, aligned_range_start) {
+            (Some(rewind_start_offset), _) => {
+                tracing::info!(
+                    "Sink error occurred. Rebuild the log reader stream from the rewind start offset returned by the coordinator."
+                );
+                LogStoreReadStateStreamRangeStart::LastPersistedEpoch(rewind_start_offset)
+            }
+            (None, Some(aligned_range_start)) => aligned_range_start.clone(),
+            (None, None) => {
+                // still consuming persisted state store data
+                let persisted_epoch =
+                    self.truncate_offset
+                        .map(|truncate_offset| match truncate_offset {
+                            TruncateOffset::Chunk { epoch, .. } => epoch.prev_epoch(),
+                            TruncateOffset::Barrier { epoch } => epoch,
+                        });
+
+                match persisted_epoch {
+                    Some(last_persisted_epoch) => {
+                        LogStoreReadStateStreamRangeStart::LastPersistedEpoch(last_persisted_epoch)
+                    }
+                    None => LogStoreReadStateStreamRangeStart::Unbounded,
+                }
+            }
+        };
+        self.future_state = KvLogStoreReaderFutureState::ReadStateStoreStream(
+            self.read_persisted_log_store(range_start).await?,
+        );
+        self.rx.rewind(start_offset);
+        Ok(())
+    }
+
+    async fn init(&mut self) -> LogStoreResult<()> {
+        if let Some(init_epoch_rx) = self.init_epoch_rx.take() {
+            let init_epoch = init_epoch_rx
+                .await
+                .map_err(|_| anyhow!("should get the first epoch"))?;
+            let first_write_epoch = init_epoch.curr;
+
+            assert_eq!(
+                self.first_write_epoch.replace(first_write_epoch),
+                None,
+                "should not init twice"
+            );
+        } else {
+            let (new_vnode_bitmap, write_epoch) = self
+                .update_vnode_bitmap_rx
+                .recv()
+                .await
+                .ok_or_else(|| anyhow!("failed to receive update vnode"))?;
+            self.state.serde.update_vnode_bitmap(new_vnode_bitmap);
+            self.first_write_epoch = Some(write_epoch);
+        };
+
+        self.future_state = KvLogStoreReaderFutureState::Reset(None);
+        self.latest_offset = None;
+        self.truncate_offset = None;
+        self.rewind_delay = RewindDelay::new(&self.metrics);
+
+        Ok(())
+    }
+
+    async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
         while *self.is_paused.borrow_and_update() {
             info!("next_item of {} get blocked by is_pause", self.identity);
             self.is_paused
@@ -532,106 +600,6 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
                     },
                 )
             }
-        })
-    }
-}
-
-impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
-    async fn start_from(&mut self, start_offset: Option<u64>) -> LogStoreResult<()> {
-        // init or rewind must be executed before start_from.
-        let aligned_range_start =
-            if let KvLogStoreReaderFutureState::Reset(aligned_range_start) = &self.future_state {
-                aligned_range_start
-            } else {
-                panic!("future state is not Reset");
-            };
-
-        // Construct the log reader's read stream based on start_offset, aligned_range_start or persisted_epoch.
-        let range_start = match (start_offset, aligned_range_start) {
-            (Some(rewind_start_offset), _) => {
-                tracing::info!(
-                    "Sink error occurred. Rebuild the log reader stream from the rewind start offset returned by the coordinator."
-                );
-                LogStoreReadStateStreamRangeStart::LastPersistedEpoch(rewind_start_offset)
-            }
-            (None, Some(aligned_range_start)) => aligned_range_start.clone(),
-            (None, None) => {
-                // still consuming persisted state store data
-                let persisted_epoch =
-                    self.truncate_offset
-                        .map(|truncate_offset| match truncate_offset {
-                            TruncateOffset::Chunk { epoch, .. } => epoch.prev_epoch(),
-                            TruncateOffset::Barrier { epoch } => epoch,
-                        });
-
-                match persisted_epoch {
-                    Some(last_persisted_epoch) => {
-                        LogStoreReadStateStreamRangeStart::LastPersistedEpoch(last_persisted_epoch)
-                    }
-                    None => LogStoreReadStateStreamRangeStart::Unbounded,
-                }
-            }
-        };
-        self.future_state = KvLogStoreReaderFutureState::ReadStateStoreStream(
-            self.read_persisted_log_store(range_start).await?,
-        );
-        self.rx.rewind(start_offset);
-        Ok(())
-    }
-
-    async fn init(&mut self) -> LogStoreResult<()> {
-        if let Some(init_epoch_rx) = self.init_epoch_rx.take() {
-            let init_epoch = init_epoch_rx
-                .await
-                .map_err(|_| anyhow!("should get the first epoch"))?;
-            let first_write_epoch = init_epoch.curr;
-
-            assert_eq!(
-                self.first_write_epoch.replace(first_write_epoch),
-                None,
-                "should not init twice"
-            );
-        } else {
-            let (new_vnode_bitmap, write_epoch) = self
-                .update_vnode_bitmap_rx
-                .recv()
-                .await
-                .ok_or_else(|| anyhow!("failed to receive update vnode"))?;
-            self.state.serde.update_vnode_bitmap(new_vnode_bitmap);
-            self.first_write_epoch = Some(write_epoch);
-        };
-
-        self.future_state = KvLogStoreReaderFutureState::Reset(None);
-        self.latest_offset = None;
-        self.truncate_offset = None;
-        self.rewind_delay = RewindDelay::new(&self.metrics);
-
-        Ok(())
-    }
-
-    async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
-        // NOTE(kwannoel):
-        // After the optimization in https://github.com/risingwavelabs/risingwave/pull/12250,
-        // DELETEs will be sequenced before INSERTs in JDBC sinks and PG rust sink.
-        // as such we must do a compaction over the output,
-        // otherwise there's a risk that adjacent chunks with DELETEs on the same PK
-        // will have double DELETEs followed by unspecified sequence of INSERTs,
-        // and lead to inconsistent data downstream.
-        self.next_item_inner().await.map(|(epoch, item)| {
-            let item = match item {
-                LogStoreReadItem::StreamChunk { chunk, chunk_id }
-                    // downstream_pk_indices not empty
-                    // implies that the sink is a upsert sink
-                    if !self.downstream_pk_indices.is_empty() =>
-                {
-                    LogStoreReadItem::StreamChunk {
-                        chunk: merge_chunk_row(chunk, &self.downstream_pk_indices),
-                        chunk_id,
-                    }
-                }
-                other => other,
-            };
-            (epoch, item)
         })
     }
 
