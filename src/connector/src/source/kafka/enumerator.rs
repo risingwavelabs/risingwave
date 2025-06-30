@@ -450,11 +450,24 @@ impl KafkaSplitEnumerator {
                     );
                     result.insert(elem.partition(), Some(high_watermark - 1)); // align to Latest
                 }
-                Offset::Invalid | Offset::Beginning | Offset::Stored | Offset::OffsetTail(_) => {
+                Offset::Beginning => {
+                    let (low, _) = watermarks.get(&elem.partition()).unwrap();
+                    tracing::info!(
+                        source_id = self.context.info.source_id,
+                        "all message in partition {} is after timestamp {} (ms), start from earliest",
+                        elem.partition(),
+                        time,
+                    );
+                    result.insert(elem.partition(), Some(low - 1)); // align to Earliest
+                }
+                err_offset @ Offset::Invalid
+                | err_offset @ Offset::Stored
+                | err_offset @ Offset::OffsetTail(_) => {
                     tracing::error!(
                         source_id = self.context.info.source_id,
-                        "got invalid offset for partition {}",
-                        elem.partition()
+                        "got invalid offset for partition {}: {err_offset:?}",
+                        elem.partition(),
+                        err_offset = err_offset,
                     );
                     return Err(KafkaError::OffsetFetch(RDKafkaErrorCode::NoOffset));
                 }
