@@ -182,7 +182,7 @@ mixtrics = { version = "0.2", features = ["prometheus"] }
 mysql_async = { version = "0.34", default-features = false, features = [
     "default",
 ] }
-opendal = "0.49"
+opendal = "0.53"
 opentelemetry = "0.29"
 opentelemetry-otlp = { version = "0.29", features = ["grpc-tonic"] }
 opentelemetry-semantic-conventions = "0.16"

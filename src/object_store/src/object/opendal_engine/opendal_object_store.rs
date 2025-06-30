@@ -22,7 +22,7 @@ use futures::{StreamExt, stream};
 use opendal::layers::{RetryLayer, TimeoutLayer};
 use opendal::raw::BoxedStaticFuture;
 use opendal::services::Memory;
-use opendal::{Execute, Executor, Metakey, Operator, Writer};
+use opendal::{Execute, Executor, Operator, Writer};
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::range::RangeBoundsExt;
 use thiserror_ext::AsReport;
@@ -227,7 +227,7 @@ impl ObjectStore for OpendalObjectStore {
     /// Deletes the objects with the given paths permanently from the storage. If an object
     /// specified in the request is not found, it will be considered as successfully deleted.
     async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
-        self.op.remove(paths.to_vec()).await?;
+        self.op.delete_iter(paths.to_vec()).await?;
         Ok(())
     }
 
@@ -237,11 +237,7 @@ impl ObjectStore for OpendalObjectStore {
         start_after: Option<String>,
         limit: Option<usize>,
     ) -> ObjectResult<ObjectMetadataIter> {
-        let mut object_lister = self
-            .op
-            .lister_with(prefix)
-            .recursive(true)
-            .metakey(Metakey::ContentLength);
+        let mut object_lister = self.op.lister_with(prefix).recursive(true);
         if let Some(start_after) = start_after {
             object_lister = object_lister.start_after(&start_after);
         }
@@ -347,11 +343,9 @@ impl OpendalStreamingUploader {
         media_type: &'static str,
     ) -> ObjectResult<Self> {
         let monitored_execute = OpendalStreamingUploaderExecute::new(metrics, media_type);
+        let executor = Executor::with(monitored_execute);
+        op.update_executor(|_| executor);
 
-        // The layer specified first will be executed first.
-        // `TimeoutLayer` must be specified before `RetryLayer`.
-        // Otherwise, it will lead to bad state inside OpenDAL and panic.
-        // See https://docs.rs/opendal/latest/opendal/layers/struct.RetryLayer.html#panics
         let writer = op
             .clone()
             .layer(TimeoutLayer::new().with_io_timeout(Duration::from_millis(
@@ -367,7 +361,6 @@ impl OpendalStreamingUploader {
             )
             .writer_with(&path)
             .concurrent(config.opendal_upload_concurrency)
-            .executor(Executor::with(monitored_execute))
             .await?;
         Ok(Self {
             writer,

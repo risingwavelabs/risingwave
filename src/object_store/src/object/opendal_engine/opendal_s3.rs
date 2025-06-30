@@ -44,11 +44,11 @@ impl OpendalObjectStore {
         }
 
         let http_client = Self::new_http_client(&config)?;
-        builder = builder.http_client(http_client);
 
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .finish();
+        op.update_http_client(|_| http_client);
 
         Ok(Self {
             op,
@@ -84,11 +84,13 @@ impl OpendalObjectStore {
             .access_key_id(access_key_id)
             .secret_access_key(secret_access_key)
             .endpoint(&format!("{}{}", endpoint_prefix, address))
-            .disable_config_load()
-            .http_client(Self::new_http_client(&config)?);
+            .disable_config_load();
+
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .finish();
+        let http_client = Self::new_http_client(&config)?;
+        op.update_http_client(|_| http_client);
 
         Ok(Self {
             op,
@@ -108,7 +110,7 @@ impl OpendalObjectStore {
         if let Some(nodelay) = config.s3.nodelay.as_ref() {
             client_builder = client_builder.tcp_nodelay(*nodelay);
         }
-
+        #[allow(deprecated)]
         Ok(HttpClient::build(client_builder)?)
     }
 }
