@@ -21,15 +21,15 @@ tonic = { workspace = true }
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
-[dev-dependencies]
-static_assertions = "1"
-
 [build-dependencies]
 fs-err = "3.1"
 pbjson-build = "0.7"
 prost-build = { workspace = true }
 tonic-build = { workspace = true }
 walkdir = "2"
+
+[dev-dependencies]
+static_assertions = "1"
 
 [lints]
 workspace = true

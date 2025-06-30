@@ -7,6 +7,10 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[[bin]]
+name = "risingwave_state_cleaning_test"
+path = "src/bin/main.rs"
+
 [dependencies]
 anyhow = "1"
 clap = { workspace = true }
@@ -23,10 +27,6 @@ tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
-
-[[bin]]
-name = "risingwave_state_cleaning_test"
-path = "src/bin/main.rs"
 
 [lints]
 workspace = true
