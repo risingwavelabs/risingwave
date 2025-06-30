@@ -582,10 +582,13 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                 }
             }
 
+            let mut realigned_logstore = false;
+
             #[for_await]
             for message in input {
                 match message? {
                     Message::Barrier(barrier) => {
+                        let is_checkpoint = barrier.is_checkpoint();
                         let mut progress = LogStoreVnodeProgress::None;
                         progress.apply_aligned(
                             read_state.vnodes().clone(),
@@ -599,6 +602,10 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                             barrier.as_update_vnode_bitmap(self.actor_context.id);
                         yield Message::Barrier(barrier);
                         post_seal.post_yield_barrier(update_vnode_bitmap).await?;
+                        if !realigned_logstore && is_checkpoint {
+                            realigned_logstore = true;
+                            tracing::info!("realigned logstore");
+                        }
                     }
                     Message::Chunk(chunk) => {
                         yield Message::Chunk(chunk);
@@ -903,6 +910,11 @@ impl<S: StateStoreRead> ReadFuture<S> {
                             flushed,
                             cardinality = chunk.cardinality(),
                             "read buffered chunk of size"
+                        );
+                        progress.apply_aligned(
+                            read_state.vnodes().clone(),
+                            item_epoch,
+                            Some(end_seq_id),
                         );
                         return Ok(chunk);
                     }
