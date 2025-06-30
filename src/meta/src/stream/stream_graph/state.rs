@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash as _, Hasher as _};
 
 use itertools::Itertools;
@@ -25,7 +25,7 @@ use strum::IntoDiscriminant;
 
 /// Helper type for describing a [`StreamNode`] in error messages.
 #[derive(thiserror::Error, thiserror_ext::Macro, Debug)]
-enum Error {
+pub enum Error {
     #[error("invalid graph: {0}")]
     InvalidGraph(#[message] String),
     #[error("failed to match: {0}")]
@@ -42,13 +42,17 @@ struct Node {
     body: NodeBody,
 }
 
-struct Graph {
+pub struct Graph {
     nodes: HashMap<Id, Node>,
     downstreams: HashMap<Id, Vec<Id>>,
     upstreams: HashMap<Id, Vec<Id>>,
 }
 
 impl Graph {
+    fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
     fn topo_order(&self) -> Result<Vec<Id>> {
         let mut topo = Vec::new();
         let mut downstream_cnts = HashMap::new();
@@ -94,6 +98,7 @@ impl Graph {
             let upstream_fps = self.upstreams[&node_id]
                 .iter()
                 .map(|id| *fps.get(id).unwrap())
+                .sorted() // ignore order
                 .collect_vec();
 
             let mut hasher = DefaultHasher::new();
@@ -118,11 +123,19 @@ struct Match {
     table_matches: HashMap<u32, u32>,
 }
 
-struct Mapping {
+struct Matches {
     inner: HashMap<Id, Match>,
+    matched_targets: HashSet<Id>,
 }
 
-impl Mapping {
+impl Matches {
+    fn new() -> Self {
+        Self {
+            inner: HashMap::new(),
+            matched_targets: HashSet::new(),
+        }
+    }
+
     fn target(&self, u: Id) -> Option<Id> {
         self.inner.get(&u).map(|m| m.target)
     }
@@ -135,7 +148,11 @@ impl Mapping {
         self.inner.contains_key(&u)
     }
 
-    fn try_add(&mut self, u: &Node, v: &Node) -> Result<()> {
+    fn target_used(&self, v: Id) -> bool {
+        self.matched_targets.contains(&v)
+    }
+
+    fn try_match(&mut self, u: &Node, v: &Node) -> Result<()> {
         if self.mapped(u.id) {
             panic!("node {} was already mapped", u.id);
         }
@@ -203,13 +220,126 @@ impl Mapping {
             table_matches,
         };
         self.inner.insert(u.id, m);
+        self.matched_targets.insert(v.id);
 
         Ok(())
     }
 
-    fn remove(&mut self, u: Id) {
-        self.inner
+    fn undo_match(&mut self, u: Id) {
+        let target = self
+            .inner
             .remove(&u)
-            .unwrap_or_else(|| panic!("node {} was not mapped", u));
+            .unwrap_or_else(|| panic!("node {} was not mapped", u))
+            .target;
+
+        let target_removed = self.matched_targets.remove(&target);
+        assert!(target_removed);
     }
+
+    fn into_table_mapping(self) -> HashMap<u32, u32> {
+        self.inner
+            .into_iter()
+            .flat_map(|(_, m)| m.table_matches.into_iter())
+            .collect()
+    }
+}
+
+fn match_graph(g1: &Graph, g2: &Graph) -> Result<Matches> {
+    if g1.len() != g2.len() {
+        bail_failed_to_match!("graphs have different number of nodes");
+    }
+
+    let fps1 = g1.fingerprints()?;
+    let fps2 = g2.fingerprints()?;
+
+    let mut fp_cand = HashMap::with_capacity(g1.len());
+    for (&u, &f1) in &fps1 {
+        for (&v, &f2) in &fps2 {
+            if f1 == f2 {
+                fp_cand.entry(u).or_insert_with(HashSet::new).insert(v);
+            }
+        }
+    }
+
+    fn dfs(
+        g1: &Graph,
+        g2: &Graph,
+        fp_cand: &mut HashMap<Id, HashSet<Id>>,
+        matches: &mut Matches,
+    ) -> Result<()> {
+        if matches.len() == g1.len() {
+            // We are done.
+            return Ok(());
+        }
+
+        // Choose node with fewest remaining candidates that's unmapped.
+        let (&u, u_cands) = fp_cand
+            .iter()
+            .filter(|(u, _)| !matches.mapped(**u))
+            .min_by_key(|(_, cands)| cands.len())
+            .unwrap();
+        let u_cands = u_cands.clone();
+
+        for v in u_cands {
+            // Skip if v is already used.
+            if matches.target_used(v) {
+                continue;
+            }
+
+            // For each upstream of u, if it's already matched, then it must be matched to the corresponding v's upstream.
+            let upstreams = g1.upstreams[&u].clone();
+            for u_upstream in upstreams {
+                if let Some(v_upstream) = matches.target(u_upstream) {
+                    if !g2.upstreams[&v].contains(&v_upstream) {
+                        // Not a valid match.
+                        continue;
+                    }
+                }
+            }
+            // Same for downstream of u.
+            let downstreams = g1.downstreams[&u].clone();
+            for u_downstream in downstreams {
+                if let Some(v_downstream) = matches.target(u_downstream) {
+                    if !g2.downstreams[&v].contains(&v_downstream) {
+                        // Not a valid match.
+                        continue;
+                    }
+                }
+            }
+
+            match matches.try_match(&g1.nodes[&u], &g2.nodes[&v]) {
+                Ok(_) => {
+                    let fp_cand_clone = fp_cand.clone();
+
+                    // v cannot be a candidate for any other u. Remove it.
+                    for (_, u_cands) in fp_cand.iter_mut() {
+                        u_cands.remove(&v);
+                    }
+
+                    // Try to match the rest.
+                    match dfs(g1, g2, fp_cand, matches) {
+                        Ok(_) => return Ok(()),
+                        Err(_err) => {} // TODO: record error
+                    }
+
+                    // Backtrack.
+                    *fp_cand = fp_cand_clone;
+                    matches.undo_match(u);
+                }
+
+                Err(_err) => {} // TODO: record error
+            }
+        }
+
+        bail_failed_to_match!("no valid match found for node {u} ({})", g1.nodes[&u].body);
+    }
+
+    let mut matches = Matches::new();
+    dfs(g1, g2, &mut fp_cand, &mut matches)?;
+    Ok(matches)
+}
+
+// TODO: make it `pub(super)`
+pub fn match_graph_internal_tables(g1: &Graph, g2: &Graph) -> Result<HashMap<u32, u32>> {
+    match_graph(g1, g2).map(|matches| matches.into_table_mapping())
 }
