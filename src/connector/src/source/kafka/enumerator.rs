@@ -22,7 +22,8 @@ use moka::future::Cache as MokaCache;
 use moka::ops::compute::Op;
 use rdkafka::admin::{AdminClient, AdminOptions};
 use rdkafka::consumer::{BaseConsumer, Consumer};
-use rdkafka::error::KafkaResult;
+use rdkafka::error::{KafkaError, KafkaResult};
+use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::{ClientConfig, Offset, TopicPartitionList};
 use risingwave_common::bail;
 use risingwave_common::metrics::LabelGuardedIntGauge;
@@ -288,13 +289,17 @@ impl KafkaSplitEnumerator {
             )
         })?;
 
+        // Watermark here has nothing to do with watermark in streaming processing. Watermark
+        // here means smallest/largest offset available for reading.
+        let mut watermarks = self.get_watermarks(topic_partitions.as_ref()).await?;
+
         // here we are getting the start offset and end offset for each partition with the given
         // timestamp if the timestamp is None, we will use the low watermark and high
         // watermark as the start and end offset if the timestamp is provided, we will use
         // the watermark to narrow down the range
         let mut expect_start_offset = if let Some(ts) = expect_start_timestamp_millis {
             Some(
-                self.fetch_offset_for_time(topic_partitions.as_ref(), ts)
+                self.fetch_offset_for_time(topic_partitions.as_ref(), ts, &watermarks)
                     .await?,
             )
         } else {
@@ -303,37 +308,24 @@ impl KafkaSplitEnumerator {
 
         let mut expect_stop_offset = if let Some(ts) = expect_stop_timestamp_millis {
             Some(
-                self.fetch_offset_for_time(topic_partitions.as_ref(), ts)
+                self.fetch_offset_for_time(topic_partitions.as_ref(), ts, &watermarks)
                     .await?,
             )
         } else {
             None
         };
 
-        // Watermark here has nothing to do with watermark in streaming processing. Watermark
-        // here means smallest/largest offset available for reading.
-        let mut watermarks = {
-            let mut ret = HashMap::new();
-            for partition in &topic_partitions {
-                let (low, high) = self
-                    .client
-                    .fetch_watermarks(self.topic.as_str(), *partition, self.sync_call_timeout)
-                    .await?;
-                ret.insert(partition, (low - 1, high));
-            }
-            ret
-        };
-
         Ok(topic_partitions
             .iter()
             .map(|partition| {
-                let (low, high) = watermarks.remove(&partition).unwrap();
+                let (low, high) = watermarks.remove(partition).unwrap();
                 let start_offset = {
+                    let earliest_offset = low - 1;
                     let start = expect_start_offset
                         .as_mut()
-                        .map(|m| m.remove(partition).flatten().map(|t| t-1).unwrap_or(low))
-                        .unwrap_or(low);
-                    i64::max(start, low)
+                        .map(|m| m.remove(partition).flatten().unwrap_or(earliest_offset))
+                        .unwrap_or(earliest_offset);
+                    i64::max(start, earliest_offset)
                 };
                 let stop_offset = {
                     let stop = expect_stop_offset
@@ -379,7 +371,8 @@ impl KafkaSplitEnumerator {
                 Ok(map)
             }
             KafkaEnumeratorOffset::Timestamp(time) => {
-                self.fetch_offset_for_time(partitions, time).await
+                self.fetch_offset_for_time(partitions, time, watermarks)
+                    .await
             }
             KafkaEnumeratorOffset::None => partitions
                 .iter()
@@ -408,7 +401,8 @@ impl KafkaSplitEnumerator {
                 Ok(map)
             }
             KafkaEnumeratorOffset::Timestamp(time) => {
-                self.fetch_offset_for_time(partitions, time).await
+                self.fetch_offset_for_time(partitions, time, watermarks)
+                    .await
             }
             KafkaEnumeratorOffset::None => partitions
                 .iter()
@@ -421,6 +415,7 @@ impl KafkaSplitEnumerator {
         &self,
         partitions: &[i32],
         time: i64,
+        watermarks: &HashMap<i32, (i64, i64)>,
     ) -> KafkaResult<HashMap<i32, Option<i64>>> {
         let mut tpl = TopicPartitionList::new();
 
@@ -441,16 +436,48 @@ impl KafkaSplitEnumerator {
                     // XXX(rc): currently in RW source, `offset` means the last consumed offset, so we need to subtract 1
                     result.insert(elem.partition(), Some(offset - 1));
                 }
-                _ => {
-                    let (_, high_watermark) = self
-                        .client
-                        .fetch_watermarks(
-                            self.topic.as_str(),
-                            elem.partition(),
-                            self.sync_call_timeout,
-                        )
-                        .await?;
-                    result.insert(elem.partition(), Some(high_watermark));
+                Offset::End => {
+                    let (_, high_watermark) = watermarks.get(&elem.partition()).unwrap();
+                    tracing::info!(
+                        source_id = self.context.info.source_id,
+                        "no message found before timestamp {} (ms) for partition {}, start from latest",
+                        time,
+                        elem.partition()
+                    );
+                    result.insert(elem.partition(), Some(high_watermark - 1)); // align to Latest
+                }
+                Offset::Invalid => {
+                    // special case for madsim test
+                    // For a read Kafka, it returns `Offset::Latest` when the timestamp is later than the latest message in the partition
+                    // But in madsim, it returns `Offset::Invalid`
+                    // So we align to Latest here
+                    tracing::info!(
+                        source_id = self.context.info.source_id,
+                        "got invalid offset for partition  {} at timestamp {}, align to latest",
+                        elem.partition(),
+                        time
+                    );
+                    let (_, high_watermark) = watermarks.get(&elem.partition()).unwrap();
+                    result.insert(elem.partition(), Some(high_watermark - 1)); // align to Latest
+                }
+                Offset::Beginning => {
+                    let (low, _) = watermarks.get(&elem.partition()).unwrap();
+                    tracing::info!(
+                        source_id = self.context.info.source_id,
+                        "all message in partition {} is after timestamp {} (ms), start from earliest",
+                        elem.partition(),
+                        time,
+                    );
+                    result.insert(elem.partition(), Some(low - 1)); // align to Earliest
+                }
+                err_offset @ Offset::Stored | err_offset @ Offset::OffsetTail(_) => {
+                    tracing::error!(
+                        source_id = self.context.info.source_id,
+                        "got invalid offset for partition {}: {err_offset:?}",
+                        elem.partition(),
+                        err_offset = err_offset,
+                    );
+                    return Err(KafkaError::OffsetFetch(RDKafkaErrorCode::NoOffset));
                 }
             }
         }
