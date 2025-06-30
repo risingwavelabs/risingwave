@@ -18,6 +18,7 @@ use std::num::NonZeroUsize;
 use anyhow::anyhow;
 use indexmap::IndexMap;
 use itertools::Itertools;
+use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::stream_graph_visitor::{
@@ -46,9 +47,9 @@ use risingwave_pb::meta::subscribe_response::{
 use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup};
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
+use risingwave_pb::stream_plan::PbStreamNode;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::{FragmentTypeFlag, PbFragmentTypeFlag, PbStreamNode};
 use risingwave_pb::user::PbUserInfo;
 use risingwave_sqlparser::ast::{SqlOption, Statement};
 use risingwave_sqlparser::parser::{Parser, ParserError};
@@ -1429,12 +1430,18 @@ impl CatalogController {
             .await?;
         let mut fragments = fragments
             .into_iter()
-            .map(|(id, mask, stream_node)| (id, mask, stream_node.to_protobuf()))
+            .map(|(id, mask, stream_node)| {
+                (
+                    id,
+                    FragmentTypeMask::from(mask as u32),
+                    stream_node.to_protobuf(),
+                )
+            })
             .collect_vec();
 
         fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
             let mut found = false;
-            if *fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0 {
+            if fragment_type_mask.contains(FragmentTypeFlag::Source) {
                 visit_stream_node_mut(stream_node, |node| {
                     if let PbNodeBody::Source(node) = node {
                         if let Some(node_inner) = &mut node.source_inner
@@ -1451,7 +1458,7 @@ impl CatalogController {
                 // so we just scan all fragments for StreamFsFetch node if using fs connector
                 visit_stream_node_mut(stream_node, |node| {
                     if let PbNodeBody::StreamFsFetch(node) = node {
-                        *fragment_type_mask |= PbFragmentTypeFlag::FsFetch as i32;
+                        fragment_type_mask.add(FragmentTypeFlag::FsFetch);
                         if let Some(node_inner) = &mut node.node_inner
                             && node_inner.source_id == source_id as u32
                         {
@@ -1472,7 +1479,7 @@ impl CatalogController {
         for (id, fragment_type_mask, stream_node) in fragments {
             fragment::ActiveModel {
                 fragment_id: Set(id),
-                fragment_type_mask: Set(fragment_type_mask),
+                fragment_type_mask: Set(fragment_type_mask.into()),
                 stream_node: Set(StreamNode::from(&stream_node)),
                 ..Default::default()
             }
@@ -1504,7 +1511,7 @@ impl CatalogController {
         &self,
         job_id: ObjectId,
         // returns true if the mutation is applied
-        mut fragments_mutation_fn: impl FnMut(&mut i32, &mut PbStreamNode) -> bool,
+        mut fragments_mutation_fn: impl FnMut(FragmentTypeMask, &mut PbStreamNode) -> bool,
         // error message when no relevant fragments is found
         err_msg: &'static str,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
@@ -1524,11 +1531,13 @@ impl CatalogController {
             .await?;
         let mut fragments = fragments
             .into_iter()
-            .map(|(id, mask, stream_node)| (id, mask, stream_node.to_protobuf()))
+            .map(|(id, mask, stream_node)| {
+                (id, FragmentTypeMask::from(mask), stream_node.to_protobuf())
+            })
             .collect_vec();
 
         fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
-            fragments_mutation_fn(fragment_type_mask, stream_node)
+            fragments_mutation_fn(*fragment_type_mask, stream_node)
         });
         if fragments.is_empty() {
             return Err(MetaError::invalid_parameter(format!(
@@ -1557,13 +1566,13 @@ impl CatalogController {
     async fn mutate_fragment_by_fragment_id(
         &self,
         fragment_id: FragmentId,
-        mut fragment_mutation_fn: impl FnMut(&mut i32, &mut PbStreamNode) -> bool,
+        mut fragment_mutation_fn: impl FnMut(FragmentTypeMask, &mut PbStreamNode) -> bool,
         err_msg: &'static str,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let (mut fragment_type_mask, stream_node): (i32, StreamNode) =
+        let (fragment_type_mask, stream_node): (i32, StreamNode) =
             Fragment::find_by_id(fragment_id)
                 .select_only()
                 .columns([
@@ -1575,8 +1584,9 @@ impl CatalogController {
                 .await?
                 .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
         let mut pb_stream_node = stream_node.to_protobuf();
+        let fragment_type_mask = FragmentTypeMask::from(fragment_type_mask);
 
-        if !fragment_mutation_fn(&mut fragment_type_mask, &mut pb_stream_node) {
+        if !fragment_mutation_fn(fragment_type_mask, &mut pb_stream_node) {
             return Err(MetaError::invalid_parameter(format!(
                 "fragment id {fragment_id}: {}",
                 err_msg
@@ -1606,9 +1616,11 @@ impl CatalogController {
         rate_limit: Option<u32>,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let update_backfill_rate_limit =
-            |fragment_type_mask: &mut i32, stream_node: &mut PbStreamNode| {
+            |fragment_type_mask: FragmentTypeMask, stream_node: &mut PbStreamNode| {
                 let mut found = false;
-                if *fragment_type_mask & PbFragmentTypeFlag::backfill_rate_limit_fragments() != 0 {
+                if fragment_type_mask
+                    .contains_any(FragmentTypeFlag::backfill_rate_limit_fragments())
+                {
                     visit_stream_node_mut(stream_node, |node| match node {
                         PbNodeBody::StreamCdcScan(node) => {
                             node.rate_limit = rate_limit;
@@ -1648,9 +1660,9 @@ impl CatalogController {
         rate_limit: Option<u32>,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let update_sink_rate_limit =
-            |fragment_type_mask: &mut i32, stream_node: &mut PbStreamNode| {
+            |fragment_type_mask: FragmentTypeMask, stream_node: &mut PbStreamNode| {
                 let mut found = false;
-                if *fragment_type_mask & PbFragmentTypeFlag::sink_rate_limit_fragments() != 0 {
+                if fragment_type_mask.contains_any(FragmentTypeFlag::sink_rate_limit_fragments()) {
                     visit_stream_node_mut(stream_node, |node| {
                         if let PbNodeBody::Sink(node) = node {
                             node.rate_limit = rate_limit;
@@ -1671,9 +1683,9 @@ impl CatalogController {
         rate_limit: Option<u32>,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let update_dml_rate_limit =
-            |fragment_type_mask: &mut i32, stream_node: &mut PbStreamNode| {
+            |fragment_type_mask: FragmentTypeMask, stream_node: &mut PbStreamNode| {
                 let mut found = false;
-                if *fragment_type_mask & PbFragmentTypeFlag::dml_rate_limit_fragments() != 0 {
+                if fragment_type_mask.contains_any(FragmentTypeFlag::dml_rate_limit_fragments()) {
                     visit_stream_node_mut(stream_node, |node| {
                         if let PbNodeBody::Dml(node) = node {
                             node.rate_limit = rate_limit;
@@ -2030,7 +2042,7 @@ impl CatalogController {
         let fragments = fragments
             .into_iter()
             .filter(|(_, fragment_type_mask, _)| {
-                *fragment_type_mask & FragmentTypeFlag::Sink as i32 != 0
+                FragmentTypeMask::from(*fragment_type_mask).contains(FragmentTypeFlag::Sink)
             })
             .filter_map(|(id, _, stream_node)| {
                 let mut stream_node = stream_node.to_protobuf();
@@ -2089,13 +2101,15 @@ impl CatalogController {
         fragment_id: FragmentId,
         rate_limit: Option<u32>,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
-        let update_rate_limit = |fragment_type_mask: &mut i32, stream_node: &mut PbStreamNode| {
+        let update_rate_limit = |fragment_type_mask: FragmentTypeMask,
+                                 stream_node: &mut PbStreamNode| {
             let mut found = false;
-            if *fragment_type_mask & PbFragmentTypeFlag::dml_rate_limit_fragments() != 0
-                || *fragment_type_mask & PbFragmentTypeFlag::sink_rate_limit_fragments() != 0
-                || *fragment_type_mask & PbFragmentTypeFlag::backfill_rate_limit_fragments() != 0
-                || *fragment_type_mask & PbFragmentTypeFlag::source_rate_limit_fragments() != 0
-            {
+            if fragment_type_mask.contains_any(
+                FragmentTypeFlag::dml_rate_limit_fragments()
+                    .chain(FragmentTypeFlag::sink_rate_limit_fragments())
+                    .chain(FragmentTypeFlag::backfill_rate_limit_fragments())
+                    .chain(FragmentTypeFlag::source_rate_limit_fragments()),
+            ) {
                 visit_stream_node_mut(stream_node, |node| {
                     if let PbNodeBody::Dml(node) = node {
                         node.rate_limit = rate_limit;
@@ -2305,9 +2319,9 @@ impl CatalogController {
                 fragment::Column::FragmentTypeMask,
                 fragment::Column::StreamNode,
             ])
-            .filter(fragment_type_mask_intersects(
-                PbFragmentTypeFlag::rate_limit_fragments(),
-            ))
+            .filter(fragment_type_mask_intersects(FragmentTypeFlag::raw_flag(
+                FragmentTypeFlag::rate_limit_fragments(),
+            ) as _))
             .into_tuple()
             .all(&txn)
             .await?;
