@@ -308,6 +308,17 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn replace_materialized_view(
+        &self,
+        mut table: PbTable,
+        _graph: StreamFragmentGraph,
+    ) -> Result<()> {
+        table.stream_job_status = PbStreamJobStatus::Created as _;
+        assert_eq!(table.vnode_count(), VirtualNode::COUNT_FOR_TEST);
+        self.catalog.write().update_table(&table);
+        Ok(())
+    }
+
     async fn create_view(&self, mut view: PbView) -> Result<()> {
         view.id = self.gen_id();
         self.catalog.write().create_view(&view);
@@ -1172,6 +1183,16 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
+    async fn alter_source_connector_props(
+        &self,
+        _source_id: u32,
+        _changed_props: BTreeMap<String, String>,
+        _changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        _connector_conn_ref: Option<u32>,
+    ) -> RpcResult<()> {
+        unimplemented!()
+    }
+
     async fn list_hosted_iceberg_tables(&self) -> RpcResult<Vec<IcebergTable>> {
         unimplemented!()
     }
@@ -1185,6 +1206,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     fn worker_id(&self) -> u32 {
         0
+    }
+
+    async fn set_sync_log_store_aligned(&self, _job_id: u32, _aligned: bool) -> RpcResult<()> {
+        Ok(())
     }
 }
 

@@ -53,6 +53,7 @@ members = [
     "src/test_runner",
     "src/tests/compaction_test",
     "src/tests/e2e_extended_mode",
+    "src/tests/mysql_test",
     "src/tests/regress",
     "src/tests/simulation",
     "src/tests/sqlsmith",
@@ -77,7 +78,7 @@ exclude = [
 resolver = "2"
 
 [workspace.package]
-version = "2.5.0-alpha"
+version = "2.6.0-alpha"
 edition = "2024"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
@@ -151,7 +152,12 @@ criterion = { version = "0.5", features = ["async_futures"] }
 # Use a forked version which removes the dependencies on dynamo db to reduce
 # compile time and binary size.
 deltalake = { version = "0.26", features = ["s3", "gcs", "datafusion"] }
-foyer = { version = "0.17.3", features = ["serde", "tracing", "nightly"] }
+# foyer = { version = "0.17.3", features = ["serde", "tracing", "nightly"] }
+foyer = { git = "http://github.com/foyer-rs/foyer", rev = "77eef58d1f231ee50cd601f9ad69c5e3db3415f9", features = [
+    "serde",
+    "tracing",
+    "nightly",
+] }
 futures-async-stream = "0.2.9"
 governor = { version = "0.8", default-features = false, features = ["std"] }
 hashbrown = { version = "0.15", features = [
@@ -172,7 +178,7 @@ itertools = "0.14.0"
 jsonbb = "0.1.4"
 linkme = { version = "0.3.32", features = ["used_linker"] }
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "2682b85" }
-mixtrics = { version = "0.1", features = ["prometheus"] }
+mixtrics = { version = "0.2", features = ["prometheus"] }
 mysql_async = { version = "0.34", default-features = false, features = [
     "default",
 ] }
@@ -191,7 +197,7 @@ pin-project-lite = "0.2"
 prost = { version = "0.13" }
 prost-build = { version = "0.13" }
 rand = { version = "0.9", features = ["small_rng"] }
-rdkafka = { package = "madsim-rdkafka", version = "0.4.3", features = [
+rdkafka = { package = "madsim-rdkafka", version = "0.4.4", features = [
     "cmake-build",
 ] }
 redis = { version = "0.28" }

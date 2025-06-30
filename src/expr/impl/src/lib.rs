@@ -29,7 +29,7 @@
 #![feature(iter_array_chunks)]
 #![feature(result_flattening)]
 #![feature(used_with_arg)]
-#![cfg_attr(coverage, feature(coverage_attribute))]
+#![feature(coverage_attribute)]
 
 mod aggregate;
 mod scalar;

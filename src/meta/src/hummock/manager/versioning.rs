@@ -167,7 +167,6 @@ impl HummockManager {
     }
 
     /// Get version deltas from meta store
-    #[cfg_attr(coverage, coverage(off))]
     pub async fn list_version_deltas(
         &self,
         start_id: HummockVersionId,

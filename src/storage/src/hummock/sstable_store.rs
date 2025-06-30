@@ -22,7 +22,7 @@ use bytes::Bytes;
 use fail::fail_point;
 use foyer::{
     Engine, EventListener, FetchState, Hint, HybridCache, HybridCacheBuilder, HybridCacheEntry,
-    HybridCacheProperties,
+    HybridCacheProperties, LargeEngineOptions,
 };
 use futures::{StreamExt, future};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -190,7 +190,7 @@ impl SstableStore {
             .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
                 u64::BITS as usize / 8 + value.estimate_size()
             })
-            .storage(Engine::Large)
+            .storage(Engine::Large(LargeEngineOptions::new()))
             .build()
             .await
             .map_err(HummockError::foyer_error)?;
@@ -202,7 +202,7 @@ impl SstableStore {
                 // FIXME(MrCroxx): Calculate block weight more accurately.
                 u64::BITS as usize * 2 / 8 + value.raw().len()
             })
-            .storage(Engine::Large)
+            .storage(Engine::Large(LargeEngineOptions::new()))
             .build()
             .await
             .map_err(HummockError::foyer_error)?;
@@ -492,15 +492,15 @@ impl SstableStore {
     }
 
     pub fn get_sst_data_path(&self, object_id: impl Into<HummockSstableObjectId>) -> String {
-        let object_id = object_id.into();
-        let obj_prefix = self
-            .store
-            .get_object_prefix(object_id.inner(), self.use_new_object_prefix_strategy);
-        risingwave_hummock_sdk::get_object_data_path(
-            &obj_prefix,
-            &self.path,
-            HummockObjectId::Sstable(object_id),
-        )
+        self.get_object_data_path(HummockObjectId::Sstable(object_id.into()))
+    }
+
+    pub fn get_object_data_path(&self, object_id: HummockObjectId) -> String {
+        let obj_prefix = self.store.get_object_prefix(
+            object_id.as_raw().inner(),
+            self.use_new_object_prefix_strategy,
+        );
+        risingwave_hummock_sdk::get_object_data_path(&obj_prefix, &self.path, object_id)
     }
 
     pub fn get_object_id_from_path(path: &str) -> HummockObjectId {

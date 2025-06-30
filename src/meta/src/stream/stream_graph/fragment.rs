@@ -138,14 +138,11 @@ impl BuildingFragment {
             NodeBody::Materialize(materialize_node) => {
                 materialize_node.table_id = job_id;
 
-                // Fill the ID of the `Table`.
-                let table = materialize_node.table.as_mut().unwrap();
-                table.id = job_id;
-                table.database_id = job.database_id();
-                table.schema_id = job.schema_id();
-                table.fragment_id = fragment_id;
-                #[cfg(not(debug_assertions))]
-                {
+                // Fill the table field of `MaterializeNode` from the job.
+                let table = materialize_node.table.insert(job.table().unwrap().clone());
+                table.fragment_id = fragment_id; // this will later be synced back to `job.table` with `set_info_from_graph`
+                // In production, do not include full definition in the table in plan node.
+                if cfg!(not(debug_assertions)) {
                     table.definition = job.name();
                 }
 

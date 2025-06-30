@@ -73,6 +73,7 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
             chunk_size,
             upstream,
             Duration::from_millis(pause_duration_ms),
+            node.aligned,
         );
         Ok((params.info, executor).into())
     }

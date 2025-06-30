@@ -3,3 +3,4 @@ SELECT * FROM pg_catalog.pg_user order by usesysid;
 ----
 1 root t t ********
 2 postgres t t ********
+3 rwadmin t t ********
