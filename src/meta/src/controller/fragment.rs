@@ -113,6 +113,8 @@ pub struct StreamingJobInfo {
     pub parallelism: StreamingParallelism,
     pub max_parallelism: i32,
     pub resource_group: String,
+    pub database_id: DatabaseId,
+    pub schema_id: SchemaId,
 }
 
 impl CatalogControllerInner {
@@ -729,6 +731,8 @@ impl CatalogController {
                 ),
                 "resource_group",
             )
+            .column(object::Column::DatabaseId)
+            .column(object::Column::SchemaId)
             .into_model()
             .all(&inner.db)
             .await?;
