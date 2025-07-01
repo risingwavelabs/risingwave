@@ -12,16 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{DefaultHasher, Hash as _, Hasher as _};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{self, TableDesc};
-use risingwave_common::util::stream_graph_visitor::visit_stream_node_tables;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_tables_inner;
 use risingwave_pb::catalog::PbTable;
-use risingwave_pb::stream_plan::PbStreamNode;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::StreamNode;
 use strum::IntoDiscriminant;
+
+use crate::stream::StreamFragmentGraph;
 
 /// Helper type for describing a [`StreamNode`] in error messages.
 #[derive(thiserror::Error, thiserror_ext::Macro, Debug)]
@@ -39,7 +40,7 @@ type Id = u64;
 
 struct Node {
     id: Id,
-    body: NodeBody,
+    fragment: StreamNode,
 }
 
 pub struct Graph {
@@ -94,7 +95,7 @@ impl Graph {
 
         let order = self.topo_order()?;
         for node_id in order.into_iter().rev() {
-            let node = &self.nodes[&node_id];
+            // let node = &self.nodes[&node_id];
             let upstream_fps = self.upstreams[&node_id]
                 .iter()
                 .map(|id| *fps.get(id).unwrap())
@@ -103,7 +104,7 @@ impl Graph {
 
             let mut hasher = DefaultHasher::new();
             (
-                node.body.discriminant(),
+                // node.body.discriminant(),
                 self.upstreams[&node_id].len(),
                 self.downstreams[&node_id].len(),
                 upstream_fps,
@@ -157,62 +158,96 @@ impl Matches {
             panic!("node {} was already mapped", u.id);
         }
 
-        let collect_tables = |x: &Node| {
-            let mut dummy = PbStreamNode {
-                node_body: Some(x.body.clone()),
-                ..Default::default()
-            };
+        let mut table_matches = HashMap::new();
 
+        let mut uq = VecDeque::from([&u.fragment]);
+        let mut vq = VecDeque::from([&v.fragment]);
+
+        let collect_tables = |x: &StreamNode| {
             let mut tables = Vec::new();
-            visit_stream_node_tables(&mut dummy, |table, name| {
+            visit_stream_node_tables_inner(&mut x.clone(), true, false, |table, name| {
                 tables.push((name.to_owned(), table.clone()));
             });
             tables
         };
 
-        let u_tables = collect_tables(u);
-        let mut v_tables = collect_tables(v);
-
-        let mut table_matches = HashMap::new();
-
-        for (ut_name, ut) in u_tables {
-            let vt_cands = v_tables
-                .extract_if(.., |(vt_name, _)| &*vt_name == &ut_name)
-                .collect_vec();
-
-            if vt_cands.len() == 0 {
-                bail_failed_to_match!("cannot find a match for table {} in node {}", ut_name, u.id);
-            } else if vt_cands.len() > 1 {
-                bail_failed_to_match!(
-                    "found multiple matches for table {} in node {}",
-                    ut_name,
-                    u.id
-                );
-            }
-
-            let (_, vt) = vt_cands.into_iter().next().unwrap();
-
-            let table_desc_for_compare = |table: &PbTable| {
-                let mut desc = TableDesc::from_pb_table(table);
-                desc.table_id = catalog::TableId::placeholder();
-                desc
+        while let Some(mut un) = uq.pop_front() {
+            let Some(mut vn) = vq.pop_front() else {
+                bail_failed_to_match!("fragment has different shape of nodes");
             };
 
-            let ut_compare = table_desc_for_compare(&ut);
-            let vt_compare = table_desc_for_compare(&vt);
-
-            if ut_compare != vt_compare {
-                bail_failed_to_match!(
-                    "table {} in node {} cannot be matched, diff:\n{}",
-                    ut_name,
-                    u.id,
-                    pretty_assertions::Comparison::new(&ut_compare, &vt_compare)
-                );
+            // skip stateless nodes
+            let mut u_tables = collect_tables(un);
+            while u_tables.is_empty() && un.input.len() == 1 {
+                un = &un.input[0];
+                u_tables = collect_tables(un);
+            }
+            let mut v_tables = collect_tables(vn);
+            while v_tables.is_empty() && vn.input.len() == 1 {
+                vn = &vn.input[0];
+                v_tables = collect_tables(vn);
             }
 
-            table_matches
-                .try_insert(ut.id, vt.id)
-                .unwrap_or_else(|_| panic!("duplicated table id {} in node {}", ut.id, u.id));
+            if un.input.is_empty() && vn.input.is_empty() {
+                // reach the leaf node
+                continue;
+            }
+
+            if un.node_body.as_ref().unwrap().discriminant()
+                != vn.node_body.as_ref().unwrap().discriminant()
+            {
+                bail_failed_to_match!("node has different types");
+            }
+            if un.input.len() != vn.input.len() {
+                bail_failed_to_match!("node has different number of inputs");
+            }
+
+            uq.extend(un.input.iter());
+            vq.extend(vn.input.iter());
+
+            for (ut_name, ut) in u_tables {
+                let vt_cands = v_tables
+                    .extract_if(.., |(vt_name, _)| *vt_name == ut_name)
+                    .collect_vec();
+
+                if vt_cands.is_empty() {
+                    bail_failed_to_match!(
+                        "cannot find a match for table {} in node {}",
+                        ut_name,
+                        u.id
+                    );
+                } else if vt_cands.len() > 1 {
+                    bail_failed_to_match!(
+                        "found multiple matches for table {} in node {}",
+                        ut_name,
+                        u.id
+                    );
+                }
+
+                let (_, vt) = vt_cands.into_iter().next().unwrap();
+
+                let table_desc_for_compare = |table: &PbTable| {
+                    let mut desc = TableDesc::from_pb_table(table);
+                    desc.table_id = catalog::TableId::placeholder();
+                    desc
+                };
+
+                let ut_compare = table_desc_for_compare(&ut);
+                let vt_compare = table_desc_for_compare(&vt);
+
+                if ut_compare != vt_compare {
+                    bail_failed_to_match!(
+                        "table {} in node {} cannot be matched, diff:\n{}",
+                        ut_name,
+                        u.id,
+                        pretty_assertions::Comparison::new(&ut_compare, &vt_compare)
+                    );
+                }
+
+                table_matches
+                    .try_insert(ut.id, vt.id)
+                    .unwrap_or_else(|_| panic!("duplicated table id {} in node {}", ut.id, u.id));
+            }
         }
 
         let m = Match {
@@ -331,7 +366,10 @@ fn match_graph(g1: &Graph, g2: &Graph) -> Result<Matches> {
             }
         }
 
-        bail_failed_to_match!("no valid match found for node {u} ({})", g1.nodes[&u].body);
+        bail_failed_to_match!(
+            "no valid match found for node {u} ({:?})",
+            g1.nodes[&u].fragment
+        );
     }
 
     let mut matches = Matches::new();
