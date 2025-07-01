@@ -638,27 +638,27 @@ sleep 5s
 query I
 select count(*) from shared_orders_schema_table;
 ----
-3
+6
 
 query I
 select count(*) from shared_orders_table_only;
 ----
-3
+6
 
 query I
 select count(*) from shared_orders_full_format;
 ----
-3
+6
 
 query I
 select count(*) from shared_single_type_custom_schema;
 ----
-1
+2
 
 query I
 select count(*) from shared_single_type_table_only;
 ----
-1
+2
 
 # ------------ drop stage ------------
 statement ok
