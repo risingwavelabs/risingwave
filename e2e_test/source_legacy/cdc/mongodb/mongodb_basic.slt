@@ -2,15 +2,18 @@
 control substitution on
 
 statement ok
-CREATE TABLE users (_id JSONB PRIMARY KEY, payload JSONB)
-INCLUDE TIMESTAMP as commit_ts
-INCLUDE DATABASE_NAME as database_name
-INCLUDE COLLECTION_NAME as collection_name
-WITH (
+create source src_mongo with (
   connector = 'mongodb-cdc',
   mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
   collection.name = 'random_data.*'
 );
+
+statement ok
+CREATE TABLE users (_id JSONB PRIMARY KEY, payload JSONB)
+INCLUDE TIMESTAMP as commit_ts
+INCLUDE DATABASE_NAME as database_name
+INCLUDE COLLECTION_NAME as collection_name
+FROM src_mongo table 'random_data.*';
 
 statement ok
 CREATE MATERIALIZED VIEW normalized_users AS

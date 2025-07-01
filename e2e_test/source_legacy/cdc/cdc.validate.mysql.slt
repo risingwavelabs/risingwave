@@ -1,12 +1,23 @@
 # CDC MySQL source validate test
 
-# invalid username
-statement error
-create table products ( id INT,
- name STRING,
- description STRING,
- PRIMARY KEY (id)
+statement error CDC connector type 'mysql-cdc' does not support CREATE TABLE ... WITH (...), please use CREATE SOURCE and then CREATE TABLE FROM SOURCE.
+create table should_fail (
+  id INT PRIMARY KEY,
+  name STRING
 ) with (
+  connector = 'mysql-cdc',
+  hostname = 'mysql',
+  port = '3306',
+  username = 'root',
+  password = '123456',
+  database.name = 'my@db',
+  table.name = 'should_fail',
+  server.id = '5099'
+);
+
+# invalid username
+statement ok
+create source src_invalid_user with (
  connector = 'mysql-cdc',
  hostname = 'mysql',
  port = '3306',
@@ -16,14 +27,16 @@ create table products ( id INT,
  table.name = 'products',
  server.id = '5085'
 );
-
-# invalid password
 statement error
 create table products ( id INT,
  name STRING,
  description STRING,
  PRIMARY KEY (id)
-) with (
+) from src_invalid_user table 'my@db.products';
+
+# invalid password
+statement ok
+create source src_invalid_pwd with (
  connector = 'mysql-cdc',
  hostname = 'mysql',
  port = '3306',
@@ -33,14 +46,16 @@ create table products ( id INT,
  table.name = 'products',
  server.id = '5085'
 );
-
-# invalid database name
 statement error
 create table products ( id INT,
  name STRING,
  description STRING,
  PRIMARY KEY (id)
-) with (
+) from src_invalid_pwd table 'my@db.products';
+
+# invalid database name
+statement ok
+create source src_invalid_db with (
  connector = 'mysql-cdc',
  hostname = 'mysql',
  port = '3306',
@@ -50,14 +65,16 @@ create table products ( id INT,
  table.name = 'products',
  server.id = '5085'
 );
-
-# invalid table name
 statement error
 create table products ( id INT,
  name STRING,
  description STRING,
  PRIMARY KEY (id)
-) with (
+) from src_invalid_db table 'mdb.products';
+
+# invalid table name
+statement ok
+create source src_invalid_table with (
  connector = 'mysql-cdc',
  hostname = 'mysql',
  port = '3306',
@@ -67,14 +84,16 @@ create table products ( id INT,
  table.name = 'prdcts',
  server.id = '5085'
 );
-
-# empty table name
 statement error
 create table products ( id INT,
  name STRING,
  description STRING,
  PRIMARY KEY (id)
-) with (
+) from src_invalid_table table 'my@db.prdcts';
+
+# empty table name
+statement ok
+create source src_empty_table with (
  connector = 'mysql-cdc',
  hostname = 'mysql',
  port = '3306',
@@ -83,8 +102,25 @@ create table products ( id INT,
  database.name = 'my@db',
  server.id = '5085'
 );
+statement error
+create table products ( id INT,
+ name STRING,
+ description STRING,
+ PRIMARY KEY (id)
+) from src_empty_table table '';
 
 # invalid primary key
+statement ok
+create source src_invalid_pk with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'my@db',
+ table.name = 'orders',
+ server.id = '5086'
+);
 statement error
 create table orders (
    order_id int,
@@ -94,7 +130,11 @@ create table orders (
    product_id int,
    order_status smallint,
    PRIMARY KEY (product_id)
-) with (
+) from src_invalid_pk table 'my@db.orders';
+
+# column data type mismatch
+statement ok
+create source src_type_mismatch with (
  connector = 'mysql-cdc',
  hostname = 'mysql',
  port = '3306',
@@ -104,8 +144,6 @@ create table orders (
  table.name = 'orders',
  server.id = '5086'
 );
-
-# column data type mismatch
 statement error
 create table orders (
    order_id int,
@@ -115,7 +153,11 @@ create table orders (
    product_id int,
    order_status smallint,
    PRIMARY KEY (order_id)
-) with (
+) from src_type_mismatch table 'my@db.orders';
+
+# column name mismatch
+statement ok
+create source src_colname_mismatch with (
  connector = 'mysql-cdc',
  hostname = 'mysql',
  port = '3306',
@@ -125,8 +167,6 @@ create table orders (
  table.name = 'orders',
  server.id = '5086'
 );
-
-# column name mismatch
 statement error
 create table orders (
    order_id int,
@@ -136,13 +176,4 @@ create table orders (
    product_id int,
    order_status smallint,
    PRIMARY KEY (order_id)
-) with (
- connector = 'mysql-cdc',
- hostname = 'mysql',
- port = '3306',
- username = 'root',
- password = '123456',
- database.name = 'my@db',
- table.name = 'orders',
- server.id = '5086'
-);
+) from src_colname_mismatch table 'my@db.orders';

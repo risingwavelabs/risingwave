@@ -2,11 +2,7 @@
 control substitution on
 
 statement ok
-create table products ( id INT,
- name STRING,
- description STRING,
- PRIMARY KEY (id)
-) with (
+create source src_products with (
  connector = 'mysql-cdc',
  hostname = 'mysql',
  port = '3306',
@@ -16,20 +12,18 @@ create table products ( id INT,
  table.name = 'products',
  server.id = '5085'
 );
+statement ok
+create table products ( id INT,
+ name STRING,
+ description STRING,
+ PRIMARY KEY (id)
+) from src_products table 'my@db.products';
 
 statement ok
 create materialized view products_cnt as select count(*) as cnt from products;
 
 statement ok
-create table orders (
-   order_id int,
-   order_date timestamp,
-   customer_name string,
-   price decimal,
-   product_id int,
-   order_status smallint,
-   PRIMARY KEY (order_id)
-) with (
+create source src_orders with (
  connector = 'mysql-cdc',
  hostname = 'mysql',
  port = '3306',
@@ -39,19 +33,22 @@ create table orders (
  table.name = 'orders',
  server.id = '5086'
 );
+statement ok
+create table orders (
+   order_id int,
+   order_date timestamp,
+   customer_name string,
+   price decimal,
+   product_id int,
+   order_status smallint,
+   PRIMARY KEY (order_id)
+) from src_orders table 'my@db.orders';
 
 statement ok
 create materialized view orders_cnt as select count(*) as cnt from orders;
 
 statement ok
-create table shipments (
-  shipment_id INTEGER,
-  order_id INTEGER,
-  origin STRING,
-  destination STRING,
-  is_arrived boolean,
- PRIMARY KEY (shipment_id)
-) with (
+create source src_shipments with (
  connector = 'postgres-cdc',
  hostname = '${PGHOST:localhost}',
  port = '${PGPORT:5432}',
@@ -61,6 +58,15 @@ create table shipments (
  table.name = 'shipments',
  slot.name = 'shipments'
 );
+statement ok
+create table shipments (
+  shipment_id INTEGER,
+  order_id INTEGER,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+ PRIMARY KEY (shipment_id)
+) from src_shipments table '${PGDATABASE:postgres}.shipments';
 
 statement ok
 create materialized view shipments_cnt as select count(*) as cnt from shipments;
@@ -73,12 +79,7 @@ create materialized view enriched_orders as SELECT o.*, p.name, p.description, s
  LEFT JOIN shipments AS s ON o.order_id = s.order_id;
 
 statement ok
-create table mytable (
-  v1 INTEGER,
-  v2 INTEGER,
-  v3 STRING,
- PRIMARY KEY (v1)
-) with (
+create source src_mytable with (
  connector = 'mysql-cdc',
  hostname = 'mysql',
  port = '3306',
@@ -88,15 +89,17 @@ create table mytable (
  table.name = 'mytable',
  server.id = '5087'
 );
+statement ok
+create table mytable (
+  v1 INTEGER,
+  v2 INTEGER,
+  v3 STRING,
+ PRIMARY KEY (v1)
+) from src_mytable table 'my@db.mytable';
 
 # Some columns missing and reordered (mysql-cdc)
 statement ok
-create table orders_2 (
-   order_id int,
-   price decimal,
-   customer_name string,
-   PRIMARY KEY (order_id)
-) with (
+create source src_orders2 with (
  connector = 'mysql-cdc',
  hostname = 'mysql',
  port = '3306',
@@ -106,13 +109,16 @@ create table orders_2 (
  table.name = 'orders',
  server.id = '5088'
 );
+statement ok
+create table orders_2 (
+   order_id int,
+   price decimal,
+   customer_name string,
+   PRIMARY KEY (order_id)
+) from src_orders2 table 'my@db.orders';
 
-statement error
-create table tt3_rw (
-   v1 int,
-   v2 timestamp,
-   PRIMARY KEY (v1)
-) with (
+statement ok
+create source src_tt3 with (
  connector = 'mysql-cdc',
  hostname = 'mysql',
  port = '3306',
@@ -122,32 +128,23 @@ create table tt3_rw (
  table.name = 'tt3',
  server.id = '5089'
 );
+statement error
+create table tt3_rw (
+   v1 int,
+   v2 timestamp,
+   PRIMARY KEY (v1)
+) from src_tt3 table 'my@db.tt3';
 
 statement ok
 create table tt3_rw (
    v1 int,
    v2 timestamptz,
    PRIMARY KEY (v1)
-) with (
- connector = 'mysql-cdc',
- hostname = 'mysql',
- port = '3306',
- username = 'root',
- password = '123456',
- database.name = 'my@db',
- table.name = 'tt3',
- server.id = '5089'
-);
+) from src_tt3 table 'my@db.tt3';
 
 # Some columns missing and reordered (postgres-cdc)
 statement ok
-create table shipments_2 (
-  origin STRING,
-  destination STRING,
-  shipment_id INTEGER,
-  order_id INTEGER,
- PRIMARY KEY (shipment_id)
-) with (
+create source src_shipments2 with (
  connector = 'postgres-cdc',
  hostname = '${PGHOST:localhost}',
  port = '${PGPORT:5432}',
@@ -156,14 +153,18 @@ create table shipments_2 (
  database.name = '${PGDATABASE:postgres}',
  table.name = 'shipments'
 );
-
+statement ok
+create table shipments_2 (
+  origin STRING,
+  destination STRING,
+  shipment_id INTEGER,
+  order_id INTEGER,
+ PRIMARY KEY (shipment_id)
+) from src_shipments2 table '${PGDATABASE:postgres}.shipments';
 
 # Test user-provided publication
 statement ok
-create table t1_rw (
-    "V1" int primary key,
-    v3 varchar
-) with (
+create source src_t1rw with (
   connector = 'postgres-cdc',
   hostname = '${PGHOST:localhost}',
   port = '${PGPORT:5432}',
@@ -176,13 +177,14 @@ create table t1_rw (
   publication.name='my_publicaton',
   publication.create.enable='false'
 );
+statement ok
+create table t1_rw (
+    "V1" int primary key,
+    v3 varchar
+) from src_t1rw table 'abs.t1';
 
-statement error
-create table person_rw (
-    id int primary key,
-    name varchar,
-    email_address varchar
-) with (
+statement ok
+create source src_personrw with (
   connector = 'postgres-cdc',
   hostname = '${PGHOST:localhost}',
   port = '${PGPORT:5432}',
@@ -193,13 +195,15 @@ create table person_rw (
   publication.name='dumb_publicaton',
   publication.create.enable='false'
 );
+statement error
+create table person_rw (
+    id int primary key,
+    name varchar,
+    email_address varchar
+) from src_personrw table 'person';
 
 statement ok
-create table numeric_to_rw_int256 (
-  id int,
-  num rw_int256,
-  PRIMARY KEY (id)
-) with (
+create source src_numeric_to_rw_int256 with (
  connector = 'postgres-cdc',
  hostname = '${PGHOST:localhost}',
  port = '${PGPORT:5432}',
@@ -209,13 +213,15 @@ create table numeric_to_rw_int256 (
  table.name = 'numeric_table',
  slot.name = 'numeric_to_rw_int256'
 );
+statement ok
+create table numeric_to_rw_int256 (
+  id int,
+  num rw_int256,
+  PRIMARY KEY (id)
+) from src_numeric_to_rw_int256 table 'numeric_table';
 
 statement ok
-create table numeric_to_varchar (
-  id int,
-  num varchar,
-  PRIMARY KEY (id)
-) with (
+create source src_numeric_to_varchar with (
  connector = 'postgres-cdc',
  hostname = '${PGHOST:localhost}',
  port = '${PGPORT:5432}',
@@ -226,13 +232,15 @@ create table numeric_to_varchar (
  table.name = 'numeric_table',
  slot.name = 'numeric_to_varchar'
 );
+statement ok
+create table numeric_to_varchar (
+  id int,
+  num varchar,
+  PRIMARY KEY (id)
+) from src_numeric_to_varchar table 'public.numeric_table';
 
 statement ok
-create table enum_to_varchar (
-  id int,
-  current_mood varchar,
-  PRIMARY KEY (id)
-) with (
+create source src_enum_to_varchar with (
  connector = 'postgres-cdc',
  hostname = '${PGHOST:localhost}',
  port = '${PGPORT:5432}',
@@ -242,13 +250,15 @@ create table enum_to_varchar (
  table.name = 'enum_table',
  slot.name = 'enum_to_varchar'
 );
+statement ok
+create table enum_to_varchar (
+  id int,
+  current_mood varchar,
+  PRIMARY KEY (id)
+) from src_enum_to_varchar table 'enum_table';
 
 statement ok
-create table upper_orders (
-  id int,
-  name varchar,
-  PRIMARY KEY (id)
-) with (
+create source src_upper_orders with (
  connector = 'postgres-cdc',
  hostname = '${PGHOST:localhost}',
  port = '${PGPORT:5432}',
@@ -258,14 +268,15 @@ create table upper_orders (
  table.name = 'Orders',
  slot.name = 'orders'
 );
+statement ok
+create table upper_orders (
+  id int,
+  name varchar,
+  PRIMARY KEY (id)
+) from src_upper_orders table 'Orders';
 
 statement ok
-CREATE TABLE IF NOT EXISTS partitioned_timestamp_table_2023(
-  c_int int,
-  c_boolean boolean,
-  c_timestamp timestamp,
-  PRIMARY KEY (c_int, c_timestamp)
-) WITH (
+create source src_partitioned_2023 with (
  connector = 'postgres-cdc',
  hostname = '${PGHOST:localhost}',
  port = '${PGPORT:5432}',
@@ -277,14 +288,16 @@ CREATE TABLE IF NOT EXISTS partitioned_timestamp_table_2023(
  publication.name = 'rw_publication_partition_2023',
  slot.name = 'my_slot_partition'
 );
-
-statement error The ancestor or descendant partition 'partitioned_timestamp_table_2023' of the table partition 'partitioned_timestamp_table' is already covered in the publication 'rw_publication_partition_2023'.
-CREATE TABLE IF NOT EXISTS partitioned_timestamp_table(
+statement ok
+CREATE TABLE IF NOT EXISTS partitioned_timestamp_table_2023(
   c_int int,
   c_boolean boolean,
   c_timestamp timestamp,
   PRIMARY KEY (c_int, c_timestamp)
-) WITH (
+) from src_partitioned_2023 table 'public.partitioned_timestamp_table_2023';
+
+statement ok
+create source src_partitioned_table with (
  connector = 'postgres-cdc',
  hostname = '${PGHOST:localhost}',
  port = '${PGPORT:5432}',
@@ -296,14 +309,16 @@ CREATE TABLE IF NOT EXISTS partitioned_timestamp_table(
  publication.name = 'rw_publication_partition_2023',
  slot.name = 'my_slot_partition'
 );
-
-statement error The ancestor or descendant partition 'partitioned_timestamp_table_2023' of the table partition 'partitioned_timestamp_table_2023_h1' is already covered in the publication 'rw_publication_partition_2023'.
-CREATE TABLE IF NOT EXISTS partitioned_timestamp_table_2023_h1(
+statement error The ancestor or descendant partition 'partitioned_timestamp_table_2023' of the table partition 'partitioned_timestamp_table' is already covered in the publication 'rw_publication_partition_2023'.
+CREATE TABLE IF NOT EXISTS partitioned_timestamp_table(
   c_int int,
   c_boolean boolean,
   c_timestamp timestamp,
   PRIMARY KEY (c_int, c_timestamp)
-) WITH (
+) from src_partitioned_table table 'public.partitioned_timestamp_table';
+
+statement ok
+create source src_partitioned_2023_h1 with (
  connector = 'postgres-cdc',
  hostname = '${PGHOST:localhost}',
  port = '${PGPORT:5432}',
@@ -315,18 +330,20 @@ CREATE TABLE IF NOT EXISTS partitioned_timestamp_table_2023_h1(
  publication.name = 'rw_publication_partition_2023',
  slot.name = 'my_slot_partition'
 );
+statement error The ancestor or descendant partition 'partitioned_timestamp_table_2023' of the table partition 'partitioned_timestamp_table_2023_h1' is already covered in the publication 'rw_publication_partition_2023'.
+CREATE TABLE IF NOT EXISTS partitioned_timestamp_table_2023_h1(
+  c_int int,
+  c_boolean boolean,
+  c_timestamp timestamp,
+  PRIMARY KEY (c_int, c_timestamp)
+) from src_partitioned_2023_h1 table 'public.partitioned_timestamp_table_2023_h1';
 
 statement ok
 DROP TABLE partitioned_timestamp_table_2023;
 
 # for the partitioned table
 statement ok
-CREATE TABLE IF NOT EXISTS partitioned_timestamp_table(
-  c_int int,
-  c_boolean boolean,
-  c_timestamp timestamp,
-  PRIMARY KEY (c_int, c_timestamp)
-) WITH (
+create source src_partitioned_table_root with (
  connector = 'postgres-cdc',
  hostname = '${PGHOST:localhost}',
  port = '${PGPORT:5432}',
@@ -338,15 +355,17 @@ CREATE TABLE IF NOT EXISTS partitioned_timestamp_table(
  publication.name = 'rw_publication_partition_root',
  slot.name = 'my_slot_partition'
 );
-
-# for only one partition, as Postgres does not support adding both a partitioned tableand its individual partitions to the same publication, we use different publication for the partition
 statement ok
-CREATE TABLE IF NOT EXISTS partitioned_timestamp_table_2023(
+CREATE TABLE IF NOT EXISTS partitioned_timestamp_table(
   c_int int,
   c_boolean boolean,
   c_timestamp timestamp,
   PRIMARY KEY (c_int, c_timestamp)
-) WITH (
+) from src_partitioned_table_root table 'public.partitioned_timestamp_table';
+
+# for only one partition, as Postgres does not support adding both a partitioned tableand its individual partitions to the same publication, we use different publication for the partition
+statement ok
+create source src_partitioned_2023_2 with (
  connector = 'postgres-cdc',
  hostname = '${PGHOST:localhost}',
  port = '${PGPORT:5432}',
@@ -358,16 +377,16 @@ CREATE TABLE IF NOT EXISTS partitioned_timestamp_table_2023(
  publication.name = 'rw_publication_partition',
  slot.name = 'my_slot_partition_2'
 );
+statement ok
+CREATE TABLE IF NOT EXISTS partitioned_timestamp_table_2023(
+  c_int int,
+  c_boolean boolean,
+  c_timestamp timestamp,
+  PRIMARY KEY (c_int, c_timestamp)
+) from src_partitioned_2023_2 table 'public.partitioned_timestamp_table_2023';
 
 statement ok
-CREATE TABLE json_table (
-    id INT,
-    c_json JSONB,
-    c_jsonb JSONB,
-    c_json_array JSONB[],
-    c_jsonb_array JSONB[],
-    PRIMARY KEY (id)
-)  WITH (
+create source src_json_table with (
  connector = 'postgres-cdc',
  hostname = '${PGHOST:localhost}',
  port = '${PGPORT:5432}',
@@ -378,3 +397,12 @@ CREATE TABLE json_table (
  table.name = 'json_table',
  slot.name = 'json_table'
 );
+statement ok
+CREATE TABLE json_table (
+    id INT,
+    c_json JSONB,
+    c_jsonb JSONB,
+    c_json_array JSONB[],
+    c_jsonb_array JSONB[],
+    PRIMARY KEY (id)
+) from src_json_table table 'public.json_table';
