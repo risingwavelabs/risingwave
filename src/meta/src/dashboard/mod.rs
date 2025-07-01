@@ -59,7 +59,7 @@ pub(super) mod handlers {
     use axum::extract::Query;
     use futures::future::join_all;
     use itertools::Itertools;
-    use risingwave_common::catalog::TableId;
+    use risingwave_common::catalog::{FragmentTypeFlag, TableId};
     use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
     use risingwave_meta_model::WorkerId;
     use risingwave_pb::catalog::table::TableType;
@@ -77,7 +77,6 @@ pub(super) mod handlers {
         GetStreamingStatsResponse, HeapProfilingResponse, ListHeapProfilingResponse,
         StackTraceResponse,
     };
-    use risingwave_pb::stream_plan::FragmentTypeFlag;
     use risingwave_pb::user::PbUserInfo;
     use serde::{Deserialize, Serialize};
     use serde_json::json;
@@ -315,10 +314,16 @@ pub(super) mod handlers {
         let mut out_map = HashMap::new();
         for (relation_id, tf) in table_fragments {
             for (fragment_id, fragment) in &tf.fragments {
-                if (fragment.fragment_type_mask & FragmentTypeFlag::StreamScan as u32) != 0 {
+                if fragment
+                    .fragment_type_mask
+                    .contains(FragmentTypeFlag::StreamScan)
+                {
                     in_map.insert(*fragment_id, relation_id as u32);
                 }
-                if (fragment.fragment_type_mask & FragmentTypeFlag::Mview as u32) != 0 {
+                if fragment
+                    .fragment_type_mask
+                    .contains(FragmentTypeFlag::Mview)
+                {
                     out_map.insert(*fragment_id, relation_id as u32);
                 }
             }
