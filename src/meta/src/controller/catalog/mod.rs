@@ -908,9 +908,35 @@ impl CatalogControllerInner {
             .all(&self.db)
             .await?;
 
+        let creating_sinks: HashSet<_> = StreamingJob::find()
+            .select_only()
+            .column(streaming_job::Column::JobId)
+            .filter(
+                streaming_job::Column::JobStatus
+                    .eq(JobStatus::Creating)
+                    .and(
+                        streaming_job::Column::JobId
+                            .is_in(sink_objs.iter().map(|(sink, _)| sink.sink_id)),
+                    ),
+            )
+            .into_tuple::<SinkId>()
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .collect();
+
         Ok(sink_objs
             .into_iter()
-            .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
+            .map(|(sink, obj)| {
+                let is_creating = creating_sinks.contains(&sink.sink_id);
+                let mut pb_sink: PbSink = ObjectModel(sink, obj.unwrap()).into();
+                pb_sink.stream_job_status = if is_creating {
+                    PbStreamJobStatus::Creating.into()
+                } else {
+                    PbStreamJobStatus::Created.into()
+                };
+                pb_sink
+            })
             .collect())
     }
 
