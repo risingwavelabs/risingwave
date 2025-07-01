@@ -14,7 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use risingwave_pb::stream_plan::FragmentTypeFlag;
+use risingwave_common::catalog::FragmentTypeFlag;
 
 use crate::model::{FragmentId, StreamJobFragments};
 
@@ -67,9 +67,9 @@ impl BackfillOrderState {
         let mut backfill_nodes: HashMap<FragmentId, BackfillNode> = HashMap::new();
 
         for fragment in stream_job_fragments.fragments() {
-            if fragment.fragment_type_mask
-                & (FragmentTypeFlag::StreamScan as u32 | FragmentTypeFlag::SourceScan as u32)
-                > 0
+            if fragment
+                .fragment_type_mask
+                .contains_any([FragmentTypeFlag::StreamScan, FragmentTypeFlag::SourceScan])
             {
                 let fragment_id = fragment.fragment_id;
                 backfill_nodes.insert(
