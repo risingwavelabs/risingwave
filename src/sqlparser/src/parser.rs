@@ -198,7 +198,6 @@ pub enum Precedence {
     At,
     Collate,
     UnaryPosNeg,
-    PostfixFactorial,
     Array,
     DoubleColon, // 50 in upstream
 }
@@ -715,19 +714,8 @@ impl Parser<'_> {
                     expr: Box::new(sub_expr),
                 })
             }
-            tok @ Token::DoubleExclamationMark
-            | tok @ Token::PGSquareRoot
-            | tok @ Token::PGCubeRoot
-            | tok @ Token::AtSign
-            | tok @ Token::Tilde => {
-                let op = match tok {
-                    Token::DoubleExclamationMark => UnaryOperator::PGPrefixFactorial,
-                    Token::PGSquareRoot => UnaryOperator::PGSquareRoot,
-                    Token::PGCubeRoot => UnaryOperator::PGCubeRoot,
-                    Token::AtSign => UnaryOperator::PGAbs,
-                    Token::Tilde => UnaryOperator::PGBitwiseNot,
-                    _ => unreachable!(),
-                };
+            Token::Op(name) => {
+                let op = UnaryOperator::Custom(name);
                 // Counter-intuitively, `|/ 4 + 12` means `|/ (4+12)` rather than `(|/4) + 12` in
                 // PostgreSQL.
                 Ok(Expr::UnaryOp {
@@ -1316,18 +1304,9 @@ impl Parser<'_> {
             Token::Minus => Some(BinaryOperator::Minus),
             Token::Mul => Some(BinaryOperator::Multiply),
             Token::Mod => Some(BinaryOperator::Modulo),
-            Token::Concat => Some(BinaryOperator::Concat),
-            Token::Pipe => Some(BinaryOperator::BitwiseOr),
-            Token::Caret => Some(BinaryOperator::BitwiseXor),
-            Token::Ampersand => Some(BinaryOperator::BitwiseAnd),
+            Token::Pipe => Some(BinaryOperator::Custom("|".to_owned())),
+            Token::Caret => Some(BinaryOperator::Pow),
             Token::Div => Some(BinaryOperator::Divide),
-            Token::ShiftLeft => Some(BinaryOperator::PGBitwiseShiftLeft),
-            Token::ShiftRight => Some(BinaryOperator::PGBitwiseShiftRight),
-            Token::Sharp => Some(BinaryOperator::PGBitwiseXor),
-            Token::Tilde => Some(BinaryOperator::PGRegexMatch),
-            Token::Arrow => Some(BinaryOperator::Arrow),
-            Token::AtArrow => Some(BinaryOperator::Contains),
-            Token::ArrowAt => Some(BinaryOperator::Contained),
             Token::Op(name) => Some(BinaryOperator::Custom(name.clone())),
             Token::Word(w) => match w.keyword {
                 Keyword::AND => Some(BinaryOperator::And),
@@ -1489,12 +1468,6 @@ impl Parser<'_> {
             }
         } else if Token::DoubleColon == tok {
             self.parse_pg_cast(expr)
-        } else if Token::ExclamationMark == tok {
-            // PostgreSQL factorial operation
-            Ok(Expr::UnaryOp {
-                op: UnaryOperator::PGPostfixFactorial,
-                expr: Box::new(expr),
-            })
         } else if Token::LBracket == tok {
             self.parse_array_index(expr)
         } else {
@@ -1713,12 +1686,7 @@ impl Parser<'_> {
             Token::Word(w) if w.keyword == Keyword::ALL => Ok(P::Other),
             Token::Word(w) if w.keyword == Keyword::ANY => Ok(P::Other),
             Token::Word(w) if w.keyword == Keyword::SOME => Ok(P::Other),
-            Token::Tilde
-            | Token::Concat
-            | Token::Arrow
-            | Token::AtArrow
-            | Token::ArrowAt
-            | Token::Op(_) => Ok(P::Other),
+            Token::Op(_) => Ok(P::Other),
             Token::Word(w)
                 if w.keyword == Keyword::OPERATOR && self.peek_nth_token(1) == Token::LParen =>
             {
@@ -1728,13 +1696,9 @@ impl Parser<'_> {
             //   or < xor < and < shift
             // But in PostgreSQL, they are just left to right. So `2 | 3 & 4` is 0.
             Token::Pipe => Ok(P::Other),
-            Token::Sharp => Ok(P::Other),
-            Token::Ampersand => Ok(P::Other),
-            Token::ShiftRight | Token::ShiftLeft => Ok(P::Other),
             Token::Plus | Token::Minus => Ok(P::PlusMinus),
             Token::Mul | Token::Div | Token::Mod => Ok(P::MulDiv),
             Token::Caret => Ok(P::Exp),
-            Token::ExclamationMark => Ok(P::PostfixFactorial),
             Token::LBracket => Ok(P::Array),
             Token::DoubleColon => Ok(P::DoubleColon),
             _ => Ok(P::Zero),
@@ -3463,7 +3427,10 @@ impl Parser<'_> {
 
     pub fn parse_alter_view(&mut self, materialized: bool) -> ModalResult<Statement> {
         let view_name = self.parse_object_name()?;
-        let operation = if self.parse_keyword(Keyword::RENAME) {
+        let operation = if self.parse_keyword(Keyword::AS) {
+            let query = Box::new(self.parse_query()?);
+            AlterViewOperation::AsQuery { query }
+        } else if self.parse_keyword(Keyword::RENAME) {
             if self.parse_keyword(Keyword::TO) {
                 let view_name = self.parse_object_name()?;
                 AlterViewOperation::RenameView { view_name }
@@ -3542,7 +3509,7 @@ impl Parser<'_> {
             }
         } else {
             return self.expected(&format!(
-                "RENAME or OWNER TO or SET or SWAP after ALTER {}VIEW",
+                "AS, RENAME, OWNER TO, SET, or SWAP after ALTER {}VIEW",
                 if materialized { "MATERIALIZED " } else { "" }
             ));
         };
@@ -4013,7 +3980,7 @@ impl Parser<'_> {
             0..,
             separated_pair(
                 Self::parse_object_name,
-                Token::Arrow,
+                Token::Op("->".to_owned()),
                 Self::parse_object_name,
             ),
             Token::Comma,
