@@ -555,13 +555,6 @@ SELECT commit_ts > '2024-08-16 00:00:00.000+00:00' from upper_table where "ID" =
 ----
 t
 
-# ------------ drop stage ------------
-statement ok
-drop source upper_mssql_source cascade;
-
-statement ok
-drop source mssql_source cascade;
-
 # Test auto-fill functionality for SQL Server CDC table names
 # Test with schema.table format (should auto-fill database name)
 statement ok
@@ -666,3 +659,10 @@ query I
 select count(*) from shared_single_type_table_only;
 ----
 1
+
+# ------------ drop stage ------------
+statement ok
+drop source upper_mssql_source cascade;
+
+statement ok
+drop source mssql_source cascade;
