@@ -44,7 +44,7 @@ pub async fn handle_drop_sink(
     let sink = {
         let catalog_reader = session.env().catalog_reader().read_guard();
         let (sink, schema_name) =
-            match catalog_reader.get_sink_by_name(db_name, schema_path, &sink_name) {
+            match catalog_reader.get_any_sink_by_name(db_name, schema_path, &sink_name) {
                 Ok((sink, schema)) => (sink.clone(), schema),
                 Err(e) => {
                     return if if_exists {

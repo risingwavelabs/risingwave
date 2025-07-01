@@ -469,6 +469,10 @@ impl SinkCatalog {
         // We need to align with meta here, so we've utilized the proto method.
         self.to_proto().unique_identity()
     }
+
+    pub fn is_created(&self) -> bool {
+        self.stream_job_status == StreamJobStatus::Created
+    }
 }
 
 impl From<PbSink> for SinkCatalog {

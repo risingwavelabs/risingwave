@@ -642,13 +642,13 @@ impl Catalog {
         db_name: &str,
         schema_path: SchemaPath<'a>,
         table_name: &str,
-        bind_creating_relations: bool,
+        bind_creating: bool,
     ) -> CatalogResult<(&Arc<TableCatalog>, &'a str)> {
         schema_path
             .try_find(|schema_name| {
                 Ok(self
                     .get_schema_by_name(db_name, schema_name)?
-                    .get_table_by_name(table_name, bind_creating_relations))
+                    .get_table_by_name(table_name, bind_creating))
             })?
             .ok_or_else(|| CatalogError::NotFound("table", table_name.to_owned()))
     }
@@ -769,14 +769,33 @@ impl Catalog {
         db_name: &str,
         schema_path: SchemaPath<'a>,
         sink_name: &str,
+        bind_creating: bool,
     ) -> CatalogResult<(&Arc<SinkCatalog>, &'a str)> {
         schema_path
             .try_find(|schema_name| {
                 Ok(self
                     .get_schema_by_name(db_name, schema_name)?
-                    .get_sink_by_name(sink_name))
+                    .get_sink_by_name(sink_name, bind_creating))
             })?
             .ok_or_else(|| CatalogError::NotFound("sink", sink_name.to_owned()))
+    }
+
+    pub fn get_any_sink_by_name<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        sink_name: &str,
+    ) -> CatalogResult<(&Arc<SinkCatalog>, &'a str)> {
+        self.get_sink_by_name(db_name, schema_path, sink_name, true)
+    }
+
+    pub fn get_created_sink_by_name<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        sink_name: &str,
+    ) -> CatalogResult<(&Arc<SinkCatalog>, &'a str)> {
+        self.get_sink_by_name(db_name, schema_path, sink_name, false)
     }
 
     pub fn get_subscription_by_name<'a>(
@@ -994,8 +1013,12 @@ impl Catalog {
             }
         } else if schema.get_source_by_name(relation_name).is_some() {
             Err(CatalogError::duplicated("source", relation_name.to_owned()))
-        } else if schema.get_sink_by_name(relation_name).is_some() {
-            Err(CatalogError::duplicated("sink", relation_name.to_owned()))
+        } else if let Some(sink) = schema.get_any_sink_by_name(relation_name) {
+            Err(CatalogError::Duplicated(
+                "table",
+                relation_name.to_owned(),
+                !sink.is_created(),
+            ))
         } else if schema.get_view_by_name(relation_name).is_some() {
             Err(CatalogError::duplicated("view", relation_name.to_owned()))
         } else if let Some(subscription) = schema.get_subscription_by_name(relation_name) {
