@@ -15,6 +15,7 @@ failpoints = ["fail/failpoints"]
 hm-trace = []
 
 [dependencies]
+ahash = { workspace = true }
 anyhow = "1"
 arc-swap = { workspace = true }
 async-trait = "0.1"

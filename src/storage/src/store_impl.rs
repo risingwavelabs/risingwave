@@ -34,9 +34,12 @@ use crate::StateStore;
 use crate::compaction_catalog_manager::{CompactionCatalogManager, RemoteTableAccessor};
 use crate::error::StorageResult;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
+use crate::hummock::none::NoneRecentFilter;
+use crate::hummock::sharded::ShardedRecentFilter;
+use crate::hummock::simple::SimpleRecentFilter;
 use crate::hummock::{
-    Block, BlockCacheEventListener, HummockError, HummockStorage, RecentFilter, Sstable,
-    SstableBlockIndex, SstableStore, SstableStoreConfig,
+    Block, BlockCacheEventListener, HummockError, HummockStorage, Sstable, SstableBlockIndex,
+    SstableStore, SstableStoreConfig,
 };
 use crate::memory::MemoryStateStore;
 use crate::memory::sled::SledStateStore;
@@ -783,12 +786,28 @@ impl StateStoreImpl {
         };
 
         let recent_filter = if opts.data_file_cache_dir.is_empty() {
-            None
+            Arc::new(NoneRecentFilter::default().into())
+        } else if opts.cache_refill_recent_filter_shards == 1 {
+            Arc::new(
+                SimpleRecentFilter::new(
+                    opts.cache_refill_recent_filter_layers,
+                    Duration::from_millis(
+                        opts.cache_refill_recent_filter_rotate_interval_ms as u64,
+                    ),
+                )
+                .into(),
+            )
         } else {
-            Some(Arc::new(RecentFilter::new(
-                opts.cache_refill_recent_filter_layers,
-                Duration::from_millis(opts.cache_refill_recent_filter_rotate_interval_ms as u64),
-            )))
+            Arc::new(
+                ShardedRecentFilter::new(
+                    opts.cache_refill_recent_filter_layers,
+                    Duration::from_millis(
+                        opts.cache_refill_recent_filter_rotate_interval_ms as u64,
+                    ),
+                    opts.cache_refill_recent_filter_shards,
+                )
+                .into(),
+            )
         };
 
         let store = match s {

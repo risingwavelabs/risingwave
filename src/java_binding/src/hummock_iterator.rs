@@ -33,6 +33,7 @@ use risingwave_pb::java_binding::key_range::Bound;
 use risingwave_pb::java_binding::{KeyRange, ReadPlan};
 use risingwave_storage::error::{StorageError, StorageResult};
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
+use risingwave_storage::hummock::none::NoneRecentFilter;
 use risingwave_storage::hummock::store::HummockStorageIterator;
 use risingwave_storage::hummock::store::version::HummockVersionReader;
 use risingwave_storage::hummock::{
@@ -102,7 +103,7 @@ pub(crate) async fn new_hummock_java_binding_iter(
             path: read_plan.data_dir,
             prefetch_buffer_capacity: 1 << 10,
             max_prefetch_block_number: 16,
-            recent_filter: None,
+            recent_filter: Arc::new(NoneRecentFilter::default().into()),
             state_store_metrics: Arc::new(global_hummock_state_store_metrics(
                 MetricLevel::Disabled,
             )),

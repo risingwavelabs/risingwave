@@ -34,6 +34,7 @@ use risingwave_object_store::object::{
 use risingwave_storage::compaction_catalog_manager::CompactionCatalogAgent;
 use risingwave_storage::hummock::iterator::{ConcatIterator, ConcatIteratorInner, HummockIterator};
 use risingwave_storage::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
+use risingwave_storage::hummock::none::NoneRecentFilter;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
     BackwardSstableIterator, BatchSstableWriterFactory, CachePolicy, HummockResult, MemoryLimiter,
@@ -162,7 +163,7 @@ async fn generate_sstable_store(object_store: Arc<ObjectStoreImpl>) -> Arc<Sstab
         path: "test".to_owned(),
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
-        recent_filter: None,
+        recent_filter: Arc::new(NoneRecentFilter::default().into()),
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
         use_new_object_prefix_strategy: true,
         meta_cache,
