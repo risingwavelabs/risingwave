@@ -390,7 +390,7 @@ debug = "line-tables-only"
 opt-level = 2
 
 [patch.crates-io]
-faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "6d91517" }
+faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "8e181a7df1c97f1c020cbb45d9fff35c0f517665" }
 # Patch third-party crates for deterministic simulation.
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae" }
 # Don't patch `tokio-stream`, but only use the madsim version for **direct** dependencies.
