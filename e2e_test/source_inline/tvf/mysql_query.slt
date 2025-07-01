@@ -41,7 +41,8 @@ CREATE TABLE test (
     v29 tinytext,
     v30 mediumtext,
     v31 longtext,
-    v32 datetime
+    v32 datetime,
+    v33 binary(4)
 );
 INSERT INTO test SELECT
   1 as id,
@@ -77,7 +78,8 @@ INSERT INTO test SELECT
   'tinytext' as v29,
   'mediumtext' as v30,
   'longtext' as v31,
-  '2021-01-01 12:34:56' as v32;
+  '2021-01-01 12:34:56' as v32,
+  x'01020304' as v33;
 "
 
 statement ok
@@ -91,12 +93,12 @@ create source mysql_cdc_source with (
 query
 select * from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'tvf', 'select * from test;');
 ----
-1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 b 12345 \x74657874 \x74696e7974657874 \x6d656469756d74657874 \x6c6f6e6774657874 2021-01-01 12:34:56
+1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 b 12345 \x74657874 \x74696e7974657874 \x6d656469756d74657874 \x6c6f6e6774657874 2021-01-01 12:34:56 01020304
 
 query
 select * from mysql_query('mysql_cdc_source', 'select * from test;');
 ----
-1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 b 12345 \x74657874 \x74696e7974657874 \x6d656469756d74657874 \x6c6f6e6774657874 2021-01-01 12:34:56
+1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 b 12345 \x74657874 \x74696e7974657874 \x6d656469756d74657874 \x6c6f6e6774657874 2021-01-01 12:34:56 01020304
 
 
 system ok
@@ -137,7 +139,8 @@ INSERT INTO test SELECT
   'tinytext2' as v29,
   'mediumtext2' as v30,
   'longtext2' as v31,
-  '2021-01-01 12:34:56' as v32;
+  '2021-01-01 12:34:56' as v32,
+  x'05060708' as v33;
 "
 
 statement error db error: ERROR: Failed to run the query
@@ -186,7 +189,8 @@ create table test (
     v29 varchar,
     v30 varchar,
     v31 varchar,
-    v32 timestamp
+    v32 timestamp,
+    v33 bytea
 )
 with (
  connector = 'mysql-cdc',
@@ -203,8 +207,8 @@ sleep 5s
 query I
 select * from test order by id;
 ----
-1 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 b \x3132333435 text tinytext mediumtext longtext 2021-01-01 12:34:56
-2 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 NULL {"key1": 1, "key2": "abc"} NULL f 2022 c \x6162636465 text2 tinytext2 mediumtext2 longtext2 2021-01-01 12:34:56
+1 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 b \x3132333435 text tinytext mediumtext longtext 2021-01-01 12:34:56 \x01020304
+2 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 NULL {"key1": 1, "key2": "abc"} NULL f 2022 c \x6162636465 text2 tinytext2 mediumtext2 longtext2 2021-01-01 12:34:56 \x05060708
 
 system ok
 mysql -e "
