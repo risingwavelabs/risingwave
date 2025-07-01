@@ -65,6 +65,8 @@ pub struct TableCatalogBuilder {
     column_names: HashMap<String, i32>,
     watermark_columns: Option<FixedBitSet>,
     dist_key_in_pk: Option<Vec<usize>>,
+    conflict_behavior: Option<ConflictBehavior>,
+    stream_key: Option<Vec<usize>>,
 }
 
 /// For DRY, mainly used for construct internal table catalog in stateful streaming executors.
@@ -130,6 +132,14 @@ impl TableCatalogBuilder {
         self.dist_key_in_pk = Some(dist_key_in_pk);
     }
 
+    pub fn set_conflict_behavior(&mut self, conflict_behavior: ConflictBehavior) {
+        self.conflict_behavior = Some(conflict_behavior);
+    }
+
+    pub fn set_stream_key(&mut self, stream_key: Vec<usize>) {
+        self.stream_key = Some(stream_key);
+    }
+
     /// Check the column name whether exist before. if true, record occurrence and change the name
     /// to avoid duplicate.
     fn avoid_duplicate_col_name(&mut self, column_desc: &mut ColumnDesc) {
@@ -172,6 +182,9 @@ impl TableCatalogBuilder {
             );
         }
 
+        let conflict_behavior = self.conflict_behavior.unwrap_or(ConflictBehavior::NoCheck);
+        let stream_key = self.stream_key.clone().unwrap_or_default();
+
         TableCatalog {
             id: TableId::placeholder(),
             schema_id: 0,
@@ -181,7 +194,7 @@ impl TableCatalogBuilder {
             dependent_relations: vec![],
             columns: self.columns.clone(),
             pk: self.pk,
-            stream_key: vec![],
+            stream_key,
             distribution_key,
             // NOTE: This should be altered if `TableCatalogBuilder` is used to build something
             // other than internal tables.
@@ -196,7 +209,7 @@ impl TableCatalogBuilder {
                 .value_indices
                 .unwrap_or_else(|| (0..self.columns.len()).collect_vec()),
             definition: "".into(),
-            conflict_behavior: ConflictBehavior::NoCheck,
+            conflict_behavior,
             version_column_index: None,
             read_prefix_len_hint,
             version: None, // the internal table is not versioned and can't be schema changed

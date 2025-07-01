@@ -136,4 +136,12 @@ impl<S: StateStore> CdcBackfillState<S> {
             .commit_assert_no_update_vnode_bitmap(new_epoch)
             .await
     }
+
+    pub fn cached_is_finished(&self) -> bool {
+        let state_len = self.cached_state.len();
+        match self.cached_state[state_len - 3] {
+            Some(ScalarImpl::Bool(val)) => val,
+            _ => false,
+        }
+    }
 }

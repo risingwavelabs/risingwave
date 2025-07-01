@@ -168,7 +168,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let mut is_snapshot_paused = first_barrier.is_pause_on_startup();
         let first_barrier_epoch = first_barrier.epoch;
         // The first barrier message should be propagated.
+        dbg!(&first_barrier_epoch, &self.actor_ctx.id);
         yield Message::Barrier(first_barrier);
+
         let mut rate_limit_to_zero = self.rate_limit_rps.is_some_and(|val| val == 0);
 
         // Check whether this parallelism has been assigned splits,
@@ -253,9 +255,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         );
 
         let mut upstream = upstream.peekable();
-        let mut last_binlog_offset: Option<CdcOffset> = state
-            .last_cdc_offset
-            .map_or(upstream_table_reader.current_cdc_offset().await?, Some);
+        let mut last_binlog_offset: Option<CdcOffset> = Some(
+            state
+                .last_cdc_offset
+                .unwrap_or(upstream_table_reader.current_cdc_offset().await?),
+        );
 
         let offset_parse_func = upstream_table_reader.reader.get_cdc_offset_parser();
         let mut consumed_binlog_offset: Option<CdcOffset> = None;
@@ -714,6 +718,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 .await?;
         }
 
+        let offset_after_snapshot = upstream_table_reader.current_cdc_offset().await?;
+
         // drop reader to release db connection
         drop(upstream_table_reader);
 
@@ -723,33 +729,68 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             "CdcBackfill has already finished and will forward messages directly to the downstream"
         );
 
-        // Wait for first barrier to come after backfill is finished.
+        // Wait for first barrier to come after snapshot is consumed.
+        // After that, we decide the backfill is finished after the consumed binlog offset is
+        // greater than or equal to the `offset_after_snapshot`.
         // So we can update our progress + persist the status.
         while let Some(Ok(msg)) = upstream.next().await {
-            if let Some(msg) = mapping_message(msg, &self.output_indices) {
-                // If not finished then we need to update state, otherwise no need.
-                if let Message::Barrier(barrier) = &msg {
-                    // finalized the backfill state
-                    // TODO: unify `mutate_state` and `commit_state` into one method
-                    state_impl
-                        .mutate_state(
-                            current_pk_pos.clone(),
-                            last_binlog_offset.clone(),
-                            total_snapshot_row_count,
-                            true,
-                        )
-                        .await?;
-                    state_impl.commit_state(barrier.epoch).await?;
-
-                    // mark progress as finished
-                    if let Some(progress) = self.progress.as_mut() {
-                        progress.finish(barrier.epoch, total_snapshot_row_count);
+            // If not finished then we need to update state, otherwise no need.
+            match &msg {
+                Message::Barrier(barrier) => {
+                    let mut is_finished = state_impl.cached_is_finished();
+                    if let Some(offset) = last_binlog_offset.as_ref() {
+                        is_finished |= offset >= &offset_after_snapshot;
                     }
-                    yield msg;
-                    // break after the state have been saved
-                    break;
-                }
+                    if is_finished {
+                        // finalized the backfill state
+                        // TODO: unify `mutate_state` and `commit_state` into one method
+                        state_impl
+                            .mutate_state(
+                                current_pk_pos.clone(),
+                                last_binlog_offset.clone(),
+                                total_snapshot_row_count,
+                                true,
+                            )
+                            .await?;
+                        state_impl.commit_state(barrier.epoch).await?;
 
+                        // mark progress as finished
+                        if let Some(progress) = self.progress.as_mut() {
+                            progress.finish(barrier.epoch, total_snapshot_row_count);
+                        }
+                        if self.is_for_etl {
+                            // clear the materialized view for ETL CDC
+                            yield Message::Barrier(Barrier::etl_cdc_clear());
+                        }
+
+                        yield msg;
+                        // break after the state have been saved
+                        break;
+                    } else {
+                        state_impl
+                            .mutate_state(
+                                current_pk_pos.clone(),
+                                last_binlog_offset.clone(),
+                                total_snapshot_row_count,
+                                false,
+                            )
+                            .await?;
+                        state_impl.commit_state(barrier.epoch).await?;
+                    }
+                }
+                Message::Chunk(chunk) => {
+                    if !state_impl.cached_is_finished() {
+                        if let Some(offset) = get_cdc_chunk_last_offset(&offset_parse_func, chunk)?
+                        {
+                            last_binlog_offset = Some(offset);
+                        }
+                    }
+                }
+                Message::Watermark(_) => {
+                    // Ignore watermark
+                }
+            }
+            if let Some(msg) = mapping_message(msg, &self.output_indices) {
                 yield msg;
             }
         }

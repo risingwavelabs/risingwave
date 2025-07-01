@@ -31,6 +31,7 @@ use risingwave_common::util::stream_graph_visitor::{
 };
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::Table;
+use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::plan_common::PbColumnDesc;
 use risingwave_pb::stream_plan::dispatch_output_mapping::TypePair;
@@ -136,20 +137,22 @@ impl BuildingFragment {
 
         stream_graph_visitor::visit_fragment_mut(fragment, |node_body| match node_body {
             NodeBody::Materialize(materialize_node) => {
-                materialize_node.table_id = job_id;
-
                 // Fill the ID of the `Table`.
                 let table = materialize_node.table.as_mut().unwrap();
-                table.id = job_id;
-                table.database_id = job.database_id();
-                table.schema_id = job.schema_id();
-                table.fragment_id = fragment_id;
-                #[cfg(not(debug_assertions))]
-                {
-                    table.definition = job.name();
-                }
 
-                has_job = true;
+                if table.table_type() != TableType::Internal {
+                    materialize_node.table_id = job_id;
+                    table.id = job_id;
+                    table.database_id = job.database_id();
+                    table.schema_id = job.schema_id();
+                    table.fragment_id = fragment_id;
+                    #[cfg(not(debug_assertions))]
+                    {
+                        table.definition = job.name();
+                    }
+
+                    has_job = true;
+                }
             }
             NodeBody::Sink(sink_node) => {
                 sink_node.sink_desc.as_mut().unwrap().id = job_id;

@@ -170,6 +170,13 @@ impl EpochPair {
         self.curr += EPOCH_INC_MIN_STEP_FOR_TEST;
     }
 
+    pub fn dummy() -> Self {
+        Self {
+            curr: INVALID_EPOCH,
+            prev: INVALID_EPOCH,
+        }
+    }
+
     pub fn new_test_epoch(curr: u64) -> Self {
         if !is_max_epoch(curr) {
             assert!(curr >= EPOCH_INC_MIN_STEP_FOR_TEST);
