@@ -136,7 +136,7 @@ pub async fn handle_alter_streaming_rate_limit(
                             sink_id
                         )))?;
                 if String::from_utf8(is_decouple.clone().into()).unwrap() != "t" {
-                    bail!("ALTER SINK_RATE_LIMIT is only for sink with sink_decouple = t")
+                    bail!("ALTER SINK_RATE_LIMIT is only for sink with sink_decouple = true")
                 }
             }
 
