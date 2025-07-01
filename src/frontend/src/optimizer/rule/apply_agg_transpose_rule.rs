@@ -193,6 +193,29 @@ impl Rule for ApplyAggTransposeRule {
                 });
             }
             let mut group_keys: IndexSet = (0..apply_left_len).collect();
+
+            // The indices of the newly-produced expressions (those coming from the right side of the
+            // `Apply`) start right after the left side columns.
+            for (delta_idx, expr) in new_proj_exprs.iter().enumerate() {
+                let idx_in_node = apply_left_len + delta_idx;
+
+                // Detect `MapAccess(<left_col>, ..)` pattern.
+                if let ExprImpl::FunctionCall(fc) = expr {
+                    if matches!(fc.func_type(), ExprType::MapAccess) {
+                        // `MapAccess` should have at least 1 argument – the map column.
+                        if let Some(arg0) = fc.inputs().get(0) {
+                            if let Some(input_ref) = arg0.as_input_ref() {
+                                // Remove the original map column from the group key and use the
+                                // `MapAccess` result instead.
+                                group_keys.remove(input_ref.index());
+                                group_keys.insert(idx_in_node);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Keep the original agg's group key (if any) as before.
             group_keys.extend(agg_group_key.indices().map(|key| key + apply_left_len));
             Agg::new(agg_calls, group_keys, node)
                 .with_enable_two_phase(enable_two_phase)
