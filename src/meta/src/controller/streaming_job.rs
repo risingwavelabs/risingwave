@@ -534,10 +534,10 @@ impl CatalogController {
         let database_id = obj
             .database_id
             .ok_or_else(|| anyhow!("obj has no database id: {:?}", obj))?;
+        let streaming_job = streaming_job::Entity::find_by_id(job_id).one(&txn).await?;
 
         if !is_cancelled {
-            let streaming_job = streaming_job::Entity::find_by_id(job_id).one(&txn).await?;
-            if let Some(streaming_job) = streaming_job {
+            if let Some(streaming_job) = &streaming_job {
                 assert_ne!(streaming_job.job_status, JobStatus::Created);
                 if streaming_job.create_type == CreateType::Background
                     && streaming_job.job_status == JobStatus::Creating
@@ -554,12 +554,16 @@ impl CatalogController {
 
         let internal_table_ids = get_internal_tables_by_id(job_id, &txn).await?;
 
-        // Get the notification info if the job is a materialized view.
-        let table_obj = Table::find_by_id(job_id).one(&txn).await?;
+        // Get the notification info if the job is a materialized view or created in the background.
         let mut objs = vec![];
-        if let Some(table) = &table_obj
-            && table.table_type == TableType::MaterializedView
-        {
+        let table_obj = Table::find_by_id(job_id).one(&txn).await?;
+        let need_notify = if let Some(table) = &table_obj {
+            // If the job is a materialized view, we need to notify the frontend.
+            table.table_type == TableType::MaterializedView
+        } else {
+            streaming_job.map_or(false, |job| job.create_type == CreateType::Background)
+        };
+        if need_notify {
             let obj: Option<PartialObject> = Object::find_by_id(job_id)
                 .select_only()
                 .columns([
