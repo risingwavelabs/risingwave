@@ -2,6 +2,16 @@
 control substitution on
 
 # invalid username
+statement ok
+create source src_invalid_user with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'posres',
+ password = 'postgres',
+ database.name = 'cdc_test',
+ slot.name = 'shipments'
+);
 statement error
 create table shipments (
   shipment_id INTEGER,
@@ -10,18 +20,19 @@ create table shipments (
   destination STRING,
   is_arrived boolean,
  PRIMARY KEY (shipment_id)
-) with (
- connector = 'postgres-cdc',
- hostname = 'db',
- port = '5432',
- username = 'posres',
- password = 'postgres',
- database.name = 'cdc_test',
- table.name = 'shipments',
- slot.name = 'shipments'
-);
+) from src_invalid_user table 'shipments';
 
 # invalid not null
+statement ok
+create source src_invalid_notnull with (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ slot.name = 'shipments'
+);
 statement error CDC table with NOT NULL constraint is not supported
 create table shipments (
   shipment_id INTEGER,
@@ -30,38 +41,19 @@ create table shipments (
   destination STRING NOT NULL,
   is_arrived boolean NOT NULL,
  PRIMARY KEY (shipment_id)
-) with (
- connector = 'postgres-cdc',
- hostname = '${PGHOST:localhost}',
- port = '${PGPORT:5432}',
- username = '${PGUSER:$USER}',
- password = '${PGPASSWORD:}',
- database.name = '${PGDATABASE:postgres}',
- table.name = 'shipments',
- slot.name = 'shipments'
-);
+) from src_invalid_notnull table 'shipments';
 
 # invalid password
-statement error
-create table shipments (
-  shipment_id INTEGER,
-  order_id INTEGER,
-  origin STRING,
-  destination STRING,
-  is_arrived boolean,
- PRIMARY KEY (shipment_id)
-) with (
+statement ok
+create source src_invalid_pwd with (
  connector = 'postgres-cdc',
  hostname = 'db',
  port = '5432',
  username = 'postgres',
  password = 'otgres',
  database.name = 'cdc_test',
- table.name = 'shipments',
  slot.name = 'shipments'
 );
-
-# invalid table name
 statement error
 create table shipments (
   shipment_id INTEGER,
@@ -70,19 +62,41 @@ create table shipments (
   destination STRING,
   is_arrived boolean,
  PRIMARY KEY (shipment_id)
-) with (
+) from src_invalid_pwd table 'shipments';
+
+# invalid table name
+statement ok
+create source src_invalid_table with (
  connector = 'postgres-cdc',
  hostname = 'db',
  port = '5432',
  username = 'postgres',
  password = 'postgres',
  database.name = 'cdc_test',
- table.name = 'shipment',
  slot.name = 'shipments'
 );
-
+statement error
+create table shipments (
+  shipment_id INTEGER,
+  order_id INTEGER,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+ PRIMARY KEY (shipment_id)
+) from src_invalid_table table 'shipment';
 
 # invalid primary key
+statement ok
+create source src_invalid_pk with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'postgres',
+ database.name = 'cdc_test',
+ schema.name = 'public',
+ slot.name = 'shipments'
+);
 statement error
 create table shipments (
   shipment_id INTEGER,
@@ -91,7 +105,11 @@ create table shipments (
   destination STRING,
   is_arrived boolean,
  PRIMARY KEY (order_id)
-) with (
+) from src_invalid_pk table 'shipments';
+
+# column name mismatch
+statement ok
+create source src_colname_mismatch with (
  connector = 'postgres-cdc',
  hostname = 'db',
  port = '5432',
@@ -99,12 +117,8 @@ create table shipments (
  password = 'postgres',
  database.name = 'cdc_test',
  schema.name = 'public',
- table.name = 'shipments',
  slot.name = 'shipments'
 );
-
-
-# column name mismatch
 statement error
 create table shipments (
   shipment_id INTEGER,
@@ -113,7 +127,11 @@ create table shipments (
   destination STRING,
   is_arrived boolean,
  PRIMARY KEY (shipment_id)
-) with (
+) from src_colname_mismatch table 'shipments';
+
+# column data type mismatch
+statement ok
+create source src_type_mismatch with (
  connector = 'postgres-cdc',
  hostname = 'db',
  port = '5432',
@@ -121,11 +139,8 @@ create table shipments (
  password = 'postgres',
  database.name = 'cdc_test',
  schema.name = 'public',
- table.name = 'shipments',
  slot.name = 'shipments'
 );
-
-# column data type mismatch
 statement error
 create table shipments (
   shipment_id INTEGER,
@@ -134,7 +149,11 @@ create table shipments (
   destination STRING,
   is_arrived boolean,
  PRIMARY KEY (shipment_id)
-) with (
+) from src_type_mismatch table 'shipments';
+
+# format & encode provided and match with debezium json, this is okay
+statement ok
+create source src_format_encode with (
  connector = 'postgres-cdc',
  hostname = 'db',
  port = '5432',
@@ -142,11 +161,8 @@ create table shipments (
  password = 'postgres',
  database.name = 'cdc_test',
  schema.name = 'public',
- table.name = 'shipments',
  slot.name = 'shipments'
 );
-
-# format & encode provided and match with debezium json, this is okay
 statement ok
 explain create table shipments (
   shipment_id INTEGER,
@@ -155,7 +171,11 @@ explain create table shipments (
   destination STRING,
   is_arrived boolean,
  PRIMARY KEY (shipment_id)
-) with (
+) from src_format_encode table 'shipments' format debezium encode json;
+
+# format & encode provided but mismatch with debezium json, this is not allowed
+statement ok
+create source src_format_encode_err with (
  connector = 'postgres-cdc',
  hostname = 'db',
  port = '5432',
@@ -163,11 +183,8 @@ explain create table shipments (
  password = 'postgres',
  database.name = 'cdc_test',
  schema.name = 'public',
- table.name = 'shipments',
  slot.name = 'shipments'
-) format debezium encode json;
-
-# format & encode provided but mismatch with debezium json, this is not allowed
+);
 statement error Row format for CDC connectors should be either omitted or set to `FORMAT DEBEZIUM ENCODE JSON`
 create table shipments (
   shipment_id INTEGER,
@@ -176,18 +193,19 @@ create table shipments (
   destination STRING,
   is_arrived boolean,
  PRIMARY KEY (shipment_id)
-) with (
- connector = 'postgres-cdc',
- hostname = 'db',
- port = '5432',
- username = 'postgres',
- password = 'postgres',
- database.name = 'cdc_test',
- schema.name = 'public',
- table.name = 'shipments',
- slot.name = 'shipments'
-) format canal encode csv;
+) from src_format_encode_err table 'shipments' format canal encode csv;
 
+# Not supported: Non-generated column found after a generated column.
+statement ok
+create source src_gen_col_err with (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ slot.name = 'shipments'
+);
 statement error Not supported: Non-generated column found after a generated column.
 create table shipments (
   next_shipment_id INTEGER as shipment + 1,
@@ -197,23 +215,28 @@ create table shipments (
   destination STRING,
   is_arrived boolean,
  PRIMARY KEY (shipment_id)
-) with (
+) from src_gen_col_err table 'shipments';
+
+statement ok
+create source src_numeric_to_rw_int256 with (
  connector = 'postgres-cdc',
- hostname = '${PGHOST:localhost}',
- port = '${PGPORT:5432}',
+ hostname = 'db',
+ port = '5432',
  username = '${PGUSER:$USER}',
  password = '${PGPASSWORD:}',
- database.name = '${PGDATABASE:postgres}',
- table.name = 'shipments',
- slot.name = 'shipments'
+ database.name = 'cdc_test',
+ schema.name = 'public',
+ slot.name = 'numeric_to_rw_int256'
 );
-
 statement ok
 explain create table numeric_to_rw_int256 (
   id int,
   num rw_int256,
   PRIMARY KEY (id)
-) with (
+) from src_numeric_to_rw_int256 table 'public.numeric_table';
+
+statement ok
+create source src_numeric_to_varchar with (
  connector = 'postgres-cdc',
  hostname = 'db',
  port = '5432',
@@ -221,44 +244,44 @@ explain create table numeric_to_rw_int256 (
  password = '${PGPASSWORD:}',
  database.name = 'cdc_test',
  schema.name = 'public',
- table.name = 'numeric_table',
- slot.name = 'numeric_to_rw_int256'
+ slot.name = 'numeric_to_varchar'
 );
-
 statement ok
 explain create table numeric_to_varchar (
   id int,
   num varchar,
   PRIMARY KEY (id)
-) with (
- connector = 'postgres-cdc',
- hostname = 'db',
- port = '5432',
- username = '${PGUSER:$USER}',
- password = '${PGPASSWORD:}',
- database.name = 'cdc_test',
- schema.name = 'public',
- table.name = 'numeric_table',
- slot.name = 'numeric_to_varchar'
-);
+) from src_numeric_to_varchar table 'public.numeric_table';
 
 statement ok
-explain create table enum_to_varchar (
-  id int,
-  current_mood varchar,
-  PRIMARY KEY (id)
-) with (
+create source src_enum_to_varchar with (
  connector = 'postgres-cdc',
  hostname = '${PGHOST:localhost}',
  port = '${PGPORT:5432}',
  username = '${PGUSER:$USER}',
  password = '${PGPASSWORD:}',
  database.name = '${PGDATABASE:postgres}',
- table.name = 'enum_table',
  slot.name = 'enum_to_varchar'
 );
+statement ok
+explain create table enum_to_varchar (
+  id int,
+  current_mood varchar,
+  PRIMARY KEY (id)
+) from src_enum_to_varchar table 'enum_table';
 
 # generated column
+statement ok
+create source src_shipments_gen_col with (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ schema.name = 'public',
+ slot.name = 'shipments'
+);
 statement ok
 create table shipments (
   shipment_id INTEGER,
@@ -268,17 +291,7 @@ create table shipments (
   is_arrived boolean,
   generated_c INTEGER AS shipment_id + order_id,
  PRIMARY KEY (shipment_id)
-) with (
- connector = 'postgres-cdc',
- hostname = '${PGHOST:localhost}',
- port = '${PGPORT:5432}',
- username = '${PGUSER:$USER}',
- password = '${PGPASSWORD:}',
- database.name = '${PGDATABASE:postgres}',
- schema.name = 'public',
- table.name = 'shipments',
- slot.name = 'shipments'
-);
+) from src_shipments_gen_col table 'public.shipments';
 
 statement ok
 drop table shipments;
@@ -297,7 +310,6 @@ CREATE TABLE IF NOT EXISTS partitioned_timestamp_table(
  password = '${PGPASSWORD:}',
  database.name = '${PGDATABASE:postgres}',
  schema.name = 'public',
- table.name = 'partitioned_timestamp_table',
  publication.name = 'rw_publication_pubviaroot_false',
  slot.name = 'my_slot_partition'
 );

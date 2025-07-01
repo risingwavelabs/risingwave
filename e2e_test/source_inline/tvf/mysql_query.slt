@@ -125,6 +125,16 @@ statement ok
 drop table if exists test;
 
 statement ok
+create source src_tvf_test with (
+ connector = 'mysql-cdc',
+ hostname = '$MYSQL_HOST',
+ port = '$MYSQL_TCP_PORT',
+ username = '$RISEDEV_MYSQL_USER',
+ password = '$MYSQL_PWD',
+ database.name = 'tvf',
+ table.name = 'test'
+);
+statement ok
 create table test (
     id bigint primary key,
     v0 bool,
@@ -151,15 +161,7 @@ create table test (
     v21 timestamptz,
     v22 jsonb,
     v23 int
-) with (
- connector = 'mysql-cdc',
- hostname = '$MYSQL_HOST',
- port = '$MYSQL_TCP_PORT',
- username = '$RISEDEV_MYSQL_USER',
- password = '$MYSQL_PWD',
- database.name = 'tvf',
- table.name = 'test',
-);
+) from src_tvf_test table 'tvf.test';
 
 sleep 5s
 

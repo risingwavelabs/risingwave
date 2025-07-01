@@ -1349,6 +1349,29 @@ pub async fn handle_create_table(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
+    // CDC connector ban check
+    if let Some(connector) = handler_args.with_options.get_connector() {
+        use risingwave_connector::source::cdc::{
+            MONGODB_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
+            SQL_SERVER_CDC_CONNECTOR,
+        };
+        if [
+            MYSQL_CDC_CONNECTOR,
+            POSTGRES_CDC_CONNECTOR,
+            SQL_SERVER_CDC_CONNECTOR,
+            MONGODB_CDC_CONNECTOR,
+        ]
+        .contains(&connector.as_str())
+        {
+            return Err(ErrorCode::InvalidInputSyntax(
+                format!(
+                    "CDC connector type '{}' does not support CREATE TABLE ... WITH (...), please use CREATE SOURCE and then CREATE TABLE FROM SOURCE.",
+                    connector
+                )
+            ).into());
+        }
+    }
+
     if append_only {
         session.notice_to_user("APPEND ONLY TABLE is currently an experimental feature.");
     }
