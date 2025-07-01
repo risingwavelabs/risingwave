@@ -17,7 +17,29 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common_estimate_size::EstimateSize;
 
 use crate::executor::StreamExecutorResult;
-use crate::executor::join::JoinEncodingPrimitive;
+
+pub trait JoinEncoding: 'static + Send + Sync {
+    fn encode<R: Row>(row: &JoinRow<R>) -> CachedJoinRow;
+}
+
+pub struct CpuEncoding {}
+
+impl JoinEncoding for CpuEncoding {
+    fn encode<R: Row>(row: &JoinRow<R>) -> CachedJoinRow {
+        CachedJoinRow::Unencoded(JoinRow::new(row.row.to_owned_row(), row.degree))
+    }
+}
+
+pub struct MemoryEncoding {}
+
+impl JoinEncoding for MemoryEncoding {
+    fn encode<R: Row>(row: &JoinRow<R>) -> CachedJoinRow {
+        CachedJoinRow::Encoded(EncodedJoinRow {
+            compacted_row: (&row.row).into(),
+            degree: row.degree,
+        })
+    }
+}
 
 /// This is a row with a match degree
 #[derive(Clone, Debug)]
@@ -48,17 +70,8 @@ impl<R: Row> JoinRow<R> {
         (&self.row, degree)
     }
 
-    pub fn encode<const N: JoinEncodingPrimitive>(&self) -> CachedJoinRow {
-        match N {
-            super::JoinEncoding::Memory => CachedJoinRow::Encoded(EncodedJoinRow {
-                compacted_row: (&self.row).into(),
-                degree: self.degree,
-            }),
-            super::JoinEncoding::Cpu => {
-                CachedJoinRow::Unencoded(JoinRow::new(self.row.to_owned_row(), self.degree))
-            }
-            _ => unreachable!(),
-        }
+    pub fn encode<E: JoinEncoding>(&self) -> CachedJoinRow {
+        E::encode(self)
     }
 }
 

@@ -27,7 +27,7 @@ use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::executor::hash_join::*;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{ActorContextRef, JoinEncoding, JoinType};
+use crate::executor::{ActorContextRef, CpuEncoding, JoinType, MemoryEncoding};
 use crate::task::AtomicU64Ref;
 
 pub struct HashJoinExecutorBuilder;
@@ -200,33 +200,30 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
         /// This macro helps to fill the const generic type parameter.
         macro_rules! build {
             ($join_type:ident, $join_encoding:ident) => {
-                Ok(HashJoinExecutor::<
-                    K,
-                    S,
-                    { JoinType::$join_type },
-                    { JoinEncoding::$join_encoding },
-                >::new(
-                    self.ctx,
-                    self.info,
-                    self.source_l,
-                    self.source_r,
-                    self.params_l,
-                    self.params_r,
-                    self.null_safe,
-                    self.output_indices,
-                    self.cond,
-                    self.inequality_pairs,
-                    self.state_table_l,
-                    self.degree_state_table_l,
-                    self.state_table_r,
-                    self.degree_state_table_r,
-                    self.lru_manager,
-                    self.is_append_only,
-                    self.metrics,
-                    self.chunk_size,
-                    self.high_join_amplification_threshold,
+                Ok(
+                    HashJoinExecutor::<K, S, { JoinType::$join_type }, $join_encoding>::new(
+                        self.ctx,
+                        self.info,
+                        self.source_l,
+                        self.source_r,
+                        self.params_l,
+                        self.params_r,
+                        self.null_safe,
+                        self.output_indices,
+                        self.cond,
+                        self.inequality_pairs,
+                        self.state_table_l,
+                        self.degree_state_table_l,
+                        self.state_table_r,
+                        self.degree_state_table_r,
+                        self.lru_manager,
+                        self.is_append_only,
+                        self.metrics,
+                        self.chunk_size,
+                        self.high_join_amplification_threshold,
+                    )
+                    .boxed(),
                 )
-                .boxed())
             };
         }
 
@@ -238,8 +235,8 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
                     | (JoinTypeProto::Unspecified, _)
                     | (_, JoinEncodingTypeProto::Unspecified ) => unreachable!(),
                     $(
-                        (JoinTypeProto::$join_type, JoinEncodingTypeProto::MemoryOptimized) => build!($join_type, Memory),
-                        (JoinTypeProto::$join_type, JoinEncodingTypeProto::CpuOptimized) => build!($join_type, Cpu),
+                        (JoinTypeProto::$join_type, JoinEncodingTypeProto::MemoryOptimized) => build!($join_type, MemoryEncoding),
+                        (JoinTypeProto::$join_type, JoinEncodingTypeProto::CpuOptimized) => build!($join_type, CpuEncoding),
                     )*
                 }
             };

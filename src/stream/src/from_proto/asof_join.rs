@@ -23,7 +23,9 @@ use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::executor::asof_join::*;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{ActorContextRef, AsOfDesc, AsOfJoinType, JoinEncoding, JoinType};
+use crate::executor::{
+    ActorContextRef, AsOfDesc, AsOfJoinType, CpuEncoding, JoinType, MemoryEncoding,
+};
 use crate::task::AtomicU64Ref;
 
 pub struct AsOfJoinExecutorBuilder;
@@ -147,29 +149,26 @@ impl<S: StateStore> HashKeyDispatcher for AsOfJoinExecutorDispatcherArgs<S> {
         /// This macro helps to fill the const generic type parameter.
         macro_rules! build {
             ($join_type:ident, $join_encoding:ident) => {
-                Ok(AsOfJoinExecutor::<
-                    K,
-                    S,
-                    { AsOfJoinType::$join_type },
-                    { JoinEncoding::$join_encoding },
-                >::new(
-                    self.ctx,
-                    self.info,
-                    self.source_l,
-                    self.source_r,
-                    self.params_l,
-                    self.params_r,
-                    self.null_safe,
-                    self.output_indices,
-                    self.state_table_l,
-                    self.state_table_r,
-                    self.lru_manager,
-                    self.metrics,
-                    self.chunk_size,
-                    self.high_join_amplification_threshold,
-                    self.asof_desc,
+                Ok(
+                    AsOfJoinExecutor::<K, S, { AsOfJoinType::$join_type }, $join_encoding>::new(
+                        self.ctx,
+                        self.info,
+                        self.source_l,
+                        self.source_r,
+                        self.params_l,
+                        self.params_r,
+                        self.null_safe,
+                        self.output_indices,
+                        self.state_table_l,
+                        self.state_table_r,
+                        self.lru_manager,
+                        self.metrics,
+                        self.chunk_size,
+                        self.high_join_amplification_threshold,
+                        self.asof_desc,
+                    )
+                    .boxed(),
                 )
-                .boxed())
             };
         }
 
@@ -178,8 +177,8 @@ impl<S: StateStore> HashKeyDispatcher for AsOfJoinExecutorDispatcherArgs<S> {
                 match (self.join_type_proto, self.join_encoding_type) {
                     (JoinTypeProto::Unspecified, _) | (_, JoinEncodingTypeProto::Unspecified) => unreachable!(),
                     $(
-                        (JoinTypeProto::$join_type, JoinEncodingTypeProto::MemoryOptimized) => build!($join_type, Memory),
-                        (JoinTypeProto::$join_type, JoinEncodingTypeProto::CpuOptimized) => build!($join_type, Cpu),
+                        (JoinTypeProto::$join_type, JoinEncodingTypeProto::MemoryOptimized) => build!($join_type, MemoryEncoding),
+                        (JoinTypeProto::$join_type, JoinEncodingTypeProto::CpuOptimized) => build!($join_type, CpuEncoding),
                     )*
                 }
             };

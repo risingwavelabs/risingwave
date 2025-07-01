@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::collections::{BTreeMap, HashSet};
+use std::marker::PhantomData;
 use std::ops::Bound;
 use std::time::Duration;
 
@@ -30,6 +31,7 @@ use super::join::hash_join::*;
 use super::join::*;
 use super::watermark::*;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
+use crate::executor::join::row::JoinEncoding;
 use crate::executor::prelude::*;
 
 /// Evict the cache every n rows.
@@ -55,7 +57,7 @@ impl JoinParams {
     }
 }
 
-struct JoinSide<K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> {
+struct JoinSide<K: HashKey, S: StateStore, E: JoinEncoding> {
     /// Store all data from a one side stream
     ht: JoinHashMap<K, S, E>,
     /// Indices of the join key columns
@@ -69,11 +71,10 @@ struct JoinSide<K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> {
     i2o_mapping_indexed: MultiMap<usize, usize>,
     /// Whether degree table is needed for this side.
     need_degree_table: bool,
+    _marker: std::marker::PhantomData<E>,
 }
 
-impl<K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> std::fmt::Debug
-    for JoinSide<K, S, E>
-{
+impl<K: HashKey, S: StateStore, E: JoinEncoding> std::fmt::Debug for JoinSide<K, S, E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JoinSide")
             .field("join_key_indices", &self.join_key_indices)
@@ -85,7 +86,7 @@ impl<K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> std::fmt::Debug
     }
 }
 
-impl<K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> JoinSide<K, S, E> {
+impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinSide<K, S, E> {
     // WARNING: Please do not call this until we implement it.
     fn is_dirty(&self) -> bool {
         unimplemented!()
@@ -113,7 +114,7 @@ pub struct AsOfJoinExecutor<
     K: HashKey,
     S: StateStore,
     const T: AsOfJoinTypePrimitive,
-    const E: JoinEncodingPrimitive,
+    E: JoinEncoding,
 > {
     ctx: ActorContextRef,
     info: ExecutorInfo,
@@ -143,8 +144,8 @@ pub struct AsOfJoinExecutor<
     asof_desc: AsOfDesc,
 }
 
-impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, const E: JoinEncodingPrimitive>
-    std::fmt::Debug for AsOfJoinExecutor<K, S, T, E>
+impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding> std::fmt::Debug
+    for AsOfJoinExecutor<K, S, T, E>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AsOfJoinExecutor")
@@ -160,15 +161,15 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, const E: JoinEnc
     }
 }
 
-impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, const E: JoinEncodingPrimitive>
-    Execute for AsOfJoinExecutor<K, S, T, E>
+impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding> Execute
+    for AsOfJoinExecutor<K, S, T, E>
 {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
     }
 }
 
-struct EqJoinArgs<'a, K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> {
+struct EqJoinArgs<'a, K: HashKey, S: StateStore, E: JoinEncoding> {
     ctx: &'a ActorContextRef,
     side_l: &'a mut JoinSide<K, S, E>,
     side_r: &'a mut JoinSide<K, S, E>,
@@ -181,7 +182,7 @@ struct EqJoinArgs<'a, K: HashKey, S: StateStore, const E: JoinEncodingPrimitive>
     high_join_amplification_threshold: usize,
 }
 
-impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, const E: JoinEncodingPrimitive>
+impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
     AsOfJoinExecutor<K, S, T, E>
 {
     #[allow(clippy::too_many_arguments)]
@@ -300,6 +301,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, const E: JoinEnc
                 i2o_mapping_indexed: l2o_indexed,
                 start_pos: 0,
                 need_degree_table: false,
+                _marker: PhantomData,
             },
             side_r: JoinSide {
                 ht: JoinHashMap::new(
@@ -324,6 +326,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, const E: JoinEnc
                 i2o_mapping: right_to_output,
                 i2o_mapping_indexed: r2o_indexed,
                 need_degree_table: false,
+                _marker: PhantomData,
             },
             metrics,
             chunk_size,
@@ -959,6 +962,7 @@ mod tests {
 
     use super::*;
     use crate::common::table::test_utils::gen_pbtable;
+    use crate::executor::MemoryEncoding;
     use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
 
     async fn create_in_memory_state_table(
@@ -1039,24 +1043,23 @@ mod tests {
         let schema_len = schema.len();
         let info = ExecutorInfo::new(schema, vec![1], "HashJoinExecutor".to_owned(), 0);
 
-        let executor =
-            AsOfJoinExecutor::<Key64, MemoryStateStore, T, { JoinEncoding::Memory }>::new(
-                ActorContext::for_test(123),
-                info,
-                source_l,
-                source_r,
-                params_l,
-                params_r,
-                vec![false],
-                (0..schema_len).collect_vec(),
-                state_l,
-                state_r,
-                Arc::new(AtomicU64::new(0)),
-                Arc::new(StreamingMetrics::unused()),
-                1024,
-                2048,
-                asof_desc,
-            );
+        let executor = AsOfJoinExecutor::<Key64, MemoryStateStore, T, MemoryEncoding>::new(
+            ActorContext::for_test(123),
+            info,
+            source_l,
+            source_r,
+            params_l,
+            params_r,
+            vec![false],
+            (0..schema_len).collect_vec(),
+            state_l,
+            state_r,
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(StreamingMetrics::unused()),
+            1024,
+            2048,
+            asof_desc,
+        );
         (tx_l, tx_r, executor.boxed().execute())
     }
 
