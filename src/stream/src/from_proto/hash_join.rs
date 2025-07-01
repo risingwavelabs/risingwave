@@ -231,28 +231,28 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
         }
 
         macro_rules! build_match {
-            ($(($proto:ident, $join_type:ident)),*) => {
+            ($(($join_type:ident)),*) => {
                 match (self.join_type_proto, self.join_encoding_type) {
                     (JoinTypeProto::AsofInner, _)
                     | (JoinTypeProto::AsofLeftOuter, _)
                     | (JoinTypeProto::Unspecified, _)
                     | (_, JoinEncodingTypeProto::Unspecified ) => unreachable!(),
                     $(
-                        (JoinTypeProto::$proto, JoinEncodingTypeProto::MemoryOptimized) => build!($join_type, MemoryOptimized),
-                        (JoinTypeProto::$proto, JoinEncodingTypeProto::CpuOptimized) => build!($join_type, CPUOptimized),
+                        (JoinTypeProto::$join_type, JoinEncodingTypeProto::MemoryOptimized) => build!($join_type, MemoryOptimized),
+                        (JoinTypeProto::$join_type, JoinEncodingTypeProto::CpuOptimized) => build!($join_type, CPUOptimized),
                     )*
                 }
             };
         }
         build_match! {
-            (Inner, Inner),
-            (LeftOuter, LeftOuter),
-            (RightOuter, RightOuter),
-            (FullOuter, FullOuter),
-            (LeftSemi, LeftSemi),
-            (LeftAnti, LeftAnti),
-            (RightSemi, RightSemi),
-            (RightAnti, RightAnti)
+            (Inner),
+            (LeftOuter),
+            (RightOuter),
+            (FullOuter),
+            (LeftSemi),
+            (LeftAnti),
+            (RightSemi),
+            (RightAnti)
         }
     }
 
