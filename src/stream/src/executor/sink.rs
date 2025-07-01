@@ -56,6 +56,8 @@ pub struct SinkExecutor<F: LogStoreFactory> {
     input_data_types: Vec<DataType>,
     need_advance_delete: bool,
     re_construct_with_sink_pk: bool,
+    /// Upstream and Downstream PK matched.
+    pk_matched: bool,
     compact_chunk: bool,
     rate_limit: Option<u32>,
 }
@@ -160,6 +162,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         let re_construct_with_sink_pk = need_advance_delete
             && sink_param.sink_type == SinkType::Upsert
             && !sink_param.downstream_pk.is_empty();
+        let pk_matched = !stream_key_sink_pk_mismatch;
         // Don't compact chunk for blackhole sink for better benchmark performance.
         let compact_chunk = !sink.is_blackhole();
 
@@ -168,6 +171,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             actor_id = actor_context.id,
             need_advance_delete,
             re_construct_with_sink_pk,
+            pk_matched,
             compact_chunk,
             "Sink executor info"
         );
@@ -185,6 +189,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             input_data_types,
             need_advance_delete,
             re_construct_with_sink_pk,
+            pk_matched,
             compact_chunk,
             rate_limit,
         })
@@ -273,6 +278,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             self.input_columns,
                             self.sink_param,
                             self.sink_writer_param,
+                            self.pk_matched,
                             self.actor_context,
                             rate_limit_rx,
                             rebuild_sink_rx,
@@ -528,6 +534,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         columns: Vec<ColumnCatalog>,
         mut sink_param: SinkParam,
         mut sink_writer_param: SinkWriterParam,
+        pk_matched: bool,
         actor_context: ActorContextRef,
         rate_limit_rx: UnboundedReceiver<RateLimit>,
         mut rebuild_sink_rx: UnboundedReceiver<RebuildSinkMessage>,
@@ -570,15 +577,23 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 // NOTE(kwannoel):
                 // After the optimization in https://github.com/risingwavelabs/risingwave/pull/12250,
                 // `DELETE`s will be sequenced before `INSERT`s in JDBC sinks and PG rust sink.
-                // This is because there's a risk that adjacent chunks with `DELETE`s on the same PK
-                // will get merged into a single chunk, since the logstore format doesn't preserve
-                // chunk boundaries.
-                // Then we will have double `DELETE`s followed by unspecified sequence of `INSERT`s,
-                // and lead to inconsistent data downstream.
-                let chunk = if downstream_pk.is_empty() {
-                    chunk
-                } else {
+                // There's a risk that adjacent chunks with `DELETE`s on the same PK will get
+                // merged into a single chunk, since the logstore format doesn't preserve chunk
+                // boundaries. Then we will have double `DELETE`s followed by unspecified sequence
+                // of `INSERT`s, and lead to inconsistent data downstream.
+                //
+                // We only need to do the compaction for upsert sinks, when the upstream and
+                // downstream PKs are matched. When the upstream and downstream PKs are not matched,
+                // we will buffer the chunks between two barriers, so the compaction is not needed,
+                // since the barriers will preserve chunk boundaries.
+                //
+                // When the sink is not an upsert sink, it is either `force_append_only` or
+                // `append_only`, we should only append to downstream, so there should not be any
+                // overlapping keys.
+                let chunk = if pk_matched && matches!(sink_param.sink_type, SinkType::Upsert) {
                     merge_chunk_row(chunk, &downstream_pk)
+                } else {
+                    chunk
                 };
                 if visible_columns.len() != columns.len() {
                     // Do projection here because we may have columns that aren't visible to
