@@ -18,6 +18,7 @@ cfg_if::cfg_if! {
     if #[cfg(feature = "sink-deltalake")] {
         mod imp;
         pub use imp::DeltaLakeSink;
+        pub use imp::DeltaLakeConfig;
     } else {
         use crate::sink::utils::dummy::{FeatureNotEnabledSinkMarker, FeatureNotEnabledSink};
         pub struct DeltalakeNotEnabled;

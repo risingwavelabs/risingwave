@@ -125,10 +125,8 @@ macro_rules! for_all_sinks {
                 { GooglePubSub, $crate::sink::google_pubsub::GooglePubSubSink, $crate::sink::google_pubsub::GooglePubSubConfig },
                 { Nats, $crate::sink::nats::NatsSink, $crate::sink::nats::NatsConfig },
                 { Jdbc, $crate::sink::remote::JdbcSink, () },
-                // { ElasticSearchJava, $crate::sink::remote::ElasticSearchJavaSink },
-                // { OpensearchJava, $crate::sink::remote::OpenSearchJavaSink },
-                { ElasticSearch, $crate::sink::elasticsearch_opensearch::elasticsearch::ElasticSearchSink, $crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::ElasticSearchOpenSearchConfig },
-                { Opensearch, $crate::sink::elasticsearch_opensearch::opensearch::OpenSearchSink, $crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::ElasticSearchOpenSearchConfig },
+                { ElasticSearch, $crate::sink::elasticsearch_opensearch::elasticsearch::ElasticSearchSink, $crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::ElasticSearchConfig },
+                { Opensearch, $crate::sink::elasticsearch_opensearch::opensearch::OpenSearchSink, $crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::OpenSearchConfig },
                 { Cassandra, $crate::sink::remote::CassandraSink, () },
                 { Doris, $crate::sink::doris::DorisSink, $crate::sink::doris::DorisConfig },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink, $crate::sink::starrocks::StarrocksConfig },
@@ -139,7 +137,7 @@ macro_rules! for_all_sinks {
                 { Webhdfs, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::webhdfs::WebhdfsSink>, $crate::sink::file_sink::webhdfs::WebhdfsConfig },
 
                 { Fs, $crate::sink::file_sink::opendal_sink::FileSink<FsSink>, $crate::sink::file_sink::fs::FsConfig },
-                { Snowflake, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::s3::SnowflakeSink>, $crate::sink::file_sink::s3::S3Config },
+                { Snowflake, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::s3::SnowflakeSink>, $crate::sink::file_sink::s3::SnowflakeConfig },
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink, $crate::sink::deltalake::DeltaLakeConfig },
                 { BigQuery, $crate::sink::big_query::BigQuerySink, $crate::sink::big_query::BigQueryConfig },
                 { DynamoDb, $crate::sink::dynamodb::DynamoDbSink, $crate::sink::dynamodb::DynamoDbConfig },
@@ -152,6 +150,35 @@ macro_rules! for_all_sinks {
             }
             $(,$arg)*
         }
+    };
+}
+
+#[macro_export]
+macro_rules! generate_config_use_clauses {
+    ({$({ $variant_name:ident, $sink_type:ty, $config_type:ty }), *}) => {
+        $(
+            $crate::generate_config_use_single!($config_type);
+        )*
+    };
+}
+
+#[macro_export]
+macro_rules! generate_config_use_single {
+    // Skip () config types
+    (()) => {};
+
+    // Generate use clause for actual config types
+    ($config_type:path) => {
+        #[allow(unused_imports)]
+        use $config_type;
+    };
+}
+
+// Convenience macro that uses for_all_sinks
+#[macro_export]
+macro_rules! use_all_sink_configs {
+    () => {
+        $crate::for_all_sinks! { $crate::generate_config_use_clauses }
     };
 }
 

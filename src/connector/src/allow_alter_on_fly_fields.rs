@@ -33,6 +33,12 @@ mod source_properties {
     for_all_sources!(use_source_properties);
 }
 
+mod sink_properties {
+    use crate::use_all_sink_configs;
+
+    use_all_sink_configs!();
+}
+
 /// Map of source connector names to their changeable field names
 pub static SOURCE_CHANGEABLE_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {
     use source_properties::*;
@@ -52,7 +58,7 @@ pub static SINK_CHANGEABLE_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = 
     let mut map = HashMap::new();
     // KafkaConfig
     map.try_insert(
-        "KafkaConfig".to_owned(),
+        std::any::type_name::<KafkaConfig>().to_owned(),
         [
             "properties.sync.call.timeout".to_owned(),
         ].into_iter().collect(),

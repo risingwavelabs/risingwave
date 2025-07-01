@@ -497,7 +497,7 @@ fn generate_rust_allow_alter_on_fly_fields_code_separate(
         };
 
     let source_entries = generate_struct_entries(&source_info, true);
-    let sink_entries = generate_struct_entries(&sink_info, false);
+    let sink_entries = generate_struct_entries(&sink_info, true);
 
     format!(
         r#"// Copyright 2025 RisingWave Labs
@@ -529,10 +529,25 @@ macro_rules! use_source_properties {{
     }};
 }}
 
+macro_rules! use_sink_properties {{
+    ({{ $({{ $variant_name:ident, $sink_type:ty, $config_type:ty }}),* }}) => {{
+        $(
+            #[allow(unused_imports)]
+            pub(super) use $config_type;
+        )*
+    }};
+}}
+
 mod source_properties {{
     use crate::for_all_sources;
 
     for_all_sources!(use_source_properties);
+}}
+
+mod sink_properties {{
+    use crate::for_all_sinks_with_concrate_type;
+
+    for_all_sinks_with_concrate_type!(use_sink_properties);
 }}
 
 /// Map of source connector names to their changeable field names
