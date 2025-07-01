@@ -272,7 +272,7 @@ mod tests {
         gen_test_log_store_table,
     };
     use crate::common::log_store_impl::kv_log_store::{
-        KV_LOG_STORE_V2_INFO, KvLogStorePkInfo, KvLogStoreReadMetrics, LogStoreVnodeProgress, SeqId,
+        KV_LOG_STORE_V2_INFO, KvLogStoreMetrics, KvLogStorePkInfo, KvLogStoreReadMetrics, SeqIdType,
     };
 
     #[tokio::test]
@@ -325,14 +325,14 @@ mod tests {
                 .unwrap();
             let mut writer = write_state.start_writer(false);
             writer
-                .write_chunk(chunk, epoch1, 0, (chunk.cardinality() as SeqId) - 1)
+                .write_chunk(chunk, epoch1, 0, (chunk.cardinality() as SeqIdType) - 1)
                 .unwrap();
             writer.write_barrier(epoch1, true).unwrap();
             writer.finish().await.unwrap();
             let split_size = chunk.cardinality() / 2 + 1;
             let [chunk1, chunk2]: [StreamChunk; 2] = chunk.split(split_size).try_into().unwrap();
 
-            let end_seq_id = chunk1.cardinality() as SeqId - 1;
+            let end_seq_id = chunk1.cardinality() as SeqIdType - 1;
             let (_, read_chunk, _) = read_state
                 .read_flushed_chunk(
                     (**vnodes).clone(),
@@ -349,7 +349,7 @@ mod tests {
                 read_state,
                 write_state,
                 chunk2,
-                LogStoreVnodeProgress::Aligned(vnodes.clone(), epoch1, Some(end_seq_id)),
+                Some((epoch1, Some(end_seq_id))),
             )
         };
 
@@ -376,7 +376,7 @@ mod tests {
         read_state1.update_vnode_bitmap(all_vnode.clone());
         let mut items: Vec<_> = read_state1
             .read_persisted_log_store(
-                KvLogStoreReadMetrics::for_test(),
+                &KvLogStoreMetrics::for_test(),
                 epoch2,
                 LogStoreReadStateStreamRangeStart::Unbounded,
             )
@@ -388,18 +388,16 @@ mod tests {
         let (last_epoch, last_item) = items.pop().unwrap();
         assert_eq!(last_epoch, epoch1);
         let KvLogStoreItem::Barrier {
-            vnodes,
             is_checkpoint: true,
         } = last_item
         else {
             unreachable!()
         };
-        assert_eq!(all_vnode, vnodes);
 
         assert!(check_rows_eq(
             items.iter().flat_map(|(epoch, item)| {
                 assert_eq!(*epoch, epoch1);
-                let KvLogStoreItem::StreamChunk { chunk, .. } = item else {
+                let KvLogStoreItem::StreamChunk(chunk) = item else {
                     unreachable!()
                 };
                 chunk.rows()
