@@ -105,6 +105,10 @@ message MetaReport {
 
   // The connector usage of the cluster
   string connector_usage_json_str = 9;
+
+  // The license information of the cluster (JSON serialized).
+  // If there's any error, it will be like `{"error": "error message"}`.
+  string license_info_json_str = 10;
 }
 
 enum PlanOptimization {

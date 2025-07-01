@@ -53,6 +53,9 @@ pub struct FsSourceCommon {
     #[serde(rename = "refresh.interval.sec")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub refresh_interval_sec: Option<u64>,
+
+    #[serde(rename = "compression_format", default = "Default::default")]
+    pub compression_format: CompressionFormat,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
@@ -115,7 +118,11 @@ impl OpendalSource for OpendalS3 {
     type Properties = OpendalS3Properties;
 
     fn new_enumerator(properties: Self::Properties) -> ConnectorResult<OpendalEnumerator<Self>> {
-        OpendalEnumerator::new_s3_source(properties.s3_properties, properties.assume_role)
+        OpendalEnumerator::new_s3_source(
+            &properties.s3_properties,
+            properties.assume_role,
+            properties.fs_common.compression_format,
+        )
     }
 }
 

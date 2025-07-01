@@ -29,6 +29,7 @@ use crate::expr::{AggCall, ExprImpl, InputRef, Literal, OrderBy, TableFunctionTy
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalProject, LogicalScan, LogicalTableFunction, LogicalUnion, LogicalValues,
+    StreamTableScan,
 };
 use crate::optimizer::{OptimizerContext, PlanRef};
 use crate::utils::{Condition, GroupBy};
@@ -47,7 +48,6 @@ impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
         }
 
         let reader = plan.ctx().session_ctx().env().catalog_reader().read_guard();
-        // TODO(kwannoel): Make sure it reads from source tables as well.
         let backfilling_tables = get_backfilling_tables(reader);
         let plan = Self::build_plan(plan.ctx(), backfilling_tables)?;
         ApplyResult::Ok(plan)
@@ -65,6 +65,7 @@ impl TableFunctionToInternalBackfillProgressRule {
                 Field::new("fragment_id", DataType::Int32),
                 Field::new("backfill_state_table_id", DataType::Int32),
                 Field::new("current_row_count", DataType::Int64),
+                Field::new("min_epoch", DataType::Int64),
             ];
             let plan = LogicalValues::new(vec![], Schema::new(fields), ctx.clone());
             return Ok(plan.into());
@@ -95,7 +96,22 @@ impl TableFunctionToInternalBackfillProgressRule {
     }
 
     fn build_agg(backfill_info: &BackfillInfo, scan: LogicalScan) -> anyhow::Result<PlanRef> {
-        let select_exprs = vec![ExprImpl::AggCall(Box::new(AggCall::new(
+        let epoch_expr = match backfill_info.epoch_column_index {
+            Some(epoch_column_index) => ExprImpl::InputRef(Box::new(InputRef {
+                index: epoch_column_index,
+                data_type: DataType::Int64,
+            })),
+            None => ExprImpl::Literal(Box::new(Literal::new(None, DataType::Int64))),
+        };
+        let aggregated_min_epoch = ExprImpl::AggCall(Box::new(AggCall::new(
+            AggType::Builtin(PbAggKind::Min),
+            vec![epoch_expr],
+            false,
+            OrderBy::any(),
+            Condition::true_cond(),
+            vec![],
+        )?));
+        let aggregated_current_row_count = ExprImpl::AggCall(Box::new(AggCall::new(
             AggType::Builtin(PbAggKind::Sum),
             vec![ExprImpl::InputRef(Box::new(InputRef {
                 index: backfill_info.row_count_column_index,
@@ -105,7 +121,8 @@ impl TableFunctionToInternalBackfillProgressRule {
             OrderBy::any(),
             Condition::true_cond(),
             vec![],
-        )?))];
+        )?));
+        let select_exprs = vec![aggregated_current_row_count, aggregated_min_epoch];
         let group_by = GroupBy::GroupKey(vec![]);
         let (agg, _, _) = LogicalAgg::create(select_exprs, group_by, None, scan.into())?;
         Ok(agg)
@@ -121,6 +138,10 @@ impl TableFunctionToInternalBackfillProgressRule {
             data_type: DataType::Decimal,
         }))
         .cast_explicit(DataType::Int64)?;
+        let min_epoch = ExprImpl::InputRef(Box::new(InputRef {
+            index: 1,
+            data_type: DataType::Int64,
+        }));
 
         Ok(LogicalProject::new(
             agg,
@@ -129,6 +150,7 @@ impl TableFunctionToInternalBackfillProgressRule {
                 fragment_id_expr,
                 table_id_expr,
                 current_count_per_vnode,
+                min_epoch,
             ],
         ))
     }
@@ -157,28 +179,40 @@ impl TableFunctionToInternalBackfillProgressRule {
 
 struct BackfillInfo {
     job_id: u32,
-    row_count_column_index: usize,
     fragment_id: u32,
     table_id: u32,
+    row_count_column_index: usize,
+    epoch_column_index: Option<usize>,
 }
 
 impl BackfillInfo {
     fn new(table: &TableCatalog) -> anyhow::Result<Self> {
-        let Some(job_id) = table.job_id else {
+        let Some(job_id) = table.job_id.map(|id| id.table_id) else {
             bail!("`job_id` column not found in backfill table");
         };
-        let Some(row_count_column_index) =
-            table.columns.iter().position(|c| c.name() == "row_count")
+        let Some(row_count_column_index) = table
+            .columns
+            .iter()
+            .position(|c| c.name() == StreamTableScan::ROW_COUNT_COLUMN_NAME)
         else {
-            bail!("`row_count` column not found in backfill table");
+            bail!(
+                "`{}` column not found in backfill table",
+                StreamTableScan::ROW_COUNT_COLUMN_NAME
+            );
         };
+        let epoch_column_index = table
+            .columns
+            .iter()
+            .position(|c| c.name() == StreamTableScan::EPOCH_COLUMN_NAME);
         let fragment_id = table.fragment_id;
-        let table_id = table.id;
+        let table_id = table.id.table_id;
+
         Ok(Self {
-            job_id: job_id.table_id,
-            row_count_column_index,
+            job_id,
             fragment_id,
-            table_id: table_id.table_id,
+            table_id,
+            row_count_column_index,
+            epoch_column_index,
         })
     }
 }

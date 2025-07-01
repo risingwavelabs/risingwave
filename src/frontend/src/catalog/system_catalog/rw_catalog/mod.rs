@@ -58,13 +58,16 @@ mod rw_users;
 mod rw_views;
 mod rw_worker_nodes;
 
+mod common;
 mod iceberg_namespace_properties;
 mod iceberg_tables;
 mod rw_actor_id_to_ddl;
 mod rw_actor_splits;
+mod rw_backfill_info;
+mod rw_fragment_backfill_progress;
 mod rw_fragment_id_to_ddl;
 mod rw_internal_table_info;
 mod rw_resource_groups;
+mod rw_streaming_job_info;
 mod rw_streaming_jobs;
-mod rw_table_scan;
 mod rw_worker_actor_count;

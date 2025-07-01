@@ -133,14 +133,9 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         let control_stream_manager = ControlStreamManager::new(env.clone());
 
         let reader = env.system_params_reader().await;
-        let checkpoint_frequency = reader.checkpoint_frequency() as _;
         let system_enable_per_database_isolation = reader.per_database_isolation();
-        let interval = Duration::from_millis(reader.barrier_interval_ms() as u64);
-        let periodic_barriers = PeriodicBarriers::new(interval, checkpoint_frequency);
-        tracing::info!(
-            "Starting barrier scheduler with: checkpoint_frequency={:?}",
-            checkpoint_frequency,
-        );
+        // Load config will be performed in bootstrap phase.
+        let periodic_barriers = PeriodicBarriers::default();
 
         let checkpoint_control = CheckpointControl::new(env.clone());
         Self {
@@ -162,9 +157,10 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
 
     pub fn start(self) -> (JoinHandle<()>, Sender<()>) {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
-        let join_handle = tokio::spawn(async move {
-            self.run(shutdown_rx).await;
-        });
+        let fut = (self.env.await_tree_reg())
+            .register_derived_root("Global Barrier Worker")
+            .instrument(self.run(shutdown_rx));
+        let join_handle = tokio::spawn(fut);
 
         (join_handle, shutdown_tx)
     }
@@ -289,6 +285,22 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     warn!("failed to notify finish of adhoc recovery");
                                 }
                             }
+                            BarrierManagerRequest::UpdateDatabaseBarrier {
+                                database_id,
+                                barrier_interval_ms,
+                                checkpoint_frequency,
+                                sender,
+                            } => {
+                                self.periodic_barriers
+                                    .update_database_barrier(
+                                        database_id,
+                                        barrier_interval_ms,
+                                        checkpoint_frequency,
+                                    );
+                                if sender.send(()).is_err() {
+                                    warn!("failed to notify finish of update database barrier");
+                                }
+                            }
                         }
                     } else {
                         tracing::info!("end of request stream. meta node may be shutting down. Stop global barrier manager");
@@ -313,9 +325,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     let notification = notification.unwrap();
                     if let LocalNotification::SystemParamsChange(p) = notification {
                         {
-                            self.periodic_barriers.set_min_interval(Duration::from_millis(p.barrier_interval_ms() as u64));
+                            self.periodic_barriers.set_sys_barrier_interval(Duration::from_millis(p.barrier_interval_ms() as u64));
                             self.periodic_barriers
-                                .set_checkpoint_frequency(p.checkpoint_frequency() as usize);
+                                .set_sys_checkpoint_frequency(p.checkpoint_frequency());
                             self.system_enable_per_database_isolation = p.per_database_isolation();
                         }
                     }
@@ -447,7 +459,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     if self
                         .checkpoint_control
                         .can_inject_barrier(self.in_flight_barrier_nums) => {
-                    if let Some((_, Command::CreateStreamingJob { info, .. }, _)) = &new_barrier.command {
+                    if let Some((Command::CreateStreamingJob { info, .. }, _)) = &new_barrier.command {
                         let worker_ids: HashSet<_> =
                             info.stream_job_fragments.inner
                             .actors_to_create()
@@ -461,29 +473,26 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             }
                         }
                     }
-                    if let Some(failed_databases) = self.checkpoint_control.handle_new_barrier(new_barrier, &mut self.control_stream_manager)
-                        && !failed_databases.is_empty() {
+                    let database_id = new_barrier.database_id;
+                    if let Err(e) = self.checkpoint_control.handle_new_barrier(new_barrier, &mut self.control_stream_manager) {
                         if !self.enable_recovery {
                             panic!(
-                                "failed to inject barrier for some databases but recovery not enabled: {:?}",
-                                failed_databases.iter().map(|(database_id, e)| (database_id, e.as_report())).collect_vec()
+                                "failed to inject barrier to some databases but recovery not enabled: {:?}", (
+                                    database_id,
+                                    e.as_report()
+                                )
                             );
                         }
                         let result: MetaResult<_> = try {
                             if !self.enable_per_database_isolation() {
-                                let errs = failed_databases.iter().map(|(database_id, e)| (database_id, e.as_report())).collect_vec();
-                                let err = anyhow!("failed to inject barrier for databases: {:?}", errs);
+                                let err = anyhow!("failed to inject barrier to databases: {:?}", (database_id, e.as_report()));
                                 Err(err)?;
-                            } else {
-                                for (database_id, err) in failed_databases {
-                                    if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
-                                        warn!(%database_id, e = %err.as_report(),"database entering recovery on inject failure");
-                                        self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!(err).context("inject barrier failure").into()));
-                                        // TODO: add log on blocking time
-                                        let output = self.completing_task.wait_completing_task().await?;
-                                        entering_recovery.enter(output, &mut self.control_stream_manager);
-                                    }
-                                }
+                            } else if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
+                                warn!(%database_id, e = %e.as_report(),"database entering recovery on inject failure");
+                                self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!(e).context("inject barrier failure").into()));
+                                // TODO: add log on blocking time
+                                let output = self.completing_task.wait_completing_task().await?;
+                                entering_recovery.enter(output, &mut self.control_stream_manager);
                             }
                         };
                         if let Err(e) = result {
@@ -700,7 +709,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             }
             RecoveryReason::Adhoc => "adhoc recovery".to_owned(),
         };
-
         self.context.abort_and_mark_blocked(None, recovery_reason);
 
         self.recovery_inner(is_paused, reason_str).await;
@@ -709,6 +717,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         });
     }
 
+    #[await_tree::instrument("recovery({recovery_reason})")]
     async fn recovery_inner(&mut self, is_paused: bool, recovery_reason: String) {
         let event_log_manager_ref = self.env.event_log_manager_ref();
 
@@ -755,6 +764,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 mut source_splits,
                 mut background_jobs,
                 hummock_version_stats,
+                database_infos,
             } = runtime_info_snapshot;
 
             self.sink_manager.reset().await;
@@ -894,11 +904,22 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     hummock_version_stats,
                     self.env.clone(),
                 );
+
+                let reader = self.env.system_params_reader().await;
+                let checkpoint_frequency = reader.checkpoint_frequency();
+                let barrier_interval = Duration::from_millis(reader.barrier_interval_ms() as u64);
+                let periodic_barriers = PeriodicBarriers::new(
+                    barrier_interval,
+                    checkpoint_frequency,
+                    database_infos,
+                );
+
                 Ok((
                     active_streaming_nodes,
                     control_stream_manager,
                     checkpoint_control,
                     term_id,
+                    periodic_barriers,
                 ))
             }
         }.inspect_err(|err: &MetaError| {
@@ -919,6 +940,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             self.control_stream_manager,
             self.checkpoint_control,
             self.term_id,
+            self.periodic_barriers,
         ) = new_state;
 
         tracing::info!("recovery success");

@@ -22,7 +22,9 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat, WorkerSlotId};
-use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_mut};
+use risingwave_common::util::stream_graph_visitor::{
+    visit_stream_node_body, visit_stream_node_mut,
+};
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
@@ -111,6 +113,8 @@ pub struct StreamingJobInfo {
     pub parallelism: StreamingParallelism,
     pub max_parallelism: i32,
     pub resource_group: String,
+    pub database_id: DatabaseId,
+    pub schema_id: SchemaId,
 }
 
 impl CatalogControllerInner {
@@ -367,7 +371,7 @@ impl CatalogController {
 
         let stream_node = stream_node.to_protobuf();
         let mut upstream_fragments = HashSet::new();
-        visit_stream_node(&stream_node, |body| {
+        visit_stream_node_body(&stream_node, |body| {
             if let NodeBody::Merge(m) = body {
                 assert!(
                     upstream_fragments.insert(m.upstream_fragment_id),
@@ -673,7 +677,7 @@ impl CatalogController {
         } in fragments
         {
             let stream_node = stream_node.to_protobuf();
-            visit_stream_node(&stream_node, |body| {
+            visit_stream_node_body(&stream_node, |body| {
                 if let NodeBody::StreamScan(node) = body {
                     match node.stream_scan_type() {
                         StreamScanType::Unspecified => {}
@@ -727,6 +731,8 @@ impl CatalogController {
                 ),
                 "resource_group",
             )
+            .column(object::Column::DatabaseId)
+            .column(object::Column::SchemaId)
             .into_model()
             .all(&inner.db)
             .await?;
@@ -913,7 +919,7 @@ impl CatalogController {
         Ok(source_actors)
     }
 
-    pub async fn list_rw_table_scan_fragments(
+    pub async fn list_creating_fragment_descs(
         &self,
     ) -> MetaResult<Vec<(FragmentDesc, Vec<FragmentId>)>> {
         let inner = self.inner.read().await;
@@ -1374,6 +1380,7 @@ impl CatalogController {
         Ok(())
     }
 
+    #[await_tree::instrument]
     pub async fn fill_snapshot_backfill_epoch(
         &self,
         fragment_ids: impl Iterator<Item = FragmentId>,
@@ -1757,7 +1764,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::hash::{ActorMapping, VirtualNode, VnodeCount};
     use risingwave_common::util::iter_util::ZipEqDebug;
-    use risingwave_common::util::stream_graph_visitor::visit_stream_node;
+    use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
     use risingwave_meta_model::actor::ActorStatus;
     use risingwave_meta_model::fragment::DistributionType;
     use risingwave_meta_model::{
@@ -2026,7 +2033,7 @@ mod tests {
 
             assert_eq!(mview_definition, "");
 
-            visit_stream_node(stream_node, |body| {
+            visit_stream_node_body(stream_node, |body| {
                 if let PbNodeBody::Merge(m) = body {
                     assert!(
                         actor_upstreams

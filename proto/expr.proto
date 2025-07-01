@@ -307,6 +307,9 @@ message ExprNode {
     MAP_DELETE = 710;
     MAP_FILTER = 711;
 
+    // Vector functions
+    L2_DISTANCE = 750;
+
     // Internal function for schema change
     COMPOSITE_CAST = 800;
 
@@ -345,6 +348,9 @@ message ExprNode {
 
     // EXTERNAL
     ICEBERG_TRANSFORM = 2201;
+
+    // AI model functions
+    OPENAI_EMBEDDING = 2501;
   }
   // Only use this field for function call. For other types of expression, it should be UNSPECIFIED.
   Type function_type = 1;
@@ -386,6 +392,8 @@ message TableFunction {
     MYSQL_QUERY = 21;
     // Internal backfill table function
     INTERNAL_BACKFILL_PROGRESS = 30;
+    // Internal source backfill table function
+    INTERNAL_SOURCE_BACKFILL_PROGRESS = 31;
     // User defined table function
     USER_DEFINED = 100;
   }

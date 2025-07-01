@@ -889,6 +889,7 @@ message SyncLogStoreNode {
   catalog.Table log_store_table = 1;
   uint32 pause_duration_ms = 2;
   uint32 buffer_size = 3;
+  bool aligned = 4;
 }
 
 message MaterializedExprsNode {

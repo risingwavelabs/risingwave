@@ -479,6 +479,14 @@ impl Barrier {
         }
     }
 
+    pub fn should_start_fragment_backfill(&self, fragment_id: FragmentId) -> bool {
+        if let Some(Mutation::StartFragmentBackfill { fragment_ids }) = self.mutation.as_deref() {
+            fragment_ids.contains(&fragment_id)
+        } else {
+            false
+        }
+    }
+
     /// Whether this barrier adds new downstream fragment for the actor with `upstream_actor_id`.
     ///
     /// # Use case

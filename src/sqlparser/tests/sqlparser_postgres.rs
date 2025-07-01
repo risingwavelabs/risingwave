@@ -482,7 +482,7 @@ fn parse_deallocate() {
     assert_eq!(
         stmt,
         Statement::Deallocate {
-            name: "a".into(),
+            name: Some("a".into()),
             prepare: false,
         }
     );
@@ -492,7 +492,7 @@ fn parse_deallocate() {
     assert_eq!(
         stmt,
         Statement::Deallocate {
-            name: Ident::new_unchecked("ALL"),
+            name: None,
             prepare: false,
         }
     );
@@ -501,7 +501,7 @@ fn parse_deallocate() {
     assert_eq!(
         stmt,
         Statement::Deallocate {
-            name: "a".into(),
+            name: Some("a".into()),
             prepare: true,
         }
     );
@@ -511,7 +511,7 @@ fn parse_deallocate() {
     assert_eq!(
         stmt,
         Statement::Deallocate {
-            name: Ident::new_unchecked("ALL"),
+            name: None,
             prepare: true,
         }
     );
@@ -668,9 +668,9 @@ fn parse_pg_postfix_factorial() {
 fn parse_pg_regex_match_ops() {
     let pg_regex_match_ops = &[
         ("~", BinaryOperator::PGRegexMatch),
-        ("~*", BinaryOperator::PGRegexIMatch),
-        ("!~", BinaryOperator::PGRegexNotMatch),
-        ("!~*", BinaryOperator::PGRegexNotIMatch),
+        ("~*", BinaryOperator::Custom("~*".to_owned())),
+        ("!~", BinaryOperator::Custom("!~".to_owned())),
+        ("!~*", BinaryOperator::Custom("!~*".to_owned())),
     ];
 
     for (str_op, op) in pg_regex_match_ops {

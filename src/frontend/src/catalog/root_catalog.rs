@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, StreamJobStatus, TableId};
+use risingwave_common::catalog::{FunctionId, IndexId, StreamJobStatus, TableId};
 use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
@@ -98,7 +98,6 @@ impl<'a> SchemaPath<'a> {
 ///       - table/sink/source/index/view catalog
 ///        - column catalog
 pub struct Catalog {
-    version: CatalogVersion,
     database_by_name: HashMap<String, DatabaseCatalog>,
     db_name_by_id: HashMap<DatabaseId, String>,
     /// all table catalogs in the cluster identified by universal unique table id.
@@ -110,7 +109,6 @@ pub struct Catalog {
 impl Default for Catalog {
     fn default() -> Self {
         Self {
-            version: 0,
             database_by_name: HashMap::new(),
             db_name_by_id: HashMap::new(),
             table_by_id: HashMap::new(),
@@ -639,6 +637,22 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("source", source_id.to_string()))
     }
 
+    pub fn get_table_by_name<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        table_name: &str,
+        bind_creating_relations: bool,
+    ) -> CatalogResult<(&Arc<TableCatalog>, &'a str)> {
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_table_by_name(table_name, bind_creating_relations))
+            })?
+            .ok_or_else(|| CatalogError::NotFound("table", table_name.to_owned()))
+    }
+
     /// Used to get `TableCatalog` for Materialized Views, Tables and Indexes.
     /// Retrieves all tables, created or creating.
     pub fn get_any_table_by_name<'a>(
@@ -647,13 +661,7 @@ impl Catalog {
         schema_path: SchemaPath<'a>,
         table_name: &str,
     ) -> CatalogResult<(&Arc<TableCatalog>, &'a str)> {
-        schema_path
-            .try_find(|schema_name| {
-                Ok(self
-                    .get_schema_by_name(db_name, schema_name)?
-                    .get_table_by_name(table_name))
-            })?
-            .ok_or_else(|| CatalogError::NotFound("table", table_name.to_owned()))
+        self.get_table_by_name(db_name, schema_path, table_name, true)
     }
 
     /// Used to get `TableCatalog` for Materialized Views, Tables and Indexes.
@@ -664,13 +672,7 @@ impl Catalog {
         schema_path: SchemaPath<'a>,
         table_name: &str,
     ) -> CatalogResult<(&Arc<TableCatalog>, &'a str)> {
-        schema_path
-            .try_find(|schema_name| {
-                Ok(self
-                    .get_schema_by_name(db_name, schema_name)?
-                    .get_created_table_by_name(table_name))
-            })?
-            .ok_or_else(|| CatalogError::NotFound("table", table_name.to_owned()))
+        self.get_table_by_name(db_name, schema_path, table_name, false)
     }
 
     pub fn get_any_table_by_id(&self, table_id: &TableId) -> CatalogResult<&Arc<TableCatalog>> {
@@ -860,6 +862,22 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("secret", secret_name.to_owned()))
     }
 
+    pub fn get_connection_by_id(
+        &self,
+        db_name: &str,
+        connection_id: ConnectionId,
+    ) -> CatalogResult<&Arc<ConnectionCatalog>> {
+        for schema in self.get_database_by_name(db_name)?.iter_schemas() {
+            if let Some(conn) = schema.get_connection_by_id(&connection_id) {
+                return Ok(conn);
+            }
+        }
+        Err(CatalogError::NotFound(
+            "connection",
+            connection_id.to_string(),
+        ))
+    }
+
     pub fn get_connection_by_name<'a>(
         &self,
         db_name: &str,
@@ -953,7 +971,7 @@ impl Catalog {
     ) -> CatalogResult<()> {
         let schema = self.get_schema_by_name(db_name, schema_name)?;
 
-        if let Some(table) = schema.get_table_by_name(relation_name) {
+        if let Some(table) = schema.get_any_table_by_name(relation_name) {
             let is_creating = table.stream_job_status == StreamJobStatus::Creating;
             if table.is_index() {
                 Err(CatalogError::Duplicated(
@@ -1047,16 +1065,6 @@ impl Catalog {
         } else {
             Ok(())
         }
-    }
-
-    /// Get the catalog cache's catalog version.
-    pub fn version(&self) -> u64 {
-        self.version
-    }
-
-    /// Set the catalog cache's catalog version.
-    pub fn set_version(&mut self, catalog_version: CatalogVersion) {
-        self.version = catalog_version;
     }
 
     pub fn table_stats(&self) -> &HummockVersionStats {

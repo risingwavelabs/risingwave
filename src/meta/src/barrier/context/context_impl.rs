@@ -35,11 +35,13 @@ use crate::hummock::CommitEpochInfo;
 use crate::stream::SourceChange;
 
 impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
+    #[await_tree::instrument]
     async fn commit_epoch(&self, commit_info: CommitEpochInfo) -> MetaResult<HummockVersionStats> {
         self.hummock_manager.commit_epoch(commit_info).await?;
         Ok(self.hummock_manager.get_version_stats().await)
     }
 
+    #[await_tree::instrument("next_scheduled_barrier")]
     async fn next_scheduled(&self) -> Scheduled {
         self.scheduled_barriers.next_scheduled().await
     }
@@ -66,6 +68,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         }
     }
 
+    #[await_tree::instrument("post_collect_command({command})")]
     async fn post_collect_command<'a>(&'a self, command: &'a CommandContext) -> MetaResult<()> {
         command.post_collect(self).await
     }
@@ -76,10 +79,12 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
             .await
     }
 
+    #[await_tree::instrument("finish_creating_job({job})")]
     async fn finish_creating_job(&self, job: TrackingJob) -> MetaResult<()> {
         job.finish(&self.metadata_manager).await
     }
 
+    #[await_tree::instrument("new_control_stream({})", node.id)]
     async fn new_control_stream(
         &self,
         node: &WorkerNode,
@@ -144,6 +149,15 @@ impl CommandContext {
                     .hummock_manager
                     .unregister_table_ids(unregistered_state_table_ids.iter().cloned())
                     .await?;
+            }
+            Command::ConnectorPropsChange(obj_id_map_props) => {
+                // todo: we dont know the type of the object id, it can be a source or a sink. Should carry more info in the barrier command.
+                barrier_manager_context
+                    .source_manager
+                    .apply_source_change(SourceChange::UpdateSourceProps {
+                        source_id_map_new_props: obj_id_map_props.clone(),
+                    })
+                    .await;
             }
             Command::CreateStreamingJob {
                 info,
@@ -318,7 +332,6 @@ impl CommandContext {
             }
             Command::DropSubscription { .. } => {}
             Command::MergeSnapshotBackfillStreamingJobs(_) => {}
-            Command::ConnectorPropsChange(_) => {}
             Command::StartFragmentBackfill { .. } => {}
         }
 

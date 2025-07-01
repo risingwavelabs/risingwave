@@ -19,9 +19,9 @@ use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{
-    IsSingleton, VirtualNode, VnodeCount, VnodeCountCompat, WorkerSlotId,
+    ActorAlignmentId, IsSingleton, VirtualNode, VnodeCount, VnodeCountCompat,
 };
-use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node};
+use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node_body};
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::{DispatcherType, SourceId, StreamingParallelism, WorkerId};
 use risingwave_pb::catalog::Table;
@@ -366,18 +366,18 @@ impl StreamJobFragments {
     pub fn new(
         stream_job_id: TableId,
         fragments: BTreeMap<FragmentId, Fragment>,
-        actor_locations: &BTreeMap<ActorId, WorkerSlotId>,
+        actor_locations: &BTreeMap<ActorId, ActorAlignmentId>,
         ctx: StreamContext,
         table_parallelism: TableParallelism,
         max_parallelism: usize,
     ) -> Self {
         let actor_status = actor_locations
             .iter()
-            .map(|(&actor_id, worker_slot_id)| {
+            .map(|(&actor_id, alignment_id)| {
                 (
                     actor_id,
                     ActorStatus {
-                        location: PbActorLocation::from_worker(worker_slot_id.worker_id()),
+                        location: PbActorLocation::from_worker(alignment_id.worker_id()),
                         state: ActorState::Inactive as i32,
                     },
                 )
@@ -610,7 +610,7 @@ impl StreamJobFragments {
         for (fragment_id, fragment) in &self.fragments {
             {
                 {
-                    visit_stream_node(&fragment.nodes, |body| {
+                    visit_stream_node_body(&fragment.nodes, |body| {
                         if let NodeBody::Union(_) = body {
                             if let Some(union_fragment_id) = union_fragment_id.as_mut() {
                                 // The union fragment should be unique.

@@ -9,7 +9,7 @@ sync_point = []
 [dependencies]
 futures-util = "0.3"
 spin = "0.10"
-thiserror = "2"
+thiserror = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["sync", "time"] }
 
 [lints]

@@ -108,6 +108,7 @@ impl Strong {
             | ExprType::Ceil
             | ExprType::Floor
             | ExprType::Extract
+            | ExprType::L2Distance
             | ExprType::Greatest
             | ExprType::Least => self.any_null(func_call),
             // ALL: This kind of expression is null if and only if all of its arguments are null.
@@ -340,7 +341,8 @@ impl Strong {
             | ExprType::InetAton
             | ExprType::InetNtoa
             | ExprType::CompositeCast
-            | ExprType::RwEpochToTs => false,
+            | ExprType::RwEpochToTs
+            | ExprType::OpenaiEmbedding => false,
             ExprType::Unspecified => unreachable!(),
         }
     }

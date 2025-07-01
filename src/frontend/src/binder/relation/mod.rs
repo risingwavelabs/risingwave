@@ -490,12 +490,13 @@ impl Binder {
                 },
             }
         } else {
-            self.bind_relation_by_name_inner(
+            self.bind_catalog_relation_by_name(
                 db_name.as_deref(),
                 schema_name.as_deref(),
                 &table_name,
                 alias,
                 as_of,
+                false,
             )
         }
     }
@@ -563,7 +564,7 @@ impl Binder {
         let schema = args.get(1).map(|arg| arg.to_string());
 
         let table_name = self.catalog.get_table_name_by_id(table_id)?;
-        self.bind_relation_by_name_inner(None, schema.as_deref(), &table_name, alias, None)
+        self.bind_catalog_relation_by_name(None, schema.as_deref(), &table_name, alias, None, false)
     }
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {

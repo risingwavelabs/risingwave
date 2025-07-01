@@ -53,7 +53,7 @@ impl Planner {
 
             // Substitute subqueries into `LogicalApply`s.
             if exprs.iter().any(|e| e.has_subquery()) {
-                (plan, exprs) = self.substitute_subqueries(plan, exprs)?;
+                (plan, exprs) = self.substitute_subqueries_in_cross_join_way(plan, exprs)?;
             }
 
             LogicalProject::new(plan, exprs).into()
