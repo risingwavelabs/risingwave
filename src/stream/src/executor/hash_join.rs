@@ -1426,7 +1426,7 @@ mod tests {
         let info = ExecutorInfo::new(schema, vec![1], "HashJoinExecutor".to_owned(), 0);
 
         let executor =
-            HashJoinExecutor::<Key64, MemoryStateStore, T, { JoinEncoding::MemoryOptimized }>::new(
+            HashJoinExecutor::<Key64, MemoryStateStore, T, { JoinEncoding::Memory }>::new(
                 ActorContext::for_test(123),
                 info,
                 source_l,
@@ -1515,32 +1515,28 @@ mod tests {
         let schema_len = schema.len();
         let info = ExecutorInfo::new(schema, vec![1], "HashJoinExecutor".to_owned(), 0);
 
-        let executor = HashJoinExecutor::<
-            Key128,
-            MemoryStateStore,
-            T,
-            { JoinEncoding::MemoryOptimized },
-        >::new(
-            ActorContext::for_test(123),
-            info,
-            source_l,
-            source_r,
-            params_l,
-            params_r,
-            vec![false],
-            (0..schema_len).collect_vec(),
-            cond,
-            vec![],
-            state_l,
-            degree_state_l,
-            state_r,
-            degree_state_r,
-            Arc::new(AtomicU64::new(0)),
-            true,
-            Arc::new(StreamingMetrics::unused()),
-            1024,
-            2048,
-        );
+        let executor =
+            HashJoinExecutor::<Key128, MemoryStateStore, T, { JoinEncoding::Memory }>::new(
+                ActorContext::for_test(123),
+                info,
+                source_l,
+                source_r,
+                params_l,
+                params_r,
+                vec![false],
+                (0..schema_len).collect_vec(),
+                cond,
+                vec![],
+                state_l,
+                degree_state_l,
+                state_r,
+                degree_state_r,
+                Arc::new(AtomicU64::new(0)),
+                true,
+                Arc::new(StreamingMetrics::unused()),
+                1024,
+                2048,
+            );
         (tx_l, tx_r, executor.boxed().execute())
     }
 

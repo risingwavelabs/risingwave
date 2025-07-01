@@ -178,8 +178,8 @@ impl<S: StateStore> HashKeyDispatcher for AsOfJoinExecutorDispatcherArgs<S> {
                 match (self.join_type_proto, self.join_encoding_type) {
                     (JoinTypeProto::Unspecified, _) | (_, JoinEncodingTypeProto::Unspecified) => unreachable!(),
                     $(
-                        (JoinTypeProto::$join_type, JoinEncodingTypeProto::MemoryOptimized) => build!($join_type, MemoryOptimized),
-                        (JoinTypeProto::$join_type, JoinEncodingTypeProto::CpuOptimized) => build!($join_type, CPUOptimized),
+                        (JoinTypeProto::$join_type, JoinEncodingTypeProto::MemoryOptimized) => build!($join_type, Memory),
+                        (JoinTypeProto::$join_type, JoinEncodingTypeProto::CpuOptimized) => build!($join_type, Cpu),
                     )*
                 }
             };
