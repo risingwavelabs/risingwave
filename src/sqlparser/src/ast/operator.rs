@@ -24,18 +24,7 @@ pub enum UnaryOperator {
     Plus,
     Minus,
     Not,
-    /// Bitwise Not, e.g. `~9` (PostgreSQL-specific)
-    PGBitwiseNot,
-    /// Square root, e.g. `|/9` (PostgreSQL-specific)
-    PGSquareRoot,
-    /// Cube root, e.g. `||/27` (PostgreSQL-specific)
-    PGCubeRoot,
-    /// Factorial, e.g. `9!` (PostgreSQL-specific)
-    PGPostfixFactorial,
-    /// Factorial, e.g. `!!9` (PostgreSQL-specific)
-    PGPrefixFactorial,
-    /// Absolute value, e.g. `@ -9` (PostgreSQL-specific)
-    PGAbs,
+    Custom(String),
     /// Qualified, e.g. `OPERATOR(pg_catalog.+) 9` (PostgreSQL-specific)
     PGQualified(Box<QualifiedOperator>),
 }
@@ -49,12 +38,7 @@ impl fmt::Display for UnaryOperator {
             UnaryOperator::Plus => "+",
             UnaryOperator::Minus => "-",
             UnaryOperator::Not => "NOT",
-            UnaryOperator::PGBitwiseNot => "~",
-            UnaryOperator::PGSquareRoot => "|/",
-            UnaryOperator::PGCubeRoot => "||/",
-            UnaryOperator::PGPostfixFactorial => "!",
-            UnaryOperator::PGPrefixFactorial => "!!",
-            UnaryOperator::PGAbs => "@",
+            UnaryOperator::Custom(name) => name,
             UnaryOperator::PGQualified(_) => unreachable!(),
         })
     }
@@ -69,56 +53,17 @@ pub enum BinaryOperator {
     Multiply,
     Divide,
     Modulo,
-    Concat,
-    Prefix,
     Gt,
     Lt,
     GtEq,
     LtEq,
-    Spaceship,
     Eq,
     NotEq,
     And,
     Or,
     Xor,
-    BitwiseOr,
-    BitwiseAnd,
-    BitwiseXor,
-    /// Bitwise XOR, e.g. `a # b` (PostgreSQL-specific)
-    PGBitwiseXor,
-    /// Bitwise shift left, e.g. `a << b` (PostgreSQL-specific)
-    PGBitwiseShiftLeft,
-    /// Bitwise shift right, e.g. `a >> b` (PostgreSQL-specific)
-    PGBitwiseShiftRight,
-    /// String matches regular expression (case sensitively), e.g. `a ~ b` (PostgreSQL-specific)
-    PGRegexMatch,
-    /// String matches regular expression (case insensitively), e.g. `a ~* b` (PostgreSQL-specific)
-    PGRegexIMatch,
-    /// String does not match regular expression (case sensitively), e.g. `a !~ b` (PostgreSQL-specific)
-    PGRegexNotMatch,
-    /// String does not match regular expression (case insensitively), e.g. `a !~* b` (PostgreSQL-specific)
-    PGRegexNotIMatch,
-    /// String matches pattern (case sensitively), e.g. `a ~~ b` (PostgreSQL-specific)
-    PGLikeMatch,
-    /// String matches pattern (case insensitively), e.g. `a ~~* b` (PostgreSQL-specific)
-    PGILikeMatch,
-    /// String does not match pattern (case sensitively), e.g. `a !~~ b` (PostgreSQL-specific)
-    PGNotLikeMatch,
-    /// String does not match pattern (case insensitively), e.g. `a !~~* b` (PostgreSQL-specific)
-    PGNotILikeMatch,
-    /// String "starts with", eg: `a ^@ b` (PostgreSQL-specific)
-    Arrow,
-    LongArrow,
-    HashArrow,
-    HashLongArrow,
-    HashMinus,
-    Contains,
-    Contained,
-    Exists,
-    ExistsAny,
-    ExistsAll,
-    PathMatch,
-    PathExists,
+    Pow,
+    Custom(String),
     PGQualified(Box<QualifiedOperator>),
 }
 
@@ -133,44 +78,17 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::Multiply => "*",
             BinaryOperator::Divide => "/",
             BinaryOperator::Modulo => "%",
-            BinaryOperator::Concat => "||",
-            BinaryOperator::Prefix => "^@",
             BinaryOperator::Gt => ">",
             BinaryOperator::Lt => "<",
             BinaryOperator::GtEq => ">=",
             BinaryOperator::LtEq => "<=",
-            BinaryOperator::Spaceship => "<=>",
             BinaryOperator::Eq => "=",
             BinaryOperator::NotEq => "<>",
             BinaryOperator::And => "AND",
             BinaryOperator::Or => "OR",
             BinaryOperator::Xor => "XOR",
-            BinaryOperator::BitwiseOr => "|",
-            BinaryOperator::BitwiseAnd => "&",
-            BinaryOperator::BitwiseXor => "^",
-            BinaryOperator::PGBitwiseXor => "#",
-            BinaryOperator::PGBitwiseShiftLeft => "<<",
-            BinaryOperator::PGBitwiseShiftRight => ">>",
-            BinaryOperator::PGRegexMatch => "~",
-            BinaryOperator::PGRegexIMatch => "~*",
-            BinaryOperator::PGRegexNotMatch => "!~",
-            BinaryOperator::PGRegexNotIMatch => "!~*",
-            BinaryOperator::PGLikeMatch => "~~",
-            BinaryOperator::PGILikeMatch => "~~*",
-            BinaryOperator::PGNotLikeMatch => "!~~",
-            BinaryOperator::PGNotILikeMatch => "!~~*",
-            BinaryOperator::Arrow => "->",
-            BinaryOperator::LongArrow => "->>",
-            BinaryOperator::HashArrow => "#>",
-            BinaryOperator::HashLongArrow => "#>>",
-            BinaryOperator::HashMinus => "#-",
-            BinaryOperator::Contains => "@>",
-            BinaryOperator::Contained => "<@",
-            BinaryOperator::Exists => "?",
-            BinaryOperator::ExistsAny => "?|",
-            BinaryOperator::ExistsAll => "?&",
-            BinaryOperator::PathMatch => "@@",
-            BinaryOperator::PathExists => "@?",
+            BinaryOperator::Pow => "^",
+            BinaryOperator::Custom(name) => name,
             BinaryOperator::PGQualified(_) => unreachable!(),
         })
     }

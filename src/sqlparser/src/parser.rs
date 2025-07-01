@@ -34,7 +34,7 @@ use crate::ast::*;
 use crate::keywords::{self, Keyword};
 use crate::parser_v2::{
     ParserExt as _, dollar_quoted_string, keyword, literal_i64, literal_u32, literal_u64,
-    single_quoted_string, token_number,
+    single_quoted_string,
 };
 use crate::tokenizer::*;
 use crate::{impl_parse_to, parser_v2};
@@ -198,7 +198,6 @@ pub enum Precedence {
     At,
     Collate,
     UnaryPosNeg,
-    PostfixFactorial,
     Array,
     DoubleColon, // 50 in upstream
 }
@@ -675,13 +674,17 @@ impl Parser<'_> {
                 k if keywords::RESERVED_FOR_COLUMN_OR_TABLE_NAME.contains(&k) => {
                     parser_err!("syntax error at or near {token}")
                 }
+                Keyword::AGGREGATE => {
+                    *self = checkpoint;
+                    self.parse_function()
+                }
                 // Here `w` is a word, check if it's a part of a multi-part
                 // identifier, a function call, or a simple identifier:
                 _ => match self.peek_token().token {
-                    Token::LParen | Token::Period | Token::Colon => {
+                    Token::LParen | Token::Period => {
                         *self = checkpoint;
                         if let Ok(object_name) = self.parse_object_name()
-                            && !matches!(self.peek_token().token, Token::LParen | Token::Colon)
+                            && !matches!(self.peek_token().token, Token::LParen)
                         {
                             Ok(Expr::CompoundIdentifier(object_name.0))
                         } else {
@@ -711,19 +714,8 @@ impl Parser<'_> {
                     expr: Box::new(sub_expr),
                 })
             }
-            tok @ Token::DoubleExclamationMark
-            | tok @ Token::PGSquareRoot
-            | tok @ Token::PGCubeRoot
-            | tok @ Token::AtSign
-            | tok @ Token::Tilde => {
-                let op = match tok {
-                    Token::DoubleExclamationMark => UnaryOperator::PGPrefixFactorial,
-                    Token::PGSquareRoot => UnaryOperator::PGSquareRoot,
-                    Token::PGCubeRoot => UnaryOperator::PGCubeRoot,
-                    Token::AtSign => UnaryOperator::PGAbs,
-                    Token::Tilde => UnaryOperator::PGBitwiseNot,
-                    _ => unreachable!(),
-                };
+            Token::Op(name) => {
+                let op = UnaryOperator::Custom(name);
                 // Counter-intuitively, `|/ 4 + 12` means `|/ (4+12)` rather than `(|/4) + 12` in
                 // PostgreSQL.
                 Ok(Expr::UnaryOp {
@@ -1302,8 +1294,6 @@ impl Parser<'_> {
         let tok = self.next_token();
         debug!("parsing infix {:?}", tok.token);
         let regular_binary_operator = match &tok.token {
-            Token::Spaceship => Some(BinaryOperator::Spaceship),
-            Token::DoubleEq => Some(BinaryOperator::Eq),
             Token::Eq => Some(BinaryOperator::Eq),
             Token::Neq => Some(BinaryOperator::NotEq),
             Token::Gt => Some(BinaryOperator::Gt),
@@ -1314,35 +1304,10 @@ impl Parser<'_> {
             Token::Minus => Some(BinaryOperator::Minus),
             Token::Mul => Some(BinaryOperator::Multiply),
             Token::Mod => Some(BinaryOperator::Modulo),
-            Token::Concat => Some(BinaryOperator::Concat),
-            Token::Pipe => Some(BinaryOperator::BitwiseOr),
-            Token::Caret => Some(BinaryOperator::BitwiseXor),
-            Token::Prefix => Some(BinaryOperator::Prefix),
-            Token::Ampersand => Some(BinaryOperator::BitwiseAnd),
+            Token::Pipe => Some(BinaryOperator::Custom("|".to_owned())),
+            Token::Caret => Some(BinaryOperator::Pow),
             Token::Div => Some(BinaryOperator::Divide),
-            Token::ShiftLeft => Some(BinaryOperator::PGBitwiseShiftLeft),
-            Token::ShiftRight => Some(BinaryOperator::PGBitwiseShiftRight),
-            Token::Sharp => Some(BinaryOperator::PGBitwiseXor),
-            Token::Tilde => Some(BinaryOperator::PGRegexMatch),
-            Token::TildeAsterisk => Some(BinaryOperator::PGRegexIMatch),
-            Token::ExclamationMarkTilde => Some(BinaryOperator::PGRegexNotMatch),
-            Token::ExclamationMarkTildeAsterisk => Some(BinaryOperator::PGRegexNotIMatch),
-            Token::DoubleTilde => Some(BinaryOperator::PGLikeMatch),
-            Token::DoubleTildeAsterisk => Some(BinaryOperator::PGILikeMatch),
-            Token::ExclamationMarkDoubleTilde => Some(BinaryOperator::PGNotLikeMatch),
-            Token::ExclamationMarkDoubleTildeAsterisk => Some(BinaryOperator::PGNotILikeMatch),
-            Token::Arrow => Some(BinaryOperator::Arrow),
-            Token::LongArrow => Some(BinaryOperator::LongArrow),
-            Token::HashArrow => Some(BinaryOperator::HashArrow),
-            Token::HashLongArrow => Some(BinaryOperator::HashLongArrow),
-            Token::HashMinus => Some(BinaryOperator::HashMinus),
-            Token::AtArrow => Some(BinaryOperator::Contains),
-            Token::ArrowAt => Some(BinaryOperator::Contained),
-            Token::QuestionMark => Some(BinaryOperator::Exists),
-            Token::QuestionMarkPipe => Some(BinaryOperator::ExistsAny),
-            Token::QuestionMarkAmpersand => Some(BinaryOperator::ExistsAll),
-            Token::AtQuestionMark => Some(BinaryOperator::PathExists),
-            Token::AtAt => Some(BinaryOperator::PathMatch),
+            Token::Op(name) => Some(BinaryOperator::Custom(name.clone())),
             Token::Word(w) => match w.keyword {
                 Keyword::AND => Some(BinaryOperator::And),
                 Keyword::OR => Some(BinaryOperator::Or),
@@ -1503,12 +1468,6 @@ impl Parser<'_> {
             }
         } else if Token::DoubleColon == tok {
             self.parse_pg_cast(expr)
-        } else if Token::ExclamationMark == tok {
-            // PostgreSQL factorial operation
-            Ok(Expr::UnaryOp {
-                op: UnaryOperator::PGPostfixFactorial,
-                expr: Box::new(expr),
-            })
         } else if Token::LBracket == tok {
             self.parse_array_index(expr)
         } else {
@@ -1716,14 +1675,9 @@ impl Parser<'_> {
             Token::Word(w) if w.keyword == Keyword::IS => Ok(P::Is),
             Token::Word(w) if w.keyword == Keyword::ISNULL => Ok(P::Is),
             Token::Word(w) if w.keyword == Keyword::NOTNULL => Ok(P::Is),
-            Token::Eq
-            | Token::Lt
-            | Token::LtEq
-            | Token::Neq
-            | Token::Gt
-            | Token::GtEq
-            | Token::DoubleEq
-            | Token::Spaceship => Ok(P::Cmp),
+            Token::Eq | Token::Lt | Token::LtEq | Token::Neq | Token::Gt | Token::GtEq => {
+                Ok(P::Cmp)
+            }
             Token::Word(w) if w.keyword == Keyword::IN => Ok(P::Between),
             Token::Word(w) if w.keyword == Keyword::BETWEEN => Ok(P::Between),
             Token::Word(w) if w.keyword == Keyword::LIKE => Ok(P::Like),
@@ -1732,28 +1686,7 @@ impl Parser<'_> {
             Token::Word(w) if w.keyword == Keyword::ALL => Ok(P::Other),
             Token::Word(w) if w.keyword == Keyword::ANY => Ok(P::Other),
             Token::Word(w) if w.keyword == Keyword::SOME => Ok(P::Other),
-            Token::Tilde
-            | Token::TildeAsterisk
-            | Token::ExclamationMarkTilde
-            | Token::ExclamationMarkTildeAsterisk
-            | Token::DoubleTilde
-            | Token::DoubleTildeAsterisk
-            | Token::ExclamationMarkDoubleTilde
-            | Token::ExclamationMarkDoubleTildeAsterisk
-            | Token::Concat
-            | Token::Prefix
-            | Token::Arrow
-            | Token::LongArrow
-            | Token::HashArrow
-            | Token::HashLongArrow
-            | Token::HashMinus
-            | Token::AtArrow
-            | Token::ArrowAt
-            | Token::QuestionMark
-            | Token::QuestionMarkPipe
-            | Token::QuestionMarkAmpersand
-            | Token::AtQuestionMark
-            | Token::AtAt => Ok(P::Other),
+            Token::Op(_) => Ok(P::Other),
             Token::Word(w)
                 if w.keyword == Keyword::OPERATOR && self.peek_nth_token(1) == Token::LParen =>
             {
@@ -1763,13 +1696,9 @@ impl Parser<'_> {
             //   or < xor < and < shift
             // But in PostgreSQL, they are just left to right. So `2 | 3 & 4` is 0.
             Token::Pipe => Ok(P::Other),
-            Token::Sharp => Ok(P::Other),
-            Token::Ampersand => Ok(P::Other),
-            Token::ShiftRight | Token::ShiftLeft => Ok(P::Other),
             Token::Plus | Token::Minus => Ok(P::PlusMinus),
             Token::Mul | Token::Div | Token::Mod => Ok(P::MulDiv),
             Token::Caret => Ok(P::Exp),
-            Token::ExclamationMark => Ok(P::PostfixFactorial),
             Token::LBracket => Ok(P::Array),
             Token::DoubleColon => Ok(P::DoubleColon),
             _ => Ok(P::Zero),
@@ -3375,9 +3304,15 @@ impl Parser<'_> {
         } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
             let target_table = self.parse_object_name()?;
             AlterTableOperation::SwapRenameTable { target_table }
+        } else if self.parse_keyword(Keyword::CONNECTOR) {
+            let with_options = self.parse_with_properties()?;
+            AlterTableOperation::AlterConnectorProps {
+                alter_props: with_options,
+            }
         } else {
-            return self
-                .expected("ADD or RENAME or OWNER TO or SET or DROP or SWAP after ALTER TABLE");
+            return self.expected(
+                "ADD or RENAME or OWNER TO or SET or DROP or SWAP or CONNECTOR after ALTER TABLE",
+            );
         };
         Ok(Statement::AlterTable {
             name: table_name,
@@ -3492,7 +3427,10 @@ impl Parser<'_> {
 
     pub fn parse_alter_view(&mut self, materialized: bool) -> ModalResult<Statement> {
         let view_name = self.parse_object_name()?;
-        let operation = if self.parse_keyword(Keyword::RENAME) {
+        let operation = if self.parse_keyword(Keyword::AS) {
+            let query = Box::new(self.parse_query()?);
+            AlterViewOperation::AsQuery { query }
+        } else if self.parse_keyword(Keyword::RENAME) {
             if self.parse_keyword(Keyword::TO) {
                 let view_name = self.parse_object_name()?;
                 AlterViewOperation::RenameView { view_name }
@@ -3571,7 +3509,7 @@ impl Parser<'_> {
             }
         } else {
             return self.expected(&format!(
-                "RENAME or OWNER TO or SET or SWAP after ALTER {}VIEW",
+                "AS, RENAME, OWNER TO, SET, or SWAP after ALTER {}VIEW",
                 if materialized { "MATERIALIZED " } else { "" }
             ));
         };
@@ -3759,8 +3697,14 @@ impl Parser<'_> {
         } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
             let target_source = self.parse_object_name()?;
             AlterSourceOperation::SwapRenameSource { target_source }
+        } else if self.parse_keyword(Keyword::CONNECTOR) {
+            let with_options = self.parse_with_properties()?;
+            AlterSourceOperation::AlterConnectorProps {
+                alter_props: with_options,
+            }
         } else {
-            return self.expected("RENAME, ADD COLUMN, OWNER TO or SET after ALTER SOURCE");
+            return self
+                .expected("RENAME, ADD COLUMN, OWNER TO, CONNECTOR or SET after ALTER SOURCE");
         };
 
         Ok(Statement::AlterSource {
@@ -4036,7 +3980,7 @@ impl Parser<'_> {
             0..,
             separated_pair(
                 Self::parse_object_name,
-                Token::Arrow,
+                Token::Op("->".to_owned()),
                 Self::parse_object_name,
             ),
             Token::Comma,
@@ -4080,17 +4024,6 @@ impl Parser<'_> {
             Token::SingleQuotedString(s) => Ok(s),
             _ => self.expected_at(checkpoint, "literal string"),
         }
-    }
-
-    /// Parse a map key string
-    pub fn parse_map_key(&mut self) -> ModalResult<Expr> {
-        alt((
-            Self::parse_function,
-            single_quoted_string.map(|s| Expr::Value(Value::SingleQuotedString(s))),
-            token_number.map(|s| Expr::Value(Value::Number(s))),
-            fail.expect("literal string, number or function"),
-        ))
-        .parse_next(self)
     }
 
     /// Parse a SQL datatype (in the context of a CREATE TABLE statement for example)

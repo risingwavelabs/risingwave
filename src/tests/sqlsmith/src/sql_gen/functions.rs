@@ -176,7 +176,7 @@ fn make_unary_op(func: ExprType, expr: &Expr) -> Option<Expr> {
     let unary_op = match func {
         E::Neg => U::Minus,
         E::Not => U::Not,
-        E::BitwiseNot => U::PGBitwiseNot,
+        E::BitwiseNot => U::Custom("~".to_owned()),
         _ => return None,
     };
     Some(Expr::UnaryOp {
@@ -281,12 +281,12 @@ fn make_bin_op(func: ExprType, exprs: &[Expr]) -> Option<Expr> {
         E::NotEqual => B::NotEq,
         E::And => B::And,
         E::Or => B::Or,
-        E::Like => B::PGLikeMatch,
-        E::BitwiseAnd => B::BitwiseAnd,
-        E::BitwiseOr => B::BitwiseOr,
-        E::BitwiseXor => B::PGBitwiseXor,
-        E::BitwiseShiftLeft => B::PGBitwiseShiftLeft,
-        E::BitwiseShiftRight => B::PGBitwiseShiftRight,
+        E::Like => B::Custom("~~".to_owned()),
+        E::BitwiseAnd => B::Custom("&".to_owned()),
+        E::BitwiseOr => B::Custom("|".to_owned()),
+        E::BitwiseXor => B::Custom("#".to_owned()),
+        E::BitwiseShiftLeft => B::Custom("<<".to_owned()),
+        E::BitwiseShiftRight => B::Custom(">>".to_owned()),
         _ => return None,
     };
     Some(Expr::BinaryOp {

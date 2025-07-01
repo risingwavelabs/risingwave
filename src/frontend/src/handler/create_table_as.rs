@@ -142,7 +142,7 @@ pub async fn handle_create_as(
     catalog_writer
         .create_table(
             source,
-            table,
+            table.to_prost(),
             graph,
             TableJobType::Unspecified,
             if_not_exists,

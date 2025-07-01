@@ -26,7 +26,7 @@ use fail::fail_point;
 use futures::StreamExt;
 use futures::future::join_all;
 use itertools::Itertools;
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_connector::source::SplitImpl;
@@ -34,9 +34,7 @@ use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{HostAddress, WorkerNode};
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_plan::{
-    AddMutation, Barrier, BarrierMutation, FragmentTypeFlag, SubscriptionUpstreamInfo,
-};
+use risingwave_pb::stream_plan::{AddMutation, Barrier, BarrierMutation, SubscriptionUpstreamInfo};
 use risingwave_pb::stream_service::inject_barrier_request::build_actor_info::UpstreamActors;
 use risingwave_pb::stream_service::inject_barrier_request::{
     BuildActorInfo, FragmentBuildActorInfo,
@@ -525,9 +523,9 @@ impl ControlStreamManager {
         for (job_id, job) in jobs {
             if let Some((definition, stream_job_fragments)) = background_jobs.remove(&job_id) {
                 if stream_job_fragments.fragments().any(|fragment| {
-                    (fragment.fragment_type_mask
-                        & (FragmentTypeFlag::SnapshotBackfillStreamScan as u32))
-                        != 0
+                    fragment
+                        .fragment_type_mask
+                        .contains(FragmentTypeFlag::SnapshotBackfillStreamScan)
                 }) {
                     debug!(%job_id, definition, "recovered snapshot backfill job");
                     snapshot_backfill_jobs.insert(job_id, (job, definition, stream_job_fragments));

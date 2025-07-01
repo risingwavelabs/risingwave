@@ -699,7 +699,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [p1, p2, p3, t._row_id(hidden), t._row_id#1(hidden), t.src(hidden), t._row_id#2(hidden)], stream_key: [t._row_id, t._row_id#1, p2, t._row_id#2, t.src, p1], pk_columns: [t._row_id, t._row_id#1, p2, t._row_id#2, t.src, p1], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamExchange Hash([0, 1, 3, 4, 5, 6]) from 1
 
     Fragment 1
@@ -839,7 +838,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [v1, v2, v3, v4, v5, v6], stream_key: [v1], pk_columns: [v1], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamExchange Hash([0]) from 1
 
     Fragment 1

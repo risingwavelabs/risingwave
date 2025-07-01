@@ -65,8 +65,6 @@ pub enum Token {
     Whitespace(Whitespace),
     /// Custom Operator
     Op(String),
-    /// Double equals sign `==`
-    DoubleEq,
     /// Equality operator `=`
     Eq,
     /// Not Equals operator `<>` (or `!=` in some dialects)
@@ -79,8 +77,6 @@ pub enum Token {
     LtEq,
     /// Greater Than Or Equals operator `>=`
     GtEq,
-    /// Spaceship operator <=>
-    Spaceship,
     /// Plus operator `+`
     Plus,
     /// Minus operator `-`
@@ -91,8 +87,6 @@ pub enum Token {
     Div,
     /// Modulo Operator `%`
     Mod,
-    /// String concatenation `||`
-    Concat,
     /// Left parenthesis `(`
     LParen,
     /// Right parenthesis `)`
@@ -111,77 +105,16 @@ pub enum Token {
     LBracket,
     /// Right bracket `]`
     RBracket,
-    /// Ampersand `&`
-    Ampersand,
     /// Pipe `|`
     Pipe,
     /// Caret `^`
     Caret,
-    /// Prefix `^@`
-    Prefix,
     /// Left brace `{`
     LBrace,
     /// Right brace `}`
     RBrace,
     /// Right Arrow `=>`
     RArrow,
-    /// Sharp `#` used for PostgreSQL Bitwise XOR operator
-    Sharp,
-    /// Tilde `~` used for PostgreSQL Bitwise NOT operator or case sensitive match regular
-    /// expression operator
-    Tilde,
-    /// `~*` , a case insensitive match regular expression operator in PostgreSQL
-    TildeAsterisk,
-    /// `!~` , a case sensitive not match regular expression operator in PostgreSQL
-    ExclamationMarkTilde,
-    /// `!~*` , a case insensitive not match regular expression operator in PostgreSQL
-    ExclamationMarkTildeAsterisk,
-    /// `~~`, a case sensitive LIKE expression operator in PostgreSQL
-    DoubleTilde,
-    /// `~~*` , a case insensitive ILIKE regular expression operator in PostgreSQL
-    DoubleTildeAsterisk,
-    /// `!~~` , a case sensitive NOT LIKE regular expression operator in PostgreSQL
-    ExclamationMarkDoubleTilde,
-    /// `!~~*` , a case insensitive NOT ILIKE regular expression operator in PostgreSQL
-    ExclamationMarkDoubleTildeAsterisk,
-    /// `<<`, a bitwise shift left operator in PostgreSQL
-    ShiftLeft,
-    /// `>>`, a bitwise shift right operator in PostgreSQL
-    ShiftRight,
-    /// Exclamation Mark `!` used for PostgreSQL factorial operator
-    ExclamationMark,
-    /// Double Exclamation Mark `!!` used for PostgreSQL prefix factorial operator
-    DoubleExclamationMark,
-    /// AtSign `@` used for PostgreSQL abs operator
-    AtSign,
-    /// `|/`, a square root math operator in PostgreSQL
-    PGSquareRoot,
-    /// `||/` , a cube root math operator in PostgreSQL
-    PGCubeRoot,
-    /// `->`, access JSON object field or array element in PostgreSQL
-    Arrow,
-    /// `->>`, access JSON object field or array element as text in PostgreSQL
-    LongArrow,
-    /// `#>`, extract JSON sub-object at the specified path in PostgreSQL
-    HashArrow,
-    /// `#>>`, extract JSON sub-object at the specified path as text in PostgreSQL
-    HashLongArrow,
-    /// `#-`, delete a key from a JSON object in PostgreSQL
-    HashMinus,
-    /// `@>`, does the left JSON value contain the right JSON path/value entries at the top level
-    AtArrow,
-    /// `<@`, does the right JSON value contain the left JSON path/value entries at the top level
-    ArrowAt,
-    /// `?`, does the string exist as a top-level key within the JSON value
-    QuestionMark,
-    /// `?|`, do any of the strings exist as top-level keys or array elements?
-    QuestionMarkPipe,
-    /// `?&`, do all of the strings exist as top-level keys or array elements?
-    QuestionMarkAmpersand,
-    /// `@?`, does JSON path return any item for the specified JSON value?
-    AtQuestionMark,
-    /// `@@`, returns the result of a JSON path predicate check for the specified JSON value.
-    AtAt,
 }
 
 impl fmt::Display for Token {
@@ -200,8 +133,6 @@ impl fmt::Display for Token {
             Token::Comma => f.write_str(","),
             Token::Whitespace(ws) => write!(f, "{}", ws),
             Token::Op(op) => write!(f, "{}", op),
-            Token::DoubleEq => f.write_str("=="),
-            Token::Spaceship => f.write_str("<=>"),
             Token::Eq => f.write_str("="),
             Token::Neq => f.write_str("<>"),
             Token::Lt => f.write_str("<"),
@@ -212,7 +143,6 @@ impl fmt::Display for Token {
             Token::Minus => f.write_str("-"),
             Token::Mul => f.write_str("*"),
             Token::Div => f.write_str("/"),
-            Token::Concat => f.write_str("||"),
             Token::Mod => f.write_str("%"),
             Token::LParen => f.write_str("("),
             Token::RParen => f.write_str(")"),
@@ -223,41 +153,11 @@ impl fmt::Display for Token {
             Token::Backslash => f.write_str("\\"),
             Token::LBracket => f.write_str("["),
             Token::RBracket => f.write_str("]"),
-            Token::Ampersand => f.write_str("&"),
             Token::Caret => f.write_str("^"),
-            Token::Prefix => f.write_str("^@"),
             Token::Pipe => f.write_str("|"),
             Token::LBrace => f.write_str("{"),
             Token::RBrace => f.write_str("}"),
             Token::RArrow => f.write_str("=>"),
-            Token::Sharp => f.write_str("#"),
-            Token::ExclamationMark => f.write_str("!"),
-            Token::DoubleExclamationMark => f.write_str("!!"),
-            Token::Tilde => f.write_str("~"),
-            Token::TildeAsterisk => f.write_str("~*"),
-            Token::ExclamationMarkTilde => f.write_str("!~"),
-            Token::ExclamationMarkTildeAsterisk => f.write_str("!~*"),
-            Token::DoubleTilde => f.write_str("~~"),
-            Token::DoubleTildeAsterisk => f.write_str("~~*"),
-            Token::ExclamationMarkDoubleTilde => f.write_str("!~~"),
-            Token::ExclamationMarkDoubleTildeAsterisk => f.write_str("!~~*"),
-            Token::AtSign => f.write_str("@"),
-            Token::ShiftLeft => f.write_str("<<"),
-            Token::ShiftRight => f.write_str(">>"),
-            Token::PGSquareRoot => f.write_str("|/"),
-            Token::PGCubeRoot => f.write_str("||/"),
-            Token::Arrow => f.write_str("->"),
-            Token::LongArrow => f.write_str("->>"),
-            Token::HashArrow => f.write_str("#>"),
-            Token::HashLongArrow => f.write_str("#>>"),
-            Token::HashMinus => f.write_str("#-"),
-            Token::AtArrow => f.write_str("@>"),
-            Token::ArrowAt => f.write_str("<@"),
-            Token::QuestionMark => f.write_str("?"),
-            Token::QuestionMarkPipe => f.write_str("?|"),
-            Token::QuestionMarkAmpersand => f.write_str("?&"),
-            Token::AtQuestionMark => f.write_str("@?"),
-            Token::AtAt => f.write_str("@@"),
         }
     }
 }
@@ -740,53 +640,27 @@ impl<'a> Tokenizer<'a> {
                         }
                     }
                     match op {
+                        // https://github.com/postgres/postgres/blob/REL_17_4/src/backend/parser/scan.l#L965-L973
                         "+" => Ok(Some(Token::Plus)),
                         "-" => Ok(Some(Token::Minus)),
-                        "->" => Ok(Some(Token::Arrow)),
-                        "->>" => Ok(Some(Token::LongArrow)),
                         "*" => Ok(Some(Token::Mul)),
                         "/" => Ok(Some(Token::Div)),
                         "%" => Ok(Some(Token::Mod)),
-                        "|" => Ok(Some(Token::Pipe)),
-                        "||" => Ok(Some(Token::Concat)),
-                        "|/" => Ok(Some(Token::PGSquareRoot)),
-                        "||/" => Ok(Some(Token::PGCubeRoot)),
-                        "=" => Ok(Some(Token::Eq)),
-                        "=>" => Ok(Some(Token::RArrow)),
-                        "!=" => Ok(Some(Token::Neq)),
-                        "!!" => Ok(Some(Token::DoubleExclamationMark)),
-                        "!~~*" => Ok(Some(Token::ExclamationMarkDoubleTildeAsterisk)),
-                        "!~~" => Ok(Some(Token::ExclamationMarkDoubleTilde)),
-                        "!~*" => Ok(Some(Token::ExclamationMarkTildeAsterisk)),
-                        "!~" => Ok(Some(Token::ExclamationMarkTilde)),
-                        "!" => Ok(Some(Token::ExclamationMark)),
-                        "<=>" => Ok(Some(Token::Spaceship)),
-                        "<=" => Ok(Some(Token::LtEq)),
-                        "<>" => Ok(Some(Token::Neq)),
-                        "<@" => Ok(Some(Token::ArrowAt)),
-                        "<<" => Ok(Some(Token::ShiftLeft)),
-                        "<" => Ok(Some(Token::Lt)),
-                        ">>" => Ok(Some(Token::ShiftRight)),
-                        ">=" => Ok(Some(Token::GtEq)),
-                        ">" => Ok(Some(Token::Gt)),
-                        "&" => Ok(Some(Token::Ampersand)),
-                        "^@" => Ok(Some(Token::Prefix)),
                         "^" => Ok(Some(Token::Caret)),
-                        "~~*" => Ok(Some(Token::DoubleTildeAsterisk)),
-                        "~~" => Ok(Some(Token::DoubleTilde)),
-                        "~*" => Ok(Some(Token::TildeAsterisk)),
-                        "~" => Ok(Some(Token::Tilde)),
-                        "#-" => Ok(Some(Token::HashMinus)),
-                        "#>>" => Ok(Some(Token::HashLongArrow)),
-                        "#>" => Ok(Some(Token::HashArrow)),
-                        "#" => Ok(Some(Token::Sharp)),
-                        "@>" => Ok(Some(Token::AtArrow)),
-                        "@?" => Ok(Some(Token::AtQuestionMark)),
-                        "@@" => Ok(Some(Token::AtAt)),
-                        "@" => Ok(Some(Token::AtSign)),
-                        "?|" => Ok(Some(Token::QuestionMarkPipe)),
-                        "?&" => Ok(Some(Token::QuestionMarkAmpersand)),
-                        "?" => Ok(Some(Token::QuestionMark)),
+                        "<" => Ok(Some(Token::Lt)),
+                        ">" => Ok(Some(Token::Gt)),
+                        "=" => Ok(Some(Token::Eq)),
+                        // https://github.com/postgres/postgres/blob/REL_17_4/src/backend/parser/scan.l#L974-L992
+                        "=>" => Ok(Some(Token::RArrow)),
+                        "<=" => Ok(Some(Token::LtEq)),
+                        ">=" => Ok(Some(Token::GtEq)),
+                        "<>" => Ok(Some(Token::Neq)),
+                        "!=" => Ok(Some(Token::Neq)),
+                        // Our support of `Expr::LambdaFunction` makes us PostgreSQL-incompatible here.
+                        //     foo(bar, | x | x)
+                        // In PostgreSQL, this is unary operator `|` applied to `x`, then bitwise-or `x`.
+                        // In our dialect, this is a lambda function - the identity function.
+                        "|" => Ok(Some(Token::Pipe)),
                         _ => Ok(Some(Token::Op(op.to_owned()))),
                     }
                 }
@@ -1261,7 +1135,7 @@ mod tests {
             Token::Whitespace(Whitespace::Space),
             Token::SingleQuotedString(String::from("a")),
             Token::Whitespace(Whitespace::Space),
-            Token::Concat,
+            Token::Op("||".to_owned()),
             Token::Whitespace(Whitespace::Space),
             Token::SingleQuotedString(String::from("b")),
         ];
@@ -1665,28 +1539,28 @@ mod tests {
             Token::Whitespace(Whitespace::Space),
             Token::make_word("col", None),
             Token::Whitespace(Whitespace::Space),
-            Token::Tilde,
+            Token::Op("~".to_owned()),
             Token::Whitespace(Whitespace::Space),
             Token::SingleQuotedString("^a".into()),
             Token::Comma,
             Token::Whitespace(Whitespace::Space),
             Token::make_word("col", None),
             Token::Whitespace(Whitespace::Space),
-            Token::TildeAsterisk,
+            Token::Op("~*".to_owned()),
             Token::Whitespace(Whitespace::Space),
             Token::SingleQuotedString("^a".into()),
             Token::Comma,
             Token::Whitespace(Whitespace::Space),
             Token::make_word("col", None),
             Token::Whitespace(Whitespace::Space),
-            Token::ExclamationMarkTilde,
+            Token::Op("!~".to_owned()),
             Token::Whitespace(Whitespace::Space),
             Token::SingleQuotedString("^a".into()),
             Token::Comma,
             Token::Whitespace(Whitespace::Space),
             Token::make_word("col", None),
             Token::Whitespace(Whitespace::Space),
-            Token::ExclamationMarkTildeAsterisk,
+            Token::Op("!~*".to_owned()),
             Token::Whitespace(Whitespace::Space),
             Token::SingleQuotedString("^a".into()),
         ];

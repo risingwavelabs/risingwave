@@ -1,0 +1,18 @@
+control substitution on
+
+# Issue Description
+#
+# This issue exists because:
+# When we query a timestamp that is greater than all message timestamps, the Kafka SDK's `offsets_for_times` returns an offset pointing to the partition end.
+# Our handling is to use the current high-watermark as the starting offset, intending to read from the latest (the first message greater than the timestamp).
+# However, for normal latest offset handling, we use high-watermark - 1.
+# As a result, we accessed a non-existent offset in the reader, and Kafka reset the consumer position, causing us to actually consume from the earliest offset.
+
+system ok
+rpk topic create test_topic_issue_22387;
+
+system ok
+python e2e_test/source_inline/kafka/kafka_startup_millis.py --db-name $__DATABASE__ --topic test_topic_issue_22387 --produce-after-table
+
+system ok
+rpk topic delete test_topic_issue_22387;
