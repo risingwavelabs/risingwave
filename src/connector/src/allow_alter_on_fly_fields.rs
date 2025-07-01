@@ -29,8 +29,35 @@ macro_rules! use_source_properties {
 
 mod source_properties {
     use crate::for_all_sources;
+    use crate::source::base::SourceProperties;
 
     for_all_sources!(use_source_properties);
+
+    /// Implements a function that maps a source name string to the Rust type name of the corresponding property type.
+    /// Usage: `impl_source_name_to_prop_type_name!();` will generate:
+    /// ```ignore
+    /// pub fn source_name_to_prop_type_name(source_name: &str) -> Option<&'static str>
+    /// ```
+    macro_rules! impl_source_name_to_prop_type_name_inner {
+        ({ $({$variant:ident, $prop_name:ty, $split:ty}),* }) => {
+            pub fn source_name_to_prop_type_name(source_name: &str) -> Option<&'static str> {
+                match source_name {
+                    $(
+                        <$prop_name>::SOURCE_NAME => Some(std::any::type_name::<$prop_name>()),
+                    )*
+                    _ => None,
+                }
+            }
+        };
+    }
+
+    macro_rules! impl_source_name_to_prop_type_name {
+        () => {
+            $crate::for_all_sources! { impl_source_name_to_prop_type_name_inner }
+        };
+    }
+
+    impl_source_name_to_prop_type_name!();
 }
 
 mod sink_properties {
