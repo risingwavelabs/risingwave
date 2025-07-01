@@ -46,6 +46,7 @@ use std::assert_matches::assert_matches;
 use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
 
+use educe::Educe;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
 pub use logical_optimization::*;
@@ -97,11 +98,13 @@ use crate::utils::{ColIndexMappingRewriteExt, WithOptionsSecResolved};
 /// the plan will return two columns (id, v1), and the required order column is id. the id
 /// column is required in optimization, but the final generated plan will remove the unnecessary
 /// column in the result.
-#[derive(Debug, Clone)]
+#[derive(Educe)]
+#[educe(Debug, Clone)]
 pub struct PlanRoot<P> {
     // The current plan node.
     pub plan: PlanRef,
     // The phase of the plan.
+    #[educe(Debug(ignore), Clone(method(PhantomData::clone)))]
     _phase: PhantomData<P>,
     required_dist: RequiredDist,
     required_order: Order,
@@ -114,7 +117,7 @@ pub struct PlanRoot<P> {
 /// Typical phase transformation are:
 /// - `Logical` -> `OptimizedLogicalForBatch` -> `Batch`
 /// - `Logical` -> `OptimizedLogicalForStream` -> `Stream`
-pub trait PlanPhase: Clone {}
+pub trait PlanPhase {}
 
 macro_rules! for_all_phase {
     () => {
@@ -129,7 +132,6 @@ macro_rules! for_all_phase {
     ($($phase:ident),+ $(,)?) => {
         $(
             paste::paste! {
-                #[derive(Clone, Debug)]
                 pub struct [< PlanPhase$phase >];
                 impl PlanPhase for [< PlanPhase$phase >] {}
                 pub type [< $phase PlanRoot >] = PlanRoot<[< PlanPhase$phase >]>;
