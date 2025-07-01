@@ -37,9 +37,9 @@ pub type JoinEncodingPrimitive = u8;
 #[allow(non_snake_case, non_upper_case_globals)]
 pub mod JoinEncoding {
     use super::JoinEncodingPrimitive;
-    pub const MemoryOptimized: JoinEncodingPrimitive = 0;
+    pub const Memory: JoinEncodingPrimitive = 0;
 
-    pub const CPUOptimized: JoinEncodingPrimitive = 1;
+    pub const Cpu: JoinEncodingPrimitive = 1;
 }
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently

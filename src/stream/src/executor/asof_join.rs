@@ -1040,7 +1040,7 @@ mod tests {
         let info = ExecutorInfo::new(schema, vec![1], "HashJoinExecutor".to_owned(), 0);
 
         let executor =
-            AsOfJoinExecutor::<Key64, MemoryStateStore, T, { JoinEncoding::MemoryOptimized }>::new(
+            AsOfJoinExecutor::<Key64, MemoryStateStore, T, { JoinEncoding::Memory }>::new(
                 ActorContext::for_test(123),
                 info,
                 source_l,

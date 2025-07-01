@@ -1237,7 +1237,7 @@ mod tests {
             managed_state
                 .insert(
                     pk,
-                    join_row.encode::<{ JoinEncoding::MemoryOptimized }>(),
+                    join_row.encode::<{ JoinEncoding::Memory }>(),
                     inequality_key,
                 )
                 .unwrap();

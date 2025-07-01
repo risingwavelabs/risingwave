@@ -238,8 +238,8 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
                     | (JoinTypeProto::Unspecified, _)
                     | (_, JoinEncodingTypeProto::Unspecified ) => unreachable!(),
                     $(
-                        (JoinTypeProto::$join_type, JoinEncodingTypeProto::MemoryOptimized) => build!($join_type, MemoryOptimized),
-                        (JoinTypeProto::$join_type, JoinEncodingTypeProto::CpuOptimized) => build!($join_type, CPUOptimized),
+                        (JoinTypeProto::$join_type, JoinEncodingTypeProto::MemoryOptimized) => build!($join_type, Memory),
+                        (JoinTypeProto::$join_type, JoinEncodingTypeProto::CpuOptimized) => build!($join_type, Cpu),
                     )*
                 }
             };

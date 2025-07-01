@@ -156,7 +156,7 @@ pub async fn setup_bench_stream_hash_join(
                 Key128,
                 MemoryStateStore,
                 { ConstJoinType::Inner },
-                { JoinEncoding::MemoryOptimized },
+                { JoinEncoding::Memory },
             >::new_with_cache_size(
                 ActorContext::for_test(123),
                 info,
@@ -186,7 +186,7 @@ pub async fn setup_bench_stream_hash_join(
                 Key128,
                 MemoryStateStore,
                 { ConstJoinType::LeftOuter },
-                { JoinEncoding::MemoryOptimized },
+                { JoinEncoding::Memory },
             >::new_with_cache_size(
                 ActorContext::for_test(123),
                 info,
