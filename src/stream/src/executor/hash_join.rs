@@ -13,6 +13,7 @@
 // limitations under the License.
 use std::assert_matches::assert_matches;
 use std::collections::{BTreeMap, HashSet};
+use std::marker::PhantomData;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -31,7 +32,7 @@ use tokio::time::Instant;
 use self::builder::JoinChunkBuilder;
 use super::barrier_align::*;
 use super::join::hash_join::*;
-use super::join::row::JoinRow;
+use super::join::row::{JoinEncoding, JoinRow};
 use super::join::*;
 use super::watermark::*;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
@@ -61,7 +62,7 @@ impl JoinParams {
     }
 }
 
-struct JoinSide<K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> {
+struct JoinSide<K: HashKey, S: StateStore, E: JoinEncoding> {
     /// Store all data from a one side stream
     ht: JoinHashMap<K, S, E>,
     /// Indices of the join key columns
@@ -88,11 +89,10 @@ struct JoinSide<K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> {
     state_clean_columns: Vec<(usize, usize)>,
     /// Whether degree table is needed for this side.
     need_degree_table: bool,
+    _marker: std::marker::PhantomData<E>,
 }
 
-impl<K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> std::fmt::Debug
-    for JoinSide<K, S, E>
-{
+impl<K: HashKey, S: StateStore, E: JoinEncoding> std::fmt::Debug for JoinSide<K, S, E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JoinSide")
             .field("join_key_indices", &self.join_key_indices)
@@ -104,7 +104,7 @@ impl<K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> std::fmt::Debug
     }
 }
 
-impl<K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> JoinSide<K, S, E> {
+impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinSide<K, S, E> {
     // WARNING: Please do not call this until we implement it.
     fn is_dirty(&self) -> bool {
         unimplemented!()
@@ -128,12 +128,8 @@ impl<K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> JoinSide<K, S, E
 
 /// `HashJoinExecutor` takes two input streams and runs equal hash join on them.
 /// The output columns are the concatenation of left and right columns.
-pub struct HashJoinExecutor<
-    K: HashKey,
-    S: StateStore,
-    const T: JoinTypePrimitive,
-    const E: JoinEncodingPrimitive,
-> {
+pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
+{
     ctx: ActorContextRef,
     info: ExecutorInfo,
 
@@ -175,8 +171,8 @@ pub struct HashJoinExecutor<
     entry_state_max_rows: usize,
 }
 
-impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const E: JoinEncodingPrimitive>
-    std::fmt::Debug for HashJoinExecutor<K, S, T, E>
+impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding> std::fmt::Debug
+    for HashJoinExecutor<K, S, T, E>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HashJoinExecutor")
@@ -192,7 +188,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const E: JoinEncodin
     }
 }
 
-impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const E: JoinEncodingPrimitive> Execute
+impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding> Execute
     for HashJoinExecutor<K, S, T, E>
 {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
@@ -200,7 +196,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const E: JoinEncodin
     }
 }
 
-struct EqJoinArgs<'a, K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> {
+struct EqJoinArgs<'a, K: HashKey, S: StateStore, E: JoinEncoding> {
     ctx: &'a ActorContextRef,
     side_l: &'a mut JoinSide<K, S, E>,
     side_r: &'a mut JoinSide<K, S, E>,
@@ -215,7 +211,7 @@ struct EqJoinArgs<'a, K: HashKey, S: StateStore, const E: JoinEncodingPrimitive>
     entry_state_max_rows: usize,
 }
 
-impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const E: JoinEncodingPrimitive>
+impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
     HashJoinExecutor<K, S, T, E>
 {
     #[allow(clippy::too_many_arguments)]
@@ -485,6 +481,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const E: JoinEncodin
                 state_clean_columns: l_state_clean_columns,
                 start_pos: 0,
                 need_degree_table: need_degree_table_l,
+                _marker: PhantomData,
             },
             side_r: JoinSide {
                 ht: JoinHashMap::new(
@@ -512,6 +509,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const E: JoinEncodin
                 non_null_fields: r_non_null_fields,
                 state_clean_columns: r_state_clean_columns,
                 need_degree_table: need_degree_table_r,
+                _marker: PhantomData,
             },
             cond,
             inequality_pairs,
@@ -1091,7 +1089,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const E: JoinEncodin
                     // cache refill
                     if entry_state_count <= entry_state_max_rows {
                         let row_ref = entry_state
-                            .insert(encoded_pk, matched_row.encode::<0>(), None) // TODO(kwannoel): handle ineq key for asof join.
+                            .insert(encoded_pk, matched_row.encode::<E>(), None) // TODO(kwannoel): handle ineq key for asof join.
                             .with_context(|| format!("row: {}", row.display(),))?;
                         matched_row_ref = Some(row_ref);
                         entry_state_count += 1;
@@ -1311,6 +1309,7 @@ mod tests {
 
     use super::*;
     use crate::common::table::test_utils::gen_pbtable;
+    use crate::executor::MemoryEncoding;
     use crate::executor::test_utils::expr::build_from_pretty;
     use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
 
@@ -1425,28 +1424,27 @@ mod tests {
         let schema_len = schema.len();
         let info = ExecutorInfo::new(schema, vec![1], "HashJoinExecutor".to_owned(), 0);
 
-        let executor =
-            HashJoinExecutor::<Key64, MemoryStateStore, T, { JoinEncoding::Memory }>::new(
-                ActorContext::for_test(123),
-                info,
-                source_l,
-                source_r,
-                params_l,
-                params_r,
-                vec![null_safe],
-                (0..schema_len).collect_vec(),
-                cond,
-                inequality_pairs,
-                state_l,
-                degree_state_l,
-                state_r,
-                degree_state_r,
-                Arc::new(AtomicU64::new(0)),
-                false,
-                Arc::new(StreamingMetrics::unused()),
-                1024,
-                2048,
-            );
+        let executor = HashJoinExecutor::<Key64, MemoryStateStore, T, MemoryEncoding>::new(
+            ActorContext::for_test(123),
+            info,
+            source_l,
+            source_r,
+            params_l,
+            params_r,
+            vec![null_safe],
+            (0..schema_len).collect_vec(),
+            cond,
+            inequality_pairs,
+            state_l,
+            degree_state_l,
+            state_r,
+            degree_state_r,
+            Arc::new(AtomicU64::new(0)),
+            false,
+            Arc::new(StreamingMetrics::unused()),
+            1024,
+            2048,
+        );
         (tx_l, tx_r, executor.boxed().execute())
     }
 
@@ -1515,28 +1513,27 @@ mod tests {
         let schema_len = schema.len();
         let info = ExecutorInfo::new(schema, vec![1], "HashJoinExecutor".to_owned(), 0);
 
-        let executor =
-            HashJoinExecutor::<Key128, MemoryStateStore, T, { JoinEncoding::Memory }>::new(
-                ActorContext::for_test(123),
-                info,
-                source_l,
-                source_r,
-                params_l,
-                params_r,
-                vec![false],
-                (0..schema_len).collect_vec(),
-                cond,
-                vec![],
-                state_l,
-                degree_state_l,
-                state_r,
-                degree_state_r,
-                Arc::new(AtomicU64::new(0)),
-                true,
-                Arc::new(StreamingMetrics::unused()),
-                1024,
-                2048,
-            );
+        let executor = HashJoinExecutor::<Key128, MemoryStateStore, T, MemoryEncoding>::new(
+            ActorContext::for_test(123),
+            info,
+            source_l,
+            source_r,
+            params_l,
+            params_r,
+            vec![false],
+            (0..schema_len).collect_vec(),
+            cond,
+            vec![],
+            state_l,
+            degree_state_l,
+            state_r,
+            degree_state_r,
+            Arc::new(AtomicU64::new(0)),
+            true,
+            Arc::new(StreamingMetrics::unused()),
+            1024,
+            2048,
+        );
         (tx_l, tx_r, executor.boxed().execute())
     }
 

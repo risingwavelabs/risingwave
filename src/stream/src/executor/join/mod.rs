@@ -32,16 +32,6 @@ pub(crate) mod JoinOp {
     pub const Delete: JoinOpPrimitive = false;
 }
 
-pub type JoinEncodingPrimitive = u8;
-
-#[allow(non_snake_case, non_upper_case_globals)]
-pub mod JoinEncoding {
-    use super::JoinEncodingPrimitive;
-    pub const Memory: JoinEncodingPrimitive = 0;
-
-    pub const Cpu: JoinEncodingPrimitive = 1;
-}
-
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.
 // TODO: Use enum to replace this once [feature(adt_const_params)](https://github.com/rust-lang/rust/issues/95174) get completed.

@@ -30,7 +30,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::prelude::StateTable;
 use crate::executor::test_utils::{MessageSender, MockSource};
 use crate::executor::{
-    ActorContext, HashJoinExecutor, JoinEncoding, JoinParams, JoinType as ConstJoinType,
+    ActorContext, HashJoinExecutor, JoinParams, JoinType as ConstJoinType, MemoryEncoding,
 };
 
 #[derive(Clone, Copy, Debug, Display)]
@@ -156,7 +156,7 @@ pub async fn setup_bench_stream_hash_join(
                 Key128,
                 MemoryStateStore,
                 { ConstJoinType::Inner },
-                { JoinEncoding::Memory },
+                MemoryEncoding,
             >::new_with_cache_size(
                 ActorContext::for_test(123),
                 info,
@@ -186,7 +186,7 @@ pub async fn setup_bench_stream_hash_join(
                 Key128,
                 MemoryStateStore,
                 { ConstJoinType::LeftOuter },
-                { JoinEncoding::Memory },
+                MemoryEncoding,
             >::new_with_cache_size(
                 ActorContext::for_test(123),
                 info,

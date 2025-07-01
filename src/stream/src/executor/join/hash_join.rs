@@ -41,10 +41,10 @@ use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{StateTable, StateTablePostCommit};
 use crate::consistency::{consistency_error, consistency_panic, enable_strict_consistency};
-use crate::executor::StreamExecutorError;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::join::row::JoinRow;
 use crate::executor::monitor::StreamingMetrics;
+use crate::executor::{JoinEncoding, StreamExecutorError};
 use crate::task::{ActorId, AtomicU64Ref, FragmentId};
 
 /// Memcomparable encoding.
@@ -178,7 +178,7 @@ impl InequalityKeyDesc {
     }
 }
 
-pub struct JoinHashMap<K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> {
+pub struct JoinHashMap<K: HashKey, S: StateStore, E: JoinEncoding> {
     /// Store the join states.
     inner: JoinHashMapInner<K>,
     /// Data types of the join key columns
@@ -229,9 +229,10 @@ pub struct JoinHashMap<K: HashKey, S: StateStore, const E: JoinEncodingPrimitive
     inequality_key_desc: Option<InequalityKeyDesc>,
     /// Metrics of the hash map
     metrics: JoinHashMapMetrics,
+    _marker: std::marker::PhantomData<E>,
 }
 
-impl<K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> JoinHashMap<K, S, E> {
+impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
     pub(crate) fn get_degree_state_mut_ref(&mut self) -> (&[usize], &mut Option<TableInner<S>>) {
         (&self.state.order_key_indices, &mut self.degree_state)
     }
@@ -413,7 +414,7 @@ impl<S: StateStore> TableInner<S> {
     }
 }
 
-impl<K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> JoinHashMap<K, S, E> {
+impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
     /// Create a [`JoinHashMap`] with the given LRU capacity.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -486,6 +487,7 @@ impl<K: HashKey, S: StateStore, const E: JoinEncodingPrimitive> JoinHashMap<K, S
             pk_contained_in_jk,
             inequality_key_desc,
             metrics: JoinHashMapMetrics::new(&metrics, actor_id, fragment_id, side, join_table_id),
+            _marker: std::marker::PhantomData,
         }
     }
 
@@ -514,7 +516,7 @@ impl<K: HashKey, S: StateStore> JoinHashMapPostCommit<'_, K, S> {
         Ok(cache_may_stale)
     }
 }
-impl<K: HashKey, S: StateStore, const E: JoinTypePrimitive> JoinHashMap<K, S, E> {
+impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
     pub fn update_watermark(&mut self, watermark: ScalarImpl) {
         // TODO: remove data in cache.
         self.state.table.update_watermark(watermark.clone());
@@ -1203,6 +1205,7 @@ mod tests {
     use risingwave_common::util::iter_util::ZipEqDebug;
 
     use super::*;
+    use crate::executor::MemoryEncoding;
 
     fn insert_chunk(
         managed_state: &mut JoinEntryState,
@@ -1235,11 +1238,7 @@ mod tests {
             });
             let join_row = JoinRow { row, degree: 0 };
             managed_state
-                .insert(
-                    pk,
-                    join_row.encode::<{ JoinEncoding::Memory }>(),
-                    inequality_key,
-                )
+                .insert(pk, join_row.encode::<MemoryEncoding>(), inequality_key)
                 .unwrap();
         }
     }
