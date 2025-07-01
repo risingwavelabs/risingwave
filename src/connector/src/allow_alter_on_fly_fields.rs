@@ -99,6 +99,22 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
         std::any::type_name::<KafkaProperties>().to_owned(),
         [
             "properties.sync.call.timeout".to_owned(),
+            "properties.security.protocol".to_owned(),
+            "properties.ssl.endpoint.identification.algorithm".to_owned(),
+            "properties.sasl.mechanism".to_owned(),
+            "properties.sasl.username".to_owned(),
+            "properties.sasl.password".to_owned(),
+            "properties.message.max.bytes".to_owned(),
+            "properties.receive.message.max.bytes".to_owned(),
+            "properties.statistics.interval.ms".to_owned(),
+            "properties.client.id".to_owned(),
+            "properties.enable.ssl.certificate.verification".to_owned(),
+            "properties.queued.min.messages".to_owned(),
+            "properties.queued.max.messages.kbytes".to_owned(),
+            "properties.fetch.wait.max.ms".to_owned(),
+            "properties.fetch.queue.backoff.ms".to_owned(),
+            "properties.fetch.max.bytes".to_owned(),
+            "properties.enable.auto.commit".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     map
@@ -113,6 +129,16 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
         std::any::type_name::<KafkaConfig>().to_owned(),
         [
             "properties.sync.call.timeout".to_owned(),
+            "properties.security.protocol".to_owned(),
+            "properties.ssl.endpoint.identification.algorithm".to_owned(),
+            "properties.sasl.mechanism".to_owned(),
+            "properties.sasl.username".to_owned(),
+            "properties.sasl.password".to_owned(),
+            "properties.message.max.bytes".to_owned(),
+            "properties.receive.message.max.bytes".to_owned(),
+            "properties.statistics.interval.ms".to_owned(),
+            "properties.client.id".to_owned(),
+            "properties.enable.ssl.certificate.verification".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     map

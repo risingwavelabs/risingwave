@@ -605,9 +605,11 @@ KafkaConfig:
       Security protocol used for RisingWave to communicate with Kafka brokers. Could be
       PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.endpoint.identification.algorithm
     field_type: String
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.ca.location
     field_type: String
     comments: Path to CA certificate file for verifying the broker's key.
@@ -640,14 +642,17 @@ KafkaConfig:
     field_type: String
     comments: SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and AWS_MSK_IAM.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.username
     field_type: String
     comments: SASL username for SASL/PLAIN and SASL/SCRAM.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.password
     field_type: String
     comments: SASL password for SASL/PLAIN and SASL/SCRAM.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.kerberos.service.name
     field_type: String
     comments: Kafka server's Kerberos principal name under SASL/GSSAPI, not including /hostname@REALM.
@@ -695,6 +700,7 @@ KafkaConfig:
       produce time and may exceed the maximum size by one message in protocol ProduceRequests,
       the broker will enforce the topic's max.message.bytes limit
     required: false
+    allow_alter_on_fly: true
   - name: properties.receive.message.max.bytes
     field_type: usize
     comments: |-
@@ -703,16 +709,20 @@ KafkaConfig:
       + 512 to allow for protocol overhead; the value is adjusted automatically unless the
       configuration property is explicitly set.
     required: false
+    allow_alter_on_fly: true
   - name: properties.statistics.interval.ms
     field_type: usize
     required: false
+    allow_alter_on_fly: true
   - name: properties.client.id
     field_type: String
     comments: Client identifier
     required: false
+    allow_alter_on_fly: true
   - name: properties.enable.ssl.certificate.verification
     field_type: bool
     required: false
+    allow_alter_on_fly: true
   - name: properties.socket.keepalive.enable
     field_type: bool
     required: false
