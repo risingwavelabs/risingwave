@@ -345,13 +345,14 @@ pub type FragmentBackfillOrder = HashMap<FragmentId, Vec<FragmentId>>;
 #[derive(Default, Debug)]
 pub struct StreamFragmentGraph {
     /// stores all the fragments in the graph.
-    fragments: HashMap<GlobalFragmentId, BuildingFragment>,
+    pub(super) fragments: HashMap<GlobalFragmentId, BuildingFragment>,
 
     /// stores edges between fragments: upstream => downstream.
-    downstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, StreamFragmentEdge>>,
+    pub(super) downstreams:
+        HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, StreamFragmentEdge>>,
 
     /// stores edges between fragments: downstream -> upstream.
-    upstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, StreamFragmentEdge>>,
+    pub(super) upstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, StreamFragmentEdge>>,
 
     /// Dependent relations of this job.
     dependent_table_ids: HashSet<TableId>,

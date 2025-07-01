@@ -22,6 +22,7 @@ use risingwave_pb::catalog::PbTable;
 use risingwave_pb::stream_plan::StreamNode;
 use strum::IntoDiscriminant;
 
+use crate::model::StreamJobFragments;
 use crate::stream::StreamFragmentGraph;
 
 /// Helper type for describing a [`StreamNode`] in error messages.
@@ -36,7 +37,7 @@ pub enum Error {
 type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Operator id.
-type Id = u64;
+type Id = u32;
 
 struct Node {
     id: Id,
@@ -380,4 +381,91 @@ fn match_graph(g1: &Graph, g2: &Graph) -> Result<Matches> {
 // TODO: make it `pub(super)`
 pub fn match_graph_internal_tables(g1: &Graph, g2: &Graph) -> Result<HashMap<u32, u32>> {
     match_graph(g1, g2).map(|matches| matches.into_table_mapping())
+}
+
+impl Graph {
+    pub(super) fn from_building(graph: &StreamFragmentGraph) -> Self {
+        let nodes = graph
+            .fragments
+            .iter()
+            .map(|(&id, f)| {
+                (
+                    id.as_global_id(),
+                    Node {
+                        id: id.as_global_id(),
+                        fragment: f.node.clone().unwrap(),
+                    },
+                )
+            })
+            .collect();
+
+        let downstreams = graph
+            .downstreams
+            .iter()
+            .map(|(&id, downstreams)| {
+                (
+                    id.as_global_id(),
+                    downstreams
+                        .iter()
+                        .map(|(&id, _)| id.as_global_id())
+                        .collect(),
+                )
+            })
+            .collect();
+
+        let upstreams = graph
+            .upstreams
+            .iter()
+            .map(|(&id, upstreams)| {
+                (
+                    id.as_global_id(),
+                    upstreams.iter().map(|(&id, _)| id.as_global_id()).collect(),
+                )
+            })
+            .collect();
+
+        Self {
+            nodes,
+            downstreams,
+            upstreams,
+        }
+    }
+
+    pub(super) fn from_existing(
+        fragments: &StreamJobFragments,
+        fragment_upstreams: &HashMap<u32, HashSet<u32>>,
+    ) -> Self {
+        let nodes = fragments
+            .fragments
+            .iter()
+            .map(|(&id, f)| {
+                (
+                    id,
+                    Node {
+                        id,
+                        fragment: f.nodes.clone(),
+                    },
+                )
+            })
+            .collect();
+
+        let mut downstreams = HashMap::new();
+        let mut upstreams = HashMap::new();
+
+        for (&id, fragment_upstreams) in fragment_upstreams {
+            for &upstream in fragment_upstreams {
+                downstreams
+                    .entry(upstream)
+                    .or_insert_with(Vec::new)
+                    .push(id);
+                upstreams.entry(id).or_insert_with(Vec::new).push(upstream);
+            }
+        }
+
+        Self {
+            nodes,
+            downstreams,
+            upstreams,
+        }
+    }
 }
