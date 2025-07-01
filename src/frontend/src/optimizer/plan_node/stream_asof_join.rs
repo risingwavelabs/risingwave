@@ -99,7 +99,10 @@ impl StreamAsOfJoin {
             eq_join_predicate,
             is_append_only: append_only,
             inequality_desc,
-            join_encoding_type: ctx.session_ctx().config().streaming_join_encoding_type(),
+            join_encoding_type: ctx
+                .session_ctx()
+                .config()
+                .streaming_join_encoding_optimized_for(),
         }
     }
 

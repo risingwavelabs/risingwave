@@ -24,7 +24,7 @@ select v1, v2, v3, v10, v20, v30 from mv1;
 2 3 3 2 4 6
 
 statement ok
-set streaming_join_encoding_type to memoryoptimized;
+set streaming_join_encoding_optimized_for to memory;
 
 statement ok
 create materialized view mv_memory as select t1.v1, t1.v2, t1.v3, t2.v1 as v10, t2.v2 as v20, t2.v3 as v30 from t1 INNER JOIN t2 ON t1.v1=t2.v1;
@@ -33,7 +33,7 @@ statement ok
 drop materialized view mv_memory;
 
 statement ok
-set streaming_join_encoding_type to cpuoptimized;
+set streaming_join_encoding_optimized_for to cpu;
 
 statement ok
 create materialized view mv_cpu as select t1.v1, t1.v2, t1.v3, t2.v1 as v10, t2.v2 as v20, t2.v3 as v30 from t1 INNER JOIN t2 ON t1.v1=t2.v1;
