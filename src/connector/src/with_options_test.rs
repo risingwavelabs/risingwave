@@ -529,15 +529,6 @@ macro_rules! use_source_properties {{
     }};
 }}
 
-macro_rules! use_sink_properties {{
-    ({{ $({{ $variant_name:ident, $sink_type:ty, $config_type:ty }}),* }}) => {{
-        $(
-            #[allow(unused_imports)]
-            pub(super) use $config_type;
-        )*
-    }};
-}}
-
 mod source_properties {{
     use crate::for_all_sources;
 
@@ -545,9 +536,9 @@ mod source_properties {{
 }}
 
 mod sink_properties {{
-    use crate::for_all_sinks_with_concrate_type;
+    use crate::use_all_sink_configs;
 
-    for_all_sinks_with_concrate_type!(use_sink_properties);
+    use_all_sink_configs!();
 }}
 
 /// Map of source connector names to their changeable field names
@@ -559,6 +550,7 @@ pub static SOURCE_CHANGEABLE_FIELDS: LazyLock<HashMap<String, HashSet<String>>> 
 
 /// Map of sink connector names to their changeable field names
 pub static SINK_CHANGEABLE_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {{
+    use sink_properties::*;
     let mut map = HashMap::new();{sink_entries}
     map
 }});

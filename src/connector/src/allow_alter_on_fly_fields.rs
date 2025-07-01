@@ -55,6 +55,7 @@ pub static SOURCE_CHANGEABLE_FIELDS: LazyLock<HashMap<String, HashSet<String>>> 
 
 /// Map of sink connector names to their changeable field names
 pub static SINK_CHANGEABLE_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {
+    use sink_properties::*;
     let mut map = HashMap::new();
     // KafkaConfig
     map.try_insert(

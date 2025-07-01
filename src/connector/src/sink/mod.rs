@@ -155,9 +155,9 @@ macro_rules! for_all_sinks {
 
 #[macro_export]
 macro_rules! generate_config_use_clauses {
-    ({$({ $variant_name:ident, $sink_type:ty, $config_type:ty }), *}) => {
+    ({$({ $variant_name:ident, $sink_type:ty, $($config_type:tt)+ }), *}) => {
         $(
-            $crate::generate_config_use_single!($config_type);
+            $crate::generate_config_use_single! { $($config_type)+ }
         )*
     };
 }
@@ -170,7 +170,7 @@ macro_rules! generate_config_use_single {
     // Generate use clause for actual config types
     ($config_type:path) => {
         #[allow(unused_imports)]
-        use $config_type;
+        pub(super) use $config_type;
     };
 }
 

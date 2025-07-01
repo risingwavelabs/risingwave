@@ -26,5 +26,6 @@ cfg_if::cfg_if! {
             const SINK_NAME: &'static str = super::DELTALAKE_SINK;
         }
         pub type DeltaLakeSink = FeatureNotEnabledSink<DeltalakeNotEnabled>;
+        pub struct DeltaLakeConfig;
     }
 }
