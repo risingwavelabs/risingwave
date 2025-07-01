@@ -82,7 +82,7 @@ use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
     CreateStreamingJobContext, CreateStreamingJobOption, GlobalStreamManagerRef,
     JobRescheduleTarget, ReplaceStreamJobContext, SourceChange, SourceManagerRef,
-    StreamFragmentGraph, create_source_worker, validate_sink,
+    StreamFragmentGraph, create_source_worker, state, validate_sink,
 };
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
@@ -2022,6 +2022,11 @@ impl DdlController {
             .metadata_manager
             .get_job_fragments_by_id(&id.into())
             .await?;
+        let old_fragments_upstreams = self
+            .metadata_manager
+            .catalog_controller
+            .upstream_fragments(old_fragments.fragment_ids())
+            .await?;
         let old_internal_table_ids = old_fragments.internal_table_ids();
 
         // handle drop table's associated source
@@ -2038,12 +2043,20 @@ impl DdlController {
                 to_remove_source_id,
             });
         } else {
-            let old_internal_tables = self
-                .metadata_manager
-                .get_table_catalog_by_ids(old_internal_table_ids)
-                .await?;
-            // TODO(alter-mv): the current impl is very fragile for alter MV, be more strict here!
-            fragment_graph.fit_internal_table_ids(old_internal_tables)?;
+            let old_state_graph =
+                state::Graph::from_existing(&old_fragments, &old_fragments_upstreams);
+            let new_state_graph = state::Graph::from_building(&fragment_graph);
+            let matches = state::match_graph_internal_tables(&new_state_graph, &old_state_graph)
+                .context("failed to match state graph")?;
+
+            fragment_graph.fit_internal_table_ids_new(matches);
+
+            // let old_internal_tables = self
+            //     .metadata_manager
+            //     .get_table_catalog_by_ids(old_internal_table_ids)
+            //     .await?;
+            // // TODO(alter-mv): the current impl is very fragile for alter MV, be more strict here!
+            // fragment_graph.fit_internal_table_ids(old_internal_tables)?;
         }
 
         // 1. Resolve the edges to the downstream fragments, extend the fragment graph to a complete
