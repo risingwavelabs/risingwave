@@ -10,7 +10,6 @@ create source src_invalid_user with (
  username = 'posres',
  password = 'postgres',
  database.name = 'cdc_test',
- table.name = 'shipments',
  slot.name = 'shipments'
 );
 statement error
@@ -32,7 +31,6 @@ create source src_invalid_notnull with (
  username = '${PGUSER:$USER}',
  password = '${PGPASSWORD:}',
  database.name = '${PGDATABASE:postgres}',
- table.name = 'shipments',
  slot.name = 'shipments'
 );
 statement error CDC table with NOT NULL constraint is not supported
@@ -54,7 +52,6 @@ create source src_invalid_pwd with (
  username = 'postgres',
  password = 'otgres',
  database.name = 'cdc_test',
- table.name = 'shipments',
  slot.name = 'shipments'
 );
 statement error
@@ -76,7 +73,6 @@ create source src_invalid_table with (
  username = 'postgres',
  password = 'postgres',
  database.name = 'cdc_test',
- table.name = 'shipment',
  slot.name = 'shipments'
 );
 statement error
@@ -99,7 +95,6 @@ create source src_invalid_pk with (
  password = 'postgres',
  database.name = 'cdc_test',
  schema.name = 'public',
- table.name = 'shipments',
  slot.name = 'shipments'
 );
 statement error
@@ -122,7 +117,6 @@ create source src_colname_mismatch with (
  password = 'postgres',
  database.name = 'cdc_test',
  schema.name = 'public',
- table.name = 'shipments',
  slot.name = 'shipments'
 );
 statement error
@@ -145,7 +139,6 @@ create source src_type_mismatch with (
  password = 'postgres',
  database.name = 'cdc_test',
  schema.name = 'public',
- table.name = 'shipments',
  slot.name = 'shipments'
 );
 statement error
@@ -168,7 +161,6 @@ create source src_format_encode with (
  password = 'postgres',
  database.name = 'cdc_test',
  schema.name = 'public',
- table.name = 'shipments',
  slot.name = 'shipments'
 );
 statement ok
@@ -191,7 +183,6 @@ create source src_format_encode_err with (
  password = 'postgres',
  database.name = 'cdc_test',
  schema.name = 'public',
- table.name = 'shipments',
  slot.name = 'shipments'
 );
 statement error Row format for CDC connectors should be either omitted or set to `FORMAT DEBEZIUM ENCODE JSON`
@@ -213,7 +204,6 @@ create source src_gen_col_err with (
  username = '${PGUSER:$USER}',
  password = '${PGPASSWORD:}',
  database.name = '${PGDATABASE:postgres}',
- table.name = 'shipments',
  slot.name = 'shipments'
 );
 statement error Not supported: Non-generated column found after a generated column.
@@ -236,7 +226,6 @@ create source src_numeric_to_rw_int256 with (
  password = '${PGPASSWORD:}',
  database.name = 'cdc_test',
  schema.name = 'public',
- table.name = 'numeric_table',
  slot.name = 'numeric_to_rw_int256'
 );
 statement ok
@@ -255,7 +244,6 @@ create source src_numeric_to_varchar with (
  password = '${PGPASSWORD:}',
  database.name = 'cdc_test',
  schema.name = 'public',
- table.name = 'numeric_table',
  slot.name = 'numeric_to_varchar'
 );
 statement ok
@@ -273,7 +261,6 @@ create source src_enum_to_varchar with (
  username = '${PGUSER:$USER}',
  password = '${PGPASSWORD:}',
  database.name = '${PGDATABASE:postgres}',
- table.name = 'enum_table',
  slot.name = 'enum_to_varchar'
 );
 statement ok
@@ -293,7 +280,6 @@ create source src_shipments_gen_col with (
  password = '${PGPASSWORD:}',
  database.name = '${PGDATABASE:postgres}',
  schema.name = 'public',
- table.name = 'shipments',
  slot.name = 'shipments'
 );
 statement ok
@@ -324,7 +310,6 @@ CREATE TABLE IF NOT EXISTS partitioned_timestamp_table(
  password = '${PGPASSWORD:}',
  database.name = '${PGDATABASE:postgres}',
  schema.name = 'public',
- table.name = 'partitioned_timestamp_table',
  publication.name = 'rw_publication_pubviaroot_false',
  slot.name = 'my_slot_partition'
 );

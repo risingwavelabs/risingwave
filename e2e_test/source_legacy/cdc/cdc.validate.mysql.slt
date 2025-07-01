@@ -24,7 +24,6 @@ create source src_invalid_user with (
  username = 'rot',
  password = '123456',
  database.name = 'my@db',
- table.name = 'products',
  server.id = '5085'
 );
 statement error
@@ -43,7 +42,6 @@ create source src_invalid_pwd with (
  username = 'root',
  password = '1456',
  database.name = 'my@db',
- table.name = 'products',
  server.id = '5085'
 );
 statement error
@@ -62,7 +60,6 @@ create source src_invalid_db with (
  username = 'root',
  password = '123456',
  database.name = 'mdb',
- table.name = 'products',
  server.id = '5085'
 );
 statement error
@@ -81,7 +78,6 @@ create source src_invalid_table with (
  username = 'root',
  password = '123456',
  database.name = 'my@db',
- table.name = 'prdcts',
  server.id = '5085'
 );
 statement error
@@ -118,7 +114,6 @@ create source src_invalid_pk with (
  username = 'root',
  password = '123456',
  database.name = 'my@db',
- table.name = 'orders',
  server.id = '5086'
 );
 statement error
@@ -141,7 +136,6 @@ create source src_type_mismatch with (
  username = 'root',
  password = '123456',
  database.name = 'my@db',
- table.name = 'orders',
  server.id = '5086'
 );
 statement error
@@ -164,7 +158,6 @@ create source src_colname_mismatch with (
  username = 'root',
  password = '123456',
  database.name = 'my@db',
- table.name = 'orders',
  server.id = '5086'
 );
 statement error

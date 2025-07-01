@@ -9,7 +9,6 @@ create source src_products with (
  username = 'dbz',
  password = '123456',
  database.name = 'my@db',
- table.name = 'products',
  server.id = '5085'
 );
 statement ok
@@ -30,7 +29,6 @@ create source src_orders with (
  username = 'dbz',
  password = '123456',
  database.name = 'my@db',
- table.name = 'orders',
  server.id = '5086'
 );
 statement ok
@@ -55,7 +53,6 @@ create source src_shipments with (
  username = '${PGUSER:$USER}',
  password = '${PGPASSWORD:}',
  database.name = '${PGDATABASE:postgres}',
- table.name = 'shipments',
  slot.name = 'shipments'
 );
 statement ok
@@ -86,7 +83,6 @@ create source src_mytable with (
  username = 'root',
  password = '123456',
  database.name = 'my@db',
- table.name = 'mytable',
  server.id = '5087'
 );
 statement ok
@@ -106,7 +102,6 @@ create source src_orders2 with (
  username = 'root',
  password = '123456',
  database.name = 'my@db',
- table.name = 'orders',
  server.id = '5088'
 );
 statement ok
@@ -125,7 +120,6 @@ create source src_tt3 with (
  username = 'root',
  password = '123456',
  database.name = 'my@db',
- table.name = 'tt3',
  server.id = '5089'
 );
 statement error
@@ -150,8 +144,7 @@ create source src_shipments2 with (
  port = '${PGPORT:5432}',
  username = '${PGUSER:$USER}',
  password = '${PGPASSWORD:}',
- database.name = '${PGDATABASE:postgres}',
- table.name = 'shipments'
+ database.name = '${PGDATABASE:postgres}'
 );
 statement ok
 create table shipments_2 (
@@ -171,7 +164,6 @@ create source src_t1rw with (
   username = '${PGUSER:$USER}',
   password = '${PGPASSWORD:}',
   database.name = '${PGDATABASE:postgres}',
-  table.name='t1',
   schema.name='abs',
   slot.name='t1_slot',
   publication.name='my_publicaton',
@@ -191,7 +183,6 @@ create source src_personrw with (
   username = '${PGUSER:$USER}',
   password = '${PGPASSWORD:}',
   database.name = '${PGDATABASE:postgres}',
-  table.name='person',
   publication.name='dumb_publicaton',
   publication.create.enable='false'
 );
@@ -210,7 +201,6 @@ create source src_numeric_to_rw_int256 with (
  username = '${PGUSER:$USER}',
  password = '${PGPASSWORD:}',
  database.name = '${PGDATABASE:postgres}',
- table.name = 'numeric_table',
  slot.name = 'numeric_to_rw_int256'
 );
 statement ok
@@ -229,7 +219,6 @@ create source src_numeric_to_varchar with (
  password = '${PGPASSWORD:}',
  database.name = '${PGDATABASE:postgres}',
  schema.name = 'public',
- table.name = 'numeric_table',
  slot.name = 'numeric_to_varchar'
 );
 statement ok
@@ -247,7 +236,6 @@ create source src_enum_to_varchar with (
  username = '${PGUSER:$USER}',
  password = '${PGPASSWORD:}',
  database.name = '${PGDATABASE:postgres}',
- table.name = 'enum_table',
  slot.name = 'enum_to_varchar'
 );
 statement ok
@@ -265,7 +253,6 @@ create source src_upper_orders with (
  username = '${PGUSER:$USER}',
  password = '${PGPASSWORD:}',
  database.name = '${PGDATABASE:postgres}',
- table.name = 'Orders',
  slot.name = 'orders'
 );
 statement ok
@@ -284,7 +271,6 @@ create source src_partitioned_2023 with (
  password = '${PGPASSWORD:}',
  database.name = '${PGDATABASE:postgres}',
  schema.name = 'public',
- table.name = 'partitioned_timestamp_table_2023',
  publication.name = 'rw_publication_partition_2023',
  slot.name = 'my_slot_partition'
 );
@@ -305,7 +291,6 @@ create source src_partitioned_table with (
  password = '${PGPASSWORD:}',
  database.name = '${PGDATABASE:postgres}',
  schema.name = 'public',
- table.name = 'partitioned_timestamp_table',
  publication.name = 'rw_publication_partition_2023',
  slot.name = 'my_slot_partition'
 );
@@ -326,7 +311,6 @@ create source src_partitioned_2023_h1 with (
  password = '${PGPASSWORD:}',
  database.name = '${PGDATABASE:postgres}',
  schema.name = 'public',
- table.name = 'partitioned_timestamp_table_2023_h1',
  publication.name = 'rw_publication_partition_2023',
  slot.name = 'my_slot_partition'
 );
@@ -351,7 +335,6 @@ create source src_partitioned_table_root with (
  password = '${PGPASSWORD:}',
  database.name = '${PGDATABASE:postgres}',
  schema.name = 'public',
- table.name = 'partitioned_timestamp_table',
  publication.name = 'rw_publication_partition_root',
  slot.name = 'my_slot_partition'
 );
@@ -373,7 +356,6 @@ create source src_partitioned_2023_2 with (
  password = '${PGPASSWORD:}',
  database.name = '${PGDATABASE:postgres}',
  schema.name = 'public',
- table.name = 'partitioned_timestamp_table_2023',
  publication.name = 'rw_publication_partition',
  slot.name = 'my_slot_partition_2'
 );
@@ -394,7 +376,6 @@ create source src_json_table with (
  password = '${PGPASSWORD:}',
  database.name = '${PGDATABASE:postgres}',
  schema.name = 'public',
- table.name = 'json_table',
  slot.name = 'json_table'
 );
 statement ok
