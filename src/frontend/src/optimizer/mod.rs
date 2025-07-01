@@ -948,6 +948,7 @@ impl PlanRoot {
         let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close, true)?;
         assert_eq!(self.phase, PlanPhase::Stream);
         assert_eq!(stream_plan.convention(), Convention::Stream);
+        dbg!(&stream_plan);
         StreamMaterialize::create(
             stream_plan,
             mv_name,

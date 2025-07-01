@@ -40,11 +40,11 @@ use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
 use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation, Dispatchers,
-    DropSubscriptionsMutation, PauseMutation, PbAddMutation, PbBarrier, PbBarrierMutation,
-    PbDispatcher, PbStreamMessageBatch, PbUpdateMutation, PbWatermark, ResumeMutation,
-    SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
-    SubscriptionUpstreamInfo, ThrottleMutation,
+    BarrierMutation, ClearEtlCdcMaterializeMutation, CombinedMutation,
+    ConnectorPropsChangeMutation, Dispatchers, DropSubscriptionsMutation, PauseMutation,
+    PbAddMutation, PbBarrier, PbBarrierMutation, PbDispatcher, PbStreamMessageBatch,
+    PbUpdateMutation, PbWatermark, ResumeMutation, SourceChangeSplitMutation,
+    StartFragmentBackfillMutation, StopMutation, SubscriptionUpstreamInfo, ThrottleMutation,
 };
 use smallvec::SmallVec;
 
@@ -322,6 +322,7 @@ pub enum Mutation {
     StartFragmentBackfill {
         fragment_ids: HashSet<FragmentId>,
     },
+    ClearEtlCdcMaterialize,
 }
 
 /// The generic type `M` is the mutation type of the barrier.
@@ -405,6 +406,23 @@ impl Barrier {
 
     pub fn is_checkpoint(&self) -> bool {
         self.kind == BarrierKind::Checkpoint
+    }
+
+    pub fn is_etl_cdc_clear(&self) -> bool {
+        matches!(
+            self.mutation.as_deref(),
+            Some(Mutation::ClearEtlCdcMaterialize)
+        )
+    }
+
+    pub fn etl_cdc_clear() -> Self {
+        Self {
+            epoch: EpochPair::dummy(),
+            kind: BarrierKind::Barrier,
+            tracing_context: TracingContext::none(),
+            mutation: Some(Arc::new(Mutation::ClearEtlCdcMaterialize)),
+            passed_actors: Default::default(),
+        }
     }
 
     /// Get the initial split assignments for the actor with `actor_id`.
@@ -524,7 +542,8 @@ impl Barrier {
             | Mutation::Throttle(_)
             | Mutation::DropSubscriptions { .. }
             | Mutation::ConnectorPropsChange(_)
-            | Mutation::StartFragmentBackfill { .. } => false,
+            | Mutation::StartFragmentBackfill { .. }
+            | Mutation::ClearEtlCdcMaterialize => false,
         }
     }
 
@@ -794,6 +813,9 @@ impl Mutation {
                     fragment_ids: fragment_ids.iter().copied().collect(),
                 })
             }
+            Mutation::ClearEtlCdcMaterialize => {
+                PbMutation::ClearEtlCdcMaterialize(ClearEtlCdcMaterializeMutation {})
+            }
         }
     }
 
@@ -940,6 +962,7 @@ impl Mutation {
                         .collect(),
                 }
             }
+            PbMutation::ClearEtlCdcMaterialize(_) => Mutation::ClearEtlCdcMaterialize,
             PbMutation::Combined(CombinedMutation { mutations }) => match &mutations[..] {
                 [
                     BarrierMutation {

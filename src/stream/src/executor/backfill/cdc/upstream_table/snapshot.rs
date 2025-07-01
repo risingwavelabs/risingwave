@@ -42,7 +42,7 @@ pub trait UpstreamTableRead {
 
     fn current_cdc_offset(
         &self,
-    ) -> impl Future<Output = StreamExecutorResult<Option<CdcOffset>>> + Send + '_;
+    ) -> impl Future<Output = StreamExecutorResult<CdcOffset>> + Send + '_;
 }
 
 #[derive(Debug, Clone)]
@@ -236,10 +236,10 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
         }
     }
 
-    async fn current_cdc_offset(&self) -> StreamExecutorResult<Option<CdcOffset>> {
+    async fn current_cdc_offset(&self) -> StreamExecutorResult<CdcOffset> {
         let binlog = self.reader.current_cdc_offset();
         let binlog = binlog.await?;
-        Ok(Some(binlog))
+        Ok(binlog)
     }
 }
 
