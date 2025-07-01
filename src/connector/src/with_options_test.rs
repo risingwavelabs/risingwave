@@ -438,23 +438,23 @@ fn extract_allow_alter_on_fly_fields_from_yaml(yaml_path: &Path) -> BTreeMap<Str
     let yaml_data: BTreeMap<String, YamlStructInfo> = serde_yaml::from_str(&content)
         .unwrap_or_else(|_| panic!("Failed to parse YAML file: {}", yaml_path.display()));
 
-    let mut mutable_fields: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut allow_alter_on_fly_fields: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
     for (struct_name, struct_info) in yaml_data {
-        let mut changeable_field_names = Vec::new();
+        let mut allow_alter_on_fly_field_names = Vec::new();
 
         for field in struct_info.fields {
             if field.allow_alter_on_fly {
-                changeable_field_names.push(field.name);
+                allow_alter_on_fly_field_names.push(field.name);
             }
         }
 
-        if !changeable_field_names.is_empty() {
-            mutable_fields.insert(struct_name, changeable_field_names);
+        if !allow_alter_on_fly_field_names.is_empty() {
+            allow_alter_on_fly_fields.insert(struct_name, allow_alter_on_fly_field_names);
         }
     }
 
-    mutable_fields
+    allow_alter_on_fly_fields
 }
 
 fn generate_rust_allow_alter_on_fly_fields_code_separate(
@@ -462,9 +462,10 @@ fn generate_rust_allow_alter_on_fly_fields_code_separate(
     sink_info: BTreeMap<String, Vec<String>>,
 ) -> String {
     // Helper function to generate field entries for a single struct
-    let generate_struct_entries =
-        |info: &BTreeMap<String, Vec<String>>, is_source: bool| -> String {
-            info.iter()
+    let generate_struct_entries = |info: &BTreeMap<String, Vec<String>>,
+                                   is_source: bool|
+     -> String {
+        info.iter()
                 .filter_map(|(struct_name, field_names)| {
                     let key = if is_source {
                         format!("std::any::type_name::<{}>().to_owned()", struct_name)
@@ -480,21 +481,14 @@ fn generate_rust_allow_alter_on_fly_fields_code_separate(
                             .collect::<Vec<_>>()
                             .join("\n");
                         Some(format!(
-                            "
-    // {}
-    map.try_insert(
-        {},
-        [
-{}
-        ].into_iter().collect(),
-    ).unwrap();",
+                            "\n    // {}\n    map.try_insert(\n        {},\n        [\n{}\n        ].into_iter().collect(),\n    ).unwrap();",
                             struct_name, key, fields
                         ))
                     }
                 })
                 .collect::<Vec<_>>()
                 .join("")
-        };
+    };
 
     let source_entries = generate_struct_entries(&source_info, true);
     let sink_entries = generate_struct_entries(&sink_info, true);
@@ -519,6 +513,7 @@ fn generate_rust_allow_alter_on_fly_fields_code_separate(
 
 use std::collections::{{HashMap, HashSet}};
 use std::sync::LazyLock;
+use crate::error::ConnectorError;
 
 macro_rules! use_source_properties {{
     ({{ $({{ $variant_name:ident, $prop_name:ty, $split:ty }}),* }}) => {{
@@ -564,32 +559,109 @@ mod source_properties {{
 
 mod sink_properties {{
     use crate::use_all_sink_configs;
+    use crate::sink::Sink;
+    use crate::sink::file_sink::fs::FsSink;
 
     use_all_sink_configs!();
+
+    macro_rules! impl_sink_name_to_config_type_name_inner {{
+        ({{ $({{ $variant_name:ident, $sink_type:ty, $config_type:ty }}),* }}) => {{
+            pub fn sink_name_to_config_type_name(sink_name: &str) -> Option<&'static str> {{
+                match sink_name {{
+                $(
+                    <$sink_type>::SINK_NAME => Some(std::any::type_name::<$config_type>()),
+                )*
+                    _ => None,
+                }}
+            }}
+        }};
+    }}
+
+    macro_rules! impl_sink_name_to_config_type_name {{
+        () => {{
+            $crate::for_all_sinks! {{ impl_sink_name_to_config_type_name_inner }}
+        }};
+    }}
+
+    impl_sink_name_to_config_type_name!();
 }}
 
-/// Map of source connector names to their changeable field names
-pub static SOURCE_CHANGEABLE_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {{
+/// Map of source connector names to their `allow_alter_on_fly` field names
+pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {{
     use source_properties::*;
     let mut map = HashMap::new();{source_entries}
     map
 }});
 
-/// Map of sink connector names to their changeable field names
-pub static SINK_CHANGEABLE_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {{
+/// Map of sink connector names to their `allow_alter_on_fly` field names
+pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {{
     use sink_properties::*;
     let mut map = HashMap::new();{sink_entries}
     map
 }});
 
-/// Get all source connector names that have changeable fields
-pub fn get_source_connectors_with_changeable_fields() -> Vec<&'static str> {{
-    SOURCE_CHANGEABLE_FIELDS.keys().map(|s| s.as_str()).collect()
+/// Get all source connector names that have `allow_alter_on_fly` fields
+pub fn get_source_connectors_with_allow_alter_on_fly_fields() -> Vec<&'static str> {{
+    SOURCE_ALLOW_ALTER_ON_FLY_FIELDS.keys().map(|s| s.as_str()).collect()
 }}
 
-/// Get all sink connector names that have changeable fields
-pub fn get_sink_connectors_with_changeable_fields() -> Vec<&'static str> {{
-    SINK_CHANGEABLE_FIELDS.keys().map(|s| s.as_str()).collect()
+/// Get all sink connector names that have `allow_alter_on_fly` fields
+pub fn get_sink_connectors_with_allow_alter_on_fly_fields() -> Vec<&'static str> {{
+    SINK_ALLOW_ALTER_ON_FLY_FIELDS.keys().map(|s| s.as_str()).collect()
+}}
+
+/// Checks if all given fields are allowed to be altered on the fly for the specified source connector.
+/// Returns Ok(()) if all fields are allowed, otherwise returns a `ConnectorError`.
+pub fn check_source_allow_alter_on_fly_fields(
+    connector_name: &str,
+    fields: &[String],
+) -> crate::error::ConnectorResult<()> {{
+    // Convert connector name to the type name key
+    let Some(type_name) = source_properties::source_name_to_prop_type_name(connector_name) else {{
+        return Err(ConnectorError::from(anyhow::anyhow!(
+            "Unknown source connector: {{connector_name}}"
+        )));
+    }};
+    let Some(allowed_fields) = SOURCE_ALLOW_ALTER_ON_FLY_FIELDS.get(type_name) else {{
+        return Err(ConnectorError::from(anyhow::anyhow!(
+            "No allow_alter_on_fly fields registered for connector: {{connector_name}}"
+        )));
+    }};
+    for field in fields {{
+        if !allowed_fields.contains(field) {{
+            return Err(ConnectorError::from(anyhow::anyhow!(
+                "Field '{{field}}' is not allowed to be altered on the fly for connector: {{connector_name}}"
+            )));
+        }}
+    }}
+    Ok(())
+}}
+
+/// Checks if all given fields are allowed to be altered on the fly for the specified sink connector.
+/// Returns Ok(()) if all fields are allowed, otherwise returns a `ConnectorError`.
+pub fn check_sink_allow_alter_on_fly_fields(
+    sink_name: &str,
+    fields: &[String],
+) -> crate::error::ConnectorResult<()> {{
+    // Convert sink name to the type name key
+    let Some(type_name) = sink_properties::sink_name_to_config_type_name(sink_name) else {{
+        return Err(ConnectorError::from(anyhow::anyhow!(
+            "Unknown sink connector: {{sink_name}}"
+        )));
+    }};
+    let Some(allowed_fields) = SINK_ALLOW_ALTER_ON_FLY_FIELDS.get(type_name) else {{
+        return Err(ConnectorError::from(anyhow::anyhow!(
+            "No allow_alter_on_fly fields registered for sink: {{sink_name}}"
+        )));
+    }};
+    for field in fields {{
+        if !allowed_fields.contains(field) {{
+            return Err(ConnectorError::from(anyhow::anyhow!(
+                "Field '{{field}}' is not allowed to be altered on the fly for sink: {{sink_name}}"
+            )));
+        }}
+    }}
+    Ok(())
 }}
 
 "#,
