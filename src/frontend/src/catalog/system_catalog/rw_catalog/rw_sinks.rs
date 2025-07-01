@@ -22,6 +22,9 @@ use crate::catalog::system_catalog::{SysCatalogReaderImpl, get_acl_items};
 use crate::error::Result;
 use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
 
+pub const SINK_ID: &str = "sink_id";
+pub const IS_SINK_DECOUPLE_INDEX: usize = 1;
+
 #[derive(Fields)]
 struct RwSink {
     #[primary_key]

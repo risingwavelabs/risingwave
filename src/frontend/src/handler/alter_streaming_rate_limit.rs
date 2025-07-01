@@ -12,16 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures::StreamExt;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail;
 use risingwave_pb::meta::ThrottleTarget as PbThrottleTarget;
-use risingwave_sqlparser::ast::ObjectName;
+use risingwave_sqlparser::ast::{BinaryOperator, Expr, Ident, ObjectName, Statement, Value};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::Binder;
 use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::system_catalog::rw_catalog::rw_sinks::{IS_SINK_DECOUPLE_INDEX, SINK_ID};
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result};
+use crate::handler::query::handle_query;
+use crate::handler::util::gen_query_from_table_name_with_selection;
 use crate::session::SessionImpl;
 
 pub async fn handle_alter_streaming_rate_limit(
@@ -30,7 +34,7 @@ pub async fn handle_alter_streaming_rate_limit(
     table_name: ObjectName,
     rate_limit: i32,
 ) -> Result<RwPgResponse> {
-    let session = handler_args.session;
+    let session = handler_args.clone().session;
     let db_name = &session.database();
     let (schema_name, real_table_name) =
         Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
@@ -97,14 +101,46 @@ pub async fn handle_alter_streaming_rate_limit(
             (StatementType::ALTER_TABLE, table.id.table_id)
         }
         PbThrottleTarget::Sink => {
-            let reader = session.env().catalog_reader().read_guard();
-            let (table, schema_name) =
-                reader.get_sink_by_name(db_name, schema_path, &real_table_name)?;
-            if table.target_table.is_some() {
-                bail!("ALTER SINK_RATE_LIMIT is not for sink into table")
+            let sink_id = {
+                let reader = session.env().catalog_reader().read_guard();
+                let (table, schema_name) =
+                    reader.get_sink_by_name(db_name, schema_path, &real_table_name)?;
+
+                if table.target_table.is_some() {
+                    bail!("ALTER SINK_RATE_LIMIT is not for sink into table")
+                }
+                session.check_privilege_for_drop_alter(schema_name, &**table)?;
+                table.id.sink_id
+            };
+            let selection = Some(Expr::BinaryOp {
+                left: Box::new(Expr::Identifier(SINK_ID.into())),
+                op: BinaryOperator::Eq,
+                right: Box::new(Expr::Value(Value::Number(sink_id.to_string()))),
+            });
+            let query = gen_query_from_table_name_with_selection(
+                ObjectName::from(vec![
+                    Ident::from("rw_catalog"),
+                    Ident::from("rw_sink_decouple"),
+                ]),
+                selection,
+            );
+            let stmt = Statement::Query(Box::new(query));
+            let mut res = handle_query(handler_args, stmt, vec![]).await?;
+            while let Some(row) = res.values_stream().next().await {
+                let row = row?;
+                let is_decouple =
+                    row[0][IS_SINK_DECOUPLE_INDEX]
+                        .as_ref()
+                        .ok_or(ErrorCode::InternalError(format!(
+                            "Not find sink decouple message with sink_id {}",
+                            sink_id
+                        )))?;
+                if String::from_utf8(is_decouple.clone().into()).unwrap() != "t" {
+                    bail!("ALTER SINK_RATE_LIMIT is only for sink with sink_decouple = t")
+                }
             }
-            session.check_privilege_for_drop_alter(schema_name, &**table)?;
-            (StatementType::ALTER_SINK, table.id.sink_id)
+
+            (StatementType::ALTER_SINK, sink_id)
         }
         _ => bail!("Unsupported throttle target: {:?}", kind),
     };
