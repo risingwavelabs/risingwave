@@ -434,6 +434,8 @@ impl Binder {
                 ("map_delete", raw_call(ExprType::MapDelete)),
                 ("map_insert", raw_call(ExprType::MapInsert)),
                 ("map_length", raw_call(ExprType::MapLength)),
+                // vector
+                ("l2_distance", raw_call(ExprType::L2Distance)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least
@@ -723,6 +725,19 @@ impl Binder {
                 // only functions required by the existing PostgreSQL tool are implemented
                 ("date", guard_by_len(1, raw(|_binder, inputs| {
                     inputs[0].clone().cast_explicit(DataType::Date).map_err(Into::into)
+                }))),
+
+                // AI model functions
+                ("openai_embedding", guard_by_len(3, raw(|_binder, inputs| {
+                    // check if the first two arguments are constants
+                    if let ExprImpl::Literal(api_key) = &inputs[0] && let Some(ScalarImpl::Utf8(_api_key)) = api_key.get_data()
+                    && let ExprImpl::Literal(model) = &inputs[1] && let Some(ScalarImpl::Utf8(_model)) = model.get_data() {
+                        Ok(FunctionCall::new(ExprType::OpenaiEmbedding, inputs)?.into())
+                    } else {
+                        Err(ErrorCode::InvalidInputSyntax(
+                            "`api_key` and `model` must be constant strings".to_owned(),
+                        ).into())
+                    }
                 }))),
             ]
                 .into_iter()

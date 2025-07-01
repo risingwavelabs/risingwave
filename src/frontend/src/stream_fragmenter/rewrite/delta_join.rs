@@ -24,6 +24,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use super::super::{BuildFragmentGraphState, StreamFragment, StreamFragmentEdge};
+use crate::error::ErrorCode::NotSupported;
 use crate::error::Result;
 use crate::stream_fragmenter::build_and_add_fragment;
 
@@ -358,6 +359,13 @@ pub(crate) fn build_delta_join_without_arrange(
         &node,
         false,
     )?;
+
+    if state.has_snapshot_backfill {
+        return Err(NotSupported(
+            "Delta join with snapshot backfill is not supported".to_owned(),
+            "Please use a different join strategy or disable snapshot backfill by `SET streaming_use_snapshot_backfill = false`.".to_owned(),
+        ).into());
+    }
 
     Ok(union)
 }

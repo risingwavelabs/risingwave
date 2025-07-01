@@ -13,10 +13,9 @@
 // limitations under the License.
 
 use std::cmp::{Ordering, min};
-use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt::Debug;
-use std::hash::{Hash, Hasher};
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -26,7 +25,7 @@ use num_integer::Integer;
 use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::hash::ActorMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_meta_model::{ObjectId, WorkerId, actor, fragment, streaming_job};
@@ -37,9 +36,7 @@ use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
 };
 use risingwave_pb::meta::table_fragments::{self, State};
-use risingwave_pb::stream_plan::{
-    Dispatcher, FragmentTypeFlag, PbDispatcher, PbDispatcherType, StreamNode,
-};
+use risingwave_pb::stream_plan::{Dispatcher, PbDispatcher, PbDispatcherType, StreamNode};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, oneshot};
@@ -55,7 +52,7 @@ use crate::model::{
 use crate::serving::{
     ServingVnodeMapping, to_deleted_fragment_worker_slot_mapping, to_fragment_worker_slot_mapping,
 };
-use crate::stream::{GlobalStreamManager, SourceManagerRef};
+use crate::stream::{AssignerBuilder, GlobalStreamManager, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -65,7 +62,7 @@ pub struct WorkerReschedule {
 
 pub struct CustomFragmentInfo {
     pub fragment_id: u32,
-    pub fragment_type_mask: u32,
+    pub fragment_type_mask: FragmentTypeMask,
     pub distribution_type: PbFragmentDistributionType,
     pub state_table_ids: Vec<u32>,
     pub node: StreamNode,
@@ -80,16 +77,6 @@ pub struct CustomActorInfo {
     pub dispatcher: Vec<Dispatcher>,
     /// `None` if singleton.
     pub vnode_bitmap: Option<Bitmap>,
-}
-
-impl CustomFragmentInfo {
-    pub fn get_fragment_type_mask(&self) -> u32 {
-        self.fragment_type_mask
-    }
-
-    pub fn distribution_type(&self) -> FragmentDistributionType {
-        self.distribution_type
-    }
 }
 
 use educe::Educe;
@@ -538,7 +525,7 @@ impl ScaleController {
 
                 let fragment = CustomFragmentInfo {
                     fragment_id: fragment_id as _,
-                    fragment_type_mask: fragment_type_mask as _,
+                    fragment_type_mask: fragment_type_mask.into(),
                     distribution_type: distribution_type.into(),
                     state_table_ids: state_table_ids.into_u32_array(),
                     node: stream_node.to_protobuf(),
@@ -714,7 +701,9 @@ impl ScaleController {
                 }
             }
 
-            if (fragment.fragment_type_mask & FragmentTypeFlag::Source as u32) != 0
+            if fragment
+                .fragment_type_mask
+                .contains(FragmentTypeFlag::Source)
                 && fragment.node.find_stream_source().is_some()
             {
                 stream_source_fragment_ids.insert(*fragment_id);
@@ -751,7 +740,7 @@ impl ScaleController {
                 .map(|v| v.unsigned_abs())
                 .sum();
 
-            match fragment.distribution_type() {
+            match fragment.distribution_type {
                 FragmentDistributionType::Hash => {
                     if fragment.actors.len() + added_actor_count <= removed_actor_count {
                         bail!("can't remove all actors from fragment {}", fragment_id);
@@ -775,7 +764,10 @@ impl ScaleController {
             for noshuffle_downstream in no_shuffle_reschedule.keys() {
                 let fragment = fragment_map.get(noshuffle_downstream).unwrap();
                 // SourceScan is always a NoShuffle downstream, rescheduled together with the upstream Source.
-                if (fragment.fragment_type_mask & FragmentTypeFlag::SourceScan as u32) != 0 {
+                if fragment
+                    .fragment_type_mask
+                    .contains(FragmentTypeFlag::SourceScan)
+                {
                     let stream_node = &fragment.node;
                     if let Some((_source_id, upstream_source_fragment_id)) =
                         stream_node.find_source_backfill()
@@ -854,7 +846,7 @@ impl ScaleController {
 
             let fragment = ctx.fragment_map.get(fragment_id).unwrap();
 
-            match fragment.distribution_type() {
+            match fragment.distribution_type {
                 FragmentDistributionType::Single => {
                     // Skip re-balancing action for single distribution (always None)
                     fragment_actor_bitmap
@@ -967,7 +959,7 @@ impl ScaleController {
                 .unwrap_or_default();
 
             // Question: Is it possible to have Hash Distribution Fragment but the Actor's bitmap remains unchanged?
-            if upstream_fragment.distribution_type() == FragmentDistributionType::Single {
+            if upstream_fragment.distribution_type == FragmentDistributionType::Single {
                 assert!(
                     upstream_fragment_bitmap.is_empty(),
                     "single fragment should have no bitmap updates"
@@ -1045,7 +1037,7 @@ impl ScaleController {
                         None => {
                             // single fragment should have no bitmap updates (same as upstream)
                             assert_eq!(
-                                upstream_fragment.distribution_type(),
+                                upstream_fragment.distribution_type,
                                 FragmentDistributionType::Single
                             );
                         }
@@ -1066,7 +1058,7 @@ impl ScaleController {
                 }
             }
 
-            match fragment.distribution_type() {
+            match fragment.distribution_type {
                 FragmentDistributionType::Hash => {}
                 FragmentDistributionType::Single => {
                     // single distribution should update nothing
@@ -1273,7 +1265,7 @@ impl ScaleController {
                 .cloned()
                 .collect();
 
-            let upstream_dispatcher_mapping = match fragment.distribution_type() {
+            let upstream_dispatcher_mapping = match fragment.distribution_type {
                 FragmentDistributionType::Hash => {
                     if !in_degree_types.contains(&DispatcherType::Hash) {
                         None
@@ -1324,7 +1316,7 @@ impl ScaleController {
                 vec![]
             };
 
-            let vnode_bitmap_updates = match fragment.distribution_type() {
+            let vnode_bitmap_updates = match fragment.distribution_type {
                 FragmentDistributionType::Hash => {
                     let mut vnode_bitmap_updates =
                         fragment_actor_bitmap.remove(&fragment_id).unwrap();
@@ -1878,12 +1870,19 @@ impl ScaleController {
             },
         ) in job_parallelism_updates
         {
+            let assigner = AssignerBuilder::new(table_id).build();
+
             let fragment_map = table_fragment_id_map.remove(&table_id).unwrap();
 
             let available_worker_slots = workers
                 .iter()
                 .filter(|(id, _)| filtered_worker_ids.contains(&(**id as WorkerId)))
-                .map(|(_, worker)| (worker.id as WorkerId, worker.compute_node_parallelism()))
+                .map(|(_, worker)| {
+                    (
+                        worker.id as WorkerId,
+                        NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
+                    )
+                })
                 .collect::<BTreeMap<_, _>>();
 
             for fragment_id in fragment_map {
@@ -1899,7 +1898,11 @@ impl ScaleController {
                     *fragment_slots.entry(worker_id).or_default() += 1;
                 }
 
-                let available_slot_count: usize = available_worker_slots.values().cloned().sum();
+                let available_slot_count: usize = available_worker_slots
+                    .values()
+                    .cloned()
+                    .map(NonZeroUsize::get)
+                    .sum();
 
                 if available_slot_count == 0 {
                     bail!(
@@ -1921,10 +1924,11 @@ impl ScaleController {
 
                         assert_eq!(*should_be_one, 1);
 
-                        let units = schedule_units_for_slots(&available_worker_slots, 1, table_id)?;
+                        let assignment =
+                            assigner.count_actors_per_worker(&available_worker_slots, 1);
 
                         let (chosen_target_worker_id, should_be_one) =
-                            units.iter().exactly_one().ok().with_context(|| {
+                            assignment.iter().exactly_one().ok().with_context(|| {
                                 format!(
                                     "Cannot find a single target worker for fragment {fragment_id}"
                                 )
@@ -1958,12 +1962,11 @@ impl ScaleController {
                                 tracing::warn!(
                                     "available parallelism for table {table_id} is larger than max parallelism, force limit to {max_parallelism}"
                                 );
-                                // force limit to `max_parallelism`
-                                let target_worker_slots = schedule_units_for_slots(
+
+                                let target_worker_slots = assigner.count_actors_per_worker(
                                     &available_worker_slots,
                                     max_parallelism,
-                                    table_id,
-                                )?;
+                                );
 
                                 target_plan.insert(
                                     fragment_id,
@@ -1976,11 +1979,11 @@ impl ScaleController {
                                 tracing::info!(
                                     "available parallelism for table {table_id} is limit by adaptive strategy {adaptive_parallelism_strategy}, resetting to {target_slot_count}"
                                 );
-                                let target_worker_slots = schedule_units_for_slots(
+
+                                let target_worker_slots = assigner.count_actors_per_worker(
                                     &available_worker_slots,
                                     target_slot_count,
-                                    table_id,
-                                )?;
+                                );
 
                                 target_plan.insert(
                                     fragment_id,
@@ -1990,6 +1993,11 @@ impl ScaleController {
                                     ),
                                 );
                             } else {
+                                let available_worker_slots = available_worker_slots
+                                    .iter()
+                                    .map(|(worker_id, v)| (*worker_id, v.get()))
+                                    .collect();
+
                                 target_plan.insert(
                                     fragment_id,
                                     Self::diff_worker_slot_changes(
@@ -2008,7 +2016,7 @@ impl ScaleController {
                             }
 
                             let target_worker_slots =
-                                schedule_units_for_slots(&available_worker_slots, n, table_id)?;
+                                assigner.count_actors_per_worker(&available_worker_slots, n);
 
                             target_plan.insert(
                                 fragment_id,
@@ -2689,199 +2697,5 @@ impl GlobalStreamManager {
         });
 
         (join_handle, shutdown_tx)
-    }
-}
-
-pub fn schedule_units_for_slots(
-    slots: &BTreeMap<WorkerId, usize>,
-    total_unit_size: usize,
-    salt: u32,
-) -> MetaResult<BTreeMap<WorkerId, usize>> {
-    let mut ch = ConsistentHashRing::new(salt);
-
-    for (worker_id, parallelism) in slots {
-        ch.add_worker(*worker_id as _, *parallelism as u32);
-    }
-
-    let target_distribution = ch.distribute_tasks(total_unit_size as u32)?;
-
-    Ok(target_distribution
-        .into_iter()
-        .map(|(worker_id, task_count)| (worker_id as WorkerId, task_count as usize))
-        .collect())
-}
-
-pub struct ConsistentHashRing {
-    ring: BTreeMap<u64, u32>,
-    weights: BTreeMap<u32, u32>,
-    virtual_nodes: u32,
-    salt: u32,
-}
-
-impl ConsistentHashRing {
-    fn new(salt: u32) -> Self {
-        ConsistentHashRing {
-            ring: BTreeMap::new(),
-            weights: BTreeMap::new(),
-            virtual_nodes: 1024,
-            salt,
-        }
-    }
-
-    fn hash<T: Hash, S: Hash>(key: T, salt: S) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        salt.hash(&mut hasher);
-        key.hash(&mut hasher);
-        hasher.finish()
-    }
-
-    fn add_worker(&mut self, id: u32, weight: u32) {
-        let virtual_nodes_count = self.virtual_nodes;
-
-        for i in 0..virtual_nodes_count {
-            let virtual_node_key = (id, i);
-            let hash = Self::hash(virtual_node_key, self.salt);
-            self.ring.insert(hash, id);
-        }
-
-        self.weights.insert(id, weight);
-    }
-
-    fn distribute_tasks(&self, total_tasks: u32) -> MetaResult<BTreeMap<u32, u32>> {
-        let total_weight = self.weights.values().sum::<u32>();
-
-        let mut soft_limits = HashMap::new();
-        for (worker_id, worker_capacity) in &self.weights {
-            soft_limits.insert(
-                *worker_id,
-                (total_tasks as f64 * (*worker_capacity as f64 / total_weight as f64)).ceil()
-                    as u32,
-            );
-        }
-
-        let mut task_distribution: BTreeMap<u32, u32> = BTreeMap::new();
-        let mut task_hashes = (0..total_tasks)
-            .map(|task_idx| Self::hash(task_idx, self.salt))
-            .collect_vec();
-
-        // Sort task hashes to disperse them around the hash ring
-        task_hashes.sort();
-
-        for task_hash in task_hashes {
-            let mut assigned = false;
-
-            // Iterator that starts from the current task_hash or the next node in the ring
-            let ring_range = self.ring.range(task_hash..).chain(self.ring.iter());
-
-            for (_, &worker_id) in ring_range {
-                let task_limit = soft_limits[&worker_id];
-
-                let worker_task_count = task_distribution.entry(worker_id).or_insert(0);
-
-                if *worker_task_count < task_limit {
-                    *worker_task_count += 1;
-                    assigned = true;
-                    break;
-                }
-            }
-
-            if !assigned {
-                bail!("Could not distribute tasks due to capacity constraints.");
-            }
-        }
-
-        Ok(task_distribution)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const DEFAULT_SALT: u32 = 42;
-
-    #[test]
-    fn test_single_worker_capacity() {
-        let mut ch = ConsistentHashRing::new(DEFAULT_SALT);
-        ch.add_worker(1, 10);
-
-        let total_tasks = 5;
-        let task_distribution = ch.distribute_tasks(total_tasks).unwrap();
-
-        assert_eq!(task_distribution.get(&1).cloned().unwrap_or(0), 5);
-    }
-
-    #[test]
-    fn test_multiple_workers_even_distribution() {
-        let mut ch = ConsistentHashRing::new(DEFAULT_SALT);
-
-        ch.add_worker(1, 1);
-        ch.add_worker(2, 1);
-        ch.add_worker(3, 1);
-
-        let total_tasks = 3;
-        let task_distribution = ch.distribute_tasks(total_tasks).unwrap();
-
-        for id in 1..=3 {
-            assert_eq!(task_distribution.get(&id).cloned().unwrap_or(0), 1);
-        }
-    }
-
-    #[test]
-    fn test_weighted_distribution() {
-        let mut ch = ConsistentHashRing::new(DEFAULT_SALT);
-
-        ch.add_worker(1, 2);
-        ch.add_worker(2, 3);
-        ch.add_worker(3, 5);
-
-        let total_tasks = 10;
-        let task_distribution = ch.distribute_tasks(total_tasks).unwrap();
-
-        assert_eq!(task_distribution.get(&1).cloned().unwrap_or(0), 2);
-        assert_eq!(task_distribution.get(&2).cloned().unwrap_or(0), 3);
-        assert_eq!(task_distribution.get(&3).cloned().unwrap_or(0), 5);
-    }
-
-    #[test]
-    fn test_over_capacity() {
-        let mut ch = ConsistentHashRing::new(DEFAULT_SALT);
-
-        ch.add_worker(1, 1);
-        ch.add_worker(2, 2);
-        ch.add_worker(3, 3);
-
-        let total_tasks = 10; // More tasks than the total weight
-        let task_distribution = ch.distribute_tasks(total_tasks);
-
-        assert!(task_distribution.is_ok());
-    }
-
-    #[test]
-    fn test_balance_distribution() {
-        for mut worker_capacity in 1..10 {
-            for workers in 3..10 {
-                let mut ring = ConsistentHashRing::new(DEFAULT_SALT);
-
-                for worker_id in 0..workers {
-                    ring.add_worker(worker_id, worker_capacity);
-                }
-
-                // Here we simulate a real situation where the actual parallelism cannot fill all the capacity.
-                // This is to ensure an average distribution, for example, when three workers with 6 parallelism are assigned 9 tasks,
-                // they should ideally get an exact distribution of 3, 3, 3 respectively.
-                if worker_capacity % 2 == 0 {
-                    worker_capacity /= 2;
-                }
-
-                let total_tasks = worker_capacity * workers;
-
-                let task_distribution = ring.distribute_tasks(total_tasks).unwrap();
-
-                for (_, v) in task_distribution {
-                    assert_eq!(v, worker_capacity);
-                }
-            }
-        }
     }
 }

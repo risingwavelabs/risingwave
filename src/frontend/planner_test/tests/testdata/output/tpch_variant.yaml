@@ -274,7 +274,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, _row_id(hidden), min(ps_supplycost)(hidden), ps_partkey(hidden), _row_id#1(hidden), _row_id#2(hidden), r_regionkey(hidden), _row_id#3(hidden), n_nationkey(hidden), _row_id#4(hidden), s_suppkey(hidden)], stream_key: [_row_id, p_partkey, _row_id#1, _row_id#2, r_regionkey, _row_id#3, n_nationkey, _row_id#4, s_suppkey, min(ps_supplycost), ps_partkey], pk_columns: [s_acctbal, n_name, s_name, p_partkey, _row_id, _row_id#1, _row_id#2, r_regionkey, _row_id#3, n_nationkey, _row_id#4, s_suppkey, min(ps_supplycost), ps_partkey], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamExchange Hash([3, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]) from 1
 
     Fragment 1
@@ -572,7 +571,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [n_name, revenue], stream_key: [n_name], pk_columns: [revenue, n_name], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [n_name, sum($expr1)] }
         └── StreamHashAgg [append_only] { group_key: [n_name], aggs: [sum($expr1), count] } { tables: [ HashAggState: 0 ] }
             └── StreamExchange Hash([0]) from 1
@@ -842,7 +840,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [supp_nation, cust_nation, l_year, revenue], stream_key: [supp_nation, cust_nation, l_year], pk_columns: [supp_nation, cust_nation, l_year], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [n_name, n_name, $expr1, sum($expr2)] }
         └── StreamHashAgg [append_only] { group_key: [n_name, n_name, $expr1], aggs: [sum($expr2), count] } { tables: [ HashAggState: 0 ] }
             └── StreamExchange Hash([0, 1, 2]) from 1
@@ -1151,7 +1148,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [o_year, mkt_share], stream_key: [o_year], pk_columns: [o_year], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [$expr1, RoundDigit((sum($expr3) / sum($expr2)), 6:Int32) as $expr4] }
         └── StreamHashAgg [append_only] { group_key: [$expr1], aggs: [sum($expr3), sum($expr2), count] }
             ├── tables: [ HashAggState: 0 ]
@@ -1460,7 +1456,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [nation, o_year, sum_profit], stream_key: [nation, o_year], pk_columns: [nation, o_year], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [n_name, $expr1, RoundDigit(sum($expr2), 2:Int32) as $expr3] }
         └── StreamHashAgg [append_only] { group_key: [n_name, $expr1], aggs: [sum($expr2), count] } { tables: [ HashAggState: 0 ] }
             └── StreamExchange Hash([0, 1]) from 1
@@ -1708,7 +1703,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [s_name, s_address, _row_id(hidden), _row_id#1(hidden), s_nationkey(hidden), s_suppkey(hidden)], stream_key: [_row_id, _row_id#1, s_nationkey, s_suppkey], pk_columns: [s_name, _row_id, _row_id#1, s_nationkey, s_suppkey], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamExchange Hash([2, 3, 4, 5]) from 1
 
     Fragment 1
@@ -1953,7 +1947,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [s_name, numwait], stream_key: [s_name], pk_columns: [numwait, s_name], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamHashAgg { group_key: [s_name], aggs: [count] } { tables: [ HashAggState: 0 ] }
         └── StreamExchange Hash([0]) from 1
 

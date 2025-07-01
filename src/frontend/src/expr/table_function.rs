@@ -539,9 +539,20 @@ impl TableFunction {
                             MySqlColumnType::MYSQL_TYPE_TIMESTAMP2 => DataType::Timestamptz,
 
                             // String types
-                            MySqlColumnType::MYSQL_TYPE_VARCHAR
-                            | MySqlColumnType::MYSQL_TYPE_STRING
-                            | MySqlColumnType::MYSQL_TYPE_VAR_STRING => DataType::Varchar,
+                            MySqlColumnType::MYSQL_TYPE_VARCHAR => DataType::Varchar,
+                            // mysql_async does not have explicit `varbinary` and `binary` types,
+                            // we need to check the `ColumnFlags` to distinguish them.
+                            MySqlColumnType::MYSQL_TYPE_STRING
+                            | MySqlColumnType::MYSQL_TYPE_VAR_STRING => {
+                                if column
+                                    .flags()
+                                    .contains(mysql_common::constants::ColumnFlags::BINARY_FLAG)
+                                {
+                                    DataType::Bytea
+                                } else {
+                                    DataType::Varchar
+                                }
+                            }
 
                             // JSON types
                             MySqlColumnType::MYSQL_TYPE_JSON => DataType::Jsonb,
@@ -596,6 +607,20 @@ impl TableFunction {
                 ("min_epoch".to_owned(), DataType::Int64),
             ])),
             function_type: TableFunctionType::InternalBackfillProgress,
+            user_defined: None,
+        }
+    }
+
+    pub fn new_internal_source_backfill_progress() -> Self {
+        TableFunction {
+            args: vec![],
+            return_type: DataType::Struct(StructType::new(vec![
+                ("job_id".to_owned(), DataType::Int32),
+                ("fragment_id".to_owned(), DataType::Int32),
+                ("backfill_state_table_id".to_owned(), DataType::Int32),
+                ("backfill_progress".to_owned(), DataType::Jsonb),
+            ])),
+            function_type: TableFunctionType::InternalSourceBackfillProgress,
             user_defined: None,
         }
     }

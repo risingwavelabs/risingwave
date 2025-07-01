@@ -30,6 +30,7 @@ use crate::binder::{Binder, Clause};
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, FunctionCall, InputRef};
+use crate::handler::privilege::ObjectCheckItem;
 use crate::user::UserId;
 use crate::utils::ordinal;
 
@@ -113,10 +114,13 @@ impl Binder {
         let table_catalog = &bound_table.table_catalog;
         Self::check_for_dml(table_catalog, true)?;
         self.check_privilege(
-            PbObject::TableId(table_catalog.id.table_id),
+            ObjectCheckItem::new(
+                table_catalog.owner,
+                AclMode::Insert,
+                table_name.clone(),
+                PbObject::TableId(table_catalog.id.table_id),
+            ),
             table_catalog.database_id,
-            AclMode::Insert,
-            table_catalog.owner,
         )?;
 
         let default_columns_from_catalog =
