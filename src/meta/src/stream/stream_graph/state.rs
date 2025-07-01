@@ -54,13 +54,21 @@ impl Graph {
         self.nodes.len()
     }
 
+    fn downstreams(&self, id: Id) -> &[Id] {
+        self.downstreams.get(&id).map_or(&[], |v| v.as_slice())
+    }
+
+    fn upstreams(&self, id: Id) -> &[Id] {
+        self.upstreams.get(&id).map_or(&[], |v| v.as_slice())
+    }
+
     fn topo_order(&self) -> Result<Vec<Id>> {
         let mut topo = Vec::new();
         let mut downstream_cnts = HashMap::new();
 
         // Iterate all nodes to find the root and initialize the downstream counts.
         for node_id in self.nodes.keys() {
-            let downstream_cnt = self.downstreams.get(node_id).unwrap().len();
+            let downstream_cnt = self.downstreams(*node_id).len();
             if downstream_cnt == 0 {
                 topo.push(*node_id);
             } else {
@@ -72,7 +80,7 @@ impl Graph {
         while let Some(&node_id) = topo.get(i) {
             i += 1;
             // Find if we can process more nodes.
-            for &upstream_id in self.upstreams.get(&node_id).unwrap() {
+            for &upstream_id in self.upstreams(node_id).iter() {
                 let downstream_cnt = downstream_cnts.get_mut(&upstream_id).unwrap();
                 *downstream_cnt -= 1;
                 if *downstream_cnt == 0 {
@@ -96,7 +104,8 @@ impl Graph {
         let order = self.topo_order()?;
         for node_id in order.into_iter().rev() {
             // let node = &self.nodes[&node_id];
-            let upstream_fps = self.upstreams[&node_id]
+            let upstream_fps = self
+                .upstreams(node_id)
                 .iter()
                 .map(|id| *fps.get(id).unwrap())
                 .sorted() // ignore order
@@ -105,8 +114,8 @@ impl Graph {
             let mut hasher = DefaultHasher::new();
             (
                 // node.body.discriminant(),
-                self.upstreams[&node_id].len(),
-                self.downstreams[&node_id].len(),
+                self.upstreams(node_id).len(),
+                self.downstreams(node_id).len(),
                 upstream_fps,
             )
                 .hash(&mut hasher);
@@ -227,9 +236,12 @@ impl Matches {
                 let (_, vt) = vt_cands.into_iter().next().unwrap();
 
                 let table_desc_for_compare = |table: &PbTable| {
-                    let mut desc = TableDesc::from_pb_table(table);
-                    desc.table_id = catalog::TableId::placeholder();
-                    desc
+                    // Set some fields to dummy value for comparison.
+                    let mut table = table.clone();
+                    table.id = 0;
+                    table.maybe_vnode_count = Some(42);
+
+                    TableDesc::from_pb_table(&table)
                 };
 
                 let ut_compare = table_desc_for_compare(&ut);
@@ -322,20 +334,20 @@ fn match_graph(g1: &Graph, g2: &Graph) -> Result<Matches> {
             }
 
             // For each upstream of u, if it's already matched, then it must be matched to the corresponding v's upstream.
-            let upstreams = g1.upstreams[&u].clone();
+            let upstreams = g1.upstreams(u).to_vec();
             for u_upstream in upstreams {
                 if let Some(v_upstream) = matches.target(u_upstream) {
-                    if !g2.upstreams[&v].contains(&v_upstream) {
+                    if !g2.upstreams(v).contains(&v_upstream) {
                         // Not a valid match.
                         continue;
                     }
                 }
             }
             // Same for downstream of u.
-            let downstreams = g1.downstreams[&u].clone();
+            let downstreams = g1.downstreams(u).to_vec();
             for u_downstream in downstreams {
                 if let Some(v_downstream) = matches.target(u_downstream) {
-                    if !g2.downstreams[&v].contains(&v_downstream) {
+                    if !g2.downstreams(v).contains(&v_downstream) {
                         // Not a valid match.
                         continue;
                     }
@@ -377,13 +389,12 @@ fn match_graph(g1: &Graph, g2: &Graph) -> Result<Matches> {
     Ok(matches)
 }
 
-// TODO: make it `pub(super)`
-pub fn match_graph_internal_tables(g1: &Graph, g2: &Graph) -> Result<HashMap<u32, u32>> {
+pub(crate) fn match_graph_internal_tables(g1: &Graph, g2: &Graph) -> Result<HashMap<u32, u32>> {
     match_graph(g1, g2).map(|matches| matches.into_table_mapping())
 }
 
 impl Graph {
-    pub(super) fn from_building(graph: &StreamFragmentGraph) -> Self {
+    pub(crate) fn from_building(graph: &StreamFragmentGraph) -> Self {
         let nodes = graph
             .fragments
             .iter()
@@ -430,11 +441,11 @@ impl Graph {
         }
     }
 
-    pub(super) fn from_existing(
+    pub(crate) fn from_existing(
         fragments: &StreamJobFragments,
         fragment_upstreams: &HashMap<u32, HashSet<u32>>,
     ) -> Self {
-        let nodes = fragments
+        let nodes: HashMap<_, _> = fragments
             .fragments
             .iter()
             .map(|(&id, f)| {
@@ -452,7 +463,12 @@ impl Graph {
         let mut upstreams = HashMap::new();
 
         for (&id, fragment_upstreams) in fragment_upstreams {
+            assert!(nodes.contains_key(&id));
+
             for &upstream in fragment_upstreams {
+                if !nodes.contains_key(&upstream) {
+                    continue;
+                }
                 downstreams
                     .entry(upstream)
                     .or_insert_with(Vec::new)

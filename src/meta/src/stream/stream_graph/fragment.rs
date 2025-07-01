@@ -536,6 +536,19 @@ impl StreamFragmentGraph {
         Ok(())
     }
 
+    /// matches: new_table_id -> old_table_id
+    pub fn fit_internal_table_ids_new(&mut self, matches: HashMap<u32, u32>) {
+        for fragment in self.fragments.values_mut() {
+            stream_graph_visitor::visit_internal_tables(
+                &mut fragment.inner,
+                |table, _table_type_name| {
+                    let target = matches.get(&table.id).cloned().unwrap();
+                    table.id = target;
+                },
+            );
+        }
+    }
+
     /// Returns the fragment id where the streaming job node located.
     pub fn table_fragment_id(&self) -> FragmentId {
         self.fragments
