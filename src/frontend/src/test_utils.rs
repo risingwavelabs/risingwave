@@ -308,6 +308,17 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn replace_materialized_view(
+        &self,
+        mut table: PbTable,
+        _graph: StreamFragmentGraph,
+    ) -> Result<()> {
+        table.stream_job_status = PbStreamJobStatus::Created as _;
+        assert_eq!(table.vnode_count(), VirtualNode::COUNT_FOR_TEST);
+        self.catalog.write().update_table(&table);
+        Ok(())
+    }
+
     async fn create_view(&self, mut view: PbView) -> Result<()> {
         view.id = self.gen_id();
         self.catalog.write().create_view(&view);
