@@ -1,0 +1,32 @@
+# regression test for issue #22465: MapAccess + UDTF + Cross Join caused panic
+
+statement ok
+CREATE TABLE t (
+    id BIGINT,
+    s_map MAP<VARCHAR, VARCHAR>,
+    s_str VARCHAR,
+    PRIMARY KEY (id)
+);
+
+statement ok
+CREATE FUNCTION my_udf(a VARCHAR)
+RETURNS TABLE (x VARCHAR, y VARCHAR, z INT)
+LANGUAGE javascript AS $$
+    yield {x: 'x', y: 'y', z: 1};
+$$;
+
+statement ok
+INSERT INTO t (id, s_map, s_str) VALUES
+(1, MAP {'data': 'abc,def,ghi'}, 'abc,def,ghi'),
+(2, MAP {'data': '123,456,789'}, '123,456,789');
+
+# The following query previously panicked with `InvalidTagEncoding(100)`.
+query I
+SELECT count(*) FROM t, my_udf(s_map['data']);
+----
+2
+
+statement ok
+DROP FUNCTION my_udf;
+statement ok
+DROP TABLE t;
