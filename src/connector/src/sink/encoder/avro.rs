@@ -446,6 +446,20 @@ fn on_field<D: MaybeData>(
         },
         DataType::Varchar => match inner {
             AvroSchema::String => maybe.on_base(|s| Ok(Value::String(s.into_utf8().into())))?,
+            AvroSchema::Enum(enum_schema) => maybe.on_base(|s| {
+                let s = s.into_utf8();
+                let idx = enum_schema
+                    .symbols
+                    .iter()
+                    .position(|sym| sym == s)
+                    .ok_or_else(|| {
+                        FieldEncodeError::new(format!(
+                            "invalid symbol in enum {}: {}",
+                            enum_schema.name, s
+                        ))
+                    })?;
+                Ok(Value::Enum(idx as _, s.to_owned()))
+            })?,
             _ => return no_match_err(),
         },
         DataType::Bytea => match inner {

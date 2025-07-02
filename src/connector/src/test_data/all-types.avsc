@@ -35,15 +35,15 @@
       "size": 12,
       "logicalType": "duration"
     }]},
+    {"name": "enum_field", "type": ["null", {
+      "type": "enum",
+      "name": "Suit",
+      "symbols": ["SPADES", "HEARTS", "DIAMONDS", "CLUBS"]
+    }]},
     {"name": "unsupported", "type": ["null", {
       "type": "record",
       "name": "Unsupported",
       "fields": [
-        {"name": "enum_field", "type": ["null", {
-          "type": "enum",
-          "name": "Suit",
-          "symbols": ["SPADES", "HEARTS", "DIAMONDS", "CLUBS"]
-        }]},
         {"name": "map_field", "type": ["null", {
           "type": "map",
           "values": ["null", "string"]
