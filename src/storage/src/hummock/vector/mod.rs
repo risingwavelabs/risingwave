@@ -20,7 +20,7 @@ use crate::vector::VectorRef;
 use crate::vector::hnsw::{VectorAccessor, VectorStore};
 
 pub(crate) mod file;
-pub(crate) mod writer;
+pub mod writer;
 
 pub struct VectorBlockAccessor {
     block: VectorBlockHolder,
