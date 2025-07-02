@@ -26,8 +26,7 @@ use jni::sys::{JNI_VERSION_1_2, jint};
 use jni::{JNIEnv, JavaVM};
 use prost::Message;
 use risingwave_common::error::AsReport;
-use risingwave_common::jvm_runtime::jvm_env;
-use risingwave_jni_core::jvm_runtime::register_java_binding_native_methods;
+use risingwave_jni_core::jvm_runtime::{jvm_env, register_java_binding_native_methods};
 use risingwave_jni_core::{
     EnvParam, JAVA_BINDING_ASYNC_RUNTIME, JavaBindingIterator, Pointer, execute_and_catch,
     gen_class_name, to_guarded_slice,

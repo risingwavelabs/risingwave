@@ -22,6 +22,7 @@ peekable = { version = "0.3", features = ["tokio"] }
 postgres-types = { version = "0.2.6" }
 reqwest = "0.12.2"
 risingwave_common = { workspace = true }
+risingwave_jni_core = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

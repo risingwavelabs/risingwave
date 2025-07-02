@@ -1866,7 +1866,7 @@ pub async fn create_iceberg_engine_table(
 
     // before we create the table, ensure the JVM is initialized as we use jdbc catalog right now.
     // If JVM isn't initialized successfully, current not atomic ddl will result in a partially created iceberg engine table.
-    let _ = JVM.get_or_init()?;
+    let _ = JVM.get_or_init();
 
     let catalog_writer = session.catalog_writer()?;
     // TODO(iceberg): make iceberg engine table creation ddl atomic

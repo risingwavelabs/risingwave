@@ -71,7 +71,7 @@ where
             SourceType::from(T::source_type())
         );
 
-        let jvm = JVM.get_or_init()?;
+        let jvm = JVM.get_or_init();
         let source_id = context.info.source_id;
         tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
             execute_with_jni_env(jvm, |env| {
