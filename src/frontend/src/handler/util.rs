@@ -39,8 +39,8 @@ use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_sqlparser::ast::{
-    CompatibleFormatEncode, Expr, FormatEncodeOptions, ObjectName, Query, Select, SelectItem,
-    SetExpr, TableFactor, TableWithJoins,
+    CompatibleFormatEncode, FormatEncodeOptions, ObjectName, Query, Select, SelectItem, SetExpr,
+    TableFactor, TableWithJoins,
 };
 use thiserror_ext::AsReport;
 
@@ -218,13 +218,6 @@ impl CompatibleFormatEncode {
 }
 
 pub fn gen_query_from_table_name(from_name: ObjectName) -> Query {
-    gen_query_from_table_name_with_selection(from_name, None)
-}
-
-pub fn gen_query_from_table_name_with_selection(
-    from_name: ObjectName,
-    selection: Option<Expr>,
-) -> Query {
     let table_factor = TableFactor::Table {
         name: from_name,
         alias: None,
@@ -236,7 +229,6 @@ pub fn gen_query_from_table_name_with_selection(
     }];
     let select = Select {
         from,
-        selection,
         projection: vec![SelectItem::Wildcard(None)],
         ..Default::default()
     };
