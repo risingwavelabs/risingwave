@@ -39,7 +39,7 @@ use crate::handler::HandlerArgs;
 use crate::optimizer::plan_expr_rewriter::ConstEvalRewriter;
 use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMaterialize};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
-use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
+use crate::optimizer::{LogicalPlanRoot, OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::{GraphJobType, build_graph};
@@ -410,7 +410,7 @@ fn assemble_input(
     include_columns: &[ExprImpl],
     cardinality: Cardinality,
     required_dist: RequiredDist,
-) -> Result<PlanRoot> {
+) -> Result<LogicalPlanRoot> {
     // Build logical plan and then call gen_create_index_plan
     // LogicalProject(index_columns, include_columns)
     //   LogicalScan(table_desc)
@@ -418,8 +418,6 @@ fn assemble_input(
     let logical_scan = LogicalScan::create(
         table_name,
         table_catalog.clone(),
-        // Index table has no indexes.
-        vec![],
         context,
         None,
         cardinality,

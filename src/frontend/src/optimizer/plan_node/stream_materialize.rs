@@ -72,7 +72,6 @@ impl StreamMaterialize {
     ///
     /// When creating index, `TableType` should be `Index`. Then, materialize will distribute keys
     /// using `user_distributed_by`.
-    #[expect(clippy::too_many_arguments)]
     pub fn create(
         StreamOptimizedLogicalPlanRoot {
             plan: input,
