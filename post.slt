@@ -1,0 +1,18 @@
+control substitution on
+
+statement ok
+alter sink jdbc_pg_sink set sink_rate_limit = default;
+
+query I retry 3 backoff 5s
+select * from postgres_query(
+    '$PGHOST',
+    '$PGPORT',
+    '$PGUSER',
+    '${PGPASSWORD:postgres}',
+    '${PGDATABASE}',
+    'select * from t'
+);
+----
+
+
+control substitution off
