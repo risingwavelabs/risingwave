@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! This module contains the logic for matching the internal state tables of two streaming jobs,
+//! used for replacing a streaming job (typically `ALTER MV`) while preserving the existing state.
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{DefaultHasher, Hash as _, Hasher as _};
 
