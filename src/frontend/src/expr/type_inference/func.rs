@@ -626,8 +626,21 @@ fn infer_type_for_special(
                 .into()),
             }
         }
-        ExprType::MapCat => {
+        ExprType::MapContains => {
             ensure_arity!("map_contains", | inputs | == 2);
+            let map_type = inputs[0].try_into_map_type()?;
+            match inputs[1].cast_implicit_mut(map_type.key().clone()) {
+                Ok(()) => Ok(Some(DataType::Boolean)),
+                Err(_) => Err(ErrorCode::BindError(format!(
+                    "Cannot check if {} exists in {}",
+                    inputs[1].return_type(),
+                    inputs[0].return_type(),
+                ))
+                .into()),
+            }
+        }
+        ExprType::MapCat => {
+            ensure_arity!("map_cat", | inputs | == 2);
             Ok(Some(align_types(inputs.iter_mut())?))
         }
         ExprType::MapInsert => {
