@@ -177,9 +177,10 @@ impl<S: StateStore> NowExecutor<S> {
                         < new_timestamp.timestamp_millis()
                     {
                         info!(
-                            "adjusting progress timestamp from {} to {}. barrier_interval_ms: {}, progress_ratio: {}",
+                            "adjusted next now timestamp from {} to {}. curr_epoch: {}, barrier_interval_ms: {}, progress_ratio: {}",
                             new_timestamp.timestamp_millis(),
                             progress_timestamp,
+                            barrier.get_curr_epoch(),
                             barrier_interval_ms,
                             progress_ratio
                         );
