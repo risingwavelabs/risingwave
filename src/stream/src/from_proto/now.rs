@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use anyhow::Context;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::value_encoding::DatumFromProtoExt;
 use risingwave_pb::stream_plan::now_node::PbMode as PbNowMode;
@@ -71,13 +72,21 @@ impl ExecutorBuilder for NowExecutorBuilder {
 
         let state_table =
             StateTable::from_table_catalog(node.get_state_table()?, store, None).await;
-
+        let barrier_interval_ms = params
+            .env
+            .system_params_manager_ref()
+            .get_params()
+            .load()
+            .barrier_interval_ms();
+        let progress_ratio = params.env.config().developer.now_progress_ratio;
         let exec = NowExecutor::new(
             params.info.schema.data_types(),
             mode,
             params.eval_error_report,
             barrier_receiver,
             state_table,
+            progress_ratio,
+            barrier_interval_ms,
         );
         Ok((params.info, exec).into())
     }
