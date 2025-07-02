@@ -299,7 +299,7 @@ DynamoDbConfig:
     field_type: usize
     required: false
     default: '256'
-ElasticSearchOpenSearchConfig:
+ElasticSearchConfig:
   fields:
   - name: url
     field_type: String
@@ -593,6 +593,7 @@ KafkaConfig:
     field_type: Duration
     required: false
     default: 'Duration :: from_secs (5)'
+    allow_alter_on_fly: true
   - name: properties.bootstrap.server
     field_type: String
     required: true
@@ -1074,6 +1075,51 @@ NatsConfig:
   - name: r#type
     field_type: String
     required: true
+OpenSearchConfig:
+  fields:
+  - name: url
+    field_type: String
+    required: true
+  - name: index
+    field_type: String
+    comments: The index's name of elasticsearch or openserach
+    required: false
+  - name: delimiter
+    field_type: String
+    comments: If pk is set, then "pk1+delimiter+pk2+delimiter..." will be used as the key, if pk is not set, we will just use the first column as the key.
+    required: false
+  - name: username
+    field_type: String
+    comments: The username of elasticsearch or openserach
+    required: false
+  - name: password
+    field_type: String
+    comments: The username of elasticsearch or openserach
+    required: false
+  - name: index_column
+    field_type: String
+    comments: It is used for dynamic index, if it is be set, the value of this column will be used as the index. It and `index` can only set one
+    required: false
+  - name: routing_column
+    field_type: String
+    comments: It is used for dynamic route, if it is be set, the value of this column will be used as the route
+    required: false
+  - name: retry_on_conflict
+    field_type: i32
+    required: true
+  - name: batch_num_messages
+    field_type: usize
+    required: true
+  - name: batch_size_kb
+    field_type: usize
+    required: true
+  - name: concurrent_requests
+    field_type: usize
+    required: true
+  - name: r#type
+    field_type: String
+    required: false
+    default: '"upsert" . to_owned ()'
 PulsarConfig:
   fields:
   - name: properties.retry.max
@@ -1172,7 +1218,7 @@ RedisConfig:
   - name: redis.url
     field_type: String
     required: true
-S3Config:
+SnowflakeConfig:
   fields:
   - name: s3.region_name
     field_type: String

@@ -114,41 +114,39 @@ macro_rules! for_all_sinks {
     ($macro:path $(, $arg:tt)*) => {
         $macro! {
             {
-                { Redis, $crate::sink::redis::RedisSink },
-                { Kafka, $crate::sink::kafka::KafkaSink },
-                { Pulsar, $crate::sink::pulsar::PulsarSink },
-                { BlackHole, $crate::sink::trivial::BlackHoleSink },
-                { Kinesis, $crate::sink::kinesis::KinesisSink },
-                { ClickHouse, $crate::sink::clickhouse::ClickHouseSink },
-                { Iceberg, $crate::sink::iceberg::IcebergSink },
-                { Mqtt, $crate::sink::mqtt::MqttSink },
-                { GooglePubSub, $crate::sink::google_pubsub::GooglePubSubSink },
-                { Nats, $crate::sink::nats::NatsSink },
-                { Jdbc, $crate::sink::remote::JdbcSink },
-                // { ElasticSearchJava, $crate::sink::remote::ElasticSearchJavaSink },
-                // { OpensearchJava, $crate::sink::remote::OpenSearchJavaSink },
-                { ElasticSearch, $crate::sink::elasticsearch_opensearch::elasticsearch::ElasticSearchSink },
-                { Opensearch, $crate::sink::elasticsearch_opensearch::opensearch::OpenSearchSink },
-                { Cassandra, $crate::sink::remote::CassandraSink },
-                { Doris, $crate::sink::doris::DorisSink },
-                { Starrocks, $crate::sink::starrocks::StarrocksSink },
-                { S3, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::s3::S3Sink>},
+                { Redis, $crate::sink::redis::RedisSink, $crate::sink::redis::RedisConfig },
+                { Kafka, $crate::sink::kafka::KafkaSink, $crate::sink::kafka::KafkaConfig },
+                { Pulsar, $crate::sink::pulsar::PulsarSink, $crate::sink::pulsar::PulsarConfig },
+                { BlackHole, $crate::sink::trivial::BlackHoleSink, () },
+                { Kinesis, $crate::sink::kinesis::KinesisSink, $crate::sink::kinesis::KinesisSinkConfig },
+                { ClickHouse, $crate::sink::clickhouse::ClickHouseSink, $crate::sink::clickhouse::ClickHouseConfig },
+                { Iceberg, $crate::sink::iceberg::IcebergSink, $crate::sink::iceberg::IcebergConfig },
+                { Mqtt, $crate::sink::mqtt::MqttSink, $crate::sink::mqtt::MqttConfig },
+                { GooglePubSub, $crate::sink::google_pubsub::GooglePubSubSink, $crate::sink::google_pubsub::GooglePubSubConfig },
+                { Nats, $crate::sink::nats::NatsSink, $crate::sink::nats::NatsConfig },
+                { Jdbc, $crate::sink::remote::JdbcSink, () },
+                { ElasticSearch, $crate::sink::elasticsearch_opensearch::elasticsearch::ElasticSearchSink, $crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::ElasticSearchConfig },
+                { Opensearch, $crate::sink::elasticsearch_opensearch::opensearch::OpenSearchSink, $crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::OpenSearchConfig },
+                { Cassandra, $crate::sink::remote::CassandraSink, () },
+                { Doris, $crate::sink::doris::DorisSink, $crate::sink::doris::DorisConfig },
+                { Starrocks, $crate::sink::starrocks::StarrocksSink, $crate::sink::starrocks::StarrocksConfig },
+                { S3, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::s3::S3Sink>, $crate::sink::file_sink::s3::S3Config },
 
-                { Gcs, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::gcs::GcsSink>  },
-                { Azblob, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::azblob::AzblobSink>},
-                { Webhdfs, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::webhdfs::WebhdfsSink>},
+                { Gcs, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::gcs::GcsSink>, $crate::sink::file_sink::gcs::GcsConfig },
+                { Azblob, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::azblob::AzblobSink>, $crate::sink::file_sink::azblob::AzblobConfig },
+                { Webhdfs, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::webhdfs::WebhdfsSink>, $crate::sink::file_sink::webhdfs::WebhdfsConfig },
 
-                { Fs, $crate::sink::file_sink::opendal_sink::FileSink<FsSink>  },
-                { Snowflake, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::s3::SnowflakeSink>},
-                { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
-                { BigQuery, $crate::sink::big_query::BigQuerySink },
-                { DynamoDb, $crate::sink::dynamodb::DynamoDbSink },
-                { Mongodb, $crate::sink::mongodb::MongodbSink },
-                { SqlServer, $crate::sink::sqlserver::SqlServerSink },
-                { Postgres, $crate::sink::postgres::PostgresSink },
+                { Fs, $crate::sink::file_sink::opendal_sink::FileSink<FsSink>, $crate::sink::file_sink::fs::FsConfig },
+                { Snowflake, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::s3::SnowflakeSink>, $crate::sink::file_sink::s3::SnowflakeConfig },
+                { DeltaLake, $crate::sink::deltalake::DeltaLakeSink, $crate::sink::deltalake::DeltaLakeConfig },
+                { BigQuery, $crate::sink::big_query::BigQuerySink, $crate::sink::big_query::BigQueryConfig },
+                { DynamoDb, $crate::sink::dynamodb::DynamoDbSink, $crate::sink::dynamodb::DynamoDbConfig },
+                { Mongodb, $crate::sink::mongodb::MongodbSink, $crate::sink::mongodb::MongodbConfig },
+                { SqlServer, $crate::sink::sqlserver::SqlServerSink, $crate::sink::sqlserver::SqlServerConfig },
+                { Postgres, $crate::sink::postgres::PostgresSink, $crate::sink::postgres::PostgresConfig },
 
-                { Test, $crate::sink::test_sink::TestSink },
-                { Table, $crate::sink::trivial::TableSink }
+                { Test, $crate::sink::test_sink::TestSink, () },
+                { Table, $crate::sink::trivial::TableSink, () }
             }
             $(,$arg)*
         }
@@ -156,8 +154,37 @@ macro_rules! for_all_sinks {
 }
 
 #[macro_export]
+macro_rules! generate_config_use_clauses {
+    ({$({ $variant_name:ident, $sink_type:ty, $($config_type:tt)+ }), *}) => {
+        $(
+            $crate::generate_config_use_single! { $($config_type)+ }
+        )*
+    };
+}
+
+#[macro_export]
+macro_rules! generate_config_use_single {
+    // Skip () config types
+    (()) => {};
+
+    // Generate use clause for actual config types
+    ($config_type:path) => {
+        #[allow(unused_imports)]
+        pub(super) use $config_type;
+    };
+}
+
+// Convenience macro that uses for_all_sinks
+#[macro_export]
+macro_rules! use_all_sink_configs {
+    () => {
+        $crate::for_all_sinks! { $crate::generate_config_use_clauses }
+    };
+}
+
+#[macro_export]
 macro_rules! dispatch_sink {
-    ({$({$variant_name:ident, $sink_type:ty}),*}, $impl:tt, $sink:tt, $body:tt) => {{
+    ({$({$variant_name:ident, $sink_type:ty, $config_type:ty}),*}, $impl:tt, $sink:tt, $body:tt) => {{
         use $crate::sink::SinkImpl;
 
         match $impl {
@@ -173,7 +200,7 @@ macro_rules! dispatch_sink {
 
 #[macro_export]
 macro_rules! match_sink_name_str {
-    ({$({$variant_name:ident, $sink_type:ty}),*}, $name_str:tt, $type_name:ident, $body:tt, $on_other_closure:tt) => {{
+    ({$({$variant_name:ident, $sink_type:ty, $config_type:ty}),*}, $name_str:tt, $type_name:ident, $body:tt, $on_other_closure:tt) => {{
         use $crate::sink::Sink;
         match $name_str {
             $(
@@ -813,7 +840,7 @@ macro_rules! def_sink_impl {
     () => {
         $crate::for_all_sinks! { def_sink_impl }
     };
-    ({ $({ $variant_name:ident, $sink_type:ty }),* }) => {
+    ({ $({ $variant_name:ident, $sink_type:ty, $config_type:ty }),* }) => {
         #[derive(Debug)]
         pub enum SinkImpl {
             $(
