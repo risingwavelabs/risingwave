@@ -38,6 +38,10 @@ pub struct NowExecutor<S: StateStore> {
     barrier_receiver: UnboundedReceiver<Barrier>,
 
     state_table: StateTable<S>,
+
+    progress_ratio: Option<f32>,
+
+    barrier_interval_ms: u32,
 }
 
 pub enum NowMode {
@@ -66,6 +70,8 @@ impl<S: StateStore> NowExecutor<S> {
         eval_error_report: ActorEvalErrorReport,
         barrier_receiver: UnboundedReceiver<Barrier>,
         state_table: StateTable<S>,
+        progress_ratio: Option<f32>,
+        barrier_interval_ms: u32,
     ) -> Self {
         Self {
             data_types,
@@ -73,6 +79,8 @@ impl<S: StateStore> NowExecutor<S> {
             eval_error_report,
             barrier_receiver,
             state_table,
+            progress_ratio,
+            barrier_interval_ms,
         }
     }
 
@@ -84,6 +92,8 @@ impl<S: StateStore> NowExecutor<S> {
             eval_error_report,
             barrier_receiver,
             mut state_table,
+            progress_ratio,
+            barrier_interval_ms,
         } = self;
 
         let max_chunk_size = crate::config::chunk_size();
@@ -116,7 +126,7 @@ impl<S: StateStore> NowExecutor<S> {
         for barriers in
             UnboundedReceiverStream::new(barrier_receiver).ready_chunks(MAX_MERGE_BARRIER_SIZE)
         {
-            let mut curr_timestamp = None;
+            let mut curr_timestamp: Option<ScalarImpl> = None;
             if barriers.len() > 1 {
                 warn!(
                     "handle multiple barriers at once in now executor: {}",
@@ -124,7 +134,7 @@ impl<S: StateStore> NowExecutor<S> {
                 );
             }
             for barrier in barriers {
-                let new_timestamp = Some(barrier.get_curr_epoch().as_scalar());
+                let new_timestamp = barrier.get_curr_epoch().as_timestamptz();
                 let pause_mutation =
                     barrier
                         .mutation
@@ -152,7 +162,36 @@ impl<S: StateStore> NowExecutor<S> {
                 }
 
                 // Extract timestamp from the current epoch.
-                curr_timestamp = new_timestamp;
+                if let Some(ScalarImpl::Timestamptz(timestamp)) = &last_timestamp
+                    && let Some(progress_ratio) = progress_ratio
+                    && progress_ratio > 1.0
+                {
+                    // curr_timestamp = min(last_timestamp + barrier_interval * progress_ratio, timestamp from epoch)
+                    // to avoid having a big gap between the last timestamp and the current timestamp,
+                    // which may cause excessive changes in downstream dynamic filter
+                    let progress_timestamp = timestamp
+                        .timestamp_millis()
+                        .checked_add((barrier_interval_ms as f32 * progress_ratio).ceil() as i64)
+                        .expect("progress_timestamp is out of i64 range");
+                    let adjusted_timestamp = if progress_timestamp
+                        < new_timestamp.timestamp_millis()
+                    {
+                        info!(
+                            "adjusting progress timestamp from {} to {}. barrier_interval_ms: {}, progress_ratio: {}",
+                            new_timestamp.timestamp_millis(),
+                            progress_timestamp,
+                            barrier_interval_ms,
+                            progress_ratio
+                        );
+                        Timestamptz::from_millis(progress_timestamp)
+                            .expect("progress_timestamp is out of timestamptz range")
+                    } else {
+                        new_timestamp
+                    };
+                    curr_timestamp = Some(adjusted_timestamp.into());
+                } else {
+                    curr_timestamp = Some(new_timestamp.into());
+                }
 
                 // Update paused state.
                 if let Some(pause_mutation) = pause_mutation {
@@ -647,12 +686,16 @@ mod tests {
             actor_context: ActorContext::for_test(123),
             identity: "NowExecutor".into(),
         };
+        let progress_ratio = Some(2.0);
+        let barrier_interval_ms = 1000;
         let now_executor = NowExecutor::new(
             vec![DataType::Timestamptz],
             mode,
             eval_error_report,
             barrier_receiver,
             state_table,
+            progress_ratio,
+            barrier_interval_ms,
         );
         (sender, now_executor.boxed().execute())
     }
