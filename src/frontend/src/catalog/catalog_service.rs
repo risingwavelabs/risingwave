@@ -26,7 +26,9 @@ use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
 };
-use risingwave_pb::ddl_service::replace_job_plan::{ReplaceJob, ReplaceSource, ReplaceTable};
+use risingwave_pb::ddl_service::replace_job_plan::{
+    ReplaceJob, ReplaceMaterializedView, ReplaceSource, ReplaceTable,
+};
 use risingwave_pb::ddl_service::{
     PbReplaceJobPlan, PbTableJobType, ReplaceJobPlan, TableJobType, WaitVersion,
     alter_name_request, alter_owner_request, alter_set_schema_request, alter_swap_rename_request,
@@ -335,7 +337,15 @@ impl CatalogWriter for CatalogWriterImpl {
         notice_to_user(format!("table: {table:#?}"));
         notice_to_user(format!("graph: {graph:#?}"));
 
-        Ok(())
+        let version = self
+            .meta_client
+            .replace_job(
+                graph,
+                ReplaceJob::ReplaceMaterializedView(ReplaceMaterializedView { table: Some(table) }),
+            )
+            .await?;
+
+        self.wait_version(version).await
     }
 
     async fn create_view(&self, view: PbView) -> Result<()> {
