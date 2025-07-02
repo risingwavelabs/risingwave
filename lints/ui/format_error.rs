@@ -12,11 +12,11 @@ fn main() {
     let err = "foo".parse::<i32>().unwrap_err();
 
     let _ = format!("{err}");
-    let _ = format!("{}", err);
-    let _ = format!("{:#}", err);
-    let _ = format!("{:?}", err);
-    let _ = format!("{e}", e = err);
-    let _ = format!("{0}", err);
+    let _ = format!("{err}");
+    let _ = format!("{err:#}");
+    let _ = format!("{err:?}");
+    let _ = format!("{err}");
+    let _ = format!("{err}");
 
     let _ = format!("{}", &err);
     let _ = format!("{}", &&err);
@@ -27,7 +27,7 @@ fn main() {
     let _ = format!("{}", Box::new(&err));
     let _ = format!("{}", Box::new(err.clone()));
 
-    println!("{}", err);
+    println!("{err}");
     info!("{}", err);
     my_info!("{}", err);
 
@@ -40,8 +40,7 @@ fn main() {
     let _ = info_span!("span", %err);
 
     let _ = format!(
-        "this is a really long message, test lint span: {} {} {} ",
-        err, err, err
+        "this is a really long message, test lint span: {err} {err} {err} "
     );
 
     let _ = err.to_string();
@@ -60,7 +59,7 @@ fn main() {
     let make_anyhow_err = || anyhow!("foobar");
     let anyhow_err = make_anyhow_err();
 
-    let _ = format!("{}", anyhow_err);
+    let _ = format!("{anyhow_err}");
     let _ = format!("{}", &anyhow_err);
     let _ = format!("{}", &&anyhow_err);
     let _ = format!("{}", Box::new(&anyhow_err)); // TODO: fail to lint
@@ -86,7 +85,7 @@ fn main() {
     let box_dyn_err_3: Box<dyn Error + Send + Sync> = Box::new(err.clone());
 
     // TODO: fail to lint
-    let _ = format!("{}", box_dyn_err_1);
+    let _ = format!("{box_dyn_err_1}");
     info!("{}", box_dyn_err_2);
     let _ = box_dyn_err_3.to_string();
 

@@ -434,7 +434,7 @@ impl Cluster {
         for i in 1..=conf.meta_nodes {
             meta_addrs.push(format!("http://meta-{i}:5690"));
         }
-        std::env::set_var("RW_META_ADDR", meta_addrs.join(","));
+        unsafe { std::env::set_var("RW_META_ADDR", meta_addrs.join(",")) };
 
         let sqlite_file_handle: NamedTempFile = NamedTempFile::new().unwrap();
         let file_path = sqlite_file_handle.path().display().to_string();
