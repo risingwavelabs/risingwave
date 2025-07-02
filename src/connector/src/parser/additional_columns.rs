@@ -22,8 +22,9 @@ use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColum
 use risingwave_pb::plan_common::{
     AdditionalCollectionName, AdditionalColumn, AdditionalColumnFilename, AdditionalColumnHeader,
     AdditionalColumnHeaders, AdditionalColumnKey, AdditionalColumnOffset,
-    AdditionalColumnPartition, AdditionalColumnPayload, AdditionalColumnTimestamp,
-    AdditionalDatabaseName, AdditionalSchemaName, AdditionalSubject, AdditionalTableName,
+    AdditionalColumnPartition, AdditionalColumnPayload, AdditionalColumnPulsarMessageIdData,
+    AdditionalColumnTimestamp, AdditionalDatabaseName, AdditionalSchemaName, AdditionalSubject,
+    AdditionalTableName,
 };
 
 use crate::error::ConnectorResult;
@@ -53,7 +54,7 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
             ),
             (
                 PULSAR_CONNECTOR,
-                HashSet::from(["key", "partition", "offset", "payload"]),
+                HashSet::from(["key", "partition", "offset", "payload", "message_id_data"]),
             ),
             (
                 KINESIS_CONNECTOR,
@@ -277,10 +278,48 @@ pub fn build_additional_column_desc(
                 column_type: Some(AdditionalColumnType::Subject(AdditionalSubject {})),
             },
         ),
+        "message_id_data" => ColumnDesc::named_with_additional_column(
+            column_name,
+            column_id,
+            DataType::Bytea,
+            AdditionalColumn {
+                column_type: Some(AdditionalColumnType::PulsarMessageIdData(
+                    AdditionalColumnPulsarMessageIdData {},
+                )),
+            },
+        ),
         _ => unreachable!(),
     };
 
     Ok(col_desc)
+}
+
+pub fn derive_pulsar_message_id_data_column(
+    connector_name: &str,
+    column_exist: &mut Vec<bool>,
+    additional_columns: &mut Vec<ColumnDesc>,
+) {
+    // additional columns already check the max_column_id
+    // so we can take the max column id of additional columns as the max column id of all columns
+    let max_column_id = additional_columns
+        .iter()
+        .fold(ColumnId::first_user_column(), |a, b| a.max(b.column_id));
+
+    // assume user does not include `message_id_data` column
+    column_exist.push(false);
+    additional_columns.push(
+        build_additional_column_desc(
+            max_column_id.next(),
+            connector_name,
+            "message_id_data",
+            None,
+            None,
+            None,
+            false,
+            false,
+        )
+        .unwrap(),
+    );
 }
 
 /// Utility function for adding partition and offset columns to the columns, if not specified by the user.
@@ -292,8 +331,8 @@ pub fn source_add_partition_offset_cols(
     columns: &[ColumnCatalog],
     connector_name: &str,
     skip_col_id: bool,
-) -> ([bool; 2], [ColumnDesc; 2]) {
-    let mut columns_exist = [false; 2];
+) -> (Vec<bool>, Vec<ColumnDesc>) {
+    let mut columns_exist = vec![false; 2];
 
     let mut last_column_id = max_column_id(columns);
     let mut assign_col_id = || {
@@ -365,7 +404,7 @@ pub fn source_add_partition_offset_cols(
         }
     }
 
-    (columns_exist, additional_columns.try_into().unwrap())
+    (columns_exist, additional_columns)
 }
 
 fn build_header_catalog(

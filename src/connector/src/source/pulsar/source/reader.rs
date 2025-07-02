@@ -12,15 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+use std::task::Poll;
+
 use anyhow::Context;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use pulsar::consumer::InitialPosition;
+use moka::future::Cache as MokaCache;
+use pulsar::consumer::{InitialPosition, Message};
 use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
+use pulsar_prost::Message as PulsarProstMessage;
 use risingwave_common::{bail, ensure};
+use thiserror_ext::AsReport;
 
 use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
@@ -28,8 +34,11 @@ use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
     BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SplitId, SplitMetaData,
-    SplitReader, into_chunk_stream,
+    SplitReader, build_pulsar_ack_channel_id, into_chunk_stream,
 };
+pub static PULSAR_ACK_CHANNEL: LazyLock<
+    MokaCache<String, tokio::sync::mpsc::UnboundedSender<Vec<u8>>>,
+> = LazyLock::new(|| moka::future::Cache::builder().build()); // mapping:
 
 const PULSAR_DEFAULT_SUBSCRIPTION_PREFIX: &str = "rw-consumer";
 
@@ -85,9 +94,7 @@ pub struct PulsarBrokerReader {
     #[expect(dead_code)]
     pulsar: Pulsar<TokioExecutor>,
     consumer: Consumer<Vec<u8>, TokioExecutor>,
-    #[expect(dead_code)]
     split: PulsarSplit,
-    #[expect(dead_code)]
     split_id: SplitId,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
@@ -212,6 +219,8 @@ impl SplitReader for PulsarBrokerReader {
             //     .await?;
         }
 
+        tracing::info!("consumer created with split {:?}", split);
+
         Ok(Self {
             pulsar,
             consumer,
@@ -234,13 +243,123 @@ impl PulsarBrokerReader {
     async fn into_data_stream(self) {
         let max_chunk_size = self.source_ctx.source_ctrl_opts.chunk_size;
         #[for_await]
-        for msgs in self.consumer.ready_chunks(max_chunk_size) {
+        for msgs in self.into_stream().await.ready_chunks(max_chunk_size) {
+            let msgs = msgs
+                .into_iter()
+                .collect::<Result<Vec<Message<Vec<u8>>>, _>>()?;
             let mut res = Vec::with_capacity(msgs.len());
             for msg in msgs {
-                let msg = SourceMessage::from(msg?);
+                let msg = SourceMessage::from(msg);
                 res.push(msg);
             }
             yield res;
         }
+    }
+
+    async fn into_stream(self) -> PulsarConsumeStream {
+        let (ack_tx, ack_rx) = tokio::sync::mpsc::unbounded_channel();
+        let channel_entry = build_pulsar_ack_channel_id(&self.source_ctx.source_id, &self.split_id);
+        PULSAR_ACK_CHANNEL
+            .entry(channel_entry)
+            .and_upsert_with(|_| std::future::ready(ack_tx))
+            .await;
+
+        PulsarConsumeStream {
+            source_ctx: self.source_ctx,
+            split_id: self.split_id,
+            pulsar_reader: self.consumer,
+            ack_rx,
+            topic: self.split.topic.to_string(),
+        }
+    }
+}
+
+struct PulsarConsumeStream {
+    source_ctx: SourceContextRef,
+    split_id: SplitId,
+    pulsar_reader: Consumer<Vec<u8>, TokioExecutor>,
+    ack_rx: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
+    topic: String,
+}
+
+impl PulsarConsumeStream {
+    fn do_ack(&mut self, message_id_bytes: Vec<u8>) {
+        let message_id = match MessageIdData::decode(message_id_bytes.as_slice()) {
+            Ok(message_id) => message_id,
+            Err(e) => {
+                tracing::warn!(
+                    error=%e.as_report(), "meet error when decode message id, skip ack"
+                );
+                return;
+            }
+        };
+        let topic = self.topic.clone();
+        tracing::info!(
+            "ack message id: {:?} from channel {}",
+            message_id,
+            build_pulsar_ack_channel_id(&self.source_ctx.source_id, &self.split_id)
+        );
+        #[cfg(not(madsim))]
+        {
+            // FIXME: madsim does not support block_on and block_in_place
+            let _ = tokio::task::block_in_place(move || {
+                tokio::runtime::Handle::current().block_on(async {
+                    self.pulsar_reader
+                        .cumulative_ack_with_id(&topic, message_id)
+                        .await
+                })
+            })
+            .map_err(|e| {
+                tracing::warn!(
+                    error=%e.as_report(), "meet error when ack message"
+                )
+            });
+        }
+    }
+}
+
+impl futures::Stream for PulsarConsumeStream {
+    type Item = Result<pulsar::consumer::Message<Vec<u8>>, pulsar::error::Error>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match (
+            self.ack_rx.poll_recv(cx),
+            self.pulsar_reader.poll_next_unpin(cx),
+        ) {
+            (Poll::Pending, Poll::Pending) => {}
+            (Poll::Ready(some_ack), Poll::Pending) => {
+                if let Some(ack_message_id) = some_ack {
+                    self.do_ack(ack_message_id);
+                }
+            }
+            (Poll::Pending, Poll::Ready(maybe_message)) => match maybe_message {
+                Some(Ok(msg)) => {
+                    return Poll::Ready(Some(Ok(msg)));
+                }
+                Some(Err(e)) => {
+                    return Poll::Ready(Some(Err(e)));
+                }
+                None => {}
+            },
+            (Poll::Ready(some_ack), Poll::Ready(maybe_message)) => {
+                if let Some(ack_message_id) = some_ack {
+                    self.do_ack(ack_message_id);
+                }
+                match maybe_message {
+                    Some(Ok(msg)) => {
+                        return Poll::Ready(Some(Ok(msg)));
+                    }
+                    Some(Err(e)) => {
+                        return Poll::Ready(Some(Err(e)));
+                    }
+                    None => {}
+                }
+            }
+        }
+
+        Poll::Pending
     }
 }

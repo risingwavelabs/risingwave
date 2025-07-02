@@ -230,7 +230,8 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
-        let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
+        // pulsar's `message_id_data_idx` is not used in this executor, so we don't need to get it.
+        let (Some(split_idx), Some(offset_idx), _) = get_split_offset_col_idx(&source_desc.columns)
         else {
             unreachable!("Partition and offset columns must be set.");
         };
@@ -406,8 +407,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 }
                                 let chunk = prune_additional_cols(
                                     &chunk,
-                                    split_idx,
-                                    offset_idx,
+                                    &[split_idx, offset_idx],
                                     &source_desc.columns,
                                 );
                                 yield Message::Chunk(chunk);
