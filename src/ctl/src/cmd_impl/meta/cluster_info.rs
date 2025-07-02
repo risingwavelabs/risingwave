@@ -16,12 +16,12 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use comfy_table::{Attribute, Cell, Row, Table};
 use itertools::Itertools;
+use risingwave_common::catalog::FragmentTypeFlag;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::source::ConnectorSplits;
-use risingwave_pb::stream_plan::FragmentTypeFlag;
 
 use crate::CtlContext;
 

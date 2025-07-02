@@ -96,14 +96,8 @@ impl Binder {
             BinaryOperator::GtEq => ExprType::GreaterThanOrEqual,
             BinaryOperator::And => ExprType::And,
             BinaryOperator::Or => ExprType::Or,
-            BinaryOperator::BitwiseOr => ExprType::BitwiseOr,
-            BinaryOperator::BitwiseAnd => ExprType::BitwiseAnd,
-            BinaryOperator::BitwiseXor => ExprType::Pow,
-            BinaryOperator::PGBitwiseXor => ExprType::BitwiseXor,
-            BinaryOperator::PGBitwiseShiftLeft => ExprType::BitwiseShiftLeft,
-            BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
-            BinaryOperator::Arrow => ExprType::JsonbAccess,
-            BinaryOperator::Contains => {
+            BinaryOperator::Pow => ExprType::Pow,
+            BinaryOperator::Custom(name) if name == "@>" => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
                 match (left_type, right_type) {
@@ -123,7 +117,7 @@ impl Binder {
                     }
                 }
             }
-            BinaryOperator::Contained => {
+            BinaryOperator::Custom(name) if name == "<@" => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
                 match (left_type, right_type) {
@@ -143,7 +137,7 @@ impl Binder {
                     }
                 }
             }
-            BinaryOperator::Concat => {
+            BinaryOperator::Custom(name) if name == "||" => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
                 match (left_type, right_type) {
@@ -181,9 +175,16 @@ impl Binder {
                     }
                 }
             }
-            BinaryOperator::PGRegexMatch => ExprType::RegexpEq,
             BinaryOperator::Custom(name) => match name.as_str() {
+                // number
+                "&" => ExprType::BitwiseAnd,
+                "|" => ExprType::BitwiseOr,
+                "#" => ExprType::BitwiseXor,
+                "<<" => ExprType::BitwiseShiftLeft,
+                ">>" => ExprType::BitwiseShiftRight,
+                // string
                 "^@" => ExprType::StartsWith,
+                "~" => ExprType::RegexpEq,
                 "~~" => ExprType::Like,
                 "~~*" => ExprType::ILike,
                 "!~" => {
@@ -198,6 +199,8 @@ impl Binder {
                     func_types.push(ExprType::Not);
                     ExprType::ILike
                 }
+                // jsonb
+                "->" => ExprType::JsonbAccess,
                 "->>" => ExprType::JsonbAccessStr,
                 "#-" => ExprType::JsonbDeletePath,
                 "#>" => ExprType::JsonbExtractPathVariadic,
@@ -209,7 +212,9 @@ impl Binder {
                 "<->" => ExprType::L2Distance,
                 _ => bail_not_implemented!(issue = 112, "binary op: {:?}", name),
             },
-            _ => bail_not_implemented!(issue = 112, "binary op: {:?}", op),
+            BinaryOperator::Xor | BinaryOperator::PGQualified(_) => {
+                bail_not_implemented!(issue = 112, "binary op: {:?}", op)
+            }
         };
         func_types.push(final_type);
         Ok(func_types)

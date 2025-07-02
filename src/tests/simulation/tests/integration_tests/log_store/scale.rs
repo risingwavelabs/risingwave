@@ -15,7 +15,7 @@
 use std::sync::atomic::Ordering::Relaxed;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use itertools::Itertools;
 use madsim::runtime::init_logger;
 use risingwave_common::hash::WorkerSlotId;
@@ -111,7 +111,8 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
             tracing::info!("ran insert amplification workload");
         }
 
-        wait_unaligned_join(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
+        realign_join(&mut cluster, UNALIGNED_MV_NAME, result_count).await?;
+        tracing::info!("realigned join");
     }
 
     // aligned join workload
@@ -120,17 +121,39 @@ async fn test_scale_in_synced_log_store() -> Result<()> {
     assert_eq!(count, result_count);
 
     // compare results
-    let mut first = ALIGNED_MV_NAME;
-    let mut second = UNALIGNED_MV_NAME;
-    for i in 0..2 {
-        let compare_sql = format!("select * from {first} except select * from {second}");
+
+    let compare_missing_result = {
+        let compare_sql =
+            format!("select * from {ALIGNED_MV_NAME} except select * from {UNALIGNED_MV_NAME}");
         let mut session = cluster.start_session();
         let result = session.run(compare_sql).await?;
         if !result.is_empty() {
-            panic!("{second} missing the following results from {first}: {result}");
+            Err(anyhow!(
+                "{UNALIGNED_MV_NAME} missing the following results from {ALIGNED_MV_NAME}: {result}"
+            ))
+        } else {
+            Ok(())
         }
-        std::mem::swap(&mut first, &mut second);
-    }
+    };
 
-    Ok(())
+    let compare_extra_result = {
+        let compare_sql =
+            format!("select * from {UNALIGNED_MV_NAME} except select * from {ALIGNED_MV_NAME}");
+        let mut session = cluster.start_session();
+        let result = session.run(compare_sql).await?;
+        if !result.is_empty() {
+            Err(anyhow!(
+                "{UNALIGNED_MV_NAME} has the following results that {ALIGNED_MV_NAME} does not: {result}"
+            ))
+        } else {
+            Ok(())
+        }
+    };
+
+    match (compare_missing_result, compare_extra_result) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(e), Ok(())) => Err(e),
+        (Ok(()), Err(e)) => Err(e),
+        (Err(e1), Err(e2)) => Err(anyhow!("missing and extra results: {e1}, {e2}")),
+    }
 }
