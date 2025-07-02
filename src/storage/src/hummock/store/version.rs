@@ -33,7 +33,7 @@ use risingwave_hummock_sdk::key::{
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::{
-    TableWatermarksIndex, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
+    PkPrefixTableWatermarksIndex, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::LevelType;
@@ -235,7 +235,7 @@ pub struct HummockReadVersion {
     /// `ReadVersion` just for that local state store.
     is_replicated: bool,
 
-    table_watermarks: Option<TableWatermarksIndex>,
+    table_watermarks: Option<PkPrefixTableWatermarksIndex>,
 
     // Vnode bitmap corresponding to the read version
     // It will be initialized after local state store init
@@ -260,15 +260,17 @@ impl HummockReadVersion {
             table_watermarks: {
                 match committed_version.table_watermarks.get(&table_id) {
                     Some(table_watermarks) => match table_watermarks.watermark_type {
-                        WatermarkSerdeType::PkPrefix => Some(TableWatermarksIndex::new_committed(
-                            table_watermarks.clone(),
-                            committed_version
-                                .state_table_info
-                                .info()
-                                .get(&table_id)
-                                .expect("should exist")
-                                .committed_epoch,
-                        )),
+                        WatermarkSerdeType::PkPrefix => {
+                            Some(PkPrefixTableWatermarksIndex::new_committed(
+                                table_watermarks.clone(),
+                                committed_version
+                                    .state_table_info
+                                    .info()
+                                    .get(&table_id)
+                                    .expect("should exist")
+                                    .committed_epoch,
+                            ))
+                        }
 
                         WatermarkSerdeType::NonPkPrefix => None, /* do not fill the non-pk prefix watermark to index */
                     },
@@ -438,7 +440,8 @@ impl HummockReadVersion {
                     }));
 
                     if let Some(committed_watermarks) =
-                        self.committed.table_watermarks.get(&self.table_id)
+                        committed_version.table_watermarks.get(&self.table_id)
+                        && let WatermarkSerdeType::PkPrefix = committed_watermarks.watermark_type
                     {
                         if let Some(watermark_index) = &mut self.table_watermarks {
                             watermark_index.apply_committed_watermarks(
@@ -446,10 +449,11 @@ impl HummockReadVersion {
                                 committed_epoch,
                             );
                         } else {
-                            self.table_watermarks = Some(TableWatermarksIndex::new_committed(
-                                committed_watermarks.clone(),
-                                committed_epoch,
-                            ));
+                            self.table_watermarks =
+                                Some(PkPrefixTableWatermarksIndex::new_committed(
+                                    committed_watermarks.clone(),
+                                    committed_epoch,
+                                ));
                         }
                     }
                 }
@@ -470,7 +474,7 @@ impl HummockReadVersion {
                         direction,
                     );
                 } else {
-                    self.table_watermarks = Some(TableWatermarksIndex::new(
+                    self.table_watermarks = Some(PkPrefixTableWatermarksIndex::new(
                         direction,
                         epoch,
                         vnode_watermarks,
