@@ -274,13 +274,13 @@ impl MergeExecutor {
                             .upstream_actor_ids()
                             .iter()
                             .any(|actor_id| dispatchers.contains_key(actor_id))
-                        {
-                            // `Watermark` of upstream may become stale after downstream scaling.
-                            select_all
-                                .buffered_watermarks
-                                .values_mut()
-                                .for_each(|buffers| buffers.clear());
-                        }
+                    {
+                        // `Watermark` of upstream may become stale after downstream scaling.
+                        select_all
+                            .buffered_watermarks
+                            .values_mut()
+                            .for_each(|buffers| buffers.clear());
+                    }
 
                     if let Some(update) =
                         barrier.as_update_merge(self.actor_context.id, self.upstream_fragment_id)

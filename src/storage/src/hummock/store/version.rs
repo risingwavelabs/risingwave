@@ -950,9 +950,10 @@ impl HummockVersionReader {
                     &user_key_range_ref,
                     *prefix_hash,
                     local_stats,
-                ) {
-                    continue;
-                }
+                )
+            {
+                continue;
+            }
 
             staging_sst_iter_count += 1;
             factory.add_staging_sst_iter(F::SstableIteratorType::create(
@@ -1002,9 +1003,10 @@ impl HummockVersionReader {
                             &user_key_range_ref,
                             *dist_hash,
                             local_stats,
-                        ) {
-                            continue;
-                        }
+                        )
+                    {
+                        continue;
+                    }
                     // Since there is only one sst to be included for the current non-overlapping
                     // level, there is no need to create a ConcatIterator on it.
                     // We put the SstableIterator in `overlapping_iters` just for convenience since
@@ -1038,9 +1040,10 @@ impl HummockVersionReader {
                             &user_key_range_ref,
                             *dist_hash,
                             local_stats,
-                        ) {
-                            continue;
-                        }
+                        )
+                    {
+                        continue;
+                    }
                     factory.add_overlapping_sst_iter(F::SstableIteratorType::create(
                         sstable,
                         self.sstable_store.clone(),

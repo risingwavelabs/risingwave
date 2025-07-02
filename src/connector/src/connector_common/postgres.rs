@@ -91,9 +91,10 @@ impl PostgresExternalTable {
             });
 
         if (*ssl_mode == SslMode::VerifyCa || *ssl_mode == SslMode::VerifyFull)
-            && let Some(root_cert) = ssl_root_cert {
-                options = options.ssl_root_cert(root_cert.as_str());
-            }
+            && let Some(root_cert) = ssl_root_cert
+        {
+            options = options.ssl_root_cert(root_cert.as_str());
+        }
 
         let connection = PgPool::connect_with(options).await?;
         let schema_discovery = SchemaDiscovery::new(connection, schema);

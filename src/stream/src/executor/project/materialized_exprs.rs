@@ -244,9 +244,10 @@ impl<S: StateStore> Inner<S> {
 
                     if let Some((_, cache_may_stale)) =
                         post_commit.post_yield_barrier(update_vnode_bitmap).await?
-                        && cache_may_stale {
-                            self.state_table.cache.clear();
-                        }
+                        && cache_may_stale
+                    {
+                        self.state_table.cache.clear();
+                    }
                 }
                 Message::Watermark(watermark) => {
                     if let Some(state_clean_col_idx) = self.state_clean_col_idx

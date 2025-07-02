@@ -213,10 +213,7 @@ fn generator_from_data_type(
     offset: u64,
 ) -> Result<FieldGeneratorImpl> {
     let random_seed_key = format!("fields.{}.seed", name);
-    let random_seed: u64 = match fields_option_map
-        .get(&random_seed_key)
-        .cloned()
-    {
+    let random_seed: u64 = match fields_option_map.get(&random_seed_key).cloned() {
         Some(seed) => {
             match seed.parse::<u64>() {
                 // we use given seed xor split_index to make sure every split has different

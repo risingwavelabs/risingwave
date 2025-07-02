@@ -133,9 +133,10 @@ fn memcmp_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> anyhow::Result<Vec<Vec<Datum
             for (i, c) in c.needed_ids.iter().enumerate() {
                 let ri = *needed_to_row.get(c).unwrap();
                 if ri != 65536
-                    && let Some(v) = &row[ri] {
-                        needed[i] = Some(v.clone());
-                    }
+                    && let Some(v) = &row[ri]
+                {
+                    needed[i] = Some(v.clone());
+                }
             }
             res.push(needed);
         }
@@ -181,9 +182,10 @@ fn basic_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> anyhow::Result<Vec<Vec<Datum>
             for (i, c) in c.needed_ids.iter().enumerate() {
                 let ri = *needed_to_row.get(c).unwrap();
                 if ri != 65536
-                    && let Some(v) = &row[ri] {
-                        needed[i] = Some(v.clone());
-                    }
+                    && let Some(v) = &row[ri]
+                {
+                    needed[i] = Some(v.clone());
+                }
             }
             res.push(needed);
         }

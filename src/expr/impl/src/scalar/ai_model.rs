@@ -98,9 +98,10 @@ impl Expression for OpenAiEmbedding {
 
         for i in 0..input.capacity() {
             if let Some(text) = text_array.value_at(i)
-                && !text.is_empty() {
-                    texts_to_embed.push(text.to_owned());
-                }
+                && !text.is_empty()
+            {
+                texts_to_embed.push(text.to_owned());
+            }
         }
         let n_texts_to_embed = texts_to_embed.len();
 

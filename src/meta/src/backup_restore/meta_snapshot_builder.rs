@@ -101,12 +101,13 @@ impl MetaSnapshotV2Builder {
                 max_log_id = Some(version_delta.id);
             }
             if let Some(max_log_id) = max_log_id
-                && max_log_id != redo_state.id {
-                    return Err(BackupError::Other(anyhow::anyhow!(format!(
-                        "inconsistent hummock version: expected {}, actual {}",
-                        max_log_id, redo_state.id
-                    ))));
-                }
+                && max_log_id != redo_state.id
+            {
+                return Err(BackupError::Other(anyhow::anyhow!(format!(
+                    "inconsistent hummock version: expected {}, actual {}",
+                    max_log_id, redo_state.id
+                ))));
+            }
             redo_state
         };
         let mut metadata = MetadataV2 {

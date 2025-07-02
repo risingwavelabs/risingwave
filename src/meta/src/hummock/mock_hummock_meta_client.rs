@@ -350,24 +350,24 @@ impl HummockMetaClient for MockHummockMetaClient {
                         table_stats_change,
                         object_timestamps,
                     }) = item.event.unwrap()
-                        && let Err(e) = hummock_manager_compact
-                            .report_compact_task(
-                                task_id,
-                                TaskStatus::try_from(task_status).unwrap(),
-                                sorted_output_ssts
-                                    .into_iter()
-                                    .map(SstableInfo::from)
-                                    .collect_vec(),
-                                Some(table_stats_change),
-                                object_timestamps
-                                    .into_iter()
-                                    .map(|(id, ts)| (id.into(), ts))
-                                    .collect(),
-                            )
-                            .await
-                        {
-                            tracing::error!(error = %e.as_report(), "report compact_tack fail");
-                        }
+                    && let Err(e) = hummock_manager_compact
+                        .report_compact_task(
+                            task_id,
+                            TaskStatus::try_from(task_status).unwrap(),
+                            sorted_output_ssts
+                                .into_iter()
+                                .map(SstableInfo::from)
+                                .collect_vec(),
+                            Some(table_stats_change),
+                            object_timestamps
+                                .into_iter()
+                                .map(|(id, ts)| (id.into(), ts))
+                                .collect(),
+                        )
+                        .await
+                {
+                    tracing::error!(error = %e.as_report(), "report compact_tack fail");
+                }
             }
         });
 

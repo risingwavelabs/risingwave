@@ -882,9 +882,10 @@ impl ScaleController {
             let mut new_actor_ids = BTreeMap::new();
             for actor in &fragment.actors {
                 if let Some(actors_to_remove) = fragment_actors_to_remove.get(fragment_id)
-                    && actors_to_remove.contains_key(&actor.actor_id) {
-                        continue;
-                    }
+                    && actors_to_remove.contains_key(&actor.actor_id)
+                {
+                    continue;
+                }
                 let worker_id = ctx.actor_id_to_worker_id(&actor.actor_id)?;
                 new_actor_ids.insert(actor.actor_id as ActorId, worker_id);
             }
@@ -1111,20 +1112,21 @@ impl ScaleController {
         for fragment_id in reschedules.keys() {
             if ctx.no_shuffle_source_fragment_ids.contains(fragment_id)
                 && !ctx.no_shuffle_target_fragment_ids.contains(fragment_id)
-                && let Some(downstream_fragments) = ctx.fragment_dispatcher_map.get(fragment_id) {
-                    for downstream_fragment_id in downstream_fragments.keys() {
-                        arrange_no_shuffle_relation(
-                            &ctx,
-                            downstream_fragment_id,
-                            fragment_id,
-                            &fragment_actors_after_reschedule,
-                            &mut actor_group_map,
-                            &mut fragment_actor_bitmap,
-                            &mut no_shuffle_upstream_actor_map,
-                            &mut no_shuffle_downstream_actors_map,
-                        );
-                    }
+                && let Some(downstream_fragments) = ctx.fragment_dispatcher_map.get(fragment_id)
+            {
+                for downstream_fragment_id in downstream_fragments.keys() {
+                    arrange_no_shuffle_relation(
+                        &ctx,
+                        downstream_fragment_id,
+                        fragment_id,
+                        &fragment_actors_after_reschedule,
+                        &mut actor_group_map,
+                        &mut fragment_actor_bitmap,
+                        &mut no_shuffle_upstream_actor_map,
+                        &mut no_shuffle_downstream_actors_map,
+                    );
                 }
+            }
         }
 
         tracing::debug!("actor group map {:?}", actor_group_map);
@@ -1335,9 +1337,10 @@ impl ScaleController {
                             let bitmap = vnode_bitmap_updates.get(actor_id).unwrap();
 
                             if let Some(prev_bitmap) = actor.vnode_bitmap.as_ref()
-                                && prev_bitmap.eq(bitmap) {
-                                    vnode_bitmap_updates.remove(actor_id);
-                                }
+                                && prev_bitmap.eq(bitmap)
+                            {
+                                vnode_bitmap_updates.remove(actor_id);
+                            }
                         }
                     }
 
@@ -1557,10 +1560,10 @@ impl ScaleController {
             if let Some(mapping) = dispatcher.hash_mapping.as_mut()
                 && let Some(downstream_updated_bitmap) =
                     fragment_actor_bitmap.get(&downstream_fragment_id)
-                {
-                    // If downstream scale in/out
-                    *mapping = ActorMapping::from_bitmaps(downstream_updated_bitmap).to_protobuf();
-                }
+            {
+                // If downstream scale in/out
+                *mapping = ActorMapping::from_bitmaps(downstream_updated_bitmap).to_protobuf();
+            }
         }
 
         Ok(())

@@ -452,9 +452,10 @@ impl VectorFileBuilder {
 
     pub async fn try_flush(&mut self) -> HummockResult<()> {
         if let Some((builder, _)) = &self.building_block
-            && builder.encoded_len() >= self.max_block_size {
-                self.flush_inner().await?;
-            }
+            && builder.encoded_len() >= self.max_block_size
+        {
+            self.flush_inner().await?;
+        }
         Ok(())
     }
 

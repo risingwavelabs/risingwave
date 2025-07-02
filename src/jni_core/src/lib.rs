@@ -262,7 +262,6 @@ mod opaque_type {
     // TODO: may only return a RowRef
     pub type StreamChunkRowIterator<'a> = impl Iterator<Item = (Op, OwnedRow)> + 'a;
 
-
     impl<'a> JavaBindingIteratorInner<'a> {
         #[define_opaque(StreamChunkRowIterator)]
         pub(super) fn from_chunk(chunk: &'a StreamChunk) -> JavaBindingIteratorInner<'a> {

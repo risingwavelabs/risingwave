@@ -284,9 +284,10 @@ pub fn build_graph_from_pretty(
             .or_insert_with(|| graph.add_node(label.clone()));
 
         if let Some(parent_label) = parent_label
-            && let Some(&parent_node) = nodes.get(parent_label) {
-                graph.add_edge(parent_node, current_node, "".to_owned());
-            }
+            && let Some(&parent_node) = nodes.get(parent_label)
+        {
+            graph.add_edge(parent_node, current_node, "".to_owned());
+        }
 
         for child in &r.children {
             build_graph_from_pretty(child, graph, nodes, Some(&label));

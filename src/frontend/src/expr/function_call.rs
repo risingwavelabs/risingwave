@@ -422,8 +422,9 @@ fn explain_verbose_binary_op(
 
 pub fn is_row_function(expr: &ExprImpl) -> bool {
     if let ExprImpl::FunctionCall(func) = expr
-        && func.func_type() == ExprType::Row {
-            return true;
-        }
+        && func.func_type() == ExprType::Row
+    {
+        return true;
+    }
     false
 }

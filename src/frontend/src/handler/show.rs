@@ -126,7 +126,7 @@ fn schema_or_search_path(
                 if s.eq(USER_NAME_WILD_CARD) {
                     session.user_name()
                 } else {
-                    s.to_string()
+                    s.clone()
                 }
             })
             .collect()

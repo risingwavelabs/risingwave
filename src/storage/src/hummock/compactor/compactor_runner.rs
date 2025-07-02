@@ -304,11 +304,12 @@ pub fn partition_overlapping_sstable_infos(
             && KeyComparator::encoded_full_key_less_than(
                 &prev_group.max_right_bound,
                 &sst.key_range.left,
-            ) {
-                prev_group.max_right_bound.clone_from(&sst.key_range.right);
-                prev_group.ssts.push(sst);
-                continue;
-            }
+            )
+        {
+            prev_group.max_right_bound.clone_from(&sst.key_range.right);
+            prev_group.ssts.push(sst);
+            continue;
+        }
         groups.push(SstableGroup {
             max_right_bound: sst.key_range.right.clone(),
             ssts: vec![sst],

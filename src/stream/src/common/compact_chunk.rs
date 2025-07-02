@@ -135,22 +135,24 @@ impl<'a, 'b> RowOpMap<'a, 'b> {
                 }
                 RowOp::Insert(_) => {
                     if self.warn_for_inconsistent_stream
-                        && let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                            tracing::warn!(
-                                suppressed_count,
-                                "double insert for the same pk, breaking the sink's pk constraint"
-                            );
-                        }
+                        && let Ok(suppressed_count) = LOG_SUPPERSSER.check()
+                    {
+                        tracing::warn!(
+                            suppressed_count,
+                            "double insert for the same pk, breaking the sink's pk constraint"
+                        );
+                    }
                     e.insert(RowOp::Insert(v));
                 }
                 RowOp::Update((old_v, _)) => {
                     if self.warn_for_inconsistent_stream
-                        && let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                            tracing::warn!(
-                                suppressed_count,
-                                "double insert for the same pk, breaking the sink's pk constraint"
-                            );
-                        }
+                        && let Ok(suppressed_count) = LOG_SUPPERSSER.check()
+                    {
+                        tracing::warn!(
+                            suppressed_count,
+                            "double insert for the same pk, breaking the sink's pk constraint"
+                        );
+                    }
                     e.insert(RowOp::Update((*old_v, v)));
                 }
             },
@@ -172,9 +174,10 @@ impl<'a, 'b> RowOpMap<'a, 'b> {
                 }
                 RowOp::Delete(_) => {
                     if self.warn_for_inconsistent_stream
-                        && let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                            tracing::warn!(suppressed_count, "double delete for the same pk");
-                        }
+                        && let Ok(suppressed_count) = LOG_SUPPERSSER.check()
+                    {
+                        tracing::warn!(suppressed_count, "double delete for the same pk");
+                    }
                     e.insert(RowOp::Delete(v));
                 }
             },

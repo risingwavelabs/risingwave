@@ -211,9 +211,9 @@ impl CatalogController {
                         &txn,
                     )
                     .await?
-                    {
-                        bail!("Creating such a sink will result in circular dependency.");
-                    }
+                {
+                    bail!("Creating such a sink will result in circular dependency.");
+                }
 
                 let job_id = Self::create_streaming_job_obj(
                     &txn,
@@ -1437,11 +1437,11 @@ impl CatalogController {
                 visit_stream_node_mut(stream_node, |node| {
                     if let PbNodeBody::Source(node) = node
                         && let Some(node_inner) = &mut node.source_inner
-                            && node_inner.source_id == source_id as u32
-                        {
-                            node_inner.rate_limit = rate_limit;
-                            found = true;
-                        }
+                        && node_inner.source_id == source_id as u32
+                    {
+                        node_inner.rate_limit = rate_limit;
+                        found = true;
+                    }
                 });
             }
             if is_fs_source {

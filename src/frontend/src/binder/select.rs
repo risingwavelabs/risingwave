@@ -312,13 +312,14 @@ impl Binder {
 
         if let Some(Relation::Share(bound)) = &from
             && matches!(bound.input, BoundShareInput::ChangeLog(_))
-                && fields.iter().filter(|&x| x.name.eq(CHANGELOG_OP)).count() > 1
-            {
-                return Err(ErrorCode::BindError(
-                    "The source table of changelog cannot have `changelog_op`, please rename it first".to_owned()
-                )
-                .into());
-            }
+            && fields.iter().filter(|&x| x.name.eq(CHANGELOG_OP)).count() > 1
+        {
+            return Err(ErrorCode::BindError(
+                "The source table of changelog cannot have `changelog_op`, please rename it first"
+                    .to_owned(),
+            )
+            .into());
+        }
 
         Ok(BoundSelect {
             distinct,

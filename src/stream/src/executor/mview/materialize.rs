@@ -310,9 +310,10 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     // Update the vnode bitmap for the state table if asked.
                     if let Some((_, cache_may_stale)) =
                         post_commit.post_yield_barrier(update_vnode_bitmap).await?
-                        && cache_may_stale {
-                            self.materialize_cache.lru_cache.clear();
-                        }
+                        && cache_may_stale
+                    {
+                        self.materialize_cache.lru_cache.clear();
+                    }
 
                     self.metrics
                         .materialize_current_epoch

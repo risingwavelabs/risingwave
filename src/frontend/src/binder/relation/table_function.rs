@@ -95,13 +95,14 @@ impl Binder {
         let func = func?;
 
         if let ExprImpl::TableFunction(func) = &func
-            && func.args.iter().any(|arg| arg.has_subquery()) {
-                // Same error reports as DuckDB.
-                return Err(ErrorCode::InvalidInputSyntax(
+            && func.args.iter().any(|arg| arg.has_subquery())
+        {
+            // Same error reports as DuckDB.
+            return Err(ErrorCode::InvalidInputSyntax(
                     format!("Only table-in-out functions can have subquery parameters. The table function has subquery parameters is {}", func.name()),
                 )
                     .into());
-            }
+        }
 
         // bool indicates if the field is hidden
         let mut columns = if let DataType::Struct(s) = func.return_type() {

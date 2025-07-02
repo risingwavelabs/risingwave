@@ -656,7 +656,6 @@ mod retry_strategy {
     // MrCroxx: Use concrete type here to prevent unsolved compiler issue.
     // Feel free to replace the concrete type with TAIT after fixed.
 
-    //
     // mod retry_backoff_future {
     //     use std::future::Future;
     //     use std::time::Duration;

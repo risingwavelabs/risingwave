@@ -592,9 +592,9 @@ impl LogicalAggBuilder {
                 .group_key
                 .indices()
                 .position(|group_key| group_key == input_index)
-            {
-                return Some(index);
-            }
+        {
+            return Some(index);
+        }
         None
     }
 

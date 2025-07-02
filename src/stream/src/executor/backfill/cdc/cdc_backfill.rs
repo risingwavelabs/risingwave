@@ -498,15 +498,15 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     // events before `last_binlog_offset`.
                                     if let Some(last_binlog_offset) = last_binlog_offset.as_ref()
                                         && let Some(chunk_offset) = chunk_binlog_offset
-                                            && chunk_offset < *last_binlog_offset
-                                        {
-                                            tracing::trace!(
-                                                "skip changelog chunk: chunk_offset {:?}, capacity {}",
-                                                chunk_offset,
-                                                chunk.capacity()
-                                            );
-                                            continue;
-                                        }
+                                        && chunk_offset < *last_binlog_offset
+                                    {
+                                        tracing::trace!(
+                                            "skip changelog chunk: chunk_offset {:?}, capacity {}",
+                                            chunk_offset,
+                                            chunk.capacity()
+                                        );
+                                        continue;
+                                    }
                                     // Buffer the upstream chunk.
                                     upstream_chunk_buffer.push(chunk.compact());
                                 }

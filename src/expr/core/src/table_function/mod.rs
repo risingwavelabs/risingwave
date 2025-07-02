@@ -233,15 +233,16 @@ impl<'a> TableFunctionOutputIter<'a> {
 /// Checks if the output chunk returned by `TableFunction::eval` contains any error.
 pub fn check_error(chunk: &DataChunk) -> Result<()> {
     if let Some(errors) = chunk.columns().get(2)
-        && errors.null_bitmap().any() {
-            return Err(ExprError::Custom(
-                errors
-                    .as_utf8()
-                    .iter()
-                    .find_map(|s| s)
-                    .expect("no error message")
-                    .into(),
-            ));
-        }
+        && errors.null_bitmap().any()
+    {
+        return Err(ExprError::Custom(
+            errors
+                .as_utf8()
+                .iter()
+                .find_map(|s| s)
+                .expect("no error message")
+                .into(),
+        ));
+    }
     Ok(())
 }

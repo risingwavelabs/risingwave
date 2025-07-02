@@ -146,9 +146,10 @@ impl Sender {
         };
 
         if let Some(permits) = &permits
-            && self.permits.acquire_permits(permits).await.is_err() {
-                return Err(mpsc::error::SendError(message));
-            }
+            && self.permits.acquire_permits(permits).await.is_err()
+        {
+            return Err(mpsc::error::SendError(message));
+        }
 
         self.tx
             .send(MessageWithPermits { message, permits })

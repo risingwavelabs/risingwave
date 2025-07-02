@@ -259,7 +259,7 @@ impl TableFunction {
                         let mut rw_types = vec![];
                         for field in &fields {
                             rw_types.push((
-                                field.name().to_string(),
+                                field.name().clone(),
                                 IcebergArrowConvert.type_from_field(field)?,
                             ));
                         }

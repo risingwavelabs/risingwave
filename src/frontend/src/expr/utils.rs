@@ -268,9 +268,10 @@ impl ExprRewriter for BooleanConstantFolding {
 /// return None. Otherwise it will return the boolean value.
 pub fn try_get_bool_constant(expr: &ExprImpl) -> Option<bool> {
     if let ExprImpl::Literal(l) = expr
-        && let Some(ScalarImpl::Bool(v)) = l.get_data() {
-            return Some(*v);
-        }
+        && let Some(ScalarImpl::Bool(v)) = l.get_data()
+    {
+        return Some(*v);
+    }
     None
 }
 

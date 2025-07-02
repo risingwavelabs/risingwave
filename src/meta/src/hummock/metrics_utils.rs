@@ -207,10 +207,11 @@ pub fn trigger_sst_stat(
     }
 
     if compacting_task_stat.is_empty()
-        && let Some(levels) = current_version.levels.get(&compaction_group_id) {
-            let max_level = levels.levels.len();
-            remove_compacting_task_stat(metrics, compaction_group_id, max_level);
-        }
+        && let Some(levels) = current_version.levels.get(&compaction_group_id)
+    {
+        let max_level = levels.levels.len();
+        remove_compacting_task_stat(metrics, compaction_group_id, max_level);
+    }
 
     {
         // sub level stat
@@ -293,20 +294,21 @@ pub fn trigger_sst_stat(
                 Ordering::Relaxed,
             )
             .is_ok()
-        && let Some(compact_status) = compact_status {
-            for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
-                let sst_num = level_sst_cnt(idx);
-                let sst_size = level_sst_size(idx);
-                let compact_cnt = level_handler.pending_file_count();
-                tracing::info!(
-                    "Level {} has {} SSTs, the total size of which is {}KB, while {} of those are being compacted to bottom levels",
-                    idx,
-                    sst_num,
-                    sst_size,
-                    compact_cnt,
-                );
-            }
+        && let Some(compact_status) = compact_status
+    {
+        for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
+            let sst_num = level_sst_cnt(idx);
+            let sst_size = level_sst_size(idx);
+            let compact_cnt = level_handler.pending_file_count();
+            tracing::info!(
+                "Level {} has {} SSTs, the total size of which is {}KB, while {} of those are being compacted to bottom levels",
+                idx,
+                sst_num,
+                sst_size,
+                compact_cnt,
+            );
         }
+    }
 }
 
 pub fn trigger_epoch_stat(metrics: &MetaMetrics, version: &HummockVersion) {

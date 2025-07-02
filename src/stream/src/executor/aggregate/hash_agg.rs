@@ -465,9 +465,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     vars.stats.merge_state_cache_stats(stats);
 
                     if let Some(change) = change
-                        && let Some(chunk) = vars.chunk_builder.append_record(change) {
-                            yield chunk;
-                        }
+                        && let Some(chunk) = vars.chunk_builder.append_record(change)
+                    {
+                        yield chunk;
+                    }
                 }
             }
         } else {
@@ -481,9 +482,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 vars.stats.merge_state_cache_stats(stats);
 
                 if let Some(change) = change
-                    && let Some(chunk) = vars.chunk_builder.append_record(change) {
-                        yield chunk;
-                    }
+                    && let Some(chunk) = vars.chunk_builder.append_record(change)
+                {
+                    yield chunk;
+                }
             }
         }
 

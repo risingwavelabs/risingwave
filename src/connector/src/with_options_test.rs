@@ -238,13 +238,13 @@ fn extract_comments(attrs: &[Attribute]) -> String {
         .filter_map(|attr| {
             if let Meta::NameValue(mnv) = &attr.meta
                 && mnv.path.is_ident("doc")
-                    && let syn::Expr::Lit(syn::ExprLit {
-                        lit: Lit::Str(lit_str),
-                        ..
-                    }) = &mnv.value
-                    {
-                        return Some(lit_str.value().trim().to_owned());
-                    }
+                && let syn::Expr::Lit(syn::ExprLit {
+                    lit: Lit::Str(lit_str),
+                    ..
+                }) = &mnv.value
+            {
+                return Some(lit_str.value().trim().to_owned());
+            }
             None
         })
         .collect::<Vec<_>>()
@@ -256,45 +256,46 @@ fn extract_comments(attrs: &[Attribute]) -> String {
 fn extract_serde_properties(field: &Field) -> SerdeProperties {
     for attr in &field.attrs {
         if let Meta::List(meta_list) = &attr.meta
-            && meta_list.path.is_ident("serde") {
-                // Initialize the values to be extracted
-                let mut serde_props = SerdeProperties::default();
+            && meta_list.path.is_ident("serde")
+        {
+            // Initialize the values to be extracted
+            let mut serde_props = SerdeProperties::default();
 
-                // Iterate over nested meta items (e.g., rename = "abc")
-                meta_list
-                    .parse_nested_meta(|meta| {
-                        if meta.path.is_ident("rename") {
-                            if let Ok(value) = meta.value()?.parse::<LitStr>() {
-                                serde_props.rename = Some(value.value());
-                            }
-                        } else if meta.path.is_ident("alias") {
-                            if let Ok(value) = meta.value()?.parse::<LitStr>() {
-                                serde_props.alias.push(value.value());
-                            }
-                        } else if meta.path.is_ident("default") {
-                            if let Ok(value) = meta.value().and_then(|v| v.parse::<LitStr>()) {
-                                serde_props.default_func = Some(value.value());
-                            } else {
-                                serde_props.default_func = Some("Default::default".to_owned());
-                            }
+            // Iterate over nested meta items (e.g., rename = "abc")
+            meta_list
+                .parse_nested_meta(|meta| {
+                    if meta.path.is_ident("rename") {
+                        if let Ok(value) = meta.value()?.parse::<LitStr>() {
+                            serde_props.rename = Some(value.value());
                         }
-                        // drain the remaining meta. Otherwise parse_nested_meta returns err
-                        // <https://github.com/dtolnay/syn/issues/1426>
-                        _ = meta.value();
-                        _ = meta.input.parse::<LitStr>();
-                        Ok(())
-                    })
-                    .unwrap_or_else(|err| {
-                        panic!(
-                            "Failed to parse serde properties for field: {:?}, err: {}",
-                            field.ident,
-                            err.to_report_string(),
-                        )
-                    });
+                    } else if meta.path.is_ident("alias") {
+                        if let Ok(value) = meta.value()?.parse::<LitStr>() {
+                            serde_props.alias.push(value.value());
+                        }
+                    } else if meta.path.is_ident("default") {
+                        if let Ok(value) = meta.value().and_then(|v| v.parse::<LitStr>()) {
+                            serde_props.default_func = Some(value.value());
+                        } else {
+                            serde_props.default_func = Some("Default::default".to_owned());
+                        }
+                    }
+                    // drain the remaining meta. Otherwise parse_nested_meta returns err
+                    // <https://github.com/dtolnay/syn/issues/1426>
+                    _ = meta.value();
+                    _ = meta.input.parse::<LitStr>();
+                    Ok(())
+                })
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "Failed to parse serde properties for field: {:?}, err: {}",
+                        field.ident,
+                        err.to_report_string(),
+                    )
+                });
 
-                // Return the extracted values
-                return serde_props;
-            }
+            // Return the extracted values
+            return serde_props;
+        }
     }
     SerdeProperties::default()
 }
@@ -360,9 +361,10 @@ fn flatten_struct(
 // For HashMap<K, V>, return HashMap.
 fn extract_type_name(ty: &Type) -> String {
     if let Type::Path(typepath) = ty
-        && let Some(segment) = typepath.path.segments.last() {
-            return segment.ident.to_string();
-        }
+        && let Some(segment) = typepath.path.segments.last()
+    {
+        return segment.ident.to_string();
+    }
     panic!("Failed to extract type name: {}", quote::quote!(#ty));
 }
 

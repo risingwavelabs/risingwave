@@ -152,19 +152,20 @@ impl Inner {
                 Message::Chunk(chunk) => match self.map_filter_chunk(chunk).await? {
                     Some(new_chunk) => {
                         if !self.nondecreasing_expr_indices.is_empty()
-                            && let Some((_, first_visible_row)) = new_chunk.rows().next() {
-                                // it's ok to use the first row here, just one chunk delay
-                                first_visible_row
-                                    .project(&self.nondecreasing_expr_indices)
-                                    .iter()
-                                    .enumerate()
-                                    .for_each(|(idx, value)| {
-                                        self.last_nondec_expr_values[idx] =
-                                            Some(value.to_owned_datum().expect(
-                                                "non-decreasing expression should never be NULL",
-                                            ));
-                                    });
-                            }
+                            && let Some((_, first_visible_row)) = new_chunk.rows().next()
+                        {
+                            // it's ok to use the first row here, just one chunk delay
+                            first_visible_row
+                                .project(&self.nondecreasing_expr_indices)
+                                .iter()
+                                .enumerate()
+                                .for_each(|(idx, value)| {
+                                    self.last_nondec_expr_values[idx] =
+                                        Some(value.to_owned_datum().expect(
+                                            "non-decreasing expression should never be NULL",
+                                        ));
+                                });
+                        }
                         yield Message::Chunk(new_chunk)
                     }
                     None => continue,

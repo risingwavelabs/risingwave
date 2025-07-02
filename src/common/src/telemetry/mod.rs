@@ -179,9 +179,10 @@ pub async fn report_to_scarf() {
     loop {
         let res = reqwest::get(&request_url).await;
         if let Ok(res) = res
-            && res.status().is_success() {
-                break;
-            }
+            && res.status().is_success()
+        {
+            break;
+        }
         tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
     }
 }

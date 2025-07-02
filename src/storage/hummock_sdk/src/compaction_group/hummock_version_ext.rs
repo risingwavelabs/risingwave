@@ -1344,9 +1344,10 @@ pub fn insert_new_sub_level(
     #[cfg(debug_assertions)]
     {
         if insert_pos > 0
-            && let Some(smaller_level) = l0.sub_levels.get(insert_pos - 1) {
-                debug_assert!(smaller_level.sub_level_id < insert_sub_level_id);
-            }
+            && let Some(smaller_level) = l0.sub_levels.get(insert_pos - 1)
+        {
+            debug_assert!(smaller_level.sub_level_id < insert_sub_level_id);
+        }
         if let Some(larger_level) = l0.sub_levels.get(insert_pos) {
             debug_assert!(larger_level.sub_level_id > insert_sub_level_id);
         }
@@ -1551,12 +1552,12 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
                             .key_range
                             .compare_right_with(&table_info.key_range.left)
                             != Ordering::Less
-                        {
-                            res.push(format!(
-                                "{} SST {}: key range should not overlap. prev={:?}, cur={:?}",
-                                level_identifier, table_info.object_id, prev, table_info
-                            ));
-                        }
+                    {
+                        res.push(format!(
+                            "{} SST {}: key range should not overlap. prev={:?}, cur={:?}",
+                            level_identifier, table_info.object_id, prev, table_info
+                        ));
+                    }
                     let _ = prev_table_info.insert(table_info);
                 }
             }

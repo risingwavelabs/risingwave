@@ -269,20 +269,21 @@ impl Inner {
         chunk: &StreamChunk,
     ) {
         if !self.nondecreasing_expr_indices.is_empty()
-            && let Some((_, first_visible_row)) = chunk.rows().next() {
-                // it's ok to use the first row here, just one chunk delay
-                first_visible_row
-                    .project(&self.nondecreasing_expr_indices)
-                    .iter()
-                    .enumerate()
-                    .for_each(|(idx, value)| {
-                        last_nondec_expr_values[idx] = Some(
-                            value
-                                .to_owned_datum()
-                                .expect("non-decreasing expression should never be NULL"),
-                        );
-                    });
-            }
+            && let Some((_, first_visible_row)) = chunk.rows().next()
+        {
+            // it's ok to use the first row here, just one chunk delay
+            first_visible_row
+                .project(&self.nondecreasing_expr_indices)
+                .iter()
+                .enumerate()
+                .for_each(|(idx, value)| {
+                    last_nondec_expr_values[idx] = Some(
+                        value
+                            .to_owned_datum()
+                            .expect("non-decreasing expression should never be NULL"),
+                    );
+                });
+        }
     }
 
     async fn handle_watermark(&self, watermark: Watermark) -> StreamExecutorResult<Vec<Watermark>> {

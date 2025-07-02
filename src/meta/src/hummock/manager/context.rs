@@ -220,15 +220,16 @@ impl HummockManager {
         // sanity check on monotonically increasing table committed epoch
         for (table_id, committed_epoch) in tables_to_commit {
             if let Some(info) = current_version.state_table_info.info().get(table_id)
-                && *committed_epoch <= info.committed_epoch {
-                    return Err(anyhow::anyhow!(
-                        "table {} Epoch {} <= committed_epoch {}",
-                        table_id,
-                        committed_epoch,
-                        info.committed_epoch,
-                    )
-                    .into());
-                }
+                && *committed_epoch <= info.committed_epoch
+            {
+                return Err(anyhow::anyhow!(
+                    "table {} Epoch {} <= committed_epoch {}",
+                    table_id,
+                    committed_epoch,
+                    info.committed_epoch,
+                )
+                .into());
+            }
         }
 
         // HummockManager::now requires a write to the meta store. Thus, it should be avoided whenever feasible.

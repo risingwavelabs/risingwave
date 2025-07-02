@@ -160,10 +160,10 @@ impl BuildingFragment {
             NodeBody::StreamFsFetch(fs_fetch_node) => {
                 if let StreamingJob::Table(table_source, _, _) = job
                     && let Some(node_inner) = fs_fetch_node.node_inner.as_mut()
-                        && let Some(source) = table_source
-                    {
-                        node_inner.source_id = source.id;
-                    }
+                    && let Some(source) = table_source
+                {
+                    node_inner.source_id = source.id;
+                }
             }
             NodeBody::Source(source_node) => {
                 match job {
@@ -171,10 +171,11 @@ impl BuildingFragment {
                     // Note: For table with connector, it's source node has a source id different with the table id (job id), assigned in create_job_catalog.
                     StreamingJob::Table(source, _table, _table_job_type) => {
                         if let Some(source_inner) = source_node.source_inner.as_mut()
-                            && let Some(source) = source {
-                                debug_assert_ne!(source.id, job_id);
-                                source_inner.source_id = source.id;
-                            }
+                            && let Some(source) = source
+                        {
+                            debug_assert_ne!(source.id, job_id);
+                            source_inner.source_id = source.id;
+                        }
                     }
                     StreamingJob::Source(source) => {
                         has_job = true;

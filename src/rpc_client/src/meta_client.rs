@@ -373,14 +373,15 @@ impl MetaClient {
         let request = HeartbeatRequest { node_id };
         let resp = self.inner.heartbeat(request).await?;
         if let Some(status) = resp.status
-            && status.code() == risingwave_pb::common::status::Code::UnknownWorker {
-                // Ignore the error if we're already shutting down.
-                // Otherwise, exit the process.
-                if !self.shutting_down.load(Relaxed) {
-                    tracing::error!(message = status.message, "worker expired");
-                    std::process::exit(1);
-                }
+            && status.code() == risingwave_pb::common::status::Code::UnknownWorker
+        {
+            // Ignore the error if we're already shutting down.
+            // Otherwise, exit the process.
+            if !self.shutting_down.load(Relaxed) {
+                tracing::error!(message = status.message, "worker expired");
+                std::process::exit(1);
             }
+        }
         Ok(())
     }
 

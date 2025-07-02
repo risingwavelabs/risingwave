@@ -534,13 +534,14 @@ impl HummockManager {
                     && let Err(err) = compaction_groups_txn.update_compaction_config(
                         &[*cg_id],
                         &[MutableConfig::SplitWeightByVnode(partition_vnode_count)],
-                    ) {
-                        tracing::error!(
-                            error = %err.as_report(),
-                            "failed to update compaction config for group-{}",
-                            cg_id
-                        );
-                    }
+                    )
+                {
+                    tracing::error!(
+                        error = %err.as_report(),
+                        "failed to update compaction config for group-{}",
+                        cg_id
+                    );
+                }
             }
 
             new_version_delta.pre_apply();

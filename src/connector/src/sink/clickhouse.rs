@@ -146,12 +146,8 @@ impl ClickHouseEngine {
     pub fn get_sign_name(&self) -> Option<String> {
         match self {
             ClickHouseEngine::CollapsingMergeTree(sign_name) => Some(sign_name.clone()),
-            ClickHouseEngine::VersionedCollapsingMergeTree(sign_name) => {
-                Some(sign_name.clone())
-            }
-            ClickHouseEngine::ReplicatedCollapsingMergeTree(sign_name) => {
-                Some(sign_name.clone())
-            }
+            ClickHouseEngine::VersionedCollapsingMergeTree(sign_name) => Some(sign_name.clone()),
+            ClickHouseEngine::ReplicatedCollapsingMergeTree(sign_name) => Some(sign_name.clone()),
             ClickHouseEngine::ReplicatedVersionedCollapsingMergeTree(sign_name) => {
                 Some(sign_name.clone())
             }

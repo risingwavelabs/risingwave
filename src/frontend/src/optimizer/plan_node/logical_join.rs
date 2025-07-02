@@ -1519,9 +1519,10 @@ impl ToBatch for LogicalJoin {
                 && let Some(lookup_join) = self.to_batch_lookup_join_with_index_selection(
                     predicate.clone(),
                     logical_join.clone(),
-                )? {
-                    return Ok(lookup_join.into());
-                }
+                )?
+            {
+                return Ok(lookup_join.into());
+            }
             self.to_batch_hash_join(logical_join, predicate)
         } else if self.is_asof_join() {
             Err(ErrorCode::InvalidInputSyntax(

@@ -41,9 +41,9 @@ fn pg_indexes_size_impl(catalog: &CatalogReader, db_name: &str, oid: i32) -> Res
                     .table_stats()
                     .table_stats
                     .get(&index.primary_table.id().table_id)
-                {
-                    sum += table_stats.total_key_size + table_stats.total_value_size;
-                }
+            {
+                sum += table_stats.total_key_size + table_stats.total_value_size;
+            }
         }
     }
     Ok(sum)

@@ -977,18 +977,19 @@ impl DatabaseCheckpointControl {
         }
 
         if let Some(Command::RescheduleFragment { .. }) = &command
-            && !self.creating_streaming_job_controls.is_empty() {
-                warn!("ignore reschedule when creating streaming job with snapshot backfill");
-                for notifier in notifiers {
-                    notifier.notify_start_failed(
+            && !self.creating_streaming_job_controls.is_empty()
+        {
+            warn!("ignore reschedule when creating streaming job with snapshot backfill");
+            for notifier in notifiers {
+                notifier.notify_start_failed(
                         anyhow!(
                             "cannot reschedule when creating streaming job with snapshot backfill",
                         )
                         .into(),
                     );
-                }
-                return Ok(());
             }
+            return Ok(());
+        }
 
         let Some(barrier_info) =
             self.state

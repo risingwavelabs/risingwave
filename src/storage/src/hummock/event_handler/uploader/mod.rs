@@ -604,22 +604,23 @@ impl LocalInstanceUnsyncData {
         // reverse so that newer data comes first
         ret.reverse();
         if let Some(latest_epoch_data) = &self.current_epoch_data
-            && latest_epoch_data.epoch <= epoch {
-                assert!(self.sealed_data.is_empty());
-                assert!(latest_epoch_data.is_empty());
-                assert!(!latest_epoch_data.has_spilled);
-                if cfg!(debug_assertions) {
-                    panic!(
-                        "sync epoch exceeds latest epoch, and the current instance should have been archived"
-                    );
-                }
-                warn!(
-                    instance_id = self.instance_id,
-                    table_id = self.table_id.table_id,
-                    "sync epoch exceeds latest epoch, and the current instance should have be archived"
+            && latest_epoch_data.epoch <= epoch
+        {
+            assert!(self.sealed_data.is_empty());
+            assert!(latest_epoch_data.is_empty());
+            assert!(!latest_epoch_data.has_spilled);
+            if cfg!(debug_assertions) {
+                panic!(
+                    "sync epoch exceeds latest epoch, and the current instance should have been archived"
                 );
-                self.current_epoch_data = None;
             }
+            warn!(
+                instance_id = self.instance_id,
+                table_id = self.table_id.table_id,
+                "sync epoch exceeds latest epoch, and the current instance should have be archived"
+            );
+            self.current_epoch_data = None;
+        }
         ret
     }
 
@@ -628,9 +629,10 @@ impl LocalInstanceUnsyncData {
             assert!(!oldest_sealed_data.imms.is_empty());
             assert_gt!(oldest_sealed_data.epoch, epoch);
         } else if let Some(current_data) = &self.current_epoch_data
-            && current_data.epoch <= epoch {
-                assert!(current_data.imms.is_empty() && !current_data.has_spilled);
-            }
+            && current_data.epoch <= epoch
+        {
+            assert!(current_data.imms.is_empty() && !current_data.has_spilled);
+        }
     }
 
     fn is_finished(&self) -> bool {

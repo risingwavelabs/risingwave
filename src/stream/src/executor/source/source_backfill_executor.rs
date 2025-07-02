@@ -727,20 +727,20 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                                 to_apply_mutation,
                                             )
                                             .await?
-                                        {
-                                            let reader = rebuild_reader_on_split_changed(
-                                                &self,
-                                                &backfill_stage,
-                                                &source_desc,
-                                            )
-                                            .await?;
+                                    {
+                                        let reader = rebuild_reader_on_split_changed(
+                                            &self,
+                                            &backfill_stage,
+                                            &source_desc,
+                                        )
+                                        .await?;
 
-                                            backfill_stream = select_with_strategy(
-                                                input.by_ref().map(Either::Left),
-                                                reader.map(Either::Right),
-                                                select_strategy,
-                                            );
-                                        }
+                                        backfill_stream = select_with_strategy(
+                                            input.by_ref().map(Either::Left),
+                                            reader.map(Either::Right),
+                                            select_strategy,
+                                        );
+                                    }
                                 }
                             }
                             Message::Chunk(chunk) => {
