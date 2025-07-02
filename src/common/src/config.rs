@@ -1254,6 +1254,9 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::streaming_hash_join_entry_state_max_rows")]
     pub hash_join_entry_state_max_rows: usize,
 
+    #[serde(default = "default::developer::streaming_now_progress_ratio")]
+    pub now_progress_ratio: Option<f32>,
+
     /// Enable / Disable profiling stats used by `EXPLAIN ANALYZE`
     #[serde(default = "default::developer::enable_explain_analyze_stats")]
     pub enable_explain_analyze_stats: bool,
@@ -2315,6 +2318,10 @@ pub mod default {
         pub fn streaming_hash_join_entry_state_max_rows() -> usize {
             // NOTE(kwannoel): This is just an arbitrary number.
             30000
+        }
+
+        pub fn streaming_now_progress_ratio() -> Option<f32> {
+            None
         }
 
         pub fn enable_explain_analyze_stats() -> bool {
