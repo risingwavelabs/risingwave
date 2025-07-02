@@ -393,9 +393,14 @@ message ReplaceJobPlan {
     catalog.Source source = 1;
   }
 
+  message ReplaceMaterializedView {
+    catalog.Table table = 1;
+  }
+
   oneof replace_job {
     ReplaceTable replace_table = 3;
     ReplaceSource replace_source = 4;
+    ReplaceMaterializedView replace_materialized_view = 5;
   }
 }
 

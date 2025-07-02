@@ -41,6 +41,8 @@ mod notifier;
 mod progress;
 mod rpc;
 mod schedule;
+#[cfg(test)]
+mod tests;
 mod trace;
 mod utils;
 mod worker;

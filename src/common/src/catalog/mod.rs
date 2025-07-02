@@ -19,6 +19,7 @@ mod physical_table;
 mod schema;
 pub mod test_utils;
 
+use std::fmt::Binary;
 use std::sync::Arc;
 
 pub use column::*;
@@ -614,4 +615,275 @@ pub enum AlterDatabaseParam {
     // None represents the default value, which means it follows `SystemParams`.
     BarrierIntervalMs(Option<u32>),
     CheckpointFrequency(Option<u64>),
+}
+
+macro_rules! for_all_fragment_type_flags {
+    () => {
+        for_all_fragment_type_flags! {
+            {
+                Source,
+                Mview,
+                Sink,
+                Now,
+                StreamScan,
+                BarrierRecv,
+                Values,
+                Dml,
+                CdcFilter,
+                Skipped1,
+                SourceScan,
+                SnapshotBackfillStreamScan,
+                FsFetch,
+                CrossDbSnapshotBackfillStreamScan
+            },
+            {},
+            0
+        }
+    };
+    (
+        {},
+        {
+            $(
+                {$flag:ident, $index:expr}
+            ),*
+        },
+        $next_index:expr
+    ) => {
+        #[derive(Clone, Copy, Debug, Display, Hash, PartialOrd, PartialEq, Eq)]
+        #[repr(u32)]
+        pub enum FragmentTypeFlag {
+            $(
+                $flag = (1 << $index),
+            )*
+        }
+
+        pub const FRAGMENT_TYPE_FLAG_LIST: [FragmentTypeFlag; $next_index] = [
+            $(
+                FragmentTypeFlag::$flag,
+            )*
+        ];
+
+        impl TryFrom<u32> for FragmentTypeFlag {
+            type Error = String;
+
+            fn try_from(value: u32) -> Result<Self, Self::Error> {
+                match value {
+                    $(
+                        value if value == (FragmentTypeFlag::$flag as u32) => Ok(FragmentTypeFlag::$flag),
+                    )*
+                    _ => Err(format!("Invalid FragmentTypeFlag value: {}", value)),
+                }
+            }
+        }
+
+        impl FragmentTypeFlag {
+            pub fn as_str_name(&self) -> &'static str {
+                match self {
+                    $(
+                        FragmentTypeFlag::$flag => paste::paste!{stringify!( [< $flag:snake:upper >] )},
+                    )*
+                }
+            }
+        }
+    };
+    (
+        {$first:ident $(, $rest:ident)*},
+        {
+            $(
+                {$flag:ident, $index:expr}
+            ),*
+        },
+        $next_index:expr
+    ) => {
+        for_all_fragment_type_flags! {
+            {$($rest),*},
+            {
+                $({$flag, $index},)*
+                {$first, $next_index}
+            },
+            $next_index + 1
+        }
+    };
+}
+
+for_all_fragment_type_flags!();
+
+impl FragmentTypeFlag {
+    pub fn raw_flag(flags: impl IntoIterator<Item = FragmentTypeFlag>) -> u32 {
+        flags.into_iter().fold(0, |acc, flag| acc | (flag as u32))
+    }
+
+    /// Fragments that may be affected by `BACKFILL_RATE_LIMIT`.
+    pub fn backfill_rate_limit_fragments() -> impl Iterator<Item = FragmentTypeFlag> {
+        [FragmentTypeFlag::SourceScan, FragmentTypeFlag::StreamScan].into_iter()
+    }
+
+    /// Fragments that may be affected by `SOURCE_RATE_LIMIT`.
+    /// Note: for `FsFetch`, old fragments don't have this flag set, so don't use this to check.
+    pub fn source_rate_limit_fragments() -> impl Iterator<Item = FragmentTypeFlag> {
+        [FragmentTypeFlag::Source, FragmentTypeFlag::FsFetch].into_iter()
+    }
+
+    /// Fragments that may be affected by `BACKFILL_RATE_LIMIT`.
+    pub fn sink_rate_limit_fragments() -> impl Iterator<Item = FragmentTypeFlag> {
+        [FragmentTypeFlag::Sink].into_iter()
+    }
+
+    /// Note: this doesn't include `FsFetch` created in old versions.
+    pub fn rate_limit_fragments() -> impl Iterator<Item = FragmentTypeFlag> {
+        Self::backfill_rate_limit_fragments()
+            .chain(Self::source_rate_limit_fragments())
+            .chain(Self::sink_rate_limit_fragments())
+    }
+
+    pub fn dml_rate_limit_fragments() -> impl Iterator<Item = FragmentTypeFlag> {
+        [FragmentTypeFlag::Dml].into_iter()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialOrd, PartialEq, Eq, Default)]
+pub struct FragmentTypeMask(u32);
+
+impl Binary for FragmentTypeMask {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:b}", self.0)
+    }
+}
+
+impl From<i32> for FragmentTypeMask {
+    fn from(value: i32) -> Self {
+        Self(value as u32)
+    }
+}
+
+impl From<u32> for FragmentTypeMask {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl From<FragmentTypeMask> for u32 {
+    fn from(value: FragmentTypeMask) -> Self {
+        value.0
+    }
+}
+
+impl From<FragmentTypeMask> for i32 {
+    fn from(value: FragmentTypeMask) -> Self {
+        value.0 as _
+    }
+}
+
+impl FragmentTypeMask {
+    pub fn empty() -> Self {
+        FragmentTypeMask(0)
+    }
+
+    pub fn add(&mut self, flag: FragmentTypeFlag) {
+        self.0 |= flag as u32;
+    }
+
+    pub fn contains_any(&self, flags: impl IntoIterator<Item = FragmentTypeFlag>) -> bool {
+        let flag = FragmentTypeFlag::raw_flag(flags);
+        (self.0 & flag) != 0
+    }
+
+    pub fn contains(&self, flag: FragmentTypeFlag) -> bool {
+        self.contains_any([flag])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use itertools::Itertools;
+    use risingwave_common::catalog::FRAGMENT_TYPE_FLAG_LIST;
+
+    use crate::catalog::FragmentTypeFlag;
+
+    #[test]
+    fn test_all_fragment_type_flag() {
+        expect_test::expect![[r#"
+            [
+                (
+                    Source,
+                    1,
+                    "SOURCE",
+                ),
+                (
+                    Mview,
+                    2,
+                    "MVIEW",
+                ),
+                (
+                    Sink,
+                    4,
+                    "SINK",
+                ),
+                (
+                    Now,
+                    8,
+                    "NOW",
+                ),
+                (
+                    StreamScan,
+                    16,
+                    "STREAM_SCAN",
+                ),
+                (
+                    BarrierRecv,
+                    32,
+                    "BARRIER_RECV",
+                ),
+                (
+                    Values,
+                    64,
+                    "VALUES",
+                ),
+                (
+                    Dml,
+                    128,
+                    "DML",
+                ),
+                (
+                    CdcFilter,
+                    256,
+                    "CDC_FILTER",
+                ),
+                (
+                    Skipped1,
+                    512,
+                    "SKIPPED1",
+                ),
+                (
+                    SourceScan,
+                    1024,
+                    "SOURCE_SCAN",
+                ),
+                (
+                    SnapshotBackfillStreamScan,
+                    2048,
+                    "SNAPSHOT_BACKFILL_STREAM_SCAN",
+                ),
+                (
+                    FsFetch,
+                    4096,
+                    "FS_FETCH",
+                ),
+                (
+                    CrossDbSnapshotBackfillStreamScan,
+                    8192,
+                    "CROSS_DB_SNAPSHOT_BACKFILL_STREAM_SCAN",
+                ),
+            ]
+        "#]]
+        .assert_debug_eq(
+            &FRAGMENT_TYPE_FLAG_LIST
+                .into_iter()
+                .map(|flag| (flag, flag as u32, flag.as_str_name()))
+                .collect_vec(),
+        );
+        for flag in FRAGMENT_TYPE_FLAG_LIST {
+            assert_eq!(FragmentTypeFlag::try_from(flag as u32).unwrap(), flag);
+        }
+    }
 }

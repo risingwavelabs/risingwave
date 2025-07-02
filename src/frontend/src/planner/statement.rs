@@ -14,11 +14,11 @@
 
 use crate::binder::BoundStatement;
 use crate::error::Result;
-use crate::optimizer::PlanRoot;
+use crate::optimizer::LogicalPlanRoot;
 use crate::planner::Planner;
 
 impl Planner {
-    pub(super) fn plan_statement(&mut self, stmt: BoundStatement) -> Result<PlanRoot> {
+    pub(super) fn plan_statement(&mut self, stmt: BoundStatement) -> Result<LogicalPlanRoot> {
         match stmt {
             BoundStatement::Insert(i) => self.plan_insert(*i),
             BoundStatement::Delete(d) => self.plan_delete(*d),

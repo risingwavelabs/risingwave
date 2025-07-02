@@ -16,13 +16,13 @@ use fixedbitset::FixedBitSet;
 
 use crate::binder::BoundInsert;
 use crate::error::Result;
-use crate::optimizer::PlanRoot;
 use crate::optimizer::plan_node::{LogicalInsert, LogicalProject, PlanRef, generic};
 use crate::optimizer::property::{Order, RequiredDist};
+use crate::optimizer::{LogicalPlanRoot, PlanRoot};
 use crate::planner::Planner;
 
 impl Planner {
-    pub(super) fn plan_insert(&mut self, insert: BoundInsert) -> Result<PlanRoot> {
+    pub(super) fn plan_insert(&mut self, insert: BoundInsert) -> Result<LogicalPlanRoot> {
         let mut input = self.plan_query(insert.source)?.into_unordered_subplan();
         if !insert.cast_exprs.is_empty() {
             input = LogicalProject::create(input, insert.cast_exprs);

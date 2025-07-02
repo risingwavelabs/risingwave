@@ -61,7 +61,7 @@ pub struct ActiveStreamingWorkerNodes {
     worker_nodes: HashMap<WorkerId, WorkerNode>,
     rx: UnboundedReceiver<LocalNotification>,
     #[cfg_attr(not(debug_assertions), expect(dead_code))]
-    meta_manager: MetadataManager,
+    meta_manager: Option<MetadataManager>,
 }
 
 impl Debug for ActiveStreamingWorkerNodes {
@@ -73,11 +73,25 @@ impl Debug for ActiveStreamingWorkerNodes {
 }
 
 impl ActiveStreamingWorkerNodes {
-    pub(crate) fn uninitialized(meta_manager: MetadataManager) -> Self {
+    pub(crate) fn uninitialized() -> Self {
         Self {
             worker_nodes: Default::default(),
             rx: unbounded_channel().1,
-            meta_manager,
+            meta_manager: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(worker_nodes: HashMap<WorkerId, WorkerNode>) -> Self {
+        let (tx, rx) = unbounded_channel();
+        let _join_handle = tokio::spawn(async move {
+            let _tx = tx;
+            std::future::pending::<()>().await
+        });
+        Self {
+            worker_nodes,
+            rx,
+            meta_manager: None,
         }
     }
 
@@ -89,7 +103,7 @@ impl ActiveStreamingWorkerNodes {
         Ok(Self {
             worker_nodes: nodes.into_iter().map(|node| (node.id as _, node)).collect(),
             rx,
-            meta_manager,
+            meta_manager: Some(meta_manager),
         })
     }
 
@@ -208,11 +222,10 @@ impl ActiveStreamingWorkerNodes {
     pub(crate) async fn validate_change(&self) {
         use risingwave_pb::common::WorkerNode;
         use thiserror_ext::AsReport;
-        match self
-            .meta_manager
-            .list_active_streaming_compute_nodes()
-            .await
-        {
+        let Some(meta_manager) = &self.meta_manager else {
+            return;
+        };
+        match meta_manager.list_active_streaming_compute_nodes().await {
             Ok(worker_nodes) => {
                 let ignore_irrelevant_info = |node: &WorkerNode| {
                     (

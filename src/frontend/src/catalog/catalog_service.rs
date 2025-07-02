@@ -26,7 +26,9 @@ use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
 };
-use risingwave_pb::ddl_service::replace_job_plan::{ReplaceJob, ReplaceSource, ReplaceTable};
+use risingwave_pb::ddl_service::replace_job_plan::{
+    ReplaceJob, ReplaceMaterializedView, ReplaceSource, ReplaceTable,
+};
 use risingwave_pb::ddl_service::{
     PbReplaceJobPlan, PbTableJobType, ReplaceJobPlan, TableJobType, WaitVersion,
     alter_name_request, alter_owner_request, alter_set_schema_request, alter_swap_rename_request,
@@ -41,6 +43,7 @@ use super::root_catalog::Catalog;
 use super::{DatabaseId, SecretId, TableId};
 use crate::error::Result;
 use crate::scheduler::HummockSnapshotManagerRef;
+use crate::session::current::notice_to_user;
 use crate::user::UserId;
 
 pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
@@ -91,6 +94,12 @@ pub trait CatalogWriter: Send + Sync {
         dependencies: HashSet<ObjectId>,
         specific_resource_group: Option<String>,
         if_not_exists: bool,
+    ) -> Result<()>;
+
+    async fn replace_materialized_view(
+        &self,
+        table: PbTable,
+        graph: StreamFragmentGraph,
     ) -> Result<()>;
 
     async fn create_table(
@@ -317,6 +326,26 @@ impl CatalogWriter for CatalogWriterImpl {
             self.wait_version(version).await?
         }
         Ok(())
+    }
+
+    async fn replace_materialized_view(
+        &self,
+        table: PbTable,
+        graph: StreamFragmentGraph,
+    ) -> Result<()> {
+        // TODO: this is a dummy implementation for debugging only.
+        notice_to_user(format!("table: {table:#?}"));
+        notice_to_user(format!("graph: {graph:#?}"));
+
+        let version = self
+            .meta_client
+            .replace_job(
+                graph,
+                ReplaceJob::ReplaceMaterializedView(ReplaceMaterializedView { table: Some(table) }),
+            )
+            .await?;
+
+        self.wait_version(version).await
     }
 
     async fn create_view(&self, view: PbView) -> Result<()> {

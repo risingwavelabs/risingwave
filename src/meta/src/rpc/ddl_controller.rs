@@ -23,7 +23,7 @@ use anyhow::{Context, anyhow};
 use await_tree::{InstrumentAwait, span};
 use either::Either;
 use itertools::Itertools;
-use risingwave_common::catalog::AlterDatabaseParam;
+use risingwave_common::catalog::{AlterDatabaseParam, FragmentTypeFlag};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
@@ -54,7 +54,7 @@ use risingwave_pb::ddl_service::{
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    FragmentTypeFlag, MergeNode, PbDispatchOutputMapping, PbDispatcherType, PbStreamFragmentGraph,
+    MergeNode, PbDispatchOutputMapping, PbDispatcherType, PbStreamFragmentGraph,
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
@@ -749,7 +749,7 @@ impl DdlController {
         let stream_scan_fragment = table_fragments
             .fragments
             .values()
-            .filter(|f| f.fragment_type_mask & FragmentTypeFlag::StreamScan as u32 != 0)
+            .filter(|f| f.fragment_type_mask.contains(FragmentTypeFlag::StreamScan))
             .exactly_one()
             .ok()
             .with_context(|| {
@@ -1514,10 +1514,10 @@ impl DdlController {
         fragment_graph: StreamFragmentGraphProto,
     ) -> MetaResult<NotificationVersion> {
         match &mut streaming_job {
-            StreamingJob::Table(..) | StreamingJob::Source(..) => {}
-            StreamingJob::MaterializedView(..)
-            | StreamingJob::Sink(..)
-            | StreamingJob::Index(..) => {
+            StreamingJob::Table(..)
+            | StreamingJob::Source(..)
+            | StreamingJob::MaterializedView(..) => {}
+            StreamingJob::Sink(..) | StreamingJob::Index(..) => {
                 bail_not_implemented!("schema change for {}", streaming_job.job_type_str())
             }
         }
@@ -1565,6 +1565,7 @@ impl DdlController {
                 .await?;
             drop_table_connector_ctx = ctx.drop_table_connector_ctx.clone();
 
+            // Handle sinks that sink into the table.
             if let StreamingJob::Table(_, table, ..) = &streaming_job {
                 let catalogs = self
                     .metadata_manager
@@ -1997,10 +1998,10 @@ impl DdlController {
         tmp_job_id: TableId,
     ) -> MetaResult<(ReplaceStreamJobContext, StreamJobFragmentsToCreate)> {
         match &stream_job {
-            StreamingJob::Table(..) | StreamingJob::Source(..) => {}
-            StreamingJob::MaterializedView(..)
-            | StreamingJob::Sink(..)
-            | StreamingJob::Index(..) => {
+            StreamingJob::Table(..)
+            | StreamingJob::Source(..)
+            | StreamingJob::MaterializedView(..) => {}
+            StreamingJob::Sink(..) | StreamingJob::Index(..) => {
                 bail_not_implemented!("schema change for {}", stream_job.job_type_str())
             }
         }
@@ -2041,6 +2042,7 @@ impl DdlController {
                 .metadata_manager
                 .get_table_catalog_by_ids(old_internal_table_ids)
                 .await?;
+            // TODO(alter-mv): the current impl is very fragile for alter MV, be more strict here!
             fragment_graph.fit_internal_table_ids(old_internal_tables)?;
         }
 
@@ -2067,8 +2069,9 @@ impl DdlController {
                     job_type,
                 )?
             }
-            StreamingJobType::Table(TableJobType::SharedCdcSource) => {
-                // get the upstream fragment which should be the cdc source
+            StreamingJobType::Table(TableJobType::SharedCdcSource)
+            | StreamingJobType::MaterializedView => {
+                // CDC tables or materialized views can have upstream jobs as well.
                 let (upstream_root_fragments, upstream_actor_location) = self
                     .metadata_manager
                     .get_upstream_root_fragments(fragment_graph.dependent_table_ids())

@@ -33,6 +33,7 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
+use risingwave_pb::ddl_service::replace_job_plan::ReplaceMaterializedView;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::frontend_service::GetTableReplacePlanRequest;
 use risingwave_pb::meta::event_log;
@@ -105,6 +106,9 @@ impl DdlServiceImpl {
             replace_job_plan::ReplaceJob::ReplaceSource(ReplaceSource { source }) => {
                 StreamingJob::Source(source.unwrap())
             }
+            replace_job_plan::ReplaceJob::ReplaceMaterializedView(ReplaceMaterializedView {
+                table,
+            }) => StreamingJob::MaterializedView(table.unwrap()),
         };
 
         ReplaceStreamJobInfo {

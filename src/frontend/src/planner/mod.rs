@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use crate::binder::{BoundStatement, ShareId};
 use crate::error::Result;
-use crate::optimizer::{OptimizerContextRef, PlanRoot};
+use crate::optimizer::{LogicalPlanRoot, OptimizerContextRef};
 
 mod changelog;
 mod delete;
@@ -94,7 +94,7 @@ impl Planner {
     }
 
     /// Plan a [`BoundStatement`]. Need to bind a statement before plan.
-    pub fn plan(&mut self, stmt: BoundStatement) -> Result<PlanRoot> {
+    pub fn plan(&mut self, stmt: BoundStatement) -> Result<LogicalPlanRoot> {
         self.plan_statement(stmt)
     }
 

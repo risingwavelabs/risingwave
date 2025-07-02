@@ -43,6 +43,7 @@ use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
 mod alter_database_param;
+mod alter_mv;
 mod alter_owner;
 mod alter_parallelism;
 mod alter_rename;
@@ -998,6 +999,16 @@ pub async fn handle(
                         );
                     }
                     alter_streaming_enable_unaligned_join::handle_alter_streaming_enable_unaligned_join(handler_args, name, enable).await
+                }
+                AlterViewOperation::AsQuery { query } => {
+                    if !materialized {
+                        bail_not_implemented!("ALTER VIEW AS QUERY");
+                    }
+                    // `ALTER MATERIALIZED VIEW AS QUERY` is only available in development build now.
+                    if !cfg!(debug_assertions) {
+                        bail_not_implemented!("ALTER MATERIALIZED VIEW AS QUERY");
+                    }
+                    alter_mv::handle_alter_mv(handler_args, name, query).await
                 }
             }
         }

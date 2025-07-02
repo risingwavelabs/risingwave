@@ -544,7 +544,9 @@ impl TableCatalog {
                 .collect(),
             pk: self.pk.iter().map(|o| o.to_protobuf()).collect(),
             stream_key: self.stream_key.iter().map(|x| *x as _).collect(),
-            dependent_relations: vec![],
+            dependent_relations: (self.dependent_relations.iter())
+                .map(|t| t.table_id)
+                .collect(),
             optional_associated_source_id: self
                 .associated_source_id
                 .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
@@ -846,7 +848,7 @@ mod tests {
             ],
             pk: vec![ColumnOrder::new(0, OrderType::ascending()).to_protobuf()],
             stream_key: vec![0],
-            dependent_relations: vec![],
+            dependent_relations: vec![114514],
             distribution_key: vec![0],
             optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)
                 .into(),
@@ -945,7 +947,7 @@ mod tests {
                 incoming_sinks: vec![],
                 created_at_cluster_version: None,
                 initialized_at_cluster_version: None,
-                dependent_relations: vec![],
+                dependent_relations: vec![114514.into()],
                 version_column_index: None,
                 cdc_table_id: None,
                 vnode_count: VnodeCount::set(233),

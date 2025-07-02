@@ -172,7 +172,7 @@ pub async fn handle_alter_table_drop_connector(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .replace_table(None, table, graph, TableJobType::General as _)
+        .replace_table(None, table.to_prost(), graph, TableJobType::General as _)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))

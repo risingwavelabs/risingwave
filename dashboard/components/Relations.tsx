@@ -172,6 +172,12 @@ export function Relations<R extends Relation>(
   const table = (
     <Box p={3}>
       <Title>{title}</Title>
+      {relationList && (
+        <Box mb={3} fontSize="sm" color="gray.600">
+          Total: {relationList.length}{" "}
+          {relationList.length === 1 ? "item" : "items"}
+        </Box>
+      )}
       <TableContainer>
         <Table variant="simple" size="sm" maxWidth="full">
           <Thead>

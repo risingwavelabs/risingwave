@@ -509,7 +509,7 @@ pub fn max_column_id(columns: &[ColumnCatalog]) -> ColumnId {
 }
 
 #[cfg(test)]
-pub mod tests {
+mod tests {
     use risingwave_pb::plan_common::PbColumnDesc;
 
     use crate::catalog::ColumnDesc;

@@ -21,7 +21,6 @@ use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::sink::catalog::SinkCatalog;
-use risingwave_pb::catalog::{Source, Table};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ProjectNode, StreamFragmentGraph};
@@ -34,6 +33,7 @@ use super::create_table::{ColumnIdGenerator, generate_stream_graph_for_replace_t
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::purify::try_purify_table_source_create_sql_ast;
 use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, InputRef, Literal};
@@ -91,7 +91,12 @@ pub async fn get_replace_table_plan(
     new_definition: Statement,
     old_catalog: &Arc<TableCatalog>,
     sql_column_strategy: SqlColumnStrategy,
-) -> Result<(Option<Source>, Table, StreamFragmentGraph, TableJobType)> {
+) -> Result<(
+    Option<SourceCatalog>,
+    TableCatalog,
+    StreamFragmentGraph,
+    TableJobType,
+)> {
     // Create handler args as if we're creating a new table with the altered definition.
     let handler_args = HandlerArgs::new(session.clone(), &new_definition, Arc::from(""))?;
     let col_id_gen = ColumnIdGenerator::new_alter(old_catalog);
@@ -109,11 +114,9 @@ pub async fn get_replace_table_plan(
 
     let incoming_sink_ids: HashSet<_> = old_catalog.incoming_sinks.iter().copied().collect();
 
-    let target_columns = table
-        .columns
-        .iter()
-        .map(|col| ColumnCatalog::from(col.clone()))
+    let target_columns = (table.columns.iter())
         .filter(|col| !col.is_rw_timestamp_column())
+        .cloned()
         .collect_vec();
 
     for sink in fetch_incoming_sinks(session, &incoming_sink_ids)? {
@@ -128,7 +131,7 @@ pub async fn get_replace_table_plan(
     // Set some fields ourselves so that the meta service does not need to maintain them.
     let mut table = table;
     table.incoming_sinks = incoming_sink_ids.iter().copied().collect();
-    table.maybe_vnode_count = VnodeCount::set(old_catalog.vnode_count()).to_protobuf();
+    table.vnode_count = VnodeCount::set(old_catalog.vnode_count());
 
     Ok((source, table, graph, job_type))
 }
@@ -379,7 +382,12 @@ pub async fn handle_alter_table_column(
     let catalog_writer = session.catalog_writer()?;
 
     catalog_writer
-        .replace_table(source, table, graph, job_type)
+        .replace_table(
+            source.map(|x| x.to_prost()),
+            table.to_prost(),
+            graph,
+            job_type,
+        )
         .await?;
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))
 }

@@ -235,6 +235,7 @@ pub async fn do_handle_explain(
                         }
                         Convention::Stream => {
                             let graph = build_graph(plan.clone(), None)?;
+                            let table = table.map(|x| x.to_prost());
                             if explain_format == ExplainFormat::Dot {
                                 blocks.push(explain_stream_graph_as_dot(
                                     &graph,

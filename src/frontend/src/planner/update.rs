@@ -23,10 +23,10 @@ use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalProject, LogicalUpdate, generic};
 use crate::optimizer::property::{Order, RequiredDist};
-use crate::optimizer::{PlanRef, PlanRoot};
+use crate::optimizer::{LogicalPlanRoot, PlanRef, PlanRoot};
 
 impl Planner {
-    pub(super) fn plan_update(&mut self, update: BoundUpdate) -> Result<PlanRoot> {
+    pub(super) fn plan_update(&mut self, update: BoundUpdate) -> Result<LogicalPlanRoot> {
         let returning = !update.returning_list.is_empty();
 
         let scan = self.plan_base_table(&update.table)?;
@@ -53,7 +53,7 @@ impl Planner {
 
             // Substitute subqueries into `LogicalApply`s.
             if exprs.iter().any(|e| e.has_subquery()) {
-                (plan, exprs) = self.substitute_subqueries(plan, exprs)?;
+                (plan, exprs) = self.substitute_subqueries_in_cross_join_way(plan, exprs)?;
             }
 
             LogicalProject::new(plan, exprs).into()

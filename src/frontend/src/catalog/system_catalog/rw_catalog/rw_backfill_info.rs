@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::FragmentTypeFlag;
 use risingwave_common::types::Fields;
 use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node_source_backfill, visit_stream_node_stream_scan,
 };
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::meta::FragmentDistribution;
-use risingwave_pb::stream_plan::FragmentTypeFlag;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::catalog::system_catalog::rw_catalog::common::CatalogBackfillType;
