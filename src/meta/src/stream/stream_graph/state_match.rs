@@ -29,27 +29,46 @@ use crate::model::StreamJobFragments;
 use crate::stream::StreamFragmentGraph;
 
 /// Helper type for describing a [`StreamNode`] in error messages.
-#[derive(thiserror::Error, thiserror_ext::Macro, Debug)]
-pub enum Error {
-    #[error("invalid graph: {0}")]
-    InvalidGraph(#[message] String),
-    #[error("failed to match: {0}")]
-    FailedToMatch(#[message] String),
-}
+pub(crate) struct StreamNodeDesc(Box<str>);
 
-type Result<T, E = Error> = std::result::Result<T, E>;
-
-struct D<'a>(&'a StreamNode);
-
-impl std::fmt::Display for D<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let node = self.0;
+impl From<&StreamNode> for StreamNodeDesc {
+    fn from(node: &StreamNode) -> Self {
         let id = node.operator_id;
         let identity = &node.identity;
         let body = node.node_body.as_ref().unwrap();
-        write!(f, "{}({}, {})", body, id, identity)
+
+        Self(format!("{}({}, {})", body, id, identity).into_boxed_str())
     }
 }
+
+impl std::fmt::Display for StreamNodeDesc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Error type for failed state table matching.
+#[derive(thiserror::Error, thiserror_ext::Macro, thiserror_ext::ReportDebug)]
+pub(crate) enum Error {
+    #[error("failed to match graph: {message}")]
+    Graph { message: String },
+
+    #[error("failed to match fragment {id}: {message}")]
+    Fragment {
+        source: Option<Box<Error>>,
+        id: Id,
+        message: String,
+    },
+
+    #[error("failed to match operator {from} to {to}: {message}")]
+    Operator {
+        from: StreamNodeDesc,
+        to: StreamNodeDesc,
+        message: String,
+    },
+}
+
+type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Fragment id.
 type Id = u32;
@@ -119,7 +138,7 @@ impl StateGraph {
 
         if !downstream_cnts.is_empty() {
             // There are nodes that are not processed yet.
-            bail_invalid_graph!("graph is not a DAG");
+            bail_graph!("fragment graph is not a DAG");
         }
         assert_eq!(topo.len(), self.len());
 
@@ -224,18 +243,14 @@ impl Matches {
 
         let mut table_matches = HashMap::new();
 
-        // Use BFS to match the nodes.
+        // Use BFS to match the operator nodes.
         let mut uq = VecDeque::from([&u.root]);
         let mut vq = VecDeque::from([&v.root]);
 
         while let Some(mut un) = uq.pop_front() {
-            let Some(mut vn) = vq.pop_front() else {
-                bail_failed_to_match!(
-                    "fragment {} has different shape of operators than target fragment {}",
-                    u.id,
-                    v.id
-                );
-            };
+            // Since we ensure the number of inputs of an operator is the same before extending
+            // the BFS queue, we can safely unwrap here.
+            let mut vn = vq.pop_front().unwrap();
 
             // Skip while the node is stateless and has only one input.
             let mut u_tables = collect_tables(un);
@@ -254,23 +269,23 @@ impl Matches {
                 continue;
             }
 
+            // Perform checks.
             if un.node_body.as_ref().unwrap().discriminant()
                 != vn.node_body.as_ref().unwrap().discriminant()
             {
-                bail_failed_to_match!(
-                    "operator `{}` has different type than target `{}`",
-                    D(un),
-                    D(vn)
-                );
+                bail_operator!(from = un, to = vn, "operator has different type");
             }
             if un.input.len() != vn.input.len() {
-                bail_failed_to_match!(
-                    "operator `{}` has different number of inputs than target `{}`",
-                    D(un),
-                    D(vn)
+                bail_operator!(
+                    from = un,
+                    to = vn,
+                    "operator has different number of inputs ({} vs {})",
+                    un.input.len(),
+                    vn.input.len()
                 );
             }
 
+            // Extend the BFS queue.
             uq.extend(un.input.iter());
             vq.extend(vn.input.iter());
 
@@ -280,18 +295,16 @@ impl Matches {
                     .collect_vec();
 
                 if vt_cands.is_empty() {
-                    bail_failed_to_match!(
-                        "cannot find a match for table `{}` of operator `{}` in target `{}`",
-                        ut_name,
-                        D(un),
-                        D(vn)
+                    bail_operator!(
+                        from = un,
+                        to = vn,
+                        "cannot find a match for table `{ut_name}`",
                     );
                 } else if vt_cands.len() > 1 {
-                    bail_failed_to_match!(
-                        "found multiple matches for table `{}` in operator `{}` in target `{}`",
-                        ut_name,
-                        D(un),
-                        D(vn)
+                    bail_operator!(
+                        from = un,
+                        to = vn,
+                        "found multiple matches for table `{ut_name}`",
                     );
                 }
 
@@ -311,11 +324,10 @@ impl Matches {
                 let vt_compare = table_desc_for_compare(&vt);
 
                 if ut_compare != vt_compare {
-                    bail_failed_to_match!(
-                        "found a match for table `{}` of operator `{}` in target `{}`, but they are incompatible, diff:\n{}",
-                        ut_name,
-                        D(un),
-                        D(vn),
+                    bail_operator!(
+                        from = un,
+                        to = vn,
+                        "found a match for table `{ut_name}`, but they are incompatible, diff:\n{}",
                         pretty_assertions::Comparison::new(&ut_compare, &vt_compare)
                     );
                 }
@@ -360,7 +372,11 @@ impl Matches {
 /// Matches two [`StateGraph`]s, and returns the match result from each fragment in `g1` to `g2`.
 fn match_graph(g1: &StateGraph, g2: &StateGraph) -> Result<Matches> {
     if g1.len() != g2.len() {
-        bail_failed_to_match!("graphs have different number of fragments");
+        bail_graph!(
+            "graphs have different number of fragments ({} vs {})",
+            g1.len(),
+            g2.len()
+        );
     }
 
     let fps1 = g1.fingerprints()?;
@@ -382,12 +398,12 @@ fn match_graph(g1: &StateGraph, g2: &StateGraph) -> Result<Matches> {
         fp_cand: &mut HashMap<Id, HashSet<Id>>,
         matches: &mut Matches,
     ) -> Result<()> {
-        // If all fragments are matched, we are done.
+        // If all fragments are matched, return.
         if matches.len() == g1.len() {
             return Ok(());
         }
 
-        // Choose fragment with fewest remaining candidates that's unmatched.
+        // Choose fragment with fewest remaining candidates that's not matched.
         let (&u, u_cands) = fp_cand
             .iter()
             .filter(|(u, _)| !matches.matched(**u))
@@ -395,7 +411,9 @@ fn match_graph(g1: &StateGraph, g2: &StateGraph) -> Result<Matches> {
             .unwrap();
         let u_cands = u_cands.clone();
 
-        for v in u_cands {
+        let mut last_error = None;
+
+        for &v in &u_cands {
             // Skip if v is already used.
             if matches.target_matched(v) {
                 continue;
@@ -435,8 +453,9 @@ fn match_graph(g1: &StateGraph, g2: &StateGraph) -> Result<Matches> {
                     // Try to match the rest.
                     match dfs(g1, g2, fp_cand, matches) {
                         Ok(()) => return Ok(()), // success, return
-                        Err(_err) => {
-                            // TODO: record error
+                        Err(err) => {
+                            last_error = Some(err);
+
                             // Backtrack.
                             *fp_cand = fp_cand_clone;
                             matches.undo_match(u);
@@ -444,14 +463,23 @@ fn match_graph(g1: &StateGraph, g2: &StateGraph) -> Result<Matches> {
                     }
                 }
 
-                Err(_err) => {} // TODO: record error
+                Err(err) => last_error = Some(err),
             }
         }
 
-        bail_failed_to_match!(
-            "no valid match found for fragment {u} ({:?})",
-            g1.nodes[&u].root
-        );
+        if let Some(error) = last_error {
+            bail_fragment!(
+                source = Box::new(error),
+                id = u,
+                "tried against all {} candidates, but failed",
+                u_cands.len()
+            );
+        } else {
+            bail_fragment!(
+                id = u,
+                "cannot find a candidate with same topological position"
+            )
+        }
     }
 
     let mut matches = Matches::new();
