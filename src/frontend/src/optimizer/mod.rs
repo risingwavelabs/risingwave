@@ -1015,7 +1015,7 @@ impl LogicalPlanRoot {
     }
 
     pub fn gen_vector_index_plan(
-        mut self,
+        self,
         index_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
@@ -1023,20 +1023,15 @@ impl LogicalPlanRoot {
         retention_seconds: Option<NonZeroU32>,
     ) -> Result<StreamVectorIndexWrite> {
         let cardinality = self.compute_cardinality();
-        assert_eq!(self.phase, PlanPhase::Logical);
         assert_eq!(self.plan.convention(), Convention::Logical);
         let stream_plan = self.gen_optimized_stream_plan(false, false)?;
-        assert_eq!(self.phase, PlanPhase::Stream);
-        assert_eq!(stream_plan.convention(), Convention::Stream);
+        assert_eq!(stream_plan.plan.convention(), Convention::Stream);
 
         StreamVectorIndexWrite::create(
             stream_plan,
             index_name,
             database_id,
             schema_id,
-            self.required_order.clone(),
-            self.out_fields.clone(),
-            self.out_names.clone(),
             definition,
             cardinality,
             retention_seconds,

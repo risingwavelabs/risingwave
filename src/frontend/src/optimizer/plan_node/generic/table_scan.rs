@@ -26,8 +26,9 @@ use risingwave_sqlparser::ast::AsOf;
 
 use super::GenericPlanNode;
 use crate::TableCatalog;
+use crate::catalog::ColumnId;
+use crate::catalog::index_catalog::{TableIndex, VectorIndex};
 use crate::catalog::table_catalog::TableType;
-use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{Cardinality, FunctionalDependencySet, Order, WatermarkColumns};
@@ -51,7 +52,8 @@ pub struct TableScan {
     /// Table Desc (subset of table catalog).
     pub table_desc: Rc<TableDesc>,
     /// Descriptors of all indexes on this table
-    pub indexes: Vec<Rc<IndexCatalog>>,
+    pub table_indexes: Vec<Arc<TableIndex>>,
+    pub vector_indexes: Vec<Arc<VectorIndex>>,
     /// The pushed down predicates. It refers to column indexes of the table.
     pub predicate: Condition,
     /// syntax `FOR SYSTEM_TIME AS OF PROCTIME()` is used for temporal join.
@@ -249,6 +251,7 @@ impl TableScan {
             new_output_col_idx,
             index_table_catalog,
             vec![],
+            vec![],
             self.ctx.clone(),
             new_predicate,
             self.as_of.clone(),
@@ -262,7 +265,8 @@ impl TableScan {
         table_name: String,
         output_col_idx: Vec<usize>, // the column index in the table
         table_catalog: Arc<TableCatalog>,
-        indexes: Vec<Rc<IndexCatalog>>,
+        table_indexes: Vec<Arc<TableIndex>>,
+        vector_indexes: Vec<Arc<VectorIndex>>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
         as_of: Option<AsOf>,
@@ -272,7 +276,8 @@ impl TableScan {
             table_name,
             output_col_idx,
             table_catalog,
-            indexes,
+            table_indexes,
+            vector_indexes,
             ctx,
             predicate,
             as_of,
@@ -280,12 +285,12 @@ impl TableScan {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_inner(
         table_name: String,
         output_col_idx: Vec<usize>, // the column index in the table
         table_catalog: Arc<TableCatalog>,
-        indexes: Vec<Rc<IndexCatalog>>,
+        table_indexes: Vec<Arc<TableIndex>>,
+        vector_indexes: Vec<Arc<VectorIndex>>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
         as_of: Option<AsOf>,
@@ -315,7 +320,8 @@ impl TableScan {
             output_col_idx,
             table_catalog,
             table_desc,
-            indexes,
+            table_indexes,
+            vector_indexes,
             predicate,
             as_of,
             table_cardinality,

@@ -14,7 +14,6 @@
 
 use std::num::NonZeroU32;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{
@@ -27,6 +26,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{DatabaseId, SchemaId};
+use crate::optimizer::StreamOptimizedLogicalPlanRoot;
 use crate::optimizer::plan_node::derive::{derive_columns, derive_pk};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
@@ -65,13 +65,16 @@ impl StreamVectorIndexWrite {
     }
 
     pub fn create(
-        input: PlanRef,
+        StreamOptimizedLogicalPlanRoot {
+            plan: input,
+            required_order: user_order_by,
+            out_fields: user_cols,
+            out_names,
+            ..
+        }: StreamOptimizedLogicalPlanRoot,
         name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        user_order_by: Order,
-        user_cols: FixedBitSet,
-        out_names: Vec<String>,
         definition: String,
         cardinality: Cardinality,
         retention_seconds: Option<NonZeroU32>,
