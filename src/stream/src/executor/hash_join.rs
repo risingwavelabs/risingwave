@@ -35,6 +35,7 @@ use super::join::hash_join::*;
 use super::join::row::{JoinEncoding, JoinRow};
 use super::join::*;
 use super::watermark::*;
+use crate::executor::CachedJoinRow;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::join::hash_join::CacheResult;
 use crate::executor::prelude::*;
@@ -701,8 +702,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         &mut self,
         epoch: EpochPair,
     ) -> StreamExecutorResult<(
-        JoinHashMapPostCommit<'_, K, S>,
-        JoinHashMapPostCommit<'_, K, S>,
+        JoinHashMapPostCommit<'_, K, S, E>,
+        JoinHashMapPostCommit<'_, K, S, E>,
     )> {
         // All changes to the state has been buffered in the mem-table of the state table. Just
         // `commit` them here.
@@ -993,7 +994,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         const SIDE: SideTypePrimitive,
         const JOIN_OP: JoinOpPrimitive,
     >(
-        cached_lookup_result: CacheResult,
+        cached_lookup_result: CacheResult<E>,
         row: RowRef<'a>,
         key: &'a K,
         hashjoin_chunk_builder: &'a mut JoinChunkBuilder<T, SIDE>,
@@ -1005,7 +1006,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         entry_state_max_rows: usize,
     ) {
         let cache_hit = matches!(cached_lookup_result, CacheResult::Hit(_));
-        let mut entry_state = JoinEntryState::default();
+        let mut entry_state: JoinEntryState<E> = JoinEntryState::default();
         let mut entry_state_count = 0;
 
         let mut degree = 0;
@@ -1089,7 +1090,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                     // cache refill
                     if entry_state_count <= entry_state_max_rows {
                         let row_ref = entry_state
-                            .insert(encoded_pk, matched_row.encode::<E>(), None) // TODO(kwannoel): handle ineq key for asof join.
+                            .insert(encoded_pk, E::encode(&matched_row), None) // TODO(kwannoel): handle ineq key for asof join.
                             .with_context(|| format!("row: {}", row.display(),))?;
                         matched_row_ref = Some(row_ref);
                         entry_state_count += 1;
@@ -1166,7 +1167,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
     >(
         update_row: RowRef<'a>,
         mut matched_row: JoinRow<OwnedRow>,
-        mut matched_row_cache_ref: Option<&mut StateValueType>,
+        mut matched_row_cache_ref: Option<&mut E::EncodedRow>,
         hashjoin_chunk_builder: &'a mut JoinChunkBuilder<T, SIDE>,
         match_order_key_indices: &[usize],
         match_degree_table: &mut Option<TableInner<S>>,

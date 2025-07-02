@@ -504,8 +504,8 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
         &mut self,
         epoch: EpochPair,
     ) -> StreamExecutorResult<(
-        JoinHashMapPostCommit<'_, K, S>,
-        JoinHashMapPostCommit<'_, K, S>,
+        JoinHashMapPostCommit<'_, K, S, E>,
+        JoinHashMapPostCommit<'_, K, S, E>,
     )> {
         // All changes to the state has been buffered in the mem-table of the state table. Just
         // `commit` them here.
@@ -589,7 +589,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
     async fn hash_eq_match(
         key: &K,
         ht: &mut JoinHashMap<K, S, E>,
-    ) -> StreamExecutorResult<Option<HashValueType>> {
+    ) -> StreamExecutorResult<Option<HashValueType<E>>> {
         if !key.null_bitmap().is_subset(ht.null_matched()) {
             Ok(None)
         } else {
