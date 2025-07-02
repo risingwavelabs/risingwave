@@ -61,6 +61,20 @@ impl<'a> VectorRef<'a> {
     }
 }
 
+#[cfg_attr(not(test), expect(dead_code))]
+fn l2_norm_trivial(vec: &VectorInner<impl AsRef<[VectorItem]>>) -> VectorItem {
+    vec.0
+        .as_ref()
+        .iter()
+        .map(|item| item.powi(2))
+        .sum::<VectorItem>()
+        .sqrt()
+}
+
+fn l2_norm_faiss(vec: &VectorInner<impl AsRef<[VectorItem]>>) -> VectorItem {
+    faiss::utils::fvec_norm_l2sqr(vec.0.as_ref()).sqrt()
+}
+
 impl<T: AsRef<[VectorItem]>> VectorInner<T> {
     pub fn dimension(&self) -> usize {
         self.0.as_ref().len()
@@ -71,12 +85,7 @@ impl<T: AsRef<[VectorItem]>> VectorInner<T> {
     }
 
     pub fn magnitude(&self) -> VectorItem {
-        self.0
-            .as_ref()
-            .iter()
-            .map(|item| item.powi(2))
-            .sum::<VectorItem>()
-            .sqrt()
+        l2_norm_faiss(self)
     }
 
     pub fn normalized(&self) -> Vector {
@@ -103,12 +112,12 @@ pub type VectorDistance = f32;
 
 pub trait OnNearestItem<O> = for<'i> Fn(VectorRef<'i>, VectorDistance, &'i [u8]) -> O;
 
-pub trait MeasureDistance<'a> {
+pub trait MeasureDistance {
     fn measure(&self, other: VectorRef<'_>) -> VectorDistance;
 }
 
 pub trait MeasureDistanceBuilder {
-    type Measure<'a>: MeasureDistance<'a>;
+    type Measure<'a>: MeasureDistance + 'a;
     fn new(target: VectorRef<'_>) -> Self::Measure<'_>;
 
     fn distance(target: VectorRef<'_>, other: VectorRef<'_>) -> VectorDistance
@@ -187,10 +196,32 @@ mod tests {
 
     use crate::vector::distance::L2Distance;
     use crate::vector::test_utils::{gen_info, gen_vector};
-    use crate::vector::{MeasureDistanceBuilder, NearestBuilder, Vector, VectorDistance};
+    use crate::vector::{
+        MeasureDistanceBuilder, NearestBuilder, Vector, VectorDistance, VectorInner, l2_norm_faiss,
+        l2_norm_trivial,
+    };
 
     fn gen_random_input(count: usize) -> Vec<(Vector, Bytes)> {
         (0..count).map(|i| (gen_vector(10), gen_info(i))).collect()
+    }
+
+    #[test]
+    fn test_vector() {
+        let vec = [0.238474, 0.578234];
+        let [v1_1, v1_2] = vec;
+        let vec = VectorInner(&vec[..]);
+
+        assert_eq!(vec.magnitude(), (v1_1.powi(2) + v1_2.powi(2)).sqrt());
+        assert_eq!(l2_norm_faiss(&vec), l2_norm_trivial(&vec));
+
+        let mut normalized_vec = Vector::new(&[v1_1 / vec.magnitude(), v1_2 / vec.magnitude()]);
+        assert_eq!(vec.normalized(), normalized_vec);
+        assert!(normalized_vec.get_mut().is_some());
+        let mut normalized_vec_clone = normalized_vec.clone();
+        assert!(normalized_vec.get_mut().is_none());
+        assert!(normalized_vec_clone.get_mut().is_none());
+        drop(normalized_vec);
+        assert!(normalized_vec_clone.get_mut().is_some());
     }
 
     #[test]

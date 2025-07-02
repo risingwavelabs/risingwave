@@ -1135,7 +1135,7 @@ impl CompleteStreamFragmentGraph {
                 let nodes = table_fragment.node.as_ref().unwrap();
 
                 let (dist_key_indices, output_mapping) = match job_type {
-                    StreamingJobType::Table(_) => {
+                    StreamingJobType::Table(_) | StreamingJobType::MaterializedView => {
                         let mview_node = nodes.get_node_body().unwrap().as_materialize().unwrap();
                         let all_columns = mview_node.column_descs();
                         let dist_key_indices = mview_node.dist_key_indices();

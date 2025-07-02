@@ -1214,6 +1214,11 @@ impl CatalogController {
                 let source = source::ActiveModel::from(source);
                 source.update(txn).await?;
             }
+            StreamingJob::MaterializedView(table) => {
+                // Update the table catalog with the new one.
+                let table = table::ActiveModel::from(table);
+                table.update(txn).await?;
+            }
             _ => unreachable!(
                 "invalid streaming job type: {:?}",
                 streaming_job.job_type_str()
@@ -1291,7 +1296,7 @@ impl CatalogController {
         // 4. update catalogs and notify.
         let mut objects = vec![];
         match job_type {
-            StreamingJobType::Table(_) => {
+            StreamingJobType::Table(_) | StreamingJobType::MaterializedView => {
                 let (table, table_obj) = Table::find_by_id(original_job_id)
                     .find_also_related(Object)
                     .one(txn)
