@@ -1662,6 +1662,10 @@ impl MetaClient {
         let resp = self.inner.stack_trace(request).await?;
         Ok(resp)
     }
+
+    pub async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse> {
+        self.inner.refresh(request).await
+    }
 }
 
 #[async_trait]
@@ -2256,6 +2260,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }
             ,{ stream_client, alter_connector_props, AlterConnectorPropsRequest, AlterConnectorPropsResponse }
             ,{ stream_client, get_fragment_by_id, GetFragmentByIdRequest, GetFragmentByIdResponse }
+            ,{ stream_client, refresh, RefreshRequest, RefreshResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }

@@ -199,6 +199,9 @@ pub struct TableCatalog {
     pub engine: Engine,
 
     pub clean_watermark_index_in_pk: Option<usize>,
+
+    /// Whether the table supports manual refresh operations
+    pub refreshable: bool,
 }
 
 pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
@@ -585,6 +588,7 @@ impl TableCatalog {
             job_id: self.job_id.map(|id| id.table_id),
             engine: Some(self.engine.to_protobuf().into()),
             clean_watermark_index_in_pk: self.clean_watermark_index_in_pk.map(|x| x as i32),
+            refreshable: self.refreshable,
         }
     }
 
@@ -792,6 +796,7 @@ impl From<PbTable> for TableCatalog {
             job_id: tb.job_id.map(TableId::from),
             engine,
             clean_watermark_index_in_pk: tb.clean_watermark_index_in_pk.map(|x| x as usize),
+            refreshable: tb.refreshable,
         }
     }
 }

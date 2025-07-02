@@ -34,6 +34,8 @@ pub mod prelude {
         OpendalEnumerator<crate::source::filesystem::opendal_source::OpendalS3>;
     pub type PosixFsSplitEnumerator =
         OpendalEnumerator<crate::source::filesystem::opendal_source::OpendalPosixFs>;
+    pub type BatchPosixFsSplitEnumerator =
+        OpendalEnumerator<crate::source::filesystem::opendal_source::OpendalBatchPosixFs>;
     pub use crate::source::cdc::enumerator::DebeziumSplitEnumerator;
     pub type CitusCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Citus>;
     pub type MongodbCdcSplitEnumerator = DebeziumSplitEnumerator<crate::source::cdc::Mongodb>;
@@ -55,6 +57,7 @@ pub mod mqtt;
 pub mod nats;
 pub mod nexmark;
 pub mod pulsar;
+
 mod util;
 
 use std::future::IntoFuture;
@@ -82,7 +85,8 @@ pub use util::fill_adaptive_split;
 
 pub use crate::source::filesystem::LEGACY_S3_CONNECTOR;
 pub use crate::source::filesystem::opendal_source::{
-    AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
+    AZBLOB_CONNECTOR, BATCH_POSIX_FS_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR,
+    POSIX_FS_CONNECTOR,
 };
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
 pub use crate::source::pulsar::PULSAR_CONNECTOR;

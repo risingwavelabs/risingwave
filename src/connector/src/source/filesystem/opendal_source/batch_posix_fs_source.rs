@@ -1,0 +1,64 @@
+// Copyright 2025 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use std::marker::PhantomData;
+
+use anyhow::Context;
+use opendal::Operator;
+use opendal::layers::{LoggingLayer, RetryLayer};
+use opendal::services::Fs;
+
+use super::opendal_enumerator::OpendalEnumerator;
+use super::{BatchPosixFsProperties, OpendalSource};
+use crate::error::ConnectorResult;
+
+// Batch Posix fs source for refreshable tables.
+// Unlike regular posix_fs, this connector only lists files on demand (during refresh),
+// not continuously. This makes it suitable for refreshable table functionality.
+//
+// For a single-CN cluster, the behavior is well-defined. It will read from the local file system.
+// For a multi-CN cluster, each CN will read from its own local file system under the given directory.
+
+impl<Src: OpendalSource> OpendalEnumerator<Src> {
+    /// create opendal batch posix fs source for refreshable tables.
+    pub fn new_batch_posix_fs_source(
+        batch_posix_fs_properties: BatchPosixFsProperties,
+    ) -> ConnectorResult<Self> {
+        // Create Fs builder.
+        let builder = Fs::default().root(&batch_posix_fs_properties.root);
+        let op: Operator = Operator::new(builder)?
+            .layer(LoggingLayer::default())
+            .layer(RetryLayer::default())
+            .finish();
+
+        let (prefix, matcher) =
+            if let Some(pattern) = batch_posix_fs_properties.match_pattern.as_ref() {
+                // TODO(Kexiang): Currently, FsListnenr in opendal does not support a prefix. (Seems a bug in opendal)
+                // So we assign prefix to empty string.
+                let matcher = glob::Pattern::new(pattern)
+                    .with_context(|| format!("Invalid match_pattern: {}", pattern))?;
+                (Some(String::new()), Some(matcher))
+            } else {
+                (None, None)
+            };
+        let compression_format = batch_posix_fs_properties.compression_format;
+        Ok(Self {
+            op,
+            prefix,
+            matcher,
+            marker: PhantomData,
+            compression_format,
+        })
+    }
+}

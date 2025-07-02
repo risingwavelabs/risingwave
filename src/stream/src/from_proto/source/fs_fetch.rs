@@ -18,7 +18,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::filesystem::opendal_source::{
-    OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3,
+    OpendalAzblob, OpendalBatchPosixFs, OpendalGcs, OpendalPosixFs, OpendalS3,
 };
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
 use risingwave_pb::stream_plan::StreamFsFetchNode;
@@ -127,6 +127,15 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             }
             risingwave_connector::source::ConnectorProperties::PosixFs(_) => {
                 FsFetchExecutor::<_, OpendalPosixFs>::new(
+                    params.actor_context.clone(),
+                    stream_source_core,
+                    upstream,
+                    source.rate_limit,
+                )
+                .boxed()
+            }
+            risingwave_connector::source::ConnectorProperties::BatchPosixFs(_) => {
+                FsFetchExecutor::<_, OpendalBatchPosixFs>::new(
                     params.actor_context.clone(),
                     stream_source_core,
                     upstream,

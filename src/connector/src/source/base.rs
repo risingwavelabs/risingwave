@@ -45,7 +45,10 @@ use super::monitor::SourceMetrics;
 use super::nats::source::NatsMeta;
 use super::nexmark::source::message::NexmarkMeta;
 use super::pulsar::source::PulsarMeta;
-use super::{AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
+use super::{
+    AZBLOB_CONNECTOR, BATCH_POSIX_FS_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR,
+    POSIX_FS_CONNECTOR,
+};
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
@@ -536,6 +539,7 @@ impl ConnectorProperties {
             .map(|s| {
                 s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR)
                     || s.eq_ignore_ascii_case(POSIX_FS_CONNECTOR)
+                    || s.eq_ignore_ascii_case(BATCH_POSIX_FS_CONNECTOR)
                     || s.eq_ignore_ascii_case(GCS_CONNECTOR)
                     || s.eq_ignore_ascii_case(AZBLOB_CONNECTOR)
             })

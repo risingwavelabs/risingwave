@@ -35,7 +35,7 @@ use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use risingwave_connector::source::filesystem::opendal_source::{
-    OpendalAzblob, OpendalGcs, OpendalS3,
+    OpendalAzblob, OpendalBatchPosixFs, OpendalGcs, OpendalS3,
 };
 use risingwave_connector::source::iceberg::IcebergSplitEnumerator;
 use risingwave_connector::source::kafka::KafkaSplitEnumerator;
@@ -383,6 +383,18 @@ impl SourceScanInfo {
                 let stream = build_opendal_fs_list_for_batch(lister);
                 let batch_res: Vec<_> = stream.try_collect().await?;
                 let res = batch_res.into_iter().map(SplitImpl::Azblob).collect_vec();
+
+                Ok(SourceScanInfo::Complete(res))
+            }
+            (ConnectorProperties::BatchPosixFs(prop), SourceFetchParameters::Empty) => {
+                let lister: OpendalEnumerator<OpendalBatchPosixFs> =
+                    OpendalEnumerator::new_batch_posix_fs_source(*prop)?;
+                let stream = build_opendal_fs_list_for_batch(lister);
+                let batch_res: Vec<_> = stream.try_collect().await?;
+                let res = batch_res
+                    .into_iter()
+                    .map(SplitImpl::BatchPosixFs)
+                    .collect_vec();
 
                 Ok(SourceScanInfo::Complete(res))
             }

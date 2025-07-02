@@ -38,6 +38,20 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
+/// State for tracking refresh operations on batch sources
+#[derive(Debug)]
+struct RefreshState {
+    table_id: TableId,
+    /// Tracks active splits and their last seen epoch with data
+    active_splits: HashMap<SplitId, Epoch>,
+    /// Last epoch where we received any data
+    last_data_epoch: Epoch,
+    /// Number of consecutive epochs without data (for EOF detection)
+    epochs_without_data: u32,
+    /// Whether load completion has been detected
+    load_finished: bool,
+}
+
 use super::executor_core::StreamSourceCore;
 use super::{barrier_to_message_stream, get_split_offset_col_idx, prune_additional_cols};
 use crate::common::rate_limit::limited_chunk_size;
@@ -69,6 +83,9 @@ pub struct SourceExecutor<S: StateStore> {
     rate_limit_rps: Option<u32>,
 
     is_shared_non_cdc: bool,
+
+    /// State for tracking refresh operations on batch sources
+    refresh_state: Option<RefreshState>,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -89,6 +106,7 @@ impl<S: StateStore> SourceExecutor<S> {
             system_params,
             rate_limit_rps,
             is_shared_non_cdc,
+            refresh_state: None,
         }
     }
 
@@ -199,6 +217,81 @@ impl<S: StateStore> SourceExecutor<S> {
         );
 
         (column_ids, source_ctx)
+    }
+
+    /// Check if this is a batch source (like BatchPosixFs) that should trigger LoadFinish
+    fn is_batch_source(&self) -> bool {
+        // For now, return false to avoid compilation issues
+        // TODO: Implement proper batch source detection based on connector properties
+        // This would require checking the with_properties or other source metadata
+        false
+    }
+
+    /// Initialize refresh state when RefreshStart is received
+    fn start_refresh(&mut self, table_id: TableId, epoch: Epoch) {
+        if self.is_batch_source() {
+            self.refresh_state = Some(RefreshState {
+                table_id,
+                active_splits: HashMap::new(),
+                last_data_epoch: epoch,
+                epochs_without_data: 0,
+                load_finished: false,
+            });
+            tracing::info!(
+                "Started refresh tracking for batch source table {}",
+                table_id
+            );
+        }
+    }
+
+    /// Update refresh state with data from splits
+    fn update_refresh_state(&mut self, updated_splits: &HashMap<SplitId, SplitImpl>, epoch: Epoch) {
+        if let Some(refresh_state) = &mut self.refresh_state {
+            let received_data = !updated_splits.is_empty();
+
+            if received_data {
+                // Update active splits with new data
+                for split_id in updated_splits.keys() {
+                    refresh_state.active_splits.insert(split_id.clone(), epoch);
+                }
+                refresh_state.last_data_epoch = epoch;
+                refresh_state.epochs_without_data = 0;
+            } else {
+                refresh_state.epochs_without_data += 1;
+
+                // If we haven't received data for multiple epochs, consider load finished
+                const MAX_EPOCHS_WITHOUT_DATA: u32 = 2;
+                if refresh_state.epochs_without_data >= MAX_EPOCHS_WITHOUT_DATA
+                    && !refresh_state.load_finished
+                {
+                    refresh_state.load_finished = true;
+                    tracing::info!(
+                        "Detected load completion for table {} after {} epochs without data",
+                        refresh_state.table_id,
+                        refresh_state.epochs_without_data
+                    );
+                }
+            }
+        }
+    }
+
+    /// Check if we should emit LoadFinish mutation
+    fn should_emit_load_finish(&self) -> Option<TableId> {
+        if let Some(refresh_state) = &self.refresh_state {
+            if refresh_state.load_finished {
+                return Some(refresh_state.table_id);
+            }
+        }
+        None
+    }
+
+    /// Clear refresh state after emitting LoadFinish
+    fn clear_refresh_state(&mut self) {
+        if let Some(refresh_state) = &self.refresh_state {
+            let table_id = refresh_state.table_id;
+            self.refresh_state = None;
+            tracing::info!("Cleared refresh state for table {}", table_id);
+        }
     }
 
     fn is_auto_schema_change_enable(&self) -> bool {
@@ -638,11 +731,26 @@ impl<S: StateStore> SourceExecutor<S> {
                                     self.rebuild_stream_reader(&source_desc, &mut stream)?;
                                 }
                             }
+                            Mutation::RefreshStart { table_id } => {
+                                // Start tracking refresh state for batch sources
+                                self.start_refresh(
+                                    *table_id,
+                                    risingwave_common::util::epoch::Epoch(epoch.curr),
+                                );
+                            }
                             _ => {}
                         }
                     }
 
                     let updated_splits = self.persist_state_and_clear_cache(epoch).await?;
+
+                    // Update refresh state based on whether we received data in this epoch
+                    if self.refresh_state.is_some() {
+                        self.update_refresh_state(
+                            &updated_splits,
+                            risingwave_common::util::epoch::Epoch(epoch.curr),
+                        );
+                    }
 
                     // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
                     if barrier.kind.is_checkpoint()
@@ -655,7 +763,19 @@ impl<S: StateStore> SourceExecutor<S> {
                     }
 
                     let barrier_epoch = barrier.epoch;
-                    yield Message::Barrier(barrier);
+
+                    // Check if we should inject LoadFinish mutation for batch sources
+                    if let Some(table_id) = self.should_emit_load_finish() {
+                        let mut load_finish_barrier = barrier.clone();
+                        load_finish_barrier.mutation =
+                            Some(std::sync::Arc::new(Mutation::LoadFinish {
+                                table_id: table_id,
+                            }));
+                        yield Message::Barrier(load_finish_barrier);
+                        self.clear_refresh_state();
+                    } else {
+                        yield Message::Barrier(barrier);
+                    }
 
                     if let Some((
                         source_desc,

@@ -195,6 +195,7 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
             .map(|s| {
                 s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR)
                     || s.eq_ignore_ascii_case(POSIX_FS_CONNECTOR)
+                    || s.eq_ignore_ascii_case(crate::source::BATCH_POSIX_FS_CONNECTOR)
                     || s.eq_ignore_ascii_case(GCS_CONNECTOR)
                     || s.eq_ignore_ascii_case(AZBLOB_CONNECTOR)
             })

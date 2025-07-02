@@ -322,6 +322,12 @@ pub enum Mutation {
     StartFragmentBackfill {
         fragment_ids: HashSet<FragmentId>,
     },
+    RefreshStart {
+        table_id: TableId,
+    },
+    LoadFinish {
+        table_id: TableId,
+    },
 }
 
 /// The generic type `M` is the mutation type of the barrier.
@@ -524,7 +530,9 @@ impl Barrier {
             | Mutation::Throttle(_)
             | Mutation::DropSubscriptions { .. }
             | Mutation::ConnectorPropsChange(_)
-            | Mutation::StartFragmentBackfill { .. } => false,
+            | Mutation::StartFragmentBackfill { .. }
+            | Mutation::RefreshStart { .. }
+            | Mutation::LoadFinish { .. } => false,
         }
     }
 
@@ -794,6 +802,16 @@ impl Mutation {
                     fragment_ids: fragment_ids.iter().copied().collect(),
                 })
             }
+            Mutation::RefreshStart { table_id } => {
+                PbMutation::RefreshStart(risingwave_pb::stream_plan::RefreshStartMutation {
+                    table_id: table_id.table_id,
+                })
+            }
+            Mutation::LoadFinish { table_id } => {
+                PbMutation::LoadFinish(risingwave_pb::stream_plan::LoadFinishMutation {
+                    table_id: table_id.table_id,
+                })
+            }
         }
     }
 
@@ -940,6 +958,12 @@ impl Mutation {
                         .collect(),
                 }
             }
+            PbMutation::RefreshStart(refresh_start) => Mutation::RefreshStart {
+                table_id: TableId::new(refresh_start.table_id),
+            },
+            PbMutation::LoadFinish(load_finish) => Mutation::LoadFinish {
+                table_id: TableId::new(load_finish.table_id),
+            },
             PbMutation::Combined(CombinedMutation { mutations }) => match &mutations[..] {
                 [
                     BarrierMutation {

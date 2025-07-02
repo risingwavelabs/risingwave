@@ -72,8 +72,8 @@ use crate::error::{ErrorCode, Result, RwError, bail_bind_error};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::handler::HandlerArgs;
 use crate::handler::create_source::{
-    UPSTREAM_SOURCE_KEY, bind_connector_props, bind_create_source_or_table_with_connector,
-    bind_source_watermark, handle_addition_columns,
+    UPSTREAM_SOURCE_KEY, bind_connector_props_with_refreshable,
+    bind_create_source_or_table_with_connector, bind_source_watermark, handle_addition_columns,
 };
 use crate::handler::util::SourceSchemaCompatExt;
 use crate::optimizer::plan_node::generic::{CdcScanOptions, SourceNodeKind};
@@ -91,6 +91,12 @@ pub use col_id_gen::*;
 use risingwave_connector::sink::iceberg::parse_partition_by_exprs;
 
 use crate::handler::drop_table::handle_drop_table;
+
+/// Determine if a connector type supports refreshable tables
+pub fn is_refreshable_connector(connector: &str) -> bool {
+    // Currently only batch_posix_fs connector supports refreshable tables
+    connector.eq_ignore_ascii_case("batch_posix_fs")
+}
 
 fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
     for option_def in &c.options {
@@ -467,7 +473,16 @@ pub(crate) async fn gen_create_table_plan_with_source(
     }
 
     let session = &handler_args.session;
-    let with_properties = bind_connector_props(&handler_args, &format_encode, false)?;
+
+    // Determine if the table should be refreshable based on the connector type
+    let connector_props = handler_args.with_options.clone().into_connector_props();
+    let refreshable = connector_props
+        .get_connector()
+        .map(|connector| is_refreshable_connector(&connector))
+        .unwrap_or(false);
+
+    let with_properties =
+        bind_connector_props_with_refreshable(&handler_args, &format_encode, false, refreshable)?;
     if with_properties.is_shareable_cdc_connector() {
         generated_columns_check_for_cdc_table(&column_defs)?;
         not_null_check_for_cdc_table(&wildcard_idx, &column_defs)?;
@@ -931,31 +946,34 @@ fn derive_with_options_for_cdc_table(
     external_table_name: String,
 ) -> Result<WithOptionsSecResolved> {
     use source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR};
-    // we should remove the prefix from `full_table_name`
-    let source_database_name: &str = source_with_properties
-        .get("database.name")
-        .ok_or_else(|| anyhow!("The source with properties does not contain 'database.name'"))?
-        .as_str();
+    // Note: `database.name` may be provided via secret reference and therefore absent from the
+    // plain option map. Do *not* eagerly error out. Instead, only fetch it for the connectors
+    // that really need the value, and gracefully skip the validation when the value is hidden
+    // behind a secret.
     let mut with_options = source_with_properties.clone();
     if let Some(connector) = source_with_properties.get(UPSTREAM_SOURCE_KEY) {
         match connector.as_str() {
             MYSQL_CDC_CONNECTOR => {
                 // MySQL doesn't allow '.' in database name and table name, so we can split the
                 // external table name by '.' to get the table name
-                let (db_name, table_name) = external_table_name.split_once('.').ok_or_else(|| {
+                let (db_name, table_name) = external_table_name.split_once('.') .ok_or_else(|| {
                     anyhow!("The upstream table name must contain database name prefix, e.g. 'database.table'")
                 })?;
-                // We allow multiple database names in the source definition
-                if !source_database_name
-                    .split(',')
-                    .map(|s| s.trim())
-                    .any(|name| name == db_name)
-                {
-                    return Err(anyhow!(
-                        "The database name `{}` in the FROM clause is not included in the database name `{}` in source definition",
-                        db_name,
-                        source_database_name
-                    ).into());
+                // If `database.name` is present in the plain options, validate it. Otherwise, it
+                // is very likely provided as a secret reference and we skip the validation as we
+                // cannot access the secret value here.
+                if let Some(source_database_name) = source_with_properties.get(DATABASE_NAME_KEY) {
+                    if !source_database_name
+                        .split(',')
+                        .map(|s| s.trim())
+                        .any(|name| name == db_name)
+                    {
+                        return Err(anyhow!(
+                            "The database name `{}` in the FROM clause is not included in the database name `{}` in source definition",
+                            db_name,
+                            source_database_name
+                        ).into());
+                    }
                 }
                 with_options.insert(DATABASE_NAME_KEY.into(), db_name.into());
                 with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
@@ -977,13 +995,16 @@ fn derive_with_options_for_cdc_table(
                         anyhow!("The upstream table name must be in 'database.schema.table' format")
                     })?;
 
-                // Currently SQL Server only supports single database name in the source definition
-                if db_name != source_database_name {
-                    return Err(anyhow!(
-                            "The database name `{}` in the FROM clause is not the same as the database name `{}` in source definition",
-                            db_name,
-                            source_database_name
-                        ).into());
+                // Validate database name if it is explicitly present in the plain options. Skip
+                // the check when it is provided via secret reference.
+                if let Some(source_database_name) = source_with_properties.get(DATABASE_NAME_KEY) {
+                    if db_name != source_database_name {
+                        return Err(anyhow!(
+                                "The database name `{}` in the FROM clause is not the same as the database name `{}` in source definition",
+                                db_name,
+                                source_database_name
+                            ).into());
+                    }
                 }
 
                 let (schema_name, table_name) =

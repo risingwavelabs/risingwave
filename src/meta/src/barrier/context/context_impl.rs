@@ -325,6 +325,7 @@ impl CommandContext {
             Command::MergeSnapshotBackfillStreamingJobs(_) => {}
             Command::ConnectorPropsChange(_) => {}
             Command::StartFragmentBackfill { .. } => {}
+            Command::Refresh { .. } => {} // TODO: Add refresh handling logic
         }
 
         Ok(())

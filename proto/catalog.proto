@@ -495,6 +495,29 @@ message Table {
   // NOTICE: when it is "None", the watermark column should be the first column in the pk
   optional int32 clean_watermark_index_in_pk = 44;
 
+  // Whether the table supports manual refresh operation:
+  // reload data from external source and emit messages based on the diff with current data.
+  //
+  // Design consideration: This is an explicit field rather than inferring from connector type
+  // to ensure semantic decoupling and future extensibility:
+  // 1. Semantic clarity: Refresh capability is a table-level semantic property, not tied to
+  //    the physical connector implementation. This allows the same connector to serve both
+  //    streaming and refreshable tables.
+  // 2. Future extensibility: When new connectors support refresh (e.g., iceberg_source),
+  //    we won't need to maintain a growing list of "batch connector names" or create
+  //    naming variations like "iceberg_batch" vs "iceberg_stream".
+  // 3. User visibility: DESCRIBE TABLE can clearly show refresh capability without requiring
+  //    users to memorize which connector names imply refreshability.
+  // 4. Evolution safety: If connectors are renamed or merged, existing tables retain their
+  //    refresh semantics without breaking changes.
+  // 5. Fine-grained control: Allows future features like enabling/disabling refresh on
+  //    individual tables even with the same underlying connector.
+  //
+  // Alternative considered: Infer from connector name (e.g., batch_posix_fs implies refreshable).
+  // Rejected due to tight coupling between table semantics and connector naming, limiting
+  // future flexibility when connectors evolve to support multiple modes.
+  bool refreshable = 45;
+
   // Per-table catalog version, used by schema change. `None` for internal
   // tables and tests. Not to be confused with the global catalog version for
   // notification service.

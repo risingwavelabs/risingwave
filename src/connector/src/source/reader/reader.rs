@@ -29,8 +29,8 @@ use crate::error::ConnectorResult;
 use crate::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use crate::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use crate::source::filesystem::opendal_source::{
-    DEFAULT_REFRESH_INTERVAL_SEC, OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3,
-    OpendalSource,
+    DEFAULT_REFRESH_INTERVAL_SEC, OpendalAzblob, OpendalBatchPosixFs, OpendalGcs, OpendalPosixFs,
+    OpendalS3, OpendalSource,
 };
 use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
 use crate::source::{
@@ -114,6 +114,14 @@ impl SourceReader {
                 list_interval_sec = get_list_interval_sec(prop.fs_common.refresh_interval_sec);
                 let lister: OpendalEnumerator<OpendalPosixFs> =
                     OpendalEnumerator::new_posix_fs_source(*prop)?;
+                Ok(build_opendal_fs_list_stream(lister, list_interval_sec))
+            }
+            ConnectorProperties::BatchPosixFs(prop) => {
+                // For batch_posix_fs, we don't use continuous listing but rather on-demand listing during refresh
+                // This connector is specifically designed for refreshable tables
+                list_interval_sec = get_list_interval_sec(prop.fs_common.refresh_interval_sec);
+                let lister: OpendalEnumerator<OpendalBatchPosixFs> =
+                    OpendalEnumerator::new_batch_posix_fs_source(*prop)?;
                 Ok(build_opendal_fs_list_stream(lister, list_interval_sec))
             }
             other => bail!("Unsupported source: {:?}", other),

@@ -652,6 +652,48 @@ where
             .await
     }
 
+    /// Clear all rows from the state table for refresh operations
+    pub async fn clear_all_rows(&mut self) -> StreamExecutorResult<()> {
+        use std::ops::Bound::Unbounded;
+
+        use futures::pin_mut;
+
+        // Clear the watermark cache first
+        if USE_WATERMARK_CACHE {
+            self.watermark_cache.clear();
+        }
+
+        // Collect all rows to delete first, then delete them
+        let pk_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
+        let vnodes: Vec<_> = self.vnodes().iter_vnodes().collect();
+        let mut all_rows_to_delete = Vec::new();
+
+        // First pass: collect all rows
+        for vnode in vnodes {
+            let stream = self
+                .iter_keyed_row_with_vnode(vnode, pk_range, PrefetchOptions::default())
+                .await?;
+            pin_mut!(stream);
+
+            #[for_await]
+            for entry in stream {
+                let keyed_row = entry?;
+                all_rows_to_delete.push(keyed_row.into_owned_row());
+            }
+        }
+
+        // Second pass: delete all collected rows
+        for row in all_rows_to_delete {
+            self.delete(row);
+        }
+
+        // Reset watermark state
+        self.pending_watermark = None;
+        self.committed_watermark = None;
+
+        Ok(())
+    }
+
     async fn get_inner<O: Send + 'static>(
         &self,
         pk: impl Row,

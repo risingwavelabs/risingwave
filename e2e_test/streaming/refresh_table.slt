@@ -1,0 +1,64 @@
+# Test cases for refreshable table functionality using batch_posix_fs connector
+# This test validates that the REFRESH TABLE command works with batch_posix_fs connector
+
+# Setup test directory and initial test files
+system ok
+mkdir -p /tmp/rw_refresh_test
+
+system ok
+echo "1" > /tmp/rw_refresh_test/file1.csv
+
+system ok
+echo "2" > /tmp/rw_refresh_test/file2.csv
+
+# ----
+# Create refreshable table using batch_posix_fs connector
+statement ok
+CREATE TABLE refresh_fs_t (v1 int) WITH (
+    connector = 'batch_posix_fs',
+    batch_posix_fs.root = '/tmp/rw_refresh_test',
+    match_pattern = '*.csv'
+) FORMAT PLAIN ENCODE CSV ( without_header = 'true', delimiter = ',') REFRESHABLE;
+
+# ----
+# Initially should be empty until first refresh
+query I rowsort
+SELECT * FROM refresh_fs_t;
+----
+
+# Test that REFRESH command works
+statement ok
+REFRESH TABLE refresh_fs_t;
+
+# After refresh, should be able to read data from files
+query I rowsort
+SELECT * FROM refresh_fs_t;
+----
+1
+2
+
+# ----
+# Test error case: Refreshing a non-refreshable table
+statement ok
+CREATE TABLE non_refreshable_t (v1 int) WITH (
+    connector = 'datagen',
+    fields.v1.kind = 'sequence',
+    fields.v1.start = '1',
+    fields.v1.end = '10'
+) FORMAT NATIVE ENCODE NATIVE;
+
+statement error Table 'public.non_refreshable_t' is not refreshable
+REFRESH TABLE non_refreshable_t;
+
+# ----
+# Cleanup
+
+statement ok
+DROP TABLE refresh_fs_t;
+
+statement ok
+DROP TABLE non_refreshable_t;
+
+# Clean up test files
+system ok
+rm -rf /tmp/rw_refresh_test

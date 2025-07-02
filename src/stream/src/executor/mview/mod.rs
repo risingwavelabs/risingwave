@@ -13,8 +13,14 @@
 // limitations under the License.
 
 mod materialize;
+mod refresh_diff;
+mod refresh_handler;
+mod refreshable_materialize;
 
 #[cfg(test)]
 pub(crate) mod test_utils;
 
 pub use materialize::*;
+pub use refresh_diff::*;
+pub use refresh_handler::*;
+pub use refreshable_materialize::*;

@@ -73,7 +73,7 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     is_dummy_table: bool,
 }
 
-fn get_op_consistency_level(
+pub fn get_op_consistency_level(
     conflict_behavior: ConflictBehavior,
     may_have_downstream: bool,
     depended_subscriptions: &HashSet<u32>,
@@ -563,8 +563,8 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S
 }
 
 /// A cache for materialize executors.
-struct MaterializeCache<SD> {
-    lru_cache: ManagedLruCache<Vec<u8>, CacheValue>,
+pub struct MaterializeCache<SD> {
+    pub lru_cache: ManagedLruCache<Vec<u8>, CacheValue>,
     row_serde: BasicSerde,
     version_column_index: Option<u32>,
     _serde: PhantomData<SD>,
@@ -573,7 +573,7 @@ struct MaterializeCache<SD> {
 type CacheValue = Option<CompactedRow>;
 
 impl<SD: ValueRowSerde> MaterializeCache<SD> {
-    fn new(
+    pub fn new(
         watermark_sequence: AtomicU64Ref,
         metrics_info: MetricsInfo,
         row_serde: BasicSerde,
@@ -760,7 +760,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         })
     }
 
-    fn evict(&mut self) {
+    pub fn evict(&mut self) {
         self.lru_cache.evict()
     }
 }

@@ -83,6 +83,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 POSIX_FS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv],
                 ),
+                BATCH_POSIX_FS_CONNECTOR => hashmap!(
+                    Format::Plain => vec![Encode::Csv, Encode::Text],
+                ),
                 MYSQL_CDC_CONNECTOR => hashmap!(
                     Format::Debezium => vec![Encode::Json],
                     // support source stream job

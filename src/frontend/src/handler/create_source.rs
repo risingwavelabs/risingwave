@@ -62,9 +62,10 @@ use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{EventType, get_event_data_types_with_names};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 use risingwave_connector::source::{
-    AZBLOB_CONNECTOR, ConnectorProperties, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
-    KINESIS_CONNECTOR, LEGACY_S3_CONNECTOR, MQTT_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR,
-    OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR,
+    AZBLOB_CONNECTOR, BATCH_POSIX_FS_CONNECTOR, ConnectorProperties, GCS_CONNECTOR,
+    GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, LEGACY_S3_CONNECTOR,
+    MQTT_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
+    PULSAR_CONNECTOR,
 };
 pub use risingwave_connector::source::{UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR};
 use risingwave_pb::catalog::connection_params::PbConnectionType;
@@ -727,6 +728,15 @@ pub fn bind_connector_props(
     format_encode: &FormatEncodeOptions,
     is_create_source: bool,
 ) -> Result<WithOptions> {
+    bind_connector_props_with_refreshable(handler_args, format_encode, is_create_source, false)
+}
+
+pub fn bind_connector_props_with_refreshable(
+    handler_args: &HandlerArgs,
+    format_encode: &FormatEncodeOptions,
+    is_create_source: bool,
+    _refreshable: bool,
+) -> Result<WithOptions> {
     let mut with_properties = handler_args.with_options.clone().into_connector_props();
     validate_compatibility(format_encode, &mut with_properties)?;
     let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
@@ -773,6 +783,7 @@ pub fn bind_connector_props(
             .entry("server.id".to_owned())
             .or_insert(rand::rng().random_range(1..u32::MAX).to_string());
     }
+
     Ok(with_properties)
 }
 
