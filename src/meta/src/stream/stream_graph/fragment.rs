@@ -536,7 +536,7 @@ impl StreamFragmentGraph {
     }
 
     /// matches: new_table_id -> old_table_id
-    pub fn fit_internal_table_ids_new(&mut self, matches: HashMap<u32, u32>) {
+    pub fn fit_internal_table_ids_with_mapping(&mut self, matches: HashMap<u32, u32>) {
         for fragment in self.fragments.values_mut() {
             stream_graph_visitor::visit_internal_tables(
                 &mut fragment.inner,
