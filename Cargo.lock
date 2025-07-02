@@ -12119,6 +12119,7 @@ dependencies = [
  "md5",
  "memcomparable",
  "mysql_async",
+ "mysql_common",
  "num-integer",
  "parking_lot 0.12.1",
  "parse-display",
