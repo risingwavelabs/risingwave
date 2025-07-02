@@ -40,6 +40,7 @@ use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::distributed::query::QueryMessage::Stage;
 use crate::scheduler::distributed::stage::StageEvent::ScheduledRoot;
 use crate::scheduler::plan_fragmenter::{Query, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID, StageId};
+use crate::scheduler::task_context::QueryStats;
 use crate::scheduler::{ExecutionContextRef, SchedulerError, SchedulerResult};
 
 /// Message sent to a `QueryRunner` to control its execution.
@@ -165,7 +166,7 @@ impl QueryExecution {
                     }));
                 }
 
-                // Create a oneshot channel for QueryResultFetcher to get failed event.
+                // Create an oneshot channel for QueryResultFetcher to get failed event.
                 let (root_stage_sender, root_stage_receiver) =
                     oneshot::channel::<SchedulerResult<QueryResultFetcher>>();
 
@@ -189,7 +190,15 @@ impl QueryExecution {
                 tracing::trace!("Starting query: {:?}", self.query.query_id);
 
                 // Not trace the error here, it will be processed in scheduler.
-                tokio::spawn(async move { runner.run().instrument(span).await });
+                tokio::spawn(
+                    async move {
+                        let query_stats = runner.run().instrument(span).await;
+                        // Record the stats field in the handle_query span.
+                        tracing::Span::current()
+                            .record("stats", tracing::field::display(&query_stats));
+                    }
+                    .instrument(tracing::Span::current()),
+                );
 
                 let root_stage = root_stage_receiver
                     .await
@@ -297,7 +306,7 @@ impl Debug for QueryRunner {
 }
 
 impl QueryRunner {
-    async fn run(mut self) {
+    async fn run(mut self) -> QueryStats {
         self.query_metrics.running_query_num.inc();
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
@@ -313,6 +322,7 @@ impl QueryRunner {
         let has_lookup_join_stage = self.query.has_lookup_join_stage();
 
         let mut finished_stage_cnt = 0usize;
+        let mut query_stats = QueryStats::new();
         while let Some(msg_inner) = self.msg_receiver.recv().await {
             match msg_inner {
                 Stage(Scheduled(stage_id)) => {
@@ -363,8 +373,11 @@ impl QueryRunner {
                     // One stage failed, not necessary to execute schedule stages.
                     break;
                 }
-                Stage(StageEvent::Completed(_)) => {
+                Stage(StageEvent::Completed(_, stage_stats)) => {
                     finished_stage_cnt += 1;
+                    if let Some(stage_stats) = stage_stats {
+                        query_stats.add_stage_stats(&stage_stats);
+                    }
                     assert!(finished_stage_cnt <= self.stage_executions.len());
                     if finished_stage_cnt == self.stage_executions.len() {
                         tracing::trace!(
@@ -384,6 +397,7 @@ impl QueryRunner {
                 }
             }
         }
+        query_stats
     }
 
     /// The `shutdown_tx` will only be Some if the stage is 1. In that case, we should keep the life
