@@ -2047,10 +2047,11 @@ impl DdlController {
                 .await?;
 
             let old_state_graph =
-                state_match::StateGraph::from_existing(&old_fragments, &old_fragments_upstreams);
-            let new_state_graph = state_match::StateGraph::from_building(&fragment_graph);
-            let mapping = state_match::match_graph_internal_tables(&new_state_graph, &old_state_graph)
-                .context("failed to match state graph")?;
+                state_match::Graph::from_existing(&old_fragments, &old_fragments_upstreams);
+            let new_state_graph = state_match::Graph::from_building(&fragment_graph);
+            let mapping =
+                state_match::match_graph_internal_tables(&new_state_graph, &old_state_graph)
+                    .context("incompatible altering on the streaming job states")?;
 
             fragment_graph.fit_internal_table_ids_with_mapping(mapping);
         } else {

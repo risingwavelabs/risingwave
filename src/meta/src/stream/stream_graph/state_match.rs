@@ -73,7 +73,7 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 /// Fragment id.
 type Id = u32;
 
-/// Node for a fragment in the [`StateGraph`].
+/// Node for a fragment in the [`Graph`].
 struct Fragment {
     /// The fragment id.
     id: Id,
@@ -82,7 +82,7 @@ struct Fragment {
 }
 
 /// A streaming job graph that's used for state table matching.
-pub struct StateGraph {
+pub struct Graph {
     /// All fragments in the graph.
     nodes: HashMap<Id, Fragment>,
     /// Downstreams of each fragment.
@@ -91,7 +91,7 @@ pub struct StateGraph {
     upstreams: HashMap<Id, Vec<Id>>,
 }
 
-impl StateGraph {
+impl Graph {
     /// Returns the number of fragments in the graph.
     fn len(&self) -> usize {
         self.nodes.len()
@@ -186,7 +186,7 @@ struct Match {
     table_matches: HashMap<u32, u32>,
 }
 
-/// The successful matching result of two [`StateGraph`]s.
+/// The successful matching result of two [`Graph`]s.
 struct Matches {
     /// The mapping from source fragment id to target fragment id.
     inner: HashMap<Id, Match>,
@@ -369,8 +369,8 @@ impl Matches {
     }
 }
 
-/// Matches two [`StateGraph`]s, and returns the match result from each fragment in `g1` to `g2`.
-fn match_graph(g1: &StateGraph, g2: &StateGraph) -> Result<Matches> {
+/// Matches two [`Graph`]s, and returns the match result from each fragment in `g1` to `g2`.
+fn match_graph(g1: &Graph, g2: &Graph) -> Result<Matches> {
     if g1.len() != g2.len() {
         bail_graph!(
             "graphs have different number of fragments ({} vs {})",
@@ -393,8 +393,8 @@ fn match_graph(g1: &StateGraph, g2: &StateGraph) -> Result<Matches> {
     }
 
     fn dfs(
-        g1: &StateGraph,
-        g2: &StateGraph,
+        g1: &Graph,
+        g2: &Graph,
         fp_cand: &mut HashMap<Id, HashSet<Id>>,
         matches: &mut Matches,
     ) -> Result<()> {
@@ -487,16 +487,13 @@ fn match_graph(g1: &StateGraph, g2: &StateGraph) -> Result<Matches> {
     Ok(matches)
 }
 
-/// Matches two [`StateGraph`]s, and returns the internal table mapping from `g1` to `g2`.
-pub(crate) fn match_graph_internal_tables(
-    g1: &StateGraph,
-    g2: &StateGraph,
-) -> Result<HashMap<u32, u32>> {
+/// Matches two [`Graph`]s, and returns the internal table mapping from `g1` to `g2`.
+pub(crate) fn match_graph_internal_tables(g1: &Graph, g2: &Graph) -> Result<HashMap<u32, u32>> {
     match_graph(g1, g2).map(|matches| matches.into_table_mapping())
 }
 
-impl StateGraph {
-    /// Creates a [`StateGraph`] from a [`StreamFragmentGraph`] that's being built.
+impl Graph {
+    /// Creates a [`Graph`] from a [`StreamFragmentGraph`] that's being built.
     pub(crate) fn from_building(graph: &StreamFragmentGraph) -> Self {
         let nodes = graph
             .fragments
@@ -544,7 +541,7 @@ impl StateGraph {
         }
     }
 
-    /// Creates a [`StateGraph`] from a [`StreamJobFragments`] that's existing.
+    /// Creates a [`Graph`] from a [`StreamJobFragments`] that's existing.
     pub(crate) fn from_existing(
         fragments: &StreamJobFragments,
         fragment_upstreams: &HashMap<u32, HashSet<u32>>,
