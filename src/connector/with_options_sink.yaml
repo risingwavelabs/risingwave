@@ -491,7 +491,7 @@ IcebergConfig:
     field_type: String
     comments: |-
       Credential for accessing iceberg catalog, only applicable in rest catalog.
-      A credential to exchange for a token in the OAuth2 client credentials flow.
+      A credential to exchange for a token in the `OAuth2` client credentials flow.
     required: false
   - name: catalog.token
     field_type: String
@@ -509,7 +509,7 @@ IcebergConfig:
     field_type: String
     comments: |-
       scope for accessing iceberg catalog, only applicable in rest catalog.
-      Additional scope for OAuth2.
+      Additional scope for `OAuth2`.
     required: false
   - name: catalog.rest.signing_region
     field_type: String
@@ -521,7 +521,7 @@ IcebergConfig:
     required: false
   - name: catalog.rest.sigv4_enabled
     field_type: bool
-    comments: Whether to use SigV4 for signing requests to the REST catalog.
+    comments: Whether to use `SigV4` for signing requests to the REST catalog.
     required: false
     default: Default::default
   - name: s3.path.style.access
@@ -560,7 +560,7 @@ IcebergConfig:
     default: Default::default
   - name: is_exactly_once
     field_type: bool
-    comments: Whether it is exactly_once, the default is not.
+    comments: Whether it is `exactly_once`, the default is not.
     required: false
     default: Default::default
   - name: commit_retry_num
@@ -602,7 +602,7 @@ KafkaConfig:
     field_type: String
     comments: |-
       Security protocol used for RisingWave to communicate with Kafka brokers. Could be
-      PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
+      PLAINTEXT, SSL, `SASL_PLAINTEXT` or `SASL_SSL`.
     required: false
   - name: properties.ssl.endpoint.identification.algorithm
     field_type: String
@@ -637,7 +637,7 @@ KafkaConfig:
     required: false
   - name: properties.sasl.mechanism
     field_type: String
-    comments: SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and AWS_MSK_IAM.
+    comments: SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and `AWS_MSK_IAM`.
     required: false
   - name: properties.sasl.username
     field_type: String
@@ -691,7 +691,7 @@ KafkaConfig:
     comments: |-
       Maximum Kafka protocol request message size. Due to differing framing overhead between
       protocol versions the producer is unable to reliably enforce a strict max message limit at
-      produce time and may exceed the maximum size by one message in protocol ProduceRequests,
+      produce time and may exceed the maximum size by one message in protocol `ProduceRequests`,
       the broker will enforce the topic's max.message.bytes limit
     required: false
   - name: properties.receive.message.max.bytes
@@ -736,7 +736,7 @@ KafkaConfig:
     field_type: f64
     comments: |-
       Delay in milliseconds to wait for messages in the producer queue to accumulate before
-      constructing message batches (MessageSets) to transmit to brokers. A higher value allows
+      constructing message batches (`MessageSets`) to transmit to brokers. A higher value allows
       larger and more effective (less overhead, improved compression) batches of messages to
       accumulate at the expense of increased message delivery latency.
     required: false
@@ -747,7 +747,7 @@ KafkaConfig:
       once and in the original produce order. The following configuration properties are adjusted
       automatically (if not modified by the user) when idempotence is enabled:
       max.in.flight.requests.per.connection=5 (must be less than or equal to 5),
-      retries=INT32_MAX (must be greater than 0), acks=all, queuing.strategy=fifo. Producer
+      `retries=INT32_MAX` (must be greater than 0), acks=all, queuing.strategy=fifo. Producer
       will fail if user-supplied configuration is incompatible.
     required: false
   - name: properties.message.send.max.retries
@@ -760,12 +760,12 @@ KafkaConfig:
     required: false
   - name: properties.batch.num.messages
     field_type: usize
-    comments: Maximum number of messages batched in one MessageSet
+    comments: Maximum number of messages batched in one `MessageSet`
     required: false
   - name: properties.batch.size
     field_type: usize
     comments: |-
-      Maximum size (in bytes) of all messages batched in one MessageSet, including protocol
+      Maximum size (in bytes) of all messages batched in one `MessageSet`, including protocol
       framing overhead. This limit is applied after the first message has been added to the
       batch, regardless of the first message's size, this is to ensure that messages that exceed
       batch.size are produced.
@@ -917,7 +917,7 @@ MongodbConfig:
   fields:
   - name: mongodb.url
     field_type: String
-    comments: The URL of MongoDB
+    comments: The URL of `MongoDB`
     required: true
   - name: collection.name
     field_type: String
@@ -954,7 +954,7 @@ MqttConfig:
   - name: url
     field_type: String
     comments: |-
-      The url of the broker to connect to. e.g. tcp://localhost.
+      The url of the broker to connect to. e.g. <tcp://localhost>.
       Must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,
       to denote the protocol for establishing a connection with the broker.
       `mqtts://`, `ssl://` will use the native certificates if no ca is specified
@@ -962,8 +962,8 @@ MqttConfig:
   - name: qos
     field_type: QualityOfService
     comments: |-
-      The quality of service to use when publishing messages. Defaults to at_most_once.
-      Could be at_most_once, at_least_once or exactly_once
+      The quality of service to use when publishing messages. Defaults to `at_most_once`.
+      Could be `at_most_once`, `at_least_once` or `exactly_once`
     required: false
   - name: username
     field_type: String
@@ -1307,7 +1307,7 @@ StarrocksConfig:
       to Starrocks at every n checkpoints by leveraging the
       [StreamLoad Transaction API](https://docs.starrocks.io/docs/loading/Stream_Load_transaction_interface/),
       also, in this time, the `sink_decouple` option should be enabled as well.
-      Defaults to 10 if commit_checkpoint_interval <= 0
+      Defaults to 10 if `commit_checkpoint_interval` <= 0
     required: false
     default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
   - name: starrocks.partial_update
