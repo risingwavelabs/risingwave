@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{DefaultHasher, Hash as _, Hasher as _};
 
 use itertools::Itertools;
-use risingwave_common::catalog::{self, TableDesc};
+use risingwave_common::catalog::TableDesc;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_tables_inner;
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::stream_plan::StreamNode;
@@ -36,33 +36,56 @@ pub enum Error {
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
-/// Operator id.
-type Id = u32;
+struct D<'a>(&'a StreamNode);
 
-struct Node {
-    id: Id,
-    fragment: StreamNode,
+impl std::fmt::Display for D<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let node = self.0;
+        let id = node.operator_id;
+        let identity = &node.identity;
+        let body = node.node_body.as_ref().unwrap();
+        write!(f, "{}({}, {})", body, id, identity)
+    }
 }
 
-pub struct Graph {
-    nodes: HashMap<Id, Node>,
+/// Fragment id.
+type Id = u32;
+
+/// Node for a fragment in the [`StateGraph`].
+struct Fragment {
+    /// The fragment id.
+    id: Id,
+    /// The root node of the fragment.
+    root: StreamNode,
+}
+
+/// A streaming job graph that's used for state table matching.
+pub struct StateGraph {
+    /// All fragments in the graph.
+    nodes: HashMap<Id, Fragment>,
+    /// Downstreams of each fragment.
     downstreams: HashMap<Id, Vec<Id>>,
+    /// Upstreams of each fragment.
     upstreams: HashMap<Id, Vec<Id>>,
 }
 
-impl Graph {
+impl StateGraph {
+    /// Returns the number of fragments in the graph.
     fn len(&self) -> usize {
         self.nodes.len()
     }
 
+    /// Returns the downstreams of a fragment.
     fn downstreams(&self, id: Id) -> &[Id] {
         self.downstreams.get(&id).map_or(&[], |v| v.as_slice())
     }
 
+    /// Returns the upstreams of a fragment.
     fn upstreams(&self, id: Id) -> &[Id] {
         self.upstreams.get(&id).map_or(&[], |v| v.as_slice())
     }
 
+    /// Returns the topological order of the graph.
     fn topo_order(&self) -> Result<Vec<Id>> {
         let mut topo = Vec::new();
         let mut downstream_cnts = HashMap::new();
@@ -95,51 +118,62 @@ impl Graph {
             // There are nodes that are not processed yet.
             bail_invalid_graph!("graph is not a DAG");
         }
+        assert_eq!(topo.len(), self.len());
 
         Ok(topo)
     }
 
+    /// Calculates the fingerprints of all fragments based on their position in the graph.
+    ///
+    /// This is used to locate the candidates when matching a fragment against another graph.
     fn fingerprints(&self) -> Result<HashMap<Id, u64>> {
         let mut fps = HashMap::new();
 
         let order = self.topo_order()?;
-        for node_id in order.into_iter().rev() {
-            // let node = &self.nodes[&node_id];
+        for u in order.into_iter().rev() {
             let upstream_fps = self
-                .upstreams(node_id)
+                .upstreams(u)
                 .iter()
                 .map(|id| *fps.get(id).unwrap())
-                .sorted() // ignore order
+                .sorted() // allow input order to be arbitrary
                 .collect_vec();
 
+            // Hash the downstream count, upstream count, and upstream fingerprints to
+            // generate the fingerprint of this node.
             let mut hasher = DefaultHasher::new();
             (
-                // node.body.discriminant(),
-                self.upstreams(node_id).len(),
-                self.downstreams(node_id).len(),
+                self.upstreams(u).len(),
+                self.downstreams(u).len(),
                 upstream_fps,
             )
                 .hash(&mut hasher);
             let fingerprint = hasher.finish();
 
-            fps.insert(node_id, fingerprint);
+            fps.insert(u, fingerprint);
         }
 
         Ok(fps)
     }
 }
 
+/// The match result of a fragment in the source graph to a fragment in the target graph.
 struct Match {
+    /// The target fragment id.
     target: Id,
+    /// The mapping from source table id to target table id within the fragment.
     table_matches: HashMap<u32, u32>,
 }
 
+/// The successful matching result of two [`StateGraph`]s.
 struct Matches {
+    /// The mapping from source fragment id to target fragment id.
     inner: HashMap<Id, Match>,
+    /// The set of target fragment ids that are already matched.
     matched_targets: HashSet<Id>,
 }
 
 impl Matches {
+    /// Creates a new empty match result.
     fn new() -> Self {
         Self {
             inner: HashMap::new(),
@@ -147,32 +181,36 @@ impl Matches {
         }
     }
 
+    /// Returns the target fragment id of a source fragment id.
     fn target(&self, u: Id) -> Option<Id> {
         self.inner.get(&u).map(|m| m.target)
     }
 
+    /// Returns the number of matched fragments.
     fn len(&self) -> usize {
         self.inner.len()
     }
 
-    fn mapped(&self, u: Id) -> bool {
+    /// Returns true if the source fragment is already matched.
+    fn matched(&self, u: Id) -> bool {
         self.inner.contains_key(&u)
     }
 
-    fn target_used(&self, v: Id) -> bool {
+    /// Returns true if the target fragment is already matched.
+    fn target_matched(&self, v: Id) -> bool {
         self.matched_targets.contains(&v)
     }
 
-    fn try_match(&mut self, u: &Node, v: &Node) -> Result<()> {
-        if self.mapped(u.id) {
-            panic!("node {} was already mapped", u.id);
+    /// Tries to match a source fragment to a target fragment. If successful, they will be recorded
+    /// in the match result.
+    ///
+    /// This will check the operators and internal tables of the fragment.
+    fn try_match(&mut self, u: &Fragment, v: &Fragment) -> Result<()> {
+        if self.matched(u.id) {
+            panic!("fragment {} was already matched", u.id);
         }
 
-        let mut table_matches = HashMap::new();
-
-        let mut uq = VecDeque::from([&u.fragment]);
-        let mut vq = VecDeque::from([&v.fragment]);
-
+        // Collect the internal tables of a node (not visiting children).
         let collect_tables = |x: &StreamNode| {
             let mut tables = Vec::new();
             visit_stream_node_tables_inner(&mut x.clone(), true, false, |table, name| {
@@ -181,12 +219,22 @@ impl Matches {
             tables
         };
 
+        let mut table_matches = HashMap::new();
+
+        // Use BFS to match the nodes.
+        let mut uq = VecDeque::from([&u.root]);
+        let mut vq = VecDeque::from([&v.root]);
+
         while let Some(mut un) = uq.pop_front() {
             let Some(mut vn) = vq.pop_front() else {
-                bail_failed_to_match!("fragment has different shape of nodes");
+                bail_failed_to_match!(
+                    "fragment {} has different shape of operators than target fragment {}",
+                    u.id,
+                    v.id
+                );
             };
 
-            // skip stateless nodes
+            // Skip while the node is stateless and has only one input.
             let mut u_tables = collect_tables(un);
             while u_tables.is_empty() && un.input.len() == 1 {
                 un = &un.input[0];
@@ -198,18 +246,26 @@ impl Matches {
                 v_tables = collect_tables(vn);
             }
 
+            // If we reach the leaf node, we are done of this fragment.
             if un.input.is_empty() && vn.input.is_empty() {
-                // reach the leaf node
                 continue;
             }
 
             if un.node_body.as_ref().unwrap().discriminant()
                 != vn.node_body.as_ref().unwrap().discriminant()
             {
-                bail_failed_to_match!("node has different types");
+                bail_failed_to_match!(
+                    "operator `{}` has different type than target `{}`",
+                    D(un),
+                    D(vn)
+                );
             }
             if un.input.len() != vn.input.len() {
-                bail_failed_to_match!("node has different number of inputs");
+                bail_failed_to_match!(
+                    "operator `{}` has different number of inputs than target `{}`",
+                    D(un),
+                    D(vn)
+                );
             }
 
             uq.extend(un.input.iter());
@@ -222,25 +278,28 @@ impl Matches {
 
                 if vt_cands.is_empty() {
                     bail_failed_to_match!(
-                        "cannot find a match for table {} in node {}",
+                        "cannot find a match for table `{}` of operator `{}` in target `{}`",
                         ut_name,
-                        u.id
+                        D(un),
+                        D(vn)
                     );
                 } else if vt_cands.len() > 1 {
                     bail_failed_to_match!(
-                        "found multiple matches for table {} in node {}",
+                        "found multiple matches for table `{}` in operator `{}` in target `{}`",
                         ut_name,
-                        u.id
+                        D(un),
+                        D(vn)
                     );
                 }
 
                 let (_, vt) = vt_cands.into_iter().next().unwrap();
 
+                // Since the requirement is to ensure the state compatibility, we focus solely on
+                // the "physical" part of the table, best illustrated by `TableDesc`.
                 let table_desc_for_compare = |table: &PbTable| {
-                    // Set some fields to dummy value for comparison.
                     let mut table = table.clone();
-                    table.id = 0;
-                    table.maybe_vnode_count = Some(42);
+                    table.id = 0; // ignore id
+                    table.maybe_vnode_count = Some(42); // vnode count is unfilled for new fragment graph, fill it with a dummy value before proceeding
 
                     TableDesc::from_pb_table(&table)
                 };
@@ -250,16 +309,17 @@ impl Matches {
 
                 if ut_compare != vt_compare {
                     bail_failed_to_match!(
-                        "table {} in node {} cannot be matched, diff:\n{}",
+                        "found a match for table `{}` of operator `{}` in target `{}`, but they are incompatible, diff:\n{}",
                         ut_name,
-                        u.id,
+                        D(un),
+                        D(vn),
                         pretty_assertions::Comparison::new(&ut_compare, &vt_compare)
                     );
                 }
 
-                table_matches
-                    .try_insert(ut.id, vt.id)
-                    .unwrap_or_else(|_| panic!("duplicated table id {} in node {}", ut.id, u.id));
+                table_matches.try_insert(ut.id, vt.id).unwrap_or_else(|_| {
+                    panic!("duplicated table id {} in fragment {}", ut.id, u.id)
+                });
             }
         }
 
@@ -273,17 +333,19 @@ impl Matches {
         Ok(())
     }
 
+    /// Undoes the match of a source fragment.
     fn undo_match(&mut self, u: Id) {
         let target = self
             .inner
             .remove(&u)
-            .unwrap_or_else(|| panic!("node {} was not mapped", u))
+            .unwrap_or_else(|| panic!("fragment {} was not previously matched", u))
             .target;
 
         let target_removed = self.matched_targets.remove(&target);
         assert!(target_removed);
     }
 
+    /// Converts the match result into a table mapping.
     fn into_table_mapping(self) -> HashMap<u32, u32> {
         self.inner
             .into_iter()
@@ -292,14 +354,16 @@ impl Matches {
     }
 }
 
-fn match_graph(g1: &Graph, g2: &Graph) -> Result<Matches> {
+/// Matches two [`StateGraph`]s, and returns the match result from each fragment in `g1` to `g2`.
+fn match_graph(g1: &StateGraph, g2: &StateGraph) -> Result<Matches> {
     if g1.len() != g2.len() {
-        bail_failed_to_match!("graphs have different number of nodes");
+        bail_failed_to_match!("graphs have different number of fragments");
     }
 
     let fps1 = g1.fingerprints()?;
     let fps2 = g2.fingerprints()?;
 
+    // Collect the candidates for each fragment.
     let mut fp_cand = HashMap::with_capacity(g1.len());
     for (&u, &f1) in &fps1 {
         for (&v, &f2) in &fps2 {
@@ -310,27 +374,27 @@ fn match_graph(g1: &Graph, g2: &Graph) -> Result<Matches> {
     }
 
     fn dfs(
-        g1: &Graph,
-        g2: &Graph,
+        g1: &StateGraph,
+        g2: &StateGraph,
         fp_cand: &mut HashMap<Id, HashSet<Id>>,
         matches: &mut Matches,
     ) -> Result<()> {
+        // If all fragments are matched, we are done.
         if matches.len() == g1.len() {
-            // We are done.
             return Ok(());
         }
 
-        // Choose node with fewest remaining candidates that's unmapped.
+        // Choose fragment with fewest remaining candidates that's unmatched.
         let (&u, u_cands) = fp_cand
             .iter()
-            .filter(|(u, _)| !matches.mapped(**u))
+            .filter(|(u, _)| !matches.matched(**u))
             .min_by_key(|(_, cands)| cands.len())
             .unwrap();
         let u_cands = u_cands.clone();
 
         for v in u_cands {
             // Skip if v is already used.
-            if matches.target_used(v) {
+            if matches.target_matched(v) {
                 continue;
             }
 
@@ -355,24 +419,26 @@ fn match_graph(g1: &Graph, g2: &Graph) -> Result<Matches> {
                 }
             }
 
+            // Now that `u` and `v` are in the same position of the graph, try to match them by visiting the operators.
             match matches.try_match(&g1.nodes[&u], &g2.nodes[&v]) {
-                Ok(_) => {
+                Ok(()) => {
                     let fp_cand_clone = fp_cand.clone();
 
-                    // v cannot be a candidate for any other u. Remove it.
+                    // v cannot be a candidate for any other u. Remove it before proceeding.
                     for (_, u_cands) in fp_cand.iter_mut() {
                         u_cands.remove(&v);
                     }
 
                     // Try to match the rest.
                     match dfs(g1, g2, fp_cand, matches) {
-                        Ok(_) => return Ok(()),
-                        Err(_err) => {} // TODO: record error
+                        Ok(()) => return Ok(()), // success, return
+                        Err(_err) => {
+                            // TODO: record error
+                            // Backtrack.
+                            *fp_cand = fp_cand_clone;
+                            matches.undo_match(u);
+                        }
                     }
-
-                    // Backtrack.
-                    *fp_cand = fp_cand_clone;
-                    matches.undo_match(u);
                 }
 
                 Err(_err) => {} // TODO: record error
@@ -380,8 +446,8 @@ fn match_graph(g1: &Graph, g2: &Graph) -> Result<Matches> {
         }
 
         bail_failed_to_match!(
-            "no valid match found for node {u} ({:?})",
-            g1.nodes[&u].fragment
+            "no valid match found for fragment {u} ({:?})",
+            g1.nodes[&u].root
         );
     }
 
@@ -390,11 +456,16 @@ fn match_graph(g1: &Graph, g2: &Graph) -> Result<Matches> {
     Ok(matches)
 }
 
-pub(crate) fn match_graph_internal_tables(g1: &Graph, g2: &Graph) -> Result<HashMap<u32, u32>> {
+/// Matches two [`StateGraph`]s, and returns the internal table mapping from `g1` to `g2`.
+pub(crate) fn match_graph_internal_tables(
+    g1: &StateGraph,
+    g2: &StateGraph,
+) -> Result<HashMap<u32, u32>> {
     match_graph(g1, g2).map(|matches| matches.into_table_mapping())
 }
 
-impl Graph {
+impl StateGraph {
+    /// Creates a [`StateGraph`] from a [`StreamFragmentGraph`] that's being built.
     pub(crate) fn from_building(graph: &StreamFragmentGraph) -> Self {
         let nodes = graph
             .fragments
@@ -402,9 +473,9 @@ impl Graph {
             .map(|(&id, f)| {
                 (
                     id.as_global_id(),
-                    Node {
+                    Fragment {
                         id: id.as_global_id(),
-                        fragment: f.node.clone().unwrap(),
+                        root: f.node.clone().unwrap(),
                     },
                 )
             })
@@ -442,6 +513,7 @@ impl Graph {
         }
     }
 
+    /// Creates a [`StateGraph`] from a [`StreamJobFragments`] that's existing.
     pub(crate) fn from_existing(
         fragments: &StreamJobFragments,
         fragment_upstreams: &HashMap<u32, HashSet<u32>>,
@@ -452,9 +524,9 @@ impl Graph {
             .map(|(&id, f)| {
                 (
                     id,
-                    Node {
+                    Fragment {
                         id,
-                        fragment: f.nodes.clone(),
+                        root: f.nodes.clone(),
                     },
                 )
             })
@@ -468,6 +540,7 @@ impl Graph {
 
             for &upstream in fragment_upstreams {
                 if !nodes.contains_key(&upstream) {
+                    // Upstream fragment can be from a different job, ignore it.
                     continue;
                 }
                 downstreams

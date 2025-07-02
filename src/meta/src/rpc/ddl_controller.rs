@@ -2047,20 +2047,20 @@ impl DdlController {
                 .await?;
 
             let old_state_graph =
-                state::Graph::from_existing(&old_fragments, &old_fragments_upstreams);
-            let new_state_graph = state::Graph::from_building(&fragment_graph);
+                state::StateGraph::from_existing(&old_fragments, &old_fragments_upstreams);
+            let new_state_graph = state::StateGraph::from_building(&fragment_graph);
             let mapping = state::match_graph_internal_tables(&new_state_graph, &old_state_graph)
                 .context("failed to match state graph")?;
 
             fragment_graph.fit_internal_table_ids_with_mapping(mapping);
         } else {
-            // If it's ALTER TABLE or SOURCE, use a simple table id matching algorithm to keep the original behavior.
+            // If it's ALTER TABLE or SOURCE, use a trivial table id matching algorithm to keep the original behavior.
             // TODO(alter-mv): this is actually a special case of ALTER MV, can we merge the two branches?
             let old_internal_tables = self
                 .metadata_manager
                 .get_table_catalog_by_ids(old_internal_table_ids)
                 .await?;
-            fragment_graph.fit_internal_table_ids(old_internal_tables)?;
+            fragment_graph.fit_internal_tables_trivial(old_internal_tables)?;
         }
 
         // 1. Resolve the edges to the downstream fragments, extend the fragment graph to a complete

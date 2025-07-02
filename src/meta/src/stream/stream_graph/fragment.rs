@@ -495,8 +495,9 @@ impl StreamFragmentGraph {
         }
     }
 
-    /// Set internal tables' `table_id`s according to a list of internal tables
-    pub fn fit_internal_table_ids(
+    /// Use a trivial algorithm to match the internal tables of the new graph for
+    /// `ALTER TABLE` or `ALTER SOURCE`.
+    pub fn fit_internal_tables_trivial(
         &mut self,
         mut old_internal_tables: Vec<Table>,
     ) -> MetaResult<()> {
@@ -535,13 +536,14 @@ impl StreamFragmentGraph {
         Ok(())
     }
 
-    /// matches: new_table_id -> old_table_id
+    /// Fit the internal tables' `table_id`s according to the given mapping.
     pub fn fit_internal_table_ids_with_mapping(&mut self, matches: HashMap<u32, u32>) {
         for fragment in self.fragments.values_mut() {
             stream_graph_visitor::visit_internal_tables(
                 &mut fragment.inner,
                 |table, _table_type_name| {
                     let target = matches.get(&table.id).cloned().unwrap();
+                    // TODO(alter-mv): some other fields may also need to be aligned, like `vnode_count`?
                     table.id = target;
                 },
             );
