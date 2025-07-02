@@ -59,6 +59,9 @@ pub struct TableIndex {
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct VectorIndex {
     pub index_table: Arc<TableCatalog>,
+    pub vector_item: ExprImpl,
+    pub info_items: Vec<ExprImpl>,
+    pub primary_to_secondary_mapping: BTreeMap<usize, usize>,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -147,6 +150,9 @@ impl IndexCatalog {
                 assert_eq!(index_prost.index_columns_len, 1);
                 IndexType::Vector(Arc::new(VectorIndex {
                     index_table: index_table.clone(),
+                    vector_item: index_item[0].clone(),
+                    info_items: index_item[1..].iter().cloned().collect_vec(),
+                    primary_to_secondary_mapping,
                 }))
             }
             TableType::Table | TableType::MaterializedView | TableType::Internal => {

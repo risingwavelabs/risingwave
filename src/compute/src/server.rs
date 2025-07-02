@@ -61,7 +61,8 @@ use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient
 use risingwave_storage::hummock::utils::HummockMemoryCollector;
 use risingwave_storage::monitor::{
     GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS, GLOBAL_OBJECT_STORE_METRICS,
-    global_hummock_state_store_metrics, global_storage_metrics, monitor_cache,
+    MonitoredStorageMetrics, global_hummock_state_store_metrics, global_storage_metrics,
+    monitor_cache,
 };
 use risingwave_storage::opts::StorageOpts;
 use risingwave_stream::executor::monitor::global_streaming_metrics;
@@ -206,19 +207,21 @@ pub async fn compute_node_serve(
     };
 
     LicenseManager::get().refresh(system_params.license_key());
-    let state_store = StateStoreImpl::new(
-        state_store_url,
-        storage_opts.clone(),
-        hummock_meta_client.clone(),
-        state_store_metrics.clone(),
-        object_store_metrics,
-        storage_metrics.clone(),
-        compactor_metrics.clone(),
-        await_tree_config.clone(),
-        system_params.use_new_object_prefix_strategy(),
-    )
-    .await
-    .unwrap();
+    let state_store =
+        StateStoreImpl::shared_in_memory_store(Arc::new(MonitoredStorageMetrics::unused()));
+    // let state_store = StateStoreImpl::new(
+    //     state_store_url,
+    //     storage_opts.clone(),
+    //     hummock_meta_client.clone(),
+    //     state_store_metrics.clone(),
+    //     object_store_metrics,
+    //     storage_metrics.clone(),
+    //     compactor_metrics.clone(),
+    //     await_tree_config.clone(),
+    //     system_params.use_new_object_prefix_strategy(),
+    // )
+    // .await
+    // .unwrap();
 
     LocalSecretManager::init(
         opts.temp_secret_file_dir,
