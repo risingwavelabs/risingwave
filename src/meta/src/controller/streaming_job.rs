@@ -25,6 +25,7 @@ use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node_body, visit_stream_node_mut,
 };
 use risingwave_common::{bail, current_cluster_version};
+use risingwave_connector::allow_alter_on_fly_fields::check_sink_allow_alter_on_fly_fields;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
@@ -1946,20 +1947,14 @@ impl CatalogController {
         match sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) {
             Some(connector) => {
                 let connector_type = connector.to_lowercase();
+                let field_names: Vec<String> = props.keys().cloned().collect();
+                check_sink_allow_alter_on_fly_fields(&connector_type, &field_names)
+                    .map_err(|e| SinkError::Config(anyhow!(e)))?;
+
                 match_sink_name_str!(
                     connector_type.as_str(),
                     SinkType,
                     {
-                        for (k, v) in &props {
-                            if !SinkType::SINK_ALTER_CONFIG_LIST.contains(&k.as_str()) {
-                                return Err(SinkError::Config(anyhow!(
-                                    "unsupported alter config: {}={}",
-                                    k,
-                                    v
-                                ))
-                                .into());
-                            }
-                        }
                         let mut new_props = sink.properties.0.clone();
                         new_props.extend(props.clone());
                         SinkType::validate_alter_config(&new_props)
