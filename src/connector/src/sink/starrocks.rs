@@ -107,6 +107,7 @@ pub struct StarrocksConfig {
     /// Defaults to 10 if commit_checkpoint_interval <= 0
     #[serde(default = "default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub commit_checkpoint_interval: u64,
 
     /// Enable partial update

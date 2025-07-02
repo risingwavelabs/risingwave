@@ -73,6 +73,7 @@ pub struct ClickHouseCommon {
     /// Commit every n(>0) checkpoints, default is 10.
     #[serde(default = "default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub commit_checkpoint_interval: u64,
 }
 

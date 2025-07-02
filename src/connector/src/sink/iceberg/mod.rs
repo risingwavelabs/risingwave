@@ -128,6 +128,7 @@ pub struct IcebergConfig {
     /// Commit every n(>0) checkpoints, default is 10.
     #[serde(default = "default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub commit_checkpoint_interval: u64,
 
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
@@ -146,15 +147,18 @@ pub struct IcebergConfig {
 
     /// Whether to enable iceberg compaction.
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    #[with_option(allow_alter_on_fly)]
     pub enable_compaction: bool,
 
     /// The interval of iceberg compaction
     #[serde(default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub compaction_interval_sec: Option<u64>,
 
     /// Whether to enable iceberg expired snapshots.
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    #[with_option(allow_alter_on_fly)]
     pub enable_snapshot_expiration: bool,
 }
 

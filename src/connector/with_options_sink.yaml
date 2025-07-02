@@ -138,6 +138,7 @@ ClickHouseConfig:
     comments: Commit every n(>0) checkpoints, default is 10.
     required: false
     default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
+    allow_alter_on_fly: true
   - name: r#type
     field_type: String
     required: true
@@ -204,6 +205,7 @@ DeltaLakeConfig:
     comments: Commit every n(>0) checkpoints, default is 10.
     required: false
     default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
+    allow_alter_on_fly: true
   - name: r#type
     field_type: String
     required: true
@@ -554,6 +556,7 @@ IcebergConfig:
     comments: Commit every n(>0) checkpoints, default is 10.
     required: false
     default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
+    allow_alter_on_fly: true
   - name: create_table_if_not_exists
     field_type: bool
     required: false
@@ -572,16 +575,19 @@ IcebergConfig:
     comments: Whether to enable iceberg compaction.
     required: false
     default: Default::default
+    allow_alter_on_fly: true
   - name: compaction_interval_sec
     field_type: u64
     comments: The interval of iceberg compaction
     required: false
     default: Default::default
+    allow_alter_on_fly: true
   - name: enable_snapshot_expiration
     field_type: bool
     comments: Whether to enable iceberg expired snapshots.
     required: false
     default: Default::default
+    allow_alter_on_fly: true
 KafkaConfig:
   fields:
   - name: topic
@@ -731,18 +737,21 @@ KafkaConfig:
     field_type: bool
     comments: Allow automatic topic creation on the broker when subscribing to or assigning non-existent topics.
     required: false
+    allow_alter_on_fly: true
   - name: properties.queue.buffering.max.messages
     field_type: usize
     comments: |-
       Maximum number of messages allowed on the producer queue. This queue is shared by all
       topics and partitions. A value of 0 disables this limit.
     required: false
+    allow_alter_on_fly: true
   - name: properties.queue.buffering.max.kbytes
     field_type: usize
     comments: |-
       Maximum total message size sum allowed on the producer queue. This queue is shared by all
       topics and partitions. This property has higher priority than queue.buffering.max.messages.
     required: false
+    allow_alter_on_fly: true
   - name: properties.queue.buffering.max.ms
     field_type: f64
     comments: |-
@@ -751,6 +760,7 @@ KafkaConfig:
       larger and more effective (less overhead, improved compression) batches of messages to
       accumulate at the expense of increased message delivery latency.
     required: false
+    allow_alter_on_fly: true
   - name: properties.enable.idempotence
     field_type: bool
     comments: |-
@@ -761,18 +771,22 @@ KafkaConfig:
       retries=INT32_MAX (must be greater than 0), acks=all, queuing.strategy=fifo. Producer
       will fail if user-supplied configuration is incompatible.
     required: false
+    allow_alter_on_fly: true
   - name: properties.message.send.max.retries
     field_type: usize
     comments: How many times to retry sending a failing Message.
     required: false
+    allow_alter_on_fly: true
   - name: properties.retry.backoff.ms
     field_type: usize
     comments: The backoff time in milliseconds before retrying a protocol request.
     required: false
+    allow_alter_on_fly: true
   - name: properties.batch.num.messages
     field_type: usize
     comments: Maximum number of messages batched in one MessageSet
     required: false
+    allow_alter_on_fly: true
   - name: properties.batch.size
     field_type: usize
     comments: |-
@@ -781,6 +795,7 @@ KafkaConfig:
       batch, regardless of the first message's size, this is to ensure that messages that exceed
       batch.size are produced.
     required: false
+    allow_alter_on_fly: true
   - name: properties.compression.codec
     field_type: CompressionCodec
     comments: Compression codec to use for compressing message sets.
@@ -792,14 +807,17 @@ KafkaConfig:
       This value is used to limits the time a produced message waits for
       successful delivery (including retries).
     required: false
+    allow_alter_on_fly: true
   - name: properties.max.in.flight.requests.per.connection
     field_type: usize
     comments: The maximum number of unacknowledged requests the client will send on a single connection before blocking.
     required: false
     default: '5'
+    allow_alter_on_fly: true
   - name: properties.request.required.acks
     field_type: i32
     required: false
+    allow_alter_on_fly: true
   - name: broker.rewrite.endpoints
     field_type: BTreeMap<String,String>
     comments: This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
@@ -1366,6 +1384,7 @@ StarrocksConfig:
       Defaults to 10 if commit_checkpoint_interval <= 0
     required: false
     default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
+    allow_alter_on_fly: true
   - name: starrocks.partial_update
     field_type: String
     comments: Enable partial update
