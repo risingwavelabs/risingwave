@@ -199,6 +199,20 @@ impl BuildingFragment {
                     table_desc.table_id = job_id;
                 }
             }
+            NodeBody::VectorIndexWrite(node) => {
+                node.table_id = job_id;
+                let table = node.table.as_mut().unwrap();
+                table.id = job_id;
+                table.database_id = job.database_id();
+                table.schema_id = job.schema_id();
+                table.fragment_id = fragment_id;
+                #[cfg(not(debug_assertions))]
+                {
+                    table.definition = job.name();
+                }
+
+                has_job = true;
+            }
             _ => {}
         });
 
@@ -1653,10 +1667,18 @@ impl CompleteStreamFragmentGraph {
                 None
             };
 
+        let vector_index_fragment_id =
+            if inner.fragment_type_mask & FragmentTypeFlag::VectorIndexWrite as u32 != 0 {
+                job_id
+            } else {
+                None
+            };
+
         let state_table_ids = internal_tables
             .iter()
             .map(|t| t.id)
             .chain(materialized_fragment_id)
+            .chain(vector_index_fragment_id)
             .collect();
 
         Fragment {
