@@ -8,9 +8,9 @@ REPO_ROOT=${PWD}
 ARCH="$(uname -m)"
 
 echo "--- Check env"
-if [ "${BUILDKITE_SOURCE}" != "schedule" ] && [ "${BUILDKITE_SOURCE}" != "webhook" ] && [[ -z "${BINARY_NAME+x}" ]]; then
-  exit 0
-fi
+#if [ "${BUILDKITE_SOURCE}" != "schedule" ] && [ "${BUILDKITE_SOURCE}" != "webhook" ] && [[ -z "${BINARY_NAME+x}" ]]; then
+#  exit 0
+#fi
 
 echo "--- Install aws cli"
 curl "https://awscli.amazonaws.com/awscli-exe-linux-${ARCH}.zip" -o "awscliv2.zip"
