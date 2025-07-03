@@ -134,7 +134,7 @@ pub struct IcebergConfig {
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,
 
-    /// Whether it is exactly_once, the default is not.
+    /// Whether it is `exactly_once`, the default is not.
     #[serde(default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub is_exactly_once: Option<bool>,
@@ -217,7 +217,7 @@ impl IcebergConfig {
                     && k != &"catalog.type"
                     && k != &"catalog.name"
             })
-            .map(|(k, v)| (k[8..].to_string(), v.to_string()))
+            .map(|(k, v)| (k[8..].to_string(), v.clone()))
             .collect();
 
         if config.commit_checkpoint_interval == 0 {

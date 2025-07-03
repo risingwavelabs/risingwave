@@ -103,7 +103,7 @@ pub struct RdKafkaPropertiesProducer {
     queue_buffering_max_kbytes: Option<usize>,
 
     /// Delay in milliseconds to wait for messages in the producer queue to accumulate before
-    /// constructing message batches (MessageSets) to transmit to brokers. A higher value allows
+    /// constructing message batches (`MessageSets`) to transmit to brokers. A higher value allows
     /// larger and more effective (less overhead, improved compression) batches of messages to
     /// accumulate at the expense of increased message delivery latency.
     #[serde(rename = "properties.queue.buffering.max.ms")]
@@ -115,7 +115,7 @@ pub struct RdKafkaPropertiesProducer {
     /// once and in the original produce order. The following configuration properties are adjusted
     /// automatically (if not modified by the user) when idempotence is enabled:
     /// max.in.flight.requests.per.connection=5 (must be less than or equal to 5),
-    /// retries=INT32_MAX (must be greater than 0), acks=all, queuing.strategy=fifo. Producer
+    /// `retries=INT32_MAX` (must be greater than 0), acks=all, queuing.strategy=fifo. Producer
     /// will fail if user-supplied configuration is incompatible.
     #[serde(rename = "properties.enable.idempotence")]
     #[serde_as(as = "Option<DisplayFromStr>")]
@@ -134,13 +134,13 @@ pub struct RdKafkaPropertiesProducer {
     #[with_option(allow_alter_on_fly)]
     retry_backoff_ms: Option<usize>,
 
-    /// Maximum number of messages batched in one MessageSet
+    /// Maximum number of messages batched in one `MessageSet`
     #[serde(rename = "properties.batch.num.messages")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
     batch_num_messages: Option<usize>,
 
-    /// Maximum size (in bytes) of all messages batched in one MessageSet, including protocol
+    /// Maximum size (in bytes) of all messages batched in one `MessageSet`, including protocol
     /// framing overhead. This limit is applied after the first message has been added to the
     /// batch, regardless of the first message's size, this is to ensure that messages that exceed
     /// batch.size are produced.
@@ -436,6 +436,7 @@ mod opaque_type {
     use super::*;
     pub type KafkaSinkDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
 
+    #[define_opaque(KafkaSinkDeliveryFuture)]
     pub(super) fn map_delivery_future(future: DeliveryFuture) -> KafkaSinkDeliveryFuture {
         future.map(KafkaPayloadWriter::<'static>::map_future_result)
     }

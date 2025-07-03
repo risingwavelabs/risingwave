@@ -552,7 +552,7 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("db_id", db_id.to_string()))?;
         self.database_by_name
             .get(db_name)
-            .ok_or_else(|| CatalogError::NotFound("database", db_name.to_string()))
+            .ok_or_else(|| CatalogError::NotFound("database", db_name.clone()))
     }
 
     pub fn get_all_schema_names(&self, db_name: &str) -> CatalogResult<Vec<String>> {

@@ -663,30 +663,42 @@ mod retry_strategy {
     // Retry max interval.
     const RECOVERY_RETRY_MAX_INTERVAL: Duration = Duration::from_secs(5);
 
-    mod retry_backoff_future {
-        use std::future::Future;
-        use std::time::Duration;
+    // MrCroxx: Use concrete type here to prevent unsolved compiler issue.
+    // Feel free to replace the concrete type with TAIT after fixed.
 
-        use tokio::time::sleep;
+    // mod retry_backoff_future {
+    //     use std::future::Future;
+    //     use std::time::Duration;
+    //
+    //     use tokio::time::sleep;
+    //
+    //     pub(crate) type RetryBackoffFuture = impl Future<Output = ()> + Unpin + Send + 'static;
+    //
+    //     #[define_opaque(RetryBackoffFuture)]
+    //     pub(super) fn get_retry_backoff_future(duration: Duration) -> RetryBackoffFuture {
+    //         Box::pin(sleep(duration))
+    //     }
+    // }
+    // pub(crate) use retry_backoff_future::*;
 
-        pub(crate) type RetryBackoffFuture = impl Future<Output = ()> + Unpin + Send + 'static;
-        pub(super) fn get_retry_backoff_future(duration: Duration) -> RetryBackoffFuture {
-            Box::pin(sleep(duration))
-        }
+    pub(crate) type RetryBackoffFuture = std::pin::Pin<Box<tokio::time::Sleep>>;
+
+    pub(crate) fn get_retry_backoff_future(duration: Duration) -> RetryBackoffFuture {
+        Box::pin(tokio::time::sleep(duration))
     }
-    pub(crate) use retry_backoff_future::*;
 
     pub(crate) type RetryBackoffStrategy =
         impl Iterator<Item = RetryBackoffFuture> + Send + 'static;
 
-    #[inline(always)]
     /// Initialize a retry strategy for operation in recovery.
-    pub(crate) fn get_retry_strategy() -> impl Iterator<Item = Duration> {
+    #[inline(always)]
+    pub(crate) fn get_retry_strategy() -> impl Iterator<Item = Duration> + Send + 'static {
         ExponentialBackoff::from_millis(RECOVERY_RETRY_BASE_INTERVAL)
             .max_delay(RECOVERY_RETRY_MAX_INTERVAL)
             .map(jitter)
     }
 
+    #[define_opaque(RetryBackoffStrategy)]
     pub(crate) fn get_retry_backoff_strategy() -> RetryBackoffStrategy {
         get_retry_strategy().map(get_retry_backoff_future)
     }

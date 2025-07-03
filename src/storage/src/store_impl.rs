@@ -61,14 +61,17 @@ mod opaque_type {
     pub type MemoryStateStoreType = impl StateStore + AsHummock;
     pub type SledStateStoreType = impl StateStore + AsHummock;
 
+    #[define_opaque(MemoryStateStoreType)]
     pub fn in_memory(state_store: MemoryStateStore) -> MemoryStateStoreType {
         may_dynamic_dispatch(state_store)
     }
 
+    #[define_opaque(HummockStorageType)]
     pub fn hummock(state_store: HummockStorage) -> HummockStorageType {
         may_dynamic_dispatch(may_verify(state_store))
     }
 
+    #[define_opaque(SledStateStoreType)]
     pub fn sled(state_store: SledStateStore) -> SledStateStoreType {
         may_dynamic_dispatch(state_store)
     }

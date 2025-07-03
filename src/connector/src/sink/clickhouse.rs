@@ -133,12 +133,12 @@ impl ClickHouseEngine {
 
     pub fn get_delete_col(&self) -> Option<String> {
         match self {
-            ClickHouseEngine::ReplacingMergeTree(Some(delete_col)) => Some(delete_col.to_string()),
+            ClickHouseEngine::ReplacingMergeTree(Some(delete_col)) => Some(delete_col.clone()),
             ClickHouseEngine::ReplicatedReplacingMergeTree(Some(delete_col)) => {
-                Some(delete_col.to_string())
+                Some(delete_col.clone())
             }
             ClickHouseEngine::SharedReplacingMergeTree(Some(delete_col)) => {
-                Some(delete_col.to_string())
+                Some(delete_col.clone())
             }
             _ => None,
         }
@@ -146,19 +146,15 @@ impl ClickHouseEngine {
 
     pub fn get_sign_name(&self) -> Option<String> {
         match self {
-            ClickHouseEngine::CollapsingMergeTree(sign_name) => Some(sign_name.to_string()),
-            ClickHouseEngine::VersionedCollapsingMergeTree(sign_name) => {
-                Some(sign_name.to_string())
-            }
-            ClickHouseEngine::ReplicatedCollapsingMergeTree(sign_name) => {
-                Some(sign_name.to_string())
-            }
+            ClickHouseEngine::CollapsingMergeTree(sign_name) => Some(sign_name.clone()),
+            ClickHouseEngine::VersionedCollapsingMergeTree(sign_name) => Some(sign_name.clone()),
+            ClickHouseEngine::ReplicatedCollapsingMergeTree(sign_name) => Some(sign_name.clone()),
             ClickHouseEngine::ReplicatedVersionedCollapsingMergeTree(sign_name) => {
-                Some(sign_name.to_string())
+                Some(sign_name.clone())
             }
-            ClickHouseEngine::SharedCollapsingMergeTree(sign_name) => Some(sign_name.to_string()),
+            ClickHouseEngine::SharedCollapsingMergeTree(sign_name) => Some(sign_name.clone()),
             ClickHouseEngine::SharedVersionedCollapsingMergeTree(sign_name) => {
-                Some(sign_name.to_string())
+                Some(sign_name.clone())
             }
             _ => None,
         }

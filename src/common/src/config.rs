@@ -3171,10 +3171,10 @@ mod tests {
             section_configs
                 .into_iter()
                 .for_each(|(k, v)| set_default_values(sub_section.clone(), k, v, configs))
-        } else if let Some(t) = configs.get_mut(&section) {
-            if let Some(item_doc) = t.get_mut(&name) {
-                item_doc.default = format!("{}", value);
-            }
+        } else if let Some(t) = configs.get_mut(&section)
+            && let Some(item_doc) = t.get_mut(&name)
+        {
+            item_doc.default = format!("{}", value);
         }
     }
 

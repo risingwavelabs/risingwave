@@ -1600,19 +1600,17 @@ pub async fn create_iceberg_engine_table(
                 with_common.insert("database.name".to_owned(), iceberg_database_name.to_owned());
                 with_common.insert("table.name".to_owned(), iceberg_table_name.to_owned());
 
-                if let Some(s) = params.properties.get("hosted_catalog") {
-                    if s.eq_ignore_ascii_case("true") {
-                        with_common.insert("catalog.type".to_owned(), "jdbc".to_owned());
-                        with_common.insert("catalog.uri".to_owned(), catalog_uri.to_owned());
-                        with_common
-                            .insert("catalog.jdbc.user".to_owned(), meta_store_user.to_owned());
-                        with_common.insert(
-                            "catalog.jdbc.password".to_owned(),
-                            meta_store_password.clone(),
-                        );
-                        with_common
-                            .insert("catalog.name".to_owned(), iceberg_catalog_name.to_owned());
-                    }
+                if let Some(s) = params.properties.get("hosted_catalog")
+                    && s.eq_ignore_ascii_case("true")
+                {
+                    with_common.insert("catalog.type".to_owned(), "jdbc".to_owned());
+                    with_common.insert("catalog.uri".to_owned(), catalog_uri.to_owned());
+                    with_common.insert("catalog.jdbc.user".to_owned(), meta_store_user.to_owned());
+                    with_common.insert(
+                        "catalog.jdbc.password".to_owned(),
+                        meta_store_password.clone(),
+                    );
+                    with_common.insert("catalog.name".to_owned(), iceberg_catalog_name.to_owned());
                 }
 
                 with_common

@@ -82,6 +82,7 @@ pub(crate) mod dummy {
         }
     }
 
+    #[allow(dead_code)]
     pub struct FeatureNotEnabledSink<S: FeatureNotEnabledSinkMarker>(PhantomData<S>);
 
     impl<S: FeatureNotEnabledSinkMarker> Debug for FeatureNotEnabledSink<S> {

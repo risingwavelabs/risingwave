@@ -2026,7 +2026,7 @@ impl DdlController {
 
         // handle drop table's associated source
         let mut drop_table_connector_ctx = None;
-        if drop_table_associated_source_id.is_some() {
+        if let Some(to_remove_source_id) = drop_table_associated_source_id {
             // drop table's associated source means the fragment containing the table has just one internal table (associated source's state table)
             debug_assert!(old_internal_table_ids.len() == 1);
 
@@ -2035,7 +2035,7 @@ impl DdlController {
                 // just need to remove the ref to the state table
                 to_change_streaming_job_id: id as i32,
                 to_remove_state_table_id: old_internal_table_ids[0] as i32, // asserted before
-                to_remove_source_id: drop_table_associated_source_id.unwrap(),
+                to_remove_source_id,
             });
         } else {
             let old_internal_tables = self

@@ -711,7 +711,6 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
         false
     }
 
-    #[expect(clippy::unused_async)]
     async fn new_coordinator(
         &self,
         _db: DatabaseConnection,
