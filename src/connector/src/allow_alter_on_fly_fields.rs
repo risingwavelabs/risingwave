@@ -98,6 +98,7 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
     map.try_insert(
         std::any::type_name::<KafkaProperties>().to_owned(),
         [
+            "group.id.prefix".to_owned(),
             "properties.sync.call.timeout".to_owned(),
             "properties.security.protocol".to_owned(),
             "properties.ssl.endpoint.identification.algorithm".to_owned(),
