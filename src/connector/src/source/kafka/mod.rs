@@ -150,6 +150,7 @@ pub struct KafkaProperties {
     ///   offsets, and does not join the consumer group. It just reports offsets
     ///   to the group.
     #[serde(rename = "group.id.prefix")]
+    #[with_option(allow_alter_on_fly)]
     pub group_id_prefix: Option<String>,
 
     /// This parameter is used to tell `KafkaSplitReader` to produce `UpsertMessage`s, which
