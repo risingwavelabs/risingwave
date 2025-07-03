@@ -42,37 +42,37 @@ use super::{LicenseError, LicenseManager, Tier, report_telemetry};
 macro_rules! for_all_features {
     ($macro:ident) => {
         $macro! {
-            // name                      min tier    doc
-            { TestPaid,                  Paid,       "A dummy feature that's only available on paid tier for testing purposes." },
-            { TimeTravel,                Paid,       "Query historical data within the retention period."},
-            { GlueSchemaRegistry,        Paid,       "Use Schema Registry from AWS Glue rather than Confluent." },
-            { SnowflakeSink,             Paid,       "Delivering data to SnowFlake." },
-            { DynamoDbSink,              Paid,       "Delivering data to DynamoDb." },
-            { OpenSearchSink,            Paid,       "Delivering data to OpenSearch." },
-            { BigQuerySink,              Paid,       "Delivering data to BigQuery." },
-            { ClickHouseSharedEngine,    Paid,       "Delivering data to Shared tree on clickhouse cloud"},
-            { SecretManagement,          Paid,       "Secret management." },
-            { SqlServerSink,             Paid,       "Sink data from RisingWave to SQL Server." },
-            { SqlServerCdcSource,        Paid,       "CDC source connector for Sql Server." },
-            { CdcAutoSchemaChange,       Paid,       "Auto replicate upstream DDL to CDC Table." },
-            { IcebergSinkWithGlue,       Paid,       "Delivering data to Iceberg with Glue catalog." },
-            { ElasticDiskCache,          Paid,       "Disk cache and refilling to boost performance and reduce object store access cost." },
-            { ResourceGroup,             Paid,       "Resource group to isolate workload and failure." },
-            { DatabaseFailureIsolation,  Paid,       "Failure isolation between databases." },
-            { IcebergCompaction,         Paid,       "Auto iceberg compaction." },
+            // name                      doc
+            { TestPaid,                  "A dummy feature that's only available on paid tier for testing purposes." },
+            { TimeTravel,                "Query historical data within the retention period."},
+            { GlueSchemaRegistry,        "Use Schema Registry from AWS Glue rather than Confluent." },
+            { SnowflakeSink,             "Delivering data to SnowFlake." },
+            { DynamoDbSink,              "Delivering data to DynamoDb." },
+            { OpenSearchSink,            "Delivering data to OpenSearch." },
+            { BigQuerySink,              "Delivering data to BigQuery." },
+            { ClickHouseSharedEngine,    "Delivering data to Shared tree on clickhouse cloud"},
+            { SecretManagement,          "Secret management." },
+            { SqlServerSink,             "Sink data from RisingWave to SQL Server." },
+            { SqlServerCdcSource,        "CDC source connector for Sql Server." },
+            { CdcAutoSchemaChange,       "Auto replicate upstream DDL to CDC Table." },
+            { IcebergSinkWithGlue,       "Delivering data to Iceberg with Glue catalog." },
+            { ElasticDiskCache,          "Disk cache and refilling to boost performance and reduce object store access cost." },
+            { ResourceGroup,             "Resource group to isolate workload and failure." },
+            { DatabaseFailureIsolation,  "Failure isolation between databases." },
+            { IcebergCompaction,         "Auto iceberg compaction." },
         }
     };
 }
 
 macro_rules! def_feature {
-    ($({ $name:ident, $min_tier:ident, $doc:literal },)*) => {
-        /// A set of features that are available based on the tier of the license.
+    ($({ $name:ident, $doc:literal },)*) => {
+        /// A set of features that are available based on the license.
         ///
         /// To define a new feature, add a new entry in the macro [`for_all_features`].
-        #[derive(Clone, Copy, Debug)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
         pub enum Feature {
             $(
-                #[doc = concat!($doc, "\n\nAvailable for tier `", stringify!($min_tier), "` and above.")]
+                #[doc = $doc]
                 $name,
             )*
         }
@@ -82,12 +82,13 @@ macro_rules! def_feature {
             fn min_tier(self) -> Tier {
                 match self {
                     $(
-                        Self::$name => Tier::$min_tier,
+                        Self::$name => Tier::Paid,
                     )*
                 }
             }
 
-            fn get_feature_name(&self) -> &'static str {
+            /// Name of the feature.
+            fn name(&self) -> &'static str {
                 match &self {
                     $(
                         Self::$name => stringify!($name),
@@ -143,7 +144,7 @@ impl Feature {
             }),
         };
 
-        report_telemetry(&self, self.get_feature_name(), check_res.is_ok());
+        report_telemetry(&self, self.name(), check_res.is_ok());
 
         check_res
     }
