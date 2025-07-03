@@ -102,6 +102,25 @@ select * from t_non_persistent;
 12 foo
 17 bar
 
+# ==== test for issue #22486 ====
+
+statement ok
+recover
+
+python3 e2e_test/commands/pulsar_util.py produce -t "persistent://public/default/topic" <<EOF
+{"f1":18,"f2":"foo"}
+{"f1":19,"f2":"bar"}
+EOF
+
+query I retry 3 backoff 1s
+select f1 from t_partitioned order by f1;
+----
+12
+17
+18
+19
+
+# ==== test end ====
 
 statement ok
 drop table t_partitioned;

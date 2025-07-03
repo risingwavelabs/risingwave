@@ -94,7 +94,7 @@ pub struct PulsarBrokerReader {
 }
 
 // {ledger_id}:{entry_id}:{partition}:{batch_index}
-fn parse_message_id(id: &str) -> ConnectorResult<MessageIdData> {
+fn get_next_message_id(id: &str) -> ConnectorResult<MessageIdData> {
     let splits = id.split(':').collect_vec();
 
     if splits.len() < 2 || splits.len() > 4 {
@@ -102,11 +102,13 @@ fn parse_message_id(id: &str) -> ConnectorResult<MessageIdData> {
     }
 
     let ledger_id = splits[0].parse::<u64>().context("illegal ledger id")?;
-    let entry_id = splits[1].parse::<u64>().context("illegal entry id")?;
+
+    // the entry id is inclusive, so we need to get the next entry id
+    let next_entry_id = splits[1].parse::<u64>().context("illegal entry id")? + 1;
 
     let mut message_id = MessageIdData {
         ledger_id,
-        entry_id,
+        entry_id: next_entry_id,
         partition: None,
         batch_index: None,
         ack_set: vec![],
@@ -195,7 +197,7 @@ impl SplitReader for PulsarBrokerReader {
                 } else {
                     builder.with_options(pulsar::ConsumerOptions {
                         durable: Some(false),
-                        start_message_id: parse_message_id(m.as_str()).ok(),
+                        start_message_id: get_next_message_id(m.as_str()).ok(),
                         ..Default::default()
                     })
                 }
