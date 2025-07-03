@@ -73,7 +73,7 @@ pub enum MetaErrorInner {
     #[construct(skip)]
     CatalogIdNotFound(&'static str, String),
 
-    #[error("table_fragment not exist: id={0}")]
+    #[error("table fragment does not exist: id={0}")]
     FragmentNotFound(u32),
 
     #[provide(PostgresErrorCode => PostgresErrorCode::DuplicateObject)]
