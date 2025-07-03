@@ -21,7 +21,7 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::time::Duration;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use foyer::{Engine, HybridCacheBuilder, LargeEngineOptions};
+use foyer::{CacheBuilder, Engine, HybridCacheBuilder, LargeEngineOptions};
 use rand::random;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
@@ -167,6 +167,8 @@ async fn generate_sstable_store(object_store: Arc<ObjectStoreImpl>) -> Arc<Sstab
         use_new_object_prefix_strategy: true,
         meta_cache,
         block_cache,
+        vector_meta_cache: CacheBuilder::new(1 << 10).build(),
+        vector_block_cache: CacheBuilder::new(1 << 10).build(),
     }))
 }
 

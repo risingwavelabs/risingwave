@@ -19,7 +19,7 @@ use std::{env, fs};
 use itertools::Itertools;
 use proc_macro2::TokenTree;
 use quote::ToTokens;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use syn::{Attribute, Field, Item, ItemFn, Lit, LitStr, Meta, Type, parse_file};
 use thiserror_ext::AsReport;
 use walkdir::{DirEntry, WalkDir};
@@ -58,6 +58,17 @@ pub fn generate_with_options_yaml_source() -> String {
 
 pub fn generate_with_options_yaml_sink() -> String {
     generate_with_options_yaml_inner(&connector_crate_path().join("src").join("sink"))
+}
+
+pub fn generate_allow_alter_on_fly_fields_combined() -> String {
+    let source_info = extract_allow_alter_on_fly_fields_from_yaml(
+        &connector_crate_path().join("with_options_source.yaml"),
+    );
+    let sink_info = extract_allow_alter_on_fly_fields_from_yaml(
+        &connector_crate_path().join("with_options_sink.yaml"),
+    );
+
+    generate_rust_allow_alter_on_fly_fields_code_separate(source_info, sink_info)
 }
 
 /// Collect all structs with `#[derive(WithOptions)]` in the `.rs` files in `path` (plus `common.rs`),
@@ -119,6 +130,8 @@ fn generate_with_options_yaml_inner(path: &Path) -> String {
                     alias,
                 } = extract_serde_properties(&field);
 
+                let allow_alter_on_fly = extract_with_option_allow_alter_on_fly(&field);
+
                 let field_type = field.ty;
                 let mut required = match extract_type_name(&field_type).as_str() {
                     // Fields of type Option<T> or HashMap<K, V> are always considered optional.
@@ -155,6 +168,7 @@ fn generate_with_options_yaml_inner(path: &Path) -> String {
                     required,
                     default,
                     alias,
+                    allow_alter_on_fly,
                 });
             } else {
                 panic!("Unexpected tuple struct: {}", struct_name);
@@ -196,6 +210,9 @@ struct FieldInfo {
 
     #[serde(skip_serializing_if = "Vec::is_empty")]
     alias: Vec<String>,
+
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    allow_alter_on_fly: bool,
 }
 
 #[derive(Default)]
@@ -213,6 +230,18 @@ struct StructInfo {
 #[derive(Debug)]
 struct FunctionInfo {
     body: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct YamlFieldInfo {
+    name: String,
+    #[serde(default)]
+    allow_alter_on_fly: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct YamlStructInfo {
+    fields: Vec<YamlFieldInfo>,
 }
 
 /// Has `#[derive(WithOptions)]`
@@ -382,4 +411,259 @@ fn extract_function_body(func: ItemFn) -> (String, FunctionInfo) {
         .to_owned();
 
     (func.sig.ident.to_string(), FunctionInfo { body })
+}
+
+fn extract_with_option_allow_alter_on_fly(field: &Field) -> bool {
+    field.attrs.iter().any(|attr| {
+        if let Meta::List(meta_list) = &attr.meta {
+            return meta_list.path.is_ident("with_option")
+                && meta_list.tokens.clone().into_iter().any(|token| {
+                    if let TokenTree::Ident(ident) = token {
+                        ident == "allow_alter_on_fly"
+                    } else {
+                        false
+                    }
+                });
+        }
+        false
+    })
+}
+
+fn extract_allow_alter_on_fly_fields_from_yaml(yaml_path: &Path) -> BTreeMap<String, Vec<String>> {
+    let content = fs::read_to_string(yaml_path)
+        .unwrap_or_else(|_| panic!("Failed to read YAML file: {}", yaml_path.display()));
+
+    let yaml_data: BTreeMap<String, YamlStructInfo> = serde_yaml::from_str(&content)
+        .unwrap_or_else(|_| panic!("Failed to parse YAML file: {}", yaml_path.display()));
+
+    let mut allow_alter_on_fly_fields: BTreeMap<String, Vec<String>> = BTreeMap::new();
+
+    for (struct_name, struct_info) in yaml_data {
+        let mut allow_alter_on_fly_field_names = Vec::new();
+
+        for field in struct_info.fields {
+            if field.allow_alter_on_fly {
+                allow_alter_on_fly_field_names.push(field.name);
+            }
+        }
+
+        if !allow_alter_on_fly_field_names.is_empty() {
+            allow_alter_on_fly_fields.insert(struct_name, allow_alter_on_fly_field_names);
+        }
+    }
+
+    allow_alter_on_fly_fields
+}
+
+fn generate_rust_allow_alter_on_fly_fields_code_separate(
+    source_info: BTreeMap<String, Vec<String>>,
+    sink_info: BTreeMap<String, Vec<String>>,
+) -> String {
+    // Helper function to generate field entries for a single struct
+    let generate_struct_entries = |info: &BTreeMap<String, Vec<String>>,
+                                   is_source: bool|
+     -> String {
+        info.iter()
+                .filter_map(|(struct_name, field_names)| {
+                    let key = if is_source {
+                        format!("std::any::type_name::<{}>().to_owned()", struct_name)
+                    } else {
+                        format!("\"{}\".to_owned()", struct_name)
+                    };
+                    if field_names.is_empty() {
+                        None
+                    } else {
+                        let fields = field_names
+                            .iter()
+                            .map(|field| format!("            \"{}\".to_owned(),", field))
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        Some(format!(
+                            "\n    // {}\n    map.try_insert(\n        {},\n        [\n{}\n        ].into_iter().collect(),\n    ).unwrap();",
+                            struct_name, key, fields
+                        ))
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("")
+    };
+
+    let source_entries = generate_struct_entries(&source_info, true);
+    let sink_entries = generate_struct_entries(&sink_info, true);
+
+    format!(
+        r#"// Copyright 2025 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// THIS FILE IS AUTO_GENERATED. DO NOT EDIT
+// UPDATE WITH: ./risedev generate-with-options
+
+use std::collections::{{HashMap, HashSet}};
+use std::sync::LazyLock;
+use crate::error::ConnectorError;
+
+macro_rules! use_source_properties {{
+    ({{ $({{ $variant_name:ident, $prop_name:ty, $split:ty }}),* }}) => {{
+        $(
+            #[allow(unused_imports)]
+            pub(super) use $prop_name;
+        )*
+    }};
+}}
+
+mod source_properties {{
+    use crate::for_all_sources;
+    use crate::source::base::SourceProperties;
+
+    for_all_sources!(use_source_properties);
+
+    /// Implements a function that maps a source name string to the Rust type name of the corresponding property type.
+    /// Usage: `impl_source_name_to_prop_type_name!();` will generate:
+    /// ```ignore
+    /// pub fn source_name_to_prop_type_name(source_name: &str) -> Option<&'static str>
+    /// ```
+    macro_rules! impl_source_name_to_prop_type_name_inner {{
+        ({{ $({{$variant:ident, $prop_name:ty, $split:ty}}),* }}) => {{
+            pub fn source_name_to_prop_type_name(source_name: &str) -> Option<&'static str> {{
+                match source_name {{
+                    $(
+                        <$prop_name>::SOURCE_NAME => Some(std::any::type_name::<$prop_name>()),
+                    )*
+                    _ => None,
+                }}
+            }}
+        }};
+    }}
+
+    macro_rules! impl_source_name_to_prop_type_name {{
+        () => {{
+            $crate::for_all_sources! {{ impl_source_name_to_prop_type_name_inner }}
+        }};
+    }}
+
+    impl_source_name_to_prop_type_name!();
+}}
+
+mod sink_properties {{
+    use crate::use_all_sink_configs;
+    use crate::sink::Sink;
+    use crate::sink::file_sink::fs::FsSink;
+
+    use_all_sink_configs!();
+
+    macro_rules! impl_sink_name_to_config_type_name_inner {{
+        ({{ $({{ $variant_name:ident, $sink_type:ty, $config_type:ty }}),* }}) => {{
+            pub fn sink_name_to_config_type_name(sink_name: &str) -> Option<&'static str> {{
+                match sink_name {{
+                $(
+                    <$sink_type>::SINK_NAME => Some(std::any::type_name::<$config_type>()),
+                )*
+                    _ => None,
+                }}
+            }}
+        }};
+    }}
+
+    macro_rules! impl_sink_name_to_config_type_name {{
+        () => {{
+            $crate::for_all_sinks! {{ impl_sink_name_to_config_type_name_inner }}
+        }};
+    }}
+
+    impl_sink_name_to_config_type_name!();
+}}
+
+/// Map of source connector names to their `allow_alter_on_fly` field names
+pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {{
+    use source_properties::*;
+    let mut map = HashMap::new();{source_entries}
+    map
+}});
+
+/// Map of sink connector names to their `allow_alter_on_fly` field names
+pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {{
+    use sink_properties::*;
+    let mut map = HashMap::new();{sink_entries}
+    map
+}});
+
+/// Get all source connector names that have `allow_alter_on_fly` fields
+pub fn get_source_connectors_with_allow_alter_on_fly_fields() -> Vec<&'static str> {{
+    SOURCE_ALLOW_ALTER_ON_FLY_FIELDS.keys().map(|s| s.as_str()).collect()
+}}
+
+/// Get all sink connector names that have `allow_alter_on_fly` fields
+pub fn get_sink_connectors_with_allow_alter_on_fly_fields() -> Vec<&'static str> {{
+    SINK_ALLOW_ALTER_ON_FLY_FIELDS.keys().map(|s| s.as_str()).collect()
+}}
+
+/// Checks if all given fields are allowed to be altered on the fly for the specified source connector.
+/// Returns Ok(()) if all fields are allowed, otherwise returns a `ConnectorError`.
+pub fn check_source_allow_alter_on_fly_fields(
+    connector_name: &str,
+    fields: &[String],
+) -> crate::error::ConnectorResult<()> {{
+    // Convert connector name to the type name key
+    let Some(type_name) = source_properties::source_name_to_prop_type_name(connector_name) else {{
+        return Err(ConnectorError::from(anyhow::anyhow!(
+            "Unknown source connector: {{connector_name}}"
+        )));
+    }};
+    let Some(allowed_fields) = SOURCE_ALLOW_ALTER_ON_FLY_FIELDS.get(type_name) else {{
+        return Err(ConnectorError::from(anyhow::anyhow!(
+            "No allow_alter_on_fly fields registered for connector: {{connector_name}}"
+        )));
+    }};
+    for field in fields {{
+        if !allowed_fields.contains(field) {{
+            return Err(ConnectorError::from(anyhow::anyhow!(
+                "Field '{{field}}' is not allowed to be altered on the fly for connector: {{connector_name}}"
+            )));
+        }}
+    }}
+    Ok(())
+}}
+
+/// Checks if all given fields are allowed to be altered on the fly for the specified sink connector.
+/// Returns Ok(()) if all fields are allowed, otherwise returns a `ConnectorError`.
+pub fn check_sink_allow_alter_on_fly_fields(
+    sink_name: &str,
+    fields: &[String],
+) -> crate::error::ConnectorResult<()> {{
+    // Convert sink name to the type name key
+    let Some(type_name) = sink_properties::sink_name_to_config_type_name(sink_name) else {{
+        return Err(ConnectorError::from(anyhow::anyhow!(
+            "Unknown sink connector: {{sink_name}}"
+        )));
+    }};
+    let Some(allowed_fields) = SINK_ALLOW_ALTER_ON_FLY_FIELDS.get(type_name) else {{
+        return Err(ConnectorError::from(anyhow::anyhow!(
+            "No allow_alter_on_fly fields registered for sink: {{sink_name}}"
+        )));
+    }};
+    for field in fields {{
+        if !allowed_fields.contains(field) {{
+            return Err(ConnectorError::from(anyhow::anyhow!(
+                "Field '{{field}}' is not allowed to be altered on the fly for sink: {{sink_name}}"
+            )));
+        }}
+    }}
+    Ok(())
+}}
+
+"#,
+        source_entries = source_entries,
+        sink_entries = sink_entries
+    )
 }

@@ -100,35 +100,17 @@ pub(super) struct GlobalBarrierWorker<C> {
     term_id: String,
 }
 
-impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
-    /// Create a new [`crate::barrier::worker::GlobalBarrierWorker`].
-    pub async fn new(
-        scheduled_barriers: schedule::ScheduledBarriers,
+impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
+    pub(super) async fn new_inner(
         env: MetaSrvEnv,
-        metadata_manager: MetadataManager,
-        hummock_manager: HummockManagerRef,
-        source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
-        scale_controller: ScaleControllerRef,
         request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
+        context: Arc<C>,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
 
-        let active_streaming_nodes =
-            ActiveStreamingWorkerNodes::uninitialized(metadata_manager.clone());
-
-        let status = Arc::new(ArcSwap::new(Arc::new(BarrierManagerStatus::Starting)));
-
-        let context = Arc::new(GlobalBarrierWorkerContextImpl::new(
-            scheduled_barriers,
-            status,
-            metadata_manager,
-            hummock_manager,
-            source_manager,
-            scale_controller,
-            env.clone(),
-        ));
+        let active_streaming_nodes = ActiveStreamingWorkerNodes::uninitialized();
 
         let control_stream_manager = ControlStreamManager::new(env.clone());
 
@@ -153,6 +135,34 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             control_stream_manager,
             term_id: "uninitialized".into(),
         }
+    }
+}
+
+impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
+    /// Create a new [`crate::barrier::worker::GlobalBarrierWorker`].
+    pub async fn new(
+        scheduled_barriers: schedule::ScheduledBarriers,
+        env: MetaSrvEnv,
+        metadata_manager: MetadataManager,
+        hummock_manager: HummockManagerRef,
+        source_manager: SourceManagerRef,
+        sink_manager: SinkCoordinatorManager,
+        scale_controller: ScaleControllerRef,
+        request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
+    ) -> Self {
+        let status = Arc::new(ArcSwap::new(Arc::new(BarrierManagerStatus::Starting)));
+
+        let context = Arc::new(GlobalBarrierWorkerContextImpl::new(
+            scheduled_barriers,
+            status,
+            metadata_manager,
+            hummock_manager,
+            source_manager,
+            scale_controller,
+            env.clone(),
+        ));
+
+        Self::new_inner(env, sink_manager, request_rx, context).await
     }
 
     pub fn start(self) -> (JoinHandle<()>, Sender<()>) {
@@ -251,7 +261,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         }
     }
 
-    async fn run_inner(mut self, mut shutdown_rx: Receiver<()>) {
+    pub(super) async fn run_inner(mut self, mut shutdown_rx: Receiver<()>) {
         let (local_notification_tx, mut local_notification_rx) =
             tokio::sync::mpsc::unbounded_channel();
         self.env

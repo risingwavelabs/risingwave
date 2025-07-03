@@ -22,7 +22,8 @@ use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    CDC_SOURCE_COLUMN_NUM, TableId, generate_internal_table_name_with_type,
+    CDC_SOURCE_COLUMN_NUM, FragmentTypeFlag, FragmentTypeMask, TableId,
+    generate_internal_table_name_with_type,
 };
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -39,9 +40,8 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    BackfillOrder, DispatchOutputMapping, DispatchStrategy, DispatcherType, FragmentTypeFlag,
-    PbStreamNode, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode,
-    StreamScanType,
+    BackfillOrder, DispatchOutputMapping, DispatchStrategy, DispatcherType, PbStreamNode,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode, StreamScanType,
 };
 
 use crate::barrier::SnapshotBackfillInfo;
@@ -548,7 +548,9 @@ impl StreamFragmentGraph {
     pub fn dml_fragment_id(&self) -> Option<FragmentId> {
         self.fragments
             .values()
-            .filter(|b| b.fragment_type_mask & FragmentTypeFlag::Dml as u32 != 0)
+            .filter(|b| {
+                FragmentTypeMask::from(b.fragment_type_mask).contains(FragmentTypeFlag::Dml)
+            })
             .map(|b| b.fragment_id)
             .at_most_one()
             .expect("require at most 1 dml node when creating the streaming job")
@@ -588,16 +590,17 @@ impl StreamFragmentGraph {
     pub fn collect_snapshot_backfill_info(
         &self,
     ) -> MetaResult<(Option<SnapshotBackfillInfo>, SnapshotBackfillInfo)> {
-        Self::collect_snapshot_backfill_info_impl(
-            self.fragments
-                .values()
-                .map(|fragment| (fragment.node.as_ref().unwrap(), fragment.fragment_type_mask)),
-        )
+        Self::collect_snapshot_backfill_info_impl(self.fragments.values().map(|fragment| {
+            (
+                fragment.node.as_ref().unwrap(),
+                fragment.fragment_type_mask.into(),
+            )
+        }))
     }
 
     /// Returns `Ok((Some(``snapshot_backfill_info``), ``cross_db_snapshot_backfill_info``))`
     pub fn collect_snapshot_backfill_info_impl(
-        fragments: impl IntoIterator<Item = (&PbStreamNode, u32)>,
+        fragments: impl IntoIterator<Item = (&PbStreamNode, FragmentTypeMask)>,
     ) -> MetaResult<(Option<SnapshotBackfillInfo>, SnapshotBackfillInfo)> {
         let mut prev_stream_scan: Option<(Option<SnapshotBackfillInfo>, StreamScanNode)> = None;
         let mut cross_db_info = SnapshotBackfillInfo {
@@ -612,17 +615,15 @@ impl StreamFragmentGraph {
                     let is_snapshot_backfill = match stream_scan_type {
                         StreamScanType::SnapshotBackfill => {
                             assert!(
-                                (fragment_type_mask
-                                    & (FragmentTypeFlag::SnapshotBackfillStreamScan as u32))
-                                    > 0
+                                fragment_type_mask
+                                    .contains(FragmentTypeFlag::SnapshotBackfillStreamScan)
                             );
                             true
                         }
                         StreamScanType::CrossDbSnapshotBackfill => {
                             assert!(
-                                (fragment_type_mask
-                                    & (FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32))
-                                    > 0
+                                fragment_type_mask
+                                    .contains(FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan)
                             );
                             cross_db_info.upstream_mv_table_id_to_backfill_epoch.insert(
                                 TableId::new(stream_scan.table_id),
@@ -994,8 +995,9 @@ impl CompleteStreamFragmentGraph {
                         | StreamingJobType::Index => {
                             // Build the extra edges between the upstream `Materialize` and
                             // the downstream `StreamScan` of the new job.
-                            if upstream_fragment.fragment_type_mask & FragmentTypeFlag::Mview as u32
-                                != 0
+                            if upstream_fragment
+                                .fragment_type_mask
+                                .contains(FragmentTypeFlag::Mview)
                             {
                                 // Resolve the required output columns from the upstream materialized view.
                                 let (dist_key_indices, output_mapping) = {
@@ -1029,9 +1031,9 @@ impl CompleteStreamFragmentGraph {
                             }
                             // Build the extra edges between the upstream `Source` and
                             // the downstream `SourceBackfill` of the new job.
-                            else if upstream_fragment.fragment_type_mask
-                                & FragmentTypeFlag::Source as u32
-                                != 0
+                            else if upstream_fragment
+                                .fragment_type_mask
+                                .contains(FragmentTypeFlag::Source)
                             {
                                 let output_mapping = {
                                     let nodes = &upstream_fragment.nodes;
@@ -1132,7 +1134,7 @@ impl CompleteStreamFragmentGraph {
                 let nodes = table_fragment.node.as_ref().unwrap();
 
                 let (dist_key_indices, output_mapping) = match job_type {
-                    StreamingJobType::Table(_) => {
+                    StreamingJobType::Table(_) | StreamingJobType::MaterializedView => {
                         let mview_node = nodes.get_node_body().unwrap().as_materialize().unwrap();
                         let all_columns = mview_node.column_descs();
                         let dist_key_indices = mview_node.dist_key_indices();
@@ -1367,7 +1369,7 @@ impl CompleteStreamFragmentGraph {
         let vnode_count = distribution.vnode_count();
 
         let materialized_fragment_id =
-            if inner.fragment_type_mask & FragmentTypeFlag::Mview as u32 != 0 {
+            if FragmentTypeMask::from(inner.fragment_type_mask).contains(FragmentTypeFlag::Mview) {
                 job_id
             } else {
                 None
@@ -1381,7 +1383,7 @@ impl CompleteStreamFragmentGraph {
 
         Fragment {
             fragment_id: inner.fragment_id,
-            fragment_type_mask: inner.fragment_type_mask,
+            fragment_type_mask: inner.fragment_type_mask.into(),
             distribution_type,
             actors,
             state_table_ids,

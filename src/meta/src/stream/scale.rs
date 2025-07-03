@@ -25,7 +25,7 @@ use num_integer::Integer;
 use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::hash::ActorMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_meta_model::{ObjectId, WorkerId, actor, fragment, streaming_job};
@@ -36,9 +36,7 @@ use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
 };
 use risingwave_pb::meta::table_fragments::{self, State};
-use risingwave_pb::stream_plan::{
-    Dispatcher, FragmentTypeFlag, PbDispatcher, PbDispatcherType, StreamNode,
-};
+use risingwave_pb::stream_plan::{Dispatcher, PbDispatcher, PbDispatcherType, StreamNode};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, oneshot};
@@ -64,7 +62,7 @@ pub struct WorkerReschedule {
 
 pub struct CustomFragmentInfo {
     pub fragment_id: u32,
-    pub fragment_type_mask: u32,
+    pub fragment_type_mask: FragmentTypeMask,
     pub distribution_type: PbFragmentDistributionType,
     pub state_table_ids: Vec<u32>,
     pub node: StreamNode,
@@ -79,16 +77,6 @@ pub struct CustomActorInfo {
     pub dispatcher: Vec<Dispatcher>,
     /// `None` if singleton.
     pub vnode_bitmap: Option<Bitmap>,
-}
-
-impl CustomFragmentInfo {
-    pub fn get_fragment_type_mask(&self) -> u32 {
-        self.fragment_type_mask
-    }
-
-    pub fn distribution_type(&self) -> FragmentDistributionType {
-        self.distribution_type
-    }
 }
 
 use educe::Educe;
@@ -537,7 +525,7 @@ impl ScaleController {
 
                 let fragment = CustomFragmentInfo {
                     fragment_id: fragment_id as _,
-                    fragment_type_mask: fragment_type_mask as _,
+                    fragment_type_mask: fragment_type_mask.into(),
                     distribution_type: distribution_type.into(),
                     state_table_ids: state_table_ids.into_u32_array(),
                     node: stream_node.to_protobuf(),
@@ -713,7 +701,9 @@ impl ScaleController {
                 }
             }
 
-            if (fragment.fragment_type_mask & FragmentTypeFlag::Source as u32) != 0
+            if fragment
+                .fragment_type_mask
+                .contains(FragmentTypeFlag::Source)
                 && fragment.node.find_stream_source().is_some()
             {
                 stream_source_fragment_ids.insert(*fragment_id);
@@ -750,7 +740,7 @@ impl ScaleController {
                 .map(|v| v.unsigned_abs())
                 .sum();
 
-            match fragment.distribution_type() {
+            match fragment.distribution_type {
                 FragmentDistributionType::Hash => {
                     if fragment.actors.len() + added_actor_count <= removed_actor_count {
                         bail!("can't remove all actors from fragment {}", fragment_id);
@@ -774,7 +764,10 @@ impl ScaleController {
             for noshuffle_downstream in no_shuffle_reschedule.keys() {
                 let fragment = fragment_map.get(noshuffle_downstream).unwrap();
                 // SourceScan is always a NoShuffle downstream, rescheduled together with the upstream Source.
-                if (fragment.fragment_type_mask & FragmentTypeFlag::SourceScan as u32) != 0 {
+                if fragment
+                    .fragment_type_mask
+                    .contains(FragmentTypeFlag::SourceScan)
+                {
                     let stream_node = &fragment.node;
                     if let Some((_source_id, upstream_source_fragment_id)) =
                         stream_node.find_source_backfill()
@@ -853,7 +846,7 @@ impl ScaleController {
 
             let fragment = ctx.fragment_map.get(fragment_id).unwrap();
 
-            match fragment.distribution_type() {
+            match fragment.distribution_type {
                 FragmentDistributionType::Single => {
                     // Skip re-balancing action for single distribution (always None)
                     fragment_actor_bitmap
@@ -966,7 +959,7 @@ impl ScaleController {
                 .unwrap_or_default();
 
             // Question: Is it possible to have Hash Distribution Fragment but the Actor's bitmap remains unchanged?
-            if upstream_fragment.distribution_type() == FragmentDistributionType::Single {
+            if upstream_fragment.distribution_type == FragmentDistributionType::Single {
                 assert!(
                     upstream_fragment_bitmap.is_empty(),
                     "single fragment should have no bitmap updates"
@@ -1044,7 +1037,7 @@ impl ScaleController {
                         None => {
                             // single fragment should have no bitmap updates (same as upstream)
                             assert_eq!(
-                                upstream_fragment.distribution_type(),
+                                upstream_fragment.distribution_type,
                                 FragmentDistributionType::Single
                             );
                         }
@@ -1065,7 +1058,7 @@ impl ScaleController {
                 }
             }
 
-            match fragment.distribution_type() {
+            match fragment.distribution_type {
                 FragmentDistributionType::Hash => {}
                 FragmentDistributionType::Single => {
                     // single distribution should update nothing
@@ -1271,7 +1264,7 @@ impl ScaleController {
                 .cloned()
                 .collect();
 
-            let upstream_dispatcher_mapping = match fragment.distribution_type() {
+            let upstream_dispatcher_mapping = match fragment.distribution_type {
                 FragmentDistributionType::Hash => {
                     if !in_degree_types.contains(&DispatcherType::Hash) {
                         None
@@ -1322,7 +1315,7 @@ impl ScaleController {
                 vec![]
             };
 
-            let vnode_bitmap_updates = match fragment.distribution_type() {
+            let vnode_bitmap_updates = match fragment.distribution_type {
                 FragmentDistributionType::Hash => {
                     let mut vnode_bitmap_updates =
                         fragment_actor_bitmap.remove(&fragment_id).unwrap();

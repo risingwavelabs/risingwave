@@ -41,6 +41,9 @@ memcomparable = "0.2"
 mysql_async = { version = "0.34", default-features = false, features = [
     "default",
 ] }
+mysql_common = { version = "0.32", default-features = false, features = [
+    "chrono",
+] }
 num-integer = "0.1"
 parking_lot = { workspace = true }
 parse-display = "0.10"
