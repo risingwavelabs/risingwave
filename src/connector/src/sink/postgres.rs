@@ -13,13 +13,15 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashSet};
+use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
+use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use itertools::Itertools;
 use phf::phf_set;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{Row, RowExt};
 use serde_derive::Deserialize;
@@ -256,83 +258,18 @@ impl Sink for PostgresSink {
     }
 }
 
-struct ParameterBuffer<'a> {
-    /// A set of parameters to be inserted/deleted.
-    /// Each set is a flattened 2d-array.
-    parameters: Vec<Vec<Option<ScalarAdapter>>>,
-    /// the column dimension (fixed).
-    column_length: usize,
-    /// schema types to serialize into `ScalarAdapter`
-    schema_types: &'a [PgType],
-    /// estimated number of parameters that can be sent in a single query.
-    estimated_parameter_size: usize,
-    /// current parameter buffer to be filled.
-    current_parameter_buffer: Vec<Option<ScalarAdapter>>,
-    /// Parameter upper bound
-    parameter_upper_bound: usize,
-}
-
-impl<'a> ParameterBuffer<'a> {
-    /// The maximum number of parameters that can be sent in a single query.
-    /// See: <https://www.postgresql.org/docs/current/limits.html>
-    /// and <https://github.com/sfackler/rust-postgres/issues/356>
-    const MAX_PARAMETERS: usize = 32768;
-
-    /// `flattened_chunk_size` is the number of datums in a single chunk.
-    fn new(schema_types: &'a [PgType], parameter_upper_bound: usize) -> Self {
-        let estimated_parameter_size = usize::min(Self::MAX_PARAMETERS, parameter_upper_bound);
-        Self {
-            parameters: vec![],
-            column_length: schema_types.len(),
-            schema_types,
-            estimated_parameter_size,
-            current_parameter_buffer: Vec::with_capacity(estimated_parameter_size),
-            parameter_upper_bound,
-        }
-    }
-
-    fn add_row(&mut self, row: impl Row) {
-        assert_eq!(row.len(), self.column_length);
-        if self.current_parameter_buffer.len() + self.column_length > self.parameter_upper_bound {
-            self.new_buffer();
-        }
-        for (i, datum_ref) in row.iter().enumerate() {
-            let pg_datum = datum_ref.map(|s| {
-                let ty = &self.schema_types[i];
-                match ScalarAdapter::from_scalar(s, ty) {
-                    Ok(scalar) => Some(scalar),
-                    Err(e) => {
-                        tracing::error!(error=%e.as_report(), scalar=?s, "Failed to convert scalar to pg value");
-                        None
-                    }
-                }
-            });
-            self.current_parameter_buffer.push(pg_datum.flatten());
-        }
-    }
-
-    fn new_buffer(&mut self) {
-        let filled_buffer = std::mem::replace(
-            &mut self.current_parameter_buffer,
-            Vec::with_capacity(self.estimated_parameter_size),
-        );
-        self.parameters.push(filled_buffer);
-    }
-
-    fn into_parts(self) -> (Vec<Vec<Option<ScalarAdapter>>>, Vec<Option<ScalarAdapter>>) {
-        (self.parameters, self.current_parameter_buffer)
-    }
-}
-
 pub struct PostgresSinkWriter {
-    config: PostgresConfig,
-    pk_indices: Vec<usize>,
-    pk_indices_lookup: HashSet<usize>,
     is_append_only: bool,
     client: tokio_postgres::Client,
+    pk_indices: Vec<usize>,
     pk_types: Vec<PgType>,
     schema_types: Vec<PgType>,
-    schema: Schema,
+    raw_insert_sql: Arc<String>,
+    raw_upsert_sql: Arc<String>,
+    raw_delete_sql: Arc<String>,
+    insert_sql: Arc<tokio_postgres::Statement>,
+    delete_sql: Arc<tokio_postgres::Statement>,
+    upsert_sql: Arc<tokio_postgres::Statement>,
 }
 
 impl PostgresSinkWriter {
@@ -391,15 +328,41 @@ impl PostgresSinkWriter {
             (pk_types, schema_types)
         };
 
+        let raw_insert_sql = create_insert_sql(&schema, &config.schema, &config.table);
+        let raw_upsert_sql = create_upsert_sql(
+            &schema,
+            &config.schema,
+            &config.table,
+            &pk_indices,
+            &pk_indices_lookup,
+        );
+        let raw_delete_sql = create_delete_sql(&schema, &config.schema, &config.table, &pk_indices);
+
+        let insert_sql = client
+            .prepare(&raw_insert_sql)
+            .await
+            .with_context(|| format!("failed to prepare insert statement: {}", raw_insert_sql))?;
+        let upsert_sql = client
+            .prepare(&raw_upsert_sql)
+            .await
+            .with_context(|| format!("failed to prepare upsert statement: {}", raw_upsert_sql))?;
+        let delete_sql = client
+            .prepare(&raw_delete_sql)
+            .await
+            .with_context(|| format!("failed to prepare delete statement: {}", raw_delete_sql))?;
+
         let writer = Self {
-            config,
-            pk_indices,
-            pk_indices_lookup,
             is_append_only,
             client,
+            pk_indices,
             pk_types,
             schema_types,
-            schema,
+            raw_insert_sql: Arc::new(raw_insert_sql),
+            raw_upsert_sql: Arc::new(raw_upsert_sql),
+            raw_delete_sql: Arc::new(raw_delete_sql),
+            insert_sql: Arc::new(insert_sql),
+            delete_sql: Arc::new(delete_sql),
+            upsert_sql: Arc::new(upsert_sql),
         };
         Ok(writer)
     }
@@ -415,219 +378,103 @@ impl PostgresSinkWriter {
     }
 
     async fn write_batch_append_only(&mut self, chunk: StreamChunk) -> Result<()> {
-        // 1d flattened array of parameters to be inserted.
-        let mut parameter_buffer = ParameterBuffer::new(
-            &self.schema_types,
-            chunk.cardinality() * chunk.data_types().len(),
-        );
+        let transaction = Arc::new(self.client.transaction().await?);
+        let mut insert_futures = FuturesUnordered::new();
         for (op, row) in chunk.rows() {
             match op {
                 Op::Insert => {
-                    parameter_buffer.add_row(row);
+                    let pg_row = convert_row_to_pg_row(row, &self.schema_types);
+                    let insert_sql = self.insert_sql.clone();
+                    let raw_insert_sql = self.raw_insert_sql.clone();
+                    let transaction = transaction.clone();
+                    let future = async move {
+                        transaction
+                            .execute_raw(insert_sql.as_ref(), &pg_row)
+                            .await
+                            .with_context(|| {
+                                format!(
+                                    "failed to execute insert statement: {}, parameters: {:?}",
+                                    raw_insert_sql, pg_row
+                                )
+                            })
+                    };
+                    insert_futures.push(future);
                 }
-                Op::UpdateInsert | Op::Delete | Op::UpdateDelete => {
-                    bail!(
-                        "append-only sink should not receive update insert, update delete and delete operations"
-                    )
+                _ => {
+                    tracing::error!(
+                        "row ignored, append-only sink should not receive update insert, update delete and delete operations"
+                    );
                 }
             }
         }
-        let (parameters, remaining) = parameter_buffer.into_parts();
 
-        let mut transaction = self.client.transaction().await?;
-        Self::execute_parameter(
-            Op::Insert,
-            &mut transaction,
-            &self.schema,
-            &self.config.schema,
-            &self.config.table,
-            &self.pk_indices,
-            &self.pk_indices_lookup,
-            parameters,
-            remaining,
-            true,
-        )
-        .await?;
-        transaction.commit().await?;
+        while let Some(result) = insert_futures.next().await {
+            result?;
+        }
+        if let Some(transaction) = Arc::into_inner(transaction) {
+            transaction.commit().await?;
+        } else {
+            tracing::error!("transaction lost!");
+        }
 
         Ok(())
     }
 
     async fn write_batch_non_append_only(&mut self, chunk: StreamChunk) -> Result<()> {
-        // 1d flattened array of parameters to be inserted.
-        let mut insert_parameter_buffer = ParameterBuffer::new(
-            &self.schema_types,
-            // NOTE(kwannoel):
-            // insert on conflict do update may have multiple
-            // rows on the same PK.
-            // In that case they could encounter the following PG error:
-            // ERROR: ON CONFLICT DO UPDATE command cannot affect row a second time
-            // HINT: Ensure that no rows proposed for insertion within the same command have duplicate constrained values
-            // Given that JDBC sink does not batch their insert on conflict do update,
-            // we can keep the behaviour consistent.
-            //
-            // We may opt for an optimization flag to toggle this behaviour in the future.
-            chunk.data_types().len(),
-        );
-        let mut delete_parameter_buffer =
-            ParameterBuffer::new(&self.pk_types, chunk.cardinality() * self.pk_indices.len());
-        // 1d flattened array of parameters to be deleted.
+        let transaction = Arc::new(self.client.transaction().await?);
+        let mut delete_futures = FuturesUnordered::new();
+        let mut upsert_futures = FuturesUnordered::new();
         for (op, row) in chunk.rows() {
             match op {
-                Op::UpdateInsert | Op::Insert => {
-                    insert_parameter_buffer.add_row(row);
+                Op::Delete | Op::UpdateDelete => {
+                    let pg_row =
+                        convert_row_to_pg_row(row.project(&self.pk_indices), &self.pk_types);
+                    let delete_sql = self.delete_sql.clone();
+                    let raw_delete_sql = self.raw_delete_sql.clone();
+                    let transaction = transaction.clone();
+                    let future = async move {
+                        transaction
+                            .execute_raw(delete_sql.as_ref(), &pg_row)
+                            .await
+                            .with_context(|| {
+                                format!(
+                                    "failed to execute delete statement: {}, parameters: {:?}",
+                                    raw_delete_sql, pg_row
+                                )
+                            })
+                    };
+                    delete_futures.push(future);
                 }
-                Op::UpdateDelete | Op::Delete => {
-                    delete_parameter_buffer.add_row(row.project(&self.pk_indices));
+                Op::Insert | Op::UpdateInsert => {
+                    let pg_row = convert_row_to_pg_row(row, &self.schema_types);
+                    let upsert_sql = self.upsert_sql.clone();
+                    let raw_upsert_sql = self.raw_upsert_sql.clone();
+                    let transaction = transaction.clone();
+                    let future = async move {
+                        transaction
+                            .execute_raw(upsert_sql.as_ref(), &pg_row)
+                            .await
+                            .with_context(|| {
+                                format!(
+                                    "failed to execute upsert statement: {}, parameters: {:?}",
+                                    raw_upsert_sql, pg_row
+                                )
+                            })
+                    };
+                    upsert_futures.push(future);
                 }
             }
         }
-
-        let (delete_parameters, delete_remaining_parameter) = delete_parameter_buffer.into_parts();
-        let mut transaction = self.client.transaction().await?;
-        Self::execute_parameter(
-            Op::Delete,
-            &mut transaction,
-            &self.schema,
-            &self.config.schema,
-            &self.config.table,
-            &self.pk_indices,
-            &self.pk_indices_lookup,
-            delete_parameters,
-            delete_remaining_parameter,
-            false,
-        )
-        .await?;
-        let (insert_parameters, insert_remaining_parameter) = insert_parameter_buffer.into_parts();
-        Self::execute_parameter(
-            Op::Insert,
-            &mut transaction,
-            &self.schema,
-            &self.config.schema,
-            &self.config.table,
-            &self.pk_indices,
-            &self.pk_indices_lookup,
-            insert_parameters,
-            insert_remaining_parameter,
-            false,
-        )
-        .await?;
-        transaction.commit().await?;
-
-        Ok(())
-    }
-
-    async fn execute_parameter(
-        op: Op,
-        transaction: &mut tokio_postgres::Transaction<'_>,
-        schema: &Schema,
-        schema_name: &str,
-        table_name: &str,
-        pk_indices: &[usize],
-        pk_indices_lookup: &HashSet<usize>,
-        parameters: Vec<Vec<Option<ScalarAdapter>>>,
-        remaining_parameter: Vec<Option<ScalarAdapter>>,
-        append_only: bool,
-    ) -> Result<()> {
-        async fn prepare_statement(
-            transaction: &mut tokio_postgres::Transaction<'_>,
-            op: Op,
-            schema: &Schema,
-            schema_name: &str,
-            table_name: &str,
-            pk_indices: &[usize],
-            pk_indices_lookup: &HashSet<usize>,
-            rows_length: usize,
-            append_only: bool,
-        ) -> Result<(String, tokio_postgres::Statement)> {
-            assert!(rows_length > 0, "parameters are empty");
-            let statement_str = match op {
-                Op::Insert => {
-                    if append_only {
-                        create_insert_sql(schema, schema_name, table_name, rows_length)
-                    } else {
-                        create_upsert_sql(
-                            schema,
-                            schema_name,
-                            table_name,
-                            pk_indices,
-                            pk_indices_lookup,
-                            rows_length,
-                        )
-                    }
-                }
-                Op::Delete => {
-                    create_delete_sql(schema, schema_name, table_name, pk_indices, rows_length)
-                }
-                _ => unreachable!(),
-            };
-            let statement = transaction
-                .prepare(&statement_str)
-                .await
-                .with_context(|| format!("failed to prepare statement: {}", statement_str))?;
-            Ok((statement_str, statement))
+        while let Some(result) = delete_futures.next().await {
+            result?;
         }
-
-        let column_length = match op {
-            Op::Insert => schema.len(),
-            Op::Delete => pk_indices.len(),
-            _ => unreachable!(),
-        };
-
-        if !parameters.is_empty() {
-            let parameter_length = parameters[0].len();
-            assert_eq!(
-                parameter_length % column_length,
-                0,
-                "flattened parameters are unaligned, parameter_length={} column_length={}",
-                parameter_length,
-                column_length,
-            );
-            let rows_length = parameter_length / column_length;
-            let (statement_str, statement) = prepare_statement(
-                transaction,
-                op,
-                schema,
-                schema_name,
-                table_name,
-                pk_indices,
-                pk_indices_lookup,
-                rows_length,
-                append_only,
-            )
-            .await?;
-            for parameter in parameters {
-                transaction
-                    .execute_raw(&statement, parameter)
-                    .await
-                    .with_context(|| format!("failed to execute statement: {}", statement_str,))?;
-            }
+        while let Some(result) = upsert_futures.next().await {
+            result?;
         }
-        if !remaining_parameter.is_empty() {
-            let parameter_length = remaining_parameter.len();
-            assert_eq!(
-                parameter_length % column_length,
-                0,
-                "flattened parameters are unaligned"
-            );
-            let rows_length = remaining_parameter.len() / column_length;
-            let (statement_str, statement) = prepare_statement(
-                transaction,
-                op,
-                schema,
-                schema_name,
-                table_name,
-                pk_indices,
-                pk_indices_lookup,
-                rows_length,
-                append_only,
-            )
-            .await?;
-            tracing::trace!("binding parameters: {:?}", remaining_parameter);
-            transaction
-                .execute_raw(&statement, remaining_parameter)
-                .await
-                .with_context(|| format!("failed to execute statement: {}", statement_str))?;
+        if let Some(transaction) = Arc::into_inner(transaction) {
+            transaction.commit().await?;
+        } else {
+            tracing::error!("transaction lost!");
         }
         Ok(())
     }
@@ -652,16 +499,7 @@ impl LogSinker for PostgresSinkWriter {
     }
 }
 
-fn create_insert_sql(
-    schema: &Schema,
-    schema_name: &str,
-    table_name: &str,
-    number_of_rows: usize,
-) -> String {
-    assert!(
-        number_of_rows > 0,
-        "number of parameters must be greater than 0"
-    );
+fn create_insert_sql(schema: &Schema, schema_name: &str, table_name: &str) -> String {
     let normalized_table_name = format!(
         "{}.{}",
         quote_identifier(schema_name),
@@ -673,16 +511,10 @@ fn create_insert_sql(
         .iter()
         .map(|field| quote_identifier(&field.name))
         .join(", ");
-    let parameters: String = (0..number_of_rows)
-        .map(|i| {
-            let row_parameters = (0..number_of_columns)
-                .map(|j| format!("${}", i * number_of_columns + j + 1))
-                .join(", ");
-            format!("({row_parameters})")
-        })
-        .collect_vec()
+    let column_parameters: String = (0..number_of_columns)
+        .map(|i| format!("${}", i + 1))
         .join(", ");
-    format!("INSERT INTO {normalized_table_name} ({columns}) VALUES {parameters}")
+    format!("INSERT INTO {normalized_table_name} ({columns}) VALUES ({column_parameters})")
 }
 
 fn create_delete_sql(
@@ -690,18 +522,17 @@ fn create_delete_sql(
     schema_name: &str,
     table_name: &str,
     pk_indices: &[usize],
-    number_of_rows: usize,
 ) -> String {
-    assert!(
-        number_of_rows > 0,
-        "number of parameters must be greater than 0"
-    );
     let normalized_table_name = format!(
         "{}.{}",
         quote_identifier(schema_name),
         quote_identifier(table_name)
     );
-    let number_of_pk = pk_indices.len();
+    let pk_indices = if pk_indices.is_empty() {
+        (0..schema.len()).collect_vec()
+    } else {
+        pk_indices.to_vec()
+    };
     let pk = {
         let pk_symbols = pk_indices
             .iter()
@@ -709,16 +540,10 @@ fn create_delete_sql(
             .join(", ");
         format!("({})", pk_symbols)
     };
-    let parameters: String = (0..number_of_rows)
-        .map(|i| {
-            let row_parameters: String = (0..pk_indices.len())
-                .map(|j| format!("${}", i * number_of_pk + j + 1))
-                .join(", ");
-            format!("({row_parameters})")
-        })
-        .collect_vec()
+    let parameters: String = (0..pk_indices.len())
+        .map(|i| format!("${}", i + 1))
         .join(", ");
-    format!("DELETE FROM {normalized_table_name} WHERE {pk} in ({parameters})")
+    format!("DELETE FROM {normalized_table_name} WHERE {pk} in (({parameters}))")
 }
 
 fn create_upsert_sql(
@@ -727,16 +552,17 @@ fn create_upsert_sql(
     table_name: &str,
     pk_indices: &[usize],
     pk_indices_lookup: &HashSet<usize>,
-    number_of_rows: usize,
 ) -> String {
-    let number_of_columns = schema.len();
-    let insert_sql = create_insert_sql(schema, schema_name, table_name, number_of_rows);
+    let insert_sql = create_insert_sql(schema, schema_name, table_name);
+    if pk_indices.is_empty() {
+        return insert_sql;
+    }
     let pk_columns = pk_indices
         .iter()
         .map(|pk_index| quote_identifier(&schema.fields()[*pk_index].name))
         .collect_vec()
         .join(", ");
-    let update_parameters: String = (0..number_of_columns)
+    let update_parameters: String = (0..schema.len())
         .filter(|i| !pk_indices_lookup.contains(i))
         .map(|i| {
             let column = quote_identifier(&schema.fields()[i].name);
@@ -750,6 +576,26 @@ fn create_upsert_sql(
 /// Quote an identifier for PostgreSQL.
 fn quote_identifier(identifier: &str) -> String {
     format!("\"{}\"", identifier.replace("\"", "\"\""))
+}
+
+type PgDatum = Option<ScalarAdapter>;
+type PgRow = Vec<PgDatum>;
+
+fn convert_row_to_pg_row(row: impl Row, schema_types: &[PgType]) -> PgRow {
+    let mut buffer = Vec::with_capacity(row.len());
+    for (i, datum_ref) in row.iter().enumerate() {
+        let pg_datum = datum_ref.map(|s| {
+            match ScalarAdapter::from_scalar(s, &schema_types[i]) {
+                Ok(scalar) => Some(scalar),
+                Err(e) => {
+                    tracing::error!(error=%e.as_report(), scalar=?s, "Failed to convert scalar to pg value");
+                    None
+                }
+            }
+        });
+        buffer.push(pg_datum.flatten());
+    }
+    buffer
 }
 
 #[cfg(test)]
@@ -781,12 +627,10 @@ mod tests {
         ]);
         let schema_name = "test_schema";
         let table_name = "test_table";
-        let sql = create_insert_sql(&schema, schema_name, table_name, 3);
+        let sql = create_insert_sql(&schema, schema_name, table_name);
         check(
             sql,
-            expect![[
-                r#"INSERT INTO "test_schema"."test_table" ("a", "b") VALUES ($1, $2), ($3, $4), ($5, $6)"#
-            ]],
+            expect![[r#"INSERT INTO "test_schema"."test_table" ("a", "b") VALUES ($1, $2)"#]],
         );
     }
 
@@ -804,20 +648,16 @@ mod tests {
         ]);
         let schema_name = "test_schema";
         let table_name = "test_table";
-        let sql = create_delete_sql(&schema, schema_name, table_name, &[1], 3);
+        let sql = create_delete_sql(&schema, schema_name, table_name, &[1]);
         check(
             sql,
-            expect![[
-                r#"DELETE FROM "test_schema"."test_table" WHERE ("b") in (($1), ($2), ($3))"#
-            ]],
+            expect![[r#"DELETE FROM "test_schema"."test_table" WHERE ("b") in (($1))"#]],
         );
         let table_name = "test_table";
-        let sql = create_delete_sql(&schema, schema_name, table_name, &[0, 1], 3);
+        let sql = create_delete_sql(&schema, schema_name, table_name, &[0, 1]);
         check(
             sql,
-            expect![[
-                r#"DELETE FROM "test_schema"."test_table" WHERE ("a", "b") in (($1, $2), ($3, $4), ($5, $6))"#
-            ]],
+            expect![[r#"DELETE FROM "test_schema"."test_table" WHERE ("a", "b") in (($1, $2))"#]],
         );
     }
 
@@ -836,18 +676,11 @@ mod tests {
         let schema_name = "test_schema";
         let table_name = "test_table";
         let pk_indices_lookup = HashSet::from_iter([1]);
-        let sql = create_upsert_sql(
-            &schema,
-            schema_name,
-            table_name,
-            &[1],
-            &pk_indices_lookup,
-            3,
-        );
+        let sql = create_upsert_sql(&schema, schema_name, table_name, &[1], &pk_indices_lookup);
         check(
             sql,
             expect![[
-                r#"INSERT INTO "test_schema"."test_table" ("a", "b") VALUES ($1, $2), ($3, $4), ($5, $6) on conflict ("b") do update set "a" = EXCLUDED."a""#
+                r#"INSERT INTO "test_schema"."test_table" ("a", "b") VALUES ($1, $2) on conflict ("b") do update set "a" = EXCLUDED."a""#
             ]],
         );
     }
