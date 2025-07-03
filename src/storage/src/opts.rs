@@ -96,6 +96,7 @@ pub struct StorageOpts {
     pub data_file_cache_fifo_probation_ratio: f64,
     pub data_file_cache_runtime_config: foyer::RuntimeOptions,
     pub data_file_cache_throttle: foyer::Throttle,
+    pub data_file_cache_keeper: bool,
 
     pub cache_refill_data_refill_levels: Vec<u32>,
     pub cache_refill_timeout_ms: u64,
@@ -120,6 +121,7 @@ pub struct StorageOpts {
     pub meta_file_cache_fifo_probation_ratio: f64,
     pub meta_file_cache_runtime_config: foyer::RuntimeOptions,
     pub meta_file_cache_throttle: foyer::Throttle,
+    pub meta_file_cache_keeper: bool,
 
     /// The storage url for storing backups.
     pub backup_storage_url: String,
@@ -219,6 +221,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             data_file_cache_fifo_probation_ratio: c.storage.data_file_cache.fifo_probation_ratio,
             data_file_cache_runtime_config: c.storage.data_file_cache.runtime_config.clone(),
             data_file_cache_throttle,
+            data_file_cache_keeper: c.storage.data_file_cache.keeper,
             meta_file_cache_dir: c.storage.meta_file_cache.dir.clone(),
             meta_file_cache_capacity_mb: c.storage.meta_file_cache.capacity_mb,
             meta_file_cache_file_capacity_mb: c.storage.meta_file_cache.file_capacity_mb,
@@ -232,6 +235,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             meta_file_cache_fifo_probation_ratio: c.storage.meta_file_cache.fifo_probation_ratio,
             meta_file_cache_runtime_config: c.storage.meta_file_cache.runtime_config.clone(),
             meta_file_cache_throttle,
+            meta_file_cache_keeper: c.storage.meta_file_cache.keeper,
             cache_refill_data_refill_levels: c.storage.cache_refill.data_refill_levels.clone(),
             cache_refill_timeout_ms: c.storage.cache_refill.timeout_ms,
             cache_refill_concurrency: c.storage.cache_refill.concurrency,

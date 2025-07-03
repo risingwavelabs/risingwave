@@ -274,15 +274,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d62b7694a562cdf5a74227903507c56ab2cc8bdd1f781ed5cb4cf9c9f810bfc"
 
 [[package]]
-name = "array-util"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c4dd5139f13c1a8b0e9f52197dcda016bbcd4e877055f93fb9ecd0f6c6136a7"
-dependencies = [
- "arrayvec",
-]
-
-[[package]]
 name = "arrayref"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4948,7 +4939,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.17.4"
-source = "git+http://github.com/foyer-rs/foyer?rev=c222ee00f67f07eb95669a50f673c818632013d6#c222ee00f67f07eb95669a50f673c818632013d6"
+source = "git+http://github.com/foyer-rs/foyer?rev=9c0156d4d05f9a9e2a026c078242183d9564eab4#9c0156d4d05f9a9e2a026c078242183d9564eab4"
 dependencies = [
  "anyhow",
  "equivalent",
@@ -4968,7 +4959,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.17.4"
-source = "git+http://github.com/foyer-rs/foyer?rev=c222ee00f67f07eb95669a50f673c818632013d6#c222ee00f67f07eb95669a50f673c818632013d6"
+source = "git+http://github.com/foyer-rs/foyer?rev=9c0156d4d05f9a9e2a026c078242183d9564eab4#9c0156d4d05f9a9e2a026c078242183d9564eab4"
 dependencies = [
  "bincode 1.3.3",
  "bytes",
@@ -4997,7 +4988,7 @@ dependencies = [
 [[package]]
 name = "foyer-memory"
 version = "0.17.4"
-source = "git+http://github.com/foyer-rs/foyer?rev=c222ee00f67f07eb95669a50f673c818632013d6#c222ee00f67f07eb95669a50f673c818632013d6"
+source = "git+http://github.com/foyer-rs/foyer?rev=9c0156d4d05f9a9e2a026c078242183d9564eab4#9c0156d4d05f9a9e2a026c078242183d9564eab4"
 dependencies = [
  "arc-swap",
  "bitflags 2.9.0",
@@ -5021,11 +5012,10 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.17.4"
-source = "git+http://github.com/foyer-rs/foyer?rev=c222ee00f67f07eb95669a50f673c818632013d6#c222ee00f67f07eb95669a50f673c818632013d6"
+source = "git+http://github.com/foyer-rs/foyer?rev=9c0156d4d05f9a9e2a026c078242183d9564eab4#9c0156d4d05f9a9e2a026c078242183d9564eab4"
 dependencies = [
  "allocator-api2",
  "anyhow",
- "array-util",
  "auto_enums",
  "bytes",
  "equivalent",

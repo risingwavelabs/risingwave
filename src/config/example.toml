@@ -243,6 +243,7 @@ indexer_shards = 64
 compression = "None"
 fifo_probation_ratio = 0.1
 recover_mode = "Quiet"
+keeper = false
 
 [storage.data_file_cache.throttle]
 write_iops = 100000
@@ -269,6 +270,7 @@ indexer_shards = 64
 compression = "None"
 fifo_probation_ratio = 0.1
 recover_mode = "Quiet"
+keeper = false
 
 [storage.meta_file_cache.throttle]
 write_iops = 100000

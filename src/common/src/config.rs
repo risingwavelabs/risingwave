@@ -1071,6 +1071,9 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::runtime_config")]
     pub runtime_config: RuntimeOptions,
 
+    #[serde(default = "default::file_cache::keeper")]
+    pub keeper: bool,
+
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -2048,6 +2051,10 @@ pub mod default {
 
         pub fn runtime_config() -> RuntimeOptions {
             RuntimeOptions::Unified(TokioRuntimeOptions::default())
+        }
+
+        pub fn keeper() -> bool {
+            false
         }
 
         pub fn throttle() -> Throttle {

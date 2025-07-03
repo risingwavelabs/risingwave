@@ -703,7 +703,8 @@ impl StateStoreImpl {
                         )
                         .with_recover_mode(opts.meta_file_cache_recover_mode)
                         .with_compression(opts.meta_file_cache_compression)
-                        .with_runtime_options(opts.meta_file_cache_runtime_config.clone());
+                        .with_runtime_options(opts.meta_file_cache_runtime_config.clone())
+                        .with_keeper(opts.meta_file_cache_keeper);
                 }
             }
 
@@ -753,7 +754,8 @@ impl StateStoreImpl {
                         )
                         .with_recover_mode(opts.data_file_cache_recover_mode)
                         .with_compression(opts.data_file_cache_compression)
-                        .with_runtime_options(opts.data_file_cache_runtime_config.clone());
+                        .with_runtime_options(opts.data_file_cache_runtime_config.clone())
+                        .with_keeper(opts.data_file_cache_keeper);
                 }
             }
 

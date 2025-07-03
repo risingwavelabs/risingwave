@@ -150,7 +150,7 @@ criterion = { version = "0.5", features = ["async_futures"] }
 # Use a forked version which removes the dependencies on dynamo db to reduce
 # compile time and binary size.
 deltalake = { version = "0.20.1", features = ["s3", "gcs", "datafusion"] }
-foyer = { git = "http://github.com/foyer-rs/foyer", rev = "c222ee00f67f07eb95669a50f673c818632013d6", features = [
+foyer = { git = "http://github.com/foyer-rs/foyer", rev = "9c0156d4d05f9a9e2a026c078242183d9564eab4", features = [
     "serde",
     "tracing",
     "nightly",
