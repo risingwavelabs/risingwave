@@ -986,37 +986,88 @@ impl DdlService for DdlServiceImpl {
                 .await?;
 
             for table in tables {
+                // 在 table_change.columns 里补充原表所有 _rw 开头且 is_hidden=false 的列
+                let original_visible_rw_columns: Vec<_> = table.columns.iter()
+                    .filter(|col| {
+                        let col = ColumnCatalog::from((*col).clone());
+                        col.column_desc.name.starts_with("_rw") && !col.is_hidden && !col.is_generated()
+                    })
+                    .collect();
+                let mut table_change_columns = table_change.columns.clone();
+                for col in original_visible_rw_columns {
+                    // 先将 col 转换为 ColumnCatalog 并绑定，避免临时值生命周期问题
+                    let col_catalog = ColumnCatalog::from(col.clone());
+                    let col_name = &col_catalog.column_desc.name;
+                    let col_type = col_catalog.data_type();
+                    let exists = table_change_columns.iter().any(|c| {
+                        let c = ColumnCatalog::from(c.clone());
+                        &c.column_desc.name == col_name && c.data_type() == col_type && !c.is_hidden
+                    });
+                    if !exists {
+                        table_change_columns.push(col.clone().into());
+                    }
+                }
+                // 用新的 columns 替换
+                let mut table_change = table_change.clone();
+                table_change.columns = table_change_columns;
+                
                 // Since we only support `ADD` and `DROP` column, we check whether the new columns and the original columns
                 // is a subset of the other.
-                let original_columns: HashSet<(String, DataType)> =
+                // 首先收集原始表的所有列（包括隐藏列，但排除 generated 列）
+                let original_columns: HashSet<(String, DataType, bool)> =
                     HashSet::from_iter(table.columns.iter().filter_map(|col| {
                         let col = ColumnCatalog::from(col.clone());
                         let data_type = col.data_type().clone();
                         if col.is_generated() {
                             None
                         } else {
-                            Some((col.column_desc.name, data_type))
+                            Some((col.column_desc.name.clone(), data_type, col.is_hidden))
                         }
                     }));
-                let new_columns: HashSet<(String, DataType)> =
-                    HashSet::from_iter(table_change.columns.iter().map(|col| {
-                        let col = ColumnCatalog::from(col.clone());
-                        let data_type = col.data_type().clone();
-                        (col.column_desc.name, data_type)
-                    }));
 
-                if !(original_columns.is_subset(&new_columns)
-                    || original_columns.is_superset(&new_columns))
+                // 构造 new_columns 时，先加 table_change 里的列（这些列的 is_hidden 字段需要从 ColumnCatalog 取）
+                let mut new_columns: HashSet<(String, DataType, bool)> = HashSet::new();
+                for col in &table_change.columns {
+                    let col = ColumnCatalog::from(col.clone());
+                    println!("改动col detail: {:?}", col);
+                    let data_type = col.data_type().clone();
+                    new_columns.insert((col.column_desc.name.clone(), data_type, col.is_hidden));
+                }
+
+                // 针对原始表中 _rw 开头的列，如果 new_columns 里没有，则补充进去，is_hidden 字段和原表保持一致
+                for (name, data_type, is_hidden) in &original_columns {
+                    if name.starts_with("_rw")
+                        && !new_columns.iter().any(|(n, d, h)| n == name && d == data_type && *h == *is_hidden)
+                    {
+                        new_columns.insert((name.clone(), data_type.clone(), *is_hidden));
+                    }
+                }
+
+                println!("这里", );
+                println!("original_columns: {:?}", original_columns);
+                println!("new_columns: {:?}", new_columns);
+                // 过滤掉 original_columns 和 new_columns 里的隐藏列（hidden column），只比较用户可见的列
+                let filter_hidden = |cols: &HashSet<(String, DataType, bool)>| -> HashSet<(String, DataType)> {
+                    cols.iter()
+                        .filter(|(_, _, is_hidden)| !*is_hidden)
+                        .map(|(name, data_type, _)| (name.clone(), data_type.clone()))
+                        .collect()
+                };
+                let visible_original_columns = filter_hidden(&original_columns);
+                let visible_new_columns = filter_hidden(&new_columns);
+
+                if !(visible_original_columns.is_subset(&visible_new_columns)
+                    || visible_original_columns.is_superset(&visible_new_columns))
                 {
                     tracing::warn!(target: "auto_schema_change",
                                     table_id = table.id,
                                     cdc_table_id = table.cdc_table_id,
                                     upstraem_ddl = table_change.upstream_ddl,
-                                    original_columns = ?original_columns,
-                                    new_columns = ?new_columns,
-                                    "New columns should be a subset or superset of the original columns, since only `ADD COLUMN` and `DROP COLUMN` is supported");
+                                    original_columns = ?visible_original_columns,
+                                    new_columns = ?visible_new_columns,
+                                    "New columns should be a subset or superset of the original columns (excluding hidden columns), since only `ADD COLUMN` and `DROP COLUMN` is supported");
                     return Err(Status::invalid_argument(
-                        "New columns should be a subset or superset of the original columns",
+                        "New columns should be a subset or superset of the original columns (excluding hidden columns)",
                     ));
                 }
                 // skip the schema change if there is no change to original columns
