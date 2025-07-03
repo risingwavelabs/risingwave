@@ -99,6 +99,22 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
         std::any::type_name::<KafkaProperties>().to_owned(),
         [
             "properties.sync.call.timeout".to_owned(),
+            "properties.security.protocol".to_owned(),
+            "properties.ssl.endpoint.identification.algorithm".to_owned(),
+            "properties.sasl.mechanism".to_owned(),
+            "properties.sasl.username".to_owned(),
+            "properties.sasl.password".to_owned(),
+            "properties.message.max.bytes".to_owned(),
+            "properties.receive.message.max.bytes".to_owned(),
+            "properties.statistics.interval.ms".to_owned(),
+            "properties.client.id".to_owned(),
+            "properties.enable.ssl.certificate.verification".to_owned(),
+            "properties.queued.min.messages".to_owned(),
+            "properties.queued.max.messages.kbytes".to_owned(),
+            "properties.fetch.wait.max.ms".to_owned(),
+            "properties.fetch.queue.backoff.ms".to_owned(),
+            "properties.fetch.max.bytes".to_owned(),
+            "properties.enable.auto.commit".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     map
@@ -108,11 +124,64 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
 pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {
     use sink_properties::*;
     let mut map = HashMap::new();
+    // ClickHouseConfig
+    map.try_insert(
+        std::any::type_name::<ClickHouseConfig>().to_owned(),
+        [
+            "commit_checkpoint_interval".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
+    // DeltaLakeConfig
+    map.try_insert(
+        std::any::type_name::<DeltaLakeConfig>().to_owned(),
+        [
+            "commit_checkpoint_interval".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
+    // IcebergConfig
+    map.try_insert(
+        std::any::type_name::<IcebergConfig>().to_owned(),
+        [
+            "commit_checkpoint_interval".to_owned(),
+            "enable_compaction".to_owned(),
+            "compaction_interval_sec".to_owned(),
+            "enable_snapshot_expiration".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
     // KafkaConfig
     map.try_insert(
         std::any::type_name::<KafkaConfig>().to_owned(),
         [
             "properties.sync.call.timeout".to_owned(),
+            "properties.security.protocol".to_owned(),
+            "properties.ssl.endpoint.identification.algorithm".to_owned(),
+            "properties.sasl.mechanism".to_owned(),
+            "properties.sasl.username".to_owned(),
+            "properties.sasl.password".to_owned(),
+            "properties.message.max.bytes".to_owned(),
+            "properties.receive.message.max.bytes".to_owned(),
+            "properties.statistics.interval.ms".to_owned(),
+            "properties.client.id".to_owned(),
+            "properties.enable.ssl.certificate.verification".to_owned(),
+            "properties.allow.auto.create.topics".to_owned(),
+            "properties.queue.buffering.max.messages".to_owned(),
+            "properties.queue.buffering.max.kbytes".to_owned(),
+            "properties.queue.buffering.max.ms".to_owned(),
+            "properties.enable.idempotence".to_owned(),
+            "properties.message.send.max.retries".to_owned(),
+            "properties.retry.backoff.ms".to_owned(),
+            "properties.batch.num.messages".to_owned(),
+            "properties.batch.size".to_owned(),
+            "properties.message.timeout.ms".to_owned(),
+            "properties.max.in.flight.requests.per.connection".to_owned(),
+            "properties.request.required.acks".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
+    // StarrocksConfig
+    map.try_insert(
+        std::any::type_name::<StarrocksConfig>().to_owned(),
+        [
+            "commit_checkpoint_interval".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     map
