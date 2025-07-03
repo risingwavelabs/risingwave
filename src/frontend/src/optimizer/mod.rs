@@ -11,9 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use std::num::NonZeroU32;
 use std::ops::DerefMut;
 use std::sync::Arc;
+
+use risingwave_pb::catalog::PbVectorIndexInfo;
 
 pub mod plan_node;
 
@@ -1021,6 +1024,7 @@ impl LogicalPlanRoot {
         schema_id: SchemaId,
         definition: String,
         retention_seconds: Option<NonZeroU32>,
+        vector_index_info: PbVectorIndexInfo,
     ) -> Result<StreamVectorIndexWrite> {
         let cardinality = self.compute_cardinality();
         assert_eq!(self.plan.convention(), Convention::Logical);
@@ -1035,6 +1039,7 @@ impl LogicalPlanRoot {
             definition,
             cardinality,
             retention_seconds,
+            vector_index_info,
         )
     }
 

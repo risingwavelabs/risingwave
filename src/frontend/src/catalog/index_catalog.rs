@@ -105,44 +105,45 @@ impl IndexCatalog {
             .map(|expr| item_rewriter::CompositeCastEliminator.rewrite_expr(expr))
             .collect();
 
-        let primary_to_secondary_mapping: BTreeMap<usize, usize> = index_item
-            .iter()
-            .enumerate()
-            .filter_map(|(i, expr)| match expr {
-                ExprImpl::InputRef(input_ref) => Some((input_ref.index, i)),
-                ExprImpl::FunctionCall(_) => None,
-                _ => unreachable!(),
-            })
-            .collect();
-
-        let secondary_to_primary_mapping = BTreeMap::from_iter(
-            primary_to_secondary_mapping
-                .clone()
-                .into_iter()
-                .map(|(x, y)| (y, x)),
-        );
-
-        let function_mapping: HashMap<FunctionCall, usize> = index_item
-            .iter()
-            .enumerate()
-            .filter_map(|(i, expr)| match expr {
-                ExprImpl::InputRef(_) => None,
-                ExprImpl::FunctionCall(func) => Some((func.deref().clone(), i)),
-                _ => unreachable!(),
-            })
-            .collect();
-
         let index_type = match index_table.table_type {
-            TableType::Index => IndexType::Table(Arc::new(TableIndex {
-                name: index_prost.name.clone(),
-                index_column_properties: index_prost.index_column_properties.clone(),
-                index_columns_len: index_prost.index_columns_len,
-                index_table: index_table.clone(),
-                primary_table: primary_table.clone(),
-                primary_to_secondary_mapping,
-                secondary_to_primary_mapping,
-                function_mapping,
-            })),
+            TableType::Index => {
+                let primary_to_secondary_mapping: BTreeMap<usize, usize> = index_item
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, expr)| match expr {
+                        ExprImpl::InputRef(input_ref) => Some((input_ref.index, i)),
+                        ExprImpl::FunctionCall(_) => None,
+                        _ => unreachable!(),
+                    })
+                    .collect();
+
+                let secondary_to_primary_mapping = BTreeMap::from_iter(
+                    primary_to_secondary_mapping
+                        .clone()
+                        .into_iter()
+                        .map(|(x, y)| (y, x)),
+                );
+
+                let function_mapping: HashMap<FunctionCall, usize> = index_item
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, expr)| match expr {
+                        ExprImpl::InputRef(_) => None,
+                        ExprImpl::FunctionCall(func) => Some((func.deref().clone(), i)),
+                        _ => unreachable!(),
+                    })
+                    .collect();
+                IndexType::Table(Arc::new(TableIndex {
+                    name: index_prost.name.clone(),
+                    index_column_properties: index_prost.index_column_properties.clone(),
+                    index_columns_len: index_prost.index_columns_len,
+                    index_table: index_table.clone(),
+                    primary_table: primary_table.clone(),
+                    primary_to_secondary_mapping,
+                    secondary_to_primary_mapping,
+                    function_mapping,
+                }))
+            }
             TableType::VectorIndex => {
                 assert_eq!(index_prost.index_columns_len, 1);
                 IndexType::Vector(Arc::new(VectorIndex {
