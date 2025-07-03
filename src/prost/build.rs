@@ -258,6 +258,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "hummock.TableWatermarks.EpochNewWatermarks",
             "#[derive(Eq)]",
         )
+        .type_attribute(
+            "catalog.VectorIndexInfo",
+            "#[derive(Eq, Hash)]",
+        )
+        .type_attribute(
+            "catalog.VectorIndexInfo.config",
+            "#[derive(Eq, Hash)]",
+        )
+        .type_attribute(
+            "catalog.FlatIndexConfig",
+            "#[derive(Eq, Hash)]",
+        )
         // proto version enums
         .type_attribute("stream_plan.AggNodeVersion", "#[derive(prost_helpers::Version)]")
         .type_attribute(

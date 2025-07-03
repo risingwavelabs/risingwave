@@ -671,6 +671,7 @@ mod await_epoch_completed_future {
 
 use await_epoch_completed_future::*;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_pb::hummock::vector_index_delta::PbVectorIndexAdds;
 use risingwave_storage::{StateStoreImpl, dispatch_state_store};
 
 use crate::executor::exchange::permit;
@@ -774,12 +775,13 @@ impl LocalBarrierWorker {
             load_finished_source_ids,
         } = result;
 
-        let (synced_sstables, table_watermarks, old_value_ssts) = sync_result
+        let (synced_sstables, table_watermarks, old_value_ssts, vector_index_adds) = sync_result
             .map(|sync_result| {
                 (
                     sync_result.uncommitted_ssts,
                     sync_result.table_watermarks,
                     sync_result.old_value_ssts,
+                    sync_result.vector_index_adds,
                 )
             })
             .unwrap_or_default();
@@ -818,6 +820,17 @@ impl LocalBarrierWorker {
                             .collect(),
                         database_id: database_id.database_id,
                         load_finished_source_ids,
+                        vector_index_adds: vector_index_adds
+                            .into_iter()
+                            .map(|(table_id, adds)| {
+                                (
+                                    table_id.table_id,
+                                    PbVectorIndexAdds {
+                                        adds: adds.into_iter().map(|add| add.into()).collect(),
+                                    },
+                                )
+                            })
+                            .collect(),
                     },
                 )
             }
