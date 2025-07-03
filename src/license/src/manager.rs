@@ -20,14 +20,14 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use thiserror_ext::AsReport;
 
-use crate::LicenseKeyRef;
+use crate::{Feature, LicenseKeyRef};
 
 /// License tier.
 ///
 /// Each enterprise [`Feature`](super::Feature) is available for a specific tier and above.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Tier {
+pub enum CompatTier {
     /// Free tier.
     ///
     /// This is more like a placeholder. If a feature is available for the free tier, there's no
@@ -78,7 +78,11 @@ pub struct License {
     pub iss: Issuer,
 
     /// Tier of the license.
-    pub tier: Tier,
+    #[serde(rename = "tier")]
+    pub compat_tier: Option<CompatTier>,
+
+    /// Available features.
+    pub available_features: Vec<Feature>,
 
     /// Maximum number of compute-node CPU cores allowed to use. Typically used for the paid tier.
     pub cpu_core_limit: Option<NonZeroUsize>,
@@ -96,10 +100,22 @@ impl Default for License {
     fn default() -> Self {
         Self {
             sub: "default".to_owned(),
-            tier: Tier::Free,
+            compat_tier: None,
+            available_features: vec![],
             iss: Issuer::Prod,
             cpu_core_limit: None,
             exp: u64::MAX,
+        }
+    }
+}
+
+impl License {
+    /// Get a slice of all available features for the license.
+    pub(crate) fn available_features(&self) -> &[Feature] {
+        match self.compat_tier {
+            Some(CompatTier::Free) => &[],
+            Some(CompatTier::Paid) => Feature::all_compat_paid_tier(),
+            None => &self.available_features,
         }
     }
 }

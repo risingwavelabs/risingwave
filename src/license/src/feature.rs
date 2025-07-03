@@ -12,19 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::{LicenseError, LicenseManager, Tier, report_telemetry};
+use super::{LicenseError, LicenseManager, report_telemetry};
 
-/// Define all features that are available based on the tier of the license.
+/// Define all features that require a license to use.
 ///
 /// # Define a new feature
 ///
 /// To add a new feature, add a new entry below following the same pattern as the existing ones.
-///
-/// Check the definition of [`Tier`] for all available tiers. Note that normally there's no need to
-/// add a feature with the minimum tier of `Free`, as you can directly write the code without
-/// gating it with a feature check.
+/// ALWAYS add a new entry at the END to keep the order of the enum.
 ///
 /// # Check the availability of a feature
 ///
@@ -35,10 +33,9 @@ use super::{LicenseError, LicenseManager, Tier, report_telemetry};
 ///
 /// # Feature availability in tests
 ///
-/// In tests with `debug_assertions` enabled, a license key of the paid (maximum) tier is set by
-/// default. As a result, all features are available in tests. To test the behavior when a feature
-/// is not available, you can manually set a license key with a lower tier. Check the e2e test cases
-/// under `error_ui` for examples.
+/// In tests with `debug_assertions` enabled, a special license key with all features enabled is set by
+/// default. To test the behavior when a feature is not available, you can manually set a license key.
+/// Check the e2e test cases under `error_ui` for examples.
 macro_rules! for_all_features {
     ($macro:ident) => {
         $macro! {
@@ -69,7 +66,7 @@ macro_rules! def_feature {
         /// A set of features that are available based on the license.
         ///
         /// To define a new feature, add a new entry in the macro [`for_all_features`].
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
         pub enum Feature {
             $(
                 #[doc = $doc]
@@ -78,22 +75,22 @@ macro_rules! def_feature {
         }
 
         impl Feature {
-            /// Minimum tier required to use this feature.
-            fn min_tier(self) -> Tier {
-                match self {
-                    $(
-                        Self::$name => Tier::Paid,
-                    )*
-                }
-            }
-
             /// Name of the feature.
-            fn name(&self) -> &'static str {
+            pub(crate) fn name(&self) -> &'static str {
                 match &self {
                     $(
                         Self::$name => stringify!($name),
                     )*
                 }
+            }
+
+            /// Get a slice of all features.
+            pub(crate) fn all() -> &'static [Feature] {
+                &[
+                    $(
+                        Feature::$name,
+                    )*
+                ]
             }
         }
     };
@@ -101,18 +98,22 @@ macro_rules! def_feature {
 
 for_all_features!(def_feature);
 
+impl Feature {
+    /// Get a slice of all features that are available for `CompatTier::Paid`.
+    pub(crate) fn all_compat_paid_tier() -> &'static [Feature] {
+        // `IcebergCompaction` is the last feature introduced before we deprecate tiers in kernel.
+        &Feature::all()[..=Feature::IcebergCompaction as usize]
+    }
+}
+
 /// The error type for feature not available due to license.
 #[derive(Debug, Error)]
 pub enum FeatureNotAvailable {
     #[error(
-    "feature {:?} is only available for tier {:?} and above, while the current tier is {:?}\n\n\
-        Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.",
-    feature, feature.min_tier(), current_tier,
+        "feature {feature:?} is not available based on your license\n\n\
+        Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command."
     )]
-    InsufficientTier {
-        feature: Feature,
-        current_tier: Tier,
-    },
+    NotAvailable { feature: Feature },
 
     #[error("feature {feature:?} is not available due to license error")]
     LicenseError {
@@ -129,13 +130,10 @@ impl Feature {
     ) -> Result<(), FeatureNotAvailable> {
         let check_res = match manager.license() {
             Ok(license) => {
-                if license.tier >= self.min_tier() {
+                if license.available_features().contains(&self) {
                     Ok(())
                 } else {
-                    Err(FeatureNotAvailable::InsufficientTier {
-                        feature: self,
-                        current_tier: license.tier,
-                    })
+                    Err(FeatureNotAvailable::NotAvailable { feature: self })
                 }
             }
             Err(error) => Err(FeatureNotAvailable::LicenseError {

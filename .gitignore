@@ -91,3 +91,5 @@ e2e_test/iceberg/metastore_db
 book
 
 dhat-heap.json
+
+rustc-ice-*.txt
