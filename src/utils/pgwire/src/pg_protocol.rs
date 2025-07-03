@@ -122,8 +122,16 @@ pub struct TlsConfig {
 
 impl TlsConfig {
     pub fn new_default() -> Option<Self> {
-        let cert = std::env::var("RW_SSL_CERT").ok()?;
-        let key = std::env::var("RW_SSL_KEY").ok()?;
+        let cert = std::env::var("RW_SSL_CERT")
+            .inspect_err(|err| {
+                tracing::warn!("ssl disabled due to err reading RW_SSL_CERT: {err}");
+            })
+            .ok()?;
+        let key = std::env::var("RW_SSL_KEY")
+            .inspect_err(|err| {
+                tracing::warn!("ssl disabled due to err reading RW_SSL_KEY: {err}");
+            })
+            .ok()?;
         tracing::info!("RW_SSL_CERT={}, RW_SSL_KEY={}", cert, key);
         Some(Self { cert, key })
     }
@@ -216,9 +224,13 @@ where
             state: PgProtocolState::Startup,
             session_mgr,
             session: None,
-            tls_context: tls_config
-                .as_ref()
-                .and_then(|e| build_ssl_ctx_from_config(e).ok()),
+            tls_context: tls_config.as_ref().and_then(|e| {
+                build_ssl_ctx_from_config(e)
+                    .inspect_err(|err| {
+                        tracing::warn!("failed to build ssl context from config: {err}");
+                    })
+                    .ok()
+            }),
             result_cache: Default::default(),
             unnamed_prepare_statement: Default::default(),
             prepare_statement_store: Default::default(),
