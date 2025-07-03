@@ -24,7 +24,10 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{IndexId, TableDesc, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_pb::catalog::{PbIndex, PbIndexColumnProperties, PbStreamJobStatus};
+use risingwave_pb::catalog::{
+    PbFlatIndexConfig, PbIndex, PbIndexColumnProperties, PbStreamJobStatus, PbVectorIndexInfo,
+};
+use risingwave_pb::common::PbDistanceType;
 use risingwave_sqlparser::ast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 
@@ -127,6 +130,7 @@ pub(crate) fn gen_create_index_plan(
         ))
         .into());
     }
+    let mut dimension = None;
     for column in columns {
         if is_vector_index && (column.asc.is_some() || column.nulls_first.is_some()) {
             return Err(ErrorCode::InvalidInputSyntax(
@@ -161,7 +165,9 @@ pub(crate) fn gen_create_index_plan(
         }
         if is_vector_index {
             match expr_impl.return_type() {
-                DataType::Vector(_) => {}
+                DataType::Vector(d) => {
+                    dimension = Some(d);
+                }
                 other => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "vector index must be defined on column of Vector type, but got {:?}",
@@ -274,6 +280,13 @@ pub(crate) fn gen_create_index_plan(
             index_schema_id,
             definition,
             retention_seconds,
+            PbVectorIndexInfo {
+                dimension: dimension.expect("should be set for vector index") as _,
+                config: Some(risingwave_pb::catalog::vector_index_info::PbConfig::Flat(
+                    PbFlatIndexConfig {},
+                )),
+                distance_type: PbDistanceType::InnerProduct as _,
+            },
         )?;
         let index_table = vector_index_write.table().clone();
         let plan: PlanRef = vector_index_write.into();

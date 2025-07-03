@@ -22,6 +22,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_pb::catalog::PbVectorIndexInfo;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use crate::catalog::table_catalog::TableType;
@@ -78,6 +79,7 @@ impl StreamVectorIndexWrite {
         definition: String,
         cardinality: Cardinality,
         retention_seconds: Option<NonZeroU32>,
+        vector_index_info: PbVectorIndexInfo,
     ) -> crate::error::Result<Self> {
         let input = RequiredDist::PhysicalDist(Distribution::Single)
             .enforce_if_not_satisfies(input, &Order::any())?;
@@ -104,11 +106,13 @@ impl StreamVectorIndexWrite {
             cardinality,
             retention_seconds,
             create_type,
+            vector_index_info,
         )?;
 
         Ok(Self::new(input, table))
     }
 
+    #[expect(clippy::too_many_arguments)]
     fn derive_table_catalog(
         rewritten_input: PlanRef,
         name: String,
@@ -120,6 +124,7 @@ impl StreamVectorIndexWrite {
         cardinality: Cardinality,
         retention_seconds: Option<NonZeroU32>,
         create_type: CreateType,
+        vector_index_info: PbVectorIndexInfo,
     ) -> crate::error::Result<TableCatalog> {
         let input = rewritten_input;
 
@@ -178,6 +183,7 @@ impl StreamVectorIndexWrite {
             job_id: None,
             engine: Engine::Hummock,
             clean_watermark_index_in_pk: None,
+            vector_index_info: Some(vector_index_info),
         })
     }
 
