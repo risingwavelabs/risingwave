@@ -92,6 +92,7 @@ pub use file_scan::*;
 mod postgres_query;
 pub use postgres_query::*;
 
+mod batch_vector_index_nearest;
 mod mysql_query;
 pub use mysql_query::*;
 

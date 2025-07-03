@@ -252,7 +252,9 @@ mod table_function_to_internal_backfill_progress;
 mod table_function_to_internal_source_backfill_progress;
 mod table_function_to_mysql_query_rule;
 mod table_function_to_postgres_query_rule;
+mod top_n_to_vector_search_rule;
 mod values_extract_project_rule;
+mod vector_index_selection_rule;
 
 pub use add_logstore_rule::*;
 pub use batch::batch_iceberg_count_star::*;
@@ -267,6 +269,7 @@ pub use table_function_to_internal_source_backfill_progress::*;
 pub use table_function_to_mysql_query_rule::*;
 pub use table_function_to_postgres_query_rule::*;
 pub use values_extract_project_rule::*;
+pub use vector_index_selection_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -352,6 +355,7 @@ macro_rules! for_all_rules {
             , { SourceToIcebergScanRule }
             , { AddLogstoreRule }
             , { EmptyAggRemoveRule }
+            , { VectorIndexSelectionRule }
         }
     };
 }

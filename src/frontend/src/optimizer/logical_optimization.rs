@@ -822,6 +822,12 @@ impl LogicalOptimizer {
 
         // Do a final column pruning and predicate pushing down to clean up the plan.
         plan = Self::column_pruning(plan, explain_trace, &ctx);
+        let todo = 0;
+        plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Vector Index",
+            vec![Box::new(VectorIndexSelectionRule {})],
+            ApplyOrder::BottomUp,
+        ))?;
         if last_total_rule_applied_before_predicate_pushdown != ctx.total_rule_applied() {
             (#[allow(unused_assignments)]
             last_total_rule_applied_before_predicate_pushdown) = ctx.total_rule_applied();
