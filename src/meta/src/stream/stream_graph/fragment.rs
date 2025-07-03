@@ -523,10 +523,13 @@ impl StreamFragmentGraph {
             .zip_eq_fast(old_internal_tables.into_iter())
             .collect::<HashMap<_, _>>();
 
+        // TODO(alter-mv): unify this with `fit_internal_table_ids_with_mapping` after we
+        // confirm the behavior is the same.
         for fragment in self.fragments.values_mut() {
             stream_graph_visitor::visit_internal_tables(
                 &mut fragment.inner,
                 |table, _table_type_name| {
+                    // XXX: this replaces the entire table, instead of just the id!
                     let target = internal_table_id_map.get(&table.id).cloned().unwrap();
                     *table = target;
                 },
@@ -537,14 +540,16 @@ impl StreamFragmentGraph {
     }
 
     /// Fit the internal tables' `table_id`s according to the given mapping.
-    pub fn fit_internal_table_ids_with_mapping(&mut self, matches: HashMap<u32, u32>) {
+    pub fn fit_internal_table_ids_with_mapping(&mut self, mut matches: HashMap<u32, Table>) {
         for fragment in self.fragments.values_mut() {
             stream_graph_visitor::visit_internal_tables(
                 &mut fragment.inner,
                 |table, _table_type_name| {
-                    let target = matches.get(&table.id).cloned().unwrap();
-                    // TODO(alter-mv): some other fields may also need to be aligned, like `vnode_count`?
-                    table.id = target;
+                    let target = matches.remove(&table.id).unwrap_or_else(|| {
+                        panic!("no matching table for table {}({})", table.id, table.name)
+                    });
+                    table.id = target.id;
+                    table.maybe_vnode_count = target.maybe_vnode_count;
                 },
             );
         }
