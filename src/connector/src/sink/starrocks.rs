@@ -107,6 +107,7 @@ pub struct StarrocksConfig {
     /// Defaults to 10 if commit_checkpoint_interval <= 0
     #[serde(default = "default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub commit_checkpoint_interval: u64,
 
     /// Enable partial update
@@ -278,7 +279,6 @@ impl Sink for StarrocksSink {
     type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = DecoupleCheckpointLogSinkerOf<StarrocksSinkWriter>;
 
-    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &["commit_checkpoint_interval"];
     const SINK_NAME: &'static str = STARROCKS_SINK;
 
     async fn validate(&self) -> Result<()> {

@@ -237,6 +237,8 @@ struct YamlFieldInfo {
     name: String,
     #[serde(default)]
     allow_alter_on_fly: bool,
+    #[serde(default)]
+    alias: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -446,6 +448,9 @@ fn extract_allow_alter_on_fly_fields_from_yaml(yaml_path: &Path) -> BTreeMap<Str
         for field in struct_info.fields {
             if field.allow_alter_on_fly {
                 allow_alter_on_fly_field_names.push(field.name);
+                for alias in &field.alias {
+                    allow_alter_on_fly_field_names.push(alias.clone());
+                }
             }
         }
 

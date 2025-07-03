@@ -274,9 +274,11 @@ KafkaProperties:
       Security protocol used for RisingWave to communicate with Kafka brokers. Could be
       PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.endpoint.identification.algorithm
     field_type: String
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.ca.location
     field_type: String
     comments: Path to CA certificate file for verifying the broker's key.
@@ -309,14 +311,17 @@ KafkaProperties:
     field_type: String
     comments: SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and AWS_MSK_IAM.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.username
     field_type: String
     comments: SASL username for SASL/PLAIN and SASL/SCRAM.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.password
     field_type: String
     comments: SASL password for SASL/PLAIN and SASL/SCRAM.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.kerberos.service.name
     field_type: String
     comments: Kafka server's Kerberos principal name under SASL/GSSAPI, not including /hostname@REALM.
@@ -349,6 +354,7 @@ KafkaProperties:
       produce time and may exceed the maximum size by one message in protocol ProduceRequests,
       the broker will enforce the topic's max.message.bytes limit
     required: false
+    allow_alter_on_fly: true
   - name: properties.receive.message.max.bytes
     field_type: usize
     comments: |-
@@ -357,16 +363,20 @@ KafkaProperties:
       + 512 to allow for protocol overhead; the value is adjusted automatically unless the
       configuration property is explicitly set.
     required: false
+    allow_alter_on_fly: true
   - name: properties.statistics.interval.ms
     field_type: usize
     required: false
+    allow_alter_on_fly: true
   - name: properties.client.id
     field_type: String
     comments: Client identifier
     required: false
+    allow_alter_on_fly: true
   - name: properties.enable.ssl.certificate.verification
     field_type: bool
     required: false
+    allow_alter_on_fly: true
   - name: properties.socket.keepalive.enable
     field_type: bool
     required: false
@@ -377,15 +387,18 @@ KafkaProperties:
       Minimum number of messages per topic+partition librdkafka tries to maintain in the local
       consumer queue.
     required: false
+    allow_alter_on_fly: true
   - name: properties.queued.max.messages.kbytes
     field_type: usize
     required: false
+    allow_alter_on_fly: true
   - name: properties.fetch.wait.max.ms
     field_type: usize
     comments: |-
       Maximum time the broker may wait to fill the Fetch response with `fetch.min.`bytes of
       messages.
     required: false
+    allow_alter_on_fly: true
   - name: properties.fetch.min.bytes
     field_type: usize
     comments: Minimum number of bytes the broker responds with. If fetch.wait.max.ms expires the accumulated data will be sent to the client regardless of this setting.
@@ -403,6 +416,7 @@ KafkaProperties:
       and the application is experiencing long (~1s) delays between messages. Low values may
       increase CPU utilization.
     required: false
+    allow_alter_on_fly: true
   - name: properties.fetch.max.bytes
     field_type: usize
     comments: |-
@@ -410,20 +424,22 @@ KafkaProperties:
       batches by the consumer and if the first message batch in the first non-empty partition of
       the Fetch request is larger than this value, then the message batch will still be returned
       to ensure the consumer can make progress. The maximum message batch size accepted by the
-      broker is defined via `message.max.bytes` (broker config) or `max.message.bytes` (broker
-      topic config). `fetch.max.bytes` is automatically adjusted upwards to be at least
-      `message.max.bytes` (consumer config).
+      broker is defined via `message.max.bytes` (broker config) or `max.message.bytes` (broker
+      topic config). `fetch.max.bytes` is automatically adjusted upwards to be at least
+      `message.max.bytes` (consumer config).
     required: false
+    allow_alter_on_fly: true
   - name: properties.enable.auto.commit
     field_type: bool
     comments: |-
       Whether to automatically and periodically commit offsets in the background.
 
-      Note that RisingWave does NOT rely on committed offsets. Committing offset is only for exposing the
+      Note that RisingWave does NOT rely on committed offsets. Committing offset is only for exposing the
       progress for monitoring. Setting this to false can avoid creating consumer groups.
 
       default: true
     required: false
+    allow_alter_on_fly: true
   - name: broker.rewrite.endpoints
     field_type: BTreeMap<String,String>
     comments: This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
