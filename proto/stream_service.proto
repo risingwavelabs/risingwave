@@ -71,6 +71,7 @@ message BarrierCompleteResponse {
   // prev_epoch of barrier
   uint64 epoch = 9;
   uint32 database_id = 10;
+  map<uint32, hummock.VectorIndexDelta.VectorIndexAdds> vector_index_adds = 11;
 }
 
 message StreamingControlStreamRequest {
