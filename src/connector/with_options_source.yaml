@@ -246,6 +246,7 @@ KafkaProperties:
       offsets, and does not join the consumer group. It just reports offsets
       to the group.
     required: false
+    allow_alter_on_fly: true
   - name: upsert
     field_type: String
     comments: |-
