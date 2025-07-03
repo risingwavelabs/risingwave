@@ -470,6 +470,12 @@ fn build_fragment(
                     .add(FragmentTypeFlag::FsFetch);
             }
 
+            NodeBody::VectorIndexWrite(_) => {
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::VectorIndexWrite);
+            }
+
             _ => {}
         };
 
