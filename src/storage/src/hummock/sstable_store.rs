@@ -100,7 +100,12 @@ impl EventListener for BlockCacheEventListener {
         self.metrics
             .block_efficiency_histogram
             .observe(value.efficiency());
-        EVICTED.log((*key, SystemTime::now()));
+        if std::env::var("RW_BLOCK_LOG")
+            .map(|s| s.parse().unwrap_or(false))
+            .unwrap_or(false)
+        {
+            EVICTED.log((*key, SystemTime::now()));
+        }
     }
 }
 
@@ -431,11 +436,22 @@ impl SstableStore {
             policy
         };
 
+        let idx = SstableBlockIndex {
+            sst_id: object_id,
+            block_idx: block_index as _,
+        };
+
         // future: fetch block if hybrid cache miss
         let fetch_block = move || {
             let range = range.clone();
 
             async move {
+                if std::env::var("RW_BLOCK_LOG")
+                    .map(|s| s.parse().unwrap_or(false))
+                    .unwrap_or(false)
+                {
+                    MISSED.log((idx, SystemTime::now()));
+                }
                 let block_data = match store
                     .read(&data_path, range.clone())
                     .instrument_await("get_block_response".verbose())
@@ -465,10 +481,6 @@ impl SstableStore {
 
         match policy {
             CachePolicy::Fill(hint) => {
-                let idx = SstableBlockIndex {
-                    sst_id: object_id,
-                    block_idx: block_index as _,
-                };
                 let entry = self.block_cache.fetch_with_properties(
                     idx,
                     HybridCacheProperties::default().with_hint(hint),
@@ -476,17 +488,13 @@ impl SstableStore {
                 );
                 if matches!(entry.state(), FetchState::Miss) {
                     stats.cache_data_block_miss += 1;
-                    MISSED.log((idx, SystemTime::now()));
                 }
                 Ok(BlockResponse::Entry(entry))
             }
             CachePolicy::NotFill => {
                 match self
                     .block_cache
-                    .get(&SstableBlockIndex {
-                        sst_id: object_id,
-                        block_idx: block_index as _,
-                    })
+                    .get(&idx)
                     .await
                     .map_err(HummockError::foyer_error)?
                 {
