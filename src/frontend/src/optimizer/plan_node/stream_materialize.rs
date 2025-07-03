@@ -321,6 +321,7 @@ impl StreamMaterialize {
                 }
             },
             clean_watermark_index_in_pk: None, // TODO: fill this field
+            vector_index_info: None,
         })
     }
 

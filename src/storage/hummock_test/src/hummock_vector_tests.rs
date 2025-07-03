@@ -19,8 +19,9 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_hummock_sdk::HummockReadEpoch;
-use risingwave_pb::hummock::vector_index_delta::{PbVectorIndexInit, vector_index_init};
-use risingwave_pb::hummock::{PbDistanceType, PbFlatIndexConfig};
+use risingwave_pb::catalog::{PbFlatIndexConfig, PbVectorIndexInfo, vector_index_info};
+use risingwave_pb::common::PbDistanceType;
+use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::{
@@ -46,9 +47,11 @@ async fn test_flat_vector() {
             TEST_TABLE_ID,
             base_epoch,
             PbVectorIndexInit {
-                dimension: VECTOR_DIM as _,
-                distance_type: PbDistanceType::InnerProduct as _,
-                config: Some(vector_index_init::PbConfig::Flat(PbFlatIndexConfig {})),
+                info: Some(PbVectorIndexInfo {
+                    dimension: VECTOR_DIM as _,
+                    distance_type: PbDistanceType::InnerProduct as _,
+                    config: Some(vector_index_info::PbConfig::Flat(PbFlatIndexConfig {})),
+                }),
             },
         )
         .await;

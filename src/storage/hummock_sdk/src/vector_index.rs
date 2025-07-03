@@ -15,14 +15,16 @@
 use std::collections::{HashMap, HashSet};
 
 use risingwave_common::catalog::TableId;
+use risingwave_pb::catalog::PbFlatIndexConfig;
+use risingwave_pb::catalog::vector_index_info::Config;
+use risingwave_pb::common::PbDistanceType;
 use risingwave_pb::hummock::vector_index::PbVariant;
-use risingwave_pb::hummock::vector_index_delta::vector_index_init::Config;
 use risingwave_pb::hummock::vector_index_delta::{
     PbVectorIndexAdd, PbVectorIndexInit, vector_index_add,
 };
 use risingwave_pb::hummock::{
-    PbDistanceType, PbFlatIndex, PbFlatIndexAdd, PbFlatIndexConfig, PbVectorFileInfo,
-    PbVectorIndex, PbVectorIndexDelta, vector_index_delta,
+    PbFlatIndex, PbFlatIndexAdd, PbVectorFileInfo, PbVectorIndex, PbVectorIndexDelta,
+    vector_index_delta,
 };
 
 use crate::{HummockObjectId, HummockVectorFileId};
@@ -340,12 +342,13 @@ impl From<VectorIndex> for PbVectorIndex {
 }
 
 fn init_vector_index(init: &PbVectorIndexInit) -> VectorIndex {
-    let inner = match init.config.as_ref().unwrap() {
+    let init_info = init.info.as_ref().unwrap();
+    let inner = match init_info.config.as_ref().unwrap() {
         Config::Flat(config) => VectorIndexImpl::Flat(FlatIndex::new(config)),
     };
     VectorIndex {
-        dimension: init.dimension as _,
-        distance_type: init.distance_type.try_into().unwrap(),
+        dimension: init_info.dimension as _,
+        distance_type: init_info.distance_type.try_into().unwrap(),
         inner,
     }
 }
