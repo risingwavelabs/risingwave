@@ -607,7 +607,6 @@ pub(crate) mod tests {
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_owned(),
             table_catalog.into(),
-            vec![],
             ctx,
             None,
             Cardinality::unknown(),
