@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod distance;
+pub mod hnsw;
 pub use distance::DistanceMeasurement;
 
 pub mod utils;
@@ -161,6 +162,7 @@ impl<'a, O, M: MeasureDistanceBuilder> NearestBuilder<'a, O, M> {
 
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils {
+    use std::cmp::min;
     use std::sync::LazyLock;
 
     use bytes::Bytes;
@@ -170,7 +172,7 @@ pub mod test_utils {
     use rand::{Rng, SeedableRng};
 
     use crate::store::Vector;
-    use crate::vector::VectorItem;
+    use crate::vector::{VectorDistance, VectorItem};
 
     pub fn gen_vector(d: usize) -> Vector {
         static RNG: LazyLock<Mutex<StdRng>> =
@@ -185,20 +187,26 @@ pub mod test_utils {
     pub fn gen_info(i: usize) -> Bytes {
         Bytes::copy_from_slice(i.to_le_bytes().as_slice())
     }
+
+    pub fn top_n<O>(input: &mut Vec<(VectorDistance, O)>, n: usize) {
+        input.sort_by(|(first_distance, _), (second_distance, _)| {
+            first_distance.total_cmp(second_distance)
+        });
+        let n = min(n, input.len());
+        input.resize_with(n, || unreachable!());
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::cmp::min;
 
     use bytes::Bytes;
     use itertools::Itertools;
 
     use crate::vector::distance::L2Distance;
-    use crate::vector::test_utils::{gen_info, gen_vector};
+    use crate::vector::test_utils::{gen_info, gen_vector, top_n};
     use crate::vector::{
-        MeasureDistanceBuilder, NearestBuilder, Vector, VectorDistance, VectorInner, l2_norm_faiss,
-        l2_norm_trivial,
+        MeasureDistanceBuilder, NearestBuilder, Vector, VectorInner, l2_norm_faiss, l2_norm_trivial,
     };
 
     fn gen_random_input(count: usize) -> Vec<(Vector, Bytes)> {
@@ -229,14 +237,6 @@ mod tests {
         let vec = gen_vector(10);
         let builder = NearestBuilder::<'_, (), L2Distance>::new(vec.to_ref(), 10);
         assert!(builder.finish().is_empty());
-    }
-
-    fn top_n<O>(input: &mut Vec<(VectorDistance, O)>, n: usize) {
-        input.sort_by(|(first_distance, _), (second_distance, _)| {
-            first_distance.total_cmp(second_distance)
-        });
-        let n = min(n, input.len());
-        input.resize_with(n, || unreachable!());
     }
 
     fn test_inner(count: usize, n: usize) {
