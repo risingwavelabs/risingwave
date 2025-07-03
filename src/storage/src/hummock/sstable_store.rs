@@ -14,8 +14,9 @@
 use std::clone::Clone;
 use std::collections::VecDeque;
 use std::future::Future;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, LazyLock};
+use std::time::SystemTime;
 
 use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
@@ -39,11 +40,34 @@ use super::{
     BatchUploadWriter, Block, BlockMeta, BlockResponse, RecentFilter, Sstable, SstableMeta,
     SstableWriterOptions,
 };
+use crate::hummock::batch_logger::BatchLogger;
 use crate::hummock::block_stream::{
     BlockDataStream, BlockStream, MemoryUsageTracker, PrefetchBlockStream,
 };
 use crate::hummock::{BlockHolder, HummockError, HummockResult};
 use crate::monitor::{HummockStateStoreMetrics, StoreLocalStatistic};
+
+static MISSED: LazyLock<BatchLogger<(SstableBlockIndex, SystemTime)>> = LazyLock::new(|| {
+    BatchLogger::new(
+        tracing::Level::INFO,
+        "========== MISSED DATA BLOCKS ==========",
+        std::time::Duration::from_secs(10),
+        std::env::var("RW_LOG_BATCH")
+            .map(|s| s.parse().unwrap_or(1000))
+            .unwrap_or(1000),
+    )
+});
+
+static EVICTED: LazyLock<BatchLogger<(SstableBlockIndex, SystemTime)>> = LazyLock::new(|| {
+    BatchLogger::new(
+        tracing::Level::INFO,
+        "========== EVICTED DATA BLOCKS ==========",
+        std::time::Duration::from_secs(10),
+        std::env::var("RW_LOG_BATCH")
+            .map(|s| s.parse().unwrap_or(1000))
+            .unwrap_or(1000),
+    )
+});
 
 pub type TableHolder = HybridCacheEntry<HummockSstableObjectId, Box<Sstable>>;
 
@@ -67,7 +91,7 @@ impl EventListener for BlockCacheEventListener {
     type Key = SstableBlockIndex;
     type Value = Box<Block>;
 
-    fn on_leave(&self, _reason: foyer::Event, _key: &Self::Key, value: &Self::Value)
+    fn on_leave(&self, _reason: foyer::Event, key: &Self::Key, value: &Self::Value)
     where
         Self::Key: foyer::Key,
         Self::Value: foyer::Value,
@@ -75,6 +99,12 @@ impl EventListener for BlockCacheEventListener {
         self.metrics
             .block_efficiency_histogram
             .observe(value.efficiency());
+        if std::env::var("RW_BLOCK_LOG")
+            .map(|s| s.parse().unwrap_or(false))
+            .unwrap_or(false)
+        {
+            EVICTED.log((*key, SystemTime::now()));
+        }
     }
 }
 
@@ -405,11 +435,23 @@ impl SstableStore {
             policy
         };
 
+        let idx = SstableBlockIndex {
+            sst_id: object_id,
+            block_idx: block_index as _,
+        };
+
         // future: fetch block if hybrid cache miss
         let fetch_block = move || {
             let range = range.clone();
 
             async move {
+                if std::env::var("RW_BLOCK_LOG")
+                    .map(|s| s.parse().unwrap_or(false))
+                    .unwrap_or(false)
+                {
+                    MISSED.log((idx, SystemTime::now()));
+                }
+
                 let block_data = match store
                     .read(&data_path, range.clone())
                     .instrument_await("get_block_response".verbose())
@@ -441,10 +483,7 @@ impl SstableStore {
         match policy {
             CachePolicy::Fill(hint) => {
                 let entry = self.block_cache.fetch_with_properties(
-                    SstableBlockIndex {
-                        sst_id: object_id,
-                        block_idx: block_index as _,
-                    },
+                    idx,
                     HybridCacheProperties::default().with_hint(hint),
                     fetch_block,
                 );
@@ -456,10 +495,7 @@ impl SstableStore {
             CachePolicy::NotFill => {
                 match self
                     .block_cache
-                    .get(&SstableBlockIndex {
-                        sst_id: object_id,
-                        block_idx: block_index as _,
-                    })
+                    .get(&idx)
                     .await
                     .map_err(HummockError::foyer_error)?
                 {
