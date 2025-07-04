@@ -75,7 +75,7 @@ use crate::handler::create_source::{
     bind_source_watermark, handle_addition_columns,
 };
 use crate::handler::util::SourceSchemaCompatExt;
-use crate::optimizer::plan_node::generic::{CdcScanOptions, SourceNodeKind};
+use crate::optimizer::plan_node::generic::{SourceNodeKind, build_cdc_scan_options_with_options};
 use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
@@ -872,7 +872,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
 
     tracing::debug!(?cdc_table_desc, "create cdc table");
 
-    let options = CdcScanOptions::from_with_options(context.with_options())?;
+    let options = build_cdc_scan_options_with_options(context.with_options())?;
 
     let logical_scan = LogicalCdcScan::create(
         external_table_name.clone(),

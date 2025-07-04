@@ -1,0 +1,539 @@
+// Copyright 2025 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use std::future::Future;
+use std::pin::Pin;
+
+use either::Either;
+use futures::stream;
+use futures::stream::select_with_strategy;
+use itertools::Itertools;
+use risingwave_common::array::DataChunk;
+use risingwave_common::bail;
+use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::row::RowDeserializer;
+use risingwave_connector::parser::{
+    ByteStreamSourceParser, DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties,
+    ProtocolProperties, SourceStreamChunkBuilder, SpecificParserConfig,
+};
+use risingwave_connector::source::cdc::CdcScanOptions;
+use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReaderImpl};
+use risingwave_connector::source::{
+    CdcTableSnapshotSplit, CdcTableSnapshotSplitRaw, SourceColumnDesc, SourceContext,
+    SourceCtrlOpts,
+};
+use rw_futures_util::pausable;
+use thiserror_ext::AsReport;
+use tracing::Instrument;
+
+use crate::executor::UpdateMutation;
+use crate::executor::backfill::cdc::state_v2::ParallelizedCdcBackfillState;
+use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
+use crate::executor::backfill::cdc::upstream_table::snapshot::{
+    SnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
+};
+use crate::executor::backfill::utils::{
+    get_cdc_chunk_last_offset, get_new_pos, mapping_chunk, mapping_message, mark_cdc_chunk,
+};
+use crate::executor::monitor::CdcBackfillMetrics;
+use crate::executor::prelude::*;
+use crate::executor::source::get_infinite_backoff_strategy;
+use crate::task::CreateMviewProgressReporter;
+
+/// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.
+const METADATA_STATE_LEN: usize = 4;
+
+pub struct ParallelizedCdcBackfillExecutor<S: StateStore> {
+    actor_ctx: ActorContextRef,
+
+    /// The external table to be backfilled
+    external_table: ExternalStorageTable,
+
+    /// Upstream changelog stream which may contain metadata columns, e.g. `_rw_offset`
+    upstream: Executor,
+
+    /// The column indices need to be forwarded to the downstream from the upstream and table scan.
+    output_indices: Vec<usize>,
+
+    /// The schema of output chunk, including additional columns if any
+    output_columns: Vec<ColumnDesc>,
+
+    // TODO: introduce a CdcBackfillProgress to report finish to Meta
+    // This object is just a stub right now
+    progress: Option<CreateMviewProgressReporter>,
+
+    metrics: CdcBackfillMetrics,
+
+    /// Rate limit in rows/s.
+    rate_limit_rps: Option<u32>,
+
+    options: CdcScanOptions,
+
+    state_table: StateTable<S>,
+}
+
+impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        actor_ctx: ActorContextRef,
+        external_table: ExternalStorageTable,
+        upstream: Executor,
+        output_indices: Vec<usize>,
+        output_columns: Vec<ColumnDesc>,
+        progress: Option<CreateMviewProgressReporter>,
+        metrics: Arc<StreamingMetrics>,
+        state_table: StateTable<S>,
+        rate_limit_rps: Option<u32>,
+        options: CdcScanOptions,
+    ) -> Self {
+        let pk_indices = external_table.pk_indices();
+        let upstream_table_id = external_table.table_id().table_id;
+
+        let metrics = metrics.new_cdc_backfill_metrics(external_table.table_id(), actor_ctx.id);
+
+        Self {
+            actor_ctx,
+            external_table,
+            upstream,
+            output_indices,
+            output_columns,
+            progress,
+            metrics,
+            rate_limit_rps,
+            options,
+            state_table,
+        }
+    }
+
+    fn report_metrics(
+        metrics: &CdcBackfillMetrics,
+        snapshot_processed_row_count: u64,
+        upstream_processed_row_count: u64,
+    ) {
+        metrics
+            .cdc_backfill_snapshot_read_row_count
+            .inc_by(snapshot_processed_row_count);
+
+        metrics
+            .cdc_backfill_upstream_output_row_count
+            .inc_by(upstream_processed_row_count);
+    }
+
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn execute_inner(mut self) {
+        // The indices to primary key columns
+        let pk_indices = self.external_table.pk_indices().to_vec();
+        let pk_order = self.external_table.pk_order_types().to_vec();
+
+        let table_id = self.external_table.table_id().table_id;
+        let upstream_table_name = self.external_table.qualified_table_name();
+        let schema_table_name = self.external_table.schema_table_name().clone();
+        let external_database_name = self.external_table.database_name().to_owned();
+
+        let additional_columns = self
+            .output_columns
+            .iter()
+            .filter(|col| col.additional_column.column_type.is_some())
+            .cloned()
+            .collect_vec();
+
+        let mut upstream = self.upstream.execute();
+
+        // Current position of the upstream_table storage primary key.
+        // `None` means it starts from the beginning.
+        let mut current_pk_pos: Option<OwnedRow>;
+
+        // Poll the upstream to get the first barrier.
+        let mut first_barrier = expect_first_barrier(&mut upstream).await?;
+
+        let mut actor_snapshot_splits = vec![];
+        // Currently we hard code the split column to be the first column of primary keys.
+        let cdc_table_snapshot_split_column = &self.external_table.schema().fields[pk_indices[0]];
+        if let Some(Mutation::Add(add)) = first_barrier.mutation.as_deref() {
+            let mut all_snapshot_splits = add.actor_cdc_table_snapshot_splits.clone();
+            // TODO(zw): remove consumed splits to reduce barrier size for downstream.
+            if let Some(splits) = all_snapshot_splits.get(&self.actor_ctx.id) {
+                actor_snapshot_splits = splits
+                    .into_iter()
+                    .map(|s: &CdcTableSnapshotSplitRaw| {
+                        let de =
+                            RowDeserializer::new(vec![cdc_table_snapshot_split_column.data_type()]);
+                        let left_bound_inclusive =
+                            de.deserialize(s.left_bound_inclusive.as_ref()).unwrap();
+                        let right_bound_exclusive =
+                            de.deserialize(s.right_bound_exclusive.as_ref()).unwrap();
+                        CdcTableSnapshotSplit {
+                            split_id: s.split_id,
+                            left_bound_inclusive,
+                            right_bound_exclusive,
+                        }
+                    })
+                    .collect();
+            }
+        }
+        tracing::debug!(?actor_snapshot_splits, "!!!");
+
+        let mut is_snapshot_paused = first_barrier.is_pause_on_startup();
+        let first_barrier_epoch = first_barrier.epoch;
+        // The first barrier message should be propagated.
+        yield Message::Barrier(first_barrier);
+        let mut rate_limit_to_zero = self.rate_limit_rps.is_some_and(|val| val == 0);
+
+        let actor_bounds = if actor_snapshot_splits.is_empty() {
+            None
+        } else {
+            Some((
+                actor_snapshot_splits[0].left_bound_inclusive.clone(),
+                actor_snapshot_splits[actor_snapshot_splits.len() - 1]
+                    .right_bound_exclusive
+                    .clone(),
+            ))
+        };
+
+        // Check whether this parallelism has been assigned splits,
+        // if not, we should bypass the backfill directly.
+        let mut state_impl = ParallelizedCdcBackfillState::new(
+            self.state_table,
+            pk_indices.len() + METADATA_STATE_LEN,
+        );
+        state_impl.init_epoch(first_barrier_epoch).await?;
+        // // restore backfill state
+
+        // Keep track of rows from the snapshot.
+        // let mut total_snapshot_row_count = state.row_count as u64;
+        // TODO(zw): impl
+        let mut total_snapshot_row_count = 0;
+
+        // Find next split that need backfill.
+        let mut next_split_idx = actor_snapshot_splits.len();
+        if !self.options.disable_backfill {
+            for (idx, split) in actor_snapshot_splits.iter().enumerate() {
+                let state = state_impl.restore_state(split.split_id).await?;
+                tracing::debug!(
+                    table_id,
+                    split_id = split.split_id,
+                    upstream_table_name,
+                    is_finished = state.is_finished,
+                    is_snapshot_paused,
+                    snapshot_row_count = total_snapshot_row_count,
+                    rate_limit = self.rate_limit_rps,
+                    disable_backfill = self.options.disable_backfill,
+                    snapshot_barrier_interval = self.options.snapshot_barrier_interval,
+                    snapshot_batch_size = self.options.snapshot_batch_size,
+                    "!!!",
+                );
+                if !state.is_finished {
+                    next_split_idx = idx;
+                    break;
+                }
+            }
+        }
+
+        // After init the state table and forward the initial barrier to downstream,
+        // we now try to create the table reader with retry.
+        // If backfill hasn't finished, we can ignore upstream cdc events before we create the table reader;
+        // If backfill is finished, we should forward the upstream cdc events to downstream.
+        let mut table_reader: Option<ExternalTableReaderImpl> = None;
+        let external_table = self.external_table.clone();
+        let mut future = Box::pin(async move {
+            let backoff = get_infinite_backoff_strategy();
+            tokio_retry::Retry::spawn(backoff, || async {
+                match external_table.create_table_reader().await {
+                    Ok(reader) => Ok(reader),
+                    Err(e) => {
+                        tracing::warn!(error = %e.as_report(), "failed to create cdc table reader, retrying...");
+                        Err(e)
+                    }
+                }
+            })
+                .instrument(tracing::info_span!("create_cdc_table_reader_with_retry"))
+                .await
+                .expect("Retry create cdc table reader until success.")
+        });
+
+        // Make sure to use mapping_message after transform_upstream.
+        let mut upstream = transform_upstream(upstream, self.output_columns.clone()).boxed();
+        loop {
+            if let Some(msg) =
+                build_reader_and_poll_upstream(&mut upstream, &mut table_reader, &mut future)
+                    .await?
+            {
+                if let Some(msg) = mapping_message(msg, &self.output_indices) {
+                    match msg {
+                        Message::Barrier(barrier) => {
+                            // commit state to bump the epoch of state table
+                            state_impl.commit_state(barrier.epoch).await?;
+                            yield Message::Barrier(barrier);
+                        }
+                        Message::Chunk(chunk) => {
+                            // TODO(zw): For chunks of splits that has completed, forward the chunk to downstream.
+                            yield Message::Chunk(chunk);
+                        }
+                        Message::Watermark(_) => {
+                            // ignore watermark
+                        }
+                    }
+                }
+            } else {
+                assert!(table_reader.is_some(), "table reader must created");
+                tracing::info!(
+                    table_id,
+                    upstream_table_name,
+                    "table reader created successfully"
+                );
+                break;
+            }
+        }
+        let upstream_table_reader = UpstreamTableReader::new(
+            self.external_table.clone(),
+            table_reader.expect("table reader must created"),
+        );
+        let mut upstream = upstream.peekable();
+        let offset_parse_func = upstream_table_reader.reader.get_cdc_offset_parser();
+
+        // drive the upstream changelog first to ensure we can receive timely changelog event,
+        // otherwise the upstream changelog may be blocked by the snapshot read stream
+        let _ = Pin::new(&mut upstream).peek().await;
+        // wait for a barrier to make sure the backfill starts after upstream source
+        #[for_await]
+        for msg in upstream.by_ref() {
+            match msg? {
+                Message::Barrier(barrier) => {
+                    match barrier.mutation.as_deref() {
+                        Some(crate::executor::Mutation::Pause) => {
+                            is_snapshot_paused = true;
+                            tracing::info!(
+                                    table_id,
+                                    upstream_table_name,
+                                    "snapshot is paused by barrier"
+                                );
+                        }
+                        Some(crate::executor::Mutation::Resume) => {
+                            is_snapshot_paused = false;
+                            tracing::info!(
+                                    table_id,
+                                    upstream_table_name,
+                                    "snapshot is resumed by barrier"
+                                );
+                        }
+                        _ => {
+                            // ignore other mutations
+                        }
+                    }
+                    // commit state just to bump the epoch of state table
+                    state_impl.commit_state(barrier.epoch).await?;
+                    yield Message::Barrier(barrier);
+                    break;
+                }
+                Message::Chunk(ref chunk) => {}
+                Message::Watermark(_) => {
+                    // Ignore watermark
+                }
+            }
+        }
+
+        for split in actor_snapshot_splits.iter().skip(next_split_idx) {
+            let state = state_impl.restore_state(split.split_id).await?;
+            tracing::info!(
+                table_id,
+                upstream_table_name,
+                ?split,
+                is_snapshot_paused,
+                "start cdc backfill split");
+
+            let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
+
+            // TODO(zw): impl backfill
+
+            // TODO(zw): mark split finish
+        }
+
+        upstream_table_reader.disconnect().await?;
+        tracing::info!(
+            table_id,
+            upstream_table_name,
+            "CdcBackfill has already finished and will forward messages directly to the downstream"
+        );
+
+        // // Wait for first barrier to come after backfill is finished.
+        // // So we can update our progress + persist the status.
+        // while let Some(Ok(msg)) = upstream.next().await {
+        //     if let Some(msg) = mapping_message(msg, &self.output_indices) {
+        //         // If not finished then we need to update state, otherwise no need.
+        //         if let Message::Barrier(barrier) = &msg {
+        //             // finalized the backfill state
+        //             // TODO: unify `mutate_state` and `commit_state` into one method
+        //             state_impl
+        //                 .mutate_state(
+        //                     split.split_id,
+        //                     current_pk_pos.clone(),
+        //                     total_snapshot_row_count,
+        //                     true,
+        //                 )
+        //                 .await?;
+        //             state_impl.commit_state(barrier.epoch).await?;
+        //
+        //             // mark progress as finished
+        //             if let Some(progress) = self.progress.as_mut() {
+        //                 progress.finish(barrier.epoch, total_snapshot_row_count);
+        //             }
+        //             yield msg;
+        //             // break after the state have been saved
+        //             break;
+        //         }
+        //         yield msg;
+        //     }
+        // }
+
+        // After backfill progress finished
+        // we can forward messages directly to the downstream,
+        // as backfill is finished.
+        #[for_await]
+        for msg in upstream {
+            // upstream offsets will be removed from the message before forwarding to
+            // downstream
+            if let Some(msg) = mapping_message(msg?, &self.output_indices) {
+                if let Message::Barrier(barrier) = &msg {
+                    // // commit state just to bump the epoch of state table
+                    // state_impl.commit_state(barrier.epoch).await?;
+                }
+                // TODO(zw): filter data by actor_bounds
+                yield msg;
+            }
+        }
+    }
+}
+
+async fn build_reader_and_poll_upstream(
+    upstream: &mut BoxedMessageStream,
+    table_reader: &mut Option<ExternalTableReaderImpl>,
+    future: &mut Pin<Box<impl Future<Output = ExternalTableReaderImpl>>>,
+) -> StreamExecutorResult<Option<Message>> {
+    if table_reader.is_some() {
+        return Ok(None);
+    }
+    tokio::select! {
+        biased;
+        reader = &mut *future => {
+            *table_reader = Some(reader);
+            Ok(None)
+        }
+        msg = upstream.next() => {
+            msg.transpose()
+        }
+    }
+}
+
+#[try_stream(ok = Message, error = StreamExecutorError)]
+pub async fn transform_upstream(upstream: BoxedMessageStream, output_columns: Vec<ColumnDesc>) {
+    let props = SpecificParserConfig {
+        encoding_config: EncodingProperties::Json(JsonProperties {
+            use_schema_registry: false,
+            timestamptz_handling: None,
+        }),
+        // the cdc message is generated internally so the key must exist.
+        protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
+    };
+
+    // convert to source column desc to feed into parser
+    let columns_with_meta = output_columns
+        .iter()
+        .map(SourceColumnDesc::from)
+        .collect_vec();
+
+    let mut parser = DebeziumParser::new(
+        props,
+        columns_with_meta.clone(),
+        Arc::new(SourceContext::dummy()),
+    )
+    .await
+    .map_err(StreamExecutorError::connector_error)?;
+
+    pin_mut!(upstream);
+    #[for_await]
+    for msg in upstream {
+        let mut msg = msg?;
+        if let Message::Chunk(chunk) = &mut msg {
+            let parsed_chunk = parse_debezium_chunk(&mut parser, chunk).await?;
+            let _ = std::mem::replace(chunk, parsed_chunk);
+        }
+        yield msg;
+    }
+}
+
+async fn parse_debezium_chunk(
+    parser: &mut DebeziumParser,
+    chunk: &StreamChunk,
+) -> StreamExecutorResult<StreamChunk> {
+    // here we transform the input chunk in `(payload varchar, _rw_offset varchar, _rw_table_name varchar)` schema
+    // to chunk with downstream table schema `info.schema` of MergeNode contains the schema of the
+    // table job with `_rw_offset` in the end
+    // see `gen_create_table_plan_for_cdc_source` for details
+
+    // use `SourceStreamChunkBuilder` for convenience
+    let mut builder = SourceStreamChunkBuilder::new(
+        parser.columns().to_vec(),
+        SourceCtrlOpts {
+            chunk_size: chunk.capacity(),
+            split_txn: false,
+        },
+    );
+
+    // The schema of input chunk `(payload varchar, _rw_offset varchar, _rw_table_name varchar, _row_id)`
+    // We should use the debezium parser to parse the first column,
+    // then chain the parsed row with `_rw_offset` row to get a new row.
+    let payloads = chunk.data_chunk().project(&[0]);
+    let offsets = chunk.data_chunk().project(&[1]).compact();
+
+    // TODO: preserve the transaction semantics
+    for payload in payloads.rows() {
+        let ScalarRefImpl::Jsonb(jsonb_ref) = payload.datum_at(0).expect("payload must exist")
+        else {
+            panic!("payload must be jsonb");
+        };
+
+        parser
+            .parse_inner(
+                None,
+                Some(jsonb_ref.to_string().as_bytes().to_vec()),
+                builder.row_writer(),
+            )
+            .await
+            .unwrap();
+    }
+    builder.finish_current_chunk();
+
+    let parsed_chunk = {
+        let mut iter = builder.consume_ready_chunks();
+        assert_eq!(1, iter.len());
+        iter.next().unwrap()
+    };
+    assert_eq!(parsed_chunk.capacity(), chunk.capacity()); // each payload is expected to generate one row
+    let (ops, mut columns, vis) = parsed_chunk.into_inner();
+    // note that `vis` is not necessarily the same as the original chunk's visibilities
+
+    // concat the rows in the parsed chunk with the `_rw_offset` column
+    columns.extend(offsets.into_parts().0);
+
+    Ok(StreamChunk::from_parts(
+        ops,
+        DataChunk::from_parts(columns.into(), vis),
+    ))
+}
+
+impl<S: StateStore> Execute for ParallelizedCdcBackfillExecutor<S> {
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        self.execute_inner().boxed()
+    }
+}

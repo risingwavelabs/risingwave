@@ -34,6 +34,7 @@ use risingwave_common::util::stream_graph_visitor::{
 use risingwave_common::{bail, bail_not_implemented, must_match};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::connector_common::validate_connection;
+use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, UPSTREAM_SOURCE_KEY,
 };
@@ -761,15 +762,25 @@ impl DdlController {
                     table_fragments.fragments
                 )
             })?;
-
-        assert_eq!(
-            stream_scan_fragment.actors.len(),
-            1,
-            "Stream scan fragment should have only one actor"
-        );
+        fn assert_parallelism(stream_scan_fragment: &Fragment, node_body: &Option<NodeBody>) {
+            if let Some(NodeBody::StreamCdcScan(node)) = node_body {
+                if let Some(o) = node.options
+                    && CdcScanOptions::from_proto(&o).is_parallelized_backfill()
+                {
+                    // Use parallel CDC backfill.
+                } else {
+                    assert_eq!(
+                        stream_scan_fragment.actors.len(),
+                        1,
+                        "Stream scan fragment should have only one actor"
+                    );
+                }
+            }
+        }
         let mut found_cdc_scan = false;
         match &stream_scan_fragment.nodes.node_body {
             Some(NodeBody::StreamCdcScan(_)) => {
+                assert_parallelism(&stream_scan_fragment, &stream_scan_fragment.nodes.node_body);
                 if Self::validate_cdc_table_inner(
                     &stream_scan_fragment.nodes.node_body,
                     table.id,
@@ -783,6 +794,7 @@ impl DdlController {
             // When there's generated columns, the cdc scan node is wrapped in a project node
             Some(NodeBody::Project(_)) => {
                 for input in &stream_scan_fragment.nodes.input {
+                    assert_parallelism(&stream_scan_fragment, &input.node_body);
                     if Self::validate_cdc_table_inner(
                         &input.node_body,
                         table.id,

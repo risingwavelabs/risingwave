@@ -194,6 +194,19 @@ impl StreamCdcTableScan {
         };
 
         let exchange_operator_id = self.core.ctx.next_plan_node_id();
+        let strategy = if self.core.options.is_parallelized_backfill() {
+            DispatchStrategy {
+                r#type: DispatcherType::Broadcast as _,
+                dist_key_indices: vec![],
+                output_mapping: PbDispatchOutputMapping::identical(cdc_source_schema.len()).into(),
+            }
+        } else {
+            DispatchStrategy {
+                r#type: DispatcherType::Simple as _,
+                dist_key_indices: vec![], // simple exchange doesn't need dist key
+                output_mapping: PbDispatchOutputMapping::identical(cdc_source_schema.len()).into(),
+            }
+        };
         // Add a simple exchange node between filter and stream scan
         let exchange_stream_node = StreamNode {
             operator_id: exchange_operator_id.0 as _,
@@ -203,12 +216,7 @@ impl StreamCdcTableScan {
             identity: "Exchange".to_owned(),
             fields: cdc_source_schema.clone(),
             node_body: Some(PbNodeBody::Exchange(Box::new(ExchangeNode {
-                strategy: Some(DispatchStrategy {
-                    r#type: DispatcherType::Simple as _,
-                    dist_key_indices: vec![], // simple exchange doesn't need dist key
-                    output_mapping: PbDispatchOutputMapping::identical(cdc_source_schema.len())
-                        .into(),
-                }),
+                strategy: Some(strategy),
             }))),
         };
 

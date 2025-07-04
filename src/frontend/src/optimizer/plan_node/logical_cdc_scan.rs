@@ -16,6 +16,7 @@ use std::rc::Rc;
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{CdcTableDesc, ColumnDesc};
+use risingwave_connector::source::cdc::CdcScanOptions;
 
 use super::generic::GenericPlanRef;
 use super::utils::{Distill, childless_record};
@@ -28,7 +29,6 @@ use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::CdcScanOptions;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamCdcTableScan,
     ToStreamContext,
