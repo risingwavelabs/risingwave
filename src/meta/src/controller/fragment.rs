@@ -630,6 +630,7 @@ impl CatalogController {
                     fragment::Column::StreamNode,
                 ])
                 .column_as(Expr::col(actor::Column::ActorId).count(), "parallelism")
+                // NOTE(actor): actor usage
                 .join(JoinType::LeftJoin, fragment::Relation::Actor.def())
                 .filter(fragment::Column::FragmentId.eq(fragment_id))
                 .group_by(fragment::Column::FragmentId)
@@ -1256,7 +1257,8 @@ impl CatalogController {
     ) -> MetaResult<Vec<(FragmentDesc, Vec<FragmentId>)>> {
         let inner = self.inner.read().await;
         let mut result = Vec::new();
-        let fragments = FragmentModel::find()
+        // 1. Load fragment metadata + job status filter from the DB
+        let fragments_meta: Vec<_> = FragmentModel::find()
             .select_only()
             .columns([
                 fragment::Column::FragmentId,
@@ -1267,8 +1269,6 @@ impl CatalogController {
                 fragment::Column::VnodeCount,
                 fragment::Column::StreamNode,
             ])
-            .column_as(Expr::col(actor::Column::ActorId).count(), "parallelism")
-            .join(JoinType::LeftJoin, fragment::Relation::Actor.def())
             .join(JoinType::LeftJoin, fragment::Relation::Object.def())
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
             .filter(
@@ -1276,10 +1276,80 @@ impl CatalogController {
                     .eq(JobStatus::Initial)
                     .or(streaming_job::Column::JobStatus.eq(JobStatus::Creating)),
             )
-            .group_by(fragment::Column::FragmentId)
-            .into_model::<FragmentDesc>()
             .all(&inner.db)
             .await?;
+
+        // 2. Build the `FragmentDesc` list using in-memory cache for parallelism
+        let fragments_from_cache: Vec<FragmentDesc> = fragments_meta
+            .iter()
+            .map(|fm| {
+                let parallelism = inner
+                    .actors
+                    .actors_by_fragment_id
+                    .get(&fm.fragment_id)
+                    .map(|ids| ids.len() as i64)
+                    .unwrap_or(0);
+                FragmentDesc {
+                    fragment_id: fm.fragment_id,
+                    job_id: fm.job_id,
+                    fragment_type_mask: fm.fragment_type_mask,
+                    distribution_type: fm.distribution_type,
+                    state_table_ids: fm.state_table_ids.clone(),
+                    vnode_count: fm.vnode_count,
+                    stream_node: fm.stream_node.clone(),
+                    parallelism,
+                }
+            })
+            .collect();
+
+        // #[cfg(debug_assertions)]
+        {
+            // Execute original DB query (with actor count) for comparison
+            let fragments_from_db: Vec<FragmentDesc> = FragmentModel::find()
+                .select_only()
+                .columns([
+                    fragment::Column::FragmentId,
+                    fragment::Column::JobId,
+                    fragment::Column::FragmentTypeMask,
+                    fragment::Column::DistributionType,
+                    fragment::Column::StateTableIds,
+                    fragment::Column::VnodeCount,
+                    fragment::Column::StreamNode,
+                ])
+                .column_as(Expr::col(actor::Column::ActorId).count(), "parallelism")
+                // NOTE(actor): actor usage
+                .join(JoinType::LeftJoin, fragment::Relation::Actor.def())
+                .join(JoinType::LeftJoin, fragment::Relation::Object.def())
+                .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
+                .filter(
+                    streaming_job::Column::JobStatus
+                        .eq(JobStatus::Initial)
+                        .or(streaming_job::Column::JobStatus.eq(JobStatus::Creating)),
+                )
+                .group_by(fragment::Column::FragmentId)
+                .into_model::<FragmentDesc>()
+                .all(&inner.db)
+                .await?;
+
+            // Compare by mapping each FragmentDesc by its id
+            let map_db: HashMap<FragmentId, FragmentDesc> = fragments_from_db
+                .into_iter()
+                .map(|fd| (fd.fragment_id, fd))
+                .collect();
+            let map_cache: HashMap<FragmentId, FragmentDesc> = fragments_from_cache
+                .iter()
+                .cloned()
+                .map(|fd| (fd.fragment_id, fd))
+                .collect();
+
+            debug_assert_eq!(
+                map_db, map_cache,
+                "FragmentDesc mismatch between DB and cache"
+            );
+        }
+
+        // 3. Use the cache-based result going forward
+        let fragments = fragments_from_cache;
         for fragment in fragments {
             let upstreams: Vec<FragmentId> = FragmentRelation::find()
                 .select_only()
@@ -1351,6 +1421,7 @@ impl CatalogController {
                     fragment::Column::StreamNode,
                 ])
                 .column_as(Expr::col(actor::Column::ActorId).count(), "parallelism")
+                // NOTE(actor): actor usage
                 .join(JoinType::LeftJoin, fragment::Relation::Actor.def())
                 .group_by(fragment::Column::FragmentId)
                 .into_model::<FragmentDesc>()
@@ -2597,6 +2668,7 @@ impl CatalogController {
         //#[cfg(debug_assertions)]
         {
             let fragments_from_db: Vec<(FragmentId, i32, i64)> = FragmentModel::find()
+                // NOTE(actor): actor usage
                 .join(JoinType::InnerJoin, fragment::Relation::Actor.def())
                 .select_only()
                 .columns([
