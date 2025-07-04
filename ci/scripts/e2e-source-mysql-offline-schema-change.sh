@@ -9,10 +9,10 @@ export MYSQL_PWD="123456"
 echo "\n\n\n-------------Run mysql offline schema change test------------\n\n\n"
 
 # Cleanup
-./risedev k && ./risedev clean-data
+risedev k && risedev clean-data
 
 # Setup CDC table with initial schema
-./risedev d mysql-offline-schema-change-test
+risedev dev mysql-offline-schema-change-test
 echo "\n\n\n-------------RW started------------\n\n\n"
 
 mysql -e "
@@ -29,7 +29,7 @@ mysql -e "
 "
 
 # sqllogictest -p 4566 -d dev reproduce-21801.slt
-./risedev psql -c "create source s with (
+risedev psql -c "create source s with (
   username = '${MYSQL_USER:-root}',
   connector='mysql-cdc',
   hostname='${MYSQL_HOST}',
@@ -41,7 +41,7 @@ mysql -e "
 );
 "
 
-./risedev psql -c "create source s1 with (
+risedev psql -c "create source s1 with (
   username = '${MYSQL_USER:-root}',
   connector='mysql-cdc',
   hostname='${MYSQL_HOST}',
@@ -53,12 +53,12 @@ mysql -e "
 
 sleep 5
 
-./risedev psql -c "create table t (
+risedev psql -c "create table t (
   k int primary key,
   v text
 ) from s table 'risedev.t';"
 
-./risedev psql -c "create table t1 (
+risedev psql -c "create table t1 (
   k int primary key,
   v text
 ) from s1 table 'test_db.t1';"
@@ -73,18 +73,18 @@ mysql -e "
 "
 
 sleep 5
-./risedev psql -c "select * from t;"
+risedev psql -c "select * from t;"
 
 sleep 5
-./risedev psql -c "select * from t1;"
+risedev psql -c "select * from t1;"
 
 
 echo "\n\n\n-------------Take RW offline------------\n\n\n"
 #
-./risedev k
+risedev k
 
 # Resume MySQL only, perform some writes, then schema change, then some more writes
-./risedev d mysql-only
+risedev dev mysql-only
 
 # docker exec -it risedev-mysql-8306 mysql -u root -p -D risedev  "USE risedev; DROP TABLE IF EXISTS t; CREATE TABLE t (k int primary key, v text);"
 
@@ -98,13 +98,13 @@ mysql -u root -D test_db -e "insert into t1 values (2, 'def'); alter table t1 ad
 echo "\n\n\n-------------Resume RW CDC------------\n\n\n"
 sleep 5
 # Resume RW CDC
-./risedev d mysql-offline-schema-change-test
+risedev dev mysql-offline-schema-change-test
 
 # Verify data
 # If the bug is reproduced, you won't see rows with k=2 and k=3, check the logs of compute-node!
 
 sleep 5
-./risedev psql -c "select * from t1;"
+risedev psql -c "select * from t1;"
 
 sleep 5
-./risedev psql -c "select * from t;"
+risedev psql -c "select * from t;"
