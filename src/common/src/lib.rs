@@ -117,7 +117,7 @@ pub const SERVER_ENCODING: &str = "UTF8";
 pub const STANDARD_CONFORMING_STRINGS: &str = "on";
 
 pub static STATE_STORE_URL: OnceLock<String> = OnceLock::new();
-pub static DATA_DIRECTPRY: OnceLock<String> = OnceLock::new();
+pub static DATA_DIRECTORY: OnceLock<String> = OnceLock::new();
 
 #[macro_export]
 macro_rules! git_sha {

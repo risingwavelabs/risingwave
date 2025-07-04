@@ -936,6 +936,23 @@ profile:
       - use: prometheus
       - use: grafana
 
+  mysql-offline-schema-change-test:
+    steps:
+      - use: minio
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      - use: compactor
+      - use: mysql
+        port: 3306
+        user: root
+        password: 123456
+        database: risedev
+
+  mysql-only:
+  steps:
+    - use: mysql
+
 # The `use` field specified in the above `risedev` section will refer to the templates below.
 template:
   minio:

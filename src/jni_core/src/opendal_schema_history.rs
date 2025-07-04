@@ -18,7 +18,7 @@ use std::sync::{Arc, OnceLock};
 use bytes::Bytes;
 use jni::objects::{JByteArray, JObject, JString};
 use risingwave_common::config::ObjectStoreConfig;
-use risingwave_common::{DATA_DIRECTPRY, STATE_STORE_URL};
+use risingwave_common::{DATA_DIRECTORY, STATE_STORE_URL};
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{ObjectStoreImpl, build_remote_object_store};
 
@@ -26,9 +26,9 @@ use crate::{EnvParam, JAVA_BINDING_ASYNC_RUNTIME, execute_and_catch, to_guarded_
 
 static OBJECT_STORE_INSTANCE: OnceLock<Arc<ObjectStoreImpl>> = OnceLock::new();
 
-// schema history is internal state, all data is stored under the DATA_DIRECTPRY directory.
+// schema history is internal state, all data is stored under the DATA_DIRECTORY directory.
 fn prepend_data_directory(path: &str) -> String {
-    let data_dir = DATA_DIRECTPRY.get().map(|s| s.as_str()).unwrap_or("");
+    let data_dir = DATA_DIRECTORY.get().map(|s| s.as_str()).unwrap_or("");
     if data_dir.is_empty() || path.starts_with(data_dir) {
         path.to_owned()
     } else if data_dir.ends_with('/') || path.starts_with('/') {
