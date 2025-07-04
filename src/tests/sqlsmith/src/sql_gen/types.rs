@@ -53,7 +53,7 @@ pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
                 .collect(),
         ),
         DataType::List(typ) => AstDataType::Array(Box::new(data_type_to_ast_data_type(typ))),
-        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+        DataType::Vector(n) => AstDataType::Vector(*n as _),
         DataType::Map(_) => todo!(),
     }
 }
@@ -118,6 +118,10 @@ static FUNC_BAN_LIST: LazyLock<HashSet<ExprType>> = LazyLock::new(|| {
         ExprType::Sqrt,
         // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
         ExprType::Pow,
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7328
+        ExprType::Position,
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7328
+        ExprType::Strpos,
     ]
     .into_iter()
     .collect()

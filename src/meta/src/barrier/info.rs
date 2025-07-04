@@ -347,15 +347,13 @@ impl InflightSubscriptionInfo {
             upstream_mv_table_id,
             retention_second,
         } = command
-        {
-            if let Some(prev_retiontion) = self
+            && let Some(prev_retiontion) = self
                 .mv_depended_subscriptions
                 .entry(*upstream_mv_table_id)
                 .or_default()
                 .insert(*subscription_id, *retention_second)
-            {
-                warn!(subscription_id, ?upstream_mv_table_id, mv_depended_subscriptions = ?self.mv_depended_subscriptions, prev_retiontion, "add an existing subscription id");
-            }
+        {
+            warn!(subscription_id, ?upstream_mv_table_id, mv_depended_subscriptions = ?self.mv_depended_subscriptions, prev_retiontion, "add an existing subscription id");
         }
     }
 }

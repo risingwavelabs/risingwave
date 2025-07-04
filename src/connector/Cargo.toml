@@ -18,7 +18,7 @@ anyhow = "1"
 apache-avro = { workspace = true }
 assert_matches = "1"
 async-compression = { version = "0.4.5", features = ["gzip", "tokio"] }
-async-nats = "0.41"
+async-nats = { version = "0.42", features = ["websockets"] }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
@@ -155,7 +155,7 @@ sqlx = { workspace = true }
 strum = "0.27"
 strum_macros = "0.27"
 tempfile = "3"
-thiserror = "2"
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 # To easiy get the type_name and impl IntoSql for rust_decimal, we fork the crate.
 # Another reason is that we are planning to refactor their IntoSql trait to allow specifying the type to convert.

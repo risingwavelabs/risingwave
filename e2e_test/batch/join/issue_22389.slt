@@ -1,0 +1,36 @@
+statement ok
+create table t1 (v1 jsonb, v2 int);
+
+statement ok
+create table t2 (v1 jsonb, v2 int);
+
+statement ok
+set rw_batch_enable_lookup_join = true;
+
+statement ok
+set rw_streaming_allow_jsonb_in_stream_key = true;
+
+statement ok
+create materialized view t3 as select v1, count(v2) as v2 from t2 group by v1;
+
+# Planning panics - anti join + jsonb
+query I
+explain select * from t1
+except
+select * from t3;
+----
+BatchExchange { order: [], dist: Single }
+└─BatchHashAgg { group_key: [t1.v1, $expr1], aggs: [] }
+  └─BatchLookupJoin { type: LeftAnti, predicate: t1.v1 IS NOT DISTINCT FROM t3.v1 AND $expr1 IS NOT DISTINCT FROM t3.v2, lookup table: t3 }
+    └─BatchExchange { order: [], dist: UpstreamHashShard(t1.v1) }
+      └─BatchProject { exprs: [t1.v1, t1.v2::Int64 as $expr1] }
+        └─BatchScan { table: t1, columns: [v1, v2] }
+
+statement ok
+drop materialized view t3;
+
+statement ok
+drop table t2;
+
+statement ok
+drop table t1;

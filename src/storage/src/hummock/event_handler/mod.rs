@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use itertools::Itertools;
 use parking_lot::{RwLock, RwLockReadGuard};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
@@ -32,6 +33,7 @@ pub mod refiller;
 pub mod uploader;
 
 pub use hummock_event_handler::HummockEventHandler;
+use risingwave_hummock_sdk::vector_index::VectorIndexAdd;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 
 use super::store::version::HummockReadVersion;
@@ -70,7 +72,7 @@ pub enum HummockEvent {
 
     ImmToUploader {
         instance_id: SharedBufferBatchId,
-        imm: ImmutableMemtable,
+        imms: Vec<ImmutableMemtable>,
     },
 
     StartEpoch {
@@ -105,6 +107,21 @@ pub enum HummockEvent {
         instance_id: LocalInstanceId,
     },
 
+    RegisterVectorWriter {
+        table_id: TableId,
+        init_epoch: HummockEpoch,
+    },
+
+    VectorWriterSealEpoch {
+        table_id: TableId,
+        next_epoch: HummockEpoch,
+        add: Option<VectorIndexAdd>,
+    },
+
+    DropVectorWriter {
+        table_id: TableId,
+    },
+
     GetMinUncommittedObjectId {
         result_tx: oneshot::Sender<Option<HummockRawObjectId>>,
     },
@@ -137,8 +154,12 @@ impl HummockEvent {
                 format!("InitEpoch {} {}", instance_id, init_epoch)
             }
 
-            HummockEvent::ImmToUploader { instance_id, imm } => {
-                format!("ImmToUploader {} {}", instance_id, imm.batch_id())
+            HummockEvent::ImmToUploader { instance_id, imms } => {
+                format!(
+                    "ImmToUploader {} {:?}",
+                    instance_id,
+                    imms.iter().map(|imm| imm.batch_id()).collect_vec()
+                )
             }
 
             HummockEvent::LocalSealEpoch {
@@ -171,6 +192,9 @@ impl HummockEvent {
             HummockEvent::GetMinUncommittedObjectId { .. } => {
                 "GetMinUncommittedObjectId".to_owned()
             }
+            HummockEvent::RegisterVectorWriter { .. } => "RegisterVectorWriter".to_owned(),
+            HummockEvent::VectorWriterSealEpoch { .. } => "VectorWriterSealEpoch".to_owned(),
+            HummockEvent::DropVectorWriter { .. } => "DropVectorWriter".to_owned(),
         }
     }
 }

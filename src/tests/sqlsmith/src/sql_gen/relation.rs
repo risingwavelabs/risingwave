@@ -19,7 +19,7 @@ use risingwave_sqlparser::ast::{
     Ident, ObjectName, TableAlias, TableFactor, TableWithJoins, Value,
 };
 
-use crate::config::Feature;
+use crate::config::{Feature, Syntax};
 use crate::sql_gen::types::BINARY_INEQUALITY_OP_TABLE;
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext};
 use crate::{BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Table};
@@ -37,7 +37,7 @@ fn create_equi_expr(left: &Column, right: &Column) -> Expr {
 impl<R: Rng> SqlGenerator<'_, R> {
     /// A relation specified in the FROM clause.
     pub(crate) fn gen_from_relation(&mut self) -> (TableWithJoins, Vec<Table>) {
-        if !self.should_generate(Feature::Join) {
+        if !self.should_generate(Syntax::Join) {
             return self.gen_no_join();
         }
         match self.rng.random_range(1..=3) {
@@ -129,9 +129,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     fn gen_bool_with_tables(&mut self, tables: Vec<Table>) -> Expr {
         let old_context = self.new_local_context();
         self.add_relations_to_context(tables);
-        self.config.set_enabled(Feature::Agg, false);
-        let expr = self.gen_expr(&Boolean, SqlGeneratorContext::new(false));
-        self.config.set_enabled(Feature::Agg, true);
+        let expr = self.gen_expr(&Boolean, SqlGeneratorContext::new(false, false));
         self.restore_context(old_context);
         expr
     }

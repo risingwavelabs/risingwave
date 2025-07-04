@@ -40,6 +40,13 @@ impl SplitEnumerator for NatsSplitEnumerator {
         _context: SourceEnumeratorContextRef,
     ) -> ConnectorResult<NatsSplitEnumerator> {
         let client = properties.common.build_client().await?;
+
+        // check if the stream exists or allow create stream
+        let jetstream = properties.common.build_context().await?;
+        let _ = properties
+            .common
+            .build_or_get_stream(jetstream, properties.stream.clone())
+            .await?;
         Ok(Self {
             subject: properties.common.subject,
             split_id: Arc::from("0"),

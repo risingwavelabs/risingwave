@@ -325,17 +325,27 @@ pub fn storage_memory_config(
     let block_cache_eviction_config =
         get_eviction_config(&storage_config.cache.block_cache_eviction);
     let meta_cache_eviction_config = get_eviction_config(&storage_config.cache.meta_cache_eviction);
+    let vector_block_cache_eviction_config =
+        get_eviction_config(&storage_config.cache.vector_block_cache_eviction_config);
+    let vector_meta_cache_eviction_config =
+        get_eviction_config(&storage_config.cache.vector_meta_cache_eviction_config);
 
     StorageMemoryConfig {
         block_cache_capacity_mb,
         block_cache_shard_num,
         meta_cache_capacity_mb,
         meta_cache_shard_num,
+        vector_block_cache_capacity_mb: storage_config.cache.vector_block_cache_capacity_mb,
+        vector_block_cache_shard_num: storage_config.cache.vector_block_cache_shard_num,
+        vector_meta_cache_capacity_mb: storage_config.cache.vector_meta_cache_capacity_mb,
+        vector_meta_cache_shard_num: storage_config.cache.vector_meta_cache_shard_num,
         shared_buffer_capacity_mb,
         compactor_memory_limit_mb,
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,
         meta_cache_eviction_config,
+        vector_block_cache_eviction_config,
+        vector_meta_cache_eviction_config,
         block_file_cache_flush_buffer_threshold_mb,
         meta_file_cache_flush_buffer_threshold_mb,
     }

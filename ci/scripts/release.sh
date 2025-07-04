@@ -38,6 +38,7 @@ source "$HOME/.cargo/env"
 rustup show
 source ci/scripts/common.sh
 unset RUSTC_WRAPPER # disable sccache
+unset RUSTC_WORKSPACE_WRAPPER
 
 echo "--- Install protoc3"
 PROTOC_ARCH=${ARCH}

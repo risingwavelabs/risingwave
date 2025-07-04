@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{ConfigParam, FormatEncodeOptions, SqlOption};
 use crate::ast::{
-    DataType, Expr, Ident, ObjectName, SecretRefValue, SetVariableValue, Value,
+    DataType, Expr, Ident, ObjectName, Query, SecretRefValue, SetVariableValue, Value,
     display_comma_separated, display_separated,
 };
 use crate::tokenizer::Token;
@@ -123,6 +123,10 @@ pub enum AlterTableOperation {
     },
     /// `DROP CONNECTOR`
     DropConnector,
+    /// `ALTER CONNECTOR WITH (<connector_props>)`
+    AlterConnectorProps {
+        alter_props: Vec<SqlOption>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -169,6 +173,13 @@ pub enum AlterViewOperation {
     SwapRenameView {
         target_view: ObjectName,
     },
+    SetStreamingEnableUnalignedJoin {
+        enable: bool,
+    },
+    /// `AS <query>`
+    AsQuery {
+        query: Box<Query>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -197,6 +208,9 @@ pub enum AlterSinkOperation {
     },
     AlterConnectorProps {
         alter_props: Vec<SqlOption>,
+    },
+    SetStreamingEnableUnalignedJoin {
+        enable: bool,
     },
 }
 
@@ -238,6 +252,9 @@ pub enum AlterSourceOperation {
     SetParallelism {
         parallelism: SetVariableValue,
         deferred: bool,
+    },
+    AlterConnectorProps {
+        alter_props: Vec<SqlOption>,
     },
 }
 
@@ -382,6 +399,13 @@ impl fmt::Display for AlterTableOperation {
             AlterTableOperation::DropConnector => {
                 write!(f, "DROP CONNECTOR")
             }
+            AlterTableOperation::AlterConnectorProps { alter_props } => {
+                write!(
+                    f,
+                    "CONNECTOR WITH ({})",
+                    display_comma_separated(alter_props)
+                )
+            }
         }
     }
 }
@@ -448,6 +472,12 @@ impl fmt::Display for AlterViewOperation {
                     write!(f, "RESET RESOURCE_GROUP {}", deferred)
                 }
             }
+            AlterViewOperation::SetStreamingEnableUnalignedJoin { enable } => {
+                write!(f, "SET STREAMING_ENABLE_UNALIGNED_JOIN TO {}", enable)
+            }
+            AlterViewOperation::AsQuery { query } => {
+                write!(f, "AS {}", query)
+            }
         }
     }
 }
@@ -489,6 +519,9 @@ impl fmt::Display for AlterSinkOperation {
                     "CONNECTOR WITH ({})",
                     display_comma_separated(changed_props)
                 )
+            }
+            AlterSinkOperation::SetStreamingEnableUnalignedJoin { enable } => {
+                write!(f, "SET STREAMING_ENABLE_UNALIGNED_JOIN TO {}", enable)
             }
         }
     }
@@ -551,6 +584,13 @@ impl fmt::Display for AlterSourceOperation {
                     "SET PARALLELISM TO {}{}",
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
+                )
+            }
+            AlterSourceOperation::AlterConnectorProps { alter_props } => {
+                write!(
+                    f,
+                    "CONNECTOR WITH ({})",
+                    display_comma_separated(alter_props)
                 )
             }
         }

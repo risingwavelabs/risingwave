@@ -149,10 +149,13 @@ mod tests {
         let key_file = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(key_file.path(), INITIAL_KEY).unwrap();
 
-        let srv = MetaSrvEnv::for_test_opts(MetaOpts {
-            license_key_path: Some(key_file.path().to_path_buf()),
-            ..MetaOpts::test(false)
-        })
+        let srv = MetaSrvEnv::for_test_opts(
+            MetaOpts {
+                license_key_path: Some(key_file.path().to_path_buf()),
+                ..MetaOpts::test(false)
+            },
+            |_| (),
+        )
         .await;
         let _updater_handle = srv.may_start_watch_license_key_file().unwrap().unwrap();
 

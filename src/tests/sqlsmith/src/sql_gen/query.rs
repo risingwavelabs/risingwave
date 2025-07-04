@@ -23,11 +23,11 @@ use rand::Rng;
 use rand::prelude::{IndexedRandom, SliceRandom};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    Cte, Distinct, Expr, Ident, ObjectName, Query, Select, SelectItem, SetExpr, TableWithJoins,
-    Value, With,
+    Corresponding, Cte, Distinct, Expr, Ident, ObjectName, Query, Select, SelectItem, SetExpr,
+    SetOperator, TableWithJoins, Value, With,
 };
 
-use crate::config::Feature;
+use crate::config::{Feature, Syntax};
 use crate::sql_gen::utils::create_table_with_joins_from_table;
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext, Table};
 
@@ -152,14 +152,47 @@ impl<R: Rng> SqlGenerator<'_, R> {
         with_tables: Vec<Table>,
         num_select_items: usize,
     ) -> (SetExpr, Vec<Column>) {
-        match self.rng.random_range(0..=9) {
-            // TODO: Generate other `SetExpr`
-            0..=9 => {
-                let (select, schema) = self.gen_select_stmt(with_tables, num_select_items);
-                (SetExpr::Select(Box::new(select)), schema)
+        if self.should_generate(Feature::Except) {
+            let left_ctxt = self.new_local_context();
+            let (left_expr, left_schema) = self.gen_set_expr(with_tables.clone(), num_select_items);
+            self.restore_context(left_ctxt);
+
+            let right_ctxt = self.new_local_context();
+            let (right_expr, right_schema) =
+                self.gen_set_expr(with_tables.clone(), num_select_items);
+            self.restore_context(right_ctxt);
+
+            if !self.schemas_compatible(&left_schema, &right_schema) {
+                return self.gen_set_expr(with_tables, num_select_items);
             }
-            _ => unreachable!(),
+
+            let all = matches!(self.rng.random_range(0..=1), 1);
+            (
+                SetExpr::SetOperation {
+                    op: SetOperator::Except,
+                    all,
+                    corresponding: Corresponding {
+                        corresponding: false,
+                        column_list: None,
+                    },
+                    left: Box::new(left_expr),
+                    right: Box::new(right_expr),
+                },
+                left_schema,
+            )
+        } else {
+            let (select, schema) = self.gen_select_stmt(with_tables, num_select_items);
+            (SetExpr::Select(Box::new(select)), schema)
         }
+    }
+
+    fn schemas_compatible(&self, left: &[Column], right: &[Column]) -> bool {
+        if left.len() != right.len() {
+            return false;
+        }
+        left.iter()
+            .zip(right.iter())
+            .all(|(l, r)| l.data_type == r.data_type)
     }
 
     fn gen_limit(&mut self, has_order_by: bool) -> Option<Expr> {
@@ -198,7 +231,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn gen_select_list(&mut self, num_select_items: usize) -> (Vec<SelectItem>, Vec<Column>) {
-        let context = SqlGeneratorContext::new(false);
+        let context = SqlGeneratorContext::new(self.should_generate(Syntax::Agg), false);
         (0..num_select_items)
             .map(|i| self.gen_select_item(i, context))
             .unzip()
@@ -251,12 +284,9 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn gen_where(&mut self) -> Option<Expr> {
-        if self.should_generate(Feature::Where) {
-            self.config.set_enabled(Feature::Agg, false);
-            let context = SqlGeneratorContext::new(false);
-            let where_expr = Some(self.gen_expr(&DataType::Boolean, context));
-            self.config.set_enabled(Feature::Agg, true);
-            where_expr
+        if self.should_generate(Syntax::Where) {
+            let context = SqlGeneratorContext::new(false, false);
+            Some(self.gen_expr(&DataType::Boolean, context))
         } else {
             None
         }
@@ -325,7 +355,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
 
     fn gen_having(&mut self, have_group_by: bool) -> Option<Expr> {
         if have_group_by & self.flip_coin() {
-            let context = SqlGeneratorContext::new(false);
+            let context = SqlGeneratorContext::new(self.should_generate(Syntax::Agg), false);
             Some(self.gen_expr(&DataType::Boolean, context))
         } else {
             None

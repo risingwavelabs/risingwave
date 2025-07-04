@@ -131,10 +131,9 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
 
                     if let Some((_, cache_may_stale)) =
                         post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                        && cache_may_stale
                     {
-                        if cache_may_stale {
-                            self.cache.clear();
-                        }
+                        self.cache.clear();
                     }
                 }
 

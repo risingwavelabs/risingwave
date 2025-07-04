@@ -17,13 +17,13 @@ use std::fmt::Debug;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock};
 
-use bergloom_core::compaction::{
-    Compaction, CompactionType, RewriteDataFilesCommitManagerRetryConfig,
-};
-use bergloom_core::config::CompactionConfigBuilder;
-use bergloom_core::executor::RewriteFilesStat;
 use derive_builder::Builder;
 use iceberg::{Catalog, TableIdent};
+use iceberg_compaction_core::compaction::{
+    Compaction, CompactionType, RewriteDataFilesCommitManagerRetryConfig,
+};
+use iceberg_compaction_core::config::CompactionConfigBuilder;
+use iceberg_compaction_core::executor::RewriteFilesStat;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
@@ -288,8 +288,8 @@ impl IcebergCompactorRunner {
 
             let compaction_config = Arc::new(
                 CompactionConfigBuilder::default()
-                    .batch_parallelism(input_parallelism as usize)
-                    .target_partitions(output_parallelism as usize)
+                    .output_parallelism(output_parallelism as usize)
+                    .executor_parallelism(input_parallelism as usize)
                     .target_file_size(self.config.target_file_size_bytes)
                     .enable_validate_compaction(self.config.enable_validate_compaction)
                     .max_record_batch_rows(self.config.max_record_batch_rows)
@@ -319,7 +319,7 @@ impl IcebergCompactorRunner {
                 .with_compaction_type(CompactionType::Full)
                 .with_config(compaction_config)
                 .with_table_ident(self.table_ident.clone())
-                .with_executor_type(bergloom_core::executor::ExecutorType::DataFusion)
+                .with_executor_type(iceberg_compaction_core::executor::ExecutorType::DataFusion)
                 .with_registry(BERGLOOM_METRICS_REGISTRY.clone())
                 .with_retry_config(retry_config)
                 .build()

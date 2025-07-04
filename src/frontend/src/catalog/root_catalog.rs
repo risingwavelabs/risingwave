@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, StreamJobStatus, TableId};
+use risingwave_common::catalog::{FunctionId, IndexId, StreamJobStatus, TableId};
 use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
@@ -98,7 +98,6 @@ impl<'a> SchemaPath<'a> {
 ///       - table/sink/source/index/view catalog
 ///        - column catalog
 pub struct Catalog {
-    version: CatalogVersion,
     database_by_name: HashMap<String, DatabaseCatalog>,
     db_name_by_id: HashMap<DatabaseId, String>,
     /// all table catalogs in the cluster identified by universal unique table id.
@@ -110,7 +109,6 @@ pub struct Catalog {
 impl Default for Catalog {
     fn default() -> Self {
         Self {
-            version: 0,
             database_by_name: HashMap::new(),
             db_name_by_id: HashMap::new(),
             table_by_id: HashMap::new(),
@@ -554,7 +552,7 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("db_id", db_id.to_string()))?;
         self.database_by_name
             .get(db_name)
-            .ok_or_else(|| CatalogError::NotFound("database", db_name.to_string()))
+            .ok_or_else(|| CatalogError::NotFound("database", db_name.clone()))
     }
 
     pub fn get_all_schema_names(&self, db_name: &str) -> CatalogResult<Vec<String>> {
@@ -864,6 +862,22 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("secret", secret_name.to_owned()))
     }
 
+    pub fn get_connection_by_id(
+        &self,
+        db_name: &str,
+        connection_id: ConnectionId,
+    ) -> CatalogResult<&Arc<ConnectionCatalog>> {
+        for schema in self.get_database_by_name(db_name)?.iter_schemas() {
+            if let Some(conn) = schema.get_connection_by_id(&connection_id) {
+                return Ok(conn);
+            }
+        }
+        Err(CatalogError::NotFound(
+            "connection",
+            connection_id.to_string(),
+        ))
+    }
+
     pub fn get_connection_by_name<'a>(
         &self,
         db_name: &str,
@@ -1051,16 +1065,6 @@ impl Catalog {
         } else {
             Ok(())
         }
-    }
-
-    /// Get the catalog cache's catalog version.
-    pub fn version(&self) -> u64 {
-        self.version
-    }
-
-    /// Set the catalog cache's catalog version.
-    pub fn set_version(&mut self, catalog_version: CatalogVersion) {
-        self.version = catalog_version;
     }
 
     pub fn table_stats(&self) -> &HummockVersionStats {

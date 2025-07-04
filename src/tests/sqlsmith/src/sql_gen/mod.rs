@@ -31,7 +31,7 @@ mod cast;
 mod expr;
 pub use expr::print_function_table;
 
-use crate::config::{Configuration, Feature};
+use crate::config::{Configuration, Feature, GenerateItem};
 
 mod dml;
 mod functions;
@@ -129,16 +129,26 @@ impl Column {
 
 #[derive(Copy, Clone)]
 pub(crate) struct SqlGeneratorContext {
+    can_agg: bool, // This is used to disable agg expr totally,
+    // Used in top level, where we want to test queries
+    // without aggregates.
     inside_agg: bool,
 }
 
 impl SqlGeneratorContext {
-    pub fn new(inside_agg: bool) -> Self {
-        SqlGeneratorContext { inside_agg }
+    pub fn new(can_agg: bool, inside_agg: bool) -> Self {
+        SqlGeneratorContext {
+            can_agg,
+            inside_agg,
+        }
     }
 
     pub fn is_inside_agg(self) -> bool {
         self.inside_agg
+    }
+
+    pub fn can_gen_agg(self) -> bool {
+        self.can_agg && !self.inside_agg
     }
 }
 
@@ -263,7 +273,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         columns
             .iter()
-            .filter(|c| watermark_names.contains(&c.name.real_value()))
+            .filter(|c| watermark_names.contains(&c.name.base_name()))
             .cloned()
             .collect()
     }
@@ -277,7 +287,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     /// Decide whether to generate on config.
-    pub(crate) fn should_generate(&mut self, feature: Feature) -> bool {
-        self.config.should_generate(feature, self.rng)
+    pub(crate) fn should_generate<T: Into<GenerateItem>>(&mut self, item: T) -> bool {
+        self.config.should_generate(item, self.rng)
     }
 }

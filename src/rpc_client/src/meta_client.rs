@@ -103,6 +103,7 @@ use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
 use risingwave_pb::monitor_service::{StackTraceRequest, StackTraceResponse};
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
+use risingwave_pb::user::alter_default_privilege_request::Operation as AlterDefaultPrivilegeOperation;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;
 use risingwave_pb::user::*;
@@ -371,14 +372,14 @@ impl MetaClient {
     pub async fn send_heartbeat(&self, node_id: u32) -> Result<()> {
         let request = HeartbeatRequest { node_id };
         let resp = self.inner.heartbeat(request).await?;
-        if let Some(status) = resp.status {
-            if status.code() == risingwave_pb::common::status::Code::UnknownWorker {
-                // Ignore the error if we're already shutting down.
-                // Otherwise, exit the process.
-                if !self.shutting_down.load(Relaxed) {
-                    tracing::error!(message = status.message, "worker expired");
-                    std::process::exit(1);
-                }
+        if let Some(status) = resp.status
+            && status.code() == risingwave_pb::common::status::Code::UnknownWorker
+        {
+            // Ignore the error if we're already shutting down.
+            // Otherwise, exit the process.
+            if !self.shutting_down.load(Relaxed) {
+                tracing::error!(message = status.message, "worker expired");
+                std::process::exit(1);
             }
         }
         Ok(())
@@ -915,6 +916,25 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn alter_default_privilege(
+        &self,
+        user_ids: Vec<u32>,
+        database_id: DatabaseId,
+        schema_ids: Vec<SchemaId>,
+        operation: AlterDefaultPrivilegeOperation,
+        granted_by: u32,
+    ) -> Result<()> {
+        let request = AlterDefaultPrivilegeRequest {
+            user_ids,
+            database_id,
+            schema_ids,
+            operation: Some(operation),
+            granted_by,
+        };
+        self.inner.alter_default_privilege(request).await?;
+        Ok(())
+    }
+
     /// Unregister the current node from the cluster.
     pub async fn unregister(&self) -> Result<()> {
         let request = DeleteWorkerNodeRequest {
@@ -1069,14 +1089,10 @@ impl MetaClient {
         Ok(resp.distributions)
     }
 
-    pub async fn list_creating_stream_scan_fragment_distribution(
-        &self,
-    ) -> Result<Vec<FragmentDistribution>> {
+    pub async fn list_creating_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>> {
         let resp = self
             .inner
-            .list_creating_stream_scan_fragment_distribution(
-                ListCreatingStreamScanFragmentDistributionRequest {},
-            )
+            .list_creating_fragment_distribution(ListCreatingFragmentDistributionRequest {})
             .await?;
         Ok(resp.distributions)
     }
@@ -1342,12 +1358,6 @@ impl MetaClient {
         Ok(resp)
     }
 
-    pub async fn get_system_params(&self) -> Result<SystemParamsReader> {
-        let req = GetSystemParamsRequest {};
-        let resp = self.inner.get_system_params(req).await?;
-        Ok(resp.params.unwrap().into())
-    }
-
     pub async fn get_meta_store_endpoint(&self) -> Result<String> {
         let req = GetMetaStoreInfoRequest {};
         let resp = self.inner.get_meta_store_info(req).await?;
@@ -1367,6 +1377,24 @@ impl MetaClient {
             changed_secret_refs: changed_secret_refs.into_iter().collect(),
             connector_conn_ref,
             object_type: AlterConnectorPropsObject::Sink as i32,
+        };
+        let _resp = self.inner.alter_connector_props(req).await?;
+        Ok(())
+    }
+
+    pub async fn alter_source_connector_props(
+        &self,
+        source_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        connector_conn_ref: Option<u32>,
+    ) -> Result<()> {
+        let req = AlterConnectorPropsRequest {
+            object_id: source_id,
+            changed_props: changed_props.into_iter().collect(),
+            changed_secret_refs: changed_secret_refs.into_iter().collect(),
+            connector_conn_ref,
+            object_type: AlterConnectorPropsObject::Source as i32,
         };
         let _resp = self.inner.alter_connector_props(req).await?;
         Ok(())
@@ -1671,6 +1699,12 @@ impl MetaClient {
         };
         let resp = self.inner.stack_trace(request).await?;
         Ok(resp)
+    }
+
+    pub async fn set_sync_log_store_aligned(&self, job_id: u32, aligned: bool) -> Result<()> {
+        let request = SetSyncLogStoreAlignedRequest { job_id, aligned };
+        self.inner.set_sync_log_store_aligned(request).await?;
+        Ok(())
     }
 }
 
@@ -2258,7 +2292,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ stream_client, list_streaming_job_states, ListStreamingJobStatesRequest, ListStreamingJobStatesResponse }
             ,{ stream_client, list_fragment_distribution, ListFragmentDistributionRequest, ListFragmentDistributionResponse }
-            ,{ stream_client, list_creating_stream_scan_fragment_distribution, ListCreatingStreamScanFragmentDistributionRequest, ListCreatingStreamScanFragmentDistributionResponse }
+            ,{ stream_client, list_creating_fragment_distribution, ListCreatingFragmentDistributionRequest, ListCreatingFragmentDistributionResponse }
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ stream_client, list_actor_splits, ListActorSplitsRequest, ListActorSplitsResponse }
             ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
@@ -2266,6 +2300,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }
             ,{ stream_client, alter_connector_props, AlterConnectorPropsRequest, AlterConnectorPropsResponse }
             ,{ stream_client, get_fragment_by_id, GetFragmentByIdRequest, GetFragmentByIdResponse }
+            ,{ stream_client, set_sync_log_store_aligned, SetSyncLogStoreAlignedRequest, SetSyncLogStoreAlignedResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
@@ -2343,6 +2378,7 @@ macro_rules! for_all_meta_rpc {
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
             ,{ user_client, grant_privilege, GrantPrivilegeRequest, GrantPrivilegeResponse }
             ,{ user_client, revoke_privilege, RevokePrivilegeRequest, RevokePrivilegeResponse }
+            ,{ user_client, alter_default_privilege, AlterDefaultPrivilegeRequest, AlterDefaultPrivilegeResponse }
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
             ,{ scale_client, reschedule, RescheduleRequest, RescheduleResponse }
             ,{ notification_client, subscribe, SubscribeRequest, Streaming<SubscribeResponse> }
