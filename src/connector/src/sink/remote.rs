@@ -242,7 +242,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                             col.data_type,
                         )))}})?;
 
-    let jvm = JVM.get_or_init();
+    let jvm = JVM.get_or_init()?;
     let sink_param = param.to_proto();
 
     spawn_blocking(move || -> anyhow::Result<()> {
@@ -709,7 +709,7 @@ struct EmbeddedConnectorClient {
 
 impl EmbeddedConnectorClient {
     fn new() -> Result<Self> {
-        let jvm = JVM.get_or_init();
+        let jvm = JVM.get_or_init()?;
         Ok(EmbeddedConnectorClient { jvm })
     }
 

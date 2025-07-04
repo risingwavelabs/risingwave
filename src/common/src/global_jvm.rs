@@ -28,14 +28,12 @@ impl JavaVmWrapper {
     }
 
     /// Get the global singleton JVM instance, initializing it with the registered closure if not already initialized.
-    pub fn get_or_init(&self) -> &'static JavaVM {
-        INSTANCE.get_or_init(|| {
-            let builder = JVM_BUILDER
-                .lock()
-                .unwrap()
-                .take()
-                .expect("JVM builder must be registered (and only once) before get_or_init");
-            builder()
+    pub fn get_or_init(&self) -> anyhow::Result<&'static JavaVM> {
+        INSTANCE.get_or_try_init(|| {
+            let builder = JVM_BUILDER.lock().unwrap().take().ok_or_else(|| {
+                anyhow::anyhow!("JVM builder must be registered (and only once) before get_or_init")
+            })?;
+            Ok(builder())
         })
     }
 

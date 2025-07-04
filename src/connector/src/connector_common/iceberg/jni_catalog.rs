@@ -497,7 +497,7 @@ impl JniCatalog {
         catalog_impl: impl ToString,
         java_catalog_props: HashMap<String, String>,
     ) -> ConnectorResult<Self> {
-        let jvm = JVM.get_or_init();
+        let jvm = JVM.get_or_init()?;
 
         execute_with_jni_env(jvm, |env| {
             // Convert props to string array

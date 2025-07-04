@@ -101,7 +101,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         let source_type = conn_props.get_source_type_pb();
         let (tx, mut rx) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
 
-        let jvm = JVM.get_or_init();
+        let jvm = JVM.get_or_init()?;
         let get_event_stream_request = GetEventStreamRequest {
             source_id,
             source_type: source_type as _,
