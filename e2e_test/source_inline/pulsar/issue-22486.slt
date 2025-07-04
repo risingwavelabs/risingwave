@@ -55,7 +55,7 @@ python3 e2e_test/commands/pulsar_util.py produce -t "persistent://public/default
 {"f1":18,"f2":"bar"}
 EOF
 
-sleep 1
+sleep 1s
 
 query II retry 3 backoff 1s
 select count(f1), count(distinct f1) from t_partitioned;
