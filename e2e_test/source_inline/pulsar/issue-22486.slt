@@ -5,6 +5,7 @@ curl "$PULSAR_HTTP_URL/admin/v2/brokers/ready"
 ----
 ok
 
+
 system ok
 python3 e2e_test/commands/pulsar_util.py create-topic --topic 'persistent://public/default/topic-recovery' --partitions 3
 
@@ -60,6 +61,7 @@ query II retry 3 backoff 1s
 select count(f1), count(distinct f1) from t_partitioned;
 ----
 18 18
+
 
 # ==== clean up ====
 
