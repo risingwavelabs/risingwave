@@ -122,7 +122,7 @@ impl MetaSrvEnv {
 mod tests {
     use std::time::Duration;
 
-    use risingwave_license::{License, LicenseManager, CompatTier};
+    use risingwave_license::{License, LicenseManager, Tier};
 
     use super::*;
     use crate::manager::MetaOpts;
@@ -164,7 +164,7 @@ mod tests {
         assert_eq!(RELOAD_TIMES.load(Relaxed), 1);
         let license = LicenseManager::get().license().unwrap();
         assert_eq!(license.sub, "rw-test");
-        assert_eq!(license.compat_tier, CompatTier::Free);
+        assert_eq!(license.tier, Tier::Free);
 
         // Update the key file with an empty content, which should reset the license to the default.
         std::fs::write(key_file.path(), "").unwrap();

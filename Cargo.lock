@@ -12309,6 +12309,7 @@ dependencies = [
 name = "risingwave_license"
 version = "2.6.0-alpha"
 dependencies = [
+ "auto_enums",
  "expect-test",
  "jsonbb",
  "jsonwebtoken",
