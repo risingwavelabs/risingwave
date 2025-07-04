@@ -99,9 +99,9 @@ macro_rules! def_feature {
 for_all_features!(def_feature);
 
 impl Feature {
-    /// Get a slice of all features that are available for `CompatTier::Paid`.
-    pub(crate) fn all_compat_paid_tier() -> &'static [Feature] {
-        // `IcebergCompaction` is the last feature introduced before we deprecate tiers in kernel.
+    /// Get a slice of all features available as of 2.5 (before we introduce custom tier).
+    pub(crate) fn all_as_of_2_5() -> &'static [Feature] {
+        // `IcebergCompaction` was the last feature introduced.
         &Feature::all()[..=Feature::IcebergCompaction as usize]
     }
 }
@@ -130,7 +130,7 @@ impl Feature {
     ) -> Result<(), FeatureNotAvailable> {
         let check_res = match manager.license() {
             Ok(license) => {
-                if license.available_features().contains(&self) {
+                if license.tier.available_features().any(|x| x == self) {
                     Ok(())
                 } else {
                     Err(FeatureNotAvailable::NotAvailable { feature: self })
