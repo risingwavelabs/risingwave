@@ -1281,6 +1281,10 @@ StarrocksConfig:
     field_type: String
     comments: The `StarRocks` table you want to sink data to.
     required: true
+  - name: starrocks.use_https
+    field_type: bool
+    comments: Whether to use https to connect to the `StarRocks` server.
+    required: true
   - name: starrocks.stream_load.http.timeout.ms
     field_type: u64
     comments: The timeout in milliseconds for stream load http request, defaults to 10 seconds.
