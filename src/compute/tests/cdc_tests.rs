@@ -76,6 +76,8 @@ impl MockOffsetGenExecutor {
                 file: Some("1.binlog".to_owned()),
                 pos: Some(start_offset as _),
                 lsn: None,
+                lsn_commit: None,
+                lsn_proc: None,
                 txid: None,
                 tx_usec: None,
                 change_lsn: None,
