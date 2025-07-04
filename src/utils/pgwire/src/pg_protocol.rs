@@ -668,9 +668,13 @@ where
     }
 
     async fn process_password_msg(&mut self, msg: FePasswordMessage) -> PsqlResult<()> {
-        let authenticator = self.session.as_ref().unwrap().user_authenticator();
+        let session = self.session.as_ref().unwrap();
+        let authenticator = session.user_authenticator();
         authenticator.authenticate(&msg.password).await?;
         self.stream.write_no_flush(&BeMessage::AuthenticationOk)?;
+        self.stream.write_no_flush(&BeMessage::ParameterStatus(
+            BeParameterStatusMessage::TimeZone(&session.get_config("timezone")?),
+        ))?;
         self.stream
             .write_parameter_status_msg_no_flush(&ParameterStatus::default())?;
         self.ready_for_query()?;
