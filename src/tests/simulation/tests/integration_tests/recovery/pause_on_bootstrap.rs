@@ -87,6 +87,7 @@ async fn test_impl(resume_by: ResumeBy) -> Result<()> {
         .await?;
     sleep(Duration::from_secs(10)).await;
     cluster.run(SELECT).await?.assert_result_eq(&count);
+
     // New streaming jobs should also start from paused.
     cluster.run(CREATE_2).await?;
     sleep(Duration::from_secs(10)).await;

@@ -520,7 +520,6 @@ impl CatalogController {
             .map(|fragment| (fragment.fragment_id, fragment))
             .collect();
 
-        // TODO, actors
         let actors: Vec<PartialActor> = Actor::find().into_partial_model().all(txn).await?;
 
         let mut fragment_actors = HashMap::new();

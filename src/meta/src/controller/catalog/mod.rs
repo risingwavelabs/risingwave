@@ -175,7 +175,6 @@ pub struct ActorInfo {
 
 impl ActorInfo {
     pub fn add_actor(&mut self, actor: actor::Model) {
-        //        println!("adding actor {}", actor.actor_id);
         debug_assert!(!self.models.contains_key(&actor.actor_id));
         self.actors_by_fragment_id
             .entry(actor.fragment_id)
@@ -189,7 +188,6 @@ impl ActorInfo {
     }
 
     pub fn drop_actor(&mut self, actor_id: ActorId) {
-        // println!("dropping actor {}", actor_id);
         debug_assert!(self.models.contains_key(&actor_id));
         let actor = self.models.remove(&actor_id).expect("actor not found");
         self.actors_by_fragment_id
@@ -204,7 +202,6 @@ impl ActorInfo {
 
     pub fn drop_actors_by_fragments(&mut self, fragment_ids: &[FragmentId]) {
         for fragment_id in fragment_ids {
-            println!("dropping actors by fragment {}", fragment_id);
             let actor_ids = self
                 .actors_by_fragment_id
                 .remove(fragment_id)
@@ -225,7 +222,6 @@ impl ActorInfo {
     where
         F: FnOnce(&mut actor::Model),
     {
-        // println!("mutate actor {}", actor_id);
         let actor = self.models.get_mut(&actor_id).expect("actor not found");
         let old_worker = actor.worker_id;
         let old_fragment = actor.fragment_id;
