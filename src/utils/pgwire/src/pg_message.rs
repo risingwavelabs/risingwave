@@ -514,6 +514,7 @@ impl BeMessage<'_> {
                     }
                     ServerVersion(val) => [b"server_version", val.as_bytes()],
                     ApplicationName(val) => [b"application_name", val.as_bytes()],
+                    // psycopg3 is case-sensitive, so we use "TimeZone" instead of "timezone" #18079
                     TimeZone(val) => [b"TimeZone", val.as_bytes()],
                 };
 
