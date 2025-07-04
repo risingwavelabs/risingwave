@@ -419,11 +419,8 @@ impl StarrocksSinkWriter {
         } else {
             format!("http://{}:{}", config.common.host, config.common.http_port)
         };
-        let txn_request_builder = StarrocksTxnRequestBuilder::new(
-            url,
-            header,
-            config.stream_load_http_timeout_ms,
-        )?;
+        let txn_request_builder =
+            StarrocksTxnRequestBuilder::new(url, header, config.stream_load_http_timeout_ms)?;
 
         Ok(Self {
             config,
