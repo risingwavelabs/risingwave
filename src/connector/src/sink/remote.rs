@@ -709,7 +709,9 @@ struct EmbeddedConnectorClient {
 
 impl EmbeddedConnectorClient {
     fn new() -> Result<Self> {
-        let jvm = JVM.get_or_init()?;
+        let jvm = JVM
+            .get_or_init()
+            .context("failed to create EmbeddedConnectorClient")?;
         Ok(EmbeddedConnectorClient { jvm })
     }
 
