@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use anyhow::Context;
-use risingwave_common::jvm_runtime::JVM;
+use risingwave_common::global_jvm::JVM;
 use risingwave_jni_core::jvm_runtime::execute_with_jni_env;
 use risingwave_jni_core::{call_method, call_static_method};
 

@@ -29,7 +29,7 @@ use risingwave_common::catalog::{
     RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, TableId,
 };
 use risingwave_common::config::MetaBackend;
-use risingwave_common::jvm_runtime::JVM;
+use risingwave_common::global_jvm::JVM;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;

@@ -11329,7 +11329,6 @@ dependencies = [
  "expect-test",
  "fixedbitset 0.5.7",
  "foyer",
- "fs-err",
  "futures",
  "governor",
  "hashbrown 0.15.2",

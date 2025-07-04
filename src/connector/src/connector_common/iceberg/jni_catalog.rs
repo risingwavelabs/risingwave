@@ -36,7 +36,7 @@ use itertools::Itertools;
 use jni::JavaVM;
 use jni::objects::{GlobalRef, JObject};
 use risingwave_common::bail;
-use risingwave_common::jvm_runtime::JVM;
+use risingwave_common::global_jvm::JVM;
 use risingwave_jni_core::call_method;
 use risingwave_jni_core::jvm_runtime::{execute_with_jni_env, jobj_to_str};
 use serde::{Deserialize, Serialize};

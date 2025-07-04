@@ -20,13 +20,14 @@ use fs_err as fs;
 use fs_err::PathExt;
 use jni::objects::{JObject, JString};
 use jni::{AttachGuard, InitArgsBuilder, JNIEnv, JNIVersion, JavaVM};
-use risingwave_common::jvm_runtime::JVM;
+use risingwave_common::global_jvm::JVM;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use thiserror_ext::AsReport;
 use tracing::error;
 
 use crate::{call_method, call_static_method};
 
+/// Use 10% of compute total memory by default. Compute node uses 0.7 * system memory by default.
 const DEFAULT_MEMORY_PROPORTION: f64 = 0.07;
 
 fn locate_libs_path() -> anyhow::Result<PathBuf> {

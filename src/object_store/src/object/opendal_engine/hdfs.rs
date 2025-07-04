@@ -18,7 +18,7 @@ use opendal::Operator;
 use opendal::layers::LoggingLayer;
 use opendal::services::Hdfs;
 use risingwave_common::config::ObjectStoreConfig;
-use risingwave_common::jvm_runtime::JVM;
+use risingwave_common::global_jvm::JVM;
 
 use super::{MediaType, OpendalObjectStore};
 // use crate::object::opendal_engine::ATOMIC_WRITE_DIR;

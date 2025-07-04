@@ -30,7 +30,7 @@ use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::jvm_runtime::JVM;
+use risingwave_common::global_jvm::JVM;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::DataType;
 use risingwave_jni_core::jvm_runtime::execute_with_jni_env;

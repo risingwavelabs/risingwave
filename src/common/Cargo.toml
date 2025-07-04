@@ -42,7 +42,6 @@ enumflags2 = { version = "0.7.8" }
 ethnum = { version = "1", features = ["serde"] }
 fixedbitset = "0.5"
 foyer = { workspace = true }
-fs-err = "3"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 governor = { workspace = true }
 hashbrown = "0.15.2"
