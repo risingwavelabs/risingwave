@@ -71,7 +71,7 @@ iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }
 indexmap = { version = "2.9.0", features = ["serde"] }
 itertools = { workspace = true }
-jni = { version = "0.21.1", features = ["invocation"] }
+jni = { workspace = true }
 maplit = "1.0.2"
 moka = { version = "0.12.10", features = ["future"] }
 mongodb = "3.2.3"

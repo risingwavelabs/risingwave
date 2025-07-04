@@ -175,6 +175,7 @@ iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "a
 iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "a43641762eafe135498b886db2257102f3069484" }
 iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "a43641762eafe135498b886db2257102f3069484" }
 itertools = "0.14.0"
+jni = { version = "0.21.1", features = ["invocation"] }
 jsonbb = "0.1.4"
 linkme = { version = "0.3.32", features = ["used_linker"] }
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "2682b85" }
