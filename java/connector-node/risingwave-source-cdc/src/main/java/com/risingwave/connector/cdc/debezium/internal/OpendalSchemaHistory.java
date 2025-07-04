@@ -55,7 +55,9 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     private String objectName = "";
     private String sourceId = "";
     public static final String SOURCE_ID = "schema.history.internal.source.id";
-    private static final int MAX_RECORDS_PER_FILE = 10;
+    public static final String MAX_RECORDS_PER_FILE_CONFIG =
+            "schema.history.internal.max.records.per.file";
+    private int maxRecordsPerFile = 2048; // default records nums per file
     private List<HistoryRecord> buffer = new ArrayList<>();
     private String objectDir = "";
     private static final Pattern HISTORY_FILE_PATTERN =
@@ -81,10 +83,23 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
         }
         objectDir = String.format("mysql-cdc-schema-history-source-%s", sourceId);
         objectName = String.format("%s/schema_history.dat", objectDir);
+        String maxRecordsStr = config.getString(MAX_RECORDS_PER_FILE_CONFIG);
+        if (maxRecordsStr != null) {
+            try {
+                maxRecordsPerFile = Integer.parseInt(maxRecordsStr);
+            } catch (NumberFormatException e) {
+                LOGGER.warn(
+                        "Invalid value for {}: {}. Using default: {}",
+                        MAX_RECORDS_PER_FILE_CONFIG,
+                        maxRecordsStr,
+                        maxRecordsPerFile);
+            }
+        }
         LOGGER.info(
-                "Schema history for source id {} will be stored under directory {}",
+                "Schema history for source id {} will be stored under directory {} (maxRecordsPerFile={})",
                 sourceId,
-                objectDir);
+                objectDir,
+                maxRecordsPerFile);
     }
 
     @Override
@@ -152,7 +167,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
                 // 2. Read the latest file content
                 byte[] data = getObject(latestFile);
                 records = toHistoryRecords(data);
-                if (records.size() < MAX_RECORDS_PER_FILE) {
+                if (records.size() < maxRecordsPerFile) {
                     // 3. Append and overwrite the file
                     records.add(record);
                     putObject(latestFile, fromHistoryRecords(records));
