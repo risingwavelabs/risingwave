@@ -17,6 +17,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::cdc::external::{
     CdcTableType, ExternalTableConfig, SchemaTableName,
 };
@@ -25,7 +26,7 @@ use risingwave_pb::stream_plan::StreamCdcScanNode;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::{CdcBackfillExecutor, CdcScanOptions, ExternalStorageTable};
+use crate::executor::{CdcBackfillExecutor, ExternalStorageTable, ParallelizedCdcBackfillExecutor};
 
 pub struct StreamCdcScanExecutorBuilder;
 
@@ -106,25 +107,45 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             table_pk_indices,
         );
 
-        let vnodes = params.vnode_bitmap.map(Arc::new);
-        // cdc backfill should be singleton, so vnodes must be None.
-        assert_eq!(None, vnodes);
-        let state_table =
-            StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes).await;
-
         let output_columns = table_desc.columns.iter().map(Into::into).collect_vec();
-        let exec = CdcBackfillExecutor::new(
-            params.actor_context.clone(),
-            external_table,
-            upstream,
-            output_indices,
-            output_columns,
-            None,
-            params.executor_stats,
-            state_table,
-            node.rate_limit,
-            scan_options,
-        );
-        Ok((params.info, exec).into())
+        if scan_options.is_parallelized_backfill() {
+            // TODO(zw): review correctness
+            // Set state table's vnodes to None to allow splits to be assigned to any actors, without following vnode constraints.
+            let vnodes = None;
+            let state_table =
+                StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes).await;
+            let exec = ParallelizedCdcBackfillExecutor::new(
+                params.actor_context.clone(),
+                external_table,
+                upstream,
+                output_indices,
+                output_columns,
+                None,
+                params.executor_stats,
+                state_table,
+                node.rate_limit,
+                scan_options,
+            );
+            Ok((params.info, exec).into())
+        } else {
+            let vnodes = params.vnode_bitmap.map(Arc::new);
+            // cdc backfill should be singleton, so vnodes must be None.
+            assert_eq!(None, vnodes);
+            let state_table =
+                StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes).await;
+            let exec = CdcBackfillExecutor::new(
+                params.actor_context.clone(),
+                external_table,
+                upstream,
+                output_indices,
+                output_columns,
+                None,
+                params.executor_stats,
+                state_table,
+                node.rate_limit,
+                scan_options,
+            );
+            Ok((params.info, exec).into())
+        }
     }
 }

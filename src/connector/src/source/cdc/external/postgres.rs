@@ -28,8 +28,8 @@ use tokio_postgres::types::PgLsn;
 
 use crate::connector_common::create_pg_client;
 use crate::error::{ConnectorError, ConnectorResult};
-use crate::parser::postgres_row_to_owned_row;
 use crate::parser::scalar_adapter::ScalarAdapter;
+use crate::parser::{postgres_cell_to_scalar_impl, postgres_row_to_owned_row};
 use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
     CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, DebeziumOffset,
@@ -194,6 +194,16 @@ impl ExternalTableReader for PostgresExternalTableReader {
             }
         }
     }
+
+    fn split_snapshot_read(
+        &self,
+        table_name: SchemaTableName,
+        left: OwnedRow,
+        right: OwnedRow,
+        split_columns: Vec<Field>,
+    ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
+        self.split_snapshot_read_inner(table_name, left, right, split_columns)
+    }
 }
 
 impl PostgresExternalTableReader {
@@ -338,6 +348,53 @@ impl PostgresExternalTableReader {
         format!("({}) > ({})", col_expr, arg_expr)
     }
 
+    // row filter expression: (v1, v2, v3) >= ($1, $2, $3) AND (v1, v2, v3) < ($1, $2, $3)
+    fn split_filter_expression(
+        columns: &[String],
+        is_first_split: bool,
+        is_last_split: bool,
+    ) -> String {
+        let mut left_col_expr = String::new();
+        let mut left_arg_expr = String::new();
+        let mut right_col_expr = String::new();
+        let mut right_arg_expr = String::new();
+        let mut c = 1;
+        if !is_first_split {
+            for (i, column) in columns.iter().enumerate() {
+                if i > 0 {
+                    left_col_expr.push_str(", ");
+                    left_arg_expr.push_str(", ");
+                }
+                left_col_expr.push_str(&Self::quote_column(column));
+                left_arg_expr.push_str(format!("${}", c).as_str());
+                c += 1;
+            }
+        }
+        if !is_last_split {
+            for (i, column) in columns.iter().enumerate() {
+                if i > 0 {
+                    right_col_expr.push_str(", ");
+                    right_arg_expr.push_str(", ");
+                }
+                right_col_expr.push_str(&Self::quote_column(column));
+                right_arg_expr.push_str(format!("${}", c).as_str());
+                c += 1;
+            }
+        }
+        if is_first_split && is_last_split {
+            "1 = 1".to_owned()
+        } else if is_first_split {
+            format!("({}) < ({})", right_col_expr, right_arg_expr,)
+        } else if is_last_split {
+            format!("({}) >= ({})", left_col_expr, left_arg_expr,)
+        } else {
+            format!(
+                "({}) >= ({}) AND ({}) < ({})",
+                left_col_expr, left_arg_expr, right_col_expr, right_arg_expr,
+            )
+        }
+    }
+
     fn get_order_key(primary_keys: &Vec<String>) -> String {
         primary_keys
             .iter()
@@ -357,20 +414,26 @@ impl PostgresExternalTableReader {
             Self::get_normalized_table_name(&self.schema_table_name),
         );
         let client = self.client.lock().await;
-        let mut rows = client.query(&sql, &[]).await?;
+        let rows = client.query(&sql, &[]).await?;
         if rows.is_empty() {
             Ok(None)
         } else {
-            let row = postgres_row_to_owned_row(rows.swap_remove(0), &self.rw_schema);
-            let min = row.datum_at(0);
-            let max = row.datum_at(1);
-            if min.is_none() || max.is_none() {
-                Ok(None)
-            } else {
-                Ok(Some((
-                    min.to_owned_datum().unwrap(),
-                    max.to_owned_datum().unwrap(),
-                )))
+            let row = &rows[0];
+            let min = postgres_cell_to_scalar_impl(
+                row,
+                &self.split_column.data_type,
+                0,
+                &self.split_column.name,
+            );
+            let max = postgres_cell_to_scalar_impl(
+                row,
+                &self.split_column.data_type,
+                1,
+                &self.split_column.name,
+            );
+            match (min, max) {
+                (Some(min), Some(max)) => Ok(Some((min, max))),
+                _ => Ok(None),
             }
         }
     }
@@ -404,15 +467,19 @@ impl PostgresExternalTableReader {
             )?),
         ];
         let stream = client.query_raw(&prepared_stmt, &params).await?;
-        let row_stream = stream.map(|row| {
+        let datum_stream = stream.map(|row| {
             let row = row?;
-            Ok::<_, ConnectorError>(postgres_row_to_owned_row(row, &self.rw_schema))
+            Ok::<_, ConnectorError>(postgres_cell_to_scalar_impl(
+                &row,
+                &self.split_column.data_type,
+                0,
+                &self.split_column.name,
+            ))
         });
-        pin_mut!(row_stream);
+        pin_mut!(datum_stream);
         #[for_await]
-        for row in row_stream {
-            let row = row?;
-            let right = row.datum_at(0);
+        for datum in datum_stream {
+            let right = datum?;
             return Ok(Some(right.to_owned_datum()));
         }
         Ok(None)
@@ -443,18 +510,93 @@ impl PostgresExternalTableReader {
             )?),
         ];
         let stream = client.query_raw(&prepared_stmt, &params).await?;
+        let datum_stream = stream.map(|row| {
+            let row = row?;
+            Ok::<_, ConnectorError>(postgres_cell_to_scalar_impl(
+                &row,
+                &self.split_column.data_type,
+                0,
+                &self.split_column.name,
+            ))
+        });
+        pin_mut!(datum_stream);
+        #[for_await]
+        for datum in datum_stream {
+            let right = datum?;
+            return Ok(Some(right));
+        }
+        Ok(None)
+    }
+
+    #[try_stream(boxed, ok = OwnedRow, error = ConnectorError)]
+    async fn split_snapshot_read_inner(
+        &self,
+        table_name: SchemaTableName,
+        left: OwnedRow,
+        right: OwnedRow,
+        split_columns: Vec<Field>,
+    ) {
+        assert_eq!(left.len(), 1, "multiple split columns is not supported yet");
+        assert_eq!(
+            right.len(),
+            1,
+            "multiple split columns is not supported yet"
+        );
+        let is_first_split = left[0].is_none();
+        let is_last_split = right[0].is_none();
+        let split_column_names = split_columns.iter().map(|c| c.name.clone()).collect_vec();
+        let client = self.client.lock().await;
+        client.execute("set time zone '+00:00'", &[]).await?;
+        // prepare the scan statement, since we may need to convert the RW data type to postgres data type
+        // e.g. varchar to uuid
+        let prepared_scan_stmt = {
+            let scan_sql = format!(
+                "SELECT {} FROM {} WHERE {}",
+                self.field_names,
+                Self::get_normalized_table_name(&table_name),
+                Self::split_filter_expression(&split_column_names, is_first_split, is_last_split),
+            );
+            client.prepare(&scan_sql).await?
+        };
+
+        let mut params: Vec<Option<ScalarAdapter>> = vec![];
+        if !is_first_split {
+            let left_params: Vec<Option<ScalarAdapter>> = left
+                .iter()
+                .zip_eq_fast(prepared_scan_stmt.params().iter().take(left.len()))
+                .map(|(datum, ty)| {
+                    datum
+                        .map(|scalar| ScalarAdapter::from_scalar(scalar, ty))
+                        .transpose()
+                })
+                .try_collect()?;
+            params.extend(left_params);
+        }
+        if !is_last_split {
+            let right_params: Vec<Option<ScalarAdapter>> = right
+                .iter()
+                .zip_eq_fast(prepared_scan_stmt.params().iter().skip(params.len()))
+                .map(|(datum, ty)| {
+                    datum
+                        .map(|scalar| ScalarAdapter::from_scalar(scalar, ty))
+                        .transpose()
+                })
+                .try_collect()?;
+            params.extend(right_params);
+        }
+
+        let stream = client.query_raw(&prepared_scan_stmt, &params).await?;
         let row_stream = stream.map(|row| {
             let row = row?;
-            Ok::<_, ConnectorError>(postgres_row_to_owned_row(row, &self.rw_schema))
+            Ok::<_, crate::error::ConnectorError>(postgres_row_to_owned_row(row, &self.rw_schema))
         });
+
         pin_mut!(row_stream);
         #[for_await]
         for row in row_stream {
             let row = row?;
-            let right = row.datum_at(0);
-            return Ok(Some(right.to_owned_datum()));
+            yield row;
         }
-        Ok(None)
     }
 }
 
@@ -538,6 +680,22 @@ mod tests {
         let cols = vec!["v1".to_owned(), "v2".to_owned(), "v3".to_owned()];
         let expr = PostgresExternalTableReader::filter_expression(&cols);
         assert_eq!(expr, "(\"v1\", \"v2\", \"v3\") > ($1, $2, $3)");
+    }
+
+    #[test]
+    fn test_split_filter_expression() {
+        let cols = vec!["v1".to_owned()];
+        let expr = PostgresExternalTableReader::split_filter_expression(&cols, true, true);
+        assert_eq!(expr, "1 = 1");
+
+        let expr = PostgresExternalTableReader::split_filter_expression(&cols, true, false);
+        assert_eq!(expr, "(\"v1\") < ($1)");
+
+        let expr = PostgresExternalTableReader::split_filter_expression(&cols, false, true);
+        assert_eq!(expr, "(\"v1\") >= ($1)");
+
+        let expr = PostgresExternalTableReader::split_filter_expression(&cols, false, false);
+        assert_eq!(expr, "(\"v1\") >= ($1) AND (\"v1\") < ($2)");
     }
 
     // manual test

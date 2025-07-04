@@ -20,7 +20,7 @@ use futures::{StreamExt, TryStreamExt, pin_mut, stream};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use serde_derive::{Deserialize, Serialize};
@@ -283,6 +283,16 @@ impl ExternalTableReader for SqlServerExternalTableReader {
     ) -> BoxStream<'_, ConnectorResult<CdcTableSnapshotSplit>> {
         // TODO(zw): impl
         stream::empty::<ConnectorResult<CdcTableSnapshotSplit>>().boxed()
+    }
+
+    fn split_snapshot_read(
+        &self,
+        _table_name: SchemaTableName,
+        _left: OwnedRow,
+        _right: OwnedRow,
+        _split_columns: Vec<Field>,
+    ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
+        todo!("implement SqlServer CDC parallelized backfill")
     }
 }
 

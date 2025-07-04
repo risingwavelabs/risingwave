@@ -49,7 +49,7 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
     OwnedRow::new(datums)
 }
 
-fn postgres_cell_to_scalar_impl(
+pub fn postgres_cell_to_scalar_impl(
     row: &tokio_postgres::Row,
     data_type: &DataType,
     i: usize,

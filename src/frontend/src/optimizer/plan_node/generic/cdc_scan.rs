@@ -23,9 +23,8 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_connector::source::cdc::{
     CDC_BACKFILL_ENABLE_KEY, CDC_BACKFILL_NUM_ROWS_PER_SPLIT, CDC_BACKFILL_PARALLELISM,
-    CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY, CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY,
+    CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY, CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY, CdcScanOptions,
 };
-use risingwave_pb::stream_plan::StreamCdcScanOptions;
 
 use super::GenericPlanNode;
 use crate::WithOptions;
@@ -51,75 +50,37 @@ pub struct CdcScan {
     pub options: CdcScanOptions,
 }
 
-#[derive(Debug, Clone, Hash, PartialEq)]
-pub struct CdcScanOptions {
-    pub disable_backfill: bool,
-    pub snapshot_barrier_interval: u32,
-    pub snapshot_batch_size: u32,
-    pub backfill_parallelism: u32,
-    pub backfill_num_rows_per_split: u64,
-}
+pub fn build_cdc_scan_options_with_options(with_options: &WithOptions) -> Result<CdcScanOptions> {
+    // unspecified option will use default values
+    let mut scan_options = CdcScanOptions::default();
 
-impl Default for CdcScanOptions {
-    fn default() -> Self {
-        Self {
-            disable_backfill: false,
-            snapshot_barrier_interval: 1,
-            snapshot_batch_size: 1000,
-            backfill_parallelism: 0,
-            backfill_num_rows_per_split: 0,
-        }
-    }
-}
+    // disable backfill if 'snapshot=false'
+    if let Some(snapshot) = with_options.get(CDC_BACKFILL_ENABLE_KEY) {
+        scan_options.disable_backfill = !(bool::from_str(snapshot)
+            .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_ENABLE_KEY))?);
+    };
 
-impl CdcScanOptions {
-    pub fn from_with_options(with_options: &WithOptions) -> Result<Self> {
-        // unspecified option will use default values
-        let mut scan_options = Self::default();
+    if let Some(snapshot_interval) = with_options.get(CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY) {
+        scan_options.snapshot_barrier_interval = u32::from_str(snapshot_interval)
+            .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY))?;
+    };
 
-        // disable backfill if 'snapshot=false'
-        if let Some(snapshot) = with_options.get(CDC_BACKFILL_ENABLE_KEY) {
-            scan_options.disable_backfill = !(bool::from_str(snapshot)
-                .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_ENABLE_KEY))?);
-        };
+    if let Some(snapshot_batch_size) = with_options.get(CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY) {
+        scan_options.snapshot_batch_size = u32::from_str(snapshot_batch_size)
+            .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY))?;
+    };
 
-        if let Some(snapshot_interval) = with_options.get(CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY) {
-            scan_options.snapshot_barrier_interval = u32::from_str(snapshot_interval)
-                .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY))?;
-        };
-
-        if let Some(snapshot_batch_size) = with_options.get(CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY) {
-            scan_options.snapshot_batch_size =
-                u32::from_str(snapshot_batch_size).map_err(|_| {
-                    anyhow!("Invalid value for {}", CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY)
-                })?;
-        };
-
-        if let Some(backfill_parallelism) = with_options.get(CDC_BACKFILL_PARALLELISM) {
-            scan_options.backfill_parallelism = u32::from_str(backfill_parallelism)
-                .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_PARALLELISM))?;
-        }
-
-        if let Some(backfill_num_rows_per_split) = with_options.get(CDC_BACKFILL_NUM_ROWS_PER_SPLIT)
-        {
-            scan_options.backfill_num_rows_per_split = u64::from_str(backfill_num_rows_per_split)
-                .map_err(|_| {
-                anyhow!("Invalid value for {}", CDC_BACKFILL_NUM_ROWS_PER_SPLIT)
-            })?;
-        }
-
-        Ok(scan_options)
+    if let Some(backfill_parallelism) = with_options.get(CDC_BACKFILL_PARALLELISM) {
+        scan_options.backfill_parallelism = u32::from_str(backfill_parallelism)
+            .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_PARALLELISM))?;
     }
 
-    pub fn to_proto(&self) -> StreamCdcScanOptions {
-        StreamCdcScanOptions {
-            disable_backfill: self.disable_backfill,
-            snapshot_barrier_interval: self.snapshot_barrier_interval,
-            snapshot_batch_size: self.snapshot_batch_size,
-            backfill_parallelism: self.backfill_parallelism,
-            backfill_num_rows_per_split: self.backfill_num_rows_per_split,
-        }
+    if let Some(backfill_num_rows_per_split) = with_options.get(CDC_BACKFILL_NUM_ROWS_PER_SPLIT) {
+        scan_options.backfill_num_rows_per_split = u64::from_str(backfill_num_rows_per_split)
+            .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_NUM_ROWS_PER_SPLIT))?;
     }
+
+    Ok(scan_options)
 }
 
 impl CdcScan {

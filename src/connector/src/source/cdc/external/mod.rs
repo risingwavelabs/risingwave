@@ -25,7 +25,7 @@ use futures::pin_mut;
 use futures::stream::BoxStream;
 use futures_async_stream::try_stream;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnDesc, Schema};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_pb::secret::PbSecretRef;
@@ -222,6 +222,14 @@ pub trait ExternalTableReader: Sized {
         &self,
         options: CdcTableSnapshotSplitOption,
     ) -> BoxStream<'_, ConnectorResult<CdcTableSnapshotSplit>>;
+
+    fn split_snapshot_read(
+        &self,
+        table_name: SchemaTableName,
+        left: OwnedRow,
+        right: OwnedRow,
+        split_columns: Vec<Field>,
+    ) -> BoxStream<'_, ConnectorResult<OwnedRow>>;
 }
 
 pub struct CdcTableSnapshotSplitOption {
@@ -311,6 +319,16 @@ impl ExternalTableReader for ExternalTableReaderImpl {
     ) -> BoxStream<'_, ConnectorResult<CdcTableSnapshotSplit>> {
         self.get_parallel_cdc_splits_inner(options)
     }
+
+    fn split_snapshot_read(
+        &self,
+        table_name: SchemaTableName,
+        left: OwnedRow,
+        right: OwnedRow,
+        split_columns: Vec<Field>,
+    ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
+        self.split_snapshot_read_inner(table_name, left, right, split_columns)
+    }
 }
 
 impl ExternalTableReaderImpl {
@@ -366,6 +384,37 @@ impl ExternalTableReaderImpl {
             ExternalTableReaderImpl::SqlServer(e) => e.get_parallel_cdc_splits(options),
             ExternalTableReaderImpl::Mock(e) => e.get_parallel_cdc_splits(options),
         };
+        pin_mut!(stream);
+        #[for_await]
+        for row in stream {
+            let row = row?;
+            yield row;
+        }
+    }
+
+    #[try_stream(boxed, ok = OwnedRow, error = ConnectorError)]
+    async fn split_snapshot_read_inner(
+        &self,
+        table_name: SchemaTableName,
+        left: OwnedRow,
+        right: OwnedRow,
+        split_columns: Vec<Field>,
+    ) {
+        let stream = match self {
+            ExternalTableReaderImpl::MySql(mysql) => {
+                mysql.split_snapshot_read(table_name, left, right, split_columns)
+            }
+            ExternalTableReaderImpl::Postgres(postgres) => {
+                postgres.split_snapshot_read(table_name, left, right, split_columns)
+            }
+            ExternalTableReaderImpl::SqlServer(sql_server) => {
+                sql_server.split_snapshot_read(table_name, left, right, split_columns)
+            }
+            ExternalTableReaderImpl::Mock(mock) => {
+                mock.split_snapshot_read(table_name, left, right, split_columns)
+            }
+        };
+
         pin_mut!(stream);
         #[for_await]
         for row in stream {

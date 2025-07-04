@@ -1,0 +1,764 @@
+// Copyright 2025 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use std::future::Future;
+use std::pin::Pin;
+
+use either::Either;
+use futures::stream;
+use futures::stream::select_with_strategy;
+use itertools::Itertools;
+use risingwave_common::array::DataChunk;
+use risingwave_common::bitmap::BitmapBuilder;
+use risingwave_common::catalog::{ColumnDesc, Field};
+use risingwave_common::row::RowDeserializer;
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::sort_util::{OrderType, cmp_datum};
+use risingwave_connector::parser::{
+    ByteStreamSourceParser, DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties,
+    ProtocolProperties, SourceStreamChunkBuilder, SpecificParserConfig,
+};
+use risingwave_connector::source::cdc::CdcScanOptions;
+use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReaderImpl};
+use risingwave_connector::source::{
+    CdcTableSnapshotSplit, CdcTableSnapshotSplitRaw, SourceColumnDesc, SourceContext,
+    SourceCtrlOpts,
+};
+use rw_futures_util::pausable;
+use thiserror_ext::AsReport;
+use tracing::Instrument;
+
+use crate::executor::UpdateMutation;
+use crate::executor::backfill::cdc::state_v2::ParallelizedCdcBackfillState;
+use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
+use crate::executor::backfill::cdc::upstream_table::snapshot::{
+    SplitSnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
+};
+use crate::executor::backfill::utils::{get_cdc_chunk_last_offset, mapping_chunk, mapping_message};
+use crate::executor::monitor::CdcBackfillMetrics;
+use crate::executor::prelude::*;
+use crate::executor::source::get_infinite_backoff_strategy;
+use crate::task::CreateMviewProgressReporter;
+
+/// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.
+const METADATA_STATE_LEN: usize = 4;
+
+pub struct ParallelizedCdcBackfillExecutor<S: StateStore> {
+    actor_ctx: ActorContextRef,
+
+    /// The external table to be backfilled
+    external_table: ExternalStorageTable,
+
+    /// Upstream changelog stream which may contain metadata columns, e.g. `_rw_offset`
+    upstream: Executor,
+
+    /// The column indices need to be forwarded to the downstream from the upstream and table scan.
+    output_indices: Vec<usize>,
+
+    /// The schema of output chunk, including additional columns if any
+    output_columns: Vec<ColumnDesc>,
+
+    // TODO: introduce a CdcBackfillProgress to report finish to Meta
+    // This object is just a stub right now
+    progress: Option<CreateMviewProgressReporter>,
+
+    metrics: CdcBackfillMetrics,
+
+    /// Rate limit in rows/s.
+    rate_limit_rps: Option<u32>,
+
+    options: CdcScanOptions,
+
+    state_table: StateTable<S>,
+}
+
+impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        actor_ctx: ActorContextRef,
+        external_table: ExternalStorageTable,
+        upstream: Executor,
+        output_indices: Vec<usize>,
+        output_columns: Vec<ColumnDesc>,
+        progress: Option<CreateMviewProgressReporter>,
+        metrics: Arc<StreamingMetrics>,
+        state_table: StateTable<S>,
+        rate_limit_rps: Option<u32>,
+        options: CdcScanOptions,
+    ) -> Self {
+        let metrics = metrics.new_cdc_backfill_metrics(external_table.table_id(), actor_ctx.id);
+
+        Self {
+            actor_ctx,
+            external_table,
+            upstream,
+            output_indices,
+            output_columns,
+            progress,
+            metrics,
+            rate_limit_rps,
+            options,
+            state_table,
+        }
+    }
+
+    // fn report_metrics(
+    //     metrics: &CdcBackfillMetrics,
+    //     snapshot_processed_row_count: u64,
+    //     upstream_processed_row_count: u64,
+    // ) {
+    //     metrics
+    //         .cdc_backfill_snapshot_read_row_count
+    //         .inc_by(snapshot_processed_row_count);
+    //
+    //     metrics
+    //         .cdc_backfill_upstream_output_row_count
+    //         .inc_by(upstream_processed_row_count);
+    // }
+
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn execute_inner(mut self) {
+        // The indices to primary key columns
+        let pk_indices = self.external_table.pk_indices().to_vec();
+        let table_id = self.external_table.table_id().table_id;
+        let upstream_table_name = self.external_table.qualified_table_name();
+        let schema_table_name = self.external_table.schema_table_name().clone();
+        let external_database_name = self.external_table.database_name().to_owned();
+
+        // TODO(zw): test generated columns
+        let additional_columns = self
+            .output_columns
+            .iter()
+            .filter(|col| col.additional_column.column_type.is_some())
+            .cloned()
+            .collect_vec();
+        let mut upstream = self.upstream.execute();
+        // Poll the upstream to get the first barrier.
+        let first_barrier = expect_first_barrier(&mut upstream).await?;
+
+        let mut actor_snapshot_splits = vec![];
+        // Currently we hard code the split column to be the first column of primary keys.
+        let snapshot_split_column_index = pk_indices[0];
+        let cdc_table_snapshot_split_column =
+            vec![self.external_table.schema().fields[snapshot_split_column_index].clone()];
+        if let Some(Mutation::Add(add)) = first_barrier.mutation.as_deref() {
+            let all_snapshot_splits = &add.actor_cdc_table_snapshot_splits;
+            // TODO(zw): optimization: remove consumed splits to reduce barrier size for downstream.
+            if let Some(splits) = all_snapshot_splits.get(&self.actor_ctx.id) {
+                actor_snapshot_splits = splits
+                    .iter()
+                    .map(|s: &CdcTableSnapshotSplitRaw| {
+                        let de = RowDeserializer::new(
+                            cdc_table_snapshot_split_column
+                                .iter()
+                                .map(Field::data_type)
+                                .collect_vec(),
+                        );
+                        let left_bound_inclusive =
+                            de.deserialize(s.left_bound_inclusive.as_ref()).unwrap();
+                        let right_bound_exclusive =
+                            de.deserialize(s.right_bound_exclusive.as_ref()).unwrap();
+                        CdcTableSnapshotSplit {
+                            split_id: s.split_id,
+                            left_bound_inclusive,
+                            right_bound_exclusive,
+                        }
+                    })
+                    .collect();
+            }
+        }
+        tracing::debug!(?actor_snapshot_splits, "actor splits");
+
+        let mut is_snapshot_paused = first_barrier.is_pause_on_startup();
+        let first_barrier_epoch = first_barrier.epoch;
+        // The first barrier message should be propagated.
+        yield Message::Barrier(first_barrier);
+
+        let mut current_actor_bounds = None;
+        fn extends_current_actor_bound(
+            current: &mut Option<(OwnedRow, OwnedRow)>,
+            split: &CdcTableSnapshotSplit,
+        ) {
+            if current.is_none() {
+                *current = Some((
+                    split.left_bound_inclusive.clone(),
+                    split.right_bound_exclusive.clone(),
+                ));
+            } else {
+                current.as_mut().unwrap().1 = split.right_bound_exclusive.clone();
+            }
+        }
+
+        // Check whether this parallelism has been assigned splits,
+        // if not, we should bypass the backfill directly.
+        let mut state_impl =
+            ParallelizedCdcBackfillState::new(self.state_table, METADATA_STATE_LEN);
+        state_impl.init_epoch(first_barrier_epoch).await?;
+
+        // Find next split that need backfill.
+        let mut next_split_idx = actor_snapshot_splits.len();
+        if !self.options.disable_backfill {
+            for (idx, split) in actor_snapshot_splits.iter().enumerate() {
+                let state = state_impl.restore_state(split.split_id).await?;
+                if !state.is_finished {
+                    next_split_idx = idx;
+                    break;
+                }
+                extends_current_actor_bound(&mut current_actor_bounds, &split);
+            }
+        }
+
+        // After init the state table and forward the initial barrier to downstream,
+        // we now try to create the table reader with retry.
+        // If backfill hasn't finished, we can ignore upstream cdc events before we create the table reader;
+        // If backfill is finished, we should forward the upstream cdc events to downstream.
+        let mut table_reader: Option<ExternalTableReaderImpl> = None;
+        let external_table = self.external_table.clone();
+        let mut future = Box::pin(async move {
+            let backoff = get_infinite_backoff_strategy();
+            tokio_retry::Retry::spawn(backoff, || async {
+                match external_table.create_table_reader().await {
+                    Ok(reader) => Ok(reader),
+                    Err(e) => {
+                        tracing::warn!(error = %e.as_report(), "failed to create cdc table reader, retrying...");
+                        Err(e)
+                    }
+                }
+            })
+                .instrument(tracing::info_span!("create_cdc_table_reader_with_retry"))
+                .await
+                .expect("Retry create cdc table reader until success.")
+        });
+
+        // Make sure to use mapping_message after transform_upstream.
+        let mut upstream = transform_upstream(upstream, self.output_columns.clone()).boxed();
+        loop {
+            if let Some(msg) =
+                build_reader_and_poll_upstream(&mut upstream, &mut table_reader, &mut future)
+                    .await?
+            {
+                if let Some(msg) = mapping_message(msg, &self.output_indices) {
+                    match msg {
+                        Message::Barrier(barrier) => {
+                            // commit state to bump the epoch of state table
+                            state_impl.commit_state(barrier.epoch).await?;
+                            yield Message::Barrier(barrier);
+                        }
+                        Message::Chunk(chunk) => {
+                            if chunk.cardinality() == 0 {
+                                continue;
+                            }
+                            let filtered_chunk = filter_stream_chunk(
+                                chunk,
+                                &current_actor_bounds,
+                                snapshot_split_column_index,
+                            );
+                            if filtered_chunk.cardinality() > 0 {
+                                yield Message::Chunk(filtered_chunk);
+                            }
+                        }
+                        msg @ Message::Watermark(_) => yield msg,
+                    }
+                }
+            } else {
+                assert!(table_reader.is_some(), "table reader must created");
+                tracing::info!(
+                    table_id,
+                    upstream_table_name,
+                    "table reader created successfully"
+                );
+                break;
+            }
+        }
+        let upstream_table_reader = UpstreamTableReader::new(
+            self.external_table.clone(),
+            table_reader.expect("table reader must created"),
+        );
+        let mut upstream = upstream.peekable();
+        let offset_parse_func = upstream_table_reader.reader.get_cdc_offset_parser();
+
+        'split_backfill: for split in actor_snapshot_splits.iter().skip(next_split_idx) {
+            let state = state_impl.restore_state(split.split_id).await?;
+            // Keep track of rows from the snapshot.
+            let mut total_snapshot_row_count = state.row_count as u64;
+            tracing::info!(
+                table_id,
+                upstream_table_name,
+                ?split,
+                is_snapshot_paused,
+                "start cdc backfill split"
+            );
+            let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
+            let left_upstream = upstream.by_ref().map(Either::Left);
+            // let mut snapshot_read_row_cnt: usize = 0;
+            let read_args = SplitSnapshotReadArgs::new(
+                split.left_bound_inclusive.clone(),
+                split.right_bound_exclusive.clone(),
+                cdc_table_snapshot_split_column.clone(),
+                self.rate_limit_rps,
+                additional_columns.clone(),
+                schema_table_name.clone(),
+                external_database_name.clone(),
+            );
+            let split_low_log_offset: Option<CdcOffset> =
+                upstream_table_reader.current_cdc_offset().await?;
+            let right_snapshot = pin!(
+                upstream_table_reader
+                    .snapshot_read_table_split(read_args)
+                    .map(Either::Right)
+            );
+            let (right_snapshot, snapshot_valve) = pausable(right_snapshot);
+            if is_snapshot_paused {
+                snapshot_valve.pause();
+            }
+            let mut backfill_stream =
+                select_with_strategy(left_upstream, right_snapshot, |_: &mut ()| {
+                    stream::PollNext::Left
+                });
+            // let mut cur_barrier_snapshot_processed_rows: u64 = 0;
+            // let mut cur_barrier_upstream_processed_rows: u64 = 0;
+            #[for_await]
+            for either in &mut backfill_stream {
+                match either {
+                    // Upstream
+                    Either::Left(msg) => {
+                        match msg? {
+                            Message::Barrier(barrier) => {
+                                if let Some(mutation) = barrier.mutation.as_deref() {
+                                    use crate::executor::Mutation;
+                                    match mutation {
+                                        Mutation::Pause => {
+                                            is_snapshot_paused = true;
+                                            snapshot_valve.pause();
+                                        }
+                                        Mutation::Resume => {
+                                            is_snapshot_paused = false;
+                                            snapshot_valve.resume();
+                                        }
+                                        Mutation::Throttle(some) => {
+                                            if let Some(new_rate_limit) =
+                                                some.get(&self.actor_ctx.id)
+                                                && *new_rate_limit != self.rate_limit_rps
+                                            {
+                                                // The new rate limit will take effect since next split.
+                                                self.rate_limit_rps = *new_rate_limit;
+                                            }
+                                        }
+                                        Mutation::Update(UpdateMutation {
+                                            dropped_actors, ..
+                                        }) => {
+                                            if dropped_actors.contains(&self.actor_ctx.id) {
+                                                tracing::info!(
+                                                    table_id,
+                                                    upstream_table_name,
+                                                    "CdcBackfill has been dropped due to config change"
+                                                );
+                                                yield Message::Barrier(barrier);
+                                                break 'split_backfill;
+                                            }
+                                        }
+                                        _ => (),
+                                    }
+                                }
+
+                                // Self::report_metrics(
+                                //     &self.metrics,
+                                //     cur_barrier_snapshot_processed_rows,
+                                //     cur_barrier_upstream_processed_rows,
+                                // );
+
+                                // update and persist current backfill progress
+                                state_impl
+                                    .mutate_state(
+                                        split.split_id,
+                                        None,
+                                        None,
+                                        total_snapshot_row_count,
+                                        false,
+                                    )
+                                    .await?;
+
+                                state_impl.commit_state(barrier.epoch).await?;
+
+                                // emit barrier and continue to consume the backfill stream
+                                yield Message::Barrier(barrier);
+                            }
+                            Message::Chunk(chunk) => {
+                                // skip empty upstream chunk
+                                if chunk.cardinality() == 0 {
+                                    continue;
+                                }
+                                let chunk_binlog_offset =
+                                    get_cdc_chunk_last_offset(&offset_parse_func, &chunk)?;
+                                tracing::trace!(
+                                    "recv changelog chunk: chunk_offset {:?}, capactiy {}",
+                                    chunk_binlog_offset,
+                                    chunk.capacity()
+                                );
+                                // Since we don't need changelog before the
+                                // `split_low_log_offset`, skip the chunk that *only* contains
+                                // events before `split_low_log_offset`.
+                                if let Some(split_low_log_offset) = split_low_log_offset.as_ref()
+                                    && let Some(chunk_offset) = chunk_binlog_offset
+                                    && chunk_offset < *split_low_log_offset
+                                {
+                                    tracing::trace!(
+                                        "skip changelog chunk: chunk_offset {:?}, capacity {}",
+                                        chunk_offset,
+                                        chunk.capacity()
+                                    );
+                                    continue;
+                                }
+
+                                let filtered_chunk = filter_stream_chunk(
+                                    chunk,
+                                    &current_actor_bounds,
+                                    snapshot_split_column_index,
+                                );
+                                if filtered_chunk.cardinality() == 0 {
+                                    continue;
+                                }
+                                // Buffer the upstream chunk.
+                                upstream_chunk_buffer.push(filtered_chunk.compact());
+                            }
+                            Message::Watermark(_) => {
+                                // Ignore watermark during backfill.
+                            }
+                        }
+                    }
+                    // Snapshot read
+                    Either::Right(msg) => {
+                        match msg? {
+                            None => {
+                                tracing::info!(
+                                    table_id,
+                                    split_id = split.split_id,
+                                    "snapshot read stream ends"
+                                );
+                                // If the snapshot read stream ends, it means all historical
+                                // data has been loaded.
+                                // We should not mark the chunk anymore,
+                                // otherwise, we will ignore some rows in the buffer.
+                                for chunk in upstream_chunk_buffer.drain(..) {
+                                    yield Message::Chunk(mapping_chunk(
+                                        chunk,
+                                        &self.output_indices,
+                                    ));
+                                }
+                                // Next split.
+                                break;
+                            }
+                            Some(chunk) => {
+                                let chunk_cardinality = chunk.cardinality() as u64;
+                                // cur_barrier_snapshot_processed_rows += chunk_cardinality;
+                                total_snapshot_row_count += chunk_cardinality;
+                                yield Message::Chunk(mapping_chunk(chunk, &self.output_indices));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // TODO(zw): review: do we still need this workaround?
+            // // Here we have to ensure the snapshot stream is consumed at least once,
+            // // since the barrier event can kick in anytime.
+            // // Otherwise, the result set of the new snapshot stream may become empty.
+            // // It maybe a cancellation bug of the mysql driver.
+
+            // Self::report_metrics(
+            //     &self.metrics,
+            //     cur_barrier_snapshot_processed_rows,
+            //     cur_barrier_upstream_processed_rows,
+            // );
+
+            extends_current_actor_bound(&mut current_actor_bounds, &split);
+            // update and persist current backfill progress
+            // Wait for first barrier to come after backfill is finished.
+            // So we can update our progress + persist the status.
+            while let Some(Ok(msg)) = upstream.next().await {
+                if let Some(msg) = mapping_message(msg, &self.output_indices) {
+                    match msg {
+                        Message::Barrier(barrier) => {
+                            // finalized the backfill state
+                            state_impl
+                                .mutate_state(
+                                    split.split_id,
+                                    None,
+                                    None,
+                                    total_snapshot_row_count,
+                                    true,
+                                )
+                                .await?;
+                            state_impl.commit_state(barrier.epoch).await?;
+
+                            // mark progress as finished
+                            if let Some(progress) = self.progress.as_mut() {
+                                progress.finish(barrier.epoch, total_snapshot_row_count);
+                            }
+                            yield Message::Barrier(barrier);
+                            // break after the state have been saved
+                            break;
+                        }
+                        Message::Chunk(chunk) => {
+                            if chunk.cardinality() == 0 {
+                                continue;
+                            }
+                            let filtered_chunk = filter_stream_chunk(
+                                chunk,
+                                &current_actor_bounds,
+                                snapshot_split_column_index,
+                            );
+                            if filtered_chunk.cardinality() == 0 {
+                                continue;
+                            }
+                            yield Message::Chunk(filtered_chunk);
+                        }
+                        msg @ Message::Watermark(_) => {
+                            yield msg;
+                        }
+                    }
+                }
+            }
+        }
+
+        upstream_table_reader.disconnect().await?;
+        tracing::info!(
+            table_id,
+            upstream_table_name,
+            "CdcBackfill has already finished and will forward messages directly to the downstream"
+        );
+
+        // After backfill progress finished
+        // we can forward messages directly to the downstream,
+        // as backfill is finished.
+        #[for_await]
+        for msg in upstream {
+            // upstream offsets will be removed from the message before forwarding to
+            // downstream
+            if let Some(msg) = mapping_message(msg?, &self.output_indices) {
+                match msg {
+                    Message::Barrier(barrier) => {
+                        // commit state just to bump the epoch of state table
+                        state_impl.commit_state(barrier.epoch).await?;
+                        yield Message::Barrier(barrier);
+                    }
+                    Message::Chunk(chunk) => {
+                        if chunk.cardinality() == 0 {
+                            continue;
+                        }
+                        let filtered_chunk = filter_stream_chunk(
+                            chunk,
+                            &current_actor_bounds,
+                            snapshot_split_column_index,
+                        );
+                        if filtered_chunk.cardinality() == 0 {
+                            continue;
+                        }
+                        yield Message::Chunk(filtered_chunk);
+                    }
+                    msg @ Message::Watermark(_) => {
+                        yield msg;
+                    }
+                }
+            }
+        }
+    }
+}
+
+async fn build_reader_and_poll_upstream(
+    upstream: &mut BoxedMessageStream,
+    table_reader: &mut Option<ExternalTableReaderImpl>,
+    future: &mut Pin<Box<impl Future<Output = ExternalTableReaderImpl>>>,
+) -> StreamExecutorResult<Option<Message>> {
+    if table_reader.is_some() {
+        return Ok(None);
+    }
+    tokio::select! {
+        biased;
+        reader = &mut *future => {
+            *table_reader = Some(reader);
+            Ok(None)
+        }
+        msg = upstream.next() => {
+            msg.transpose()
+        }
+    }
+}
+
+#[try_stream(ok = Message, error = StreamExecutorError)]
+pub async fn transform_upstream(upstream: BoxedMessageStream, output_columns: Vec<ColumnDesc>) {
+    let props = SpecificParserConfig {
+        encoding_config: EncodingProperties::Json(JsonProperties {
+            use_schema_registry: false,
+            timestamptz_handling: None,
+        }),
+        // the cdc message is generated internally so the key must exist.
+        protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
+    };
+
+    // convert to source column desc to feed into parser
+    let columns_with_meta = output_columns
+        .iter()
+        .map(SourceColumnDesc::from)
+        .collect_vec();
+
+    let mut parser = DebeziumParser::new(
+        props,
+        columns_with_meta.clone(),
+        Arc::new(SourceContext::dummy()),
+    )
+    .await
+    .map_err(StreamExecutorError::connector_error)?;
+
+    pin_mut!(upstream);
+    #[for_await]
+    for msg in upstream {
+        let mut msg = msg?;
+        if let Message::Chunk(chunk) = &mut msg {
+            let parsed_chunk = parse_debezium_chunk(&mut parser, chunk).await?;
+            let _ = std::mem::replace(chunk, parsed_chunk);
+        }
+        yield msg;
+    }
+}
+
+async fn parse_debezium_chunk(
+    parser: &mut DebeziumParser,
+    chunk: &StreamChunk,
+) -> StreamExecutorResult<StreamChunk> {
+    // here we transform the input chunk in `(payload varchar, _rw_offset varchar, _rw_table_name varchar)` schema
+    // to chunk with downstream table schema `info.schema` of MergeNode contains the schema of the
+    // table job with `_rw_offset` in the end
+    // see `gen_create_table_plan_for_cdc_source` for details
+
+    // use `SourceStreamChunkBuilder` for convenience
+    let mut builder = SourceStreamChunkBuilder::new(
+        parser.columns().to_vec(),
+        SourceCtrlOpts {
+            chunk_size: chunk.capacity(),
+            split_txn: false,
+        },
+    );
+
+    // The schema of input chunk `(payload varchar, _rw_offset varchar, _rw_table_name varchar, _row_id)`
+    // We should use the debezium parser to parse the first column,
+    // then chain the parsed row with `_rw_offset` row to get a new row.
+    let payloads = chunk.data_chunk().project(&[0]);
+    let offsets = chunk.data_chunk().project(&[1]).compact();
+
+    // TODO: preserve the transaction semantics
+    for payload in payloads.rows() {
+        let ScalarRefImpl::Jsonb(jsonb_ref) = payload.datum_at(0).expect("payload must exist")
+        else {
+            panic!("payload must be jsonb");
+        };
+
+        parser
+            .parse_inner(
+                None,
+                Some(jsonb_ref.to_string().as_bytes().to_vec()),
+                builder.row_writer(),
+            )
+            .await
+            .unwrap();
+    }
+    builder.finish_current_chunk();
+
+    let parsed_chunk = {
+        let mut iter = builder.consume_ready_chunks();
+        assert_eq!(1, iter.len());
+        iter.next().unwrap()
+    };
+    assert_eq!(parsed_chunk.capacity(), chunk.capacity()); // each payload is expected to generate one row
+    let (ops, mut columns, vis) = parsed_chunk.into_inner();
+    // note that `vis` is not necessarily the same as the original chunk's visibilities
+
+    // concat the rows in the parsed chunk with the `_rw_offset` column
+    columns.extend(offsets.into_parts().0);
+
+    Ok(StreamChunk::from_parts(
+        ops,
+        DataChunk::from_parts(columns.into(), vis),
+    ))
+}
+
+fn filter_stream_chunk(
+    chunk: StreamChunk,
+    bound: &Option<(OwnedRow, OwnedRow)>,
+    snapshot_split_column_index: usize,
+) -> StreamChunk {
+    let Some((left, right)) = bound else {
+        return chunk;
+    };
+    assert_eq!(left.len(), 1, "multiple split columns is not supported yet");
+    assert_eq!(
+        right.len(),
+        1,
+        "multiple split columns is not supported yet"
+    );
+    let left_split_key = left.datum_at(0);
+    let right_split_key = right.datum_at(0);
+    let is_leftmost_bound = is_leftmost_bound(left);
+    let is_rightmost_bound = is_rightmost_bound(right);
+    if is_leftmost_bound && is_rightmost_bound {
+        return chunk;
+    }
+    let mut new_bitmap = BitmapBuilder::with_capacity(chunk.capacity());
+    let (ops, columns, visibility) = chunk.into_inner();
+    for (row_split_key, v) in columns[snapshot_split_column_index]
+        .iter()
+        .zip_eq_fast(visibility.iter())
+    {
+        if !v {
+            new_bitmap.append(false);
+            continue;
+        }
+        let mut is_in_range = true;
+        if !is_leftmost_bound {
+            is_in_range = cmp_datum(
+                row_split_key,
+                left_split_key,
+                OrderType::ascending_nulls_first(),
+            )
+            .is_ge();
+        }
+        if is_in_range && !is_rightmost_bound {
+            is_in_range = cmp_datum(
+                row_split_key,
+                right_split_key,
+                OrderType::ascending_nulls_first(),
+            )
+            .is_lt();
+        }
+        if !is_in_range {
+            tracing::trace!(?row_split_key, ?left_split_key, ?right_split_key, snapshot_split_column_index, data_type = ?columns[snapshot_split_column_index].data_type(), "filter out row")
+        }
+        new_bitmap.append(is_in_range);
+    }
+    StreamChunk::with_visibility(ops, columns, new_bitmap.finish())
+}
+
+fn is_leftmost_bound(row: &OwnedRow) -> bool {
+    row.iter().all(|d| d.is_none())
+}
+
+fn is_rightmost_bound(row: &OwnedRow) -> bool {
+    row.iter().all(|d| d.is_none())
+}
+
+impl<S: StateStore> Execute for ParallelizedCdcBackfillExecutor<S> {
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        self.execute_inner().boxed()
+    }
+}

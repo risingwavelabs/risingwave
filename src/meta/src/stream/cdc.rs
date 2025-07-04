@@ -32,11 +32,12 @@ use risingwave_connector::source::{CdcTableSnapshotSplit, CdcTableSnapshotSplitR
 use risingwave_meta_model::{TableId, cdc_table_snapshot_split};
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::stream_plan::StreamCdcScanOptions;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use sea_orm::{EntityTrait, Set, TransactionTrait};
 
 use crate::MetaResult;
 use crate::controller::SqlMetaStore;
-use crate::model::StreamJobFragments;
+use crate::model::{Fragment, StreamJobFragments};
 
 /// A CDC table snapshot splits can only be successfully initialized once.
 /// Subsequent attempts to write to the metastore with the same primary key will be rejected.
@@ -124,6 +125,21 @@ pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
     Ok(())
 }
 
+fn is_cdc_scan_fragment(fragment: &Fragment) -> bool {
+    return match &fragment.nodes.node_body {
+        Some(NodeBody::StreamCdcScan(_)) => true,
+        Some(NodeBody::Project(_)) => {
+            for input in &fragment.nodes.input {
+                if let Some(NodeBody::StreamCdcScan(_)) = input.node_body {
+                    return true;
+                }
+            }
+            false
+        }
+        _ => false,
+    };
+}
+
 pub(crate) async fn assign_cdc_table_snapshot_splits(
     table_fragments: impl Iterator<Item = &StreamJobFragments>,
     meta_store: &SqlMetaStore,
@@ -133,9 +149,12 @@ pub(crate) async fn assign_cdc_table_snapshot_splits(
         let mut stream_scan_fragments = jobs
             .fragments
             .values()
-            .filter(|f| f.fragment_type_mask.contains(FragmentTypeFlag::StreamScan))
+            .filter(|f| {
+                is_cdc_scan_fragment(f)
+                    && f.fragment_type_mask.contains(FragmentTypeFlag::StreamScan)
+            })
             .collect_vec();
-        if stream_scan_fragments.len() == 0 {
+        if stream_scan_fragments.is_empty() {
             continue;
         }
         if stream_scan_fragments.len() > 1 {
@@ -158,12 +177,11 @@ pub(crate) async fn assign_cdc_table_snapshot_splits(
         };
         if stream_scan_fragment.actors.is_empty() {
             return Err(anyhow::anyhow!(
-                "A stream scan fragment should have at least 1 actor".to_string()
+                "A stream scan fragment should have at least 1 actor".to_owned()
             )
             .into());
         }
-        let splits_per_actor = (splits.len() + stream_scan_fragment.actors.len() - 1)
-            / stream_scan_fragment.actors.len();
+        let splits_per_actor = splits.len().div_ceil(stream_scan_fragment.actors.len());
         for (actor_id, splits) in stream_scan_fragment
             .actors
             .iter()

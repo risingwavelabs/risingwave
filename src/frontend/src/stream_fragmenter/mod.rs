@@ -28,6 +28,7 @@ use educe::Educe;
 use risingwave_common::catalog::{FragmentTypeFlag, TableId};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::session_config::parallelism::ConfigParallelism;
+use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
     BackfillOrder, DispatchStrategy, DispatcherType, ExchangeNode, NoOpNode,
@@ -409,12 +410,18 @@ fn build_fragment(
                 current_fragment.upstream_table_ids.push(node.table_id);
             }
 
-            NodeBody::StreamCdcScan(_) => {
+            NodeBody::StreamCdcScan(node) => {
                 current_fragment
                     .fragment_type_mask
                     .add(FragmentTypeFlag::StreamScan);
-                // the backfill algorithm is not parallel safe
-                current_fragment.requires_singleton = true;
+                if let Some(o) = node.options
+                    && CdcScanOptions::from_proto(&o).is_parallelized_backfill()
+                {
+                    // Use parallel CDC backfill.
+                } else {
+                    // the backfill algorithm is not parallel safe
+                    current_fragment.requires_singleton = true;
+                }
                 state.has_source_backfill = true;
             }
 

@@ -17,6 +17,7 @@ use std::sync::atomic::AtomicUsize;
 use futures::stream::BoxStream;
 use futures::{StreamExt, stream};
 use futures_async_stream::try_stream;
+use risingwave_common::catalog::Field;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::ScalarImpl;
 
@@ -142,5 +143,15 @@ impl ExternalTableReader for MockExternalTableReader {
     ) -> BoxStream<'_, ConnectorResult<CdcTableSnapshotSplit>> {
         // Mock doesn't support parallelized backfill.
         stream::empty::<ConnectorResult<CdcTableSnapshotSplit>>().boxed()
+    }
+
+    fn split_snapshot_read(
+        &self,
+        _table_name: SchemaTableName,
+        _left: OwnedRow,
+        _right: OwnedRow,
+        _split_columns: Vec<Field>,
+    ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
+        unimplemented!()
     }
 }
