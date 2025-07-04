@@ -5275,7 +5275,7 @@ dependencies = [
 [[package]]
 name = "faiss"
 version = "0.12.2-alpha.0"
-source = "git+https://github.com/risingwavelabs/faiss-rs.git?rev=1d2f43c96a54ae6bb88642db7ef420d0b098fc30#1d2f43c96a54ae6bb88642db7ef420d0b098fc30"
+source = "git+https://github.com/risingwavelabs/faiss-rs.git?rev=793d612e8f660fcb29c06b689177c588a9c2dd81#793d612e8f660fcb29c06b689177c588a9c2dd81"
 dependencies = [
  "faiss-sys",
 ]
@@ -5283,7 +5283,7 @@ dependencies = [
 [[package]]
 name = "faiss-sys"
 version = "0.6.3-alpha.0"
-source = "git+https://github.com/risingwavelabs/faiss-rs.git?rev=1d2f43c96a54ae6bb88642db7ef420d0b098fc30#1d2f43c96a54ae6bb88642db7ef420d0b098fc30"
+source = "git+https://github.com/risingwavelabs/faiss-rs.git?rev=793d612e8f660fcb29c06b689177c588a9c2dd81#793d612e8f660fcb29c06b689177c588a9c2dd81"
 dependencies = [
  "cmake",
 ]
