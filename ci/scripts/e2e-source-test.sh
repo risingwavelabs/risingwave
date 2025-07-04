@@ -95,6 +95,8 @@ export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
 export SQLCMDSERVER=sqlserver-server SQLCMDUSER=SA SQLCMDPASSWORD="SomeTestOnly@SA" SQLCMDDBNAME=mydb SQLCMDPORT=1433
 risedev slt './e2e_test/source_legacy/cdc_inline/**/*.slt'
 
+sh ci/scripts/e2e-source-mysql-offline-schema-change.sh
+
 echo "--- mysql & postgres cdc validate test"
 risedev slt './e2e_test/source_legacy/cdc/cdc.validate.mysql.slt'
 risedev slt './e2e_test/source_legacy/cdc/cdc.validate.postgres.slt'
