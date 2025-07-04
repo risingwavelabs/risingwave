@@ -643,6 +643,9 @@ where
                 self.stream
                     .write_no_flush(&BeMessage::BackendKeyData(session.id()))?;
 
+                self.stream.write_no_flush(&BeMessage::ParameterStatus(
+                    BeParameterStatusMessage::TimeZone(&session.get_config("timezone")?),
+                ))?;
                 self.stream
                     .write_parameter_status_msg_no_flush(&ParameterStatus {
                         application_name: application_name.cloned(),
@@ -1245,9 +1248,6 @@ where
         ))?;
         self.write_no_flush(&BeMessage::ParameterStatus(
             BeParameterStatusMessage::ServerVersion(PG_VERSION),
-        ))?;
-        self.write_no_flush(&BeMessage::ParameterStatus(
-            BeParameterStatusMessage::TimeZone("UTC"),
         ))?;
         if let Some(application_name) = &status.application_name {
             self.write_no_flush(&BeMessage::ParameterStatus(
