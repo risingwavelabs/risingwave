@@ -122,12 +122,12 @@ WHERE nspname = 'test_schema';
 conn test_schema
 
 statement ok
-ALTER CONNECTION conn SET SCHEMA public;
+ALTER CONNECTION test_schema.conn SET SCHEMA public;
 
 # ==== cleanup ====
 
 statement ok
-drop connection test_schema.conn;
+drop connection conn;
 
 statement ok
 drop secret sec_broker;
