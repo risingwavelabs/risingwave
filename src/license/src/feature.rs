@@ -40,7 +40,7 @@ macro_rules! for_all_features {
     ($macro:ident) => {
         $macro! {
             // name                      doc
-            { TestPaid,                  "A dummy feature that's only available on paid tier for testing purposes." },
+            { TestPaid,                  "A dummy feature for testing purposes." },
             { TimeTravel,                "Query historical data within the retention period."},
             { GlueSchemaRegistry,        "Use Schema Registry from AWS Glue rather than Confluent." },
             { SnowflakeSink,             "Delivering data to SnowFlake." },
@@ -109,6 +109,7 @@ impl Feature {
 /// The error type for feature not available due to license.
 #[derive(Debug, Error)]
 pub enum FeatureNotAvailable {
+    // TODO(license): refine error message to include tier name & better instructions
     #[error(
         "feature {feature:?} is not available based on your license\n\n\
         Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command."
