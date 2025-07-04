@@ -228,7 +228,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             if read_count < batch_size as _ {
                 tracing::debug!("finished loading of full table snapshot");
                 yield None;
-                unreachable!()
+                // unreachable!()
             } else {
                 // update PK position and continue to read the table
                 read_args.current_pos = Some(current_pk_pos);

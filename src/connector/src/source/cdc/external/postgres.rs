@@ -40,12 +40,35 @@ pub struct PostgresOffset {
     // In postgres, an LSN is a 64-bit integer, representing a byte position in the write-ahead log stream.
     // It is printed as two hexadecimal numbers of up to 8 digits each, separated by a slash; for example, 16/B374D848
     pub lsn: u64,
+    // Additional LSN fields for improved tracking
+    #[serde(default)]
+    pub lsn_commit: Option<u64>,
+    #[serde(default)]
+    pub lsn_proc: Option<u64>,
 }
 
-// only compare the lsn field
+// only compare the lsn field, prefer lsn_commit and lsn_proc if both available
 impl PartialOrd for PostgresOffset {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.lsn.partial_cmp(&other.lsn)
+        match (
+            self.lsn_commit,
+            self.lsn_proc,
+            other.lsn_commit,
+            other.lsn_proc,
+        ) {
+            (_, Some(self_proc), _, Some(other_proc)) => {
+                // if both have `lsn_commit` and `lsn_proc`, compare `lsn_commit` first, then `lsn_proc`
+                // if `lsn_commit` is None, fall back to `lsn_proc`
+                match self.lsn_commit.partial_cmp(&other.lsn_commit) {
+                    Some(Ordering::Equal) => self_proc.partial_cmp(&other_proc),
+                    other_result => other_result,
+                }
+            }
+            _ => {
+                // Fall back to lsn comparison when either lsn_commit or lsn_proc is missing
+                self.lsn.partial_cmp(&other.lsn)
+            }
+        }
     }
 }
 
@@ -54,15 +77,27 @@ impl PostgresOffset {
         let dbz_offset: DebeziumOffset = serde_json::from_str(offset)
             .with_context(|| format!("invalid upstream offset: {}", offset))?;
 
+        let lsn = dbz_offset
+            .source_offset
+            .lsn
+            .context("invalid postgres lsn")?;
+
+        // `lsn_commit` may not be present in the offset for the first tx.
+        let lsn_commit = dbz_offset.source_offset.lsn_commit;
+
+        let lsn_proc = dbz_offset
+            .source_offset
+            .lsn_proc
+            .context("invalid postgres lsn_proc")?;
+
         Ok(Self {
             txid: dbz_offset
                 .source_offset
                 .txid
                 .context("invalid postgres txid")?,
-            lsn: dbz_offset
-                .source_offset
-                .lsn
-                .context("invalid postgres lsn")?,
+            lsn,
+            lsn_commit,
+            lsn_proc: Some(lsn_proc),
         })
     }
 }
@@ -258,6 +293,7 @@ impl PostgresExternalTableReader {
 
 #[cfg(test)]
 mod tests {
+    use std::cmp::Ordering;
     use std::collections::HashMap;
 
     use futures::pin_mut;
@@ -309,13 +345,159 @@ mod tests {
 
     #[test]
     fn test_postgres_offset() {
-        let off1 = PostgresOffset { txid: 4, lsn: 2 };
-        let off2 = PostgresOffset { txid: 1, lsn: 3 };
-        let off3 = PostgresOffset { txid: 5, lsn: 1 };
+        let off1 = PostgresOffset {
+            txid: 4,
+            lsn: 2,
+            ..Default::default()
+        };
+        let off2 = PostgresOffset {
+            txid: 1,
+            lsn: 3,
+            ..Default::default()
+        };
+        let off3 = PostgresOffset {
+            txid: 5,
+            lsn: 1,
+            ..Default::default()
+        };
 
         assert!(off1 < off2);
         assert!(off3 < off1);
         assert!(off2 > off3);
+    }
+
+    #[test]
+    fn test_postgres_offset_partial_ord_with_lsn_commit() {
+        // Test comparison with both lsn_commit and lsn_proc fields
+        let off1 = PostgresOffset {
+            txid: 1,
+            lsn: 100,
+            lsn_commit: Some(200),
+            lsn_proc: Some(150),
+        };
+        let off2 = PostgresOffset {
+            txid: 2,
+            lsn: 300,
+            lsn_commit: Some(250),
+            lsn_proc: Some(200),
+        };
+
+        // Should compare using lsn_commit first when both have both fields
+        assert!(off1 < off2);
+
+        // Test with same lsn_commit but different lsn_proc
+        let off3 = PostgresOffset {
+            txid: 3,
+            lsn: 500,
+            lsn_commit: Some(200), // same as off1
+            lsn_proc: Some(160),   // higher than off1
+        };
+
+        // Should compare lsn_proc when lsn_commit is equal
+        assert!(off1 < off3);
+
+        // Test with missing lsn_proc - should fall back to lsn comparison
+        let off4 = PostgresOffset {
+            txid: 4,
+            lsn: 400,
+            lsn_commit: Some(100), // lower than off1's lsn_commit
+            lsn_proc: None,        // missing lsn_proc
+        };
+
+        // Should fall back to lsn comparison (off1.lsn=100 < off4.lsn=400)
+        assert!(off1 < off4);
+
+        // Test with missing lsn_commit - should fall back to lsn comparison
+        let off5 = PostgresOffset {
+            txid: 5,
+            lsn: 50,             // lower than off1.lsn
+            lsn_commit: None,    // missing lsn_commit
+            lsn_proc: Some(300), // higher than off1's lsn_proc
+        };
+
+        // Should fall back to lsn comparison (off5.lsn=50 < off1.lsn=100)
+        assert!(off5 < off1);
+
+        // Additional test cases: equal lsn_commit values with different lsn_proc
+        let off6 = PostgresOffset {
+            txid: 6,
+            lsn: 600,
+            lsn_commit: Some(500),
+            lsn_proc: Some(300),
+        };
+        let off7 = PostgresOffset {
+            txid: 7,
+            lsn: 700,
+            lsn_commit: Some(500), // same as off6
+            lsn_proc: Some(400),   // higher than off6
+        };
+
+        // Should compare lsn_proc since lsn_commit is equal
+        assert!(off6 < off7);
+
+        // Test reverse order
+        let off8 = PostgresOffset {
+            txid: 8,
+            lsn: 800,
+            lsn_commit: Some(500), // same as others
+            lsn_proc: Some(200),   // lower than off6
+        };
+
+        assert!(off8 < off6);
+        assert!(off8 < off7);
+
+        // Test equal lsn_commit and lsn_proc
+        let off9 = PostgresOffset {
+            txid: 9,
+            lsn: 900,
+            lsn_commit: Some(500), // same as off6
+            lsn_proc: Some(300),   // same as off6
+        };
+
+        // Should be equal
+        assert_eq!(off6.partial_cmp(&off9), Some(Ordering::Equal));
+    }
+
+    #[test]
+    fn test_debezium_offset_parsing() {
+        // Test parsing with all required fields present
+        let debezium_offset_with_fields = r#"{
+            "sourcePartition": {"server": "RW_CDC_1004"},
+            "sourceOffset": {
+                "last_snapshot_record": false,
+                "lsn": 29973552,
+                "txId": 1046,
+                "ts_usec": 1670826189008456,
+                "snapshot": true,
+                "lsn_commit": 29973600,
+                "lsn_proc": 29973580
+            },
+            "isHeartbeat": false
+        }"#;
+
+        let offset = PostgresOffset::parse_debezium_offset(debezium_offset_with_fields).unwrap();
+        assert_eq!(offset.txid, 1046);
+        assert_eq!(offset.lsn, 29973552);
+        assert_eq!(offset.lsn_commit, Some(29973600));
+        assert_eq!(offset.lsn_proc, Some(29973580));
+
+        // Test parsing should fail when required fields are missing
+        let debezium_offset_missing_fields = r#"{
+            "sourcePartition": {"server": "RW_CDC_1004"},
+            "sourceOffset": {
+                "last_snapshot_record": false,
+                "lsn": 29973552,
+                "txId": 1046,
+                "ts_usec": 1670826189008456,
+                "snapshot": true
+            },
+            "isHeartbeat": false
+        }"#;
+
+        let result = PostgresOffset::parse_debezium_offset(debezium_offset_missing_fields);
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("invalid postgres lsn_commit"));
     }
 
     #[test]
