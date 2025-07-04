@@ -1,0 +1,92 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Feature",
+    "description": "A set of features that are available based on the license.",
+    "oneOf": [
+        {
+            "description": "A dummy feature for testing purposes.",
+            "type": "string",
+            "const": "TestPaid"
+        },
+        {
+            "description": "Query historical data within the retention period.",
+            "type": "string",
+            "const": "TimeTravel"
+        },
+        {
+            "description": "Use Schema Registry from AWS Glue rather than Confluent.",
+            "type": "string",
+            "const": "GlueSchemaRegistry"
+        },
+        {
+            "description": "Delivering data to SnowFlake.",
+            "type": "string",
+            "const": "SnowflakeSink"
+        },
+        {
+            "description": "Delivering data to DynamoDb.",
+            "type": "string",
+            "const": "DynamoDbSink"
+        },
+        {
+            "description": "Delivering data to OpenSearch.",
+            "type": "string",
+            "const": "OpenSearchSink"
+        },
+        {
+            "description": "Delivering data to BigQuery.",
+            "type": "string",
+            "const": "BigQuerySink"
+        },
+        {
+            "description": "Delivering data to Shared tree on clickhouse cloud",
+            "type": "string",
+            "const": "ClickHouseSharedEngine"
+        },
+        {
+            "description": "Secret management.",
+            "type": "string",
+            "const": "SecretManagement"
+        },
+        {
+            "description": "Sink data from RisingWave to SQL Server.",
+            "type": "string",
+            "const": "SqlServerSink"
+        },
+        {
+            "description": "CDC source connector for Sql Server.",
+            "type": "string",
+            "const": "SqlServerCdcSource"
+        },
+        {
+            "description": "Auto replicate upstream DDL to CDC Table.",
+            "type": "string",
+            "const": "CdcAutoSchemaChange"
+        },
+        {
+            "description": "Delivering data to Iceberg with Glue catalog.",
+            "type": "string",
+            "const": "IcebergSinkWithGlue"
+        },
+        {
+            "description": "Disk cache and refilling to boost performance and reduce object store access cost.",
+            "type": "string",
+            "const": "ElasticDiskCache"
+        },
+        {
+            "description": "Resource group to isolate workload and failure.",
+            "type": "string",
+            "const": "ResourceGroup"
+        },
+        {
+            "description": "Failure isolation between databases.",
+            "type": "string",
+            "const": "DatabaseFailureIsolation"
+        },
+        {
+            "description": "Auto iceberg compaction.",
+            "type": "string",
+            "const": "IcebergCompaction"
+        }
+    ]
+}
