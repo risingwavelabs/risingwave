@@ -21,12 +21,15 @@ use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
 use fail::fail_point;
 use foyer::{
-    Engine, EventListener, FetchState, Hint, HybridCache, HybridCacheBuilder, HybridCacheEntry,
-    HybridCacheProperties,
+    Cache, CacheBuilder, CacheEntry, Engine, EventListener, FetchState, Hint, HybridCache,
+    HybridCacheBuilder, HybridCacheEntry, HybridCacheProperties, LargeEngineOptions,
 };
 use futures::{StreamExt, future};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
+use risingwave_hummock_sdk::vector_index::VectorFileInfo;
+use risingwave_hummock_sdk::{
+    HummockObjectId, HummockSstableObjectId, HummockVectorFileId, SST_OBJECT_SUFFIX,
+};
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
     ObjectError, ObjectMetadataIter, ObjectResult, ObjectStoreRef, ObjectStreamingUploader,
@@ -42,10 +45,13 @@ use super::{
 use crate::hummock::block_stream::{
     BlockDataStream, BlockStream, MemoryUsageTracker, PrefetchBlockStream,
 };
+use crate::hummock::vector::file::{VectorBlock, VectorBlockMeta, VectorFileMeta};
 use crate::hummock::{BlockHolder, HummockError, HummockResult};
 use crate::monitor::{HummockStateStoreMetrics, StoreLocalStatistic};
 
 pub type TableHolder = HybridCacheEntry<HummockSstableObjectId, Box<Sstable>>;
+pub type VectorFileHolder = CacheEntry<HummockVectorFileId, Box<VectorFileMeta>>;
+pub type VectorBlockHolder = CacheEntry<(HummockVectorFileId, usize), Box<VectorBlock>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
 pub struct SstableBlockIndex {
@@ -127,6 +133,9 @@ pub struct SstableStoreConfig {
 
     pub meta_cache: HybridCache<HummockSstableObjectId, Box<Sstable>>,
     pub block_cache: HybridCache<SstableBlockIndex, Box<Block>>,
+
+    pub vector_meta_cache: Cache<HummockVectorFileId, Box<VectorFileMeta>>,
+    pub vector_block_cache: Cache<(HummockVectorFileId, usize), Box<VectorBlock>>,
 }
 
 pub struct SstableStore {
@@ -135,6 +144,8 @@ pub struct SstableStore {
 
     meta_cache: HybridCache<HummockSstableObjectId, Box<Sstable>>,
     block_cache: HybridCache<SstableBlockIndex, Box<Block>>,
+    pub vector_meta_cache: Cache<HummockVectorFileId, Box<VectorFileMeta>>,
+    pub vector_block_cache: Cache<(HummockVectorFileId, usize), Box<VectorBlock>>,
 
     /// Recent filter for `(sst_obj_id, blk_idx)`.
     ///
@@ -165,6 +176,8 @@ impl SstableStore {
 
             meta_cache: config.meta_cache,
             block_cache: config.block_cache,
+            vector_meta_cache: config.vector_meta_cache,
+            vector_block_cache: config.vector_block_cache,
 
             recent_filter: config.recent_filter,
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
@@ -190,7 +203,7 @@ impl SstableStore {
             .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
                 u64::BITS as usize / 8 + value.estimate_size()
             })
-            .storage(Engine::Large)
+            .storage(Engine::Large(LargeEngineOptions::new()))
             .build()
             .await
             .map_err(HummockError::foyer_error)?;
@@ -202,7 +215,7 @@ impl SstableStore {
                 // FIXME(MrCroxx): Calculate block weight more accurately.
                 u64::BITS as usize * 2 / 8 + value.raw().len()
             })
-            .storage(Engine::Large)
+            .storage(Engine::Large(LargeEngineOptions::new()))
             .build()
             .await
             .map_err(HummockError::foyer_error)?;
@@ -219,6 +232,8 @@ impl SstableStore {
 
             meta_cache,
             block_cache,
+            vector_meta_cache: CacheBuilder::new(1 << 10).build(),
+            vector_block_cache: CacheBuilder::new(1 << 10).build(),
         })
     }
 
@@ -491,14 +506,73 @@ impl SstableStore {
         }
     }
 
-    pub fn get_sst_data_path(&self, object_id: HummockSstableObjectId) -> String {
-        let obj_prefix = self
-            .store
-            .get_object_prefix(object_id, self.use_new_object_prefix_strategy);
-        risingwave_hummock_sdk::get_sst_data_path(&obj_prefix, &self.path, object_id)
+    pub async fn get_vector_file_meta(
+        &self,
+        vector_file: &VectorFileInfo,
+    ) -> HummockResult<VectorFileHolder> {
+        self.vector_meta_cache
+            .fetch(vector_file.object_id, || {
+                let store = self.store.clone();
+                let path =
+                    self.get_object_data_path(HummockObjectId::VectorFile(vector_file.object_id));
+                let meta_offset = vector_file.meta_offset;
+                async move {
+                    let encoded_footer = store.read(&path, meta_offset..).await?;
+                    let meta = VectorFileMeta::decode_footer(&encoded_footer)?;
+                    Ok(Box::new(meta))
+                }
+            })
+            .await
     }
 
-    pub fn get_object_id_from_path(path: &str) -> HummockSstableObjectId {
+    pub async fn get_vector_block(
+        &self,
+        vector_file: &VectorFileInfo,
+        block_idx: usize,
+        block_meta: &VectorBlockMeta,
+    ) -> HummockResult<VectorBlockHolder> {
+        self.vector_block_cache
+            .fetch((vector_file.object_id, block_idx), || {
+                let store = self.store.clone();
+                let path =
+                    self.get_object_data_path(HummockObjectId::VectorFile(vector_file.object_id));
+                let start_offset = block_meta.offset;
+                let end_offset = start_offset + block_meta.block_size;
+                async move {
+                    let encoded_block = store.read(&path, start_offset..end_offset).await?;
+                    let block = VectorBlock::decode(&encoded_block)?;
+                    Ok(Box::new(block))
+                }
+            })
+            .await
+    }
+
+    pub fn insert_vector_cache(
+        &self,
+        object_id: HummockVectorFileId,
+        meta: VectorFileMeta,
+        blocks: Vec<VectorBlock>,
+    ) {
+        self.vector_meta_cache.insert(object_id, Box::new(meta));
+        for (idx, block) in blocks.into_iter().enumerate() {
+            self.vector_block_cache
+                .insert((object_id, idx), Box::new(block));
+        }
+    }
+
+    pub fn get_sst_data_path(&self, object_id: impl Into<HummockSstableObjectId>) -> String {
+        self.get_object_data_path(HummockObjectId::Sstable(object_id.into()))
+    }
+
+    pub fn get_object_data_path(&self, object_id: HummockObjectId) -> String {
+        let obj_prefix = self.store.get_object_prefix(
+            object_id.as_raw().inner(),
+            self.use_new_object_prefix_strategy,
+        );
+        risingwave_hummock_sdk::get_object_data_path(&obj_prefix, &self.path, object_id)
+    }
+
+    pub fn get_object_id_from_path(path: &str) -> HummockObjectId {
         risingwave_hummock_sdk::get_object_id_from_path(path)
     }
 
@@ -566,7 +640,7 @@ impl SstableStore {
         async move { entry.await.map_err(HummockError::foyer_error) }
     }
 
-    pub async fn list_object_metadata_from_object_store(
+    pub async fn list_sst_object_metadata_from_object_store(
         &self,
         prefix: Option<String>,
         start_after: Option<String>,
@@ -575,7 +649,7 @@ impl SstableStore {
         let list_path = format!("{}/{}", self.path, prefix.unwrap_or("".into()));
         let raw_iter = self.store.list(&list_path, start_after, limit).await?;
         let iter = raw_iter.filter(|r| match r {
-            Ok(i) => future::ready(i.key.ends_with(&format!(".{}", OBJECT_SUFFIX))),
+            Ok(i) => future::ready(i.key.ends_with(&format!(".{}", SST_OBJECT_SUFFIX))),
             Err(_) => future::ready(true),
         });
         Ok(Box::pin(iter))
@@ -583,7 +657,7 @@ impl SstableStore {
 
     pub fn create_sst_writer(
         self: Arc<Self>,
-        object_id: HummockSstableObjectId,
+        object_id: impl Into<HummockSstableObjectId>,
         options: SstableWriterOptions,
     ) -> BatchUploadWriter {
         BatchUploadWriter::new(object_id, self, options)
@@ -673,7 +747,7 @@ mod tests {
     use std::ops::Range;
     use std::sync::Arc;
 
-    use risingwave_hummock_sdk::HummockSstableObjectId;
+    use risingwave_hummock_sdk::HummockObjectId;
     use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
     use super::{SstableStoreRef, SstableWriterOptions};
@@ -687,7 +761,7 @@ mod tests {
     use crate::hummock::{CachePolicy, SstableIterator, SstableMeta, SstableStore};
     use crate::monitor::StoreLocalStatistic;
 
-    const SST_ID: HummockSstableObjectId = 1;
+    const SST_ID: u64 = 1;
 
     fn get_hummock_value(x: usize) -> HummockValue<Vec<u8>> {
         HummockValue::put(format!("overlapped_new_{}", x).as_bytes().to_vec())
@@ -788,6 +862,9 @@ mod tests {
         let object_id = 123;
         let data_path = sstable_store.get_sst_data_path(object_id);
         assert_eq!(data_path, "test/123.data");
-        assert_eq!(SstableStore::get_object_id_from_path(&data_path), object_id);
+        assert_eq!(
+            SstableStore::get_object_id_from_path(&data_path),
+            HummockObjectId::Sstable(object_id.into())
+        );
     }
 }

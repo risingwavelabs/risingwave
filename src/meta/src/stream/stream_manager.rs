@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
+use await_tree::{InstrumentAwait, span};
 use futures::FutureExt;
 use futures::future::join_all;
 use itertools::Itertools;
@@ -98,7 +99,7 @@ pub struct CreateStreamingJobContext {
 
     pub streaming_job: StreamingJob,
 
-    pub fragment_backfill_ordering: Option<FragmentBackfillOrder>,
+    pub fragment_backfill_ordering: FragmentBackfillOrder,
 }
 
 impl CreateStreamingJobContext {
@@ -253,12 +254,20 @@ impl GlobalStreamManager {
     /// 4. Store related meta data.
     ///
     /// This function is a wrapper over [`Self::run_create_streaming_job_command`].
+    #[await_tree::instrument]
     pub async fn create_streaming_job(
         self: &Arc<Self>,
         stream_job_fragments: StreamJobFragmentsToCreate,
         ctx: CreateStreamingJobContext,
         run_command_notifier: Option<oneshot::Sender<MetaResult<()>>>,
     ) -> MetaResult<NotificationVersion> {
+        let await_tree_key = format!("Create Streaming Job Worker ({})", ctx.streaming_job.id());
+        let await_tree_span = span!(
+            "{:?}({})",
+            ctx.streaming_job.job_type(),
+            ctx.streaming_job.name()
+        );
+
         let table_id = stream_job_fragments.stream_job_id();
         let database_id = ctx.streaming_job.database_id().into();
         let (sender, mut receiver) = tokio::sync::mpsc::channel(10);
@@ -290,7 +299,9 @@ impl GlobalStreamManager {
                         streaming_job.id() as _,
                     )
                     .await?;
-                stream_manager.source_manager.apply_source_change(source_change).await;
+                stream_manager.source_manager
+                    .apply_source_change(source_change)
+                    .await;
                 tracing::debug!(?streaming_job, "stream job finish");
                 version
             };
@@ -315,9 +326,17 @@ impl GlobalStreamManager {
             }
         }
         .in_current_span();
+
+        let fut = (self.env.await_tree_reg())
+            .register(await_tree_key, await_tree_span)
+            .instrument(Box::pin(fut));
         tokio::spawn(fut);
 
-        while let Some(state) = receiver.recv().await {
+        while let Some(state) = receiver
+            .recv()
+            .instrument_await("recv_creating_state")
+            .await
+        {
             match state {
                 CreatingState::Failed { reason } => {
                     tracing::debug!(id=?table_id, "stream job failed");
@@ -374,6 +393,7 @@ impl GlobalStreamManager {
 
     /// The function will only return after backfilling finishes
     /// ([`crate::manager::MetadataManager::wait_streaming_job_finished`]).
+    #[await_tree::instrument]
     async fn run_create_streaming_job_command(
         &self,
         stream_job_fragments: StreamJobFragmentsToCreate,

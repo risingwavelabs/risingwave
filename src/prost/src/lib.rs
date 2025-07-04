@@ -229,12 +229,36 @@ impl stream_plan::MaterializeNode {
             .collect()
     }
 
-    pub fn column_ids(&self) -> Vec<i32> {
+    pub fn column_descs(&self) -> Vec<plan_common::PbColumnDesc> {
         self.get_table()
             .unwrap()
             .columns
             .iter()
-            .map(|c| c.get_column_desc().unwrap().column_id)
+            .map(|c| c.get_column_desc().unwrap().clone())
+            .collect()
+    }
+}
+
+impl stream_plan::StreamScanNode {
+    /// See [`Self::upstream_column_ids`].
+    pub fn upstream_columns(&self) -> Vec<plan_common::PbColumnDesc> {
+        self.upstream_column_ids
+            .iter()
+            .map(|id| {
+                (self.table_desc.as_ref().unwrap().columns.iter())
+                    .find(|c| c.column_id == *id)
+                    .unwrap()
+                    .clone()
+            })
+            .collect()
+    }
+}
+
+impl stream_plan::SourceBackfillNode {
+    pub fn column_descs(&self) -> Vec<plan_common::PbColumnDesc> {
+        self.columns
+            .iter()
+            .map(|c| c.column_desc.as_ref().unwrap().clone())
             .collect()
     }
 }
@@ -265,13 +289,13 @@ impl common::WorkerNode {
 }
 
 impl stream_plan::SourceNode {
-    pub fn column_ids(&self) -> Option<Vec<i32>> {
+    pub fn column_descs(&self) -> Option<Vec<plan_common::PbColumnDesc>> {
         Some(
             self.source_inner
                 .as_ref()?
                 .columns
                 .iter()
-                .map(|c| c.get_column_desc().unwrap().column_id)
+                .map(|c| c.get_column_desc().unwrap().clone())
                 .collect(),
         )
     }
@@ -378,10 +402,9 @@ impl stream_plan::StreamNode {
     pub fn find_stream_source(&self) -> Option<u32> {
         if let Some(crate::stream_plan::stream_node::NodeBody::Source(source)) =
             self.node_body.as_ref()
+            && let Some(inner) = &source.source_inner
         {
-            if let Some(inner) = &source.source_inner {
-                return Some(inner.source_id);
-            }
+            return Some(inner.source_id);
         }
 
         for child in &self.input {
@@ -427,44 +450,40 @@ impl stream_plan::StreamNode {
         None
     }
 }
-
-impl stream_plan::FragmentTypeFlag {
-    /// Fragments that may be affected by `BACKFILL_RATE_LIMIT`.
-    pub fn backfill_rate_limit_fragments() -> i32 {
-        stream_plan::FragmentTypeFlag::SourceScan as i32
-            | stream_plan::FragmentTypeFlag::StreamScan as i32
-    }
-
-    /// Fragments that may be affected by `SOURCE_RATE_LIMIT`.
-    /// Note: for `FsFetch`, old fragments don't have this flag set, so don't use this to check.
-    pub fn source_rate_limit_fragments() -> i32 {
-        stream_plan::FragmentTypeFlag::Source as i32 | stream_plan::FragmentTypeFlag::FsFetch as i32
-    }
-
-    /// Fragments that may be affected by `BACKFILL_RATE_LIMIT`.
-    pub fn sink_rate_limit_fragments() -> i32 {
-        stream_plan::FragmentTypeFlag::Sink as i32
-    }
-
-    /// Note: this doesn't include `FsFetch` created in old versions.
-    pub fn rate_limit_fragments() -> i32 {
-        Self::backfill_rate_limit_fragments()
-            | Self::source_rate_limit_fragments()
-            | Self::sink_rate_limit_fragments()
-    }
-
-    pub fn dml_rate_limit_fragments() -> i32 {
-        stream_plan::FragmentTypeFlag::Dml as i32
-    }
-}
-
 impl stream_plan::Dispatcher {
     pub fn as_strategy(&self) -> stream_plan::DispatchStrategy {
         stream_plan::DispatchStrategy {
             r#type: self.r#type,
             dist_key_indices: self.dist_key_indices.clone(),
-            output_indices: self.output_indices.clone(),
+            output_mapping: self.output_mapping.clone(),
         }
+    }
+}
+
+impl stream_plan::DispatchOutputMapping {
+    /// Create a mapping that forwards all columns.
+    pub fn identical(len: usize) -> Self {
+        Self {
+            indices: (0..len as u32).collect(),
+            types: Vec::new(),
+        }
+    }
+
+    /// Create a mapping that forwards columns with given indices, without type conversion.
+    pub fn simple(indices: Vec<u32>) -> Self {
+        Self {
+            indices,
+            types: Vec::new(),
+        }
+    }
+
+    /// Assert that this mapping does not involve type conversion and return the indices.
+    pub fn into_simple_indices(self) -> Vec<u32> {
+        assert!(
+            self.types.is_empty(),
+            "types must be empty for simple mapping"
+        );
+        self.indices
     }
 }
 

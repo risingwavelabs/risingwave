@@ -1,0 +1,670 @@
+
+control substitution on
+
+# ------------ data prepare stage ------------
+system ok
+sqlcmd -C -d master -Q 'create database mydb;' -b
+
+system ok
+sqlcmd -C -d master -Q 'create database UpperDB COLLATE SQL_Latin1_General_CP1_CS_AS;' -b
+
+system ok
+sqlcmd -C -i e2e_test/source_inline/cdc/sql_server/sql_server_cdc_prepare.sql -b
+
+system ok
+sqlcmd -C -d UpperDB -Q "CREATE SCHEMA UpperSchema;" -b
+
+system ok
+sqlcmd -C -d UpperDB -Q "EXEC sys.sp_cdc_enable_db; CREATE TABLE UpperSchema.UpperTable (ID INT PRIMARY KEY, Name VARCHAR(100)); EXEC sys.sp_cdc_enable_table @source_schema = 'UpperSchema', @source_name = 'UpperTable', @role_name = NULL; INSERT INTO UpperSchema.UpperTable VALUES (1, 'Alice');" -b
+
+# ------------ validate stage ------------
+
+# invalid address, comment this test out because it takes long to wait for TCP connection timeout.
+# statement error The TCP/IP connection to the host wrong-sqlserver-server, port 1433 has failed.
+# CREATE SOURCE mssql_source WITH (
+#     connector = 'sqlserver-cdc',
+#     hostname = 'wrong-sqlserver-server',
+#     port = '${SQLCMDPORT:1433}',
+#     username = '${SQLCMDUSER:SA}',
+#     password = '${SQLCMDPASSWORD}',
+#     database.name = '${SQLCMDDBNAME}',
+# );
+
+# invalid username
+statement error Login failed for user 'SAP'
+CREATE SOURCE mssql_source WITH (
+    connector = 'sqlserver-cdc',
+    hostname = '${SQLCMDSERVER:sqlserver-server}',
+    port = '${SQLCMDPORT:1433}',
+    username = 'SAP',
+    password = '${SQLCMDPASSWORD}',
+    database.name = '${SQLCMDDBNAME}',
+);
+
+# invalid password
+statement error Login failed for user
+CREATE SOURCE mssql_source WITH (
+    connector = 'sqlserver-cdc',
+    hostname = '${SQLCMDSERVER:sqlserver-server}',
+    port = '${SQLCMDPORT:1433}',
+    username = '${SQLCMDUSER:SA}',
+    password = 'MyPassword123',
+    database.name = '${SQLCMDDBNAME}',
+);
+
+# invalid database
+statement error Cannot open database "wrong_mydb" requested by the login. The login failed.
+CREATE SOURCE mssql_source WITH (
+    connector = 'sqlserver-cdc',
+    hostname = '${SQLCMDSERVER:sqlserver-server}',
+    port = '${SQLCMDPORT:1433}',
+    username = '${SQLCMDUSER:SA}',
+    password = '${SQLCMDPASSWORD}',
+    database.name = 'wrong_mydb',
+);
+
+statement error Protocol error: connector sqlserver-cdc does not support `CREATE TABLE`, please use `CREATE SOURCE` instead
+CREATE TABLE orders (
+  order_id INT PRIMARY KEY,
+  order_date BIGINT,
+  customer_name VARCHAR,
+  price DECIMAL,
+  product_id INT,
+  order_status SMALLINT
+) WITH (
+  connector = 'sqlserver-cdc',
+  hostname = '${SQLCMDSERVER:sqlserver-server}',
+  port = '${SQLCMDPORT:1433}',
+  username = '${SQLCMDUSER:SA}',
+  password = '${SQLCMDPASSWORD}',
+  table.name = 'orders',
+  database.name = '${SQLCMDDBNAME}',
+);
+
+statement error Protocol error: connector sqlserver-cdc does not support `CREATE TABLE`, please use `CREATE SOURCE` instead
+CREATE TABLE single_type (
+  id INT,
+  c_time time,
+  PRIMARY KEY (id)
+)  WITH (
+  connector = 'sqlserver-cdc',
+  hostname = '${SQLCMDSERVER:sqlserver-server}',
+  port = '${SQLCMDPORT:1433}',
+  username = '${SQLCMDUSER:SA}',
+  password = '${SQLCMDPASSWORD}',
+  table.name = 'single_type',
+  database.name = '${SQLCMDDBNAME}',
+);
+
+statement error Protocol error: connector sqlserver-cdc does not support `CREATE TABLE`, please use `CREATE SOURCE` instead
+CREATE TABLE sqlserver_all_data_types (
+  id INT PRIMARY KEY,
+  c_bit BOOLEAN,
+  c_tinyint SMALLINT,
+  c_smallint SMALLINT,
+  c_int INTEGER,
+  c_bigint BIGINT,
+  c_decimal DECIMAL,
+  c_real REAL,
+  c_float FLOAT,
+  c_varchar VARCHAR,
+  c_varbinary BYTEA,
+  c_date DATE,
+  c_time TIME,
+  c_datetime2 TIMESTAMP,
+  c_datetimeoffset TIMESTAMPTZ,
+  c_money DECIMAL
+) WITH (
+  connector = 'sqlserver-cdc',
+  hostname = '${SQLCMDSERVER:sqlserver-server}',
+  port = '${SQLCMDPORT:1433}',
+  username = '${SQLCMDUSER:SA}',
+  password = '${SQLCMDPASSWORD}',
+  table.name = 'sqlserver_all_data_types',
+  database.name = '${SQLCMDDBNAME}',
+);
+
+# invalid dbname
+statement error does not match db_name
+CREATE SOURCE upper_mssql_source WITH (
+    connector = 'sqlserver-cdc',
+    hostname = '${SQLCMDSERVER:sqlserver-server}',
+    port = '${SQLCMDPORT:1433}',
+    username = '${SQLCMDUSER:SA}',
+    password = '${SQLCMDPASSWORD}',
+    database.name = 'upperdb',
+);
+
+# ------------ Create source/table/mv stage ------------
+# create a cdc source job, which format fixed to `FORMAT PLAIN ENCODE JSON`
+
+statement ok
+CREATE SOURCE mssql_source WITH (
+    connector = 'sqlserver-cdc',
+    hostname = '${SQLCMDSERVER:sqlserver-server}',
+    port = '${SQLCMDPORT:1433}',
+    username = '${SQLCMDUSER:SA}',
+    password = '${SQLCMDPASSWORD}',
+    database.name = '${SQLCMDDBNAME}',
+);
+
+statement ok
+CREATE SOURCE upper_mssql_source WITH (
+    connector = 'sqlserver-cdc',
+    hostname = '${SQLCMDSERVER:sqlserver-server}',
+    port = '${SQLCMDPORT:1433}',
+    username = '${SQLCMDUSER:SA}',
+    password = '${SQLCMDPASSWORD}',
+    database.name = 'UpperDB',
+);
+
+statement error Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source
+create materialized view mv as select * from mssql_source;
+
+
+# invalid table name
+statement error Sql Server table 'dbo'.'wrong_orders' doesn't exist
+CREATE TABLE shared_orders (
+    order_id INT,
+    order_date BIGINT,
+    customer_name VARCHAR,
+    price DECIMAL,
+    product_id INT,
+    order_status SMALLINT,
+    PRIMARY KEY (order_id)
+)  from mssql_source table 'mydb.dbo.wrong_orders';
+
+# invalid schema name
+statement error Sql Server table 'wrong_dbo'.'orders' doesn't exist
+CREATE TABLE shared_orders (
+    order_id INT,
+    order_date BIGINT,
+    customer_name VARCHAR,
+    price DECIMAL,
+    product_id INT,
+    order_status SMALLINT,
+    PRIMARY KEY (order_id)
+)  from mssql_source table 'mydb.wrong_dbo.orders';
+
+# wrong database name
+statement error The database name `wrong_mydb` in the FROM clause is not the same as the database name `mydb` in source definition
+CREATE TABLE shared_orders (
+    order_id INT,
+    order_date BIGINT,
+    customer_name VARCHAR,
+    price DECIMAL,
+    product_id INT,
+    order_status SMALLINT,
+    PRIMARY KEY (order_id)
+) from mssql_source table 'wrong_mydb.dbo.orders';
+
+# invalid primary key
+statement error INVALID_ARGUMENT: Primary key mismatch
+CREATE TABLE shared_orders (
+    order_id INT,
+    order_date BIGINT,
+    customer_name VARCHAR,
+    price DECIMAL,
+    product_id INT,
+    order_status SMALLINT,
+    PRIMARY KEY (order_date)
+)  from mssql_source table 'mydb.dbo.orders';
+
+# column name mismatch
+statement error Column 'wrong_order_date' not found in the upstream database
+CREATE TABLE shared_orders (
+    order_id INT,
+    wrong_order_date BIGINT,
+    customer_name VARCHAR,
+    price DECIMAL,
+    product_id INT,
+    order_status SMALLINT,
+    PRIMARY KEY (order_id)
+)  from mssql_source table 'mydb.dbo.orders';
+
+# column data type mismatch
+statement error INVALID_ARGUMENT: Incompatible data type of column order_date
+CREATE TABLE shared_orders (
+    order_id INT,
+    order_date VARCHAR,
+    customer_name VARCHAR,
+    price DECIMAL,
+    product_id INT,
+    order_status SMALLINT,
+    PRIMARY KEY (order_id)
+)  from mssql_source table 'mydb.dbo.orders';
+
+# table without enabling cdc
+statement error INVALID_ARGUMENT: Table 'dbo.orders_without_cdc' has not enabled CDC.
+CREATE TABLE shared_orders_without_cdc (
+    order_id INT,
+    order_date BIGINT,
+    customer_name VARCHAR,
+    price DECIMAL,
+    product_id INT,
+    order_status SMALLINT,
+    PRIMARY KEY (order_id)
+)  from mssql_source table 'mydb.dbo.orders_without_cdc';
+
+# use batch_size = 1 here to ensure not all the data is backfilled in one batch.
+statement ok
+CREATE TABLE shared_orders (
+    order_id INT,
+    order_date BIGINT,
+    customer_name VARCHAR,
+    price DECIMAL,
+    product_id INT,
+    order_status SMALLINT,
+    PRIMARY KEY (order_id)
+) WITH (
+    snapshot.batch_size = '1',
+) from mssql_source table 'mydb.dbo.orders';
+
+statement ok
+CREATE TABLE shared_single_type (*) from mssql_source table 'mydb.dbo.single_type';
+
+statement ok
+CREATE TABLE shared_sqlserver_all_data_types (
+    *
+) from mssql_source table 'mydb.dbo.sqlserver_all_data_types';
+
+sleep 5s
+
+statement ok
+DROP table shared_sqlserver_all_data_types;
+
+statement ok
+CREATE TABLE test_pk_uuid (
+    "id" CHARACTER VARYING,
+    "NAME" CHARACTER VARYING,
+    PRIMARY KEY ("id")
+) from mssql_source table 'mydb.dbo.test_pk_uuid';
+
+statement ok
+CREATE TABLE shared_sqlserver_all_data_types (
+    id INT,
+    c_bit BOOLEAN,
+    c_tinyint SMALLINT,
+    c_smallint SMALLINT,
+    c_int INTEGER,
+    c_bigint BIGINT,
+    c_decimal DECIMAL,
+    c_real REAL,
+    c_float FLOAT,
+    c_char VARCHAR,
+    c_varchar VARCHAR,
+    c_nvarchar VARCHAR,
+    c_ntext VARCHAR,
+    c_binary BYTEA,
+    c_varbinary BYTEA,
+    c_uniqueidentifier VARCHAR,
+    c_date DATE,
+    c_time TIME,
+    c_datetime2 TIMESTAMP,
+    c_datetimeoffset TIMESTAMPTZ,
+    c_xml varchar,
+    c_money decimal,
+    PRIMARY KEY (id)
+) from mssql_source table 'mydb.dbo.sqlserver_all_data_types';
+
+statement error Sql Server table 'UpperSchema'.'UpperTable' doesn't exist in 'mydb'
+CREATE TABLE upper_table (
+    "ID" INT,
+    "Name" VARCHAR,
+    PRIMARY KEY ("ID")
+)  from mssql_source table 'mydb.UpperSchema.UpperTable';
+
+statement error Column 'name' not found in the upstream database
+CREATE TABLE upper_table (
+    "ID" INT,
+    name VARCHAR,
+    PRIMARY KEY ("ID")
+)  from upper_mssql_source table 'UpperDB.UpperSchema.UpperTable';
+
+statement error Sql Server table 'upperSchema'.'upperTable' doesn't exist in 'UpperDB'
+CREATE TABLE upper_table (
+    "ID" INT,
+    "Name" VARCHAR,
+    PRIMARY KEY ("ID")
+)  from upper_mssql_source table 'UpperDB.upperSchema.upperTable';
+
+statement ok
+CREATE TABLE upper_table (
+    "ID" INT,
+    "Name" VARCHAR,
+    PRIMARY KEY ("ID")
+)
+INCLUDE TIMESTAMP AS commit_ts
+INCLUDE DATABASE_NAME as database_name
+INCLUDE SCHEMA_NAME as schema_name
+INCLUDE TABLE_NAME as table_name
+from upper_mssql_source table 'UpperDB.UpperSchema.UpperTable';
+
+statement ok
+create materialized view shared_orders_cnt as select count(*) as cnt from shared_orders;
+
+statement ok
+create materialized view shared_single_type_cnt as select count(*) as cnt from shared_single_type;
+
+statement ok
+create materialized view shared_sqlserver_all_data_types_cnt as select count(*) as cnt from shared_sqlserver_all_data_types;
+
+# sleep to ensure the data in mssql tables is consumed from Debezium message instead of backfill.
+sleep 20s
+
+# ------------ check stage ------------
+query I
+select cnt from shared_orders_cnt;
+----
+3
+
+query I
+select count(*) from test_pk_uuid;
+----
+2000
+
+query I
+select cnt from shared_single_type_cnt;
+----
+1
+
+query I
+select cnt from shared_sqlserver_all_data_types_cnt;
+----
+3
+
+query III
+select * from shared_orders order by order_id;
+----
+1 1558430840000 Bob 11 1 1
+2 1558430840001 Alice 21 2 1
+3 1558430840002 Alice 19 2 1
+
+query I
+SELECT * from shared_single_type order by id;
+----
+3 23:59:59.999
+
+query TTTTTTT
+SELECT id, c_bit, c_tinyint, c_smallint, c_int, c_bigint from shared_sqlserver_all_data_types order by id;
+----
+1 f 0 0 0 0
+2 t 255 -32768 -2147483648 -9223372036854775808
+3 t 127 32767 2147483647 9223372036854775807
+
+query TTTT
+SELECT id, c_decimal, c_real, c_float from shared_sqlserver_all_data_types order by id;
+----
+1 0 0 0
+2 -10 -10000 -10000
+3 -10 10000 10000
+
+query TTTTTTT
+SELECT id, c_varchar, c_nvarchar, c_ntext, c_binary, c_varbinary, c_uniqueidentifier from shared_sqlserver_all_data_types order by id;
+----
+1 (empty) 中 中 \xff000000 NULL NULL
+2 aa 🌹 🌹 NULL \xff 6F9619FF-8B86-D011-B42D-00C04FC964FF
+3 zzzz 🌹👍 🌹👍 \xffffffff \xffffffff 6F9619FF-8B86-D011-B42D-00C04FC964FF
+
+query TTT
+SELECT id, char_length(c_char) from shared_sqlserver_all_data_types order by id;
+----
+1 4
+2 4
+3 4
+
+query TTTTTTT
+SELECT id, c_date, c_time, c_datetime2, c_datetimeoffset from shared_sqlserver_all_data_types order by id;
+----
+1 2001-01-01 00:00:00 2001-01-01 00:00:00 2001-01-01 00:00:00+00:00
+2 1990-01-01 13:59:59.123 2000-01-01 11:00:00.123 1990-01-01 00:00:01.123+00:00
+3 2999-12-31 23:59:59.999 2099-12-31 23:59:59.999 2999-12-31 23:59:59.999+00:00
+
+query TTTTTTT
+SELECT id, c_xml from shared_sqlserver_all_data_types order by id;
+----
+1 <Person><Name>John Doe</Name><Age>30</Age></Person>
+2 <Person><Name>Jane Doe</Name><Age>28</Age></Person>
+3 <Name>Jane Doe</Name>
+
+# ------------ kill cluster ------------
+# system ok
+# risedev kill
+
+# sleep 30s
+
+# ------------ add rows stage ------------
+system ok
+sqlcmd -C -i e2e_test/source_inline/cdc/sql_server/sql_server_cdc_insert.sql -b
+
+system ok
+sqlcmd -C -d UpperDB -Q "INSERT INTO UpperSchema.UpperTable VALUES (11, 'Alice');" -b
+
+sleep 10s
+
+# ------------ recover cluster ------------
+# system ok
+# risedev dev ci-1cn-1fe-with-recovery
+
+# sleep 30s
+
+# ------------ check after recovery stage ------------
+
+query I
+select cnt from shared_orders_cnt;
+----
+6
+
+query I
+select cnt from shared_single_type_cnt;
+----
+2
+
+query I
+select cnt from shared_sqlserver_all_data_types_cnt;
+----
+6
+
+query III
+select * from shared_orders order by order_id;
+----
+1 1558430840000 Bob 11 1 1
+2 1558430840001 Alice 21 2 1
+3 1558430840002 Alice 19 2 1
+11 1558430840000 Bob 11 1 1
+12 1558430840001 Alice 21 2 1
+13 1558430840002 Alice 19 2 1
+
+query I
+SELECT * from shared_single_type order by id;
+----
+3 23:59:59.999
+13 23:59:59.999
+
+query TTTTTTT
+SELECT id, c_bit, c_tinyint, c_smallint, c_int, c_bigint from shared_sqlserver_all_data_types order by id;
+----
+1 f 0 0 0 0
+2 t 255 -32768 -2147483648 -9223372036854775808
+3 t 127 32767 2147483647 9223372036854775807
+11 f 0 0 0 0
+12 t 255 -32768 -2147483648 -9223372036854775808
+13 t 127 32767 2147483647 9223372036854775807
+
+query TTTT
+SELECT id, c_decimal, c_real, c_float from shared_sqlserver_all_data_types order by id;
+----
+1 0 0 0
+2 -10 -10000 -10000
+3 -10 10000 10000
+11 0 0 0
+12 -10 -10000 -10000
+13 -10 10000 10000
+
+query TTTTTTT
+SELECT id, c_varchar, c_nvarchar, c_ntext, c_binary, c_varbinary, c_uniqueidentifier from shared_sqlserver_all_data_types order by id;
+----
+1 (empty) 中 中 \xff000000 NULL NULL
+2 aa 🌹 🌹 NULL \xff 6F9619FF-8B86-D011-B42D-00C04FC964FF
+3 zzzz 🌹👍 🌹👍 \xffffffff \xffffffff 6F9619FF-8B86-D011-B42D-00C04FC964FF
+11 (empty) 中 中 \xff000000 NULL NULL
+12 aa 🌹 🌹 NULL \xff 6F9619FF-8B86-D011-B42D-00C04FC964FF
+13 zzzz 🌹👍 🌹👍 \xffffffff \xffffffff 6F9619FF-8B86-D011-B42D-00C04FC964FF
+
+query TTT
+SELECT id, char_length(c_char) from shared_sqlserver_all_data_types order by id;
+----
+1 4
+2 4
+3 4
+11 4
+12 4
+13 4
+
+query TTTTTTT
+SELECT id, c_date, c_time, c_datetime2, c_datetimeoffset from shared_sqlserver_all_data_types order by id;
+----
+1 2001-01-01 00:00:00 2001-01-01 00:00:00 2001-01-01 00:00:00+00:00
+2 1990-01-01 13:59:59.123 2000-01-01 11:00:00.123 1990-01-01 00:00:01.123+00:00
+3 2999-12-31 23:59:59.999 2099-12-31 23:59:59.999 2999-12-31 23:59:59.999+00:00
+11 2001-01-01 00:00:00 2001-01-01 00:00:00 2001-01-01 00:00:00+00:00
+12 1990-01-01 13:59:59.123 2000-01-01 11:00:00.123 1990-01-01 00:00:01.123+00:00
+13 2999-12-31 23:59:59.999 2099-12-31 23:59:59.999 2999-12-31 23:59:59.999+00:00
+
+query TTTTTTT
+SELECT id, c_xml, c_money from shared_sqlserver_all_data_types order by id;
+----
+1 <Person><Name>John Doe</Name><Age>30</Age></Person>  100.51
+2 <Person><Name>Jane Doe</Name><Age>28</Age></Person>  100.50
+3 <Name>Jane Doe</Name> 100
+11 <Person><Name>John Doe</Name><Age>30</Age></Person> 200.5000
+12 <Person><Name>Jane Doe</Name><Age>28</Age></Person> 200.5000
+13 <Name>Jane Doe</Name> 200.5000
+
+query TTTTTTTT
+SELECT "ID", "Name", database_name, schema_name, table_name from upper_table order by "ID";
+----
+1 Alice UpperDB UpperSchema UpperTable
+11 Alice UpperDB UpperSchema UpperTable
+
+query TTTTTTTT
+SELECT commit_ts from upper_table where "ID" = 1;
+----
+1970-01-01 00:00:00+00:00
+
+query TTTTTTTT
+SELECT commit_ts > '2024-08-16 00:00:00.000+00:00' from upper_table where "ID" = 11;
+----
+t
+
+# Test auto-fill functionality for SQL Server CDC table names
+# Test with schema.table format (should auto-fill database name)
+statement ok
+CREATE TABLE shared_orders_schema_table (
+    order_id INT,
+    order_date BIGINT,
+    customer_name VARCHAR,
+    price DECIMAL,
+    product_id INT,
+    order_status SMALLINT,
+    PRIMARY KEY (order_id)
+) from mssql_source table 'dbo.orders';
+
+# Test with table only format (should auto-fill database name and use default schema 'dbo')
+statement ok
+CREATE TABLE shared_orders_table_only (
+    order_id INT,
+    order_date BIGINT,
+    customer_name VARCHAR,
+    price DECIMAL,
+    product_id INT,
+    order_status SMALLINT,
+    PRIMARY KEY (order_id)
+) from mssql_source table 'orders';
+
+# Test with full format (should work as before)
+statement ok
+CREATE TABLE shared_orders_full_format (
+    order_id INT,
+    order_date BIGINT,
+    customer_name VARCHAR,
+    price DECIMAL,
+    product_id INT,
+    order_status SMALLINT,
+    PRIMARY KEY (order_id)
+) from mssql_source table 'mydb.dbo.orders';
+
+# Test with invalid format (should still fail)
+statement error The upstream table name must be in one of these formats: 'database.schema.table', 'schema.table', or 'table'
+CREATE TABLE shared_orders_invalid (
+    order_id INT,
+    order_date BIGINT,
+    customer_name VARCHAR,
+    price DECIMAL,
+    product_id INT,
+    order_status SMALLINT,
+    PRIMARY KEY (order_id)
+) from mssql_source table 'mydb.dbo.orders.extra';
+
+# Test with wrong database name in full format (should still fail)
+statement error The database name `wrong_mydb` in the FROM clause is not the same as the database name `mydb` in source definition
+CREATE TABLE shared_orders_wrong_db (
+    order_id INT,
+    order_date BIGINT,
+    customer_name VARCHAR,
+    price DECIMAL,
+    product_id INT,
+    order_status SMALLINT,
+    PRIMARY KEY (order_id)
+) from mssql_source table 'wrong_mydb.dbo.orders';
+
+# Test with custom schema in schema.table format
+statement ok
+CREATE TABLE shared_single_type_custom_schema (
+    id INT,
+    c_time time,
+    PRIMARY KEY (id)
+) from mssql_source table 'dbo.single_type';
+
+# Test with table only format for single_type
+statement ok
+CREATE TABLE shared_single_type_table_only (
+    id INT,
+    c_time time,
+    PRIMARY KEY (id)
+) from mssql_source table 'single_type';
+
+sleep 5s
+
+# Verify the new tables work correctly
+query I
+select count(*) from shared_orders_schema_table;
+----
+6
+
+query I
+select count(*) from shared_orders_table_only;
+----
+6
+
+query I
+select count(*) from shared_orders_full_format;
+----
+6
+
+query I
+select count(*) from shared_single_type_custom_schema;
+----
+2
+
+query I
+select count(*) from shared_single_type_table_only;
+----
+2
+
+# ------------ drop stage ------------
+statement ok
+drop source upper_mssql_source cascade;
+
+statement ok
+drop source mssql_source cascade;

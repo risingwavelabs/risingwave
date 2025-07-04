@@ -165,7 +165,7 @@ impl DorisSink {
                     i.name
                 ))
             })?;
-            if !Self::check_and_correct_column_type(&i.data_type, value.to_string())? {
+            if !Self::check_and_correct_column_type(&i.data_type, value.clone())? {
                 return Err(SinkError::Doris(format!(
                     "Column type don't match, column name is {:?}. doris type is {:?} risingwave type is {:?} ",
                     i.name, value, i.data_type
@@ -216,6 +216,7 @@ impl DorisSink {
             risingwave_common::types::DataType::Map(_) => {
                 Err(SinkError::Doris("doris can not support Map".to_owned()))
             }
+            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
         }
     }
 }

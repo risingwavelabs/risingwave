@@ -243,13 +243,13 @@ impl SchemaCatalog {
     pub fn drop_source(&mut self, id: SourceId) {
         let source_ref = self.source_by_id.remove(&id).unwrap();
         self.source_by_name.remove(&source_ref.name).unwrap();
-        if let Some(connection_id) = source_ref.connection_id {
-            if let Occupied(mut e) = self.connection_source_ref.entry(connection_id) {
-                let source_ids = e.get_mut();
-                source_ids.retain_mut(|sid| *sid != id);
-                if source_ids.is_empty() {
-                    e.remove_entry();
-                }
+        if let Some(connection_id) = source_ref.connection_id
+            && let Occupied(mut e) = self.connection_source_ref.entry(connection_id)
+        {
+            let source_ids = e.get_mut();
+            source_ids.retain_mut(|sid| *sid != id);
+            if source_ids.is_empty() {
+                e.remove_entry();
             }
         }
     }
@@ -295,13 +295,13 @@ impl SchemaCatalog {
     pub fn drop_sink(&mut self, id: SinkId) {
         let sink_ref = self.sink_by_id.remove(&id).unwrap();
         self.sink_by_name.remove(&sink_ref.name).unwrap();
-        if let Some(connection_id) = sink_ref.connection_id {
-            if let Occupied(mut e) = self.connection_sink_ref.entry(connection_id.0) {
-                let sink_ids = e.get_mut();
-                sink_ids.retain_mut(|sid| *sid != id);
-                if sink_ids.is_empty() {
-                    e.remove_entry();
-                }
+        if let Some(connection_id) = sink_ref.connection_id
+            && let Occupied(mut e) = self.connection_sink_ref.entry(connection_id.0)
+        {
+            let sink_ids = e.get_mut();
+            sink_ids.retain_mut(|sid| *sid != id);
+            if sink_ids.is_empty() {
+                e.remove_entry();
             }
         }
     }
@@ -732,25 +732,22 @@ impl SchemaCatalog {
         self.system_table_by_name.values()
     }
 
-    pub fn get_table_by_name(&self, table_name: &str) -> Option<&Arc<TableCatalog>> {
-        self.table_by_name.get(table_name)
+    pub fn get_table_by_name(
+        &self,
+        table_name: &str,
+        bind_creating_relations: bool,
+    ) -> Option<&Arc<TableCatalog>> {
+        self.table_by_name
+            .get(table_name)
+            .filter(|&table| bind_creating_relations || table.is_created())
+    }
+
+    pub fn get_any_table_by_name(&self, table_name: &str) -> Option<&Arc<TableCatalog>> {
+        self.get_table_by_name(table_name, true)
     }
 
     pub fn get_created_table_by_name(&self, table_name: &str) -> Option<&Arc<TableCatalog>> {
-        self.table_by_name
-            .get(table_name)
-            .filter(|&table| table.stream_job_status == StreamJobStatus::Created)
-    }
-
-    /// Get a table by name, if it's a created table,
-    /// or if it's an internal table (whether created or not).
-    pub fn get_created_table_or_any_internal_table_by_name(
-        &self,
-        table_name: &str,
-    ) -> Option<&Arc<TableCatalog>> {
-        self.table_by_name.get(table_name).filter(|&table| {
-            table.stream_job_status == StreamJobStatus::Created || table.is_internal_table()
-        })
+        self.get_table_by_name(table_name, false)
     }
 
     pub fn get_table_by_id(&self, table_id: &TableId) -> Option<&Arc<TableCatalog>> {

@@ -25,6 +25,7 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::{report_scarf_enabled, report_to_scarf, telemetry_env_enabled};
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common_service::{MetricsManager, TracingExtractLayer};
+use risingwave_jni_core::jvm_runtime::register_jvm_builder;
 use risingwave_meta::MetaStoreBackend;
 use risingwave_meta::barrier::GlobalBarrierManager;
 use risingwave_meta::controller::catalog::CatalogController;
@@ -48,6 +49,7 @@ use risingwave_meta_service::heartbeat_service::HeartbeatServiceImpl;
 use risingwave_meta_service::hosted_iceberg_catalog_service::HostedIcebergCatalogServiceImpl;
 use risingwave_meta_service::hummock_service::HummockServiceImpl;
 use risingwave_meta_service::meta_member_service::MetaMemberServiceImpl;
+use risingwave_meta_service::monitor_service::MonitorServiceImpl;
 use risingwave_meta_service::notification_service::NotificationServiceImpl;
 use risingwave_meta_service::scale_service::ScaleServiceImpl;
 use risingwave_meta_service::serving_service::ServingServiceImpl;
@@ -77,6 +79,7 @@ use risingwave_pb::meta::session_param_service_server::SessionParamServiceServer
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::meta::system_params_service_server::SystemParamsServiceServer;
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoServiceServer;
+use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use risingwave_rpc_client::ComputeClientPool;
 use sea_orm::{ConnectionTrait, DbBackend};
@@ -188,6 +191,8 @@ pub async fn rpc_serve_with_store(
     init_session_config: SessionConfig,
     shutdown: CancellationToken,
 ) -> MetaResult<()> {
+    register_jvm_builder();
+
     // TODO(shutdown): directly use cancellation token
     let (election_shutdown_tx, election_shutdown_rx) = watch::channel(());
 
@@ -348,10 +353,17 @@ pub async fn start_service_as_election_leader(
     let metadata_manager = MetadataManager::new(cluster_controller, catalog_controller);
 
     let serving_vnode_mapping = Arc::new(ServingVnodeMapping::default());
+    let max_serving_parallelism = env
+        .session_params_manager_impl_ref()
+        .get_params()
+        .await
+        .batch_parallelism()
+        .map(|p| p.get());
     serving::on_meta_start(
         env.notification_manager_ref(),
         &metadata_manager,
         serving_vnode_mapping.clone(),
+        max_serving_parallelism,
     )
     .await;
 
@@ -391,10 +403,12 @@ pub async fn start_service_as_election_leader(
     let prometheus_selector = opts.prometheus_selector.unwrap_or_default();
     let diagnose_command = Arc::new(risingwave_meta::manager::diagnose::DiagnoseCommand::new(
         metadata_manager.clone(),
+        env.await_tree_reg().clone(),
         hummock_manager.clone(),
         env.event_log_manager_ref(),
         prometheus_client.clone(),
         prometheus_selector.clone(),
+        opts.redact_sql_option_keywords.clone(),
     ));
 
     let trace_state = otlp_embedded::State::new(otlp_embedded::Config {
@@ -406,10 +420,12 @@ pub async fn start_service_as_election_leader(
     #[cfg(not(madsim))]
     let _dashboard_task = if let Some(ref dashboard_addr) = address_info.dashboard_addr {
         let dashboard_service = crate::dashboard::DashboardService {
+            await_tree_reg: env.await_tree_reg().clone(),
             dashboard_addr: *dashboard_addr,
             prometheus_client,
             prometheus_selector,
             metadata_manager: metadata_manager.clone(),
+            hummock_manager: hummock_manager.clone(),
             compute_clients: ComputeClientPool::new(1, env.opts.compute_client_config.clone()), /* typically no need for plural clients */
             diagnose_command,
             trace_state,
@@ -479,6 +495,7 @@ pub async fn start_service_as_election_leader(
 
     // TODO: introduce compactor event stream handler to handle iceberg compaction events.
     let (iceberg_compaction_mgr, iceberg_compactor_event_rx) = IcebergCompactionManager::build(
+        env.clone(),
         metadata_manager.clone(),
         iceberg_compactor_manager.clone(),
         meta_metrics.clone(),
@@ -487,6 +504,10 @@ pub async fn start_service_as_election_leader(
     sub_tasks.push(IcebergCompactionManager::compaction_stat_loop(
         iceberg_compaction_mgr.clone(),
         iceberg_compaction_stat_rx,
+    ));
+
+    sub_tasks.push(IcebergCompactionManager::gc_loop(
+        iceberg_compaction_mgr.clone(),
     ));
 
     let scale_controller = Arc::new(ScaleController::new(
@@ -582,6 +603,10 @@ pub async fn start_service_as_election_leader(
     let event_log_srv = EventLogServiceImpl::new(env.event_log_manager_ref());
     let cluster_limit_srv = ClusterLimitServiceImpl::new(env.clone(), metadata_manager.clone());
     let hosted_iceberg_catalog_srv = HostedIcebergCatalogServiceImpl::new(env.clone());
+    let monitor_srv = MonitorServiceImpl {
+        metadata_manager: metadata_manager.clone(),
+        await_tree_reg: env.await_tree_reg().clone(),
+    };
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(prometheus_addr.to_string())
@@ -626,6 +651,7 @@ pub async fn start_service_as_election_leader(
             env.notification_manager_ref(),
             metadata_manager.clone(),
             serving_vnode_mapping,
+            env.session_params_manager_impl_ref(),
         )
         .await,
     );
@@ -718,7 +744,8 @@ pub async fn start_service_as_election_leader(
         .add_service(ClusterLimitServiceServer::new(cluster_limit_srv))
         .add_service(HostedIcebergCatalogServiceServer::new(
             hosted_iceberg_catalog_srv,
-        ));
+        ))
+        .add_service(MonitorServiceServer::new(monitor_srv));
 
     #[cfg(not(madsim))] // `otlp-embedded` does not use madsim-patched tonic
     let server_builder = server_builder.add_service(TraceServiceServer::new(trace_srv));

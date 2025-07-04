@@ -44,6 +44,7 @@ periodic_tombstone_reclaim_compaction_interval_sec = 600
 move_table_size_limit = 10737418240
 split_group_size_limit = 68719476736
 cut_table_size_limit = 1073741824
+protect_drop_table_with_incoming_sink = false
 do_not_config_object_storage_lifecycle = false
 partition_vnode_count = 16
 table_high_write_throughput_threshold = 16777216
@@ -108,6 +109,9 @@ meta_time_travel_vacuum_interval_sec = 30
 meta_hummock_time_travel_epoch_version_insert_batch_size = 1000
 meta_hummock_gc_history_insert_batch_size = 1000
 meta_hummock_time_travel_filter_out_objects_batch_size = 1000
+meta_hummock_time_travel_filter_out_objects_v1 = false
+meta_hummock_time_travel_filter_out_objects_list_version_batch_size = 10
+meta_hummock_time_travel_filter_out_objects_list_delta_batch_size = 1000
 
 [meta.developer.meta_compute_client_config]
 connect_timeout_secs = 5
@@ -128,7 +132,6 @@ acquire_timeout_sec = 30
 [batch]
 enable_barrier_read = false
 statement_timeout_in_sec = 3600
-frontend_compute_runtime_worker_threads = 4
 mask_worker_temporary_secs = 30
 redact_sql_option_keywords = ["credential", "key", "password", "private", "secret", "token"]
 enable_spill = true
@@ -142,6 +145,9 @@ batch_chunk_size = 1024
 batch_local_execute_buffer_size = 64
 
 [batch.developer.batch_compute_client_config]
+connect_timeout_secs = 5
+
+[batch.developer.batch_frontend_client_config]
 connect_timeout_secs = 5
 
 [frontend]
@@ -224,12 +230,31 @@ table_info_statistic_history_times = 240
 mem_table_spill_threshold = 4194304
 compactor_max_overlap_sst_count = 64
 compactor_max_preload_meta_file_count = 32
+vector_file_block_size_kb = 1024
 time_travel_version_cache_capacity = 10
+iceberg_compaction_target_file_size_mb = 1024
+iceberg_compaction_enable_validate = false
+iceberg_compaction_max_record_batch_rows = 1024
+iceberg_compaction_min_size_per_partition_mb = 1024
+iceberg_compaction_max_file_count_per_partition = 32
+iceberg_compaction_write_parquet_max_row_group_rows = 102400
+
+[storage.cache]
+vector_block_cache_capacity_mb = 16
+vector_block_cache_shard_num = 16
+vector_meta_cache_capacity_mb = 16
+vector_meta_cache_shard_num = 16
 
 [storage.cache.block_cache_eviction]
 algorithm = "Lru"
 
 [storage.cache.meta_cache_eviction]
+algorithm = "Lru"
+
+[storage.cache.vector_block_cache_eviction_config]
+algorithm = "Lru"
+
+[storage.cache.vector_meta_cache_eviction_config]
 algorithm = "Lru"
 
 [storage.data_file_cache]
@@ -242,6 +267,7 @@ recover_concurrency = 8
 insert_rate_limit_mb = 0
 indexer_shards = 64
 compression = "None"
+fifo_probation_ratio = 0.1
 recover_mode = "Quiet"
 
 [storage.data_file_cache.throttle]
@@ -267,6 +293,7 @@ recover_concurrency = 8
 insert_rate_limit_mb = 0
 indexer_shards = 64
 compression = "None"
+fifo_probation_ratio = 0.1
 recover_mode = "Quiet"
 
 [storage.meta_file_cache.throttle]

@@ -42,7 +42,7 @@ pub trait TableFunction: std::fmt::Debug + Sync + Send {
     /// # Contract of the output
     ///
     /// The returned `DataChunk` contains two or three columns:
-    /// - The first column is an I32Array containing row indices of input chunk. It should be
+    /// - The first column is an `I32Array` containing row indices of input chunk. It should be
     ///   monotonically increasing.
     /// - The second column is the output values. The data type of the column is `return_type`.
     /// - (Optional) If any error occurs, the error message is stored in the third column.
@@ -232,17 +232,17 @@ impl<'a> TableFunctionOutputIter<'a> {
 
 /// Checks if the output chunk returned by `TableFunction::eval` contains any error.
 pub fn check_error(chunk: &DataChunk) -> Result<()> {
-    if let Some(errors) = chunk.columns().get(2) {
-        if errors.null_bitmap().any() {
-            return Err(ExprError::Custom(
-                errors
-                    .as_utf8()
-                    .iter()
-                    .find_map(|s| s)
-                    .expect("no error message")
-                    .into(),
-            ));
-        }
+    if let Some(errors) = chunk.columns().get(2)
+        && errors.null_bitmap().any()
+    {
+        return Err(ExprError::Custom(
+            errors
+                .as_utf8()
+                .iter()
+                .find_map(|s| s)
+                .expect("no error message")
+                .into(),
+        ));
     }
     Ok(())
 }

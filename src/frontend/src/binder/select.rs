@@ -20,7 +20,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{
-    DataType as AstDataType, Distinct, Expr, Select, SelectItem, Value,
+    DataType as AstDataType, Distinct, Expr, Select, SelectItem, Value, WindowSpec,
 };
 
 use super::bind_context::{Clause, ColumnBinding};
@@ -42,6 +42,7 @@ pub struct BoundSelect {
     pub where_clause: Option<ExprImpl>,
     pub group_by: GroupBy,
     pub having: Option<ExprImpl>,
+    pub window: HashMap<String, WindowSpec>,
     pub schema: Schema,
 }
 
@@ -128,11 +129,20 @@ impl BoundSelect {
             .chain(self.having.iter_mut())
     }
 
-    pub fn is_correlated(&self, depth: Depth) -> bool {
+    pub fn is_correlated_by_depth(&self, depth: Depth) -> bool {
         self.exprs()
             .any(|expr| expr.has_correlated_input_ref_by_depth(depth))
             || match self.from.as_ref() {
-                Some(relation) => relation.is_correlated(depth),
+                Some(relation) => relation.is_correlated_by_depth(depth),
+                None => false,
+            }
+    }
+
+    pub fn is_correlated_by_correlated_id(&self, correlated_id: CorrelatedId) -> bool {
+        self.exprs()
+            .any(|expr| expr.has_correlated_input_ref_by_correlated_id(correlated_id))
+            || match self.from.as_ref() {
+                Some(relation) => relation.is_correlated_by_correlated_id(correlated_id),
                 None => false,
             }
     }
@@ -192,6 +202,23 @@ impl Binder {
     pub(super) fn bind_select(&mut self, select: Select) -> Result<BoundSelect> {
         // Bind FROM clause.
         let from = self.bind_vec_table_with_joins(select.from)?;
+
+        // Bind WINDOW clause early - store named window definitions for window function resolution
+        let mut named_windows = HashMap::new();
+        for named_window in &select.window {
+            let window_name = named_window.name.real_value();
+            if named_windows.contains_key(&window_name) {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "window \"{}\" is already defined",
+                    window_name
+                ))
+                .into());
+            }
+            named_windows.insert(window_name, named_window.window_spec.clone());
+        }
+
+        // Store window definitions in bind context for window function resolution
+        self.context.named_windows = named_windows.clone();
 
         // Bind SELECT clause.
         let (select_items, aliases) = self.bind_select_list(select.projection)?;
@@ -283,15 +310,15 @@ impl Binder {
             })
             .collect::<Result<Vec<Field>>>()?;
 
-        if let Some(Relation::Share(bound)) = &from {
-            if matches!(bound.input, BoundShareInput::ChangeLog(_))
-                && fields.iter().filter(|&x| x.name.eq(CHANGELOG_OP)).count() > 1
-            {
-                return Err(ErrorCode::BindError(
-                    "The source table of changelog cannot have `changelog_op`, please rename it first".to_owned()
-                )
-                .into());
-            }
+        if let Some(Relation::Share(bound)) = &from
+            && matches!(bound.input, BoundShareInput::ChangeLog(_))
+            && fields.iter().filter(|&x| x.name.eq(CHANGELOG_OP)).count() > 1
+        {
+            return Err(ErrorCode::BindError(
+                "The source table of changelog cannot have `changelog_op`, please rename it first"
+                    .to_owned(),
+            )
+            .into());
         }
 
         Ok(BoundSelect {
@@ -302,6 +329,7 @@ impl Binder {
             where_clause: selection,
             group_by,
             having,
+            window: named_windows,
             schema: Schema { fields },
         })
     }
@@ -714,6 +742,7 @@ fn data_type_to_alias(data_type: &AstDataType) -> Option<String> {
         AstDataType::Jsonb => "jsonb".to_owned(),
         AstDataType::Array(ty) => return data_type_to_alias(ty),
         AstDataType::Custom(ty) => format!("{}", ty),
+        AstDataType::Vector(_) => "vector".to_owned(),
         AstDataType::Struct(_) | AstDataType::Map(_) => {
             // It doesn't bother to derive aliases for these types.
             return None;

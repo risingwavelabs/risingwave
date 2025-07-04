@@ -32,6 +32,7 @@ use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType, cmp_datum};
 use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerializer};
 use risingwave_pb::catalog::Table;
+use risingwave_pb::catalog::table::Engine;
 use risingwave_storage::mem_table::KeyOp;
 use risingwave_storage::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 
@@ -66,6 +67,10 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     depended_subscription_ids: HashSet<u32>,
 
     metrics: MaterializeMetrics,
+
+    /// No data will be written to hummock table. This Materialize is just a dummy node.
+    /// Used for APPEND ONLY table with iceberg engine. All data will be written to iceberg table directly.
+    is_dummy_table: bool,
 }
 
 fn get_op_consistency_level(
@@ -143,6 +148,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         let metrics_info =
             MetricsInfo::new(metrics, table_catalog.id, actor_context.id, "Materialize");
 
+        let is_dummy_table =
+            table_catalog.engine == Some(Engine::Iceberg as i32) && table_catalog.append_only;
+
         Self {
             input,
             schema,
@@ -157,6 +165,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             ),
             conflict_behavior,
             version_column_index,
+            is_dummy_table,
             may_have_downstream,
             depended_subscription_ids,
             metrics: mv_metrics,
@@ -183,6 +192,12 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
             let msg = match msg {
                 Message::Watermark(w) => Message::Watermark(w),
+                Message::Chunk(chunk) if self.is_dummy_table => {
+                    self.metrics
+                        .materialize_input_row_count
+                        .inc_by(chunk.cardinality() as u64);
+                    Message::Chunk(chunk)
+                }
                 Message::Chunk(chunk) => {
                     self.metrics
                         .materialize_input_row_count
@@ -295,10 +310,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     // Update the vnode bitmap for the state table if asked.
                     if let Some((_, cache_may_stale)) =
                         post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                        && cache_may_stale
                     {
-                        if cache_may_stale {
-                            self.materialize_cache.lru_cache.clear();
-                        }
+                        self.materialize_cache.lru_cache.clear();
                     }
 
                     self.metrics
@@ -403,6 +417,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             ),
             conflict_behavior,
             version_column_index: None,
+            is_dummy_table: false,
             may_have_downstream: true,
             depended_subscription_ids: HashSet::new(),
             metrics,

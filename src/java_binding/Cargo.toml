@@ -1,13 +1,16 @@
 [package]
 name = "risingwave_java_binding"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
 
 [dependencies]
 anyhow = "1"
 bytes = "1"
 cfg-or-panic = "0.2"
-foyer ={ workspace = true }
+foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 jni = "0.21.1"
 prost = { workspace = true }
@@ -33,9 +36,6 @@ tracing = "0.1"
 
 [dev-dependencies]
 risingwave_expr = { workspace = true }
-
-[lib]
-crate-type = ["cdylib"]
 
 [[bin]]
 name = "data-chunk-payload-generator"

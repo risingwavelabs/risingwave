@@ -7,14 +7,13 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
 auto_impl = "1"
 await-tree = { workspace = true }
-chrono = { version = "0.4", default-features = false, features = [
+chrono = { workspace = true, features = [
     "clock",
     "std",
 ] }
@@ -37,9 +36,9 @@ risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_expr_macro = { path = "../macro" }
 risingwave_pb = { workspace = true }
-smallvec = "1"
+smallvec = { workspace = true }
 static_assertions = "1"
-thiserror = "1"
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt-multi-thread",

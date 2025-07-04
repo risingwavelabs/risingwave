@@ -30,7 +30,7 @@ pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use thiserror_ext::AsReport;
 use tokio_postgres::types::Type as TokioPgType;
 
-use super::{Expr, ExprImpl, ExprRewriter, Literal, RwResult, infer_type};
+use super::{ErrorCode, Expr, ExprImpl, ExprRewriter, Literal, RwResult, infer_type};
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
 use crate::catalog::root_catalog::SchemaPath;
@@ -259,7 +259,7 @@ impl TableFunction {
                         let mut rw_types = vec![];
                         for field in &fields {
                             rw_types.push((
-                                field.name().to_string(),
+                                field.name().clone(),
                                 IcebergArrowConvert.type_from_field(field)?,
                             ));
                         }
@@ -379,19 +379,20 @@ impl TableFunction {
         {
             let schema = tokio::task::block_in_place(|| {
                 FRONTEND_RUNTIME.block_on(async {
-                    let (client, connection) = tokio_postgres::connect(
-                        format!(
-                            "host={} port={} user={} password={} dbname={}",
-                            evaled_args[0],
-                            evaled_args[1],
-                            evaled_args[2],
-                            evaled_args[3],
-                            evaled_args[4]
-                        )
-                        .as_str(),
-                        tokio_postgres::NoTls,
-                    )
-                    .await?;
+                    let mut conf = tokio_postgres::Config::new();
+                    let (client, connection) = conf
+                        .host(&evaled_args[0])
+                        .port(evaled_args[1].parse().map_err(|_| {
+                            ErrorCode::InvalidParameterValue(format!(
+                                "port number: {}",
+                                evaled_args[1]
+                            ))
+                        })?)
+                        .user(&evaled_args[2])
+                        .password(evaled_args[3].clone())
+                        .dbname(&evaled_args[4])
+                        .connect(tokio_postgres::NoTls)
+                        .await?;
 
                     tokio::spawn(async move {
                         if let Err(e) = connection.await {
@@ -538,9 +539,20 @@ impl TableFunction {
                             MySqlColumnType::MYSQL_TYPE_TIMESTAMP2 => DataType::Timestamptz,
 
                             // String types
-                            MySqlColumnType::MYSQL_TYPE_VARCHAR
-                            | MySqlColumnType::MYSQL_TYPE_STRING
-                            | MySqlColumnType::MYSQL_TYPE_VAR_STRING => DataType::Varchar,
+                            MySqlColumnType::MYSQL_TYPE_VARCHAR => DataType::Varchar,
+                            // mysql_async does not have explicit `varbinary` and `binary` types,
+                            // we need to check the `ColumnFlags` to distinguish them.
+                            MySqlColumnType::MYSQL_TYPE_STRING
+                            | MySqlColumnType::MYSQL_TYPE_VAR_STRING => {
+                                if column
+                                    .flags()
+                                    .contains(mysql_common::constants::ColumnFlags::BINARY_FLAG)
+                                {
+                                    DataType::Bytea
+                                } else {
+                                    DataType::Varchar
+                                }
+                            }
 
                             // JSON types
                             MySqlColumnType::MYSQL_TYPE_JSON => DataType::Jsonb,
@@ -579,6 +591,37 @@ impl TableFunction {
                 function_type: TableFunctionType::MysqlQuery,
                 user_defined: None,
             })
+        }
+    }
+
+    /// This is a highly specific _internal_ table function meant to scan and aggregate
+    /// `backfill_table_id`, `row_count` for all MVs which are still being created.
+    pub fn new_internal_backfill_progress() -> Self {
+        TableFunction {
+            args: vec![],
+            return_type: DataType::Struct(StructType::new(vec![
+                ("job_id".to_owned(), DataType::Int32),
+                ("fragment_id".to_owned(), DataType::Int32),
+                ("backfill_state_table_id".to_owned(), DataType::Int32),
+                ("current_row_count".to_owned(), DataType::Int64),
+                ("min_epoch".to_owned(), DataType::Int64),
+            ])),
+            function_type: TableFunctionType::InternalBackfillProgress,
+            user_defined: None,
+        }
+    }
+
+    pub fn new_internal_source_backfill_progress() -> Self {
+        TableFunction {
+            args: vec![],
+            return_type: DataType::Struct(StructType::new(vec![
+                ("job_id".to_owned(), DataType::Int32),
+                ("fragment_id".to_owned(), DataType::Int32),
+                ("backfill_state_table_id".to_owned(), DataType::Int32),
+                ("backfill_progress".to_owned(), DataType::Jsonb),
+            ])),
+            function_type: TableFunctionType::InternalSourceBackfillProgress,
+            user_defined: None,
         }
     }
 

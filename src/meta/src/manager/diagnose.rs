@@ -21,15 +21,14 @@ use itertools::Itertools;
 use prometheus_http_query::response::Data::Vector;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::StackTraceResponseExt;
+use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_hummock_sdk::level::Level;
 use risingwave_meta_model::table::TableType;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::EventLog;
 use risingwave_pb::meta::event_log::Event;
 use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
-use risingwave_pb::monitor_service::{StackTraceRequest, StackTraceResponse};
-use risingwave_rpc_client::ComputeClientPool;
-use risingwave_sqlparser::ast::{CompatibleFormatEncode, Statement, Value};
+use risingwave_sqlparser::ast::RedactSqlOptionKeywordsRef;
 use risingwave_sqlparser::parser::Parser;
 use serde_json::json;
 use thiserror_ext::AsReport;
@@ -38,35 +37,41 @@ use crate::MetaResult;
 use crate::hummock::HummockManagerRef;
 use crate::manager::MetadataManager;
 use crate::manager::event_log::EventLogManagerRef;
+use crate::rpc::await_tree::dump_cluster_await_tree;
 
 pub type DiagnoseCommandRef = Arc<DiagnoseCommand>;
 
 pub struct DiagnoseCommand {
     metadata_manager: MetadataManager,
+    await_tree_reg: await_tree::Registry,
     hummock_manger: HummockManagerRef,
     event_log_manager: EventLogManagerRef,
     prometheus_client: Option<prometheus_http_query::Client>,
     prometheus_selector: String,
+    redact_sql_option_keywords: RedactSqlOptionKeywordsRef,
 }
 
 impl DiagnoseCommand {
     pub fn new(
         metadata_manager: MetadataManager,
+        await_tree_reg: await_tree::Registry,
         hummock_manger: HummockManagerRef,
         event_log_manager: EventLogManagerRef,
         prometheus_client: Option<prometheus_http_query::Client>,
         prometheus_selector: String,
+        redact_sql_option_keywords: RedactSqlOptionKeywordsRef,
     ) -> Self {
         Self {
             metadata_manager,
+            await_tree_reg,
             hummock_manger,
             event_log_manager,
             prometheus_client,
             prometheus_selector,
+            redact_sql_option_keywords,
         }
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     pub async fn report(&self, actor_traces_format: ActorTracesFormat) -> String {
         let mut report = String::new();
         let _ = writeln!(
@@ -91,7 +96,6 @@ impl DiagnoseCommand {
         report
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn write_catalog(&self, s: &mut String) {
         self.write_catalog_inner(s).await;
         let _ = self.write_table_definition(s).await.inspect_err(|e| {
@@ -102,7 +106,6 @@ impl DiagnoseCommand {
         });
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn write_catalog_inner(&self, s: &mut String) {
         let guard = self
             .metadata_manager
@@ -126,7 +129,6 @@ impl DiagnoseCommand {
         let _ = writeln!(s, "number of function: {}", stat.function_num);
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn write_worker_nodes(&self, s: &mut String) {
         let Ok(worker_actor_count) = self.metadata_manager.worker_actor_count().await else {
             tracing::warn!("failed to get worker actor count");
@@ -218,7 +220,6 @@ impl DiagnoseCommand {
         let _ = writeln!(s, "{table}");
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     fn write_event_logs(&self, s: &mut String) {
         let event_logs = self
             .event_log_manager
@@ -316,7 +317,6 @@ impl DiagnoseCommand {
         );
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     fn write_event_logs_impl<'a, F>(
         s: &mut String,
         event_logs: impl Iterator<Item = &'a EventLog>,
@@ -359,7 +359,6 @@ impl DiagnoseCommand {
         let _ = writeln!(s, "{table}");
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn write_storage(&self, s: &mut String) {
         let mut sst_num = 0;
         let mut sst_total_file_size = 0;
@@ -386,7 +385,7 @@ impl DiagnoseCommand {
         #[derive(PartialEq, Eq)]
         struct SstableSort {
             compaction_group_id: u64,
-            sst_id: u64,
+            sst_id: HummockSstableId,
             delete_ratio: u64,
         }
         impl PartialOrd for SstableSort {
@@ -406,10 +405,10 @@ impl DiagnoseCommand {
         ) {
             if heap.len() < top_k {
                 heap.push(Reverse(e));
-            } else if let Some(mut p) = heap.peek_mut() {
-                if e.delete_ratio > p.0.delete_ratio {
-                    *p = Reverse(e);
-                }
+            } else if let Some(mut p) = heap.peek_mut()
+                && e.delete_ratio > p.0.delete_ratio
+            {
+                *p = Reverse(e);
             }
         }
 
@@ -481,7 +480,6 @@ impl DiagnoseCommand {
         self.write_storage_prometheus(s).await;
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn write_streaming_prometheus(&self, s: &mut String) {
         let _ = writeln!(s, "top sources by throughput (rows/s)");
         let query = format!(
@@ -510,7 +508,6 @@ impl DiagnoseCommand {
             .await;
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn write_storage_prometheus(&self, s: &mut String) {
         let _ = writeln!(s, "top Hummock Get by duration (second)");
         let query = format!(
@@ -581,7 +578,6 @@ impl DiagnoseCommand {
             .await;
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn write_instant_vector_impl(&self, s: &mut String, query: &str, labels: Vec<&str>) {
         let Some(ref client) = self.prometheus_client else {
             return;
@@ -611,34 +607,19 @@ impl DiagnoseCommand {
         }
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn write_await_tree(&self, s: &mut String, actor_traces_format: ActorTracesFormat) {
-        // Most lines of code are copied from dashboard::handlers::dump_await_tree_all, because the latter cannot be called directly from here.
-        let Ok(worker_nodes) = self
-            .metadata_manager
-            .list_worker_node(Some(WorkerType::ComputeNode), None)
-            .await
-        else {
-            tracing::warn!("failed to get worker nodes");
-            return;
-        };
+        let all = dump_cluster_await_tree(
+            &self.metadata_manager,
+            &self.await_tree_reg,
+            actor_traces_format,
+        )
+        .await;
 
-        let mut all = StackTraceResponse::default();
-
-        let compute_clients = ComputeClientPool::adhoc();
-        for worker_node in &worker_nodes {
-            if let Ok(client) = compute_clients.get(worker_node).await
-                && let Ok(result) = client
-                    .stack_trace(StackTraceRequest {
-                        actor_traces_format: actor_traces_format as i32,
-                    })
-                    .await
-            {
-                all.merge_other(result);
-            }
+        if let Ok(all) = all {
+            write!(s, "{}", all.output()).unwrap();
+        } else {
+            tracing::warn!("failed to dump await tree");
         }
-
-        write!(s, "{}", all.output()).unwrap();
     }
 
     async fn write_table_definition(&self, s: &mut String) -> MetaResult<()> {
@@ -704,8 +685,8 @@ impl DiagnoseCommand {
             for (id, (name, schema_id, definition)) in items {
                 obj_id_to_name.insert(id, name.clone());
                 let mut row = Row::new();
-                let may_redact =
-                    redact_all_sql_options(&definition).unwrap_or_else(|| "[REDACTED]".into());
+                let may_redact = redact_sql(&definition, self.redact_sql_option_keywords.clone())
+                    .unwrap_or_else(|| "[REDACTED]".into());
                 row.add_cell(id.into());
                 row.add_cell(name.into());
                 row.add_cell(schema_id.into());
@@ -769,7 +750,6 @@ impl DiagnoseCommand {
     }
 }
 
-#[cfg_attr(coverage, coverage(off))]
 fn try_add_cell<T: Into<comfy_table::Cell>>(row: &mut comfy_table::Row, t: Option<T>) {
     match t {
         Some(t) => {
@@ -781,56 +761,17 @@ fn try_add_cell<T: Into<comfy_table::Cell>>(row: &mut comfy_table::Row, t: Optio
     }
 }
 
-#[cfg_attr(coverage, coverage(off))]
 fn merge_prometheus_selector<'a>(selectors: impl IntoIterator<Item = &'a str>) -> String {
     selectors.into_iter().filter(|s| !s.is_empty()).join(",")
 }
 
-fn redact_all_sql_options(sql: &str) -> Option<String> {
-    let Ok(mut statements) = Parser::parse_sql(sql) else {
-        return None;
-    };
-    let mut redacted = String::new();
-    for statement in &mut statements {
-        let options = match statement {
-            Statement::CreateTable {
-                with_options,
-                format_encode,
-                ..
-            } => {
-                let format_encode = match format_encode {
-                    Some(CompatibleFormatEncode::V2(cs)) => Some(&mut cs.row_options),
-                    _ => None,
-                };
-                (Some(with_options), format_encode)
-            }
-            Statement::CreateSource { stmt } => {
-                let format_encode = match &mut stmt.format_encode {
-                    CompatibleFormatEncode::V2(cs) => Some(&mut cs.row_options),
-                    _ => None,
-                };
-                (Some(&mut stmt.with_properties.0), format_encode)
-            }
-            Statement::CreateSink { stmt } => {
-                let format_encode = match &mut stmt.sink_schema {
-                    Some(cs) => Some(&mut cs.row_options),
-                    _ => None,
-                };
-                (Some(&mut stmt.with_properties.0), format_encode)
-            }
-            _ => (None, None),
-        };
-        if let Some(options) = options.0 {
-            for option in options {
-                option.value = Value::SingleQuotedString("[REDACTED]".into()).into();
-            }
-        }
-        if let Some(options) = options.1 {
-            for option in options {
-                option.value = Value::SingleQuotedString("[REDACTED]".into()).into();
-            }
-        }
-        writeln!(&mut redacted, "{statement}").unwrap();
+fn redact_sql(sql: &str, keywords: RedactSqlOptionKeywordsRef) -> Option<String> {
+    match Parser::parse_sql(sql) {
+        Ok(sqls) => Some(
+            sqls.into_iter()
+                .map(|sql| sql.to_redacted_string(keywords.clone()))
+                .join(";"),
+        ),
+        Err(_) => None,
     }
-    Some(redacted)
 }

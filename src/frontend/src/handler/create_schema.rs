@@ -43,7 +43,7 @@ pub async fn handle_create_schema(
         .into());
     }
 
-    let (db_id, db_owner) = {
+    let (db_id, db_name, db_owner) = {
         let catalog_reader = session.env().catalog_reader();
         let reader = catalog_reader.read_guard();
         if reader
@@ -60,7 +60,7 @@ pub async fn handle_create_schema(
             };
         }
         let db = reader.get_database_by_name(database_name)?;
-        (db.id(), db.owner())
+        (db.id(), db.name.to_owned(), db.owner())
     };
 
     let schema_owner = if let Some(owner) = owner {
@@ -79,6 +79,7 @@ pub async fn handle_create_schema(
     session.check_privileges(&[ObjectCheckItem::new(
         db_owner,
         AclMode::Create,
+        db_name,
         Object::DatabaseId(db_id),
     )])?;
 

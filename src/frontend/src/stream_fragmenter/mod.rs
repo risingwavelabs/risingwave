@@ -25,22 +25,22 @@ use std::ops::Deref;
 use std::rc::Rc;
 
 use educe::Educe;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{FragmentTypeFlag, TableId};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::session_config::parallelism::ConfigParallelism;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
-    BackfillOrderStrategy, DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag,
-    NoOpNode, StreamContext, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
-    StreamScanType,
+    BackfillOrder, DispatchStrategy, DispatcherType, ExchangeNode, NoOpNode,
+    PbDispatchOutputMapping, StreamContext, StreamFragmentGraph as StreamFragmentGraphProto,
+    StreamNode, StreamScanType,
 };
 
 use self::rewrite::build_delta_join_without_arrange;
-use crate::error::Result;
+use crate::error::ErrorCode::NotSupported;
+use crate::error::{Result, RwError};
 use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::reorganize_elements_id;
-use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::parallelism::derive_parallelism;
 
 /// The mutable state when building fragment graph.
@@ -67,6 +67,10 @@ pub struct BuildFragmentGraphState {
     share_mapping: HashMap<u32, LocalFragmentId>,
     /// operator id to `StreamNode` mapping used by share operator.
     share_stream_node_mapping: HashMap<u32, StreamNode>,
+
+    has_source_backfill: bool,
+    has_snapshot_backfill: bool,
+    has_cross_db_snapshot_backfill: bool,
 }
 
 impl BuildFragmentGraphState {
@@ -146,21 +150,39 @@ impl GraphJobType {
 pub fn build_graph(
     plan_node: PlanRef,
     job_type: Option<GraphJobType>,
-) -> SchedulerResult<StreamFragmentGraphProto> {
+) -> Result<StreamFragmentGraphProto> {
     build_graph_with_strategy(plan_node, job_type, None)
 }
 
 pub fn build_graph_with_strategy(
     plan_node: PlanRef,
     job_type: Option<GraphJobType>,
-    backfill_order_strategy: Option<BackfillOrderStrategy>,
-) -> SchedulerResult<StreamFragmentGraphProto> {
+    backfill_order: Option<BackfillOrder>,
+) -> Result<StreamFragmentGraphProto> {
     let ctx = plan_node.plan_base().ctx();
     let plan_node = reorganize_elements_id(plan_node);
 
     let mut state = BuildFragmentGraphState::default();
     let stream_node = plan_node.to_stream_prost(&mut state)?;
-    generate_fragment_graph(&mut state, stream_node).unwrap();
+    generate_fragment_graph(&mut state, stream_node)?;
+    if state.has_source_backfill && state.has_snapshot_backfill {
+        return Err(RwError::from(NotSupported(
+            "Snapshot backfill with shared source backfill is not supported".to_owned(),
+            "`SET streaming_use_shared_source = false` to disable shared source backfill, or \
+                    `SET streaming_use_snapshot_backfill = false` to disable snapshot backfill"
+                .to_owned(),
+        )));
+    }
+    if state.has_cross_db_snapshot_backfill
+        && let Some(ref backfill_order) = backfill_order
+        && !backfill_order.order.is_empty()
+    {
+        return Err(RwError::from(NotSupported(
+            "Backfill order control with cross-db snapshot backfill is not supported".to_owned(),
+            "Please remove backfill order specification from your query".to_owned(),
+        )));
+    }
+
     let mut fragment_graph = state.fragment_graph.to_protobuf();
 
     // Set table ids.
@@ -186,7 +208,7 @@ pub fn build_graph_with_strategy(
         timezone: ctx.get_session_timezone(),
     });
 
-    fragment_graph.backfill_order_strategy = backfill_order_strategy;
+    fragment_graph.backfill_order = backfill_order;
 
     Ok(fragment_graph)
 }
@@ -318,12 +340,14 @@ fn build_fragment(
     recursive::tracker!().recurse(|_t| {
         // Update current fragment based on the node we're visiting.
         match stream_node.get_node_body()? {
-            NodeBody::BarrierRecv(_) => {
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::BarrierRecv as u32
-            }
+            NodeBody::BarrierRecv(_) => current_fragment
+                .fragment_type_mask
+                .add(FragmentTypeFlag::BarrierRecv),
 
             NodeBody::Source(node) => {
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::Source as u32;
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::Source);
 
                 if let Some(source) = node.source_inner.as_ref()
                     && let Some(source_info) = source.info.as_ref()
@@ -336,29 +360,39 @@ fn build_fragment(
             }
 
             NodeBody::Dml(_) => {
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::Dml as u32;
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::Dml);
             }
 
             NodeBody::Materialize(_) => {
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::Mview as u32;
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::Mview);
             }
 
-            NodeBody::Sink(_) => {
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::Sink as u32
-            }
+            NodeBody::Sink(_) => current_fragment
+                .fragment_type_mask
+                .add(FragmentTypeFlag::Sink),
 
             NodeBody::TopN(_) => current_fragment.requires_singleton = true,
 
             NodeBody::StreamScan(node) => {
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::StreamScan as u32;
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::StreamScan);
                 match node.stream_scan_type() {
                     StreamScanType::SnapshotBackfill => {
-                        current_fragment.fragment_type_mask |=
-                            FragmentTypeFlag::SnapshotBackfillStreamScan as u32;
+                        current_fragment
+                            .fragment_type_mask
+                            .add(FragmentTypeFlag::SnapshotBackfillStreamScan);
+                        state.has_snapshot_backfill = true;
                     }
                     StreamScanType::CrossDbSnapshotBackfill => {
-                        current_fragment.fragment_type_mask |=
-                            FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32;
+                        current_fragment
+                            .fragment_type_mask
+                            .add(FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan);
+                        state.has_cross_db_snapshot_backfill = true;
                     }
                     StreamScanType::Unspecified
                     | StreamScanType::Chain
@@ -376,13 +410,18 @@ fn build_fragment(
             }
 
             NodeBody::StreamCdcScan(_) => {
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::StreamScan as u32;
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::StreamScan);
                 // the backfill algorithm is not parallel safe
                 current_fragment.requires_singleton = true;
+                state.has_source_backfill = true;
             }
 
             NodeBody::CdcFilter(node) => {
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::CdcFilter as u32;
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::CdcFilter);
                 // memorize upstream source id for later use
                 state
                     .dependent_table_ids
@@ -392,26 +431,35 @@ fn build_fragment(
                     .push(node.upstream_source_id);
             }
             NodeBody::SourceBackfill(node) => {
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::SourceScan as u32;
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::SourceScan);
                 // memorize upstream source id for later use
                 let source_id = node.upstream_source_id;
                 state.dependent_table_ids.insert(source_id.into());
                 current_fragment.upstream_table_ids.push(source_id);
+                state.has_source_backfill = true;
             }
 
             NodeBody::Now(_) => {
                 // TODO: Remove this and insert a `BarrierRecv` instead.
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::Now as u32;
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::Now);
                 current_fragment.requires_singleton = true;
             }
 
             NodeBody::Values(_) => {
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::Values as u32;
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::Values);
                 current_fragment.requires_singleton = true;
             }
 
             NodeBody::StreamFsFetch(_) => {
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::FsFetch as u32;
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::FsFetch);
             }
 
             _ => {}
@@ -478,8 +526,10 @@ fn build_fragment(
                             let no_shuffle_strategy = DispatchStrategy {
                                 r#type: DispatcherType::NoShuffle as i32,
                                 dist_key_indices: vec![],
-                                output_indices: (0..ref_fragment_node.fields.len() as u32)
-                                    .collect(),
+                                output_mapping: PbDispatchOutputMapping::identical(
+                                    ref_fragment_node.fields.len(),
+                                )
+                                .into(),
                             };
 
                             let no_shuffle_exchange_operator_id = state.gen_operator_id() as u64;

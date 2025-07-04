@@ -18,6 +18,7 @@ use opendal::Operator;
 use opendal::layers::LoggingLayer;
 use opendal::services::Hdfs;
 use risingwave_common::config::ObjectStoreConfig;
+use risingwave_common::global_jvm::JVM;
 
 use super::{MediaType, OpendalObjectStore};
 // use crate::object::opendal_engine::ATOMIC_WRITE_DIR;
@@ -32,11 +33,10 @@ impl OpendalObjectStore {
         metrics: Arc<ObjectStoreMetrics>,
     ) -> ObjectResult<Self> {
         // Init the jvm explicitly to avoid duplicate JVM creation by hdfs client
-        // use risingwave_jni_core::jvm_runtime::JVM;
-        // let _ = JVM
-        //     .get_or_init()
-        //     .inspect_err(|e| tracing::error!("Failed to init JVM: {:?}", e))
-        //     .unwrap();
+        let _ = JVM
+            .get_or_init()
+            .inspect_err(|e| tracing::error!("Failed to init JVM: {:?}", e))
+            .unwrap();
 
         // Create hdfs backend builder.
         let mut builder = Hdfs::default();

@@ -18,11 +18,14 @@ use risingwave_expr::window_function::WindowFuncKind;
 
 use super::{BoxedRule, Rule};
 use crate::PlanRef;
-use crate::expr::{ExprImpl, ExprType, collect_input_refs};
+use crate::expr::{
+    Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, Literal, collect_input_refs,
+};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalFilter, LogicalTopN, PlanTreeNodeUnary};
 use crate::optimizer::property::Order;
 use crate::planner::LIMIT_ALL_COUNT;
+use crate::utils::Condition;
 
 /// Transforms the following pattern to group `TopN` (No Ranking Output).
 ///
@@ -42,6 +45,9 @@ use crate::planner::LIMIT_ALL_COUNT;
 /// FROM ..
 /// WHERE rank [ < | <= | > | >= | = ] ..;
 /// ```
+///
+/// Also optimizes filter arithmetic expressions in the `Project <- Filter <- OverWindow` pattern,
+/// such as simplifying `(row_number - 1) = 0` to `row_number = 1`.
 pub struct OverWindowToTopNRule;
 
 impl OverWindowToTopNRule {
@@ -64,6 +70,13 @@ impl Rule for OverWindowToTopNRule {
         let plan = filter.input();
         // The filter is directly on top of the over window after predicate pushdown.
         let over_window = plan.as_logical_over_window()?;
+
+        // First try to simplify filter arithmetic expressions
+        let filter = if let Some(simplified) = self.simplify_filter_arithmetic(filter) {
+            simplified
+        } else {
+            filter.clone()
+        };
 
         if over_window.window_functions().len() != 1 {
             // Queries with multiple window function calls are not supported yet.
@@ -134,6 +147,130 @@ impl Rule for OverWindowToTopNRule {
             over_window.clone_with_input(filter).into()
         };
         Some(plan)
+    }
+}
+
+impl OverWindowToTopNRule {
+    /// Simplify arithmetic expressions in filter conditions before TopN optimization
+    /// For example: `(row_number - 1) = 0` -> `row_number = 1`
+    fn simplify_filter_arithmetic(&self, filter: &LogicalFilter) -> Option<LogicalFilter> {
+        let new_predicate = self.simplify_filter_arithmetic_condition(filter.predicate())?;
+        Some(LogicalFilter::new(filter.input(), new_predicate))
+    }
+
+    /// Simplify arithmetic expressions in the filter condition
+    fn simplify_filter_arithmetic_condition(&self, predicate: &Condition) -> Option<Condition> {
+        let expr = predicate.as_expr_unless_true()?;
+        let mut rewriter = FilterArithmeticRewriter {};
+        let new_expr = rewriter.rewrite_expr(expr.clone());
+
+        if new_expr != expr {
+            Some(Condition::with_expr(new_expr))
+        } else {
+            None
+        }
+    }
+}
+
+/// Filter arithmetic simplification rewriter: simplifies `(col op const) = const2` to `col = (const2 reverse_op const)`
+struct FilterArithmeticRewriter {}
+
+impl ExprRewriter for FilterArithmeticRewriter {
+    fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
+        use ExprType::{
+            Equal, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual, NotEqual,
+        };
+
+        // Check if this is a comparison operation
+        match func_call.func_type() {
+            Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual => {
+                let inputs = func_call.inputs();
+                if inputs.len() == 2 {
+                    // Check if left operand is an arithmetic expression and right operand is a constant
+                    if let ExprImpl::FunctionCall(left_func) = &inputs[0]
+                        && inputs[1].is_const()
+                        && let Some(simplified) = self.simplify_arithmetic_comparison(
+                            left_func,
+                            &inputs[1],
+                            func_call.func_type(),
+                        )
+                    {
+                        return simplified;
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        // Recursively handle sub-expressions
+        let (func_type, inputs, ret_type) = func_call.decompose();
+        let new_inputs: Vec<_> = inputs
+            .into_iter()
+            .map(|input| self.rewrite_expr(input))
+            .collect();
+
+        FunctionCall::new_unchecked(func_type, new_inputs, ret_type).into()
+    }
+}
+
+impl FilterArithmeticRewriter {
+    /// Simplify arithmetic comparison: `(col op const1) comp const2` -> `col comp (const2 reverse_op const1)`
+    fn simplify_arithmetic_comparison(
+        &self,
+        arithmetic_func: &FunctionCall,
+        comparison_const: &ExprImpl,
+        comparison_op: ExprType,
+    ) -> Option<ExprImpl> {
+        use ExprType::{Add, Subtract};
+
+        // Check arithmetic operation
+        match arithmetic_func.func_type() {
+            Add | Subtract => {
+                let inputs = arithmetic_func.inputs();
+                if inputs.len() == 2 {
+                    // Find column reference and constant
+                    let (column_ref, arith_const, reverse_op) = if inputs[1].is_const() {
+                        // col op const
+                        let reverse_op = match arithmetic_func.func_type() {
+                            Add => Subtract,
+                            Subtract => Add,
+                            _ => unreachable!(),
+                        };
+                        (&inputs[0], &inputs[1], reverse_op)
+                    } else if inputs[0].is_const() && arithmetic_func.func_type() == Add {
+                        // const + col
+                        (&inputs[1], &inputs[0], Subtract)
+                    } else {
+                        return None;
+                    };
+
+                    // Calculate new constant value
+                    if let Ok(new_const_func) = FunctionCall::new(
+                        reverse_op,
+                        vec![comparison_const.clone(), arith_const.clone()],
+                    ) {
+                        let new_const_expr: ExprImpl = new_const_func.into();
+                        // Try constant folding
+                        if let Some(Ok(Some(folded_value))) = new_const_expr.try_fold_const() {
+                            let new_const =
+                                Literal::new(Some(folded_value), new_const_expr.return_type())
+                                    .into();
+
+                            // Construct new comparison expression
+                            if let Ok(new_comparison) = FunctionCall::new(
+                                comparison_op,
+                                vec![column_ref.clone(), new_const],
+                            ) {
+                                return Some(new_comparison.into());
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        None
     }
 }
 

@@ -28,6 +28,7 @@ use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{
     FrontendClientPool, FrontendClientPoolRef, StreamClientPool, StreamClientPoolRef,
 };
+use risingwave_sqlparser::ast::RedactSqlOptionKeywordsRef;
 use sea_orm::EntityTrait;
 
 use crate::MetaResult;
@@ -77,6 +78,9 @@ pub struct MetaSrvEnv {
 
     pub hummock_seq: Arc<SequenceGenerator>,
 
+    /// The await-tree registry of the current meta node.
+    await_tree_reg: await_tree::Registry,
+
     /// options read by all services
     pub opts: Arc<MetaOpts>,
 }
@@ -121,6 +125,9 @@ pub struct MetaOpts {
     pub hummock_time_travel_epoch_version_insert_batch_size: usize,
     pub hummock_gc_history_insert_batch_size: usize,
     pub hummock_time_travel_filter_out_objects_batch_size: usize,
+    pub hummock_time_travel_filter_out_objects_v1: bool,
+    pub hummock_time_travel_filter_out_objects_list_version_batch_size: usize,
+    pub hummock_time_travel_filter_out_objects_list_delta_batch_size: usize,
     /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
     /// attempt is rejected. Greater value reduces object store IO, meanwhile it results in
     /// more loss of in memory `HummockVersionCheckpoint::stale_objects` state when meta node is
@@ -143,7 +150,8 @@ pub struct MetaOpts {
     pub periodic_compaction_interval_sec: u64,
     /// Interval of reporting the number of nodes in the cluster.
     pub node_num_monitor_interval_sec: u64,
-
+    /// Whether to protect the drop table operation with incoming sink.
+    pub protect_drop_table_with_incoming_sink: bool,
     /// The Prometheus endpoint for Meta Dashboard Service.
     /// The Dashboard service uses this in the following ways:
     /// 1. Query Prometheus for relevant metrics to find Stream Graph Bottleneck, and display it.
@@ -264,6 +272,7 @@ pub struct MetaOpts {
     pub compute_client_config: RpcClientConfig,
     pub stream_client_config: RpcClientConfig,
     pub frontend_client_config: RpcClientConfig,
+    pub redact_sql_option_keywords: RedactSqlOptionKeywordsRef,
 }
 
 impl MetaOpts {
@@ -290,6 +299,9 @@ impl MetaOpts {
             hummock_time_travel_epoch_version_insert_batch_size: 1000,
             hummock_gc_history_insert_batch_size: 1000,
             hummock_time_travel_filter_out_objects_batch_size: 1000,
+            hummock_time_travel_filter_out_objects_v1: false,
+            hummock_time_travel_filter_out_objects_list_version_batch_size: 10,
+            hummock_time_travel_filter_out_objects_list_delta_batch_size: 1000,
             min_delta_log_num_for_hummock_version_checkpoint: 1,
             min_sst_retention_time_sec: 3600 * 24 * 7,
             full_gc_interval_sec: 3600 * 24 * 7,
@@ -299,6 +311,7 @@ impl MetaOpts {
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 60,
             node_num_monitor_interval_sec: 10,
+            protect_drop_table_with_incoming_sink: false,
             prometheus_endpoint: None,
             prometheus_selector: None,
             vpc_id: None,
@@ -347,6 +360,7 @@ impl MetaOpts {
             compute_client_config: RpcClientConfig::default(),
             stream_client_config: RpcClientConfig::default(),
             frontend_client_config: RpcClientConfig::default(),
+            redact_sql_option_keywords: Arc::new(Default::default()),
         }
     }
 }
@@ -435,6 +449,8 @@ impl MetaSrvEnv {
             cluster_id,
             hummock_seq: Arc::new(SequenceGenerator::new(meta_store_impl.conn.clone())),
             opts: opts.into(),
+            // Await trees on the meta node is lightweight, thus always enabled.
+            await_tree_reg: await_tree::Registry::new(Default::default()),
         })
     }
 
@@ -497,19 +513,28 @@ impl MetaSrvEnv {
     pub fn event_log_manager_ref(&self) -> EventLogManagerRef {
         self.event_log_manager.clone()
     }
+
+    pub fn await_tree_reg(&self) -> &await_tree::Registry {
+        &self.await_tree_reg
+    }
 }
 
 #[cfg(any(test, feature = "test"))]
 impl MetaSrvEnv {
     // Instance for test.
     pub async fn for_test() -> Self {
-        Self::for_test_opts(MetaOpts::test(false)).await
+        Self::for_test_opts(MetaOpts::test(false), |_| ()).await
     }
 
-    pub async fn for_test_opts(opts: MetaOpts) -> Self {
+    pub async fn for_test_opts(
+        opts: MetaOpts,
+        on_test_system_params: impl FnOnce(&mut risingwave_pb::meta::PbSystemParams),
+    ) -> Self {
+        let mut system_params = risingwave_common::system_param::system_params_for_test();
+        on_test_system_params(&mut system_params);
         Self::new(
             opts,
-            risingwave_common::system_param::system_params_for_test(),
+            system_params,
             Default::default(),
             SqlMetaStore::for_test().await,
         )

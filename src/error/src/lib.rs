@@ -26,9 +26,11 @@
 #![feature(trait_alias)]
 
 pub mod anyhow;
+pub mod code;
 pub mod common;
 pub mod macros;
 pub mod tonic;
+pub mod wrappers;
 
 // Re-export the `thiserror-ext` crate.
 pub use thiserror_ext;
@@ -39,3 +41,8 @@ pub trait Error = std::error::Error + Send + Sync + 'static;
 
 /// A boxed error type that is [`Send`], [`Sync`], and `'static`.
 pub type BoxedError = Box<dyn Error>;
+
+/// Request a copiable value from the error, trying both `request_value` and `request_ref`.
+pub fn error_request_copy<T: Copy + 'static>(err: &(impl std::error::Error + ?Sized)) -> Option<T> {
+    std::error::request_value(err).or_else(|| std::error::request_ref(err).copied())
+}

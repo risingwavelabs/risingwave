@@ -24,6 +24,7 @@ risingwave_expr_impl::enable!();
 use std::collections::{HashMap, HashSet};
 
 use anyhow::{Result, bail};
+use config::Configuration;
 use itertools::Itertools;
 use rand::Rng;
 use rand::prelude::IndexedRandom;
@@ -35,6 +36,7 @@ use risingwave_sqlparser::parser::Parser;
 
 use crate::sql_gen::SqlGenerator;
 
+pub mod config;
 pub mod reducer;
 mod sql_gen;
 pub mod test_runners;
@@ -45,14 +47,19 @@ pub use validation::is_permissible_error;
 pub use crate::sql_gen::{Table, print_function_table};
 
 /// Generate a random SQL string.
-pub fn sql_gen(rng: &mut impl Rng, tables: Vec<Table>) -> String {
-    let mut r#gen = SqlGenerator::new(rng, tables);
+pub fn sql_gen(rng: &mut impl Rng, tables: Vec<Table>, config: &Configuration) -> String {
+    let mut r#gen = SqlGenerator::new(rng, tables, config.clone());
     format!("{}", r#gen.gen_batch_query_stmt())
 }
 
 /// Generate `INSERT`
-pub fn insert_sql_gen(rng: &mut impl Rng, tables: Vec<Table>, count: usize) -> Vec<String> {
-    let mut r#gen = SqlGenerator::new(rng, vec![]);
+pub fn insert_sql_gen(
+    rng: &mut impl Rng,
+    tables: Vec<Table>,
+    count: usize,
+    config: &Configuration,
+) -> Vec<String> {
+    let mut r#gen = SqlGenerator::new(rng, vec![], config.clone());
     tables
         .into_iter()
         .map(|table| format!("{}", r#gen.generate_insert_statement(&table, count)))
@@ -61,8 +68,13 @@ pub fn insert_sql_gen(rng: &mut impl Rng, tables: Vec<Table>, count: usize) -> V
 
 /// Generate a random CREATE MATERIALIZED VIEW sql string.
 /// These are derived from `tables`.
-pub fn mview_sql_gen<R: Rng>(rng: &mut R, tables: Vec<Table>, name: &str) -> (String, Table) {
-    let mut r#gen = SqlGenerator::new_for_mview(rng, tables);
+pub fn mview_sql_gen<R: Rng>(
+    rng: &mut R,
+    tables: Vec<Table>,
+    name: &str,
+    config: &Configuration,
+) -> (String, Table) {
+    let mut r#gen = SqlGenerator::new_for_mview(rng, tables.clone(), config.clone());
     let (mview, table) = r#gen.gen_mview_stmt(name);
     (mview.to_string(), table)
 }
@@ -71,8 +83,9 @@ pub fn differential_sql_gen<R: Rng>(
     rng: &mut R,
     tables: Vec<Table>,
     name: &str,
+    config: &Configuration,
 ) -> Result<(String, String, Table)> {
-    let mut r#gen = SqlGenerator::new_for_mview(rng, tables);
+    let mut r#gen = SqlGenerator::new_for_mview(rng, tables.clone(), config.clone());
     let (stream, table) = r#gen.gen_mview_stmt(name);
     let batch = match stream {
         Statement::CreateView { ref query, .. } => query.to_string(),
@@ -103,8 +116,9 @@ pub fn generate_update_statements<R: Rng>(
     rng: &mut R,
     tables: &[Table],
     inserts: &[Statement],
+    config: &Configuration,
 ) -> Result<Vec<Statement>> {
-    let mut r#gen = SqlGenerator::new(rng, vec![]);
+    let mut r#gen = SqlGenerator::new(rng, vec![], config.clone());
     r#gen.generate_update_statements(tables, inserts)
 }
 
@@ -122,6 +136,8 @@ pub fn create_table_statement_to_table(statement: &Statement) -> Table {
             name,
             columns,
             constraints,
+            append_only,
+            source_watermarks,
             ..
         } => {
             let column_name_to_index_mapping: HashMap<_, _> = columns
@@ -158,6 +174,8 @@ pub fn create_table_statement_to_table(statement: &Statement) -> Table {
                 name.0[0].real_value(),
                 columns.iter().map(|c| c.clone().into()).collect(),
                 pk_indices,
+                *append_only,
+                source_watermarks.to_vec(),
             )
         }
         _ => panic!(
@@ -205,46 +223,94 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             name: "t",
                             columns: [
                                 Column {
-                                    name: "v1",
+                                    name: ObjectName(
+                                        [
+                                            Ident {
+                                                value: "v1",
+                                                quote_style: None,
+                                            },
+                                        ],
+                                    ),
                                     data_type: Int32,
                                 },
                             ],
                             pk_indices: [],
                             is_base_table: true,
+                            is_append_only: false,
+                            source_watermarks: [],
                         },
                         Table {
                             name: "t2",
                             columns: [
                                 Column {
-                                    name: "v1",
+                                    name: ObjectName(
+                                        [
+                                            Ident {
+                                                value: "v1",
+                                                quote_style: None,
+                                            },
+                                        ],
+                                    ),
                                     data_type: Int32,
                                 },
                                 Column {
-                                    name: "v2",
+                                    name: ObjectName(
+                                        [
+                                            Ident {
+                                                value: "v2",
+                                                quote_style: None,
+                                            },
+                                        ],
+                                    ),
                                     data_type: Boolean,
                                 },
                             ],
                             pk_indices: [],
                             is_base_table: true,
+                            is_append_only: false,
+                            source_watermarks: [],
                         },
                         Table {
                             name: "t3",
                             columns: [
                                 Column {
-                                    name: "v1",
+                                    name: ObjectName(
+                                        [
+                                            Ident {
+                                                value: "v1",
+                                                quote_style: None,
+                                            },
+                                        ],
+                                    ),
                                     data_type: Int32,
                                 },
                                 Column {
-                                    name: "v2",
+                                    name: ObjectName(
+                                        [
+                                            Ident {
+                                                value: "v2",
+                                                quote_style: None,
+                                            },
+                                        ],
+                                    ),
                                     data_type: Boolean,
                                 },
                                 Column {
-                                    name: "v3",
+                                    name: ObjectName(
+                                        [
+                                            Ident {
+                                                value: "v3",
+                                                quote_style: None,
+                                            },
+                                        ],
+                                    ),
                                     data_type: Int16,
                                 },
                             ],
                             pk_indices: [],
                             is_base_table: true,
+                            is_append_only: false,
+                            source_watermarks: [],
                         },
                     ],
                     [
@@ -420,7 +486,14 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             name: "t",
                             columns: [
                                 Column {
-                                    name: "v1",
+                                    name: ObjectName(
+                                        [
+                                            Ident {
+                                                value: "v1",
+                                                quote_style: None,
+                                            },
+                                        ],
+                                    ),
                                     data_type: Int32,
                                 },
                             ],
@@ -428,16 +501,32 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                                 0,
                             ],
                             is_base_table: true,
+                            is_append_only: false,
+                            source_watermarks: [],
                         },
                         Table {
                             name: "t2",
                             columns: [
                                 Column {
-                                    name: "v1",
+                                    name: ObjectName(
+                                        [
+                                            Ident {
+                                                value: "v1",
+                                                quote_style: None,
+                                            },
+                                        ],
+                                    ),
                                     data_type: Int32,
                                 },
                                 Column {
-                                    name: "v2",
+                                    name: ObjectName(
+                                        [
+                                            Ident {
+                                                value: "v2",
+                                                quote_style: None,
+                                            },
+                                        ],
+                                    ),
                                     data_type: Int16,
                                 },
                             ],
@@ -445,16 +534,32 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                                 1,
                             ],
                             is_base_table: true,
+                            is_append_only: false,
+                            source_watermarks: [],
                         },
                         Table {
                             name: "t3",
                             columns: [
                                 Column {
-                                    name: "v1",
+                                    name: ObjectName(
+                                        [
+                                            Ident {
+                                                value: "v1",
+                                                quote_style: None,
+                                            },
+                                        ],
+                                    ),
                                     data_type: Int32,
                                 },
                                 Column {
-                                    name: "v2",
+                                    name: ObjectName(
+                                        [
+                                            Ident {
+                                                value: "v2",
+                                                quote_style: None,
+                                            },
+                                        ],
+                                    ),
                                     data_type: Int16,
                                 },
                             ],
@@ -463,20 +568,43 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                                 1,
                             ],
                             is_base_table: true,
+                            is_append_only: false,
+                            source_watermarks: [],
                         },
                         Table {
                             name: "t4",
                             columns: [
                                 Column {
-                                    name: "v1",
+                                    name: ObjectName(
+                                        [
+                                            Ident {
+                                                value: "v1",
+                                                quote_style: None,
+                                            },
+                                        ],
+                                    ),
                                     data_type: Int32,
                                 },
                                 Column {
-                                    name: "v2",
+                                    name: ObjectName(
+                                        [
+                                            Ident {
+                                                value: "v2",
+                                                quote_style: None,
+                                            },
+                                        ],
+                                    ),
                                     data_type: Int16,
                                 },
                                 Column {
-                                    name: "v3",
+                                    name: ObjectName(
+                                        [
+                                            Ident {
+                                                value: "v3",
+                                                quote_style: None,
+                                            },
+                                        ],
+                                    ),
                                     data_type: Boolean,
                                 },
                             ],
@@ -486,6 +614,8 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                                 2,
                             ],
                             is_base_table: true,
+                            is_append_only: false,
+                            source_watermarks: [],
                         },
                     ],
                     [
@@ -741,5 +871,44 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                     ],
                 )"#]],
         );
+    }
+
+    #[test]
+    fn test_parse_create_table_statements_with_append_only_and_watermark() {
+        let test_string = r#"
+    CREATE TABLE t1 (
+        v1 INT,
+        ts TIMESTAMP,
+        WATERMARK FOR ts AS ts - INTERVAL '5' SECOND
+    ) APPEND ONLY;
+
+    CREATE TABLE t2 (
+        v1 INT,
+        ts TIMESTAMP
+    ) APPEND ONLY;
+
+    CREATE TABLE t3 (
+        v1 INT,
+        ts TIMESTAMP
+    );
+    "#;
+
+        let (tables, _) = parse_create_table_statements(test_string);
+
+        // Check t1
+        let t1 = &tables[0];
+        assert!(t1.is_append_only);
+        assert_eq!(t1.source_watermarks.len(), 1);
+        assert_eq!(t1.source_watermarks[0].column.real_value(), "ts");
+
+        // Check t2
+        let t2 = &tables[1];
+        assert!(t2.is_append_only);
+        assert_eq!(t2.source_watermarks.len(), 0);
+
+        // Check t3
+        let t3 = &tables[2];
+        assert!(!t3.is_append_only);
+        assert_eq!(t3.source_watermarks.len(), 0);
     }
 }

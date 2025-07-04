@@ -17,6 +17,7 @@
 #![feature(let_chains)]
 #![feature(btree_cursors)]
 #![feature(strict_overflow_ops)]
+#![feature(map_try_insert)]
 
 mod key_cmp;
 
@@ -24,7 +25,8 @@ use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use std::ops::{Add, Sub};
+use std::ops::{Add, AddAssign, Sub};
+use std::str::FromStr;
 
 pub use key_cmp::*;
 use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
@@ -52,14 +54,130 @@ pub mod time_travel;
 pub mod version;
 pub use frontend_version::{FrontendHummockVersion, FrontendHummockVersionDelta};
 mod frontend_version;
+pub mod vector_index;
 
 pub use compact::*;
 use risingwave_common::catalog::TableId;
+use risingwave_pb::hummock::hummock_version_checkpoint::PbStaleObjects;
+use risingwave_pb::hummock::{PbVectorIndexObjectType, VectorIndexObjectType};
 
 use crate::table_watermark::TableWatermarks;
+use crate::vector_index::VectorIndexAdd;
 
-pub type HummockSstableObjectId = u64;
-pub type HummockSstableId = u64;
+#[derive(Debug, Eq, PartialEq, Clone, Copy, Hash, Ord, PartialOrd)]
+#[cfg_attr(any(test, feature = "test"), derive(Default))]
+pub struct TypedPrimitive<const C: usize, P>(P);
+
+impl<const C: usize, P: PartialEq> PartialEq<P> for TypedPrimitive<C, P> {
+    fn eq(&self, other: &P) -> bool {
+        self.0 == *other
+    }
+}
+
+macro_rules! impl_primitive {
+    ($($t:ty)*) => {$(
+        impl<const C: usize> PartialEq<TypedPrimitive<C, $t>> for $t {
+            fn eq(&self, other: &TypedPrimitive<C, $t>) -> bool {
+                *self == other.0
+            }
+        }
+    )*}
+}
+
+impl_primitive!(u64);
+
+impl<const C: usize, P: FromStr> FromStr for TypedPrimitive<C, P> {
+    type Err = P::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        P::from_str(s).map(TypedPrimitive)
+    }
+}
+
+impl<const C: usize, P> Borrow<P> for TypedPrimitive<C, P> {
+    fn borrow(&self) -> &P {
+        &self.0
+    }
+}
+
+impl<const C: usize, P: Add<Output = P>> Add<P> for TypedPrimitive<C, P> {
+    type Output = Self;
+
+    fn add(self, rhs: P) -> Self::Output {
+        Self(self.0 + rhs)
+    }
+}
+
+impl<const C: usize, P: AddAssign> AddAssign<P> for TypedPrimitive<C, P> {
+    fn add_assign(&mut self, rhs: P) {
+        self.0 += rhs;
+    }
+}
+
+impl<const C: usize, P: Display> Display for TypedPrimitive<C, P> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl<const C: usize, P> From<P> for TypedPrimitive<C, P> {
+    fn from(value: P) -> Self {
+        Self(value)
+    }
+}
+
+impl<const C: usize, P: Serialize> Serialize for TypedPrimitive<C, P> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de, const C: usize, P: Deserialize<'de>> Deserialize<'de> for TypedPrimitive<C, P> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Self(<P as Deserialize>::deserialize(deserializer)?))
+    }
+}
+
+impl<const C: usize, P> TypedPrimitive<C, P> {
+    pub const fn new(id: P) -> Self {
+        Self(id)
+    }
+
+    pub fn inner(self) -> P {
+        self.0
+    }
+}
+
+pub type HummockRawObjectId = TypedPrimitive<0, u64>;
+pub type HummockSstableObjectId = TypedPrimitive<1, u64>;
+pub type HummockSstableId = TypedPrimitive<2, u64>;
+pub type HummockVectorFileId = TypedPrimitive<3, u64>;
+
+macro_rules! impl_object_id {
+    ($type_name:ty) => {
+        impl $type_name {
+            pub fn as_raw(&self) -> HummockRawObjectId {
+                HummockRawObjectId::new(self.0)
+            }
+        }
+
+        impl From<HummockRawObjectId> for $type_name {
+            fn from(id: HummockRawObjectId) -> Self {
+                Self(id.0)
+            }
+        }
+    };
+}
+
+impl_object_id!(HummockSstableObjectId);
+impl_object_id!(HummockVectorFileId);
+
 pub type HummockRefCount = u64;
 pub type HummockContextId = u32;
 pub type HummockEpoch = u64;
@@ -129,8 +247,106 @@ pub const INVALID_VERSION_ID: HummockVersionId = HummockVersionId(0);
 pub const FIRST_VERSION_ID: HummockVersionId = HummockVersionId(1);
 pub const SPLIT_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 1u64 << 56;
 pub const SINGLE_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 2u64 << 56;
-pub const OBJECT_SUFFIX: &str = "data";
+pub const SST_OBJECT_SUFFIX: &str = "data";
+pub const VECTOR_FILE_OBJECT_SUFFIX: &str = "vector";
 pub const HUMMOCK_SSTABLE_OBJECT_ID_MAX_DECIMAL_LENGTH: usize = 20;
+
+macro_rules! for_all_object_suffix {
+    ($({$name:ident, $type_name:ty, $suffix:expr},)+) => {
+        #[derive(Eq, PartialEq, Debug, Hash, Clone, Copy)]
+        pub enum HummockObjectId {
+            $(
+                $name($type_name),
+            )+
+        }
+
+        pub const VALID_OBJECT_ID_SUFFIXES: [&str; 2] = [$(
+                $suffix
+            ),+];
+
+        impl HummockObjectId {
+            fn new(id: u64, suffix: &str) -> Option<Self> {
+                match suffix {
+                    $(
+                        suffix if suffix == $suffix => Some(HummockObjectId::$name(<$type_name>::new(id))),
+                    )+
+                    _ => None,
+                }
+            }
+
+            pub fn suffix(&self) -> &str {
+                match self {
+                    $(
+                        HummockObjectId::$name(_) => $suffix,
+                    )+
+                }
+            }
+
+            pub fn as_raw(&self) -> HummockRawObjectId {
+                let raw = match self {
+                    $(
+                        HummockObjectId::$name(id) => id.0,
+                    )+
+                };
+                HummockRawObjectId::new(raw)
+            }
+        }
+
+        pub fn try_get_object_id_from_path(path: &str) -> Option<HummockObjectId> {
+            let split: Vec<_> = path.split(&['/', '.']).collect();
+            if split.len() <= 2 {
+                return None;
+            }
+            let suffix = split[split.len() - 1];
+            let id_str = split[split.len() - 2];
+            match suffix {
+                $(
+                    suffix if suffix == $suffix => {
+                        let id = id_str
+                            .parse::<u64>()
+                            .unwrap_or_else(|_| panic!("expect valid object id, got {}", id_str));
+                        Some(HummockObjectId::$name(<$type_name>::new(id)))
+                    },
+                )+
+                _ => None,
+            }
+        }
+    };
+    () => {
+        for_all_object_suffix! {
+            {Sstable, HummockSstableObjectId, SST_OBJECT_SUFFIX},
+            {VectorFile, HummockVectorFileId, VECTOR_FILE_OBJECT_SUFFIX},
+        }
+    };
+}
+
+for_all_object_suffix!();
+
+pub fn get_stale_object_ids(
+    stale_objects: &PbStaleObjects,
+) -> impl Iterator<Item = HummockObjectId> + '_ {
+    // DO NOT REMOVE THIS LINE
+    // This is to ensure that when adding new variant to `HummockObjectId`,
+    // the compiler will warn us if we forget to handle it here.
+    match HummockObjectId::Sstable(0.into()) {
+        HummockObjectId::Sstable(_) => {}
+        HummockObjectId::VectorFile(_) => {}
+    };
+    stale_objects
+        .id
+        .iter()
+        .map(|sst_id| HummockObjectId::Sstable((*sst_id).into()))
+        .chain(stale_objects.vector_files.iter().map(
+            |file| match file.get_object_type().unwrap() {
+                PbVectorIndexObjectType::VectorIndexObjectUnspecified => {
+                    unreachable!()
+                }
+                VectorIndexObjectType::VectorIndexObjectVector => {
+                    HummockObjectId::VectorFile(file.id.into())
+                }
+            },
+        ))
+}
 
 #[macro_export]
 /// This is wrapper for `info` log.
@@ -168,6 +384,7 @@ pub struct SyncResult {
     pub table_watermarks: HashMap<TableId, TableWatermarks>,
     /// Sstable that holds the uncommitted old value
     pub old_value_ssts: Vec<LocalSstableInfo>,
+    pub vector_index_adds: HashMap<TableId, Vec<VectorIndexAdd>>,
 }
 
 #[derive(Debug, Clone)]
@@ -268,19 +485,25 @@ impl HummockReadEpoch {
         }
     }
 }
-pub struct SstObjectIdRange {
+pub struct ObjectIdRange {
     // inclusive
-    pub start_id: HummockSstableObjectId,
+    pub start_id: HummockRawObjectId,
     // exclusive
-    pub end_id: HummockSstableObjectId,
+    pub end_id: HummockRawObjectId,
 }
 
-impl SstObjectIdRange {
-    pub fn new(start_id: HummockSstableObjectId, end_id: HummockSstableObjectId) -> Self {
-        Self { start_id, end_id }
+impl ObjectIdRange {
+    pub fn new(
+        start_id: impl Into<HummockRawObjectId>,
+        end_id: impl Into<HummockRawObjectId>,
+    ) -> Self {
+        Self {
+            start_id: start_id.into(),
+            end_id: end_id.into(),
+        }
     }
 
-    pub fn peek_next_sst_object_id(&self) -> Option<HummockSstableObjectId> {
+    fn peek_next_object_id(&self) -> Option<HummockRawObjectId> {
         if self.start_id < self.end_id {
             return Some(self.start_id);
         }
@@ -288,8 +511,8 @@ impl SstObjectIdRange {
     }
 
     /// Pops and returns next SST id.
-    pub fn get_next_sst_object_id(&mut self) -> Option<HummockSstableObjectId> {
-        let next_id = self.peek_next_sst_object_id();
+    pub fn get_next_object_id(&mut self) -> Option<HummockRawObjectId> {
+        let next_id = self.peek_next_object_id();
         self.start_id += 1;
         next_id
     }
@@ -407,36 +630,41 @@ impl EpochWithGap {
     }
 }
 
-pub fn get_sst_data_path(
+pub fn get_object_data_path(
     obj_prefix: &str,
     path_prefix: &str,
-    object_id: HummockSstableObjectId,
+    object_id: HummockObjectId,
 ) -> String {
+    let suffix = object_id.suffix();
+    let object_id = object_id.as_raw();
+
     let mut path = String::with_capacity(
         path_prefix.len()
             + "/".len()
             + obj_prefix.len()
             + HUMMOCK_SSTABLE_OBJECT_ID_MAX_DECIMAL_LENGTH
             + ".".len()
-            + OBJECT_SUFFIX.len(),
+            + suffix.len(),
     );
     path.push_str(path_prefix);
     path.push('/');
     path.push_str(obj_prefix);
     path.push_str(&object_id.to_string());
     path.push('.');
-    path.push_str(OBJECT_SUFFIX);
+    path.push_str(suffix);
     path
 }
 
-pub fn get_object_id_from_path(path: &str) -> HummockSstableObjectId {
+pub fn get_object_id_from_path(path: &str) -> HummockObjectId {
     use itertools::Itertools;
     let split = path.split(&['/', '.']).collect_vec();
     assert!(split.len() > 2);
-    assert_eq!(split[split.len() - 1], OBJECT_SUFFIX);
-    split[split.len() - 2]
-        .parse::<HummockSstableObjectId>()
-        .expect("valid sst id")
+    let suffix = split[split.len() - 1];
+    let id = split[split.len() - 2]
+        .parse::<u64>()
+        .expect("valid object id");
+    HummockObjectId::new(id, suffix)
+        .unwrap_or_else(|| panic!("unknown object id suffix {}", suffix))
 }
 
 #[cfg(test)]
@@ -448,7 +676,7 @@ mod tests {
 
     #[test]
     fn test_object_id_decimal_max_length() {
-        let len = HummockSstableObjectId::MAX.to_string().len();
+        let len = u64::MAX.to_string().len();
         assert_eq!(len, HUMMOCK_SSTABLE_OBJECT_ID_MAX_DECIMAL_LENGTH)
     }
 

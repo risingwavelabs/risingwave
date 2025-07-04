@@ -14,6 +14,11 @@
 
 //! This module provide jni catalog.
 
+#![expect(
+    clippy::disallowed_types,
+    reason = "construct iceberg::Error to implement the trait"
+)]
+
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -31,8 +36,9 @@ use itertools::Itertools;
 use jni::JavaVM;
 use jni::objects::{GlobalRef, JObject};
 use risingwave_common::bail;
+use risingwave_common::global_jvm::JVM;
 use risingwave_jni_core::call_method;
-use risingwave_jni_core::jvm_runtime::{JVM, execute_with_jni_env, jobj_to_str};
+use risingwave_jni_core::jvm_runtime::{execute_with_jni_env, jobj_to_str};
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 

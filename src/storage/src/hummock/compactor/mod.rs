@@ -15,12 +15,18 @@
 mod compaction_executor;
 mod compaction_filter;
 pub mod compaction_utils;
+use parquet::basic::Compression;
+use parquet::file::properties::WriterProperties;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ValidationTask};
 use risingwave_pb::compactor::{DispatchCompactionTaskRequest, dispatch_compaction_task_request};
 use risingwave_pb::hummock::PbCompactTask;
 use risingwave_pb::hummock::report_compaction_task_request::{
     Event as ReportCompactionTaskEvent, HeartBeat as SharedHeartBeat,
     ReportTask as ReportSharedTask,
+};
+use risingwave_pb::iceberg_compaction::{
+    SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
+    subscribe_iceberg_compaction_event_request,
 };
 use risingwave_rpc_client::GrpcCompactorProxyClient;
 use thiserror_ext::AsReport;
@@ -34,7 +40,7 @@ mod iterator;
 mod shared_buffer_compact;
 pub(super) mod task_progress;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -78,13 +84,16 @@ pub use self::compaction_utils::{
 pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
-    GetObjectId, HummockResult, SstableBuilderOptions, SstableObjectIdManager, Xor16FilterBuilder,
+    GetObjectId, HummockResult, ObjectIdManager, SstableBuilderOptions, Xor16FilterBuilder,
 };
 use crate::compaction_catalog_manager::{
     CompactionCatalogAgentRef, CompactionCatalogManager, CompactionCatalogManagerRef,
 };
 use crate::hummock::compactor::compaction_utils::calculate_task_parallelism;
 use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, compact_done};
+use crate::hummock::iceberg_compactor_runner::{
+    IcebergCompactorRunner, IcebergCompactorRunnerConfigBuilder, RunnerContext,
+};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::{
     BlockedXor16FilterBuilder, FilterBuilder, SharedComapctorObjectIdManager, SstableWriterFactory,
@@ -96,7 +105,7 @@ use crate::monitor::CompactorMetrics;
 pub struct Compactor {
     /// The context of the compactor.
     context: CompactorContext,
-    object_id_getter: Box<dyn GetObjectId>,
+    object_id_getter: Arc<dyn GetObjectId>,
     task_config: TaskConfig,
     options: SstableBuilderOptions,
     get_id_time: Arc<AtomicU64>,
@@ -110,7 +119,7 @@ impl Compactor {
         context: CompactorContext,
         options: SstableBuilderOptions,
         task_config: TaskConfig,
-        object_id_getter: Box<dyn GetObjectId>,
+        object_id_getter: Arc<dyn GetObjectId>,
     ) -> Self {
         Self {
             context,
@@ -233,7 +242,7 @@ impl Compactor {
         compaction_filter: impl CompactionFilter,
         compaction_catalog_agent_ref: CompactionCatalogAgentRef,
         task_progress: Option<Arc<TaskProgress>>,
-        object_id_getter: Box<dyn GetObjectId>,
+        object_id_getter: Arc<dyn GetObjectId>,
     ) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
         let builder_factory = RemoteBuilderFactory::<F, B> {
             object_id_getter,
@@ -277,12 +286,270 @@ impl Compactor {
 
 /// The background compaction thread that receives compaction tasks from hummock compaction
 /// manager and runs compaction tasks.
-#[cfg_attr(coverage, coverage(off))]
+#[must_use]
+pub fn start_iceberg_compactor(
+    compactor_context: CompactorContext,
+    hummock_meta_client: Arc<dyn HummockMetaClient>,
+) -> (JoinHandle<()>, Sender<()>) {
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+    let stream_retry_interval = Duration::from_secs(30);
+    let periodic_event_update_interval = Duration::from_millis(1000);
+    let worker_num = compactor_context.compaction_executor.worker_num();
+
+    let max_task_parallelism: u32 = (worker_num as f32
+        * compactor_context.storage_opts.compactor_max_task_multiplier)
+        .ceil() as u32;
+    let running_task_parallelism = Arc::new(AtomicU32::new(0));
+
+    const MAX_PULL_TASK_COUNT: u32 = 4;
+    let max_pull_task_count = std::cmp::min(max_task_parallelism, MAX_PULL_TASK_COUNT);
+
+    assert_ge!(
+        compactor_context.storage_opts.compactor_max_task_multiplier,
+        0.0
+    );
+
+    let join_handle = tokio::spawn(async move {
+        // TODO: It's a workaround to use HashSet for filtering out duplicate tasks.
+        let iceberg_compaction_running_task_tracker =
+            Arc::new(Mutex::new((HashMap::new(), HashSet::new())));
+        let mut min_interval = tokio::time::interval(stream_retry_interval);
+        let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
+
+        // This outer loop is to recreate stream.
+        'start_stream: loop {
+            // reset state
+            // pull_task_ack.store(true, Ordering::SeqCst);
+            let mut pull_task_ack = true;
+            tokio::select! {
+                // Wait for interval.
+                _ = min_interval.tick() => {},
+                // Shutdown compactor.
+                _ = &mut shutdown_rx => {
+                    tracing::info!("Compactor is shutting down");
+                    return;
+                }
+            }
+
+            let (request_sender, response_event_stream) = match hummock_meta_client
+                .subscribe_iceberg_compaction_event()
+                .await
+            {
+                Ok((request_sender, response_event_stream)) => {
+                    tracing::debug!("Succeeded subscribe_iceberg_compaction_event.");
+                    (request_sender, response_event_stream)
+                }
+
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e.as_report(),
+                        "Subscribing to iceberg compaction tasks failed with error. Will retry.",
+                    );
+                    continue 'start_stream;
+                }
+            };
+
+            pin_mut!(response_event_stream);
+
+            let executor = compactor_context.compaction_executor.clone();
+
+            // This inner loop is to consume stream or report task progress.
+            let mut event_loop_iteration_now = Instant::now();
+            'consume_stream: loop {
+                {
+                    // report
+                    compactor_context
+                        .compactor_metrics
+                        .compaction_event_loop_iteration_latency
+                        .observe(event_loop_iteration_now.elapsed().as_millis() as _);
+                    event_loop_iteration_now = Instant::now();
+                }
+
+                let running_task_parallelism = running_task_parallelism.clone();
+                let request_sender = request_sender.clone();
+                let event: Option<Result<SubscribeIcebergCompactionEventResponse, _>> = tokio::select! {
+                    _ = periodic_event_interval.tick() => {
+                        let mut pending_pull_task_count = 0;
+                        if pull_task_ack {
+                            // TODO: Compute parallelism on meta side
+                            pending_pull_task_count = (max_task_parallelism - running_task_parallelism.load(Ordering::SeqCst)).min(max_pull_task_count);
+
+                            if pending_pull_task_count > 0 {
+                                if let Err(e) = request_sender.send(SubscribeIcebergCompactionEventRequest {
+                                    event: Some(subscribe_iceberg_compaction_event_request::Event::PullTask(
+                                        subscribe_iceberg_compaction_event_request::PullTask {
+                                            pull_task_count: pending_pull_task_count,
+                                        }
+                                    )),
+                                    create_at: SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .expect("Clock may have gone backwards")
+                                        .as_millis() as u64,
+                                }) {
+                                    tracing::warn!(error = %e.as_report(), "Failed to pull task");
+
+                                    // re subscribe stream
+                                    continue 'start_stream;
+                                } else {
+                                    pull_task_ack = false;
+                                }
+                            }
+                        }
+
+                        tracing::info!(
+                            running_parallelism_count = %running_task_parallelism.load(Ordering::SeqCst),
+                            pull_task_ack = %pull_task_ack,
+                            pending_pull_task_count = %pending_pull_task_count
+                        );
+
+                        continue;
+                    }
+                    event = response_event_stream.next() => {
+                        event
+                    }
+
+                    _ = &mut shutdown_rx => {
+                        tracing::info!("Iceberg Compactor is shutting down");
+                        return
+                    }
+                };
+
+                match event {
+                    Some(Ok(SubscribeIcebergCompactionEventResponse {
+                        event,
+                        create_at: _create_at,
+                    })) => {
+                        let event = match event {
+                            Some(event) => event,
+                            None => continue 'consume_stream,
+                        };
+
+                        let iceberg_running_task_tracker =
+                            iceberg_compaction_running_task_tracker.clone();
+                        match event {
+                            risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::CompactTask(iceberg_compaction_task) => {
+                                let task_id = iceberg_compaction_task.task_id;
+                                 let write_parquet_properties = WriterProperties::builder()
+                                        .set_created_by(concat!(
+                                            "risingwave version ",
+                                            env!("CARGO_PKG_VERSION")
+                                        )
+                                        .to_owned())
+                                        .set_max_row_group_size(
+                                            compactor_context.storage_opts.iceberg_compaction_write_parquet_max_row_group_rows
+                                        )
+                                        .set_compression(Compression::SNAPPY) // TODO: make it configurable
+                                        .build();
+
+                                let compactor_runner_config = match IcebergCompactorRunnerConfigBuilder::default()
+                                    .max_parallelism(worker_num as u32)
+                                    .min_size_per_partition(compactor_context.storage_opts.iceberg_compaction_min_size_per_partition_mb as u64 * 1024 * 1024)
+                                    .max_file_count_per_partition(compactor_context.storage_opts.iceberg_compaction_max_file_count_per_partition)
+                                    .target_file_size_bytes(compactor_context.storage_opts.iceberg_compaction_target_file_size_mb as u64 * 1024 * 1024)
+                                    .enable_validate_compaction(compactor_context.storage_opts.iceberg_compaction_enable_validate)
+                                    .max_record_batch_rows(compactor_context.storage_opts.iceberg_compaction_max_record_batch_rows)
+                                    .write_parquet_properties(write_parquet_properties)
+                                    .build() {
+                                    Ok(config) => config,
+                                    Err(e) => {
+                                        tracing::warn!(error = %e.as_report(), "Failed to build iceberg compactor runner config {}", task_id);
+                                        continue 'consume_stream;
+                                    }
+                                };
+
+
+                                let iceberg_runner = match IcebergCompactorRunner::new(
+                                    iceberg_compaction_task,
+                                    compactor_runner_config,
+                                    compactor_context.compactor_metrics.clone(),
+                                ).await {
+                                    Ok(runner) => runner,
+                                    Err(e) => {
+                                        tracing::warn!(error = %e.as_report(), "Failed to create iceberg compactor runner {}", task_id);
+                                        continue 'consume_stream;
+                                    }
+                                };
+
+                                let task_unique_ident = format!(
+                                    "{}-{:?}",
+                                    iceberg_runner.iceberg_config.catalog_name(),
+                                    iceberg_runner.table_ident
+                                );
+
+                                {
+                                    let running_task_tracker_guard = iceberg_compaction_running_task_tracker
+                                        .lock()
+                                        .unwrap();
+
+                                    if running_task_tracker_guard.1.contains(&task_unique_ident) {
+                                        tracing::warn!(
+                                            task_id = %task_id,
+                                            task_unique_ident = %task_unique_ident,
+                                            "Iceberg compaction task already running, skip",
+                                        );
+                                        continue 'consume_stream;
+                                    }
+                                }
+
+                                executor.spawn(async move {
+                                    let (tx, rx) = tokio::sync::oneshot::channel();
+                                    {
+                                        let mut running_task_tracker_guard =
+                                            iceberg_running_task_tracker.lock().unwrap();
+                                        running_task_tracker_guard.0.insert(task_id, tx);
+                                        running_task_tracker_guard.1.insert(task_unique_ident.clone());
+                                    }
+
+                                    let _release_guard = scopeguard::guard(
+                                        iceberg_running_task_tracker.clone(),
+                                        move |tracker| {
+                                            let mut running_task_tracker_guard = tracker.lock().unwrap();
+                                            running_task_tracker_guard.0.remove(&task_id);
+                                            running_task_tracker_guard.1.remove(&task_unique_ident);
+                                        },
+                                    );
+
+                                    if let Err(e) = iceberg_runner.compact(
+                                        RunnerContext::new(
+                                            max_task_parallelism,
+                                            running_task_parallelism.clone(),
+                                        ),
+                                        rx,
+                                    )
+                                    .await {
+                                        tracing::warn!(error = %e.as_report(), "Failed to compact iceberg runner {}", task_id);
+                                    }
+                                });
+                            },
+                            risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::PullTaskAck(_) => {
+                                // set flag
+                                pull_task_ack = true;
+                            },
+                    }
+                    }
+                    Some(Err(e)) => {
+                        tracing::warn!("Failed to consume stream. {}", e.message());
+                        continue 'start_stream;
+                    }
+                    _ => {
+                        // The stream is exhausted
+                        continue 'start_stream;
+                    }
+                }
+            }
+        }
+    });
+
+    (join_handle, shutdown_tx)
+}
+
+/// The background compaction thread that receives compaction tasks from hummock compaction
+/// manager and runs compaction tasks.
 #[must_use]
 pub fn start_compactor(
     compactor_context: CompactorContext,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
-    sstable_object_id_manager: Arc<SstableObjectIdManager>,
+    object_id_manager: Arc<ObjectIdManager>,
     compaction_catalog_manager_ref: CompactionCatalogManagerRef,
 ) -> (JoinHandle<()>, Sender<()>) {
     type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
@@ -343,7 +610,7 @@ pub fn start_compactor(
             pin_mut!(response_event_stream);
 
             let executor = compactor_context.compaction_executor.clone();
-            let sstable_object_id_manager = sstable_object_id_manager.clone();
+            let object_id_manager = object_id_manager.clone();
 
             // This inner loop is to consume stream or report task progress.
             let mut event_loop_iteration_now = Instant::now();
@@ -441,7 +708,10 @@ pub fn start_compactor(
                                 .map(|sst| sst.into())
                                 .collect(),
                             table_stats_change: to_prost_table_stats_map(table_stats),
-                            object_timestamps,
+                            object_timestamps: object_timestamps
+                                .into_iter()
+                                .map(|(object_id, timestamp)| (object_id.inner(), timestamp))
+                                .collect(),
                         })),
                         create_at: SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
@@ -471,7 +741,7 @@ pub fn start_compactor(
                             .compaction_event_consumed_latency
                             .observe(consumed_latency_ms as _);
 
-                        let sstable_object_id_manager = sstable_object_id_manager.clone();
+                        let object_id_manager = object_id_manager.clone();
                         let compaction_catalog_manager_ref = compaction_catalog_manager_ref.clone();
 
                         match event {
@@ -522,7 +792,7 @@ pub fn start_compactor(
                                         context.clone(),
                                         compact_task,
                                         rx,
-                                        Box::new(sstable_object_id_manager.clone()),
+                                        object_id_manager.clone(),
                                         compaction_catalog_manager_ref.clone(),
                                     )
                                     .await;
@@ -621,7 +891,6 @@ pub fn start_compactor(
 
 /// The background compaction thread that receives compaction tasks from hummock compaction
 /// manager and runs compaction tasks.
-#[cfg_attr(coverage, coverage(off))]
 #[must_use]
 pub fn start_shared_compactor(
     grpc_proxy_client: GrpcCompactorProxyClient,
@@ -685,7 +954,7 @@ pub fn start_shared_compactor(
                         });
 
                         let mut output_object_ids_deque: VecDeque<_> = VecDeque::new();
-                        output_object_ids_deque.extend(output_object_ids);
+                        output_object_ids_deque.extend(output_object_ids.into_iter().map(Into::<HummockSstableObjectId>::into));
                         let shared_compactor_object_id_manager =
                             SharedComapctorObjectIdManager::new(output_object_ids_deque, cloned_grpc_proxy_client.clone(), context.storage_opts.sstable_id_remote_fetch_number);
                             match dispatch_task.unwrap() {
@@ -700,7 +969,7 @@ pub fn start_shared_compactor(
                                         context.clone(),
                                         compact_task,
                                         rx,
-                                        Box::new(shared_compactor_object_id_manager),
+                                        shared_compactor_object_id_manager,
                                         compaction_catalog_agent_ref.clone(),
                                     )
                                     .await;
@@ -709,8 +978,11 @@ pub fn start_shared_compactor(
                                         event: Some(ReportCompactionTaskEvent::ReportTask(ReportSharedTask {
                                             compact_task: Some(PbCompactTask::from(&compact_task)),
                                             table_stats_change: to_prost_table_stats_map(table_stats),
-                                            object_timestamps,
-                                        })),
+                                            object_timestamps: object_timestamps
+                                            .into_iter()
+                                            .map(|(object_id, timestamp)| (object_id.inner(), timestamp))
+                                            .collect(),
+                                    })),
                                     };
 
                                     match cloned_grpc_proxy_client

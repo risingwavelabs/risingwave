@@ -37,11 +37,14 @@ use crate::key_range::KeyRangeCommon;
 use crate::level::{Level, LevelCommon, Levels, OverlappingLevel};
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::{ReadTableWatermark, TableWatermarks};
+use crate::vector_index::apply_vector_index_delta;
 use crate::version::{
     GroupDelta, GroupDeltaCommon, HummockVersion, HummockVersionCommon, HummockVersionDeltaCommon,
     IntraLevelDelta, IntraLevelDeltaCommon, ObjectIdReader, SstableIdReader,
 };
-use crate::{CompactionGroupId, HummockSstableId, HummockSstableObjectId, can_concat};
+use crate::{
+    CompactionGroupId, HummockObjectId, HummockSstableId, HummockSstableObjectId, can_concat,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct SstDeltaInfo {
@@ -72,7 +75,7 @@ impl<L> HummockVersionCommon<SstableInfo, L> {
     pub fn get_sst_ids_by_group_id(
         &self,
         compaction_group_id: CompactionGroupId,
-    ) -> impl Iterator<Item = u64> + '_ {
+    ) -> impl Iterator<Item = HummockSstableId> + '_ {
         self.levels
             .iter()
             .filter_map(move |(cg_id, level)| {
@@ -249,7 +252,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
         parent_group_id: CompactionGroupId,
         group_id: CompactionGroupId,
         member_table_ids: BTreeSet<StateTableId>,
-        new_sst_start_id: u64,
+        new_sst_start_id: HummockSstableId,
     ) {
         let mut new_sst_id = new_sst_start_id;
         if parent_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId {
@@ -261,7 +264,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                     );
                 } else {
                     warn!(
-                        new_sst_start_id,
+                        %new_sst_start_id,
                         "non-zero sst start id for NewCompactionGroup"
                     );
                 }
@@ -377,8 +380,8 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
         for (group_id, group_deltas) in &version_delta.group_deltas {
             let mut info = SstDeltaInfo::default();
 
-            let mut removed_l0_ssts: BTreeSet<u64> = BTreeSet::new();
-            let mut removed_ssts: BTreeMap<u32, BTreeSet<u64>> = BTreeMap::new();
+            let mut removed_l0_ssts: BTreeSet<HummockSstableId> = BTreeSet::new();
+            let mut removed_ssts: BTreeMap<u32, BTreeSet<HummockSstableId>> = BTreeMap::new();
 
             // Build only if all deltas are intra level deltas.
             if !group_deltas.group_deltas.iter().all(|delta| {
@@ -530,7 +533,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                             self.init_with_parent_group_v2(
                                 parent_group_id,
                                 *compaction_group_id,
-                                group_construct.get_new_sst_start_id(),
+                                group_construct.get_new_sst_start_id().into(),
                                 split_key.clone(),
                             );
                         } else {
@@ -539,7 +542,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                                 parent_group_id,
                                 *compaction_group_id,
                                 member_table_ids,
-                                group_construct.get_new_sst_start_id(),
+                                group_construct.get_new_sst_start_id().into(),
                             );
                         }
                     }
@@ -695,6 +698,13 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
             &version_delta.state_table_info_delta,
             &changed_table_info,
         );
+
+        // apply to vector index
+        apply_vector_index_delta(
+            &mut self.vector_indexes,
+            &version_delta.vector_index_delta,
+            &version_delta.removed_table_ids,
+        );
     }
 
     pub fn apply_change_log_delta<T: Clone>(
@@ -757,7 +767,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
             levels.extend(group.levels.iter());
             for level in levels {
                 for table_info in &level.table_infos {
-                    if table_info.sst_id == table_info.object_id {
+                    if table_info.sst_id.inner() == table_info.object_id.inner() {
                         continue;
                     }
                     let object_id = table_info.object_id;
@@ -817,7 +827,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
         &mut self,
         parent_group_id: CompactionGroupId,
         group_id: CompactionGroupId,
-        new_sst_start_id: u64,
+        new_sst_start_id: HummockSstableId,
         split_key: Option<Bytes>,
     ) {
         let mut new_sst_id = new_sst_start_id;
@@ -830,7 +840,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                     );
                 } else {
                     warn!(
-                        new_sst_start_id,
+                        %new_sst_start_id,
                         "non-zero sst start id for NewCompactionGroup"
                     );
                 }
@@ -956,13 +966,33 @@ impl<T> HummockVersionCommon<T>
 where
     T: SstableIdReader + ObjectIdReader,
 {
-    pub fn get_object_ids(&self, exclude_change_log: bool) -> HashSet<HummockSstableObjectId> {
+    pub fn get_sst_object_ids(&self, exclude_change_log: bool) -> HashSet<HummockSstableObjectId> {
         self.get_sst_infos(exclude_change_log)
             .map(|s| s.object_id())
             .collect()
     }
 
-    pub fn get_sst_ids(&self, exclude_change_log: bool) -> HashSet<HummockSstableObjectId> {
+    pub fn get_object_ids(
+        &self,
+        exclude_change_log: bool,
+    ) -> impl Iterator<Item = HummockObjectId> + '_ {
+        // DO NOT REMOVE THIS LINE
+        // This is to ensure that when adding new variant to `HummockObjectId`,
+        // the compiler will warn us if we forget to handle it here.
+        match HummockObjectId::Sstable(0.into()) {
+            HummockObjectId::Sstable(_) => {}
+            HummockObjectId::VectorFile(_) => {}
+        };
+        self.get_sst_infos(exclude_change_log)
+            .map(|s| HummockObjectId::Sstable(s.object_id()))
+            .chain(
+                self.vector_indexes
+                    .values()
+                    .flat_map(|index| index.get_objects().map(|(object_id, _)| object_id)),
+            )
+    }
+
+    pub fn get_sst_ids(&self, exclude_change_log: bool) -> HashSet<HummockSstableId> {
         self.get_sst_infos(exclude_change_log)
             .map(|s| s.sst_id())
             .collect()
@@ -1153,7 +1183,7 @@ pub fn build_initial_compaction_group_levels(
 fn split_sst_info_for_level(
     member_table_ids: &BTreeSet<u32>,
     level: &mut Level,
-    new_sst_id: &mut u64,
+    new_sst_id: &mut HummockSstableId,
 ) -> Vec<SstableInfo> {
     // Remove SST from sub level may result in empty sub level. It will be purged
     // whenever another compaction task is finished.
@@ -1168,8 +1198,8 @@ fn split_sst_info_for_level(
         let sst_size = sst_info.sst_size;
         if sst_size / 2 == 0 {
             tracing::warn!(
-                id = sst_info.sst_id,
-                object_id = sst_info.object_id,
+                id = %sst_info.sst_id,
+                object_id = %sst_info.object_id,
                 sst_size = sst_info.sst_size,
                 file_size = sst_info.file_size,
                 "Sstable sst_size is under expected",
@@ -1313,10 +1343,10 @@ pub fn insert_new_sub_level(
     };
     #[cfg(debug_assertions)]
     {
-        if insert_pos > 0 {
-            if let Some(smaller_level) = l0.sub_levels.get(insert_pos - 1) {
-                debug_assert!(smaller_level.sub_level_id < insert_sub_level_id);
-            }
+        if insert_pos > 0
+            && let Some(smaller_level) = l0.sub_levels.get(insert_pos - 1)
+        {
+            debug_assert!(smaller_level.sub_level_id < insert_sub_level_id);
         }
         if let Some(larger_level) = l0.sub_levels.get(insert_pos) {
             debug_assert!(larger_level.sub_level_id > insert_sub_level_id);
@@ -1428,7 +1458,14 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: &Vec<SstableInfo>)
     }
 }
 
-pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockSstableObjectId, u64> {
+pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockObjectId, u64> {
+    // DO NOT REMOVE THIS LINE
+    // This is to ensure that when adding new variant to `HummockObjectId`,
+    // the compiler will warn us if we forget to handle it here.
+    match HummockObjectId::Sstable(0.into()) {
+        HummockObjectId::Sstable(_) => {}
+        HummockObjectId::VectorFile(_) => {}
+    };
     version
         .levels
         .values()
@@ -1447,6 +1484,13 @@ pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockSstableObject
                     .map(|t| (t.object_id, t.file_size))
             })
         }))
+        .map(|(object_id, size)| (HummockObjectId::Sstable(object_id), size))
+        .chain(
+            version
+                .vector_indexes
+                .values()
+                .flat_map(|index| index.get_objects()),
+        )
         .collect()
 }
 
@@ -1503,17 +1547,16 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
 
                 // Ensure SSTs in non-overlapping level have non-overlapping key range
                 if level.level_type == PbLevelType::Nonoverlapping {
-                    if let Some(prev) = prev_table_info.take() {
-                        if prev
+                    if let Some(prev) = prev_table_info.take()
+                        && prev
                             .key_range
                             .compare_right_with(&table_info.key_range.left)
                             != Ordering::Less
-                        {
-                            res.push(format!(
-                                "{} SST {}: key range should not overlap. prev={:?}, cur={:?}",
-                                level_identifier, table_info.object_id, prev, table_info
-                            ));
-                        }
+                    {
+                        res.push(format!(
+                            "{} SST {}: key range should not overlap. prev={:?}, cur={:?}",
+                            level_identifier, table_info.object_id, prev, table_info
+                        ));
                     }
                     let _ = prev_table_info.insert(table_info);
                 }
@@ -1582,14 +1625,14 @@ mod tests {
                 .encode();
 
         SstableInfoInner {
-            sst_id,
+            sst_id: sst_id.into(),
             key_range: KeyRange {
                 left: full_key_l.into(),
                 right: full_key_r.into(),
                 right_exclusive: false,
             },
             table_ids,
-            object_id: sst_id,
+            object_id: sst_id.into(),
             min_epoch: 20,
             max_epoch: 20,
             file_size: 100,
@@ -1616,7 +1659,7 @@ mod tests {
             )]),
             ..Default::default()
         };
-        assert_eq!(version.get_object_ids(false).len(), 0);
+        assert_eq!(version.get_object_ids(false).count(), 0);
 
         // Add to sub level
         version
@@ -1628,29 +1671,29 @@ mod tests {
             .push(Level {
                 table_infos: vec![
                     SstableInfoInner {
-                        object_id: 11,
-                        sst_id: 11,
+                        object_id: 11.into(),
+                        sst_id: 11.into(),
                         ..Default::default()
                     }
                     .into(),
                 ],
                 ..Default::default()
             });
-        assert_eq!(version.get_object_ids(false).len(), 1);
+        assert_eq!(version.get_object_ids(false).count(), 1);
 
         // Add to non sub level
         version.levels.get_mut(&0).unwrap().levels.push(Level {
             table_infos: vec![
                 SstableInfoInner {
-                    object_id: 22,
-                    sst_id: 22,
+                    object_id: 22.into(),
+                    sst_id: 22.into(),
                     ..Default::default()
                 }
                 .into(),
             ],
             ..Default::default()
         });
-        assert_eq!(version.get_object_ids(false).len(), 2);
+        assert_eq!(version.get_object_ids(false).count(), 2);
     }
 
     #[test]
@@ -1711,8 +1754,8 @@ mod tests {
                             HashSet::new(),
                             vec![
                                 SstableInfoInner {
-                                    object_id: 1,
-                                    sst_id: 1,
+                                    object_id: 1.into(),
+                                    sst_id: 1.into(),
                                     ..Default::default()
                                 }
                                 .into(),
@@ -1745,8 +1788,8 @@ mod tests {
             level_type: LevelType::Nonoverlapping,
             table_infos: vec![
                 SstableInfoInner {
-                    object_id: 1,
-                    sst_id: 1,
+                    object_id: 1.into(),
+                    sst_id: 1.into(),
                     ..Default::default()
                 }
                 .into(),
@@ -1786,8 +1829,8 @@ mod tests {
         right: Bytes,
     ) -> SstableInfoInner {
         SstableInfoInner {
-            object_id,
-            sst_id: object_id,
+            object_id: object_id.into(),
+            sst_id: object_id.into(),
             key_range: KeyRange {
                 left,
                 right,
@@ -2213,7 +2256,7 @@ mod tests {
             let split_type = group_split::need_to_split(&origin_sst, split_key.clone());
             assert_eq!(SstSplitType::Both, split_type);
 
-            let mut new_sst_id = 10;
+            let mut new_sst_id = 10.into();
             let (origin_sst, branched_sst) = group_split::split_sst(
                 origin_sst,
                 &mut new_sst_id,
@@ -2250,7 +2293,7 @@ mod tests {
             let split_type = group_split::need_to_split(&origin_sst, split_key.clone());
             assert_eq!(SstSplitType::Both, split_type);
 
-            let mut new_sst_id = 10;
+            let mut new_sst_id = 10.into();
             let (origin_sst, branched_sst) = group_split::split_sst(
                 origin_sst,
                 &mut new_sst_id,
@@ -2301,7 +2344,7 @@ mod tests {
             let origin_sst = sst.clone();
             let sst_size = origin_sst.sst_size;
 
-            let mut new_sst_id = 10;
+            let mut new_sst_id = 10.into();
             let (origin_sst, branched_sst) = group_split::split_sst(
                 origin_sst,
                 &mut new_sst_id,
@@ -2501,7 +2544,7 @@ mod tests {
             // split Overlapping level
             let split_key = group_split::build_split_key(1, VirtualNode::ZERO);
 
-            let mut new_sst_id = 100;
+            let mut new_sst_id = 100.into();
             let x = group_split::split_sst_info_for_level_v2(
                 &mut cg1.l0.sub_levels[0],
                 &mut new_sst_id,
@@ -2541,7 +2584,7 @@ mod tests {
 
         {
             // test split empty level
-            let mut new_sst_id = 100;
+            let mut new_sst_id = 100.into();
             let split_key = group_split::build_split_key(1, VirtualNode::ZERO);
             let x = group_split::split_sst_info_for_level_v2(
                 &mut cg1.levels[2],
@@ -2557,7 +2600,7 @@ mod tests {
             let mut cg1 = cg1.clone();
             let split_key = group_split::build_split_key(1, VirtualNode::ZERO);
 
-            let mut new_sst_id = 100;
+            let mut new_sst_id = 100.into();
             let x = group_split::split_sst_info_for_level_v2(
                 &mut cg1.levels[0],
                 &mut new_sst_id,
@@ -2580,7 +2623,7 @@ mod tests {
             let mut cg1 = cg1.clone();
             let split_key = group_split::build_split_key(5, VirtualNode::ZERO);
 
-            let mut new_sst_id = 100;
+            let mut new_sst_id = 100.into();
             let x = group_split::split_sst_info_for_level_v2(
                 &mut cg1.levels[0],
                 &mut new_sst_id,
@@ -2621,7 +2664,7 @@ mod tests {
             let mut cg1 = cg1.clone();
             let split_key = group_split::build_split_key(4, VirtualNode::ZERO);
 
-            let mut new_sst_id = 100;
+            let mut new_sst_id = 100.into();
             let x = group_split::split_sst_info_for_level_v2(
                 &mut cg1.levels[0],
                 &mut new_sst_id,

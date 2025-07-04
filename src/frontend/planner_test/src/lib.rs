@@ -32,6 +32,7 @@ use risingwave_frontend::handler::{
     HandlerArgs, create_index, create_mv, create_schema, create_source, create_table, create_view,
     drop_table, explain, variable,
 };
+use risingwave_frontend::optimizer::backfill_order_strategy::explain_backfill_order_in_dot_format;
 use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::{LocalFrontend, create_proto_file, get_explain_output};
 use risingwave_frontend::{
@@ -39,7 +40,7 @@ use risingwave_frontend::{
     WithOptionsSecResolved, build_graph, explain_stream_graph,
 };
 use risingwave_sqlparser::ast::{
-    AstOption, DropMode, EmitMode, ExplainOptions, ObjectName, Statement,
+    AstOption, BackfillOrderStrategy, DropMode, EmitMode, ExplainOptions, ObjectName, Statement,
 };
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
@@ -78,6 +79,8 @@ pub enum TestType {
     EowcStreamPlan,
     /// Create MV fragments plan with EOWC semantics
     EowcStreamDistPlan,
+    /// Create Backfill Order Plan
+    BackfillOrderPlan,
 
     /// Create sink plan (assumes blackhole sink)
     /// TODO: Other sinks
@@ -220,6 +223,9 @@ pub struct TestCaseResult {
 
     /// Create MV fragments plan with EOWC semantics
     pub eowc_stream_dist_plan: Option<String>,
+
+    /// Create Backfill Order Plan
+    pub backfill_order_plan: Option<String>,
 
     /// Error of binder
     pub binder_error: Option<String>,
@@ -628,7 +634,7 @@ impl TestCase {
             .contains(&TestType::OptimizedLogicalPlanForBatch)
             || self.expected_outputs.contains(&TestType::OptimizerError)
         {
-            let mut plan_root = plan_root.clone();
+            let plan_root = plan_root.clone();
             let optimized_logical_plan_for_batch =
                 match plan_root.gen_optimized_logical_plan_for_batch() {
                     Ok(optimized_logical_plan_for_batch) => optimized_logical_plan_for_batch,
@@ -644,7 +650,7 @@ impl TestCase {
                 .contains(&TestType::OptimizedLogicalPlanForBatch)
             {
                 ret.optimized_logical_plan_for_batch =
-                    Some(explain_plan(&optimized_logical_plan_for_batch));
+                    Some(explain_plan(&optimized_logical_plan_for_batch.plan));
             }
         }
 
@@ -653,7 +659,7 @@ impl TestCase {
             .contains(&TestType::OptimizedLogicalPlanForStream)
             || self.expected_outputs.contains(&TestType::OptimizerError)
         {
-            let mut plan_root = plan_root.clone();
+            let plan_root = plan_root.clone();
             let optimized_logical_plan_for_stream =
                 match plan_root.gen_optimized_logical_plan_for_stream() {
                     Ok(optimized_logical_plan_for_stream) => optimized_logical_plan_for_stream,
@@ -669,7 +675,7 @@ impl TestCase {
                 .contains(&TestType::OptimizedLogicalPlanForStream)
             {
                 ret.optimized_logical_plan_for_stream =
-                    Some(explain_plan(&optimized_logical_plan_for_stream));
+                    Some(explain_plan(&optimized_logical_plan_for_stream.plan));
             }
         }
 
@@ -678,9 +684,9 @@ impl TestCase {
                 || self.expected_outputs.contains(&TestType::BatchPlanProto)
                 || self.expected_outputs.contains(&TestType::BatchError)
             {
-                let mut plan_root = plan_root.clone();
+                let plan_root = plan_root.clone();
                 let batch_plan = match plan_root.gen_batch_plan() {
-                    Ok(_batch_plan) => match plan_root.gen_batch_distributed_plan() {
+                    Ok(batch_plan) => match batch_plan.gen_batch_distributed_plan() {
                         Ok(batch_plan) => batch_plan,
                         Err(err) => {
                             ret.batch_error = Some(err.to_report_string_pretty());
@@ -711,9 +717,9 @@ impl TestCase {
             if self.expected_outputs.contains(&TestType::BatchLocalPlan)
                 || self.expected_outputs.contains(&TestType::BatchError)
             {
-                let mut plan_root = plan_root.clone();
+                let plan_root = plan_root.clone();
                 let batch_plan = match plan_root.gen_batch_plan() {
-                    Ok(_batch_plan) => match plan_root.gen_batch_local_plan() {
+                    Ok(batch_plan) => match batch_plan.gen_batch_local_plan() {
                         Ok(batch_plan) => batch_plan,
                         Err(err) => {
                             ret.batch_error = Some(err.to_report_string_pretty());
@@ -739,9 +745,9 @@ impl TestCase {
                 .contains(&TestType::BatchDistributedPlan)
                 || self.expected_outputs.contains(&TestType::BatchError)
             {
-                let mut plan_root = plan_root.clone();
+                let plan_root = plan_root.clone();
                 let batch_plan = match plan_root.gen_batch_plan() {
-                    Ok(_batch_plan) => match plan_root.gen_batch_distributed_plan() {
+                    Ok(batch_plan) => match batch_plan.gen_batch_distributed_plan() {
                         Ok(batch_plan) => batch_plan,
                         Err(err) => {
                             ret.batch_error = Some(err.to_report_string_pretty());
@@ -805,7 +811,7 @@ impl TestCase {
                     return Err(anyhow!("expect a query"));
                 };
 
-                let stream_plan = match create_mv::gen_create_mv_plan(
+                let (stream_plan, table) = match create_mv::gen_create_mv_plan(
                     &session,
                     context.clone(),
                     q,
@@ -813,7 +819,7 @@ impl TestCase {
                     vec![],
                     Some(emit_mode),
                 ) {
-                    Ok((stream_plan, _)) => stream_plan,
+                    Ok(r) => r,
                     Err(err) => {
                         *ret_error_str = Some(err.to_report_string_pretty());
                         continue;
@@ -827,15 +833,31 @@ impl TestCase {
 
                 // Only generate stream_dist_plan if it is specified in test case
                 if dist_plan {
-                    let graph = build_graph(stream_plan, None)?;
-                    *ret_dist_plan_str = Some(explain_stream_graph(&graph, false));
+                    let graph = build_graph(stream_plan.clone(), None)?;
+                    *ret_dist_plan_str =
+                        Some(explain_stream_graph(&graph, Some(table.to_prost()), false));
+                }
+
+                if self.expected_outputs.contains(&TestType::BackfillOrderPlan) {
+                    match explain_backfill_order_in_dot_format(
+                        &session,
+                        BackfillOrderStrategy::Auto,
+                        stream_plan,
+                    ) {
+                        Ok(formatted_order_plan) => {
+                            ret.backfill_order_plan = Some(formatted_order_plan);
+                        }
+                        Err(err) => {
+                            *ret_error_str = Some(err.to_report_string_pretty());
+                        }
+                    }
                 }
             }
         }
 
         'sink: {
             if self.expected_outputs.contains(&TestType::SinkPlan) {
-                let mut plan_root = plan_root.clone();
+                let plan_root = plan_root.clone();
                 let sink_name = "sink_test";
                 let mut options = BTreeMap::new();
                 options.insert("connector".to_owned(), "blackhole".to_owned());

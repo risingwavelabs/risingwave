@@ -15,12 +15,12 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use risingwave_common::catalog::FragmentTypeMask;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
     StreamFragment as StreamFragmentProto, StreamFragmentEdge as StreamFragmentEdgeProto,
 };
 use risingwave_pb::stream_plan::{
-    BackfillOrderStrategy, DispatchStrategy, FragmentTypeFlag,
-    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
+    DispatchStrategy, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 use thiserror_ext::AsReport;
 
@@ -36,7 +36,7 @@ pub struct StreamFragment {
     pub node: Option<Box<StreamNode>>,
 
     /// Bitwise-OR of type Flags of this fragment.
-    pub fragment_type_mask: u32,
+    pub fragment_type_mask: FragmentTypeMask,
 
     /// Mark whether this fragment requires exactly one actor.
     pub requires_singleton: bool,
@@ -64,7 +64,7 @@ impl StreamFragment {
     pub fn new(fragment_id: LocalFragmentId) -> Self {
         Self {
             fragment_id,
-            fragment_type_mask: FragmentTypeFlag::FragmentUnspecified as u32,
+            fragment_type_mask: FragmentTypeMask::empty(),
             requires_singleton: false,
             node: None,
             table_ids_cnt: 0,
@@ -76,7 +76,7 @@ impl StreamFragment {
         StreamFragmentProto {
             fragment_id: self.fragment_id,
             node: self.node.clone().map(|n| *n),
-            fragment_type_mask: self.fragment_type_mask,
+            fragment_type_mask: self.fragment_type_mask.into(),
             requires_singleton: self.requires_singleton,
             table_ids_cnt: self.table_ids_cnt,
             upstream_table_ids: self.upstream_table_ids.clone(),
@@ -110,7 +110,7 @@ impl StreamFragmentGraph {
             table_ids_cnt: 0,
             parallelism: None,
             max_parallelism: 0,
-            backfill_order_strategy: Some(BackfillOrderStrategy { strategy: None }),
+            backfill_order: Default::default(),
         }
     }
 

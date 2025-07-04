@@ -27,9 +27,13 @@ fi
 
 
 SPARK_FILE="spark-${SPARK_VERSION}-bin-hadoop3.tgz"
-
 if [ ! -d "spark-${SPARK_VERSION}-bin-hadoop3" ];then
-    wget --no-verbose https://dlcdn.apache.org/spark/spark-${SPARK_VERSION}/$SPARK_FILE
+    echo "Downloading Spark ${SPARK_VERSION}..."
+    START_TIME=$(date +%s)
+    wget --no-verbose https://rw-ci-deps-dist.s3.amazonaws.com/spark-3.5.5-bin-hadoop3.tgz
+    END_TIME=$(date +%s)
+    ELAPSED_TIME=$((END_TIME - START_TIME))
+    echo "Download ${SPARK_FILE} took ${ELAPSED_TIME} seconds"
     tar -xzf $SPARK_FILE --no-same-owner
 fi
 

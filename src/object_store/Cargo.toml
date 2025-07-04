@@ -6,10 +6,6 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[lints]
-workspace = true
 
 [package.metadata.cargo-machete]
 ignored = ["aws-credential-types"]
@@ -29,7 +25,7 @@ bytes = { version = "1", features = ["serde"] }
 crc32fast = "1"
 fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-hyper = { version = "0.14", features = ["tcp", "client"] }                    # TODO(http-bump): required by aws sdk
+hyper = { version = "0.14.27", features = ["tcp", "client"] }                    # TODO(http-bump): required by aws sdk
 hyper-rustls = { version = "0.24.2", features = ["webpki-roots"] }
 itertools = { workspace = true }
 madsim = "0.2.31"
@@ -48,13 +44,15 @@ opendal = { workspace = true, features = [
 prometheus = { version = "0.14", features = ["process"] }
 reqwest = "0.12.2" # required by opendal
 risingwave_common = { workspace = true }
-# risingwave_jni_core = { workspace = true, optional = true }
 spin = "0.10"
-thiserror = "1"
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["fs"] }
 tokio-retry = "0.3"
 tracing = "0.1"
+
+[lints]
+workspace = true
 # This crate is excluded from hakari (see hakari.toml) after hdfs is introduced...## [target.'cfg(not(madsim))'.dependencies]
 # workspace-hack = { path = "../workspace-hack" }
 #
@@ -63,4 +61,4 @@ tracing = "0.1"
 #
 
 # [features]
-# hdfs-backend = ["opendal/services-hdfs", "dep:risingwave_jni_core"]
+# hdfs-backend = ["opendal/services-hdfs"]

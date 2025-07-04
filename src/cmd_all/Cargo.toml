@@ -7,6 +7,24 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[package.metadata.cargo-machete]
+ignored = [
+    "workspace-hack",
+    "workspace-config",
+    "task_stats_alloc",
+    "tikv-jemallocator",
+    "risingwave_connector",
+]
+
+[package.metadata.cargo-udeps.ignore]
+ignored = [
+    "workspace-hack",
+    "workspace-config",
+    "task_stats_alloc",
+    "tikv-jemallocator",
+    "risingwave_connector",
+]
+
 [features]
 default = ["rw-static-link", "all-connectors"]
 rw-static-link = ["workspace-config/rw-static-link"]
@@ -15,12 +33,6 @@ openssl-vendored = ["workspace-config/openssl-vendored"]
 udf = ["risingwave_expr_impl/udf"]
 fips = ["workspace-config/fips"]
 all-connectors = ["risingwave_connector/all-sinks", "risingwave_connector/all-sources"]
-
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack", "workspace-config", "task_stats_alloc", "tikv-jemallocator", "risingwave_connector"]
-
-[package.metadata.cargo-udeps.ignore]
-ignored = ["workspace-hack", "workspace-config", "task_stats_alloc", "tikv-jemallocator", "risingwave_connector"]
 
 [dependencies]
 clap = { workspace = true }

@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use bytes::Bytes;
-use foyer::{Engine, HybridCacheBuilder};
+use foyer::{CacheBuilder, Engine, HybridCacheBuilder, LargeEngineOptions};
 use futures::{TryFutureExt, TryStreamExt};
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
@@ -83,7 +83,7 @@ pub(crate) async fn new_hummock_java_binding_iter(
         let meta_cache = HybridCacheBuilder::new()
             .memory(1 << 10)
             .with_shards(2)
-            .storage(Engine::Large)
+            .storage(Engine::Large(LargeEngineOptions::new()))
             .build()
             .map_err(HummockError::foyer_error)
             .map_err(StorageError::from)
@@ -91,7 +91,7 @@ pub(crate) async fn new_hummock_java_binding_iter(
         let block_cache = HybridCacheBuilder::new()
             .memory(1 << 10)
             .with_shards(2)
-            .storage(Engine::Large)
+            .storage(Engine::Large(LargeEngineOptions::new()))
             .build()
             .map_err(HummockError::foyer_error)
             .map_err(StorageError::from)
@@ -109,6 +109,8 @@ pub(crate) async fn new_hummock_java_binding_iter(
             use_new_object_prefix_strategy: read_plan.use_new_object_prefix_strategy,
             meta_cache,
             block_cache,
+            vector_meta_cache: CacheBuilder::new(1 << 10).build(),
+            vector_block_cache: CacheBuilder::new(1 << 10).build(),
         }));
         let reader = HummockVersionReader::new(
             sstable_store,

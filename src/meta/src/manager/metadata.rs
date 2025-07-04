@@ -25,7 +25,7 @@ use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
-use risingwave_pb::stream_plan::{PbDispatchStrategy, PbStreamScanType};
+use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamScanType};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::sync::oneshot;
 use tokio::time::{Instant, sleep};
@@ -61,7 +61,7 @@ pub struct ActiveStreamingWorkerNodes {
     worker_nodes: HashMap<WorkerId, WorkerNode>,
     rx: UnboundedReceiver<LocalNotification>,
     #[cfg_attr(not(debug_assertions), expect(dead_code))]
-    meta_manager: MetadataManager,
+    meta_manager: Option<MetadataManager>,
 }
 
 impl Debug for ActiveStreamingWorkerNodes {
@@ -73,11 +73,25 @@ impl Debug for ActiveStreamingWorkerNodes {
 }
 
 impl ActiveStreamingWorkerNodes {
-    pub(crate) fn uninitialized(meta_manager: MetadataManager) -> Self {
+    pub(crate) fn uninitialized() -> Self {
         Self {
             worker_nodes: Default::default(),
             rx: unbounded_channel().1,
-            meta_manager,
+            meta_manager: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(worker_nodes: HashMap<WorkerId, WorkerNode>) -> Self {
+        let (tx, rx) = unbounded_channel();
+        let _join_handle = tokio::spawn(async move {
+            let _tx = tx;
+            std::future::pending::<()>().await
+        });
+        Self {
+            worker_nodes,
+            rx,
+            meta_manager: None,
         }
     }
 
@@ -89,7 +103,7 @@ impl ActiveStreamingWorkerNodes {
         Ok(Self {
             worker_nodes: nodes.into_iter().map(|node| (node.id as _, node)).collect(),
             rx,
-            meta_manager,
+            meta_manager: Some(meta_manager),
         })
     }
 
@@ -208,11 +222,10 @@ impl ActiveStreamingWorkerNodes {
     pub(crate) async fn validate_change(&self) {
         use risingwave_pb::common::WorkerNode;
         use thiserror_ext::AsReport;
-        match self
-            .meta_manager
-            .list_active_streaming_compute_nodes()
-            .await
-        {
+        let Some(meta_manager) = &self.meta_manager else {
+            return;
+        };
+        match meta_manager.list_active_streaming_compute_nodes().await {
             Ok(worker_nodes) => {
                 let ignore_irrelevant_info = |node: &WorkerNode| {
                     (
@@ -506,7 +519,7 @@ impl MetadataManager {
         &self,
         job_id: u32,
     ) -> MetaResult<(
-        Vec<(PbDispatchStrategy, Fragment)>,
+        Vec<(PbDispatcherType, Fragment)>,
         HashMap<ActorId, WorkerId>,
     )> {
         let (fragments, actors) = self
@@ -730,6 +743,7 @@ impl MetadataManager {
             .collect())
     }
 
+    #[await_tree::instrument]
     pub async fn update_actor_splits_by_split_assignment(
         &self,
         split_assignment: &SplitAssignment,
@@ -819,6 +833,7 @@ impl MetadataManager {
 impl MetadataManager {
     /// Wait for job finishing notification in `TrackingJob::finish`.
     /// The progress is updated per barrier.
+    #[await_tree::instrument]
     pub(crate) async fn wait_streaming_job_finished(
         &self,
         database_id: DatabaseId,

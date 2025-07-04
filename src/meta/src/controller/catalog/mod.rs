@@ -27,7 +27,9 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use risingwave_common::catalog::{DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS, TableOption};
+use risingwave_common::catalog::{
+    DEFAULT_SCHEMA_NAME, FragmentTypeFlag, SYSTEM_SCHEMAS, TableOption,
+};
 use risingwave_common::current_cluster_version;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
@@ -57,7 +59,6 @@ use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
 use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup};
-use risingwave_pb::stream_plan::FragmentTypeFlag;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::telemetry::PbTelemetryEventStage;
 use risingwave_pb::user::PbUserInfo;
@@ -231,6 +232,9 @@ impl CatalogController {
             ..Default::default()
         };
         job.update(&txn).await?;
+
+        let _ = grant_default_privileges_automatically(&txn, job_id).await?;
+
         txn.commit().await?;
 
         Ok(())
@@ -249,10 +253,10 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("subscription", job_id))?;
 
-        let version = self
+        let mut version = self
             .notify_frontend(
-                Operation::Add,
-                Info::ObjectGroup(PbObjectGroup {
+                NotificationOperation::Add,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: vec![PbObject {
                         object_info: PbObjectInfo::Subscription(
                             ObjectModel(subscription, obj.unwrap()).into(),
@@ -262,6 +266,22 @@ impl CatalogController {
                 }),
             )
             .await;
+
+        // notify default privileges about the new subscription
+        let updated_user_ids: Vec<UserId> = UserPrivilege::find()
+            .select_only()
+            .distinct()
+            .column(user_privilege::Column::UserId)
+            .filter(user_privilege::Column::Oid.eq(subscription_id as ObjectId))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        if !updated_user_ids.is_empty() {
+            let updated_user_infos = list_user_info_by_ids(updated_user_ids, &inner.db).await?;
+            version = self.notify_users_update(updated_user_infos).await;
+        }
+
         Ok(version)
     }
 
@@ -309,7 +329,7 @@ impl CatalogController {
             property
                 .0
                 .get(UPSTREAM_SOURCE_KEY)
-                .map(|v| v.to_string())
+                .cloned()
                 .unwrap_or_default()
         };
 
@@ -429,11 +449,37 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        let changed = Self::clean_dirty_sink_downstreams(&txn).await?;
+        let updated_table_ids = Self::clean_dirty_sink_downstreams(&txn).await?;
+        let updated_table_objs = if !updated_table_ids.is_empty() {
+            Table::find()
+                .find_also_related(Object)
+                .filter(table::Column::TableId.is_in(updated_table_ids))
+                .all(&txn)
+                .await?
+        } else {
+            vec![]
+        };
 
         if dirty_job_objs.is_empty() {
-            if changed {
+            if !updated_table_objs.is_empty() {
                 txn.commit().await?;
+
+                // Notify the frontend to update the table info.
+                self.notify_frontend(
+                    NotificationOperation::Update,
+                    NotificationInfo::ObjectGroup(PbObjectGroup {
+                        objects: updated_table_objs
+                            .into_iter()
+                            .map(|(t, obj)| PbObject {
+                                object_info: PbObjectInfo::Table(
+                                    ObjectModel(t, obj.unwrap()).into(),
+                                )
+                                .into(),
+                            })
+                            .collect(),
+                    }),
+                )
+                .await;
             }
 
             return Ok(vec![]);
@@ -533,6 +579,23 @@ impl CatalogController {
         let _version = self
             .notify_frontend(NotificationOperation::Delete, object_group)
             .await;
+
+        // Notify the frontend to update the table info.
+        if !updated_table_objs.is_empty() {
+            self.notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: updated_table_objs
+                        .into_iter()
+                        .map(|(t, obj)| PbObject {
+                            object_info: PbObjectInfo::Table(ObjectModel(t, obj.unwrap()).into())
+                                .into(),
+                        })
+                        .collect(),
+                }),
+            )
+            .await;
+        }
 
         Ok(dirty_associated_source_ids)
     }

@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use crate::binder::{BoundStatement, ShareId};
 use crate::error::Result;
-use crate::optimizer::{OptimizerContextRef, PlanRoot};
+use crate::optimizer::{LogicalPlanRoot, OptimizerContextRef};
 
 mod changelog;
 mod delete;
@@ -47,8 +47,15 @@ pub struct Planner {
 #[derive(Debug, Copy, Clone)]
 pub enum PlanFor {
     Stream,
+    /// Is the `Sink` in iceberg table engine.
+    /// It connects to the table node directly, while external stream jobs may connect to an iceberg source.
+    StreamIcebergEngineInternal,
+    /// Other batch queries, e.g., DML.
     Batch,
-    /// `BatchDql` is a special mode for batch.
+    /// Batch `SELECT` queries.
+    ///
+    /// ## Special handling
+    ///
     /// Iceberg engine table will be converted to iceberg source based on this mode.
     BatchDql,
 }
@@ -78,8 +85,16 @@ impl Planner {
         }
     }
 
+    pub fn new_for_iceberg_table_engine_sink(ctx: OptimizerContextRef) -> Planner {
+        Planner {
+            ctx,
+            share_cache: Default::default(),
+            plan_for: PlanFor::StreamIcebergEngineInternal,
+        }
+    }
+
     /// Plan a [`BoundStatement`]. Need to bind a statement before plan.
-    pub fn plan(&mut self, stmt: BoundStatement) -> Result<PlanRoot> {
+    pub fn plan(&mut self, stmt: BoundStatement) -> Result<LogicalPlanRoot> {
         self.plan_statement(stmt)
     }
 

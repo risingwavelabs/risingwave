@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::error::code::PostgresErrorCode;
 use risingwave_common::error::{BoxedError, NotImplemented};
 use risingwave_common::secret::SecretError;
 use risingwave_common::session_config::SessionConfigError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
-use risingwave_meta_model::WorkerId;
+use risingwave_meta_model::{ObjectId, WorkerId};
 use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::{RpcError, ToTonicStatus};
 
@@ -26,6 +27,7 @@ use crate::model::MetadataModelError;
 
 pub type MetaResult<T> = std::result::Result<T, MetaError>;
 
+// TODO(error-handling): provide more concrete error code for different object types.
 #[derive(
     thiserror::Error,
     thiserror_ext::ReportDebug,
@@ -66,6 +68,7 @@ pub enum MetaErrorInner {
     InvalidParameter(#[message] String),
 
     // Used for catalog errors.
+    #[provide(PostgresErrorCode => PostgresErrorCode::UndefinedObject)]
     #[error("{0} id not found: {1}")]
     #[construct(skip)]
     CatalogIdNotFound(&'static str, String),
@@ -73,12 +76,13 @@ pub enum MetaErrorInner {
     #[error("table_fragment not exist: id={0}")]
     FragmentNotFound(u32),
 
-    #[error("{0} with name {1} exists{under_creation}", under_creation = (.2).then_some(" but under creation").unwrap_or(""))]
+    #[provide(PostgresErrorCode => PostgresErrorCode::DuplicateObject)]
+    #[error("{0} with name {1} exists{under_creation}", under_creation = (.2).map(|_| " but under creation").unwrap_or(""))]
     Duplicated(
         &'static str,
         String,
-        // whether the object is under creation
-        bool,
+        // if under creation, take streaming job id, otherwise None
+        Option<ObjectId>,
     ),
 
     #[error("Service unavailable: {0}")]
@@ -160,11 +164,15 @@ impl MetaError {
     }
 
     pub fn catalog_duplicated<T: Into<String>>(relation: &'static str, name: T) -> Self {
-        MetaErrorInner::Duplicated(relation, name.into(), false).into()
+        MetaErrorInner::Duplicated(relation, name.into(), None).into()
     }
 
-    pub fn catalog_under_creation<T: Into<String>>(relation: &'static str, name: T) -> Self {
-        MetaErrorInner::Duplicated(relation, name.into(), true).into()
+    pub fn catalog_under_creation<T: Into<String>>(
+        relation: &'static str,
+        name: T,
+        job_id: ObjectId,
+    ) -> Self {
+        MetaErrorInner::Duplicated(relation, name.into(), Some(job_id)).into()
     }
 }
 

@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+use std::str::FromStr;
 use std::sync::LazyLock;
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use risingwave_common::catalog::Schema;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{Date, Decimal, ScalarImpl, Time, Timestamp, Timestamptz};
+use risingwave_common::types::{DataType, Date, Decimal, ScalarImpl, Time, Timestamp, Timestamptz};
 use rust_decimal::Decimal as RustDecimal;
 use thiserror_ext::AsReport;
 use tiberius::Row;
@@ -31,19 +33,51 @@ static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::de
 
 pub fn sql_server_row_to_owned_row(row: &mut Row, schema: &Schema) -> OwnedRow {
     let mut datums: Vec<Option<ScalarImpl>> = vec![];
+    let mut money_fields: HashSet<&str> = HashSet::new();
+    // Special handling of the money field, as the third-party library Tiberius converts the money type to i64.
+    for (column, _) in row.cells() {
+        if column.column_type() == tiberius::ColumnType::Money {
+            money_fields.insert(column.name());
+        }
+    }
     for i in 0..schema.fields.len() {
         let rw_field = &schema.fields[i];
         let name = rw_field.name.as_str();
-        let datum = match row.try_get::<ScalarImplTiberiusWrapper, usize>(i) {
-            Ok(datum) => datum.map(|d| d.0),
-            Err(err) => {
-                log_error!(name, err, "parse column failed");
-                None
-            }
+        let datum = match money_fields.contains(name) {
+            true => match row.try_get::<i64, usize>(i) {
+                Ok(Some(value)) => Some(convert_money_i64_to_type(value, &rw_field.data_type)),
+                Ok(None) => None,
+                Err(err) => {
+                    log_error!(name, err, "parse column failed");
+                    None
+                }
+            },
+            false => match row.try_get::<ScalarImplTiberiusWrapper, usize>(i) {
+                Ok(datum) => datum.map(|d| d.0),
+                Err(err) => {
+                    log_error!(name, err, "parse column failed");
+                    None
+                }
+            },
         };
+
         datums.push(datum);
     }
     OwnedRow::new(datums)
+}
+
+pub fn convert_money_i64_to_type(value: i64, data_type: &DataType) -> ScalarImpl {
+    match data_type {
+        DataType::Decimal => {
+            ScalarImpl::Decimal(Decimal::from(value) / Decimal::from_str("10000").unwrap())
+        }
+        _ => {
+            panic!(
+                "Conversion of Money type to {:?} is not supported",
+                data_type
+            );
+        }
+    }
 }
 macro_rules! impl_tiberius_wrapper {
     ($wrapper_name:ident, $variant_name:ident) => {
@@ -278,9 +312,10 @@ impl<'a> tiberius::IntoSql<'a> for ScalarImplTiberiusWrapper {
             ScalarImpl::Timestamp(v) => TimestampTiberiusWrapper::from(v).into_sql(),
             ScalarImpl::Timestamptz(v) => TimestamptzTiberiusWrapper::from(v).into_sql(),
             ScalarImpl::Time(v) => TimeTiberiusWrapper::from(v).into_sql(),
+            ScalarImpl::Utf8(v) => String::from(v).into_sql(),
             // ScalarImpl::Bytea(v) => (*v.clone()).into_sql(),
             value => {
-                // Utf8, Serial, Interval, Jsonb, Int256, Struct, List are not supported yet
+                // Serial, Interval, Jsonb, Int256, Struct, List are not supported yet
                 unimplemented!("the sql server decoding for {:?} is unsupported", value);
             }
         }

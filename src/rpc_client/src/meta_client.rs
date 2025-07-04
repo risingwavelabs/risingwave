@@ -29,14 +29,15 @@ use list_rate_limits_response::RateLimitInfo;
 use lru::LruCache;
 use replace_job_plan::ReplaceJob;
 use risingwave_common::RW_VERSION;
-use risingwave_common::catalog::{FunctionId, IndexId, ObjectId, SecretId, TableId};
+use risingwave_common::catalog::{
+    AlterDatabaseParam, FunctionId, IndexId, ObjectId, SecretId, TableId,
+};
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, MetaConfig};
 use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::monitor::EndpointExt;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
@@ -45,7 +46,7 @@ use risingwave_error::tonic::ErrorIsFromTonicServerImpl;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockEpoch, HummockVersionId, SstObjectIdRange, SyncResult,
+    CompactionGroupId, HummockEpoch, HummockVersionId, ObjectIdRange, SyncResult,
 };
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
@@ -56,7 +57,7 @@ use risingwave_pb::catalog::{
 use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
 use risingwave_pb::cloud_service::*;
 use risingwave_pb::common::worker_node::Property;
-use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
+use risingwave_pb::common::{HostAddress, OptionalUint32, OptionalUint64, WorkerNode, WorkerType};
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::create_materialized_view_request::PbBackfillType;
@@ -97,8 +98,12 @@ use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient
 use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::meta::{FragmentDistribution, *};
+use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
+use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
+use risingwave_pb::monitor_service::{StackTraceRequest, StackTraceResponse};
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
+use risingwave_pb::user::alter_default_privilege_request::Operation as AlterDefaultPrivilegeOperation;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;
 use risingwave_pb::user::*;
@@ -367,14 +372,14 @@ impl MetaClient {
     pub async fn send_heartbeat(&self, node_id: u32) -> Result<()> {
         let request = HeartbeatRequest { node_id };
         let resp = self.inner.heartbeat(request).await?;
-        if let Some(status) = resp.status {
-            if status.code() == risingwave_pb::common::status::Code::UnknownWorker {
-                // Ignore the error if we're already shutting down.
-                // Otherwise, exit the process.
-                if !self.shutting_down.load(Relaxed) {
-                    tracing::error!(message = status.message, "worker expired");
-                    std::process::exit(1);
-                }
+        if let Some(status) = resp.status
+            && status.code() == risingwave_pb::common::status::Code::UnknownWorker
+        {
+            // Ignore the error if we're already shutting down.
+            // Otherwise, exit the process.
+            if !self.shutting_down.load(Relaxed) {
+                tracing::error!(message = status.message, "worker expired");
+                std::process::exit(1);
             }
         }
         Ok(())
@@ -406,6 +411,7 @@ impl MetaClient {
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
         specific_resource_group: Option<String>,
+        if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
@@ -413,6 +419,7 @@ impl MetaClient {
             backfill: PbBackfillType::Regular as _,
             dependencies: dependencies.into_iter().collect(),
             specific_resource_group,
+            if_not_exists,
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -441,10 +448,12 @@ impl MetaClient {
         &self,
         source: PbSource,
         graph: Option<StreamFragmentGraph>,
+        if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateSourceRequest {
             source: Some(source),
             fragment_graph: graph,
+            if_not_exists,
         };
 
         let resp = self.inner.create_source(request).await?;
@@ -459,12 +468,14 @@ impl MetaClient {
         graph: StreamFragmentGraph,
         affected_table_change: Option<ReplaceJobPlan>,
         dependencies: HashSet<ObjectId>,
+        if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateSinkRequest {
             sink: Some(sink),
             fragment_graph: Some(graph),
             affected_table_change,
             dependencies: dependencies.into_iter().collect(),
+            if_not_exists,
         };
 
         let resp = self.inner.create_sink(request).await?;
@@ -500,12 +511,14 @@ impl MetaClient {
         table: PbTable,
         graph: StreamFragmentGraph,
         job_type: PbTableJobType,
+        if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateTableRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
             source,
             job_type: job_type as _,
+            if_not_exists,
         };
         let resp = self.inner.create_table(request).await?;
         // TODO: handle error in `resp.status` here
@@ -545,6 +558,41 @@ impl MetaClient {
             owner_id,
         };
         let resp = self.inner.alter_owner(request).await?;
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
+    }
+
+    pub async fn alter_database_param(
+        &self,
+        database_id: DatabaseId,
+        param: AlterDatabaseParam,
+    ) -> Result<WaitVersion> {
+        let request = match param {
+            AlterDatabaseParam::BarrierIntervalMs(barrier_interval_ms) => {
+                let barrier_interval_ms = OptionalUint32 {
+                    value: barrier_interval_ms,
+                };
+                AlterDatabaseParamRequest {
+                    database_id,
+                    param: Some(alter_database_param_request::Param::BarrierIntervalMs(
+                        barrier_interval_ms,
+                    )),
+                }
+            }
+            AlterDatabaseParam::CheckpointFrequency(checkpoint_frequency) => {
+                let checkpoint_frequency = OptionalUint64 {
+                    value: checkpoint_frequency,
+                };
+                AlterDatabaseParamRequest {
+                    database_id,
+                    param: Some(alter_database_param_request::Param::CheckpointFrequency(
+                        checkpoint_frequency,
+                    )),
+                }
+            }
+        };
+        let resp = self.inner.alter_database_param(request).await?;
         Ok(resp
             .version
             .ok_or_else(|| anyhow!("wait version not set"))?)
@@ -646,13 +694,11 @@ impl MetaClient {
     pub async fn replace_job(
         &self,
         graph: StreamFragmentGraph,
-        table_col_index_mapping: ColIndexMapping,
         replace_job: ReplaceJob,
     ) -> Result<WaitVersion> {
         let request = ReplaceJobPlanRequest {
             plan: Some(ReplaceJobPlan {
                 fragment_graph: Some(graph),
-                table_col_index_mapping: Some(table_col_index_mapping.to_protobuf()),
                 replace_job: Some(replace_job),
             }),
         };
@@ -685,11 +731,13 @@ impl MetaClient {
         index: PbIndex,
         table: PbTable,
         graph: StreamFragmentGraph,
+        if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateIndexRequest {
             index: Some(index),
             index_table: Some(table),
             fragment_graph: Some(graph),
+            if_not_exists,
         };
         let resp = self.inner.create_index(request).await?;
         // TODO: handle error in `resp.status` here
@@ -868,6 +916,25 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn alter_default_privilege(
+        &self,
+        user_ids: Vec<u32>,
+        database_id: DatabaseId,
+        schema_ids: Vec<SchemaId>,
+        operation: AlterDefaultPrivilegeOperation,
+        granted_by: u32,
+    ) -> Result<()> {
+        let request = AlterDefaultPrivilegeRequest {
+            user_ids,
+            database_id,
+            schema_ids,
+            operation: Some(operation),
+            granted_by,
+        };
+        self.inner.alter_default_privilege(request).await?;
+        Ok(())
+    }
+
     /// Unregister the current node from the cluster.
     pub async fn unregister(&self) -> Result<()> {
         let request = DeleteWorkerNodeRequest {
@@ -1018,6 +1085,14 @@ impl MetaClient {
         let resp = self
             .inner
             .list_fragment_distribution(ListFragmentDistributionRequest {})
+            .await?;
+        Ok(resp.distributions)
+    }
+
+    pub async fn list_creating_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>> {
+        let resp = self
+            .inner
+            .list_creating_fragment_distribution(ListCreatingFragmentDistributionRequest {})
             .await?;
         Ok(resp.distributions)
     }
@@ -1283,12 +1358,6 @@ impl MetaClient {
         Ok(resp)
     }
 
-    pub async fn get_system_params(&self) -> Result<SystemParamsReader> {
-        let req = GetSystemParamsRequest {};
-        let resp = self.inner.get_system_params(req).await?;
-        Ok(resp.params.unwrap().into())
-    }
-
     pub async fn get_meta_store_endpoint(&self) -> Result<String> {
         let req = GetMetaStoreInfoRequest {};
         let resp = self.inner.get_meta_store_info(req).await?;
@@ -1308,6 +1377,24 @@ impl MetaClient {
             changed_secret_refs: changed_secret_refs.into_iter().collect(),
             connector_conn_ref,
             object_type: AlterConnectorPropsObject::Sink as i32,
+        };
+        let _resp = self.inner.alter_connector_props(req).await?;
+        Ok(())
+    }
+
+    pub async fn alter_source_connector_props(
+        &self,
+        source_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        connector_conn_ref: Option<u32>,
+    ) -> Result<()> {
+        let req = AlterConnectorPropsRequest {
+            object_id: source_id,
+            changed_props: changed_props.into_iter().collect(),
+            changed_secret_refs: changed_secret_refs.into_iter().collect(),
+            connector_conn_ref,
+            object_type: AlterConnectorPropsObject::Source as i32,
         };
         let _resp = self.inner.alter_connector_props(req).await?;
         Ok(())
@@ -1601,6 +1688,24 @@ impl MetaClient {
         let resp = self.inner.list_iceberg_tables(request).await?;
         Ok(resp.iceberg_tables)
     }
+
+    /// Get the await tree of all nodes in the cluster.
+    pub async fn get_cluster_stack_trace(
+        &self,
+        actor_traces_format: ActorTracesFormat,
+    ) -> Result<StackTraceResponse> {
+        let request = StackTraceRequest {
+            actor_traces_format: actor_traces_format as i32,
+        };
+        let resp = self.inner.stack_trace(request).await?;
+        Ok(resp)
+    }
+
+    pub async fn set_sync_log_store_aligned(&self, job_id: u32, aligned: bool) -> Result<()> {
+        let request = SetSyncLogStoreAlignedRequest { job_id, aligned };
+        self.inner.set_sync_log_store_aligned(request).await?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -1626,12 +1731,12 @@ impl HummockMetaClient for MetaClient {
         ))
     }
 
-    async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
+    async fn get_new_object_ids(&self, number: u32) -> Result<ObjectIdRange> {
         let resp = self
             .inner
-            .get_new_sst_ids(GetNewSstIdsRequest { number })
+            .get_new_object_ids(GetNewObjectIdsRequest { number })
             .await?;
-        Ok(SstObjectIdRange::new(resp.start_id, resp.end_id))
+        Ok(ObjectIdRange::new(resp.start_id, resp.end_id))
     }
 
     async fn commit_epoch_with_change_log(
@@ -1787,6 +1892,7 @@ struct GrpcMetaClientCore {
     event_log_client: EventLogServiceClient<Channel>,
     cluster_limit_client: ClusterLimitServiceClient<Channel>,
     hosted_iceberg_catalog_service_client: HostedIcebergCatalogServiceClient<Channel>,
+    monitor_client: MonitorServiceClient<Channel>,
 }
 
 impl GrpcMetaClientCore {
@@ -1815,7 +1921,9 @@ impl GrpcMetaClientCore {
         let sink_coordinate_client = SinkCoordinationServiceClient::new(channel.clone());
         let event_log_client = EventLogServiceClient::new(channel.clone());
         let cluster_limit_client = ClusterLimitServiceClient::new(channel.clone());
-        let hosted_iceberg_catalog_service_client = HostedIcebergCatalogServiceClient::new(channel);
+        let hosted_iceberg_catalog_service_client =
+            HostedIcebergCatalogServiceClient::new(channel.clone());
+        let monitor_client = MonitorServiceClient::new(channel);
 
         GrpcMetaClientCore {
             cluster_client,
@@ -1837,6 +1945,7 @@ impl GrpcMetaClientCore {
             event_log_client,
             cluster_limit_client,
             hosted_iceberg_catalog_service_client,
+            monitor_client,
         }
     }
 }
@@ -2183,6 +2292,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ stream_client, list_streaming_job_states, ListStreamingJobStatesRequest, ListStreamingJobStatesResponse }
             ,{ stream_client, list_fragment_distribution, ListFragmentDistributionRequest, ListFragmentDistributionResponse }
+            ,{ stream_client, list_creating_fragment_distribution, ListCreatingFragmentDistributionRequest, ListCreatingFragmentDistributionResponse }
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ stream_client, list_actor_splits, ListActorSplitsRequest, ListActorSplitsResponse }
             ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
@@ -2190,12 +2300,14 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }
             ,{ stream_client, alter_connector_props, AlterConnectorPropsRequest, AlterConnectorPropsResponse }
             ,{ stream_client, get_fragment_by_id, GetFragmentByIdRequest, GetFragmentByIdResponse }
+            ,{ stream_client, set_sync_log_store_aligned, SetSyncLogStoreAlignedRequest, SetSyncLogStoreAlignedResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
             ,{ ddl_client, alter_resource_group, AlterResourceGroupRequest, AlterResourceGroupResponse }
+            ,{ ddl_client, alter_database_param, AlterDatabaseParamRequest, AlterDatabaseParamResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
@@ -2237,7 +2349,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, get_assigned_compact_task_num, GetAssignedCompactTaskNumRequest, GetAssignedCompactTaskNumResponse }
             ,{ hummock_client, trigger_compaction_deterministic, TriggerCompactionDeterministicRequest, TriggerCompactionDeterministicResponse }
             ,{ hummock_client, disable_commit_epoch, DisableCommitEpochRequest, DisableCommitEpochResponse }
-            ,{ hummock_client, get_new_sst_ids, GetNewSstIdsRequest, GetNewSstIdsResponse }
+            ,{ hummock_client, get_new_object_ids, GetNewObjectIdsRequest, GetNewObjectIdsResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
             ,{ hummock_client, trigger_full_gc, TriggerFullGcRequest, TriggerFullGcResponse }
             ,{ hummock_client, rise_ctl_get_pinned_versions_summary, RiseCtlGetPinnedVersionsSummaryRequest, RiseCtlGetPinnedVersionsSummaryResponse }
@@ -2266,6 +2378,7 @@ macro_rules! for_all_meta_rpc {
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
             ,{ user_client, grant_privilege, GrantPrivilegeRequest, GrantPrivilegeResponse }
             ,{ user_client, revoke_privilege, RevokePrivilegeRequest, RevokePrivilegeResponse }
+            ,{ user_client, alter_default_privilege, AlterDefaultPrivilegeRequest, AlterDefaultPrivilegeResponse }
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
             ,{ scale_client, reschedule, RescheduleRequest, RescheduleResponse }
             ,{ notification_client, subscribe, SubscribeRequest, Streaming<SubscribeResponse> }
@@ -2284,6 +2397,7 @@ macro_rules! for_all_meta_rpc {
             ,{ event_log_client, add_event_log, AddEventLogRequest, AddEventLogResponse }
             ,{ cluster_limit_client, get_cluster_limits, GetClusterLimitsRequest, GetClusterLimitsResponse }
             ,{ hosted_iceberg_catalog_service_client, list_iceberg_tables, ListIcebergTablesRequest, ListIcebergTablesResponse }
+            ,{ monitor_client, stack_trace, StackTraceRequest, StackTraceResponse }
         }
     };
 }

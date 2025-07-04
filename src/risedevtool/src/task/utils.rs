@@ -142,13 +142,9 @@ pub fn add_tempo_endpoint(provide_tempo: &[TempoConfig], cmd: &mut Command) -> R
 }
 
 /// Strategy for whether to enable in-memory hummock if no minio and s3 is provided.
-// TODO: dead, remove this.
 pub enum HummockInMemoryStrategy {
-    /// Enable isolated in-memory hummock. Used by single-node configuration.
-    Isolated,
-    /// Enable in-memory hummock shared in a single process. Used by risedev playground and
-    /// deterministic end-to-end tests.
-    Shared,
+    /// Enable in-memory hummock. Used by single-node configuration.
+    Allowed,
     /// Disallow in-memory hummock. Always requires minio or s3.
     Disallowed,
 }
@@ -168,13 +164,9 @@ pub fn add_hummock_backend(
         provide_opendal,
     ) {
         ([], [], []) => match hummock_in_memory_strategy {
-            HummockInMemoryStrategy::Isolated => {
+            HummockInMemoryStrategy::Allowed => {
                 cmd.arg("--state-store").arg("hummock+memory");
                 (false, false)
-            }
-            HummockInMemoryStrategy::Shared => {
-                cmd.arg("--state-store").arg("hummock+memory-shared");
-                (true, false)
             }
             HummockInMemoryStrategy::Disallowed => {
                 return Err(anyhow!(

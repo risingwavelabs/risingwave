@@ -42,7 +42,7 @@ pub(crate) mod dummy {
     use sea_orm::DatabaseConnection;
     use tokio::sync::mpsc::UnboundedSender;
 
-    use crate::connector_common::IcebergCompactionStat;
+    use crate::connector_common::IcebergSinkCompactionUpdate;
     use crate::enforce_secret::EnforceSecret;
     use crate::error::ConnectorResult;
     use crate::sink::prelude::*;
@@ -82,6 +82,7 @@ pub(crate) mod dummy {
         }
     }
 
+    #[allow(dead_code)]
     pub struct FeatureNotEnabledSink<S: FeatureNotEnabledSinkMarker>(PhantomData<S>);
 
     impl<S: FeatureNotEnabledSinkMarker> Debug for FeatureNotEnabledSink<S> {
@@ -116,7 +117,6 @@ pub(crate) mod dummy {
         type Coordinator = FeatureNotEnabledCoordinator<S>;
         type LogSinker = FeatureNotEnabledLogSinker<S>;
 
-        const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &[];
         const SINK_NAME: &'static str = S::SINK_NAME;
 
         async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
@@ -138,7 +138,7 @@ pub(crate) mod dummy {
         async fn new_coordinator(
             &self,
             _db: DatabaseConnection,
-            _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergCompactionStat>>,
+            _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
         ) -> Result<Self::Coordinator> {
             Err(err_feature_not_enabled(S::SINK_NAME))
         }

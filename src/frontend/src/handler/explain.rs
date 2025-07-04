@@ -33,6 +33,7 @@ use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
 use crate::handler::create_table::handle_create_table_plan;
 use crate::optimizer::OptimizerContext;
+use crate::optimizer::backfill_order_strategy::explain_backfill_order_in_dot_format;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{Convention, Explain};
 use crate::scheduler::BatchPlanFragmenter;
@@ -52,7 +53,7 @@ pub async fn do_handle_explain(
     let session = handler_args.session.clone();
 
     {
-        let (plan, context) = match stmt {
+        let (plan, table, context) = match stmt {
             // `CREATE TABLE` takes the ownership of the `OptimizerContext` to avoid `Rc` across
             // `await` point. We can only take the reference back from the `PlanRef` if it's
             // successfully planned.
@@ -73,7 +74,7 @@ pub async fn do_handle_explain(
             } => {
                 let format_encode = format_encode.map(|s| s.into_v2_with_warning());
 
-                let (plan, _source, _table, _job_type) = handle_create_table_plan(
+                let (plan, _source, table, _job_type) = handle_create_table_plan(
                     handler_args,
                     explain_options,
                     format_encode,
@@ -92,14 +93,14 @@ pub async fn do_handle_explain(
                 )
                 .await?;
                 let context = plan.ctx();
-                (Ok(plan), context)
+                (Ok(plan), Some(table), context)
             }
             Statement::CreateSink { stmt } => {
-                let plan = gen_sink_plan(handler_args, stmt, Some(explain_options))
+                let plan = gen_sink_plan(handler_args, stmt, Some(explain_options), false)
                     .await
                     .map(|plan| plan.sink_plan)?;
                 let context = plan.ctx();
-                (Ok(plan), context)
+                (Ok(plan), None, context)
             }
 
             Statement::FetchCursor {
@@ -114,7 +115,7 @@ pub async fn do_handle_explain(
                     .await
                     .map(|x| x.plan)?;
                 let context = plan.ctx();
-                (Ok(plan), context)
+                (Ok(plan), None, context)
             }
 
             // For other queries without `await` point, we can keep a copy of reference to the
@@ -123,7 +124,7 @@ pub async fn do_handle_explain(
             _ => {
                 let context: OptimizerContextRef =
                     OptimizerContext::new(handler_args, explain_options).into();
-                let plan = match stmt {
+                let (plan, table) = match stmt {
                     // -- Streaming DDLs --
                     Statement::CreateView {
                         or_replace: false,
@@ -141,7 +142,7 @@ pub async fn do_handle_explain(
                         columns,
                         emit_mode,
                     )
-                    .map(|x| x.0),
+                    .map(|(plan, table)| (plan, Some(table))),
                     Statement::CreateView {
                         materialized: false,
                         ..
@@ -179,28 +180,28 @@ pub async fn do_handle_explain(
                             distributed_by,
                         )
                     }
-                    .map(|x| x.0),
+                    .map(|(plan, index_table, _index)| (plan, Some(index_table))),
 
                     // -- Batch Queries --
                     Statement::Insert { .. }
                     | Statement::Delete { .. }
                     | Statement::Update { .. }
                     | Statement::Query { .. } => {
-                        gen_batch_plan_by_statement(&session, context, stmt).map(|x| x.plan)
+                        gen_batch_plan_by_statement(&session, context, stmt).map(|x| (x.plan, None))
                     }
 
                     _ => bail_not_implemented!("unsupported statement for EXPLAIN: {stmt}"),
-                };
+                }?;
 
-                let plan = plan?;
                 let context = plan.ctx().clone();
 
-                (Ok(plan) as Result<_>, context)
+                (Ok(plan) as Result<_>, table, context)
             }
         };
 
         let explain_trace = context.is_explain_trace();
         let explain_verbose = context.is_explain_verbose();
+        let explain_backfill = context.is_explain_backfill();
         let explain_type = context.explain_type();
         let explain_format = context.explain_format();
 
@@ -234,10 +235,15 @@ pub async fn do_handle_explain(
                         }
                         Convention::Stream => {
                             let graph = build_graph(plan.clone(), None)?;
+                            let table = table.map(|x| x.to_prost());
                             if explain_format == ExplainFormat::Dot {
-                                blocks.push(explain_stream_graph_as_dot(&graph, explain_verbose))
+                                blocks.push(explain_stream_graph_as_dot(
+                                    &graph,
+                                    table,
+                                    explain_verbose,
+                                ))
                             } else {
-                                blocks.push(explain_stream_graph(&graph, explain_verbose));
+                                blocks.push(explain_stream_graph(&graph, table, explain_verbose));
                             }
                         }
                     }
@@ -247,11 +253,25 @@ pub async fn do_handle_explain(
                 // if explain trace is on, the plan has been in the rows
                 if !explain_trace && let Ok(plan) = &plan {
                     match explain_format {
-                        ExplainFormat::Text => blocks.push(plan.explain_to_string()),
+                        ExplainFormat::Text => {
+                            blocks.push(plan.explain_to_string());
+                        }
                         ExplainFormat::Json => blocks.push(plan.explain_to_json()),
                         ExplainFormat::Xml => blocks.push(plan.explain_to_xml()),
                         ExplainFormat::Yaml => blocks.push(plan.explain_to_yaml()),
-                        ExplainFormat::Dot => blocks.push(plan.explain_to_dot()),
+                        ExplainFormat::Dot => {
+                            if explain_backfill {
+                                let dot_formatted_backfill_order =
+                                    explain_backfill_order_in_dot_format(
+                                        &session,
+                                        context.with_options().backfill_order_strategy(),
+                                        plan.clone(),
+                                    )?;
+                                blocks.push(dot_formatted_backfill_order);
+                            } else {
+                                blocks.push(plan.explain_to_dot());
+                            }
+                        }
                     }
                 }
             }

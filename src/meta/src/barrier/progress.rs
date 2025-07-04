@@ -48,7 +48,7 @@ enum BackfillState {
 pub(super) struct Progress {
     // `states` and `done_count` decides whether the progress is done. See `is_done`.
     states: HashMap<ActorId, BackfillState>,
-    backfill_order_state: Option<BackfillOrderState>,
+    backfill_order_state: BackfillOrderState,
     done_count: usize,
 
     /// Tells whether the backfill is from source or mv.
@@ -75,7 +75,7 @@ impl Progress {
         upstream_mv_count: HashMap<TableId, usize>,
         upstream_total_key_count: u64,
         definition: String,
-        backfill_order_state: Option<BackfillOrderState>,
+        backfill_order_state: BackfillOrderState,
     ) -> Self {
         let mut states = HashMap::new();
         let mut backfill_upstream_types = HashMap::new();
@@ -129,9 +129,7 @@ impl Progress {
                 tracing::debug!("actor {} done", actor);
                 new = *new_consumed_rows;
                 self.done_count += 1;
-                if let Some(backfill_order_state) = &mut self.backfill_order_state {
-                    next_backfill_nodes = backfill_order_state.finish_actor(actor);
-                }
+                next_backfill_nodes = self.backfill_order_state.finish_actor(actor);
                 tracing::debug!(
                     "{} actors out of {} complete",
                     self.done_count,
@@ -233,6 +231,15 @@ pub enum TrackingJob {
     Recovered(RecoveredTrackingJob),
 }
 
+impl std::fmt::Display for TrackingJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TrackingJob::New(command) => write!(f, "{}", command.job_id),
+            TrackingJob::Recovered(recovered) => write!(f, "{}<recovered>", recovered.id),
+        }
+    }
+}
+
 impl TrackingJob {
     /// Notify metadata manager that the job is finished.
     pub(crate) async fn finish(self, metadata_manager: &MetadataManager) -> MetaResult<()> {
@@ -320,12 +327,12 @@ impl CreateMviewProgressTracker {
     /// 1. `CreateMviewProgress`.
     /// 2. `Backfill` position.
     pub fn recover(
-        mviews: impl IntoIterator<Item = (TableId, (String, &StreamJobFragments))>,
+        mviews: impl IntoIterator<Item = (TableId, (String, &StreamJobFragments, BackfillOrderState))>,
         version_stats: &HummockVersionStats,
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
-        for (creating_table_id, (definition, table_fragments)) in mviews {
+        for (creating_table_id, (definition, table_fragments, backfill_order_state)) in mviews {
             let mut states = HashMap::new();
             let mut backfill_upstream_types = HashMap::new();
             let actors = table_fragments.tracking_progress_actor_ids();
@@ -341,6 +348,7 @@ impl CreateMviewProgressTracker {
                 table_fragments.upstream_table_counts(),
                 definition,
                 version_stats,
+                backfill_order_state,
             );
             let tracking_job = TrackingJob::Recovered(RecoveredTrackingJob {
                 id: creating_table_id.table_id as i32,
@@ -366,12 +374,13 @@ impl CreateMviewProgressTracker {
         upstream_mv_count: HashMap<TableId, usize>,
         definition: String,
         version_stats: &HummockVersionStats,
+        backfill_order_state: BackfillOrderState,
     ) -> Progress {
         let upstream_mvs_total_key_count =
             calculate_total_key_count(&upstream_mv_count, version_stats);
         Progress {
             states,
-            backfill_order_state: None,
+            backfill_order_state,
             backfill_upstream_types,
             done_count: 0, // Fill only after first barrier pass
             upstream_mv_count,
@@ -574,14 +583,14 @@ impl CreateMviewProgressTracker {
             self.actor_map.insert(*actor, creating_mv_id);
         }
 
-        let backfill_order_state = fragment_backfill_ordering
-            .map(|order| BackfillOrderState::new(order, &table_fragments));
+        let backfill_order_state =
+            BackfillOrderState::new(fragment_backfill_ordering, &table_fragments);
         let progress = Progress::new(
             actors,
             upstream_mv_count,
             upstream_total_key_count,
             definition.clone(),
-            backfill_order_state.clone(),
+            backfill_order_state,
         );
         if job_type == StreamingJobType::Sink && create_type == CreateType::Background {
             // We return the original tracking job immediately.

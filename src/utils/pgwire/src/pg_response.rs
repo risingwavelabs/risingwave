@@ -78,6 +78,7 @@ pub enum StatementType {
     DROP_CONNECTION,
     DROP_SECRET,
     ALTER_DATABASE,
+    ALTER_DEFAULT_PRIVILEGES,
     ALTER_SCHEMA,
     ALTER_INDEX,
     ALTER_VIEW,
@@ -114,6 +115,8 @@ pub enum StatementType {
     KILL,
     RECOVER,
     USE,
+    PREPARE,
+    DEALLOCATE,
 }
 
 impl std::fmt::Display for StatementType {

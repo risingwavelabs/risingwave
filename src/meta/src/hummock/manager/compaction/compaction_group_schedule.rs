@@ -482,7 +482,7 @@ impl HummockManager {
                         group_config: Some(config.clone()),
                         group_id: new_compaction_group_id,
                         parent_group_id,
-                        new_sst_start_id,
+                        new_sst_start_id: new_sst_start_id.inner(),
                         table_ids: vec![],
                         version: CompatibilityVersion::LATEST as _, // for compatibility
                         split_key: Some(split_key.into()),
@@ -531,17 +531,16 @@ impl HummockManager {
                 if let Some(partition_vnode_count) = partition_vnode_count
                     && table_ids.len() == 1
                     && table_ids == split_table_ids
-                {
-                    if let Err(err) = compaction_groups_txn.update_compaction_config(
+                    && let Err(err) = compaction_groups_txn.update_compaction_config(
                         &[*cg_id],
                         &[MutableConfig::SplitWeightByVnode(partition_vnode_count)],
-                    ) {
-                        tracing::error!(
-                            error = %err.as_report(),
-                            "failed to update compaction config for group-{}",
-                            cg_id
-                        );
-                    }
+                    )
+                {
+                    tracing::error!(
+                        error = %err.as_report(),
+                        "failed to update compaction config for group-{}",
+                        cg_id
+                    );
                 }
             }
 

@@ -14,7 +14,7 @@
 
 #![feature(let_chains)]
 #![feature(impl_trait_in_assoc_type)]
-#![cfg_attr(coverage, feature(coverage_attribute))]
+#![feature(coverage_attribute)]
 
 use risingwave_meta::*;
 
@@ -29,6 +29,7 @@ pub mod heartbeat_service;
 pub mod hosted_iceberg_catalog_service;
 pub mod hummock_service;
 pub mod meta_member_service;
+pub mod monitor_service;
 pub mod notification_service;
 pub mod scale_service;
 pub mod serving_service;

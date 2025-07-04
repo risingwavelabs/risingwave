@@ -140,7 +140,13 @@ pub async fn handle_create_as(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_table(source, table, graph, TableJobType::Unspecified)
+        .create_table(
+            source,
+            table.to_prost(),
+            graph,
+            TableJobType::Unspecified,
+            if_not_exists,
+        )
         .await?;
 
     // Generate insert

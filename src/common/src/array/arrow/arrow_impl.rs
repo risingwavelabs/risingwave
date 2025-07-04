@@ -118,6 +118,7 @@ pub trait ToArrow {
             ArrayImpl::List(array) => self.list_to_arrow(data_type, array),
             ArrayImpl::Struct(array) => self.struct_to_arrow(data_type, array),
             ArrayImpl::Map(array) => self.map_to_arrow(data_type, array),
+            ArrayImpl::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
         }?;
         if arrow_array.data_type() != data_type {
             arrow_cast::cast(&arrow_array, data_type).map_err(ArrayError::to_arrow)
@@ -330,6 +331,7 @@ pub trait ToArrow {
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
             DataType::List(datatype) => self.list_type_to_arrow(datatype)?,
             DataType::Map(datatype) => self.map_type_to_arrow(datatype)?,
+            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
         };
         Ok(arrow_schema::Field::new(name, data_type, true))
     }
@@ -1355,6 +1357,23 @@ impl TryFrom<&arrow_array::StringArray> for JsonbArray {
     }
 }
 
+impl From<&IntervalArray> for arrow_array::StringArray {
+    fn from(array: &IntervalArray) -> Self {
+        let mut builder =
+            arrow_array::builder::StringBuilder::with_capacity(array.len(), array.len() * 16);
+        for value in array.iter() {
+            match value {
+                Some(interval) => {
+                    write!(&mut builder, "{}", interval).unwrap();
+                    builder.append_value("");
+                }
+                None => builder.append_null(),
+            }
+        }
+        builder.finish()
+    }
+}
+
 impl From<&JsonbArray> for arrow_array::LargeStringArray {
     fn from(array: &JsonbArray) -> Self {
         let mut builder =
@@ -1423,82 +1442,198 @@ impl From<&arrow_array::Decimal256Array> for Int256Array {
     }
 }
 
-/// This function checks whether the schema of a Parquet file matches the user defined schema.
+/// This function checks whether the schema of a Parquet file matches the user-defined schema in RisingWave.
 /// It handles the following special cases:
-/// - Arrow's `timestamp(_, None)` types (all four time units) match with RisingWave's `TimeStamp` type.
-/// - Arrow's `timestamp(_, Some)` matches with RisingWave's `TimeStamptz` type.
+/// - Arrow's `timestamp(_, None)` types (all four time units) match with RisingWave's `Timestamp` type.
+/// - Arrow's `timestamp(_, Some)` matches with RisingWave's `Timestamptz` type.
 /// - Since RisingWave does not have an `UInt` type:
 ///   - Arrow's `UInt8` matches with RisingWave's `Int16`.
 ///   - Arrow's `UInt16` matches with RisingWave's `Int32`.
 ///   - Arrow's `UInt32` matches with RisingWave's `Int64`.
 ///   - Arrow's `UInt64` matches with RisingWave's `Decimal`.
 /// - Arrow's `Float16` matches with RisingWave's `Float32`.
+///
+/// Nested data type matching:
+/// - Struct: Arrow's `Struct` type matches with RisingWave's `Struct` type recursively, requiring the same field names and types.
+/// - List: Arrow's `List` type matches with RisingWave's `List` type recursively, requiring the same element type.
+/// - Map: Arrow's `Map` type matches with RisingWave's `Map` type recursively, requiring the key and value types to match, and the inner struct must have exactly two fields named "key" and "value".
 pub fn is_parquet_schema_match_source_schema(
     arrow_data_type: &arrow_schema::DataType,
     rw_data_type: &crate::types::DataType,
 ) -> bool {
-    matches!(
-        (arrow_data_type, rw_data_type),
-        (arrow_schema::DataType::Boolean, RwDataType::Boolean)
-            | (
-                arrow_schema::DataType::Int8
-                    | arrow_schema::DataType::Int16
-                    | arrow_schema::DataType::UInt8,
-                RwDataType::Int16
-            )
-            | (
-                arrow_schema::DataType::Int32 | arrow_schema::DataType::UInt16,
-                RwDataType::Int32
-            )
-            | (
-                arrow_schema::DataType::Int64 | arrow_schema::DataType::UInt32,
-                RwDataType::Int64
-            )
-            | (
-                arrow_schema::DataType::UInt64 | arrow_schema::DataType::Decimal128(_, _),
-                RwDataType::Decimal
-            )
-            | (arrow_schema::DataType::Decimal256(_, _), RwDataType::Int256)
-            | (
-                arrow_schema::DataType::Float16 | arrow_schema::DataType::Float32,
-                RwDataType::Float32
-            )
-            | (arrow_schema::DataType::Float64, RwDataType::Float64)
-            | (
-                arrow_schema::DataType::Timestamp(_, None),
-                RwDataType::Timestamp
-            )
-            | (
-                arrow_schema::DataType::Timestamp(_, Some(_)),
-                RwDataType::Timestamptz
-            )
-            | (arrow_schema::DataType::Date32, RwDataType::Date)
-            | (
-                arrow_schema::DataType::Time32(_) | arrow_schema::DataType::Time64(_),
-                RwDataType::Time
-            )
-            | (
-                arrow_schema::DataType::Interval(IntervalUnit::MonthDayNano),
-                RwDataType::Interval
-            )
-            | (
-                arrow_schema::DataType::Utf8 | arrow_schema::DataType::LargeUtf8,
-                RwDataType::Varchar
-            )
-            | (
-                arrow_schema::DataType::Binary | arrow_schema::DataType::LargeBinary,
-                RwDataType::Bytea
-            )
-            | (arrow_schema::DataType::List(_), RwDataType::List(_))
-            | (arrow_schema::DataType::Struct(_), RwDataType::Struct(_))
-            | (arrow_schema::DataType::Map(_, _), RwDataType::Map(_))
-    )
-}
+    use arrow_schema::DataType as ArrowType;
 
+    use crate::types::{DataType as RwType, MapType, StructType};
+
+    match (arrow_data_type, rw_data_type) {
+        // Primitive type matching and special cases
+        (ArrowType::Boolean, RwType::Boolean)
+        | (ArrowType::Int8 | ArrowType::Int16 | ArrowType::UInt8, RwType::Int16)
+        | (ArrowType::Int32 | ArrowType::UInt16, RwType::Int32)
+        | (ArrowType::Int64 | ArrowType::UInt32, RwType::Int64)
+        | (ArrowType::UInt64 | ArrowType::Decimal128(_, _), RwType::Decimal)
+        | (ArrowType::Decimal256(_, _), RwType::Int256)
+        | (ArrowType::Float16 | ArrowType::Float32, RwType::Float32)
+        | (ArrowType::Float64, RwType::Float64)
+        | (ArrowType::Timestamp(_, None), RwType::Timestamp)
+        | (ArrowType::Timestamp(_, Some(_)), RwType::Timestamptz)
+        | (ArrowType::Date32, RwType::Date)
+        | (ArrowType::Time32(_) | ArrowType::Time64(_), RwType::Time)
+        | (ArrowType::Interval(arrow_schema::IntervalUnit::MonthDayNano), RwType::Interval)
+        | (ArrowType::Utf8 | ArrowType::LargeUtf8, RwType::Varchar)
+        | (ArrowType::Binary | ArrowType::LargeBinary, RwType::Bytea) => true,
+
+        // Struct type recursive matching
+        // Arrow's Struct matches RisingWave's Struct if all field names and types match recursively
+        (ArrowType::Struct(arrow_fields), RwType::Struct(rw_struct)) => {
+            if arrow_fields.len() != rw_struct.len() {
+                return false;
+            }
+            for (arrow_field, (rw_name, rw_ty)) in arrow_fields.iter().zip_eq_fast(rw_struct.iter())
+            {
+                if arrow_field.name() != rw_name {
+                    return false;
+                }
+                if !is_parquet_schema_match_source_schema(arrow_field.data_type(), rw_ty) {
+                    return false;
+                }
+            }
+            true
+        }
+        // List type recursive matching
+        // Arrow's List matches RisingWave's List if the element type matches recursively
+        (ArrowType::List(arrow_field), RwType::List(rw_elem_ty)) => {
+            is_parquet_schema_match_source_schema(arrow_field.data_type(), rw_elem_ty)
+        }
+        // Map type recursive matching
+        // Arrow's Map matches RisingWave's Map if the key and value types match recursively,
+        // and the inner struct has exactly two fields named "key" and "value"
+        (ArrowType::Map(arrow_field, _), RwType::Map(rw_map_ty)) => {
+            if let ArrowType::Struct(fields) = arrow_field.data_type() {
+                if fields.len() != 2 {
+                    return false;
+                }
+                let key_field = &fields[0];
+                let value_field = &fields[1];
+                if key_field.name() != "key" || value_field.name() != "value" {
+                    return false;
+                }
+                let (rw_key_ty, rw_value_ty) = (rw_map_ty.key(), rw_map_ty.value());
+                is_parquet_schema_match_source_schema(key_field.data_type(), rw_key_ty)
+                    && is_parquet_schema_match_source_schema(value_field.data_type(), rw_value_ty)
+            } else {
+                false
+            }
+        }
+        // Fallback: types do not match
+        _ => false,
+    }
+}
 #[cfg(test)]
 mod tests {
 
+    use arrow_schema::{DataType as ArrowType, Field as ArrowField};
+
     use super::*;
+    use crate::types::{DataType as RwType, MapType, StructType};
+
+    #[test]
+    fn test_struct_schema_match() {
+        // Arrow: struct<f1: Double, f2: Utf8>
+
+        let arrow_struct = ArrowType::Struct(
+            vec![
+                ArrowField::new("f1", ArrowType::Float64, true),
+                ArrowField::new("f2", ArrowType::Utf8, true),
+            ]
+            .into(),
+        );
+        // RW: struct<f1 Double, f2 Varchar>
+        let rw_struct = RwType::Struct(StructType::new(vec![
+            ("f1".to_owned(), RwType::Float64),
+            ("f2".to_owned(), RwType::Varchar),
+        ]));
+        assert!(is_parquet_schema_match_source_schema(
+            &arrow_struct,
+            &rw_struct
+        ));
+
+        // Field names do not match
+        let arrow_struct2 = ArrowType::Struct(
+            vec![
+                ArrowField::new("f1", ArrowType::Float64, true),
+                ArrowField::new("f3", ArrowType::Utf8, true),
+            ]
+            .into(),
+        );
+        assert!(!is_parquet_schema_match_source_schema(
+            &arrow_struct2,
+            &rw_struct
+        ));
+    }
+
+    #[test]
+    fn test_list_schema_match() {
+        // Arrow: list<double>
+        let arrow_list =
+            ArrowType::List(Box::new(ArrowField::new("item", ArrowType::Float64, true)).into());
+        // RW: list<double>
+        let rw_list = RwType::List(Box::new(RwType::Float64));
+        assert!(is_parquet_schema_match_source_schema(&arrow_list, &rw_list));
+
+        let rw_list2 = RwType::List(Box::new(RwType::Int32));
+        assert!(!is_parquet_schema_match_source_schema(
+            &arrow_list,
+            &rw_list2
+        ));
+    }
+
+    #[test]
+    fn test_map_schema_match() {
+        // Arrow: map<utf8, int32>
+        let arrow_map = ArrowType::Map(
+            Arc::new(ArrowField::new(
+                "entries",
+                ArrowType::Struct(
+                    vec![
+                        ArrowField::new("key", ArrowType::Utf8, false),
+                        ArrowField::new("value", ArrowType::Int32, true),
+                    ]
+                    .into(),
+                ),
+                false,
+            )),
+            false,
+        );
+        // RW: map<varchar, int32>
+        let rw_map = RwType::Map(MapType::from_kv(RwType::Varchar, RwType::Int32));
+        assert!(is_parquet_schema_match_source_schema(&arrow_map, &rw_map));
+
+        // Key type does not match
+        let rw_map2 = RwType::Map(MapType::from_kv(RwType::Int32, RwType::Int32));
+        assert!(!is_parquet_schema_match_source_schema(&arrow_map, &rw_map2));
+
+        // Value type does not match
+        let rw_map3 = RwType::Map(MapType::from_kv(RwType::Varchar, RwType::Float64));
+        assert!(!is_parquet_schema_match_source_schema(&arrow_map, &rw_map3));
+
+        // Arrow inner struct field name does not match
+        let arrow_map2 = ArrowType::Map(
+            Arc::new(ArrowField::new(
+                "entries",
+                ArrowType::Struct(
+                    vec![
+                        ArrowField::new("k", ArrowType::Utf8, false),
+                        ArrowField::new("value", ArrowType::Int32, true),
+                    ]
+                    .into(),
+                ),
+                false,
+            )),
+            false,
+        );
+        assert!(!is_parquet_schema_match_source_schema(&arrow_map2, &rw_map));
+    }
 
     #[test]
     fn bool() {

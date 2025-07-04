@@ -14,6 +14,8 @@
 
 use crate::handler::HandlerArgs;
 
+/// Some options can be configured both in `WITH` clause and session variables.
+/// The config in `WITH` clause has higher priority.
 #[derive(Debug, Clone, Default)]
 pub struct OverwriteOptions {
     pub source_rate_limit: Option<u32>,

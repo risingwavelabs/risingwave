@@ -46,6 +46,8 @@ pub mod hummock_time_travel_delta;
 pub mod hummock_time_travel_version;
 pub mod hummock_version_delta;
 pub mod hummock_version_stats;
+pub mod iceberg_namespace_properties;
+pub mod iceberg_tables;
 pub mod index;
 pub mod object;
 pub mod object_dependency;
@@ -60,6 +62,7 @@ pub mod subscription;
 pub mod system_parameter;
 pub mod table;
 pub mod user;
+pub mod user_default_privilege;
 pub mod user_privilege;
 pub mod view;
 pub mod worker;
@@ -83,6 +86,7 @@ pub type ConnectionId = ObjectId;
 pub type SecretId = ObjectId;
 pub type UserId = i32;
 pub type PrivilegeId = i32;
+pub type DefaultPrivilegeId = i32;
 
 pub type HummockVersionId = i64;
 pub type Epoch = i64;
@@ -409,6 +413,12 @@ derive_from_blob!(ConnectorSplits, risingwave_pb::source::ConnectorSplits);
 derive_from_blob!(VnodeBitmap, risingwave_pb::common::Buffer);
 derive_from_blob!(ActorMapping, risingwave_pb::stream_plan::PbActorMapping);
 derive_from_blob!(ExprContext, risingwave_pb::plan_common::PbExprContext);
+
+derive_array_from_blob!(
+    TypePairArray,
+    risingwave_pb::stream_plan::dispatch_output_mapping::TypePair,
+    PbTypePairArray
+);
 
 derive_array_from_blob!(
     HummockVersionDeltaArray,

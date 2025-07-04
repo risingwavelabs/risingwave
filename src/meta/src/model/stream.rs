@@ -17,11 +17,11 @@ use std::ops::{AddAssign, Deref};
 
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::hash::{
-    IsSingleton, VirtualNode, VnodeCount, VnodeCountCompat, WorkerSlotId,
+    ActorAlignmentId, IsSingleton, VirtualNode, VnodeCount, VnodeCountCompat,
 };
-use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node};
+use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node_body};
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::{DispatcherType, SourceId, StreamingParallelism, WorkerId};
 use risingwave_pb::catalog::Table;
@@ -39,8 +39,8 @@ use risingwave_pb::meta::{PbTableFragments, PbTableParallelism};
 use risingwave_pb::plan_common::PbExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, Dispatcher, FragmentTypeFlag, PbDispatcher, PbStreamActor, PbStreamContext,
-    StreamNode,
+    DispatchStrategy, Dispatcher, PbDispatchOutputMapping, PbDispatcher, PbStreamActor,
+    PbStreamContext, StreamNode,
 };
 
 use super::{ActorId, FragmentId};
@@ -131,7 +131,7 @@ pub struct DownstreamFragmentRelation {
     pub downstream_fragment_id: FragmentId,
     pub dispatcher_type: DispatcherType,
     pub dist_key_indices: Vec<u32>,
-    pub output_indices: Vec<u32>,
+    pub output_mapping: PbDispatchOutputMapping,
 }
 
 impl From<(FragmentId, DispatchStrategy)> for DownstreamFragmentRelation {
@@ -140,7 +140,7 @@ impl From<(FragmentId, DispatchStrategy)> for DownstreamFragmentRelation {
             downstream_fragment_id: fragment_id,
             dispatcher_type: dispatch.get_type().unwrap().into(),
             dist_key_indices: dispatch.dist_key_indices,
-            output_indices: dispatch.output_indices,
+            output_mapping: dispatch.output_mapping.unwrap(),
         }
     }
 }
@@ -187,7 +187,7 @@ impl StreamActor {
 #[derive(Clone, Debug, Default)]
 pub struct Fragment {
     pub fragment_id: FragmentId,
-    pub fragment_type_mask: u32,
+    pub fragment_type_mask: FragmentTypeMask,
     pub distribution_type: PbFragmentDistributionType,
     pub actors: Vec<StreamActor>,
     pub state_table_ids: Vec<u32>,
@@ -203,7 +203,7 @@ impl Fragment {
     ) -> PbFragment {
         PbFragment {
             fragment_id: self.fragment_id,
-            fragment_type_mask: self.fragment_type_mask,
+            fragment_type_mask: self.fragment_type_mask.into(),
             distribution_type: self.distribution_type as _,
             actors: self
                 .actors
@@ -366,18 +366,18 @@ impl StreamJobFragments {
     pub fn new(
         stream_job_id: TableId,
         fragments: BTreeMap<FragmentId, Fragment>,
-        actor_locations: &BTreeMap<ActorId, WorkerSlotId>,
+        actor_locations: &BTreeMap<ActorId, ActorAlignmentId>,
         ctx: StreamContext,
         table_parallelism: TableParallelism,
         max_parallelism: usize,
     ) -> Self {
         let actor_status = actor_locations
             .iter()
-            .map(|(&actor_id, worker_slot_id)| {
+            .map(|(&actor_id, alignment_id)| {
                 (
                     actor_id,
                     ActorStatus {
-                        location: PbActorLocation::from_worker(worker_slot_id.worker_id()),
+                        location: PbActorLocation::from_worker(alignment_id.worker_id()),
                         state: ActorState::Inactive as i32,
                     },
                 )
@@ -484,7 +484,7 @@ impl StreamJobFragments {
     /// Returns the actor ids with the given fragment type.
     pub fn filter_actor_ids(
         &self,
-        check_type: impl Fn(u32) -> bool + 'static,
+        check_type: impl Fn(FragmentTypeMask) -> bool + 'static,
     ) -> impl Iterator<Item = ActorId> + '_ {
         self.fragments
             .values()
@@ -495,7 +495,7 @@ impl StreamJobFragments {
     /// Returns mview actor ids.
     pub fn mview_actor_ids(&self) -> Vec<ActorId> {
         Self::filter_actor_ids(self, |fragment_type_mask| {
-            (fragment_type_mask & FragmentTypeFlag::Mview as u32) != 0
+            fragment_type_mask.contains(FragmentTypeFlag::Mview)
         })
         .collect()
     }
@@ -504,17 +504,19 @@ impl StreamJobFragments {
     pub fn tracking_progress_actor_ids(&self) -> Vec<(ActorId, BackfillUpstreamType)> {
         let mut actor_ids = vec![];
         for fragment in self.fragments.values() {
-            if fragment.fragment_type_mask & FragmentTypeFlag::CdcFilter as u32 != 0 {
+            if fragment
+                .fragment_type_mask
+                .contains(FragmentTypeFlag::CdcFilter)
+            {
                 // Note: CDC table job contains a StreamScan fragment (StreamCdcScan node) and a CdcFilter fragment.
                 // We don't track any fragments' progress.
                 return vec![];
             }
-            if (fragment.fragment_type_mask
-                & (FragmentTypeFlag::Values as u32
-                    | FragmentTypeFlag::StreamScan as u32
-                    | FragmentTypeFlag::SourceScan as u32))
-                != 0
-            {
+            if fragment.fragment_type_mask.contains_any([
+                FragmentTypeFlag::Values,
+                FragmentTypeFlag::StreamScan,
+                FragmentTypeFlag::SourceScan,
+            ]) {
                 actor_ids.extend(fragment.actors.iter().map(|actor| {
                     (
                         actor.actor_id,
@@ -536,27 +538,35 @@ impl StreamJobFragments {
     pub fn mview_fragment(&self) -> Option<Fragment> {
         self.fragments
             .values()
-            .find(|fragment| (fragment.fragment_type_mask & FragmentTypeFlag::Mview as u32) != 0)
+            .find(|fragment| {
+                fragment
+                    .fragment_type_mask
+                    .contains(FragmentTypeFlag::Mview)
+            })
             .cloned()
     }
 
     pub fn source_fragment(&self) -> Option<Fragment> {
         self.fragments
             .values()
-            .find(|fragment| (fragment.fragment_type_mask & FragmentTypeFlag::Source as u32) != 0)
+            .find(|fragment| {
+                fragment
+                    .fragment_type_mask
+                    .contains(FragmentTypeFlag::Source)
+            })
             .cloned()
     }
 
     pub fn sink_fragment(&self) -> Option<Fragment> {
         self.fragments
             .values()
-            .find(|fragment| (fragment.fragment_type_mask & FragmentTypeFlag::Sink as u32) != 0)
+            .find(|fragment| fragment.fragment_type_mask.contains(FragmentTypeFlag::Sink))
             .cloned()
     }
 
     pub fn snapshot_backfill_actor_ids(&self) -> HashSet<ActorId> {
         Self::filter_actor_ids(self, |mask| {
-            (mask & FragmentTypeFlag::SnapshotBackfillStreamScan as u32) != 0
+            mask.contains(FragmentTypeFlag::SnapshotBackfillStreamScan)
         })
         .collect()
     }
@@ -610,7 +620,7 @@ impl StreamJobFragments {
         for (fragment_id, fragment) in &self.fragments {
             {
                 {
-                    visit_stream_node(&fragment.nodes, |body| {
+                    visit_stream_node_body(&fragment.nodes, |body| {
                         if let NodeBody::Union(_) = body {
                             if let Some(union_fragment_id) = union_fragment_id.as_mut() {
                                 // The union fragment should be unique.
@@ -801,10 +811,10 @@ pub enum BackfillUpstreamType {
 }
 
 impl BackfillUpstreamType {
-    pub fn from_fragment_type_mask(mask: u32) -> Self {
-        let is_mview = (mask & FragmentTypeFlag::StreamScan as u32) != 0;
-        let is_values = (mask & FragmentTypeFlag::Values as u32) != 0;
-        let is_source = (mask & FragmentTypeFlag::SourceScan as u32) != 0;
+    pub fn from_fragment_type_mask(mask: FragmentTypeMask) -> Self {
+        let is_mview = mask.contains(FragmentTypeFlag::StreamScan);
+        let is_values = mask.contains(FragmentTypeFlag::Values);
+        let is_source = mask.contains(FragmentTypeFlag::SourceScan);
 
         // Note: in theory we can have multiple backfill executors in one fragment, but currently it's not possible.
         // See <https://github.com/risingwavelabs/risingwave/issues/6236>.
@@ -821,7 +831,7 @@ impl BackfillUpstreamType {
         } else if is_source {
             BackfillUpstreamType::Source
         } else {
-            unreachable!("invalid fragment type mask: {}", mask);
+            unreachable!("invalid fragment type mask: {:?}", mask);
         }
     }
 }

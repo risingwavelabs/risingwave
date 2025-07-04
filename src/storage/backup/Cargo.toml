@@ -21,7 +21,7 @@ risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-thiserror = "1"
+thiserror = { workspace = true }
 twox-hash = "2"
 
 [dev-dependencies]

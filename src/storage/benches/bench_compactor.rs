@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use criterion::async_executor::FuturesExecutor;
 use criterion::{Criterion, criterion_group, criterion_main};
-use foyer::{Engine, Hint, HybridCacheBuilder};
+use foyer::{CacheBuilder, Engine, Hint, HybridCacheBuilder, LargeEngineOptions};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
@@ -56,7 +56,7 @@ use risingwave_storage::monitor::{
 };
 
 pub async fn mock_sstable_store() -> SstableStoreRef {
-    let store = InMemObjectStore::new().monitored(
+    let store = InMemObjectStore::for_test().monitored(
         Arc::new(ObjectStoreMetrics::unused()),
         Arc::new(ObjectStoreConfig::default()),
     );
@@ -65,14 +65,14 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
     let meta_cache = HybridCacheBuilder::new()
         .memory(64 << 20)
         .with_shards(2)
-        .storage(Engine::Large)
+        .storage(Engine::Large(LargeEngineOptions::new()))
         .build()
         .await
         .unwrap();
     let block_cache = HybridCacheBuilder::new()
         .memory(128 << 20)
         .with_shards(2)
-        .storage(Engine::Large)
+        .storage(Engine::Large(LargeEngineOptions::new()))
         .build()
         .await
         .unwrap();
@@ -88,6 +88,8 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
 
         meta_cache,
         block_cache,
+        vector_meta_cache: CacheBuilder::new(1 << 10).build(),
+        vector_block_cache: CacheBuilder::new(1 << 10).build(),
     }))
 }
 

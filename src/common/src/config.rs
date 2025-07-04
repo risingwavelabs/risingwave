@@ -327,6 +327,10 @@ pub struct MetaConfig {
     #[deprecated]
     pub cut_table_size_limit: u64,
 
+    /// Whether to protect dropping a table with incoming sink.
+    #[serde(default = "default::meta::protect_drop_table_with_incoming_sink")]
+    pub protect_drop_table_with_incoming_sink: bool,
+
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -562,6 +566,19 @@ pub struct MetaDeveloperConfig {
     #[serde(default = "default::developer::hummock_time_travel_filter_out_objects_batch_size")]
     pub hummock_time_travel_filter_out_objects_batch_size: usize,
 
+    #[serde(default = "default::developer::hummock_time_travel_filter_out_objects_v1")]
+    pub hummock_time_travel_filter_out_objects_v1: bool,
+
+    #[serde(
+        default = "default::developer::hummock_time_travel_filter_out_objects_list_version_batch_size"
+    )]
+    pub hummock_time_travel_filter_out_objects_list_version_batch_size: usize,
+
+    #[serde(
+        default = "default::developer::hummock_time_travel_filter_out_objects_list_delta_batch_size"
+    )]
+    pub hummock_time_travel_filter_out_objects_list_delta_batch_size: usize,
+
     #[serde(default)]
     pub compute_client_config: RpcClientConfig,
 
@@ -645,9 +662,9 @@ pub struct BatchConfig {
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
 
-    #[serde(default = "default::batch::frontend_compute_runtime_worker_threads")]
+    #[serde(default)]
     /// frontend compute runtime worker threads
-    pub frontend_compute_runtime_worker_threads: usize,
+    pub frontend_compute_runtime_worker_threads: Option<usize>,
 
     /// This is the secs used to mask a worker unavailable temporarily.
     #[serde(default = "default::batch::mask_worker_temporary_secs")]
@@ -762,6 +779,21 @@ pub struct CacheConfig {
     #[serde(default)]
     #[config_doc(omitted)]
     pub meta_cache_eviction: CacheEvictionConfig,
+
+    #[serde(default = "default::storage::vector_block_cache_capacity_mb")]
+    pub vector_block_cache_capacity_mb: usize,
+    #[serde(default = "default::storage::vector_block_cache_shard_num")]
+    pub vector_block_cache_shard_num: usize,
+    #[serde(default)]
+    #[config_doc(omitted)]
+    pub vector_block_cache_eviction_config: CacheEvictionConfig,
+    #[serde(default = "default::storage::vector_meta_cache_capacity_mb")]
+    pub vector_meta_cache_capacity_mb: usize,
+    #[serde(default = "default::storage::vector_meta_cache_shard_num")]
+    pub vector_meta_cache_shard_num: usize,
+    #[serde(default)]
+    #[config_doc(omitted)]
+    pub vector_meta_cache_eviction_config: CacheEvictionConfig,
 }
 
 /// the section `[storage.cache.eviction]` in `risingwave.toml`.
@@ -956,6 +988,9 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::compactor_max_preload_meta_file_count")]
     pub compactor_max_preload_meta_file_count: usize,
 
+    #[serde(default = "default::storage::vector_file_block_size_kb")]
+    pub vector_file_block_size_kb: usize,
+
     /// Object storage configuration
     /// 1. General configuration
     /// 2. Some special configuration of Backend
@@ -965,6 +1000,21 @@ pub struct StorageConfig {
 
     #[serde(default = "default::storage::time_travel_version_cache_capacity")]
     pub time_travel_version_cache_capacity: u64,
+
+    // iceberg compaction
+    #[serde(default = "default::storage::iceberg_compaction_target_file_size_mb")]
+    pub iceberg_compaction_target_file_size_mb: u32,
+    #[serde(default = "default::storage::iceberg_compaction_enable_validate")]
+    pub iceberg_compaction_enable_validate: bool,
+    #[serde(default = "default::storage::iceberg_compaction_max_record_batch_rows")]
+    pub iceberg_compaction_max_record_batch_rows: usize,
+    #[serde(default = "default::storage::iceberg_compaction_min_size_per_partition_mb")]
+    pub iceberg_compaction_min_size_per_partition_mb: u32,
+    #[serde(default = "default::storage::iceberg_compaction_max_file_count_per_partition")]
+    pub iceberg_compaction_max_file_count_per_partition: u32,
+
+    #[serde(default = "default::storage::iceberg_compaction_write_parquet_max_row_group_rows")]
+    pub iceberg_compaction_write_parquet_max_row_group_rows: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
@@ -1042,6 +1092,9 @@ pub struct FileCacheConfig {
 
     #[serde(default = "default::file_cache::throttle")]
     pub throttle: Throttle,
+
+    #[serde(default = "default::file_cache::fifo_probation_ratio")]
+    pub fifo_probation_ratio: f64,
 
     /// Recover mode.
     ///
@@ -1295,6 +1348,9 @@ pub struct BatchDeveloperConfig {
 
     #[serde(default)]
     pub compute_client_config: RpcClientConfig,
+
+    #[serde(default)]
+    pub frontend_client_config: RpcClientConfig,
 
     #[serde(default = "default::developer::batch_local_execute_buffer_size")]
     pub local_execute_buffer_size: usize,
@@ -1659,6 +1715,10 @@ pub mod default {
             64 * 1024 * 1024 * 1024 // 64GB
         }
 
+        pub fn protect_drop_table_with_incoming_sink() -> bool {
+            false
+        }
+
         pub fn partition_vnode_count() -> u32 {
             16
         }
@@ -1946,6 +2006,26 @@ pub mod default {
             32
         }
 
+        pub fn vector_file_block_size_kb() -> usize {
+            1024
+        }
+
+        pub fn vector_block_cache_capacity_mb() -> usize {
+            16
+        }
+
+        pub fn vector_block_cache_shard_num() -> usize {
+            16
+        }
+
+        pub fn vector_meta_cache_capacity_mb() -> usize {
+            16
+        }
+
+        pub fn vector_meta_cache_shard_num() -> usize {
+            16
+        }
+
         // deprecated
         pub fn table_info_statistic_history_times() -> usize {
             240
@@ -1961,6 +2041,30 @@ pub mod default {
 
         pub fn time_travel_version_cache_capacity() -> u64 {
             10
+        }
+
+        pub fn iceberg_compaction_target_file_size_mb() -> u32 {
+            1024
+        }
+
+        pub fn iceberg_compaction_enable_validate() -> bool {
+            false
+        }
+
+        pub fn iceberg_compaction_max_record_batch_rows() -> usize {
+            1024
+        }
+
+        pub fn iceberg_compaction_write_parquet_max_row_group_rows() -> usize {
+            1024 * 100 // 100k
+        }
+
+        pub fn iceberg_compaction_min_size_per_partition_mb() -> u32 {
+            1024
+        }
+
+        pub fn iceberg_compaction_max_file_count_per_partition() -> u32 {
+            32
         }
     }
 
@@ -2029,6 +2133,10 @@ pub mod default {
 
         pub fn flush_buffer_threshold_mb() -> Option<usize> {
             None
+        }
+
+        pub fn fifo_probation_ratio() -> f64 {
+            0.1
         }
 
         pub fn recover_mode() -> RecoverMode {
@@ -2221,6 +2329,18 @@ pub mod default {
             1000
         }
 
+        pub fn hummock_time_travel_filter_out_objects_v1() -> bool {
+            false
+        }
+
+        pub fn hummock_time_travel_filter_out_objects_list_version_batch_size() -> usize {
+            10
+        }
+
+        pub fn hummock_time_travel_filter_out_objects_list_delta_batch_size() -> usize {
+            1000
+        }
+
         pub fn memory_controller_threshold_aggressive() -> f64 {
             0.9
         }
@@ -2326,10 +2446,6 @@ pub mod default {
         pub fn statement_timeout_in_sec() -> u32 {
             // 1 hour
             60 * 60
-        }
-
-        pub fn frontend_compute_runtime_worker_threads() -> usize {
-            4
         }
 
         pub fn mask_worker_temporary_secs() -> usize {
@@ -2712,11 +2828,17 @@ pub struct StorageMemoryConfig {
     pub block_cache_shard_num: usize,
     pub meta_cache_capacity_mb: usize,
     pub meta_cache_shard_num: usize,
+    pub vector_block_cache_capacity_mb: usize,
+    pub vector_block_cache_shard_num: usize,
+    pub vector_meta_cache_capacity_mb: usize,
+    pub vector_meta_cache_shard_num: usize,
     pub shared_buffer_capacity_mb: usize,
     pub compactor_memory_limit_mb: usize,
     pub prefetch_buffer_capacity_mb: usize,
     pub block_cache_eviction_config: EvictionConfig,
     pub meta_cache_eviction_config: EvictionConfig,
+    pub vector_block_cache_eviction_config: EvictionConfig,
+    pub vector_meta_cache_eviction_config: EvictionConfig,
     pub block_file_cache_flush_buffer_threshold_mb: usize,
     pub meta_file_cache_flush_buffer_threshold_mb: usize,
 }
@@ -2814,6 +2936,10 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
 
     let block_cache_eviction_config = get_eviction_config(&s.storage.cache.block_cache_eviction);
     let meta_cache_eviction_config = get_eviction_config(&s.storage.cache.meta_cache_eviction);
+    let vector_block_cache_eviction_config =
+        get_eviction_config(&s.storage.cache.vector_block_cache_eviction_config);
+    let vector_meta_cache_eviction_config =
+        get_eviction_config(&s.storage.cache.vector_meta_cache_eviction_config);
 
     let prefetch_buffer_capacity_mb =
         s.storage
@@ -2846,11 +2972,17 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         block_cache_shard_num,
         meta_cache_capacity_mb,
         meta_cache_shard_num,
+        vector_block_cache_capacity_mb: s.storage.cache.vector_block_cache_capacity_mb,
+        vector_block_cache_shard_num: s.storage.cache.vector_block_cache_shard_num,
+        vector_meta_cache_capacity_mb: s.storage.cache.vector_meta_cache_capacity_mb,
+        vector_meta_cache_shard_num: s.storage.cache.vector_meta_cache_shard_num,
         shared_buffer_capacity_mb,
         compactor_memory_limit_mb,
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,
         meta_cache_eviction_config,
+        vector_block_cache_eviction_config,
+        vector_meta_cache_eviction_config,
         block_file_cache_flush_buffer_threshold_mb,
         meta_file_cache_flush_buffer_threshold_mb,
     }
@@ -3039,10 +3171,10 @@ mod tests {
             section_configs
                 .into_iter()
                 .for_each(|(k, v)| set_default_values(sub_section.clone(), k, v, configs))
-        } else if let Some(t) = configs.get_mut(&section) {
-            if let Some(item_doc) = t.get_mut(&name) {
-                item_doc.default = format!("{}", value);
-            }
+        } else if let Some(t) = configs.get_mut(&section)
+            && let Some(item_doc) = t.get_mut(&name)
+        {
+            item_doc.default = format!("{}", value);
         }
     }
 

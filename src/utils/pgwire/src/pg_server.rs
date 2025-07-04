@@ -24,6 +24,7 @@ use parking_lot::Mutex;
 use risingwave_common::types::DataType;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
+use risingwave_jni_core::jvm_runtime::register_jvm_builder;
 use risingwave_sqlparser::ast::Statement;
 use serde::Deserialize;
 use thiserror_ext::AsReport;
@@ -272,7 +273,7 @@ pub async fn pg_serve(
 ) -> Result<(), BoxedError> {
     let listener = Listener::bind(addr).await?;
     tracing::info!(addr, "server started");
-
+    register_jvm_builder();
     let acceptor_runtime = BackgroundShutdownRuntime::from({
         let mut builder = tokio::runtime::Builder::new_multi_thread();
         builder.worker_threads(1);

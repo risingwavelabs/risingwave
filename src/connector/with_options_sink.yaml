@@ -138,6 +138,7 @@ ClickHouseConfig:
     comments: Commit every n(>0) checkpoints, default is 10.
     required: false
     default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
+    allow_alter_on_fly: true
   - name: r#type
     field_type: String
     required: true
@@ -204,6 +205,7 @@ DeltaLakeConfig:
     comments: Commit every n(>0) checkpoints, default is 10.
     required: false
     default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
+    allow_alter_on_fly: true
   - name: r#type
     field_type: String
     required: true
@@ -299,7 +301,7 @@ DynamoDbConfig:
     field_type: usize
     required: false
     default: '256'
-ElasticSearchOpenSearchConfig:
+ElasticSearchConfig:
   fields:
   - name: url
     field_type: String
@@ -491,7 +493,7 @@ IcebergConfig:
     field_type: String
     comments: |-
       Credential for accessing iceberg catalog, only applicable in rest catalog.
-      A credential to exchange for a token in the OAuth2 client credentials flow.
+      A credential to exchange for a token in the `OAuth2` client credentials flow.
     required: false
   - name: catalog.token
     field_type: String
@@ -509,7 +511,7 @@ IcebergConfig:
     field_type: String
     comments: |-
       scope for accessing iceberg catalog, only applicable in rest catalog.
-      Additional scope for OAuth2.
+      Additional scope for `OAuth2`.
     required: false
   - name: catalog.rest.signing_region
     field_type: String
@@ -521,7 +523,7 @@ IcebergConfig:
     required: false
   - name: catalog.rest.sigv4_enabled
     field_type: bool
-    comments: Whether to use SigV4 for signing requests to the REST catalog.
+    comments: Whether to use `SigV4` for signing requests to the REST catalog.
     required: false
     default: Default::default
   - name: s3.path.style.access
@@ -530,7 +532,7 @@ IcebergConfig:
     default: Default::default
   - name: enable_config_load
     field_type: bool
-    comments: enable config load.
+    comments: Enable config load. This parameter set to true will load warehouse credentials from the environment. Only allowed to be used in a self-hosted environment.
     required: false
     default: Default::default
   - name: hosted_catalog
@@ -554,19 +556,38 @@ IcebergConfig:
     comments: Commit every n(>0) checkpoints, default is 10.
     required: false
     default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
+    allow_alter_on_fly: true
   - name: create_table_if_not_exists
     field_type: bool
     required: false
     default: Default::default
   - name: is_exactly_once
     field_type: bool
-    comments: Whether it is exactly_once, the default is not.
+    comments: Whether it is `exactly_once`, the default is not.
     required: false
     default: Default::default
   - name: commit_retry_num
     field_type: u32
     required: false
     default: '8'
+  - name: enable_compaction
+    field_type: bool
+    comments: Whether to enable iceberg compaction.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: compaction_interval_sec
+    field_type: u64
+    comments: The interval of iceberg compaction
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: enable_snapshot_expiration
+    field_type: bool
+    comments: Whether to enable iceberg expired snapshots.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
 KafkaConfig:
   fields:
   - name: topic
@@ -578,6 +599,7 @@ KafkaConfig:
     field_type: Duration
     required: false
     default: 'Duration :: from_secs (5)'
+    allow_alter_on_fly: true
   - name: properties.bootstrap.server
     field_type: String
     required: true
@@ -587,11 +609,13 @@ KafkaConfig:
     field_type: String
     comments: |-
       Security protocol used for RisingWave to communicate with Kafka brokers. Could be
-      PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
+      PLAINTEXT, SSL, `SASL_PLAINTEXT` or `SASL_SSL`.
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.endpoint.identification.algorithm
     field_type: String
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.ca.location
     field_type: String
     comments: Path to CA certificate file for verifying the broker's key.
@@ -622,16 +646,19 @@ KafkaConfig:
     required: false
   - name: properties.sasl.mechanism
     field_type: String
-    comments: SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and AWS_MSK_IAM.
+    comments: SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and `AWS_MSK_IAM`.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.username
     field_type: String
     comments: SASL username for SASL/PLAIN and SASL/SCRAM.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.password
     field_type: String
     comments: SASL password for SASL/PLAIN and SASL/SCRAM.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.kerberos.service.name
     field_type: String
     comments: Kafka server's Kerberos principal name under SASL/GSSAPI, not including /hostname@REALM.
@@ -676,9 +703,10 @@ KafkaConfig:
     comments: |-
       Maximum Kafka protocol request message size. Due to differing framing overhead between
       protocol versions the producer is unable to reliably enforce a strict max message limit at
-      produce time and may exceed the maximum size by one message in protocol ProduceRequests,
+      produce time and may exceed the maximum size by one message in protocol `ProduceRequests`,
       the broker will enforce the topic's max.message.bytes limit
     required: false
+    allow_alter_on_fly: true
   - name: properties.receive.message.max.bytes
     field_type: usize
     comments: |-
@@ -687,16 +715,20 @@ KafkaConfig:
       + 512 to allow for protocol overhead; the value is adjusted automatically unless the
       configuration property is explicitly set.
     required: false
+    allow_alter_on_fly: true
   - name: properties.statistics.interval.ms
     field_type: usize
     required: false
+    allow_alter_on_fly: true
   - name: properties.client.id
     field_type: String
     comments: Client identifier
     required: false
+    allow_alter_on_fly: true
   - name: properties.enable.ssl.certificate.verification
     field_type: bool
     required: false
+    allow_alter_on_fly: true
   - name: properties.socket.keepalive.enable
     field_type: bool
     required: false
@@ -705,26 +737,30 @@ KafkaConfig:
     field_type: bool
     comments: Allow automatic topic creation on the broker when subscribing to or assigning non-existent topics.
     required: false
+    allow_alter_on_fly: true
   - name: properties.queue.buffering.max.messages
     field_type: usize
     comments: |-
       Maximum number of messages allowed on the producer queue. This queue is shared by all
       topics and partitions. A value of 0 disables this limit.
     required: false
+    allow_alter_on_fly: true
   - name: properties.queue.buffering.max.kbytes
     field_type: usize
     comments: |-
       Maximum total message size sum allowed on the producer queue. This queue is shared by all
       topics and partitions. This property has higher priority than queue.buffering.max.messages.
     required: false
+    allow_alter_on_fly: true
   - name: properties.queue.buffering.max.ms
     field_type: f64
     comments: |-
       Delay in milliseconds to wait for messages in the producer queue to accumulate before
-      constructing message batches (MessageSets) to transmit to brokers. A higher value allows
+      constructing message batches (`MessageSets`) to transmit to brokers. A higher value allows
       larger and more effective (less overhead, improved compression) batches of messages to
       accumulate at the expense of increased message delivery latency.
     required: false
+    allow_alter_on_fly: true
   - name: properties.enable.idempotence
     field_type: bool
     comments: |-
@@ -732,29 +768,34 @@ KafkaConfig:
       once and in the original produce order. The following configuration properties are adjusted
       automatically (if not modified by the user) when idempotence is enabled:
       max.in.flight.requests.per.connection=5 (must be less than or equal to 5),
-      retries=INT32_MAX (must be greater than 0), acks=all, queuing.strategy=fifo. Producer
+      `retries=INT32_MAX` (must be greater than 0), acks=all, queuing.strategy=fifo. Producer
       will fail if user-supplied configuration is incompatible.
     required: false
+    allow_alter_on_fly: true
   - name: properties.message.send.max.retries
     field_type: usize
     comments: How many times to retry sending a failing Message.
     required: false
+    allow_alter_on_fly: true
   - name: properties.retry.backoff.ms
     field_type: usize
     comments: The backoff time in milliseconds before retrying a protocol request.
     required: false
+    allow_alter_on_fly: true
   - name: properties.batch.num.messages
     field_type: usize
-    comments: Maximum number of messages batched in one MessageSet
+    comments: Maximum number of messages batched in one `MessageSet`
     required: false
+    allow_alter_on_fly: true
   - name: properties.batch.size
     field_type: usize
     comments: |-
-      Maximum size (in bytes) of all messages batched in one MessageSet, including protocol
+      Maximum size (in bytes) of all messages batched in one `MessageSet`, including protocol
       framing overhead. This limit is applied after the first message has been added to the
       batch, regardless of the first message's size, this is to ensure that messages that exceed
       batch.size are produced.
     required: false
+    allow_alter_on_fly: true
   - name: properties.compression.codec
     field_type: CompressionCodec
     comments: Compression codec to use for compressing message sets.
@@ -766,14 +807,17 @@ KafkaConfig:
       This value is used to limits the time a produced message waits for
       successful delivery (including retries).
     required: false
+    allow_alter_on_fly: true
   - name: properties.max.in.flight.requests.per.connection
     field_type: usize
     comments: The maximum number of unacknowledged requests the client will send on a single connection before blocking.
     required: false
     default: '5'
+    allow_alter_on_fly: true
   - name: properties.request.required.acks
     field_type: i32
     required: false
+    allow_alter_on_fly: true
   - name: broker.rewrite.endpoints
     field_type: BTreeMap<String,String>
     comments: This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
@@ -902,7 +946,7 @@ MongodbConfig:
   fields:
   - name: mongodb.url
     field_type: String
-    comments: The URL of MongoDB
+    comments: The URL of `MongoDB`
     required: true
   - name: collection.name
     field_type: String
@@ -939,7 +983,7 @@ MqttConfig:
   - name: url
     field_type: String
     comments: |-
-      The url of the broker to connect to. e.g. tcp://localhost.
+      The url of the broker to connect to. e.g. <tcp://localhost>.
       Must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,
       to denote the protocol for establishing a connection with the broker.
       `mqtts://`, `ssl://` will use the native certificates if no ca is specified
@@ -947,8 +991,8 @@ MqttConfig:
   - name: qos
     field_type: QualityOfService
     comments: |-
-      The quality of service to use when publishing messages. Defaults to at_most_once.
-      Could be at_most_once, at_least_once or exactly_once
+      The quality of service to use when publishing messages. Defaults to `at_most_once`.
+      Could be `at_most_once`, `at_least_once` or `exactly_once`
     required: false
   - name: username
     field_type: String
@@ -1052,9 +1096,58 @@ NatsConfig:
   - name: max_message_size
     field_type: i32
     required: false
+  - name: allow_create_stream
+    field_type: bool
+    required: false
+    default: Default::default
   - name: r#type
     field_type: String
     required: true
+OpenSearchConfig:
+  fields:
+  - name: url
+    field_type: String
+    required: true
+  - name: index
+    field_type: String
+    comments: The index's name of elasticsearch or openserach
+    required: false
+  - name: delimiter
+    field_type: String
+    comments: If pk is set, then "pk1+delimiter+pk2+delimiter..." will be used as the key, if pk is not set, we will just use the first column as the key.
+    required: false
+  - name: username
+    field_type: String
+    comments: The username of elasticsearch or openserach
+    required: false
+  - name: password
+    field_type: String
+    comments: The username of elasticsearch or openserach
+    required: false
+  - name: index_column
+    field_type: String
+    comments: It is used for dynamic index, if it is be set, the value of this column will be used as the index. It and `index` can only set one
+    required: false
+  - name: routing_column
+    field_type: String
+    comments: It is used for dynamic route, if it is be set, the value of this column will be used as the route
+    required: false
+  - name: retry_on_conflict
+    field_type: i32
+    required: true
+  - name: batch_num_messages
+    field_type: usize
+    required: true
+  - name: batch_size_kb
+    field_type: usize
+    required: true
+  - name: concurrent_requests
+    field_type: usize
+    required: true
+  - name: r#type
+    field_type: String
+    required: false
+    default: '"upsert" . to_owned ()'
 PulsarConfig:
   fields:
   - name: properties.retry.max
@@ -1153,7 +1246,7 @@ RedisConfig:
   - name: redis.url
     field_type: String
     required: true
-S3Config:
+SnowflakeConfig:
   fields:
   - name: s3.region_name
     field_type: String
@@ -1172,6 +1265,11 @@ S3Config:
     default: Default::default
     alias:
     - snowflake.s3_path
+  - name: enable_config_load
+    field_type: bool
+    comments: Enable config load. This parameter set to true will load s3 credentials from the environment. Only allowed to be used in a self-hosted environment.
+    required: false
+    default: Default::default
   - name: s3.credentials.access
     field_type: String
     required: false
@@ -1283,9 +1381,10 @@ StarrocksConfig:
       to Starrocks at every n checkpoints by leveraging the
       [StreamLoad Transaction API](https://docs.starrocks.io/docs/loading/Stream_Load_transaction_interface/),
       also, in this time, the `sink_decouple` option should be enabled as well.
-      Defaults to 10 if commit_checkpoint_interval <= 0
+      Defaults to 10 if `commit_checkpoint_interval` <= 0
     required: false
     default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
+    allow_alter_on_fly: true
   - name: starrocks.partial_update
     field_type: String
     comments: Enable partial update

@@ -78,7 +78,7 @@ impl CompactorRunner {
         split_index: usize,
         context: CompactorContext,
         task: CompactTask,
-        object_id_getter: Box<dyn GetObjectId>,
+        object_id_getter: Arc<dyn GetObjectId>,
     ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.compression_algorithm = match task.compression_algorithm {
@@ -300,15 +300,15 @@ pub fn partition_overlapping_sstable_infos(
     });
     for sst in origin_infos {
         // Pick group with the smallest right bound for every new sstable. So do not check the larger one if the smallest one does not meet condition.
-        if let Some(mut prev_group) = groups.peek_mut() {
-            if KeyComparator::encoded_full_key_less_than(
+        if let Some(mut prev_group) = groups.peek_mut()
+            && KeyComparator::encoded_full_key_less_than(
                 &prev_group.max_right_bound,
                 &sst.key_range.left,
-            ) {
-                prev_group.max_right_bound.clone_from(&sst.key_range.right);
-                prev_group.ssts.push(sst);
-                continue;
-            }
+            )
+        {
+            prev_group.max_right_bound.clone_from(&sst.key_range.right);
+            prev_group.ssts.push(sst);
+            continue;
         }
         groups.push(SstableGroup {
             max_right_bound: sst.key_range.right.clone(),
@@ -325,7 +325,7 @@ pub async fn compact_with_agent(
     compactor_context: CompactorContext,
     mut compact_task: CompactTask,
     mut shutdown_rx: Receiver<()>,
-    object_id_getter: Box<dyn GetObjectId>,
+    object_id_getter: Arc<dyn GetObjectId>,
     compaction_catalog_agent_ref: CompactionCatalogAgentRef,
 ) -> (
     (
@@ -583,7 +583,7 @@ pub async fn compact(
     compactor_context: CompactorContext,
     compact_task: CompactTask,
     shutdown_rx: Receiver<()>,
-    object_id_getter: Box<dyn GetObjectId>,
+    object_id_getter: Arc<dyn GetObjectId>,
     compaction_catalog_manager_ref: CompactionCatalogManagerRef,
 ) -> (
     (

@@ -28,6 +28,7 @@ use futures::stream::StreamExt;
 use itertools::Itertools;
 use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
 use risingwave_common::types::DataType;
+use risingwave_common::util::deployment::Deployment;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_common::util::query_log::*;
 use risingwave_common::{PG_VERSION, SERVER_ENCODING, STANDARD_CONFORMING_STRINGS};
@@ -381,7 +382,16 @@ where
             // Note: all messages will be processed through this code path, making it the
             //       only necessary place to log errors.
             if let Err(error) = &result {
-                tracing::error!(error = %error.as_report(), "error when process message");
+                if cfg!(debug_assertions) && !Deployment::current().is_ci() {
+                    // For local debugging, we print the error with backtrace.
+                    // It's useful only when:
+                    // - no additional context is added to the error
+                    // - backtrace is captured in the error
+                    // - backtrace is not printed in the middle
+                    tracing::error!(error = ?error.as_report(), "error when process message");
+                } else {
+                    tracing::error!(error = %error.as_report(), "error when process message");
+                }
             }
 
             // Log to optionally-enabled target `PGWIRE_QUERY_LOG`.
@@ -525,10 +535,16 @@ where
             FeMessage::HealthCheck => self.process_health_check(),
             FeMessage::ServerThrottle(reason) => match reason {
                 ServerThrottleReason::TooLargeMessage => {
-                    return Err(PsqlError::ServerThrottle(anyhow::anyhow!("max_single_query_size_bytes {} has been exceeded, please either reduce the query size or increase the limit", self.message_memory_manager.max_filter_bytes).into()));
+                    return Err(PsqlError::ServerThrottle(format!(
+                        "max_single_query_size_bytes {} has been exceeded, please either reduce the query size or increase the limit",
+                        self.message_memory_manager.max_filter_bytes
+                    )));
                 }
                 ServerThrottleReason::TooManyMemoryUsage => {
-                    return Err(PsqlError::ServerThrottle(anyhow::anyhow!("max_total_query_size_bytes {} has been exceeded, please either retry or increase the limit", self.message_memory_manager.max_running_bytes).into()));
+                    return Err(PsqlError::ServerThrottle(format!(
+                        "max_total_query_size_bytes {} has been exceeded, please either retry or increase the limit",
+                        self.message_memory_manager.max_running_bytes
+                    )));
                 }
             },
         }
@@ -1410,7 +1426,7 @@ mod tests {
         ";
         assert_eq!(
             redact_sql(sql, keywords),
-            "CREATE SOURCE temp (k BIGINT, v CHARACTER VARYING) WITH (connector = 'datagen', v1 = 123, v2 = '[REDACTED]', v3 = false, v4 = '[REDACTED]') FORMAT PLAIN ENCODE JSON (a = '1', b = '[REDACTED]')"
+            "CREATE SOURCE temp (k BIGINT, v CHARACTER VARYING) WITH (connector = 'datagen', v1 = 123, v2 = [REDACTED], v3 = false, v4 = [REDACTED]) FORMAT PLAIN ENCODE JSON (a = '1', b = [REDACTED])"
         );
     }
 }

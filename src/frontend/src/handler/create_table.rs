@@ -21,6 +21,7 @@ use clap::ValueEnum;
 use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use percent_encoding::percent_decode_str;
 use pgwire::pg_response::{PgResponse, StatementType};
 use prost::Message as _;
 use risingwave_common::catalog::{
@@ -28,12 +29,11 @@ use risingwave_common::catalog::{
     RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, TableId,
 };
 use risingwave_common::config::MetaBackend;
-use risingwave_common::license::Feature;
+use risingwave_common::global_jvm::JVM;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
-use risingwave_connector::jvm_runtime::JVM;
 use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
 use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::cdc::external::{
@@ -42,9 +42,9 @@ use risingwave_connector::source::cdc::external::{
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, source};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::ConnectionType;
-use risingwave_pb::catalog::source::OptionalAssociatedTableId;
-use risingwave_pb::catalog::{PbSource, PbTable, PbWebhookSourceInfo, Table, WatermarkDesc};
-use risingwave_pb::ddl_service::TableJobType;
+use risingwave_pb::catalog::{PbSource, PbWebhookSourceInfo, WatermarkDesc};
+use risingwave_pb::ddl_service::{PbTableJobType, TableJobType};
+use risingwave_pb::meta::PbThrottleTarget;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, GeneratedColumnDesc,
@@ -59,10 +59,9 @@ use risingwave_sqlparser::ast::{
     Statement, TableConstraint, WebhookSourceInfo, WithProperties,
 };
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
-use thiserror_ext::AsReport;
 
 use super::create_source::{CreateSourceType, SqlColumnStrategy, bind_columns_from_source};
-use super::{RwPgResponse, create_sink, create_source};
+use super::{RwPgResponse, alter_streaming_rate_limit, create_sink, create_source};
 use crate::binder::{Clause, SecureCompareContext, bind_data_type};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
@@ -84,10 +83,13 @@ use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
 use crate::stream_fragmenter::{GraphJobType, build_graph};
 use crate::utils::OverwriteOptions;
-use crate::{Binder, TableCatalog, WithOptions};
+use crate::{Binder, Explain, TableCatalog, WithOptions};
 
 mod col_id_gen;
 pub use col_id_gen::*;
+use risingwave_connector::sink::iceberg::parse_partition_by_exprs;
+
+use crate::handler::drop_table::handle_drop_table;
 
 fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
     for option_def in &c.options {
@@ -451,7 +453,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     include_column_options: IncludeOption,
     props: CreateTableProps,
     sql_column_strategy: SqlColumnStrategy,
-) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
+) -> Result<(PlanRef, Option<SourceCatalog>, TableCatalog)> {
     if props.append_only
         && format_encode.format != Format::Plain
         && format_encode.format != Format::Native
@@ -493,7 +495,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     let overwrite_options = OverwriteOptions::new(&mut handler_args);
     let rate_limit = overwrite_options.source_rate_limit;
-    let source_catalog = bind_create_source_or_table_with_connector(
+    let source = bind_create_source_or_table_with_connector(
         handler_args.clone(),
         table_name,
         format_encode,
@@ -512,19 +514,17 @@ pub(crate) async fn gen_create_table_plan_with_source(
     )
     .await?;
 
-    let pb_source = source_catalog.to_prost();
-
     let context = OptimizerContext::new(handler_args, explain_options);
 
     let (plan, table) = gen_table_plan_with_source(
         context.into(),
         schema_name,
-        source_catalog,
+        source.clone(),
         col_id_gen.into_version(),
         props,
     )?;
 
-    Ok((plan, Some(pb_source), table))
+    Ok((plan, Some(source), table))
 }
 
 /// `gen_create_table_plan` generates the plan for creating a table without an external stream
@@ -539,7 +539,7 @@ pub(crate) fn gen_create_table_plan(
     source_watermarks: Vec<SourceWatermark>,
     props: CreateTableProps,
     is_for_replace_plan: bool,
-) -> Result<(PlanRef, PbTable)> {
+) -> Result<(PlanRef, TableCatalog)> {
     let mut columns = bind_sql_columns(&column_defs, is_for_replace_plan)?;
     for c in &mut columns {
         col_id_gen.generate(c)?;
@@ -572,7 +572,7 @@ pub(crate) fn gen_create_table_plan_without_source(
     source_watermarks: Vec<SourceWatermark>,
     version: TableVersion,
     props: CreateTableProps,
-) -> Result<(PlanRef, PbTable)> {
+) -> Result<(PlanRef, TableCatalog)> {
     // XXX: Why not bind outside?
     let pk_names = bind_sql_pk_names(&column_defs, bind_table_constraints(&constraints)?)?;
     let (mut columns, pk_column_ids, row_id_index) =
@@ -615,7 +615,7 @@ fn gen_table_plan_with_source(
     source_catalog: SourceCatalog,
     version: TableVersion,
     props: CreateTableProps,
-) -> Result<(PlanRef, PbTable)> {
+) -> Result<(PlanRef, TableCatalog)> {
     let table_name = source_catalog.name.clone();
 
     let info = CreateTableInfo {
@@ -721,7 +721,7 @@ fn gen_table_plan_inner(
     table_name: String,
     info: CreateTableInfo,
     props: CreateTableProps,
-) -> Result<(PlanRef, PbTable)> {
+) -> Result<(PlanRef, TableCatalog)> {
     let CreateTableInfo {
         ref columns,
         row_id_index,
@@ -776,9 +776,9 @@ fn gen_table_plan_inner(
     let materialize =
         plan_root.gen_table_plan(context, table_name, database_id, schema_id, info, props)?;
 
-    let mut table = materialize.table().to_prost();
-
+    let mut table = materialize.table().clone();
     table.owner = session.user_id();
+
     Ok((materialize.into(), table))
 }
 
@@ -804,7 +804,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     schema_id: SchemaId,
     table_id: TableId,
     engine: Engine,
-) -> Result<(PlanRef, PbTable)> {
+) -> Result<(PlanRef, TableCatalog)> {
     let session = context.session_ctx().clone();
 
     // append additional columns to the end
@@ -915,10 +915,10 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         },
     )?;
 
-    let mut table = materialize.table().to_prost();
+    let mut table = materialize.table().clone();
     table.owner = session.user_id();
     table.cdc_table_id = Some(cdc_table_id);
-    table.dependent_relations = vec![source.id];
+    table.dependent_relations = vec![source.id.into()];
 
     Ok((materialize.into(), table))
 }
@@ -967,26 +967,46 @@ fn derive_with_options_for_cdc_table(
                 with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
             }
             SQL_SERVER_CDC_CONNECTOR => {
-                // SQL Server external table name is in 'databaseName.schemaName.tableName' pattern,
-                // we remove the database name prefix and split the schema name and table name
-                let (db_name, schema_table_name) =
-                    external_table_name.split_once('.').ok_or_else(|| {
-                        anyhow!("The upstream table name must be in 'database.schema.table' format")
-                    })?;
+                // SQL Server external table name can be in different formats:
+                // 1. 'databaseName.schemaName.tableName' (full format)
+                // 2. 'schemaName.tableName' (schema and table only)
+                // 3. 'tableName' (table only, will use default schema 'dbo')
+                // We will auto-fill missing parts from source configuration
+                let parts: Vec<&str> = external_table_name.split('.').collect();
+                let (_, schema_name, table_name) = match parts.len() {
+                    3 => {
+                        // Full format: database.schema.table
+                        let db_name = parts[0];
+                        let schema_name = parts[1];
+                        let table_name = parts[2];
 
-                // Currently SQL Server only supports single database name in the source definition
-                if db_name != source_database_name {
-                    return Err(anyhow!(
-                            "The database name `{}` in the FROM clause is not the same as the database name `{}` in source definition",
-                            db_name,
-                            source_database_name
+                        // Verify database name matches source configuration
+                        if db_name != source_database_name {
+                            return Err(anyhow!(
+                                "The database name `{}` in the FROM clause is not the same as the database name `{}` in source definition",
+                                db_name,
+                                source_database_name
+                            ).into());
+                        }
+                        (db_name, schema_name, table_name)
+                    }
+                    2 => {
+                        // Schema and table only: schema.table
+                        let schema_name = parts[0];
+                        let table_name = parts[1];
+                        (source_database_name, schema_name, table_name)
+                    }
+                    1 => {
+                        // Table only: table (use default schema 'dbo')
+                        let table_name = parts[0];
+                        (source_database_name, "dbo", table_name)
+                    }
+                    _ => {
+                        return Err(anyhow!(
+                            "The upstream table name must be in one of these formats: 'database.schema.table', 'schema.table', or 'table'"
                         ).into());
-                }
-
-                let (schema_name, table_name) =
-                    schema_table_name.split_once('.').ok_or_else(|| {
-                        anyhow!("The table name must contain schema name prefix, e.g. 'dbo.table'")
-                    })?;
+                    }
+                };
 
                 // insert 'schema.name' into connect properties
                 with_options.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
@@ -1020,7 +1040,7 @@ pub(super) async fn handle_create_table_plan(
     include_column_options: IncludeOption,
     webhook_info: Option<WebhookSourceInfo>,
     engine: Engine,
-) -> Result<(PlanRef, Option<PbSource>, PbTable, TableJobType)> {
+) -> Result<(PlanRef, Option<SourceCatalog>, TableCatalog, TableJobType)> {
     let col_id_gen = ColumnIdGenerator::new_initial();
     let format_encode = check_create_table_with_source(
         &handler_args.with_options,
@@ -1296,14 +1316,6 @@ async fn bind_cdc_table_schema_externally(
     cdc_with_options: WithOptionsSecResolved,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
     // read cdc table schema from external db or parsing the schema from SQL definitions
-    Feature::CdcTableSchemaMap.check_available().map_err(
-        |err: risingwave_common::license::FeatureNotAvailable| {
-            ErrorCode::NotSupported(
-                err.to_report_string(),
-                "Please define the schema manually".to_owned(),
-            )
-        },
-    )?;
     let (options, secret_refs) = cdc_with_options.into_parts();
     let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
         .context("failed to extract external table config")?;
@@ -1339,7 +1351,7 @@ fn bind_cdc_table_schema(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_create_table(
-    handler_args: HandlerArgs,
+    mut handler_args: HandlerArgs,
     table_name: ObjectName,
     column_defs: Vec<ColumnDef>,
     wildcard_idx: Option<usize>,
@@ -1367,6 +1379,21 @@ pub async fn handle_create_table(
         risingwave_sqlparser::ast::Engine::Hummock => Engine::Hummock,
         risingwave_sqlparser::ast::Engine::Iceberg => Engine::Iceberg,
     };
+    if engine == Engine::Iceberg && handler_args.with_options.get_connector().is_some() {
+        // HACK: since we don't have atomic DDL, table with connector may lose data.
+        // FIXME: remove this after https://github.com/risingwavelabs/risingwave/issues/21863
+        if let Some(_rate_limit) = handler_args.with_options.insert(
+            OverwriteOptions::SOURCE_RATE_LIMIT_KEY.to_owned(),
+            "0".to_owned(),
+        ) {
+            // prevent user specified rate limit
+            return Err(ErrorCode::NotSupported(
+                "source_rate_limit for iceberg table engine during table creation".to_owned(),
+                "Please remove source_rate_limit from WITH options.".to_owned(),
+            )
+            .into());
+        }
+    }
 
     if let Either::Right(resp) = session.check_relation_name_duplicated(
         table_name.clone(),
@@ -1376,7 +1403,7 @@ pub async fn handle_create_table(
         return Ok(resp);
     }
 
-    let (graph, source, table, job_type) = {
+    let (graph, source, hummock_table, job_type) = {
         let (plan, source, table, job_type) = handle_create_table_plan(
             handler_args.clone(),
             ExplainOptions::default(),
@@ -1395,6 +1422,7 @@ pub async fn handle_create_table(
             engine,
         )
         .await?;
+        tracing::trace!("table_plan: {:?}", plan.explain_to_string());
 
         let graph = build_graph(plan, Some(GraphJobType::Table))?;
 
@@ -1412,18 +1440,25 @@ pub async fn handle_create_table(
         Engine::Hummock => {
             let catalog_writer = session.catalog_writer()?;
             catalog_writer
-                .create_table(source, table, graph, job_type)
+                .create_table(
+                    source.map(|s| s.to_prost()),
+                    hummock_table.to_prost(),
+                    graph,
+                    job_type,
+                    if_not_exists,
+                )
                 .await?;
         }
         Engine::Iceberg => {
             create_iceberg_engine_table(
                 session,
                 handler_args,
-                source,
-                table,
+                source.map(|s| s.to_prost()),
+                hummock_table,
                 graph,
-                job_type,
                 table_name,
+                job_type,
+                if_not_exists,
             )
             .await?;
         }
@@ -1432,21 +1467,25 @@ pub async fn handle_create_table(
     Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
 }
 
+/// Iceberg table engine is composed of hummock table, iceberg sink and iceberg source.
+///
+/// 1. fetch iceberg engine options from the meta node. Or use iceberg engine connection provided by users.
+/// 2. create a hummock table
+/// 3. create an iceberg sink
+/// 4. create an iceberg source
+///
+/// See <https://github.com/risingwavelabs/risingwave/issues/21586> for an architecture diagram.
 #[allow(clippy::too_many_arguments)]
 pub async fn create_iceberg_engine_table(
     session: Arc<SessionImpl>,
     handler_args: HandlerArgs,
     mut source: Option<PbSource>,
-    table: PbTable,
+    table: TableCatalog,
     graph: StreamFragmentGraph,
-    job_type: TableJobType,
     table_name: ObjectName,
+    job_type: PbTableJobType,
+    if_not_exists: bool,
 ) -> Result<()> {
-    // 1. fetch iceberg engine options from the meta node. Or use iceberg engine connection provided by users.
-    // 2. create a hummock table
-    // 3. create an iceberg sink
-    // 4. create an iceberg source
-
     let meta_client = session.env().meta_client();
     let meta_store_endpoint = meta_client.get_meta_store_endpoint().await?;
 
@@ -1455,12 +1494,17 @@ pub async fn create_iceberg_engine_table(
     })?;
     let meta_store_backend = meta_store_endpoint.scheme().to_owned();
     let meta_store_user = meta_store_endpoint.username().to_owned();
-    let meta_store_password = meta_store_endpoint
-        .password()
-        .ok_or_else(|| {
-            ErrorCode::InternalError("failed to parse password from meta store endpoint".to_owned())
-        })?
-        .to_owned();
+    let meta_store_password = match meta_store_endpoint.password() {
+        Some(password) => percent_decode_str(password)
+            .decode_utf8()
+            .map_err(|_| {
+                ErrorCode::InternalError(
+                    "failed to parse password from meta store endpoint".to_owned(),
+                )
+            })?
+            .into_owned(),
+        None => "".to_owned(),
+    };
     let meta_store_host = meta_store_endpoint
         .host_str()
         .ok_or_else(|| {
@@ -1526,7 +1570,7 @@ pub async fn create_iceberg_engine_table(
     let sink_decouple = session.config().sink_decouple();
     if matches!(sink_decouple, SinkDecouple::Disable) {
         bail!(
-            "Iceberg engine table only supports with sink decouple, try `set sink_decouple = false` to resolve it"
+            "Iceberg engine table only supports with sink decouple, try `set sink_decouple = true` to resolve it"
         );
     }
 
@@ -1556,19 +1600,17 @@ pub async fn create_iceberg_engine_table(
                 with_common.insert("database.name".to_owned(), iceberg_database_name.to_owned());
                 with_common.insert("table.name".to_owned(), iceberg_table_name.to_owned());
 
-                if let Some(s) = params.properties.get("hosted_catalog") {
-                    if s.eq_ignore_ascii_case("true") {
-                        with_common.insert("catalog.type".to_owned(), "jdbc".to_owned());
-                        with_common.insert("catalog.uri".to_owned(), catalog_uri.to_owned());
-                        with_common
-                            .insert("catalog.jdbc.user".to_owned(), meta_store_user.to_owned());
-                        with_common.insert(
-                            "catalog.jdbc.password".to_owned(),
-                            meta_store_password.clone(),
-                        );
-                        with_common
-                            .insert("catalog.name".to_owned(), iceberg_catalog_name.to_owned());
-                    }
+                if let Some(s) = params.properties.get("hosted_catalog")
+                    && s.eq_ignore_ascii_case("true")
+                {
+                    with_common.insert("catalog.type".to_owned(), "jdbc".to_owned());
+                    with_common.insert("catalog.uri".to_owned(), catalog_uri.to_owned());
+                    with_common.insert("catalog.jdbc.user".to_owned(), meta_store_user.to_owned());
+                    with_common.insert(
+                        "catalog.jdbc.password".to_owned(),
+                        meta_store_password.clone(),
+                    );
+                    with_common.insert("catalog.name".to_owned(), iceberg_catalog_name.to_owned());
                 }
 
                 with_common
@@ -1585,11 +1627,9 @@ pub async fn create_iceberg_engine_table(
         }
     };
 
-    let table_catalog = TableCatalog::from(table.clone());
-
     // Iceberg sinks require a primary key, if none is provided, we will use the _row_id column
     // Fetch primary key from columns
-    let mut pks = table_catalog
+    let mut pks = table
         .pk_column_names()
         .iter()
         .map(|c| c.to_string())
@@ -1635,7 +1675,24 @@ pub async fn create_iceberg_engine_table(
 
     sink_with.insert("primary_key".to_owned(), pks.join(","));
     sink_with.insert("type".to_owned(), "upsert".to_owned());
-
+    // sink_with.insert(SINK_SNAPSHOT_OPTION.to_owned(), "false".to_owned());
+    //
+    // Note: in theory, we don't need to backfill from the table to the sink,
+    // but we don't have atomic DDL now https://github.com/risingwavelabs/risingwave/issues/21863
+    // so it may have potential data loss problem on the first barrier.
+    //
+    // For non-append-only table, we can always solve it by the initial sink with backfill, since
+    // data will be present in hummock table.
+    //
+    // For append-only table, we need to be more careful.
+    //
+    // The possible cases for a table:
+    // - For table without connector: it doesn't matter, since there's no data before the table is created
+    // - For table with connector: we workarounded it by setting SOURCE_RATE_LIMIT to 0
+    //   + If we support blocking DDL for table with connector, we need to be careful.
+    // - For table with an upstream job: Specifically, CDC table from shared CDC source.
+    //   + Data may come from both upstream connector, and CDC table backfill, so we need to pause both of them.
+    //   + For now we don't support APPEND ONLY CDC table, so it's safe.
     let commit_checkpoint_interval = handler_args
         .with_options
         .get(COMMIT_CHECKPOINT_INTERVAL)
@@ -1672,6 +1729,139 @@ pub async fn create_iceberg_engine_table(
 
     sink_with.insert("is_exactly_once".to_owned(), "true".to_owned());
 
+    const ENABLE_COMPACTION: &str = "enable_compaction";
+    const COMPACTION_INTERVAL_SEC: &str = "compaction_interval_sec";
+    const ENABLE_SNAPSHOT_EXPIRATION: &str = "enable_snapshot_expiration";
+
+    if let Some(enable_compaction) = handler_args.with_options.get(ENABLE_COMPACTION) {
+        match enable_compaction.to_lowercase().as_str() {
+            "true" => {
+                risingwave_common::license::Feature::IcebergCompaction
+                    .check_available()
+                    .map_err(|e| anyhow::anyhow!(e))?;
+
+                sink_with.insert(ENABLE_COMPACTION.to_owned(), "true".to_owned());
+            }
+            "false" => {
+                sink_with.insert(ENABLE_COMPACTION.to_owned(), "false".to_owned());
+            }
+            _ => {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "enable_compaction must be true or false: {}",
+                    enable_compaction
+                ))
+                .into());
+            }
+        }
+
+        // remove enable_compaction from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove("enable_compaction"));
+    } else {
+        sink_with.insert(
+            ENABLE_COMPACTION.to_owned(),
+            risingwave_common::license::Feature::IcebergCompaction
+                .check_available()
+                .is_ok()
+                .to_string(),
+        );
+    }
+
+    if let Some(compaction_interval_sec) = handler_args.with_options.get(COMPACTION_INTERVAL_SEC) {
+        let compaction_interval_sec = compaction_interval_sec.parse::<u64>().map_err(|_| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "compaction_interval_sec must be a positive integer: {}",
+                commit_checkpoint_interval
+            ))
+        })?;
+        if compaction_interval_sec == 0 {
+            bail!("compaction_interval_sec must be a positive integer: 0");
+        }
+        sink_with.insert(
+            "compaction_interval_sec".to_owned(),
+            compaction_interval_sec.to_string(),
+        );
+        // remove compaction_interval_sec from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove("compaction_interval_sec"));
+    }
+
+    if let Some(enable_snapshot_expiration) =
+        handler_args.with_options.get(ENABLE_SNAPSHOT_EXPIRATION)
+    {
+        match enable_snapshot_expiration.to_lowercase().as_str() {
+            "true" => {
+                risingwave_common::license::Feature::IcebergCompaction
+                    .check_available()
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "true".to_owned());
+            }
+            "false" => {
+                sink_with.insert(ENABLE_SNAPSHOT_EXPIRATION.to_owned(), "false".to_owned());
+            }
+            _ => {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "enable_snapshot_expiration must be true or false: {}",
+                    enable_snapshot_expiration
+                ))
+                .into());
+            }
+        }
+
+        // remove enable_snapshot_expiration from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove(ENABLE_SNAPSHOT_EXPIRATION));
+    } else {
+        sink_with.insert(
+            ENABLE_SNAPSHOT_EXPIRATION.to_owned(),
+            risingwave_common::license::Feature::IcebergCompaction
+                .check_available()
+                .is_ok()
+                .to_string(),
+        );
+    }
+
+    let partition_by = handler_args
+        .with_options
+        .get("partition_by")
+        .map(|v| v.to_owned());
+
+    if let Some(partition_by) = &partition_by {
+        let mut partition_columns = vec![];
+        for (column, _) in parse_partition_by_exprs(partition_by.clone())? {
+            table
+                .columns()
+                .iter()
+                .find(|col| col.name().eq_ignore_ascii_case(&column))
+                .ok_or_else(|| {
+                    ErrorCode::InvalidInputSyntax(format!(
+                        "Partition source column does not exist in schema: {}",
+                        column
+                    ))
+                })?;
+
+            partition_columns.push(column.to_owned());
+        }
+
+        ensure_partition_columns_are_prefix_of_primary_key(&partition_columns, &pks).map_err(
+            |_| {
+                ErrorCode::InvalidInputSyntax(
+                    "The partition columns should be the prefix of the primary key".to_owned(),
+                )
+            },
+        )?;
+
+        sink_with.insert("partition_by".to_owned(), partition_by.to_owned());
+
+        // remove partition_by from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove("partition_by"));
+    }
+
     sink_handler_args.with_options =
         WithOptions::new(sink_with, Default::default(), connection_ref.clone());
 
@@ -1703,11 +1893,32 @@ pub async fn create_iceberg_engine_table(
 
     let catalog_writer = session.catalog_writer()?;
     // TODO(iceberg): make iceberg engine table creation ddl atomic
+    let has_connector = source.is_some();
     catalog_writer
-        .create_table(source, table, graph, job_type)
+        .create_table(source, table.to_prost(), graph, job_type, if_not_exists)
         .await?;
-    create_sink::handle_create_sink(sink_handler_args, create_sink_stmt).await?;
-    create_source::handle_create_source(source_handler_args, create_source_stmt).await?;
+    let res = create_sink::handle_create_sink(sink_handler_args, create_sink_stmt, true).await;
+    if res.is_err() {
+        // Since we don't support ddl atomicity, we need to drop the partial created table.
+        handle_drop_table(handler_args.clone(), table_name.clone(), true, true).await?;
+        res?;
+    }
+    let res = create_source::handle_create_source(source_handler_args, create_source_stmt).await;
+    if res.is_err() {
+        // Since we don't support ddl atomicity, we need to drop the partial created table.
+        handle_drop_table(handler_args.clone(), table_name.clone(), true, true).await?;
+        res?;
+    }
+
+    if has_connector {
+        alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+            handler_args,
+            PbThrottleTarget::TableWithSource,
+            table_name,
+            -1,
+        )
+        .await?;
+    }
 
     Ok(())
 }
@@ -1738,6 +1949,26 @@ pub fn check_create_table_with_source(
     Ok(format_encode)
 }
 
+fn ensure_partition_columns_are_prefix_of_primary_key(
+    partition_columns: &[String],
+    primary_key_columns: &[String],
+) -> std::result::Result<(), String> {
+    if partition_columns.len() > primary_key_columns.len() {
+        return Err("Partition columns cannot be longer than primary key columns.".to_owned());
+    }
+
+    for (i, partition_col) in partition_columns.iter().enumerate() {
+        if primary_key_columns.get(i) != Some(partition_col) {
+            return Err(format!(
+                "Partition column '{}' is not a prefix of the primary key.",
+                partition_col
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn generate_stream_graph_for_replace_table(
     _session: &Arc<SessionImpl>,
@@ -1747,9 +1978,12 @@ pub async fn generate_stream_graph_for_replace_table(
     statement: Statement,
     col_id_gen: ColumnIdGenerator,
     sql_column_strategy: SqlColumnStrategy,
-) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
-    use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-
+) -> Result<(
+    StreamFragmentGraph,
+    TableCatalog,
+    Option<SourceCatalog>,
+    TableJobType,
+)> {
     let Statement::CreateTable {
         columns,
         constraints,
@@ -1878,8 +2112,7 @@ pub async fn generate_stream_graph_for_replace_table(
         }
     };
 
-    // TODO: avoid this backward conversion.
-    if TableCatalog::from(&table).pk_column_ids() != original_catalog.pk_column_ids() {
+    if table.pk_column_ids() != original_catalog.pk_column_ids() {
         Err(ErrorCode::InvalidInputSyntax(
             "alter primary key of table is not supported".to_owned(),
         ))?
@@ -1888,17 +2121,16 @@ pub async fn generate_stream_graph_for_replace_table(
     let graph = build_graph(plan, Some(GraphJobType::Table))?;
 
     // Fill the original table ID.
-    let mut table = Table {
-        id: original_catalog.id().table_id(),
+    let mut table = TableCatalog {
+        id: original_catalog.id(),
         ..table
     };
     if !is_drop_connector && let Some(source_id) = original_catalog.associated_source_id() {
-        table.optional_associated_source_id = Some(OptionalAssociatedSourceId::AssociatedSourceId(
-            source_id.table_id,
-        ));
-        source.as_mut().unwrap().id = source_id.table_id;
-        source.as_mut().unwrap().optional_associated_table_id =
-            Some(OptionalAssociatedTableId::AssociatedTableId(table.id))
+        table.associated_source_id = Some(source_id);
+
+        let source = source.as_mut().unwrap();
+        source.id = source_id.table_id;
+        source.associated_table_id = Some(table.id());
     }
 
     Ok((graph, table, source, job_type))
@@ -1951,6 +2183,7 @@ fn bind_webhook_info(
         secret_ref,
         signature_expr,
         wait_for_persistence,
+        is_batched,
     } = webhook_info;
 
     // validate secret_ref
@@ -1996,6 +2229,7 @@ fn bind_webhook_info(
         secret_ref: pb_secret_ref,
         signature_expr: Some(expr.to_expr_proto()),
         wait_for_persistence,
+        is_batched,
     };
 
     Ok(pb_webhook_info)

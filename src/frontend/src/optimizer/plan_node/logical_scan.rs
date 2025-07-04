@@ -354,7 +354,7 @@ impl Distill for LogicalScan {
                             Pretty::from(if verbose {
                                 format!("{}.{}", self.table_name(), col_name)
                             } else {
-                                col_name.to_string()
+                                col_name.clone()
                             })
                         })
                         .collect(),

@@ -17,7 +17,7 @@ use std::num::NonZeroUsize;
 use std::vec;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
+use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, SchemaId, TableId};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_pb::catalog::PbTable;
@@ -36,10 +36,9 @@ use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ExprContext, Field};
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    AggCallState, BackfillOrderStrategy, DispatchStrategy, DispatcherType, ExchangeNode,
-    FilterNode, FragmentTypeFlag, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode,
-    StreamContext, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource,
-    agg_call_state,
+    AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, MaterializeNode,
+    PbDispatchOutputMapping, ProjectNode, SimpleAggNode, SourceNode, StreamContext,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource, agg_call_state,
 };
 
 use crate::MetaResult;
@@ -234,7 +233,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Hash as i32,
                 dist_key_indices: vec![0],
-                output_indices: vec![0, 1, 2],
+                output_mapping: PbDispatchOutputMapping::simple(vec![0, 1, 2]).into(),
             }),
         }))),
         fields: vec![
@@ -293,7 +292,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     fragments.push(StreamFragment {
         fragment_id: 1,
         node: Some(simple_agg_node),
-        fragment_type_mask: FragmentTypeFlag::FragmentUnspecified as u32,
+        fragment_type_mask: 0,
         requires_singleton: false,
         table_ids_cnt: 0,
         upstream_table_ids: vec![],
@@ -366,8 +365,9 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         input: vec![project_node],
         stream_key: vec![],
         node_body: Some(NodeBody::Materialize(Box::new(MaterializeNode {
-            table_id: 1,
-            table: Some(make_materialize_table(888)),
+            // `table_id` and `table` are left empty when generated from frontend.
+            table_id: TableId::placeholder().table_id(),
+            table: None,
             column_orders: vec![make_column_order(1), make_column_order(2)],
         }))),
         fields: vec![], // TODO: fill this later
@@ -394,7 +394,7 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
             dispatch_strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Simple as i32,
                 dist_key_indices: vec![],
-                output_indices: vec![],
+                output_mapping: PbDispatchOutputMapping::identical(0).into(), /* dummy length as it's not used */
             }),
             link_id: 4,
             upstream_id: 1,
@@ -404,7 +404,7 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
             dispatch_strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Hash as i32,
                 dist_key_indices: vec![0],
-                output_indices: vec![],
+                output_mapping: PbDispatchOutputMapping::identical(0).into(), /* dummy length as it's not used */
             }),
             link_id: 1,
             upstream_id: 2,
@@ -423,7 +423,7 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
         table_ids_cnt: 3,
         parallelism: None,
         max_parallelism: VirtualNode::COUNT_FOR_TEST as _,
-        backfill_order_strategy: Some(BackfillOrderStrategy { strategy: None }),
+        backfill_order: Default::default(),
     }
 }
 

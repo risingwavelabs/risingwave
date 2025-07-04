@@ -122,11 +122,6 @@ message GroupDelta {
   }
 }
 
-message UncommittedEpoch {
-  uint64 epoch = 1;
-  repeated SstableInfo tables = 2;
-}
-
 message VnodeWatermark {
   // The watermark shared by multiple vnodes
   bytes watermark = 1;
@@ -182,6 +177,80 @@ message StateTableInfoDelta {
   uint64 compaction_group_id = 3;
 }
 
+enum DistanceType {
+  DISTANCE_TYPE_UNSPECIFIED = 0;
+  DISTANCE_TYPE_L1 = 1;
+  DISTANCE_TYPE_L2 = 2;
+  DISTANCE_TYPE_COSINE = 3;
+  DISTANCE_TYPE_INNER_PRODUCT = 4;
+}
+
+enum VectorIndexObjectType {
+  VECTOR_INDEX_OBJECT_UNSPECIFIED = 0;
+  VECTOR_INDEX_OBJECT_VECTOR = 1;
+}
+message VectorIndexObject {
+  uint64 id = 1;
+  VectorIndexObjectType object_type = 2;
+}
+
+message VectorFileInfo {
+  uint64 object_id = 1;
+  uint64 file_size = 2;
+  uint64 start_vector_id = 3;
+  uint32 vector_count = 4;
+  uint64 meta_offset = 5;
+}
+
+message FlatIndexConfig {}
+
+message FlatIndex {
+  FlatIndexConfig config = 1;
+  repeated VectorFileInfo vector_files = 2;
+  uint64 next_vector_id = 3;
+}
+
+message FlatIndexAdd {
+  repeated VectorFileInfo added_vector_files = 1;
+  uint64 next_vector_id = 2;
+}
+
+message VectorIndex {
+  uint32 dimension = 1;
+  DistanceType distance_type = 2;
+  oneof variant {
+    // reserve 64 general configs
+    FlatIndex flat = 65;
+  }
+}
+
+message VectorIndexDelta {
+  message VectorIndexInit {
+    uint32 dimension = 1;
+    DistanceType distance_type = 2;
+    oneof config {
+      // reserve 64 general configs
+      FlatIndexConfig flat = 65;
+    }
+  }
+
+  message VectorIndexAdd {
+    oneof add {
+      // reserve 64 general configs
+      FlatIndexAdd flat = 65;
+    }
+  }
+
+  message VectorIndexAdds {
+    repeated VectorIndexAdd adds = 1;
+  }
+
+  oneof delta {
+    VectorIndexInit init = 1;
+    VectorIndexAdds adds = 2;
+  }
+}
+
 message HummockVersion {
   message Levels {
     repeated Level levels = 1;
@@ -200,6 +269,7 @@ message HummockVersion {
   map<uint32, TableWatermarks> table_watermarks = 5;
   map<uint32, TableChangeLog> table_change_logs = 6;
   map<uint32, StateTableInfo> state_table_info = 7;
+  map<uint32, VectorIndex> vector_indexes = 8;
 }
 
 message HummockVersionDelta {
@@ -225,6 +295,7 @@ message HummockVersionDelta {
   }
   map<uint32, ChangeLogDelta> change_log_delta = 10;
   map<uint32, StateTableInfoDelta> state_table_info_delta = 11;
+  map<uint32, VectorIndexDelta> vector_index_delta = 12;
 }
 
 message HummockVersionDeltas {
@@ -235,6 +306,7 @@ message HummockVersionCheckpoint {
   message StaleObjects {
     repeated uint64 id = 1;
     uint64 total_file_size = 2;
+    repeated VectorIndexObject vector_files = 3;
   }
   HummockVersion version = 1;
   map<uint64, StaleObjects> stale_objects = 2;
@@ -429,11 +501,11 @@ message HummockPinnedSnapshot {
   uint64 minimal_pinned_snapshot = 2;
 }
 
-message GetNewSstIdsRequest {
+message GetNewObjectIdsRequest {
   uint32 number = 1;
 }
 
-message GetNewSstIdsResponse {
+message GetNewObjectIdsResponse {
   common.Status status = 1;
   // inclusive
   uint64 start_id = 2;
@@ -814,7 +886,7 @@ service HummockManagerService {
   rpc GetAssignedCompactTaskNum(GetAssignedCompactTaskNumRequest) returns (GetAssignedCompactTaskNumResponse);
   rpc TriggerCompactionDeterministic(TriggerCompactionDeterministicRequest) returns (TriggerCompactionDeterministicResponse);
   rpc DisableCommitEpoch(DisableCommitEpochRequest) returns (DisableCommitEpochResponse);
-  rpc GetNewSstIds(GetNewSstIdsRequest) returns (GetNewSstIdsResponse);
+  rpc GetNewObjectIds(GetNewObjectIdsRequest) returns (GetNewObjectIdsResponse);
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
   rpc TriggerFullGC(TriggerFullGCRequest) returns (TriggerFullGCResponse);
   rpc RiseCtlGetPinnedVersionsSummary(RiseCtlGetPinnedVersionsSummaryRequest) returns (RiseCtlGetPinnedVersionsSummaryResponse);

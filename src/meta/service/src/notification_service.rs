@@ -187,11 +187,18 @@ impl NotificationServiceImpl {
             .cluster_controller
             .get_inner_read_guard()
             .await;
-        let nodes = cluster_guard
+        let compute_nodes = cluster_guard
             .list_workers(Some(WorkerType::ComputeNode.into()), Some(Running.into()))
             .await?;
+        let frontends = cluster_guard
+            .list_workers(Some(WorkerType::Frontend.into()), Some(Running.into()))
+            .await?;
+        let worker_nodes = compute_nodes
+            .into_iter()
+            .chain(frontends.into_iter())
+            .collect();
         let notification_version = self.env.notification_manager().current_version().await;
-        Ok((nodes, notification_version))
+        Ok((worker_nodes, notification_version))
     }
 
     async fn get_tables_snapshot(&self) -> MetaResult<(Vec<Table>, NotificationVersion)> {
@@ -352,7 +359,6 @@ impl NotificationServiceImpl {
 impl NotificationService for NotificationServiceImpl {
     type SubscribeStream = UnboundedReceiverStream<Notification>;
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn subscribe(
         &self,
         request: Request<SubscribeRequest>,

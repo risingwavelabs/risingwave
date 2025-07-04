@@ -6,7 +6,6 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 anyhow = "1"
@@ -19,7 +18,7 @@ axum = { workspace = true }
 base64 = "0.22"
 bk-tree = "0.5.0"
 bytes = "1"
-chrono = { version = "0.4", default-features = false }
+chrono = { workspace = true }
 clap = { workspace = true }
 downcast-rs = "2.0"
 dyn-clone = "1.0.14"
@@ -42,11 +41,15 @@ memcomparable = "0.2"
 mysql_async = { version = "0.34", default-features = false, features = [
     "default",
 ] }
+mysql_common = { version = "0.32", default-features = false, features = [
+    "chrono",
+] }
 num-integer = "0.1"
 parking_lot = { workspace = true }
 parse-display = "0.10"
 paste = "1"
-petgraph = "0.6"
+percent-encoding = "2.3.1"
+petgraph = "0.8"
 pgwire = { path = "../utils/pgwire" }
 pin-project-lite = { workspace = true }
 postgres-types = { version = "0.2.6" }
@@ -75,10 +78,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
 sha2 = "0.10.7"
-smallvec = { version = "1.15.0", features = ["serde"] }
+smallvec = { workspace = true, features = ["serde"] }
 speedate = "0.15.0"
 tempfile = "3"
-thiserror = "1"
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

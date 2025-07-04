@@ -443,7 +443,10 @@ fn parse_set() {
     one_statement_parses_to("SET SESSION a = b", "SET a = b");
     for (sql, err_msg) in [
         ("SET", "expected identifier, found: EOF"),
-        ("SET a b", "expected equals sign or TO, found: b"),
+        (
+            "SET a b",
+            "expected '=' or 'TO' after config parameter, found: b",
+        ),
         ("SET a =", "expected parameter value"),
     ] {
         let error = parse_sql_statements(sql).unwrap_err().to_string();
@@ -463,11 +466,12 @@ fn parse_show() {
         }
     );
 
+    // XXX: shouldn't ALL be a keyword instead?
     let stmt = verified_stmt("SHOW ALL ALL");
     assert_eq!(
         stmt,
         Statement::ShowVariable {
-            variable: vec!["ALL".into(), "ALL".into()]
+            variable: vec![Ident::new_unchecked("ALL"), Ident::new_unchecked("ALL")]
         }
     )
 }
@@ -478,16 +482,17 @@ fn parse_deallocate() {
     assert_eq!(
         stmt,
         Statement::Deallocate {
-            name: "a".into(),
+            name: Some("a".into()),
             prepare: false,
         }
     );
 
+    // XXX: shouldn't ALL be a keyword instead?
     let stmt = verified_stmt("DEALLOCATE ALL");
     assert_eq!(
         stmt,
         Statement::Deallocate {
-            name: "ALL".into(),
+            name: None,
             prepare: false,
         }
     );
@@ -496,16 +501,17 @@ fn parse_deallocate() {
     assert_eq!(
         stmt,
         Statement::Deallocate {
-            name: "a".into(),
+            name: Some("a".into()),
             prepare: true,
         }
     );
 
+    // XXX: shouldn't ALL be a keyword instead?
     let stmt = verified_stmt("DEALLOCATE PREPARE ALL");
     assert_eq!(
         stmt,
         Statement::Deallocate {
-            name: "ALL".into(),
+            name: None,
             prepare: true,
         }
     );
@@ -602,9 +608,9 @@ fn parse_prepare() {
 #[test]
 fn parse_pg_bitwise_binary_ops() {
     let bitwise_ops = &[
-        ("#", BinaryOperator::PGBitwiseXor),
-        (">>", BinaryOperator::PGBitwiseShiftRight),
-        ("<<", BinaryOperator::PGBitwiseShiftLeft),
+        ("#", BinaryOperator::Custom("#".to_owned())),
+        (">>", BinaryOperator::Custom(">>".to_owned())),
+        ("<<", BinaryOperator::Custom("<<".to_owned())),
     ];
 
     for (str_op, op) in bitwise_ops {
@@ -623,11 +629,10 @@ fn parse_pg_bitwise_binary_ops() {
 #[test]
 fn parse_pg_unary_ops() {
     let pg_unary_ops = &[
-        ("~", UnaryOperator::PGBitwiseNot),
-        ("|/", UnaryOperator::PGSquareRoot),
-        ("||/", UnaryOperator::PGCubeRoot),
-        ("!!", UnaryOperator::PGPrefixFactorial),
-        ("@", UnaryOperator::PGAbs),
+        ("~", UnaryOperator::Custom("~".to_owned())),
+        ("|/", UnaryOperator::Custom("|/".to_owned())),
+        ("||/", UnaryOperator::Custom("||/".to_owned())),
+        ("@", UnaryOperator::Custom("@".to_owned())),
     ];
 
     for (str_op, op) in pg_unary_ops {
@@ -643,28 +648,12 @@ fn parse_pg_unary_ops() {
 }
 
 #[test]
-fn parse_pg_postfix_factorial() {
-    let postfix_factorial = &[("!", UnaryOperator::PGPostfixFactorial)];
-
-    for (str_op, op) in postfix_factorial {
-        let select = verified_only_select(&format!("SELECT a{}", &str_op));
-        assert_eq!(
-            SelectItem::UnnamedExpr(Expr::UnaryOp {
-                op: op.clone(),
-                expr: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
-            }),
-            select.projection[0]
-        );
-    }
-}
-
-#[test]
 fn parse_pg_regex_match_ops() {
     let pg_regex_match_ops = &[
-        ("~", BinaryOperator::PGRegexMatch),
-        ("~*", BinaryOperator::PGRegexIMatch),
-        ("!~", BinaryOperator::PGRegexNotMatch),
-        ("!~*", BinaryOperator::PGRegexNotIMatch),
+        ("~", BinaryOperator::Custom("~".to_owned())),
+        ("~*", BinaryOperator::Custom("~*".to_owned())),
+        ("!~", BinaryOperator::Custom("!~".to_owned())),
+        ("!~*", BinaryOperator::Custom("!~*".to_owned())),
     ];
 
     for (str_op, op) in pg_regex_match_ops {
@@ -766,7 +755,7 @@ fn parse_create_function() {
             ]),
             returns: Some(CreateFunctionReturns::Value(DataType::Int)),
             params: CreateFunctionBody {
-                language: Some("SQL".into()),
+                language: Some(Ident::new_unchecked("SQL")),
                 behavior: Some(FunctionBehavior::Immutable),
                 as_: Some(FunctionDefinition::SingleQuotedDef(
                     "select $1 + $2;".into()
@@ -791,7 +780,7 @@ fn parse_create_function() {
             ]),
             returns: Some(CreateFunctionReturns::Value(DataType::Int)),
             params: CreateFunctionBody {
-                language: Some("SQL".into()),
+                language: Some(Ident::new_unchecked("SQL")),
                 as_: Some(FunctionDefinition::DoubleDollarDef(
                     "select $1 - $2;".into()
                 )),
@@ -816,7 +805,7 @@ fn parse_create_function() {
             ]),
             returns: Some(CreateFunctionReturns::Value(DataType::Int)),
             params: CreateFunctionBody {
-                language: Some("SQL".into()),
+                language: Some(Ident::new_unchecked("SQL")),
                 return_: Some(Expr::BinaryOp {
                     left: Box::new(Expr::Parameter { index: 1 }),
                     op: BinaryOperator::Plus,
@@ -847,7 +836,7 @@ fn parse_create_function() {
             ]),
             returns: Some(CreateFunctionReturns::Value(DataType::Int)),
             params: CreateFunctionBody {
-                language: Some("SQL".into()),
+                language: Some(Ident::new_unchecked("SQL")),
                 behavior: Some(FunctionBehavior::Immutable),
                 return_: Some(Expr::BinaryOp {
                     left: Box::new(Expr::Identifier("a".into())),
@@ -878,7 +867,7 @@ fn parse_create_function() {
                 data_type: DataType::Int,
             }])),
             params: CreateFunctionBody {
-                language: Some("SQL".into()),
+                language: Some(Ident::new_unchecked("SQL")),
                 return_: Some(Expr::Identifier("a".into())),
                 ..Default::default()
             },
@@ -900,7 +889,7 @@ fn parse_create_function() {
             ]),
             returns: Some(CreateFunctionReturns::Value(DataType::Int)),
             params: CreateFunctionBody {
-                language: Some("SQL".into()),
+                language: Some(Ident::new_unchecked("SQL")),
                 behavior: Some(FunctionBehavior::Immutable),
                 as_: Some(FunctionDefinition::SingleQuotedDef(
                     "select $1 + $2;".into()
@@ -1057,7 +1046,8 @@ fn parse_array() {
                 lateral_views: vec![],
                 selection: None,
                 group_by: vec![],
-                having: None
+                having: None,
+                window: vec![],
             })),
             order_by: vec![],
             limit: None,
@@ -1096,7 +1086,8 @@ fn parse_array() {
                 lateral_views: vec![],
                 selection: None,
                 group_by: vec![],
-                having: None
+                having: None,
+                window: vec![],
             })),
             order_by: vec![],
             limit: None,
@@ -1141,7 +1132,8 @@ fn parse_array() {
                 lateral_views: vec![],
                 selection: None,
                 group_by: vec![],
-                having: None
+                having: None,
+                window: vec![],
             })),
             order_by: vec![],
             limit: None,

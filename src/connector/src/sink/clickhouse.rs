@@ -51,6 +51,10 @@ const QUERY_COLUMN: &str =
     "select distinct ?fields from system.columns where database = ? and table = ? order by ?";
 pub const CLICKHOUSE_SINK: &str = "clickhouse";
 
+const ALLOW_EXPERIMENTAL_JSON_TYPE: &str = "allow_experimental_json_type";
+const INPUT_FORMAT_BINARY_READ_JSON_AS_STRING: &str = "input_format_binary_read_json_as_string";
+const OUTPUT_FORMAT_BINARY_WRITE_JSON_AS_STRING: &str = "output_format_binary_write_json_as_string";
+
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct ClickHouseCommon {
@@ -69,6 +73,7 @@ pub struct ClickHouseCommon {
     /// Commit every n(>0) checkpoints, default is 10.
     #[serde(default = "default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub commit_checkpoint_interval: u64,
 }
 
@@ -128,12 +133,12 @@ impl ClickHouseEngine {
 
     pub fn get_delete_col(&self) -> Option<String> {
         match self {
-            ClickHouseEngine::ReplacingMergeTree(Some(delete_col)) => Some(delete_col.to_string()),
+            ClickHouseEngine::ReplacingMergeTree(Some(delete_col)) => Some(delete_col.clone()),
             ClickHouseEngine::ReplicatedReplacingMergeTree(Some(delete_col)) => {
-                Some(delete_col.to_string())
+                Some(delete_col.clone())
             }
             ClickHouseEngine::SharedReplacingMergeTree(Some(delete_col)) => {
-                Some(delete_col.to_string())
+                Some(delete_col.clone())
             }
             _ => None,
         }
@@ -141,19 +146,15 @@ impl ClickHouseEngine {
 
     pub fn get_sign_name(&self) -> Option<String> {
         match self {
-            ClickHouseEngine::CollapsingMergeTree(sign_name) => Some(sign_name.to_string()),
-            ClickHouseEngine::VersionedCollapsingMergeTree(sign_name) => {
-                Some(sign_name.to_string())
-            }
-            ClickHouseEngine::ReplicatedCollapsingMergeTree(sign_name) => {
-                Some(sign_name.to_string())
-            }
+            ClickHouseEngine::CollapsingMergeTree(sign_name) => Some(sign_name.clone()),
+            ClickHouseEngine::VersionedCollapsingMergeTree(sign_name) => Some(sign_name.clone()),
+            ClickHouseEngine::ReplicatedCollapsingMergeTree(sign_name) => Some(sign_name.clone()),
             ClickHouseEngine::ReplicatedVersionedCollapsingMergeTree(sign_name) => {
-                Some(sign_name.to_string())
+                Some(sign_name.clone())
             }
-            ClickHouseEngine::SharedCollapsingMergeTree(sign_name) => Some(sign_name.to_string()),
+            ClickHouseEngine::SharedCollapsingMergeTree(sign_name) => Some(sign_name.clone()),
             ClickHouseEngine::SharedVersionedCollapsingMergeTree(sign_name) => {
-                Some(sign_name.to_string())
+                Some(sign_name.clone())
             }
             _ => None,
         }
@@ -316,7 +317,10 @@ impl ClickHouseCommon {
             .with_url(&self.url)
             .with_user(&self.user)
             .with_password(&self.password)
-            .with_database(&self.database);
+            .with_database(&self.database)
+            .with_option(ALLOW_EXPERIMENTAL_JSON_TYPE, "1")
+            .with_option(INPUT_FORMAT_BINARY_READ_JSON_AS_STRING, "1")
+            .with_option(OUTPUT_FORMAT_BINARY_WRITE_JSON_AS_STRING, "1");
         Ok(client)
     }
 }
@@ -498,9 +502,7 @@ impl ClickHouseSink {
             risingwave_common::types::DataType::Bytea => Err(SinkError::ClickHouse(
                 "clickhouse can not support Bytea".to_owned(),
             )),
-            risingwave_common::types::DataType::Jsonb => Err(SinkError::ClickHouse(
-                "clickhouse rust can not support Json".to_owned(),
-            )),
+            risingwave_common::types::DataType::Jsonb => Ok(ck_column.r#type.contains("JSON")),
             risingwave_common::types::DataType::Serial => {
                 Ok(ck_column.r#type.contains("UInt64") | ck_column.r#type.contains("Int64"))
             }
@@ -510,6 +512,7 @@ impl ClickHouseSink {
             risingwave_common::types::DataType::Map(_) => Err(SinkError::ClickHouse(
                 "clickhouse can not support Map".to_owned(),
             )),
+            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
         };
         if !is_match? {
             return Err(SinkError::ClickHouse(format!(
@@ -526,7 +529,6 @@ impl Sink for ClickHouseSink {
     type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = DecoupleCheckpointLogSinkerOf<ClickHouseSinkWriter>;
 
-    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &["commit_checkpoint_interval"];
     const SINK_NAME: &'static str = CLICKHOUSE_SINK;
 
     async fn validate(&self) -> Result<()> {
@@ -1000,10 +1002,9 @@ impl ClickHouseFieldWithNull {
                 };
                 ClickHouseField::Int64(ticks)
             }
-            ScalarRefImpl::Jsonb(_) => {
-                return Err(SinkError::ClickHouse(
-                    "clickhouse rust interface can not support Json".to_owned(),
-                ));
+            ScalarRefImpl::Jsonb(v) => {
+                let json_str = v.to_string();
+                ClickHouseField::String(json_str)
             }
             ScalarRefImpl::Struct(v) => {
                 let mut struct_vec = vec![];
@@ -1042,6 +1043,7 @@ impl ClickHouseFieldWithNull {
                     "clickhouse can not support Map".to_owned(),
                 ));
             }
+            ScalarRefImpl::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
         };
         let data = if clickhouse_schema_feature.can_null {
             vec![ClickHouseFieldWithNull::WithSome(data)]
