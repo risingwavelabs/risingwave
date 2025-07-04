@@ -51,7 +51,7 @@ async fn test_license_cpu_limit() -> Result<()> {
 
     set_license_key!("");
     let error = test_paid_tier!().unwrap_err().to_report_string();
-    assert!(error.contains("feature TestPaid is only available for tier Paid and above, while the current tier is Free"), "{error}");
+    assert!(error.contains("feature TestPaid is not available based on your license"), "{error}");
 
     // Set a license key with CPU limit 100, it should work.
     set_license_key!(KEY_100);
