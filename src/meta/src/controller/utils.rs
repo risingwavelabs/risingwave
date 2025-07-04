@@ -1236,7 +1236,6 @@ where
                     .cloned()
                     .collect();
 
-                //#[cfg(debug_assertions)]
                 {
                     let db_pairs = Fragment::find_by_id(fragment_id)
                         .find_with_related(Actor)
@@ -1262,16 +1261,6 @@ where
                 (fragment, fragment_actors_from_cache)
             };
 
-            // if fragment_actors.is_empty() {
-            //     return Err(anyhow!("failed to find fragment: {}", fragment_id).into());
-            // }
-            // assert_eq!(
-            //     fragment_actors.len(),
-            //     1,
-            //     "find multiple fragment {:?}",
-            //     fragment_actors
-            // );
-            // let (fragment, actors) = fragment_actors.pop().unwrap();
             (
                 fragment.distribution_type,
                 Arc::new(
@@ -1574,7 +1563,6 @@ where
         })
         .collect();
 
-    //#[cfg(debug_assertions)]
     {
         let job_actors_from_db: Vec<(
             FragmentId,
@@ -1759,7 +1747,6 @@ where
         })
         .collect();
 
-    // #[cfg(debug_assertions)]
     {
         let fragment_actors_from_db: Vec<(FragmentId, ActorId)> = Actor::find()
             .select_only()
