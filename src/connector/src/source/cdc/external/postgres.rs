@@ -497,7 +497,7 @@ mod tests {
         let result = PostgresOffset::parse_debezium_offset(debezium_offset_missing_fields);
         assert!(result.is_err());
         let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("invalid postgres lsn_commit"));
+        assert!(error_msg.contains("invalid postgres lsn_proc"));
     }
 
     #[test]
