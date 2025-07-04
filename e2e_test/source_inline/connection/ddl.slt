@@ -124,7 +124,7 @@ conn test_schema
 # ==== cleanup ====
 
 statement ok
-drop connection conn;
+drop connection test_schema.conn;
 
 statement ok
 drop secret sec_broker;
