@@ -17,6 +17,7 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
+// TODO(license): make this full tier
 /// A license key with the paid tier that only works in tests.
 ///
 /// The content is a JWT token with the following payload:
@@ -33,6 +34,7 @@ pub(crate) const TEST_PAID_LICENSE_KEY_CONTENT: &str = "eyJhbGciOiJSUzUxMiIsInR5
   eyJzdWIiOiJydy10ZXN0IiwidGllciI6InBhaWQiLCJpc3MiOiJ0ZXN0LnJpc2luZ3dhdmUuY29tIiwiZXhwIjo5OTk5OTk5OTk5fQ.\
   c6Gmb6xh3dBDYX_4cOnHUbwRXJbUCM7W3mrJA77nLC5FkoOLpGstzvQ7qfnPVBu412MFtKRDvh-Lk8JwG7pVa0WLw16DeHTtVHxZukMTZ1Q_ciZ1xKeUx_pwUldkVzv6c9j99gNqPSyTjzOXTdKlidBRLer2zP0v3Lf-ZxnMG0tEcIbTinTb3BNCtAQ8bwBSRP-X48cVTWafjaZxv_zGiJT28uV3bR6jwrorjVB4VGvqhsJi6Fd074XOmUlnOleoAtyzKvjmGC5_FvnL0ztIe_I0z_pyCMfWpyJ_J4C7rCP1aVWUImyoowLmVDA-IKjclzOW5Fvi0wjXsc6OckOc_A";
 
+// TODO(license): make this full tier
 /// A license key with the paid tier and 4 core CPU limit that works in production.
 ///
 /// This allows users to evaluate paid features on a small scale. When the total CPU core in

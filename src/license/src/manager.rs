@@ -20,23 +20,56 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use thiserror_ext::AsReport;
 
-use crate::LicenseKeyRef;
+use crate::{Feature, LicenseKeyRef};
+
+/// A feature that's specified in the custom tier.
+///
+/// If it doesn't exist in the [`Feature`] enum, it's considered unknown for compatibility purposes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum MaybeFeature {
+    Feature(Feature),
+    Unknown(String),
+}
 
 /// License tier.
 ///
-/// Each enterprise [`Feature`](super::Feature) is available for a specific tier and above.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+/// Each enterprise [`Feature`] is available for a specific tier and above.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Tier {
-    /// Free tier.
-    ///
-    /// This is more like a placeholder. If a feature is available for the free tier, there's no
-    /// need to add it to the [`Feature`](super::Feature) enum at all.
+    /// Free tier. No feature is available. This is more like a placeholder.
     Free,
 
-    /// Paid tier.
-    // TODO(license): Add more tiers if needed.
-    Paid,
+    /// All features available as of 2.5.
+    #[serde(rename = "paid")]
+    AllAsOf2_5,
+
+    /// All features available currently and in the future.
+    All,
+
+    /// Custom tier, with a list of available features.
+    #[serde(untagged)]
+    Custom {
+        name: String,
+        features: Vec<MaybeFeature>,
+    },
+}
+
+impl Tier {
+    /// Get all available features based on the license tier.
+    #[auto_enums::auto_enum(Iterator)]
+    pub fn available_features(&self) -> impl Iterator<Item = Feature> {
+        match self {
+            Tier::Free => std::iter::empty(),
+            Tier::AllAsOf2_5 => Feature::all_as_of_2_5().iter().copied(),
+            Tier::All => Feature::all().iter().copied(),
+            Tier::Custom { features, .. } => features.iter().filter_map(|feature| match feature {
+                MaybeFeature::Feature(feature) => Some(*feature),
+                MaybeFeature::Unknown(_) => None,
+            }),
+        }
+    }
 }
 
 /// Issuer of the license.

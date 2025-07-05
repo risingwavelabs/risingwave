@@ -33,7 +33,7 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: connector error
-  2: feature GlueSchemaRegistry is only available for tier Paid and above, while the current tier is Free
+  2: feature GlueSchemaRegistry is not available based on your license
 
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
 
