@@ -600,6 +600,7 @@ where
         match HummockObjectId::Sstable(0.into()) {
             HummockObjectId::Sstable(_) => {}
             HummockObjectId::VectorFile(_) => {}
+            HummockObjectId::HnswGraphFile(_) => {}
         };
         self.newly_added_sst_infos(exclude_table_change_log)
             .map(|sst| HummockObjectId::Sstable(sst.object_id()))
