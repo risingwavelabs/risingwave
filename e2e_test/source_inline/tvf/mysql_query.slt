@@ -216,5 +216,89 @@ USE tvf;
 DROP DATABASE tvf;
 "
 
+# Test numeric256 types
+# Note: MySQL DECIMAL can store very large numbers that we can cast to uint256
+system ok
+mysql -e "DROP DATABASE IF EXISTS uint256_test; CREATE DATABASE uint256_test;"
+
+system ok
+mysql -e "
+USE uint256_test;
+CREATE TABLE test_numeric256 (
+    id bigint primary key,
+    int256_val varchar(255),
+    uint256_val varchar(255),
+    description text
+);"
+
+system ok
+mysql -e "
+USE uint256_test;
+INSERT INTO test_numeric256 VALUES
+    (1, '0', '0', 'zeros'),
+    (2, '123456789012345678901234567890', '123456789012345678901234567890', 'normal'),
+    (3, '-123456789012345678901234567890', NULL, 'negative int256'),
+    (4, '57896044618658097711785492504343953926634992332820282019728792003956564819967', '115792089237316195423570985008687907853269984665640564039457584007913129639935', 'max values');
+"
+
+query ITTT
+select id, int256_val::rw_int256, uint256_val::rw_uint256, description
+from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'uint256_test', 'select * from test_numeric256 order by id;');
+----
+1 0 0 zeros
+2 123456789012345678901234567890 123456789012345678901234567890 normal
+3 -123456789012345678901234567890 NULL negative int256
+4 57896044618658097711785492504343953926634992332820282019728792003956564819967 115792089237316195423570985008687907853269984665640564039457584007913129639935 max values
+
+# Test uint256 arithmetic operations through MySQL source
+query I
+select uint256_val::rw_uint256 + 1::rw_uint256
+from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'uint256_test', 'select uint256_val from test_numeric256 where id = 1;');
+----
+1
+
+# Test uint256 comparison operations
+query I
+select COUNT(*) from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'uint256_test', 'select uint256_val from test_numeric256;')
+where uint256_val::rw_uint256 > 0::rw_uint256;
+----
+2
+
+# Test uint256 aggregation with MySQL source data
+query I
+select SUM(uint256_val::rw_uint256)
+from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'uint256_test', 'select uint256_val from test_numeric256 where uint256_val is not null;');
+----
+115792089237316195423570985008687907853269984665640564039581040797925475318825
+
+# Test uint256 MAX/MIN aggregation
+query II
+select MAX(uint256_val::rw_uint256), MIN(uint256_val::rw_uint256)
+from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'uint256_test', 'select uint256_val from test_numeric256 where uint256_val is not null;');
+----
+115792089237316195423570985008687907853269984665640564039457584007913129639935 0
+
+# Test uint256 casting edge cases
+statement error
+select '-1'::rw_uint256 
+from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'uint256_test', 'select 1;');
+
+# Test uint256 ordering with large values
+query T
+select uint256_val::rw_uint256
+from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'uint256_test', 'select uint256_val from test_numeric256 where uint256_val is not null order by cast(uint256_val as unsigned);');
+----
+0
+123456789012345678901234567890
+115792089237316195423570985008687907853269984665640564039457584007913129639935
+
+# Cleanup MySQL test database
+system ok
+mysql -e "
+USE uint256_test;
+DROP TABLE test_numeric256;
+DROP DATABASE uint256_test;
+"
+
 statement ok
 drop source mysql_cdc_source;
