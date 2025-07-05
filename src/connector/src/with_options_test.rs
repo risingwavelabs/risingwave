@@ -56,6 +56,15 @@ pub fn generate_with_options_yaml_source() -> String {
     generate_with_options_yaml_inner(&connector_crate_path().join("src").join("source"))
 }
 
+pub fn generate_with_options_yaml_connection() -> String {
+    generate_with_options_yaml_inner(
+        &connector_crate_path()
+            .join("src")
+            .join("connector_common")
+            .join("connection.rs"),
+    )
+}
+
 pub fn generate_with_options_yaml_sink() -> String {
     generate_with_options_yaml_inner(&connector_crate_path().join("src").join("sink"))
 }
@@ -66,6 +75,9 @@ pub fn generate_allow_alter_on_fly_fields_combined() -> String {
     );
     let sink_info = extract_allow_alter_on_fly_fields_from_yaml(
         &connector_crate_path().join("with_options_sink.yaml"),
+    );
+    let connection_info = extract_allow_alter_on_fly_fields_from_yaml(
+        &connector_crate_path().join("with_options_connection.yaml"),
     );
 
     generate_rust_allow_alter_on_fly_fields_code_separate(source_info, sink_info)

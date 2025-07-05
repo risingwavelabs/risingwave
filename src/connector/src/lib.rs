@@ -172,8 +172,8 @@ mod tests {
     use expect_test::expect_file;
 
     use crate::with_options_test::{
-        generate_allow_alter_on_fly_fields_combined, generate_with_options_yaml_sink,
-        generate_with_options_yaml_source,
+        generate_allow_alter_on_fly_fields_combined, generate_with_options_yaml_connection,
+        generate_with_options_yaml_sink, generate_with_options_yaml_source,
     };
 
     /// This test ensures that `src/connector/with_options.yaml` is up-to-date with the default values specified
@@ -184,6 +184,9 @@ mod tests {
         expect_file!("../with_options_source.yaml").assert_eq(&generate_with_options_yaml_source());
 
         expect_file!("../with_options_sink.yaml").assert_eq(&generate_with_options_yaml_sink());
+
+        expect_file!("../with_options_connection.yaml")
+            .assert_eq(&generate_with_options_yaml_connection());
     }
 
     /// This test ensures that the `allow_alter_on_fly` fields Rust file is up-to-date.
