@@ -14,6 +14,7 @@ jni = { workspace = true }
 paste = "1"
 prost = { workspace = true }
 risingwave_common = { workspace = true }
+risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
