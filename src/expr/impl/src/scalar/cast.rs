@@ -23,7 +23,9 @@ use risingwave_common::array::{
 };
 use risingwave_common::cast;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, F64, Int256, JsonbRef, MapRef, MapValue, ToText, UInt256};
+use risingwave_common::types::{
+    DataType, F64, Int256, JsonbRef, MapRef, MapValue, ToText, UInt256,
+};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{Context, ExpressionBoxExt, InputRefExpression, build_func};
 use risingwave_expr::{ExprError, Result, function};
