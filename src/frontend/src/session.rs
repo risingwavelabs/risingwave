@@ -1687,6 +1687,10 @@ impl Session for SessionImpl {
         }
     }
 
+    fn get_config(&self, key: &str) -> std::result::Result<String, BoxedError> {
+        self.config().get(key).map_err(Into::into)
+    }
+
     fn set_config(&self, key: &str, value: String) -> std::result::Result<String, BoxedError> {
         Self::set_config(self, key, value).map_err(Into::into)
     }
