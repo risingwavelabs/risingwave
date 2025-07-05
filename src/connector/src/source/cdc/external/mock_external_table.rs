@@ -15,15 +15,17 @@
 use std::sync::atomic::AtomicUsize;
 
 use futures::stream::BoxStream;
+use futures::{StreamExt, stream};
 use futures_async_stream::try_stream;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::ScalarImpl;
 
 use crate::error::{ConnectorError, ConnectorResult};
+use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
-    CdcOffset, CdcOffsetParseFunc, ExternalTableReader, MySqlOffset, SchemaTableName,
+    CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, ExternalTableReader, MySqlOffset,
+    SchemaTableName,
 };
-
 #[derive(Debug)]
 pub struct MockExternalTableReader {
     binlog_watermarks: Vec<MySqlOffset>,
@@ -132,5 +134,13 @@ impl ExternalTableReader for MockExternalTableReader {
         _limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
         self.snapshot_read_inner()
+    }
+
+    fn get_parallel_cdc_splits(
+        &self,
+        _options: CdcTableSnapshotSplitOption,
+    ) -> BoxStream<'_, ConnectorResult<CdcTableSnapshotSplit>> {
+        // Mock doesn't support parallelized backfill.
+        stream::empty::<ConnectorResult<CdcTableSnapshotSplit>>().boxed()
     }
 }

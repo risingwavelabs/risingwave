@@ -121,6 +121,10 @@ impl ExternalStorageTable {
                 self.config.clone(),
                 self.schema.clone(),
                 self.pk_indices.clone(),
+                SchemaTableName {
+                    schema_name: self.schema_name.to_owned(),
+                    table_name: self.table_name.to_owned(),
+                },
             )
             .await
     }

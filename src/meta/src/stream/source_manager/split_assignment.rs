@@ -104,6 +104,8 @@ impl SourceManager {
     ) -> MetaResult<SplitAssignment> {
         let core = self.core.lock().await;
 
+        // stream_job_id is used to fetch pre-calculated splits for CDC table.
+        let stream_job_id = table_fragments.stream_job_id;
         let source_fragments = table_fragments.stream_source_fragments();
 
         let mut assigned = HashMap::new();
@@ -130,10 +132,9 @@ impl SourceManager {
                 let actor_hashset: HashSet<u32> = empty_actor_splits.keys().cloned().collect();
                 let splits = handle.discovered_splits(source_id, &actor_hashset).await?;
                 if splits.is_empty() {
-                    tracing::warn!("no splits detected for source {}", source_id);
+                    tracing::warn!(?stream_job_id, source_id, "no splits detected");
                     continue 'loop_source;
                 }
-
                 if let Some(diff) = reassign_splits(
                     fragment_id,
                     empty_actor_splits,

@@ -66,6 +66,7 @@ use tokio::time::sleep;
 use tracing::Instrument;
 
 use crate::barrier::BarrierManagerRef;
+use crate::controller::SqlMetaStore;
 use crate::controller::catalog::{DropTableConnectorContext, ReleaseContext};
 use crate::controller::cluster::StreamingClusterInfo;
 use crate::controller::streaming_job::SinkIntoTableContext;
@@ -78,6 +79,7 @@ use crate::model::{
     DownstreamFragmentRelation, Fragment, StreamContext, StreamJobFragments,
     StreamJobFragmentsToCreate, TableParallelism,
 };
+use crate::stream::cdc::try_init_parallel_cdc_table_snapshot_splits;
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
     CreateStreamingJobContext, CreateStreamingJobOption, GlobalStreamManagerRef,
@@ -743,6 +745,7 @@ impl DdlController {
     /// Validates the connect properties in the `cdc_table_desc` stored in the `StreamCdcScan` node
     #[await_tree::instrument]
     pub(crate) async fn validate_cdc_table(
+        &self,
         table: &Table,
         table_fragments: &StreamJobFragments,
     ) -> MetaResult<()> {
@@ -767,8 +770,12 @@ impl DdlController {
         let mut found_cdc_scan = false;
         match &stream_scan_fragment.nodes.node_body {
             Some(NodeBody::StreamCdcScan(_)) => {
-                if Self::validate_cdc_table_inner(&stream_scan_fragment.nodes.node_body, table.id)
-                    .await?
+                if Self::validate_cdc_table_inner(
+                    &stream_scan_fragment.nodes.node_body,
+                    table.id,
+                    self.env.meta_store_ref(),
+                )
+                .await?
                 {
                     found_cdc_scan = true;
                 }
@@ -776,7 +783,13 @@ impl DdlController {
             // When there's generated columns, the cdc scan node is wrapped in a project node
             Some(NodeBody::Project(_)) => {
                 for input in &stream_scan_fragment.nodes.input {
-                    if Self::validate_cdc_table_inner(&input.node_body, table.id).await? {
+                    if Self::validate_cdc_table_inner(
+                        &input.node_body,
+                        table.id,
+                        self.env.meta_store_ref(),
+                    )
+                    .await?
+                    {
                         found_cdc_scan = true;
                     }
                 }
@@ -794,6 +807,7 @@ impl DdlController {
     async fn validate_cdc_table_inner(
         node_body: &Option<NodeBody>,
         table_id: u32,
+        meta_store: &SqlMetaStore,
     ) -> MetaResult<bool> {
         if let Some(NodeBody::StreamCdcScan(stream_cdc_scan)) = node_body
             && let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc
@@ -810,6 +824,15 @@ impl DdlController {
             let _enumerator = props
                 .create_split_enumerator(SourceEnumeratorContext::dummy().into())
                 .await?;
+
+            // Create parallel splits for a CDC table. The resulted split assignments are persisted and immutable.
+            try_init_parallel_cdc_table_snapshot_splits(
+                table_id,
+                cdc_table_desc,
+                meta_store,
+                &stream_cdc_scan.options,
+            )
+            .await?;
 
             tracing::debug!(?table_id, "validate cdc table success");
             Ok(true)
@@ -1070,7 +1093,6 @@ impl DdlController {
             }
         }
         let job_id = streaming_job.id();
-
         tracing::debug!(
             id = job_id,
             definition = streaming_job.definition(),
@@ -1212,7 +1234,8 @@ impl DdlController {
 
         match streaming_job {
             StreamingJob::Table(None, table, TableJobType::SharedCdcSource) => {
-                Self::validate_cdc_table(table, &stream_job_fragments).await?;
+                self.validate_cdc_table(table, &stream_job_fragments)
+                    .await?;
             }
             StreamingJob::Table(Some(source), ..) => {
                 // Register the source on the connector node.

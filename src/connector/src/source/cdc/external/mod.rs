@@ -35,6 +35,7 @@ use crate::WithPropertiesExt;
 use crate::connector_common::{PostgresExternalTable, SslMode};
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::mysql_row_to_owned_row;
+use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::CdcSourceType;
 use crate::source::cdc::external::mock_external_table::MockExternalTableReader;
 use crate::source::cdc::external::mysql::{
@@ -87,17 +88,20 @@ impl CdcTableType {
         config: ExternalTableConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
+        schema_table_name: SchemaTableName,
     ) -> ConnectorResult<ExternalTableReaderImpl> {
         match self {
             Self::MySql => Ok(ExternalTableReaderImpl::MySql(
                 MySqlExternalTableReader::new(config, schema)?,
             )),
             Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
-                PostgresExternalTableReader::new(config, schema, pk_indices).await?,
+                PostgresExternalTableReader::new(config, schema, pk_indices, schema_table_name)
+                    .await?,
             )),
             Self::SqlServer => Ok(ExternalTableReaderImpl::SqlServer(
                 SqlServerExternalTableReader::new(config, schema, pk_indices).await?,
             )),
+            // zw: why no matching arm for Citus?
             Self::Mock => Ok(ExternalTableReaderImpl::Mock(MockExternalTableReader::new())),
             _ => bail!("invalid external table type: {:?}", *self),
         }
@@ -213,6 +217,15 @@ pub trait ExternalTableReader: Sized {
         primary_keys: Vec<String>,
         limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>>;
+
+    fn get_parallel_cdc_splits(
+        &self,
+        options: CdcTableSnapshotSplitOption,
+    ) -> BoxStream<'_, ConnectorResult<CdcTableSnapshotSplit>>;
+}
+
+pub struct CdcTableSnapshotSplitOption {
+    pub backfill_num_rows_per_split: Option<u64>,
 }
 
 pub enum ExternalTableReaderImpl {
@@ -291,6 +304,13 @@ impl ExternalTableReader for ExternalTableReaderImpl {
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
         self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
     }
+
+    fn get_parallel_cdc_splits(
+        &self,
+        options: CdcTableSnapshotSplitOption,
+    ) -> BoxStream<'_, ConnectorResult<CdcTableSnapshotSplit>> {
+        self.get_parallel_cdc_splits_inner(options)
+    }
 }
 
 impl ExternalTableReaderImpl {
@@ -330,6 +350,22 @@ impl ExternalTableReaderImpl {
             }
         };
 
+        pin_mut!(stream);
+        #[for_await]
+        for row in stream {
+            let row = row?;
+            yield row;
+        }
+    }
+
+    #[try_stream(boxed, ok = CdcTableSnapshotSplit, error = ConnectorError)]
+    async fn get_parallel_cdc_splits_inner(&self, options: CdcTableSnapshotSplitOption) {
+        let stream = match self {
+            ExternalTableReaderImpl::MySql(e) => e.get_parallel_cdc_splits(options),
+            ExternalTableReaderImpl::Postgres(e) => e.get_parallel_cdc_splits(options),
+            ExternalTableReaderImpl::SqlServer(e) => e.get_parallel_cdc_splits(options),
+            ExternalTableReaderImpl::Mock(e) => e.get_parallel_cdc_splits(options),
+        };
         pin_mut!(stream);
         #[for_await]
         for row in stream {

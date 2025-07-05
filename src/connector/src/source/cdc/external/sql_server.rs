@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 
 use anyhow::{Context, anyhow};
 use futures::stream::BoxStream;
-use futures::{StreamExt, TryStreamExt, pin_mut};
+use futures::{StreamExt, TryStreamExt, pin_mut, stream};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::bail;
@@ -29,9 +29,10 @@ use tiberius::{Config, Query, QueryItem};
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::{ScalarImplTiberiusWrapper, sql_server_row_to_owned_row};
 use crate::sink::sqlserver::SqlServerClient;
+use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
-    CdcOffset, CdcOffsetParseFunc, DebeziumOffset, ExternalTableConfig, ExternalTableReader,
-    SchemaTableName,
+    CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, DebeziumOffset,
+    ExternalTableConfig, ExternalTableReader, SchemaTableName,
 };
 
 // The maximum commit_lsn value in Sql Server
@@ -274,6 +275,14 @@ impl ExternalTableReader for SqlServerExternalTableReader {
         limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
         self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
+    }
+
+    fn get_parallel_cdc_splits(
+        &self,
+        _options: CdcTableSnapshotSplitOption,
+    ) -> BoxStream<'_, ConnectorResult<CdcTableSnapshotSplit>> {
+        // TODO(zw): impl
+        stream::empty::<ConnectorResult<CdcTableSnapshotSplit>>().boxed()
     }
 }
 

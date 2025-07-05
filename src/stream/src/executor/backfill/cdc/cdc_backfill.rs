@@ -159,6 +159,16 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
 
+        if let Some(mutation) = first_barrier.mutation.as_deref() {
+            match mutation {
+                Mutation::Add(add) => {
+                    tracing::debug!(?add.actor_cdc_table_snapshot_splits, "!!!");
+                    // TODO(zw): impl
+                }
+                _ => {}
+            }
+        }
+
         let mut is_snapshot_paused = first_barrier.is_pause_on_startup();
         let first_barrier_epoch = first_barrier.epoch;
         // The first barrier message should be propagated.
