@@ -1902,4 +1902,80 @@ mod tests {
         let arrow = arrow_array::Decimal256Array::from(&array);
         assert_eq!(Int256Array::from(&arrow), array);
     }
+
+    #[test]
+    fn uint256_arrow_sorting_correctness() {
+        use crate::types::UInt256;
+        use std::str::FromStr;
+        
+        // Create a converter instance  
+        #[derive(Default)]
+        struct DefaultArrowConvert;
+        impl ToArrow for DefaultArrowConvert {}
+        impl FromArrow for DefaultArrowConvert {}
+        
+        // Test values that expose the Decimal256Array vs FixedSizeBinary issue
+        // These values include ones >= 2^255 (MSB set) that would be misinterpreted as negative in Decimal256Array
+        let values = [
+            Some(UInt256::from(0u64)),
+            Some(UInt256::from(1u64)),
+            Some(UInt256::from(100u64)),
+            // 2^255 - 1 (MSB = 0, should be positive)
+            Some(UInt256::from_str("57896044618658097711785492504343953926634992332820282019728792003956564819967").unwrap()),
+            // 2^255 (MSB = 1, would be negative in Decimal256Array)
+            Some(UInt256::from_str("57896044618658097711785492504343953926634992332820282019728792003956564819968").unwrap()),
+            // 2^256 - 1 (MSB = 1, would be negative in Decimal256Array)
+            Some(UInt256::from_str("115792089237316195423570985008687907853269984665640564039457584007913129639935").unwrap()),
+        ];
+
+        let array = UInt256Array::from_iter(values.iter().map(|r| r.as_ref().map(|x| x.as_scalar_ref())));
+        
+        // Convert to Arrow using the current implementation (FixedSizeBinary)
+        let converter = DefaultArrowConvert::default();
+        let arrow = converter.uint256_to_arrow(&array).unwrap();
+        
+        // Critical test: verify that Arrow conversion preserves unsigned integer sorting order
+        // This is the core requirement regardless of the underlying Arrow type used
+        
+        // Create a sortable representation from the Arrow array
+        // This tests the fundamental sorting behavior
+        let mut arrow_sortable_values = Vec::new();
+        
+        for i in 0..array.len() {
+            if array.is_null(i) {
+                arrow_sortable_values.push(None);
+            } else {
+                // Extract sortable representation from Arrow array
+                // The exact format depends on the Arrow type used
+                match arrow.data_type() {
+                    arrow_schema::DataType::FixedSizeBinary(_) => {
+                        let fixed_binary = arrow.as_any().downcast_ref::<arrow_array::FixedSizeBinaryArray>().unwrap();
+                        arrow_sortable_values.push(Some(fixed_binary.value(i).to_vec()));
+                    }
+                    arrow_schema::DataType::Decimal256(_, _) => {
+                        let decimal = arrow.as_any().downcast_ref::<arrow_array::Decimal256Array>().unwrap();
+                        arrow_sortable_values.push(Some(decimal.value(i).to_le_bytes().to_vec()));
+                    }
+                    _ => panic!("Unexpected Arrow data type for UInt256: {:?}", arrow.data_type()),
+                }
+            }
+        }
+        
+        // CRITICAL ASSERTION: Arrow representation must preserve UInt256 sorting order
+        // This is the test that FAILS with Decimal256Array but PASSES with FixedSizeBinary
+        for i in 0..values.len() - 1 {
+            if let (Some(uint_a), Some(uint_b)) = (&values[i], &values[i + 1]) {
+                let arrow_a = arrow_sortable_values[i].as_ref().unwrap();
+                let arrow_b = arrow_sortable_values[i + 1].as_ref().unwrap();
+                
+                // This assertion captures the core issue: Arrow representation must preserve 
+                // the numerical ordering of unsigned integers
+                assert!(arrow_a < arrow_b, 
+                    "SORTING FAILURE: Arrow conversion broke UInt256 ordering! \
+                     UInt256 {:?} < {:?} but Arrow representation violates this order. \
+                     This causes incorrect sorting for large unsigned values.",
+                    uint_a, uint_b);
+            }
+        }
+    }
 }
