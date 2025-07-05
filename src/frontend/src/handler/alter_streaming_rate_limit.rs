@@ -99,7 +99,7 @@ pub async fn handle_alter_streaming_rate_limit(
         PbThrottleTarget::Sink => {
             let reader = session.env().catalog_reader().read_guard();
             let (table, schema_name) =
-                reader.get_sink_by_name(db_name, schema_path, &real_table_name)?;
+                reader.get_any_sink_by_name(db_name, schema_path, &real_table_name)?;
             if table.target_table.is_some() {
                 bail!("ALTER SINK_RATE_LIMIT is not for sink into table")
             }

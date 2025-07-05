@@ -43,7 +43,7 @@ impl Binder {
         );
         let (sink_catalog, _) =
             self.catalog
-                .get_sink_by_name(&self.db_name, search_path, &sink_name)?;
+                .get_any_sink_by_name(&self.db_name, search_path, &sink_name)?;
         Ok(BoundSink {
             sink_catalog: sink_catalog.clone(),
         })

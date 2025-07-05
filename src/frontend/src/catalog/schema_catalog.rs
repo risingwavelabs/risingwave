@@ -776,8 +776,22 @@ impl SchemaCatalog {
         self.source_by_id.get(source_id)
     }
 
-    pub fn get_sink_by_name(&self, sink_name: &str) -> Option<&Arc<SinkCatalog>> {
-        self.sink_by_name.get(sink_name)
+    pub fn get_sink_by_name(
+        &self,
+        sink_name: &str,
+        bind_creating: bool,
+    ) -> Option<&Arc<SinkCatalog>> {
+        self.sink_by_name
+            .get(sink_name)
+            .filter(|s| bind_creating || s.is_created())
+    }
+
+    pub fn get_any_sink_by_name(&self, sink_name: &str) -> Option<&Arc<SinkCatalog>> {
+        self.get_sink_by_name(sink_name, true)
+    }
+
+    pub fn get_created_sink_by_name(&self, sink_name: &str) -> Option<&Arc<SinkCatalog>> {
+        self.get_sink_by_name(sink_name, false)
     }
 
     pub fn get_sink_by_id(&self, sink_id: &SinkId) -> Option<&Arc<SinkCatalog>> {

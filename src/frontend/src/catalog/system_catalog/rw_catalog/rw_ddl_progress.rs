@@ -25,6 +25,7 @@ struct RwDdlProgress {
     #[primary_key]
     ddl_id: i64,
     ddl_statement: String,
+    create_type: String,
     progress: String,
     initialized_at: Option<Timestamptz>,
 }
@@ -38,6 +39,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDdlProgress>> {
         .map(|progress| progress.id as u32)
         .collect_vec();
 
+    // TODO: fetch initialized_at_epoch together with ddl_progresses
     let tables = reader.meta_client.get_tables(&table_ids, false).await?;
 
     let ddl_progress = ddl_progresses
@@ -49,8 +51,9 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDdlProgress>> {
 
             RwDdlProgress {
                 ddl_id: s.id as i64,
-                ddl_statement: s.statement.clone(),
-                progress: s.progress.clone(),
+                ddl_statement: s.statement,
+                create_type: s.create_type,
+                progress: s.progress,
                 initialized_at: initialized_at.map(|e| *e.as_scalar().as_timestamptz()),
             }
         })

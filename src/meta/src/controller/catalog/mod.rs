@@ -798,15 +798,17 @@ impl CatalogControllerInner {
             .collect())
     }
 
-    /// `list_tables` return all `CREATED` tables, `CREATING` materialized views and internal tables that belong to them.
+    /// `list_tables` return all `CREATED` tables, `CREATING` materialized views/ `BACKGROUND` jobs and internal tables that belong to them.
     async fn list_tables(&self) -> MetaResult<Vec<PbTable>> {
         let table_objs = Table::find()
             .find_also_related(Object)
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
             .filter(
-                streaming_job::Column::JobStatus
-                    .eq(JobStatus::Created)
-                    .or(table::Column::TableType.eq(TableType::MaterializedView)),
+                streaming_job::Column::JobStatus.eq(JobStatus::Created).or(
+                    table::Column::TableType
+                        .eq(TableType::MaterializedView)
+                        .or(streaming_job::Column::CreateType.eq(CreateType::Background)),
+                ),
             )
             .all(&self.db)
             .await?;
@@ -894,18 +896,48 @@ impl CatalogControllerInner {
             .collect())
     }
 
-    /// `list_sinks` return all `CREATED` sinks.
+    /// `list_sinks` return all `CREATED` and `BACKGROUND` sinks.
     async fn list_sinks(&self) -> MetaResult<Vec<PbSink>> {
         let sink_objs = Sink::find()
             .find_also_related(Object)
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
-            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
+            .filter(
+                streaming_job::Column::JobStatus
+                    .eq(JobStatus::Created)
+                    .or(streaming_job::Column::CreateType.eq(CreateType::Background)),
+            )
             .all(&self.db)
             .await?;
 
+        let creating_sinks: HashSet<_> = StreamingJob::find()
+            .select_only()
+            .column(streaming_job::Column::JobId)
+            .filter(
+                streaming_job::Column::JobStatus
+                    .eq(JobStatus::Creating)
+                    .and(
+                        streaming_job::Column::JobId
+                            .is_in(sink_objs.iter().map(|(sink, _)| sink.sink_id)),
+                    ),
+            )
+            .into_tuple::<SinkId>()
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .collect();
+
         Ok(sink_objs
             .into_iter()
-            .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
+            .map(|(sink, obj)| {
+                let is_creating = creating_sinks.contains(&sink.sink_id);
+                let mut pb_sink: PbSink = ObjectModel(sink, obj.unwrap()).into();
+                pb_sink.stream_job_status = if is_creating {
+                    PbStreamJobStatus::Creating.into()
+                } else {
+                    PbStreamJobStatus::Created.into()
+                };
+                pb_sink
+            })
             .collect())
     }
 

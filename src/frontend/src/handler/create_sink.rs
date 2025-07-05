@@ -955,7 +955,7 @@ pub mod tests {
 
         // Check sink exists.
         let (sink, _) = catalog_reader
-            .get_sink_by_name(DEFAULT_DATABASE_NAME, SchemaPath::Name(schema_name), "snk1")
+            .get_created_sink_by_name(DEFAULT_DATABASE_NAME, SchemaPath::Name(schema_name), "snk1")
             .unwrap();
         assert_eq!(sink.name, "snk1");
     }

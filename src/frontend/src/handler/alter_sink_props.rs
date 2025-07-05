@@ -39,7 +39,7 @@ pub async fn handle_alter_sink_props(
 
         let reader = session.env().catalog_reader().read_guard();
         let (sink, schema_name) =
-            reader.get_sink_by_name(db_name, schema_path, &real_table_name)?;
+            reader.get_created_sink_by_name(db_name, schema_path, &real_table_name)?;
 
         if sink.target_table.is_some() {
             return Err(ErrorCode::InvalidInputSyntax(
