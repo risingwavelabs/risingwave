@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use bytes::Bytes;
-use foyer::{Engine, HybridCacheBuilder};
+use foyer::{Engine, HybridCacheBuilder, LargeEngineOptions};
 use futures::{TryFutureExt, TryStreamExt};
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
@@ -83,7 +83,7 @@ pub(crate) async fn new_hummock_java_binding_iter(
         let meta_cache = HybridCacheBuilder::new()
             .memory(1 << 10)
             .with_shards(2)
-            .storage(Engine::Large)
+            .storage(Engine::Large(LargeEngineOptions::new()))
             .build()
             .map_err(HummockError::foyer_error)
             .map_err(StorageError::from)
@@ -91,7 +91,7 @@ pub(crate) async fn new_hummock_java_binding_iter(
         let block_cache = HybridCacheBuilder::new()
             .memory(1 << 10)
             .with_shards(2)
-            .storage(Engine::Large)
+            .storage(Engine::Large(LargeEngineOptions::new()))
             .build()
             .map_err(HummockError::foyer_error)
             .map_err(StorageError::from)

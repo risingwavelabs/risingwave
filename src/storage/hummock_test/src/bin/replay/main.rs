@@ -28,7 +28,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use clap::Parser;
-use foyer::{Engine, HybridCacheBuilder};
+use foyer::{Engine, HybridCacheBuilder, LargeEngineOptions};
 use replay_impl::{GlobalReplayImpl, get_replay_notification_client};
 use risingwave_common::config::{
     NoOverride, ObjectStoreConfig, extract_storage_memory_config, load_config,
@@ -115,14 +115,14 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
     let meta_cache = HybridCacheBuilder::new()
         .memory(storage_opts.meta_cache_capacity_mb * (1 << 20))
         .with_shards(storage_opts.meta_cache_shard_num)
-        .storage(Engine::Large)
+        .storage(Engine::Large(LargeEngineOptions::new()))
         .build()
         .await
         .unwrap();
     let block_cache = HybridCacheBuilder::new()
         .memory(storage_opts.block_cache_capacity_mb * (1 << 20))
         .with_shards(storage_opts.block_cache_shard_num)
-        .storage(Engine::Large)
+        .storage(Engine::Large(LargeEngineOptions::new()))
         .build()
         .await
         .unwrap();
