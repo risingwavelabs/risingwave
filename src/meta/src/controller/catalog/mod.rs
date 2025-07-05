@@ -42,8 +42,8 @@ use risingwave_meta_model::{
     ActorId, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId, I32Array,
     IndexId, JobStatus, ObjectId, Property, SchemaId, SecretId, SinkFormatDesc, SinkId, SourceId,
     StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, UserId, ViewId,
-    connection, database, fragment, function, index, object, object_dependency, schema, secret,
-    sink, source, streaming_job, subscription, table, user_privilege, view,
+    WorkerId, actor, connection, database, fragment, function, index, object, object_dependency,
+    schema, secret, sink, source, streaming_job, subscription, table, user_privilege, view,
 };
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::subscription::SubscriptionState;
@@ -140,12 +140,14 @@ pub struct ReleaseContext {
 impl CatalogController {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
         let meta_store = env.meta_store();
+        let actor_info = ActorInfo::init_from_db(&meta_store.conn).await?;
         let catalog_controller = Self {
             env,
             inner: RwLock::new(CatalogControllerInner {
                 db: meta_store.conn,
                 creating_table_finish_notifier: HashMap::new(),
                 dropped_tables: HashMap::new(),
+                actors: actor_info,
             }),
         };
 
@@ -164,6 +166,114 @@ impl CatalogController {
     }
 }
 
+pub struct ActorInfo {
+    pub models: HashMap<ActorId, actor::Model>,
+
+    pub actors_by_fragment_id: HashMap<FragmentId, Vec<ActorId>>,
+    pub actors_by_worker_id: HashMap<WorkerId, Vec<ActorId>>,
+}
+
+impl ActorInfo {
+    pub fn add_actor(&mut self, actor: actor::Model) {
+        debug_assert!(!self.models.contains_key(&actor.actor_id));
+        self.actors_by_fragment_id
+            .entry(actor.fragment_id)
+            .or_default()
+            .push(actor.actor_id);
+        self.actors_by_worker_id
+            .entry(actor.worker_id)
+            .or_default()
+            .push(actor.actor_id);
+        self.models.insert(actor.actor_id, actor);
+    }
+
+    pub fn drop_actor(&mut self, actor_id: ActorId) {
+        debug_assert!(self.models.contains_key(&actor_id));
+        let actor = self.models.remove(&actor_id).expect("actor not found");
+        self.actors_by_fragment_id
+            .entry(actor.fragment_id)
+            .or_default()
+            .retain(|&id| id != actor.actor_id);
+        self.actors_by_worker_id
+            .entry(actor.worker_id)
+            .or_default()
+            .retain(|&id| id != actor.actor_id);
+    }
+
+    pub fn drop_actors_by_fragments(&mut self, fragment_ids: &[FragmentId]) {
+        for fragment_id in fragment_ids {
+            let actor_ids = self
+                .actors_by_fragment_id
+                .remove(fragment_id)
+                .expect("fragment not found");
+
+            for actor_id in actor_ids {
+                self.drop_actor(actor_id);
+            }
+        }
+    }
+
+    pub fn get_actors_by_fragment(&self, fragment_id: FragmentId) -> Option<&Vec<ActorId>> {
+        self.actors_by_fragment_id.get(&fragment_id)
+    }
+
+    /// Mutate an existing actor, re-indexing if its `fragment_id` or `worker_id` changes.
+    pub fn mutate_actor<F>(&mut self, actor_id: ActorId, mutator: F)
+    where
+        F: FnOnce(&mut actor::Model),
+    {
+        let actor = self.models.get_mut(&actor_id).expect("actor not found");
+        let old_worker = actor.worker_id;
+        let old_fragment = actor.fragment_id;
+
+        mutator(actor);
+
+        debug_assert_eq!(actor.fragment_id, old_fragment);
+
+        if actor.worker_id != old_worker {
+            debug_assert!(self.actors_by_worker_id.contains_key(&old_fragment));
+            if let Some(vec) = self.actors_by_worker_id.get_mut(&old_worker) {
+                vec.retain(|&id| id != actor_id);
+            }
+            self.actors_by_worker_id
+                .entry(actor.worker_id)
+                .or_default()
+                .push(actor_id);
+        }
+    }
+}
+
+impl ActorInfo {
+    pub async fn init_from_db(db: &DatabaseConnection) -> MetaResult<Self> {
+        tracing::info!("initializing actor info");
+        let actors: Vec<_> = Actor::find().all(db).await?;
+
+        let actors: HashMap<_, _> = actors
+            .into_iter()
+            .map(|actor| (actor.actor_id, actor))
+            .collect();
+
+        let mut actors_by_fragment_id = HashMap::new();
+        let mut actors_by_worker_id = HashMap::new();
+        for actor in actors.values() {
+            actors_by_fragment_id
+                .entry(actor.fragment_id)
+                .or_insert(vec![])
+                .push(actor.actor_id);
+            actors_by_worker_id
+                .entry(actor.worker_id)
+                .or_insert(vec![])
+                .push(actor.actor_id);
+        }
+
+        Ok(Self {
+            models: actors,
+            actors_by_fragment_id,
+            actors_by_worker_id,
+        })
+    }
+}
+
 pub struct CatalogControllerInner {
     pub(crate) db: DatabaseConnection,
     /// Registered finish notifiers for creating tables.
@@ -175,6 +285,9 @@ pub struct CatalogControllerInner {
         HashMap<DatabaseId, HashMap<ObjectId, Vec<Sender<Result<NotificationVersion, String>>>>>,
     /// Tables have been dropped from the meta store, but the corresponding barrier remains unfinished.
     pub dropped_tables: HashMap<TableId, PbTable>,
+
+    /// Internal actor cache
+    pub actors: ActorInfo,
 }
 
 impl CatalogController {
@@ -385,7 +498,7 @@ impl CatalogController {
         &self,
         database_id: Option<DatabaseId>,
     ) -> MetaResult<()> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let filter_condition = object::Column::ObjType.eq(ObjectType::Subscription).and(
             object::Column::Oid.not_in_subquery(
@@ -405,11 +518,26 @@ impl CatalogController {
         } else {
             filter_condition
         };
+
+        let object_ids: Vec<ObjectId> = Object::find()
+            .select_only()
+            .column(object::Column::Oid)
+            .filter(filter_condition.clone())
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        let dirty_fragment_ids = self.get_fragment_ids_by_job_ids(&txn, &object_ids).await?;
+
         Object::delete_many()
             .filter(filter_condition)
             .exec(&txn)
             .await?;
+
         txn.commit().await?;
+
+        inner.actors.drop_actors_by_fragments(&dirty_fragment_ids);
+
         // We don't need to notify the frontend, because the Init subscription is not send to frontend.
         Ok(())
     }
@@ -419,7 +547,7 @@ impl CatalogController {
         &self,
         database_id: Option<DatabaseId>,
     ) -> MetaResult<Vec<SourceId>> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         let filter_condition = streaming_job::Column::JobStatus.eq(JobStatus::Initial).or(
@@ -554,6 +682,10 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
+        let dirty_fragment_ids = self
+            .get_fragment_ids_by_job_ids(&txn, &dirty_job_ids)
+            .await?;
+
         let to_delete_objs: HashSet<ObjectId> = dirty_job_ids
             .clone()
             .into_iter()
@@ -568,6 +700,8 @@ impl CatalogController {
         assert!(res.rows_affected > 0);
 
         txn.commit().await?;
+
+        inner.actors.drop_actors_by_fragments(&dirty_fragment_ids);
 
         let object_group = build_object_group_for_delete(
             dirty_mview_objs
@@ -732,7 +866,10 @@ impl CatalogControllerInner {
         let sink_num = Sink::find().count(&self.db).await?;
         let function_num = Function::find().count(&self.db).await?;
         let streaming_job_num = StreamingJob::find().count(&self.db).await?;
-        let actor_num = Actor::find().count(&self.db).await?;
+        let actor_num_from_db = Actor::find().count(&self.db).await?;
+        let actor_num = self.actors.models.len() as u64;
+
+        debug_assert_eq!(actor_num_from_db, actor_num);
 
         Ok(CatalogStats {
             table_num: table_num_map.remove(&TableType::Table).unwrap_or(0),
