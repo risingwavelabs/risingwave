@@ -212,7 +212,7 @@ impl<C: rdkafka::consumer::ConsumerContext + 'static> KafkaMetaFetcher for Strea
         partition: i32,
         timeout: Duration,
     ) -> rdkafka::error::KafkaResult<(i64, i64)> {
-        Consumer::fetch_watermarks(self, topic, partition, timeout).await
+        self.fetch_watermarks(topic, partition, timeout).await
     }
 }
 
