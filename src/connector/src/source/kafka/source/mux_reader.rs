@@ -211,7 +211,7 @@ impl KafkaMuxReader {
 
         self.consumer
             .incremental_assign(&tpl)
-            .map_err(|e| anyhow::anyhow!("assign failed: {e}"))?;
+            .context("assign failed")?;
         Ok(rx)
     }
 
@@ -240,7 +240,7 @@ impl KafkaMuxReader {
 
         self.consumer
             .incremental_unassign(&tpl)
-            .map_err(|e| anyhow::anyhow!("unassign failed: {e}"))?;
+            .context("unassign failed")?;
 
         if is_empty_after_removal {
             tracing::info!(
