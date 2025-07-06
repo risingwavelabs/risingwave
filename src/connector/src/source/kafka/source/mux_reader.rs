@@ -161,14 +161,14 @@ impl KafkaMuxReader {
             for (topic, partition_map) in grouped_messages {
                 for (partition, messages) in partition_map {
                     let key = (topic.clone(), partition);
-                    if let Some(sender) = senders_guard.get(&key) {
-                        if sender.send(messages).await.is_err() {
-                            eprintln!(
-                                "Failed to send messages to topic '{}' partition {}. Receiver is closed.",
-                                topic, partition
-                            );
-                            break;
-                        }
+                    if let Some(sender) = senders_guard.get(&key)
+                        && sender.send(messages).await.is_err()
+                    {
+                        eprintln!(
+                            "Failed to send messages to topic '{}' partition {}. Receiver is closed.",
+                            topic, partition
+                        );
+                        break;
                     }
                 }
             }

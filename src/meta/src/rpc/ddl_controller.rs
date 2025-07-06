@@ -773,14 +773,14 @@ impl DdlController {
                 false,
             )?;
 
-            if let Some(key) = props.unique_key_under_connection() {
-                if !existing_keys.insert(key.clone()) {
-                    bail!(
-                        "Duplicate unique key `{}` found in connection `{}`",
-                        key,
-                        connection_id
-                    );
-                }
+            if let Some(key) = props.unique_key_under_connection()
+                && !existing_keys.insert(key.clone())
+            {
+                bail!(
+                    "Duplicate unique key `{}` found in connection `{}`",
+                    key,
+                    connection_id
+                );
             }
         }
 
@@ -789,14 +789,14 @@ impl DdlController {
             false,
         )?;
 
-        if let Some(new_key) = new_props.unique_key_under_connection() {
-            if existing_keys.contains(&new_key) {
-                bail!(
-                    "Duplicate unique key `{}` found in connection `{}`",
-                    new_key,
-                    connection_id
-                );
-            }
+        if let Some(new_key) = new_props.unique_key_under_connection()
+            && existing_keys.contains(&new_key)
+        {
+            bail!(
+                "Duplicate unique key `{}` found in connection `{}`",
+                new_key,
+                connection_id
+            );
         }
 
         Ok(())

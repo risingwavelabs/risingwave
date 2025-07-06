@@ -118,6 +118,31 @@ impl<S: Stream> Stream for StreamWithSyncCleanup<S> {
     }
 }
 
+// #[pinned_drop]
+// impl<S> PinnedDrop for StreamWithSyncCleanup<S> {
+//     fn drop(self: Pin<&mut Self>) {
+//         let handle = std::mem::replace(
+//             // Safety: we are in drop, it's OK to get a mutable reference
+//             unsafe { self.map_unchecked_mut(|s| &mut s.handle) }.get_mut(),
+//             ReleaseHandle::noop(),
+//         );
+//
+//         if let Some(fut) = handle.into_future() {
+//             if let Ok(h) = Handle::try_current() {
+//                 tokio::task::block_in_place(|| h.block_on(fut));
+//             } else {
+//                 let rt = tokio::runtime::Builder::new_current_thread()
+//                     .enable_all()
+//                     .build()
+//                     .unwrap();
+//                 rt.block_on(fut);
+//             }
+//         }
+//     }
+// }
+
+use std::sync::{Condvar, Mutex};
+
 #[pinned_drop]
 impl<S> PinnedDrop for StreamWithSyncCleanup<S> {
     fn drop(self: Pin<&mut Self>) {
@@ -129,13 +154,41 @@ impl<S> PinnedDrop for StreamWithSyncCleanup<S> {
 
         if let Some(fut) = handle.into_future() {
             if let Ok(h) = Handle::try_current() {
-                tokio::task::block_in_place(|| h.block_on(fut));
+                // Case 1: We are inside an existing Tokio runtime.
+                // We must not block the thread directly.
+                // We use block_in_place to signal the scheduler,
+                // and then use a Condvar to wait for the future to complete in a background task.
+                tokio::task::block_in_place(|| {
+                    // 1. Prepare shared state and a condition variable for synchronization.
+                    // The mutex protects the completion signal.
+                    // The condvar is used to sleep the current thread until the signal is received.
+                    let pair = Arc::new((Mutex::new(false), Condvar::new()));
+                    let pair2 = Arc::clone(&pair);
+
+                    // 2. Spawn the future onto the runtime.
+                    // When it's done, it will set the flag to true and notify the waiting thread.
+                    h.spawn(async move {
+                        fut.await;
+                        let (lock, cvar) = &*pair2;
+                        let mut completed = lock.lock().unwrap();
+                        *completed = true;
+                        cvar.notify_one();
+                    });
+
+                    // 3. Wait for the spawned task to complete.
+                    let (lock, cvar) = &*pair;
+                    let mut completed = lock.lock().unwrap();
+                    while !*completed {
+                        // The `wait` method atomically unlocks the mutex and waits for a notification.
+                        // Once woken up, it re-locks the mutex and the loop condition is checked again.
+                        completed = cvar.wait(completed).unwrap();
+                    }
+                });
             } else {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap();
-                rt.block_on(fut);
+                // // Case 2: We are NOT inside a Tokio runtime.
+                // // We can use the generic `block_on` from the `futures` crate
+                // // to create a temporary minimal runtime and block the current thread.
+                futures::executor::block_on(fut);
             }
         }
     }
