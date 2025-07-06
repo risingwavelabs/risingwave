@@ -143,6 +143,8 @@ impl<S: Stream> Stream for StreamWithSyncCleanup<S> {
 
 use std::sync::{Condvar, Mutex};
 
+use thiserror_ext::AsReport;
+
 #[pinned_drop]
 impl<S> PinnedDrop for StreamWithSyncCleanup<S> {
     fn drop(self: Pin<&mut Self>) {
@@ -399,7 +401,7 @@ impl SplitReader for KafkaSplitReader {
                         tpl
                     );
                     if let Err(e) = reader.unregister_topic_partition_list(tpl).await {
-                        tracing::error!("Failed to unregister topic partition list: {}", e);
+                        tracing::error!(error = %e.as_report(), "Failed to unregister topic partition list");
                     }
                 })
             }
