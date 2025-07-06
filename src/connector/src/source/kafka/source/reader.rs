@@ -31,6 +31,7 @@ use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColum
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
+use crate::source::kafka::meta_data_reader::SharedKafkaMetaClient;
 use crate::source::kafka::{
     KAFKA_ISOLATION_LEVEL, KafkaContextCommon, KafkaProperties, KafkaSplit, RwConsumerContext,
 };
@@ -49,6 +50,7 @@ pub struct KafkaSplitReader {
     max_num_messages: usize,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
+    properties: KafkaProperties,
 }
 
 #[async_trait]
@@ -88,7 +90,7 @@ impl SplitReader for KafkaSplitReader {
             // thread consumer will keep polling in the background, we don't need to call `poll`
             // explicitly
             Some(source_ctx.metrics.rdkafka_native_metric.clone()),
-            properties.aws_auth_props,
+            properties.aws_auth_props.clone(),
             properties.connection.is_aws_msk_iam(),
         )
         .await?;
@@ -99,6 +101,8 @@ impl SplitReader for KafkaSplitReader {
             .create_with_context(client_ctx)
             .await
             .context("failed to create kafka consumer")?;
+
+        let meta_data_client = SharedKafkaMetaClient::get_client(&properties).await?;
 
         let mut tpl = TopicPartitionList::with_capacity(splits.len());
 
@@ -117,7 +121,7 @@ impl SplitReader for KafkaSplitReader {
                 tpl.add_partition(split.topic.as_str(), split.partition);
             }
 
-            let (low, high) = consumer
+            let (low, high) = meta_data_client
                 .fetch_watermarks(
                     split.topic.as_str(),
                     split.partition,
@@ -152,13 +156,13 @@ impl SplitReader for KafkaSplitReader {
 
         // The two parameters below are only used by developers for performance testing purposes,
         // so we panic here on purpose if the input is not correctly recognized.
-        let bytes_per_second = match properties.bytes_per_second {
+        let bytes_per_second = match properties.bytes_per_second.clone() {
             None => usize::MAX,
             Some(number) => number
                 .parse::<usize>()
                 .expect("bytes.per.second expect usize"),
         };
-        let max_num_messages = match properties.max_num_messages {
+        let max_num_messages = match properties.max_num_messages.clone() {
             None => usize::MAX,
             Some(number) => number
                 .parse::<usize>()
@@ -175,6 +179,7 @@ impl SplitReader for KafkaSplitReader {
             max_num_messages,
             parser_config,
             source_ctx,
+            properties,
         })
     }
 
@@ -189,12 +194,12 @@ impl SplitReader for KafkaSplitReader {
     }
 
     async fn seek_to_latest(&mut self) -> Result<Vec<SplitImpl>> {
+        let meta_data_client = SharedKafkaMetaClient::get_client(&self.properties).await?;
         let mut latest_splits: Vec<SplitImpl> = Vec::new();
         let mut tpl = TopicPartitionList::with_capacity(self.splits.len());
         for mut split in self.splits.clone() {
             // we can't get latest offset if we use Offset::End, so we just fetch watermark here.
-            let (_low, high) = self
-                .consumer
+            let (_low, high) = meta_data_client
                 .fetch_watermarks(
                     split.topic.as_str(),
                     split.partition,
