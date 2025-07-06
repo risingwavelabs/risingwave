@@ -29,6 +29,7 @@ use rdkafka::message::OwnedMessage;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::Receiver;
 use tokio_stream::Stream;
 use tokio_stream::wrappers::ReceiverStream;
@@ -93,107 +94,6 @@ pub struct KafkaSplitReader {
     max_num_messages: usize,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
-}
-
-use std::task::Poll;
-
-use pin_project::{pin_project, pinned_drop};
-use tokio::runtime::Handle;
-
-#[pin_project(PinnedDrop)]
-pub struct StreamWithSyncCleanup<S> {
-    #[pin]
-    inner: S,
-    handle: ReleaseHandle,
-}
-
-impl<S: Stream> Stream for StreamWithSyncCleanup<S> {
-    type Item = S::Item;
-
-    fn poll_next(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        self.project().inner.poll_next(cx)
-    }
-}
-
-// #[pinned_drop]
-// impl<S> PinnedDrop for StreamWithSyncCleanup<S> {
-//     fn drop(self: Pin<&mut Self>) {
-//         let handle = std::mem::replace(
-//             // Safety: we are in drop, it's OK to get a mutable reference
-//             unsafe { self.map_unchecked_mut(|s| &mut s.handle) }.get_mut(),
-//             ReleaseHandle::noop(),
-//         );
-//
-//         if let Some(fut) = handle.into_future() {
-//             if let Ok(h) = Handle::try_current() {
-//                 tokio::task::block_in_place(|| h.block_on(fut));
-//             } else {
-//                 let rt = tokio::runtime::Builder::new_current_thread()
-//                     .enable_all()
-//                     .build()
-//                     .unwrap();
-//                 rt.block_on(fut);
-//             }
-//         }
-//     }
-// }
-
-use std::sync::{Condvar, Mutex};
-
-use thiserror_ext::AsReport;
-
-#[pinned_drop]
-impl<S> PinnedDrop for StreamWithSyncCleanup<S> {
-    fn drop(self: Pin<&mut Self>) {
-        let handle = std::mem::replace(
-            // Safety: we are in drop, it's OK to get a mutable reference
-            unsafe { self.map_unchecked_mut(|s| &mut s.handle) }.get_mut(),
-            ReleaseHandle::noop(),
-        );
-
-        if let Some(fut) = handle.into_future() {
-            if let Ok(h) = Handle::try_current() {
-                // Case 1: We are inside an existing Tokio runtime.
-                // We must not block the thread directly.
-                // We use block_in_place to signal the scheduler,
-                // and then use a Condvar to wait for the future to complete in a background task.
-                tokio::task::block_in_place(|| {
-                    // 1. Prepare shared state and a condition variable for synchronization.
-                    // The mutex protects the completion signal.
-                    // The condvar is used to sleep the current thread until the signal is received.
-                    let pair = Arc::new((Mutex::new(false), Condvar::new()));
-                    let pair2 = Arc::clone(&pair);
-
-                    // 2. Spawn the future onto the runtime.
-                    // When it's done, it will set the flag to true and notify the waiting thread.
-                    h.spawn(async move {
-                        fut.await;
-                        let (lock, cvar) = &*pair2;
-                        let mut completed = lock.lock().unwrap();
-                        *completed = true;
-                        cvar.notify_one();
-                    });
-
-                    // 3. Wait for the spawned task to complete.
-                    let (lock, cvar) = &*pair;
-                    let mut completed = lock.lock().unwrap();
-                    while !*completed {
-                        // The `wait` method atomically unlocks the mutex and waits for a notification.
-                        // Once woken up, it re-locks the mutex and the loop condition is checked again.
-                        completed = cvar.wait(completed).unwrap();
-                    }
-                });
-            } else {
-                // // Case 2: We are NOT inside a Tokio runtime.
-                // // We can use the generic `block_on` from the `futures` crate
-                // // to create a temporary minimal runtime and block the current thread.
-                futures::executor::block_on(fut);
-            }
-        }
-    }
 }
 
 #[async_trait]
@@ -386,39 +286,35 @@ impl SplitReader for KafkaSplitReader {
     fn into_stream(self) -> BoxSourceChunkStream {
         let parser_cfg = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
-        let cleanup = match &self.message_reader {
-            MessageReader::MuxReader { reader, .. } => {
-                let reader = Arc::clone(reader);
-
-                let mut tpl = TopicPartitionList::new();
-                for split in &self.splits {
-                    tpl.add_partition(split.topic.as_str(), split.partition);
-                }
-
-                ReleaseHandle::new(async move {
-                    tracing::info!(
-                        "Kafka split reader dropping (mux reader mode), unregistering topic partition list: {:?}",
-                        tpl
-                    );
-                    if let Err(e) = reader.unregister_topic_partition_list(tpl).await {
-                        tracing::error!(error = %e.as_report(), "Failed to unregister topic partition list");
-                    }
-                })
-            }
-            _ => ReleaseHandle::noop(),
-        };
-
         let data_stream = self.into_data_stream();
-        let chunk_stream = into_chunk_stream(data_stream, parser_cfg, source_context);
-
-        Box::pin(StreamWithSyncCleanup {
-            inner: chunk_stream,
-            handle: cleanup,
-        })
+        into_chunk_stream(data_stream, parser_cfg, source_context)
     }
 
     fn backfill_info(&self) -> HashMap<SplitId, BackfillInfo> {
         self.backfill_info.clone()
+    }
+
+    fn release_handle(&self) -> ReleaseHandle {
+        if let MessageReader::MuxReader { reader, .. } = &self.message_reader {
+            let reader = Arc::clone(reader);
+
+            let mut tpl = TopicPartitionList::new();
+            for split in &self.splits {
+                tpl.add_partition(split.topic.as_str(), split.partition);
+            }
+
+            ReleaseHandle::new(async move {
+                tracing::info!(
+                    "Kafka split reader dropping (mux reader mode), unregistering topic partition list: {:?}",
+                    tpl
+                );
+                if let Err(e) = reader.unregister_topic_partition_list(tpl).await {
+                    tracing::error!(error = %e.as_report(), "Failed to unregister topic partition list");
+                }
+            })
+        } else {
+            ReleaseHandle::noop()
+        }
     }
 
     async fn seek_to_latest(&mut self) -> Result<Vec<SplitImpl>> {
@@ -462,10 +358,11 @@ impl SplitReader for KafkaSplitReader {
                 Ok(latest_splits)
             }
             MessageReader::MuxReader { reader, .. } => {
-                let (latest_splits, tpl) =
+                let (latest_splits, _tpl) =
                     fetch_latest_splits_meta(&**reader, &self.splits, self.sync_call_timeout)
                         .await?;
-                let _ = reader.seek(tpl, self.sync_call_timeout).await?;
+                // // todo
+                // // let _ = reader.seek(tpl, self.sync_call_timeout).await?;
                 Ok(latest_splits)
             }
         }

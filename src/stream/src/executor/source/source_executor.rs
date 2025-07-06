@@ -28,7 +28,8 @@ use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
-    ConnectorState, SplitId, SplitImpl, SplitMetaData, StreamChunkWithState, WaitCheckpointTask,
+    ConnectorState, ReleaseHandle, SplitId, SplitImpl, SplitMetaData, StreamChunkWithState,
+    WaitCheckpointTask,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::TryWaitEpochOptions;
@@ -67,6 +68,8 @@ pub struct SourceExecutor<S: StateStore> {
     rate_limit_rps: Option<u32>,
 
     is_shared_non_cdc: bool,
+
+    last_release_handles: Arc<tokio::sync::Mutex<Option<Vec<ReleaseHandle>>>>,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -87,6 +90,7 @@ impl<S: StateStore> SourceExecutor<S> {
             system_params,
             rate_limit_rps,
             is_shared_non_cdc,
+            last_release_handles: Arc::new(tokio::sync::Mutex::new(None)),
         }
     }
 
@@ -99,6 +103,7 @@ impl<S: StateStore> SourceExecutor<S> {
             is_auto_schema_change_enable: self.is_auto_schema_change_enable(),
             actor_ctx: self.actor_ctx.clone(),
             reader_stream: None,
+            last_release_handles: self.last_release_handles.clone(),
         }
     }
 
@@ -309,9 +314,13 @@ impl<S: StateStore> SourceExecutor<S> {
             target_state
         );
 
-        if source_desc.source.config.enable_mux_reader() {
-            stream.drop_data_stream();
-        }
+        // if let Some(last_release_handle) = self.last_release_handle.take()
+        //     && source_desc.source.config.enable_mux_reader()
+        // {
+        //     // If the source reader is a MuxReader, we need to release the last handle
+        //     // before rebuilding the stream reader.
+        //     //last_release_handle.release().await?;
+        // }
 
         // Replace the source reader with a new one of the new state.
         let reader_stream_builder = self.stream_reader_builder(source_desc.clone());

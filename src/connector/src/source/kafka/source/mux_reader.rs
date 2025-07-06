@@ -260,15 +260,15 @@ impl KafkaMuxReader {
         Ok(())
     }
 
-    pub async fn seek(
-        &self,
-        topic_partition_list: TopicPartitionList,
-        sync_call_timeout: Duration,
-    ) -> KafkaResult<TopicPartitionList> {
-        self.consumer
-            .seek_partitions(topic_partition_list.clone(), sync_call_timeout)
-            .await
-    }
+    // pub async fn seek(
+    //     &self,
+    //     topic_partition_list: TopicPartitionList,
+    //     _sync_call_timeout: Duration,
+    // ) -> KafkaResult<TopicPartitionList> {
+    //         // self.consumer
+    //     //     .seek_partitions(topic_partition_list.clone(), sync_call_timeout)
+    //     //     .await
+    // }
 }
 
 use crate::source::kafka::source::reader::KafkaMetaFetcher;

@@ -127,6 +127,7 @@ pub struct CreateSplitReaderOpt {
 pub struct CreateSplitReaderResult {
     pub latest_splits: Option<Vec<SplitImpl>>,
     pub backfill_info: HashMap<SplitId, BackfillInfo>,
+    pub release_handles: Vec<ReleaseHandle>,
 }
 
 pub async fn create_split_readers<P: SourceProperties>(
@@ -141,6 +142,7 @@ pub async fn create_split_readers<P: SourceProperties>(
     let mut res = CreateSplitReaderResult {
         backfill_info: HashMap::new(),
         latest_splits: None,
+        release_handles: Default::default(),
     };
     if opt.support_multiple_splits {
         let mut reader = P::SplitReader::new(
@@ -155,6 +157,7 @@ pub async fn create_split_readers<P: SourceProperties>(
             res.latest_splits = Some(reader.seek_to_latest().await?);
         }
         res.backfill_info = reader.backfill_info();
+        res.release_handles = vec![reader.release_handle()];
         Ok((reader.into_stream().boxed(), res))
     } else {
         let mut readers = try_join_all(splits.into_iter().map(|split| {
@@ -177,6 +180,8 @@ pub async fn create_split_readers<P: SourceProperties>(
             res.latest_splits = Some(latest_splits);
         }
         res.backfill_info = readers.iter().flat_map(|r| r.backfill_info()).collect();
+        res.release_handles = readers.iter().map(|r| r.release_handle()).collect();
+
         Ok((
             select_all(readers.into_iter().map(|r| r.into_stream())).boxed(),
             res,
@@ -500,6 +505,12 @@ impl ReleaseHandle {
     pub(crate) fn into_future(mut self) -> Option<Pin<Box<dyn Future<Output = ()> + Send>>> {
         self.task.take()
     }
+
+    pub async fn release(self) {
+        if let Some(task) = self.into_future() {
+            task.await;
+        }
+    }
 }
 
 /// [`SplitReader`] is a new abstraction of the external connector read interface which is
@@ -526,6 +537,10 @@ pub trait SplitReader: Sized + Send {
 
     async fn seek_to_latest(&mut self) -> Result<Vec<SplitImpl>> {
         Err(anyhow!("seek_to_latest is not supported for this connector").into())
+    }
+
+    fn release_handle(&self) -> ReleaseHandle {
+        ReleaseHandle::noop()
     }
 }
 
