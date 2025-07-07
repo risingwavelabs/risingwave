@@ -14,6 +14,7 @@ risedev ci-start mysql-offline-schema-change-test
 echo "\n\n\n-------------RW started------------\n\n\n"
 
 mysql -e "
+    create database if not exists risedev;
     USE risedev;
     DROP TABLE IF EXISTS t;
     CREATE TABLE t (k int primary key, v text);
