@@ -21,6 +21,7 @@ mod rw_ddl_progress;
 mod rw_depend;
 mod rw_description;
 mod rw_event_logs;
+mod rw_features;
 mod rw_fragment_parallelism;
 mod rw_fragments;
 mod rw_functions;
