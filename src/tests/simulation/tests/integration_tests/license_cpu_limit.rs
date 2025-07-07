@@ -64,10 +64,7 @@ async fn test_license_cpu_limit() -> Result<()> {
     // Paid-tier features should not be available.
     set_license_key!(KEY_20);
     let error = test_feature!().unwrap_err().to_report_string();
-    assert!(
-        error.contains("currently not effective"),
-        "{error}"
-    );
+    assert!(error.contains("currently not effective"), "{error}");
 
     // Kill a compute node, the total cores will be reduced to 16, which is under the limit.
     // The paid-tier features should be available again.
@@ -79,10 +76,7 @@ async fn test_license_cpu_limit() -> Result<()> {
     cluster.simple_restart_nodes(["compute-2"]).await;
     tokio::time::sleep(std::time::Duration::from_secs(100)).await;
     let error = test_feature!().unwrap_err().to_report_string();
-    assert!(
-        error.contains("currently not effective"),
-        "{error}"
-    );
+    assert!(error.contains("currently not effective"), "{error}");
 
     // Set a license key with CPU limit 100, it should work again.
     set_license_key!(KEY_100);
