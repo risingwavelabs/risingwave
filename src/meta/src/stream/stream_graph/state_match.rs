@@ -422,21 +422,21 @@ fn match_graph(g1: &Graph, g2: &Graph) -> Result<Matches> {
             // For each upstream of u, if it's already matched, then it must be matched to the corresponding v's upstream.
             let upstreams = g1.upstreams(u).to_vec();
             for u_upstream in upstreams {
-                if let Some(v_upstream) = matches.target(u_upstream) {
-                    if !g2.upstreams(v).contains(&v_upstream) {
-                        // Not a valid match.
-                        continue;
-                    }
+                if let Some(v_upstream) = matches.target(u_upstream)
+                    && !g2.upstreams(v).contains(&v_upstream)
+                {
+                    // Not a valid match.
+                    continue;
                 }
             }
             // Same for downstream of u.
             let downstreams = g1.downstreams(u).to_vec();
             for u_downstream in downstreams {
-                if let Some(v_downstream) = matches.target(u_downstream) {
-                    if !g2.downstreams(v).contains(&v_downstream) {
-                        // Not a valid match.
-                        continue;
-                    }
+                if let Some(v_downstream) = matches.target(u_downstream)
+                    && !g2.downstreams(v).contains(&v_downstream)
+                {
+                    // Not a valid match.
+                    continue;
                 }
             }
 
