@@ -174,7 +174,7 @@ psql -c "
         id int PRIMARY KEY,
         name varchar(255)
     );
-    INSERT INTO test_include_ts(id, name) VALUES (1, 'original');
+    INSERT INTO test_include_ts(id, name) VALUES (1, 'name1');
     "
 
 statement ok
@@ -206,7 +206,7 @@ SELECT count(*) from rw_test_include_ts WHERE cdc_timestamp IS NOT NULL;
 system ok
 psql -c "
     ALTER TABLE test_include_ts ADD COLUMN new_col varchar DEFAULT 'new_column_default_value';
-    INSERT INTO test_include_ts (id, name1, new_col) values (2, 'name2', 'after_change');
+    INSERT INTO test_include_ts (id, name, new_col) values (2, 'name2', 'after_change');
 "
 
 # Verify both rows exist with correct data including new column
