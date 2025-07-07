@@ -30,7 +30,7 @@ struct RwSecret {
 }
 
 #[system_catalog(table, "rw_catalog.rw_secrets")]
-fn read_rw_view_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSecret>> {
+fn read_rw_secret_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSecret>> {
     let catalog_reader = reader.catalog_reader.read_guard();
     let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;
     let user_reader = reader.user_info_reader.read_guard();
