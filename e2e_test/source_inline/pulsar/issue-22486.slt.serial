@@ -9,6 +9,13 @@ ok
 system ok
 python3 e2e_test/commands/pulsar_util.py create-topic --topic 'persistent://public/default/topic-recovery' --partitions 3
 
+
+system ok retry 3 backoff 1s
+curl -s "$PULSAR_HTTP_URL/admin/v2/persistent/public/default/topic-recovery/partitions"
+----
+{"partitions":3,"deleted":false}
+
+
 system ok
 python3 e2e_test/commands/pulsar_util.py produce -t "persistent://public/default/topic-recovery" <<EOF
 {"f1":1,"f2":"foo"}
@@ -29,6 +36,11 @@ with (
   topic = 'persistent://public/default/topic-recovery',
 ) format plain encode json;
 
+query II retry 3 backoff 1s
+select count(f1), count(distinct f1) from t_partitioned;
+----
+6 6
+
 statement ok
 recover;
 
@@ -41,6 +53,11 @@ python3 e2e_test/commands/pulsar_util.py produce -t "persistent://public/default
 {"f1":11,"f2":"foo"}
 {"f1":12,"f2":"bar"}
 EOF
+
+query II retry 3 backoff 1s
+select count(f1), count(distinct f1) from t_partitioned;
+----
+12 12
 
 statement ok
 recover;
