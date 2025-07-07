@@ -139,7 +139,7 @@ impl IcebergCompactorRunner {
             config,
             metrics,
             task_type: TaskType::try_from(task_type).map_err(|e| {
-                HummockError::compaction_executor(format!("Invalid task type: {}", e))
+                HummockError::compaction_executor(format!("Invalid task type: {}", e.as_report()))
             })?,
         })
     }
