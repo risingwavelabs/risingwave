@@ -15,7 +15,7 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: error while evaluating expression `test_feature()`
+  2: error while evaluating expression `test_feature('TestDummy')`
   3: feature TestDummy is not available based on your license
 
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
@@ -32,7 +32,7 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: error while evaluating expression `test_feature()`
+  2: error while evaluating expression `test_feature('TestDummy')`
   3: feature TestDummy is not available due to license error
   4: invalid license key
   5: InvalidToken
@@ -55,7 +55,7 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: error while evaluating expression `test_feature()`
+  2: error while evaluating expression `test_feature('TestDummy')`
   3: feature TestDummy is not available based on your license
 
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
