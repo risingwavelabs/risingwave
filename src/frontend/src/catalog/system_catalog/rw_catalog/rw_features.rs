@@ -30,6 +30,7 @@ fn read_rw_features(_reader: &SysCatalogReaderImpl) -> Result<Vec<RwFeature>> {
 
     Ok(Feature::all()
         .iter()
+        .filter(|f| **f != Feature::TestPaid) // hide test feature
         .map(|f| RwFeature {
             name: f.name(),
             description: f.description(),
