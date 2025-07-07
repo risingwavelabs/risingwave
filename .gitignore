@@ -46,6 +46,9 @@ src/log/
 # srcy-tags
 **/srcy-tags.vi
 
+# rustc ice
+rustc-ice-*
+
 # ctags
 **/tags
 
