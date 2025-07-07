@@ -88,7 +88,7 @@ pub fn try_purify_table_source_create_sql_ast(
     *wildcard_idx = None;
 
     // Filter out columns that are not defined by users in SQL.
-    let defined_columns = columns.iter().filter(|c| c.is_user_defined() || (c.name().starts_with("_rw") && !c.is_hidden()));
+    let defined_columns = columns.iter().filter(|c| c.is_user_defined());
 
     // Derive `ColumnDef` from `ColumnCatalog`.
     let mut purified_column_defs = Vec::new();
