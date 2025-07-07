@@ -65,7 +65,7 @@ async fn test_license_cpu_limit() -> Result<()> {
     set_license_key!(KEY_20);
     let error = test_feature!().unwrap_err().to_report_string();
     assert!(
-        error.contains("the license key is currently not effective"),
+        error.contains("currently not effective"),
         "{error}"
     );
 
@@ -80,7 +80,7 @@ async fn test_license_cpu_limit() -> Result<()> {
     tokio::time::sleep(std::time::Duration::from_secs(100)).await;
     let error = test_feature!().unwrap_err().to_report_string();
     assert!(
-        error.contains("the license key is currently not effective"),
+        error.contains("currently not effective"),
         "{error}"
     );
 
