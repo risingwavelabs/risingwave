@@ -410,8 +410,7 @@ impl CatalogController {
         streaming_job: &StreamingJob,
         for_replace: bool,
     ) -> MetaResult<()> {
-        let need_notify = streaming_job.create_type() == PbCreateType::Background
-            || streaming_job.is_materialized_view();
+        let need_notify = streaming_job.should_notify_creating();
         let fragment_actors =
             Self::extract_fragment_and_actors_from_fragments(stream_job_fragments)?;
         let mut all_tables = stream_job_fragments.all_tables();
@@ -694,7 +693,7 @@ impl CatalogController {
         actor_ids: Vec<crate::model::ActorId>,
         upstream_fragment_new_downstreams: &FragmentDownstreamRelation,
         split_assignment: &SplitAssignment,
-        is_mv: bool,
+        notify_for_creating: bool,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -736,7 +735,7 @@ impl CatalogController {
         .update(&txn)
         .await?;
 
-        let fragment_mapping = if is_mv {
+        let fragment_mapping = if notify_for_creating {
             get_fragment_mappings(&txn, job_id as _).await?
         } else {
             vec![]

@@ -434,6 +434,9 @@ impl CatalogController {
             filter_condition
         };
 
+        // Find `Creating` background streaming job of sink into table, they need to be cleaned up.
+        // TODO(August): remove it when background sink into table is unified.
+
         let dirty_job_objs: Vec<PartialObject> = streaming_job::Entity::find()
             .select_only()
             .column(streaming_job::Column::JobId)
@@ -507,14 +510,26 @@ impl CatalogController {
             .into_iter()
             .collect();
 
-        // Only notify delete for failed materialized views.
-        let dirty_mview_objs = dirty_job_objs
+        let dirty_background_jobs: Vec<ObjectId> = streaming_job::Entity::find()
+            .select_only()
+            .column(streaming_job::Column::JobId)
+            .filter(
+                streaming_job::Column::JobId
+                    .is_in(dirty_job_ids.clone())
+                    .and(streaming_job::Column::CreateType.eq(CreateType::Background)),
+            )
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        // notify delete for failed materialized views and background jobs.
+        let to_notify_objs = dirty_job_objs
             .into_iter()
             .filter(|obj| {
                 matches!(
                     dirty_table_type_map.get(&obj.oid),
                     Some(TableType::MaterializedView)
-                )
+                ) || dirty_background_jobs.contains(&obj.oid)
             })
             .collect_vec();
 
@@ -540,7 +555,7 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        let dirty_mview_internal_table_objs = Object::find()
+        let dirty_internal_table_objs = Object::find()
             .select_only()
             .columns([
                 object::Column::Oid,
@@ -549,7 +564,7 @@ impl CatalogController {
                 object::Column::DatabaseId,
             ])
             .join(JoinType::InnerJoin, object::Relation::Table.def())
-            .filter(table::Column::BelongsToJobId.is_in(dirty_mview_objs.iter().map(|obj| obj.oid)))
+            .filter(table::Column::BelongsToJobId.is_in(to_notify_objs.iter().map(|obj| obj.oid)))
             .into_partial_model()
             .all(&txn)
             .await?;
@@ -570,9 +585,9 @@ impl CatalogController {
         txn.commit().await?;
 
         let object_group = build_object_group_for_delete(
-            dirty_mview_objs
+            to_notify_objs
                 .into_iter()
-                .chain(dirty_mview_internal_table_objs.into_iter())
+                .chain(dirty_internal_table_objs.into_iter())
                 .collect_vec(),
         );
 

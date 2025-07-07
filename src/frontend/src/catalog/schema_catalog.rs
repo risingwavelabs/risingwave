@@ -293,16 +293,22 @@ impl SchemaCatalog {
     }
 
     pub fn drop_sink(&mut self, id: SinkId) {
-        let sink_ref = self.sink_by_id.remove(&id).unwrap();
-        self.sink_by_name.remove(&sink_ref.name).unwrap();
-        if let Some(connection_id) = sink_ref.connection_id
-            && let Occupied(mut e) = self.connection_sink_ref.entry(connection_id.0)
-        {
-            let sink_ids = e.get_mut();
-            sink_ids.retain_mut(|sid| *sid != id);
-            if sink_ids.is_empty() {
-                e.remove_entry();
+        if let Some(sink_ref) = self.sink_by_id.remove(&id) {
+            self.sink_by_name.remove(&sink_ref.name).unwrap();
+            if let Some(connection_id) = sink_ref.connection_id
+                && let Occupied(mut e) = self.connection_sink_ref.entry(connection_id.0)
+            {
+                let sink_ids = e.get_mut();
+                sink_ids.retain_mut(|sid| *sid != id);
+                if sink_ids.is_empty() {
+                    e.remove_entry();
+                }
             }
+        } else {
+            tracing::warn!(
+                id,
+                "sink not found when dropping, frontend might not be notified yet"
+            );
         }
     }
 

@@ -19,6 +19,7 @@ use std::mem::take;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::{CreateType, ObjectId};
+use risingwave_pb::catalog::PbCreateType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::PbBarrierCompleteResponse;
@@ -575,6 +576,7 @@ impl CreateMviewProgressTracker {
             definition,
             create_type,
             fragment_backfill_ordering,
+            streaming_job,
             ..
         } = info;
 
@@ -597,18 +599,31 @@ impl CreateMviewProgressTracker {
             create_type.into(),
             backfill_order_state,
         );
-        let old = self.progress_map.insert(
-            creating_job_id,
-            (
-                progress,
-                TrackingJob::New(TrackingCommand {
-                    job_id: creating_job_id,
-                    replace_stream_job: replace_table_info,
-                }),
-            ),
-        );
-        assert!(old.is_none());
-        None
+        if create_type == PbCreateType::Background && streaming_job.is_sink_into_table() {
+            // We return the original tracking job immediately.
+            // This is because sink can be decoupled with backfill progress.
+            // We don't need to wait for sink to finish backfill.
+            // This still contains the notifiers, so we can tell listeners
+            // that the sink job has been created.
+            // TODO(August): unify background notification for sink into table.
+            Some(TrackingJob::New(TrackingCommand {
+                job_id: creating_job_id,
+                replace_stream_job: replace_table_info,
+            }))
+        } else {
+            let old = self.progress_map.insert(
+                creating_job_id,
+                (
+                    progress,
+                    TrackingJob::New(TrackingCommand {
+                        job_id: creating_job_id,
+                        replace_stream_job: replace_table_info,
+                    }),
+                ),
+            );
+            assert!(old.is_none());
+            None
+        }
     }
 
     /// Update the progress of `actor` according to the Pb struct.

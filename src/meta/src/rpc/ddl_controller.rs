@@ -1282,7 +1282,10 @@ impl DdlController {
         // create streaming jobs.
         let stream_job_id = streaming_job.id();
         match (streaming_job.create_type(), &streaming_job) {
-            (CreateType::Unspecified, _) | (CreateType::Foreground, _) => {
+            // TODO(August): Unify background sink into table's creation path with MV below.
+            (CreateType::Unspecified, _)
+            | (CreateType::Foreground, _)
+            | (CreateType::Background, StreamingJob::Sink(_, Some(_))) => {
                 let version = self
                     .stream_manager
                     .create_streaming_job(stream_job_fragments, ctx, None)
