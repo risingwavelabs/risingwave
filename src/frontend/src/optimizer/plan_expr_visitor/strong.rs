@@ -318,7 +318,7 @@ impl Strong {
             | ExprType::MapLength
             | ExprType::Vnode
             | ExprType::VnodeUser
-            | ExprType::TestPaidTier
+            | ExprType::TestFeature
             | ExprType::License
             | ExprType::Proctime
             | ExprType::PgSleep

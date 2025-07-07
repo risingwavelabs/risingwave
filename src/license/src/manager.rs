@@ -114,7 +114,7 @@ pub struct License {
     /// Tier of the license.
     pub tier: Tier,
 
-    /// Maximum number of compute-node CPU cores allowed to use. Typically used for the paid tier.
+    /// Maximum number of compute-node CPU cores allowed to use.
     pub cpu_core_limit: Option<NonZeroUsize>,
 
     /// Expiration time in seconds since UNIX epoch.

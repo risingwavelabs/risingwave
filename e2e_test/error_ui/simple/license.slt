@@ -9,14 +9,14 @@ SELECT setting FROM pg_settings WHERE name = 'license_key';
 <redacted>
 
 query error
-SELECT rw_test_paid_tier();
+SELECT rw_test_feature('TestDummy');
 ----
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: error while evaluating expression `test_paid_tier()`
-  3: feature TestPaid is not available based on your license
+  2: error while evaluating expression `test_feature()`
+  3: feature TestDummy is not available based on your license
 
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
 
@@ -26,14 +26,14 @@ statement ok
 ALTER SYSTEM SET license_key TO 'invalid';
 
 query error
-SELECT rw_test_paid_tier();
+SELECT rw_test_feature('TestDummy');
 ----
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: error while evaluating expression `test_paid_tier()`
-  3: feature TestPaid is not available due to license error
+  2: error while evaluating expression `test_feature()`
+  3: feature TestDummy is not available due to license error
   4: invalid license key
   5: InvalidToken
 
@@ -49,14 +49,14 @@ SELECT setting FROM pg_settings WHERE name = 'license_key';
 (empty)
 
 query error
-SELECT rw_test_paid_tier();
+SELECT rw_test_feature('TestDummy');
 ----
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: error while evaluating expression `test_paid_tier()`
-  3: feature TestPaid is not available based on your license
+  2: error while evaluating expression `test_feature()`
+  3: feature TestDummy is not available based on your license
 
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
 
@@ -72,6 +72,6 @@ SELECT setting FROM pg_settings WHERE name = 'license_key';
 <default>
 
 query T
-SELECT rw_test_paid_tier();
+SELECT rw_test_feature('TestDummy');
 ----
 t
