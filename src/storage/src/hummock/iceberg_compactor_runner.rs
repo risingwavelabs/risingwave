@@ -323,7 +323,7 @@ impl IcebergCompactorRunner {
             );
 
             let compaction_type = match self.task_type {
-                TaskType::SmallDataFileCompaction => CompactionType::SmallFiles, /* TODO: Use appropriate type for small data file compaction */
+                TaskType::SmallDataFileCompaction => CompactionType::SmallFiles,
                 TaskType::FullCompaction => CompactionType::Full,
             };
 
