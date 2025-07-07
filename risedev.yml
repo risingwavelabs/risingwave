@@ -951,9 +951,11 @@ profile:
       - use: compactor
       - use: mysql
         port: 3306
+        address: mysql
         user: root
         password: 123456
         database: risedev
+        user-managed: true
 
   mysql-only:
     steps:

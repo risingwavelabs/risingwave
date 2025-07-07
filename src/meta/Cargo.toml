@@ -52,7 +52,6 @@ risingwave_common = { workspace = true }
 risingwave_common_heap_profiling = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
-risingwave_jni_core = { workspace = true }
 risingwave_license = { workspace = true }
 risingwave_meta_dashboard = { workspace = true }
 risingwave_meta_model = { workspace = true }

@@ -12380,7 +12380,6 @@ dependencies = [
  "risingwave_common_heap_profiling",
  "risingwave_connector",
  "risingwave_hummock_sdk",
- "risingwave_jni_core",
  "risingwave_license",
  "risingwave_meta_dashboard",
  "risingwave_meta_model",
