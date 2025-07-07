@@ -261,7 +261,7 @@ mod tests {
     use expect_test::expect;
 
     use super::*;
-    use crate::{LicenseKey, TEST_PAID_LICENSE_KEY_CONTENT};
+    use crate::{LicenseKey, PROD_ALL_4_CORE_LICENSE_KEY_CONTENT, TEST_ALL_LICENSE_KEY_CONTENT};
 
     fn do_test(key: &str, expect: expect_test::Expect) {
         let manager = LicenseManager::new();
@@ -274,16 +274,34 @@ mod tests {
     }
 
     #[test]
-    fn test_paid_license_key() {
+    fn test_all_license_key() {
         do_test(
-            TEST_PAID_LICENSE_KEY_CONTENT,
+            TEST_ALL_LICENSE_KEY_CONTENT,
             expect![[r#"
                 License {
-                    sub: "rw-test",
+                    sub: "rw-test-all",
                     iss: Test,
-                    tier: AllAsOf2_5,
+                    tier: All,
                     cpu_core_limit: None,
-                    exp: 9999999999,
+                    exp: 10000627200,
+                }
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_prod_all_4_core_license_key() {
+        do_test(
+            PROD_ALL_4_CORE_LICENSE_KEY_CONTENT,
+            expect![[r#"
+                License {
+                    sub: "rw-default-all-4-core",
+                    iss: Prod,
+                    tier: All,
+                    cpu_core_limit: Some(
+                        4,
+                    ),
+                    exp: 10000627200,
                 }
             "#]],
         );
