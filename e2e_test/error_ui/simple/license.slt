@@ -38,6 +38,12 @@ Caused by these errors (recent errors listed first):
   5: InvalidToken
 
 
+# All features are not available.
+query I
+SELECT count(*) FROM rw_features WHERE available;
+----
+0
+
 # Set the license key to empty. This demonstrates the default behavior in production, i.e., free tier.
 statement ok
 ALTER SYSTEM SET license_key TO '';
@@ -75,3 +81,15 @@ query T
 SELECT rw_test_feature('TestDummy');
 ----
 t
+
+# `rw_test_paid_tier` is deprecated but still works.
+query T
+SELECT rw_test_paid_tier();
+----
+t
+
+# Test that all features are available.
+query I
+SELECT count(*) FROM rw_features WHERE NOT available;
+----
+0
