@@ -628,7 +628,11 @@ where
                     .write_no_flush(&BeMessage::BackendKeyData(session.id()))?;
 
                 self.stream.write_no_flush(&BeMessage::ParameterStatus(
-                    BeParameterStatusMessage::TimeZone(&session.get_config("timezone")?),
+                    BeParameterStatusMessage::TimeZone(
+                        &session
+                            .get_config("timezone")
+                            .map_err(PsqlError::Uncategorized)?,
+                    ),
                 ))?;
                 self.stream
                     .write_parameter_status_msg_no_flush(&ParameterStatus {
@@ -657,7 +661,11 @@ where
         authenticator.authenticate(&msg.password).await?;
         self.stream.write_no_flush(&BeMessage::AuthenticationOk)?;
         self.stream.write_no_flush(&BeMessage::ParameterStatus(
-            BeParameterStatusMessage::TimeZone(&session.get_config("timezone")?),
+            BeParameterStatusMessage::TimeZone(
+                &session
+                    .get_config("timezone")
+                    .map_err(PsqlError::Uncategorized)?,
+            ),
         ))?;
         self.stream
             .write_parameter_status_msg_no_flush(&ParameterStatus::default())?;
