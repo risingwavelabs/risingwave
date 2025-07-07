@@ -69,7 +69,7 @@ mod tests {
             KEY,
             33,
             expect![
-                "feature TestDummy is not available due to license error: the license key is currently not effective because the CPU core in the cluster (33) exceeds the maximum allowed by the license key (32); consider removing some nodes or acquiring a new license key with a higher limit"
+                "feature TestDummy is not available due to license error: a valid license key is set, but it is currently not effective because the CPU core in the cluster (33) exceeds the maximum allowed by the license key (32); consider removing some nodes or acquiring a new license key with a higher limit"
             ],
         );
     }
