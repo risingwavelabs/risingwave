@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use itertools::Itertools;
 use parking_lot::{RwLock, RwLockReadGuard};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
@@ -70,7 +71,7 @@ pub enum HummockEvent {
 
     ImmToUploader {
         instance_id: SharedBufferBatchId,
-        imm: ImmutableMemtable,
+        imms: Vec<ImmutableMemtable>,
     },
 
     StartEpoch {
@@ -137,8 +138,12 @@ impl HummockEvent {
                 format!("InitEpoch {} {}", instance_id, init_epoch)
             }
 
-            HummockEvent::ImmToUploader { instance_id, imm } => {
-                format!("ImmToUploader {} {}", instance_id, imm.batch_id())
+            HummockEvent::ImmToUploader { instance_id, imms } => {
+                format!(
+                    "ImmToUploader {} {:?}",
+                    instance_id,
+                    imms.iter().map(|imm| imm.batch_id()).collect_vec()
+                )
             }
 
             HummockEvent::LocalSealEpoch {

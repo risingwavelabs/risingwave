@@ -890,9 +890,9 @@ dependencies = [
 
 [[package]]
 name = "async-nats"
-version = "0.41.0"
+version = "0.42.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cf0ae68ffe9ef362127a2223b42f57104edb20a50429f8c6e058912212884f7"
+checksum = "08f6da6d49a956424ca4e28fe93656f790d748b469eaccbc7488fec545315180"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -12119,6 +12119,7 @@ dependencies = [
  "md5",
  "memcomparable",
  "mysql_async",
+ "mysql_common",
  "num-integer",
  "parking_lot 0.12.1",
  "parse-display",
