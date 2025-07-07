@@ -19,17 +19,26 @@ use risingwave_common::license::{Feature, LicenseManager};
 use risingwave_common::types::JsonbVal;
 use risingwave_expr::{ExprError, Result, function};
 
+fn test_feature_inner(feature: Feature) -> Result<bool> {
+    feature
+        .check_available()
+        .map_err(|e| ExprError::Internal(anyhow::Error::from(e)))?;
+    Ok(true)
+}
+
 /// Checks if the given feature is available.
 #[function("test_feature(varchar) -> boolean")]
 pub fn test_feature(name: &str) -> Result<bool> {
     let feature: Feature = name
         .parse()
         .with_context(|| format!("no feature named {name}"))?;
+    test_feature_inner(feature)
+}
 
-    feature
-        .check_available()
-        .map_err(|e| ExprError::Internal(anyhow::Error::from(e)))?;
-    Ok(true)
+/// Backward compatibility for `rw_test_paid_tier`.
+#[function("test_feature() -> boolean")]
+pub fn test_paid_tier() -> Result<bool> {
+    test_feature_inner(Feature::TestDummy)
 }
 
 /// Dump the license information.
