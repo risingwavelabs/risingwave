@@ -51,7 +51,7 @@ impl Feature {
 
     /// Get a slice of all features.
     pub(crate) fn all() -> &'static [Feature] {
-        &Feature::VARIANTS
+        Feature::VARIANTS
     }
 
     /// Get a slice of all features available as of 2.5 (before we introduce custom tier).
