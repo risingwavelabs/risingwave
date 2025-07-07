@@ -325,6 +325,12 @@ impl IcebergCompactorRunner {
             let compaction_type = match self.task_type {
                 TaskType::SmallDataFileCompaction => CompactionType::SmallFiles,
                 TaskType::FullCompaction => CompactionType::Full,
+                _ => {
+                    unreachable!(
+                        "Unexpected task type for Iceberg compaction: {:?}",
+                        self.task_type
+                    )
+                }
             };
 
             let compaction = Compaction::builder()

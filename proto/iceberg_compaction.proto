@@ -33,9 +33,12 @@ message IcebergCompactionTask {
   map<string, string> props = 2;
 
   enum TaskType {
+    UNSPECIFIED = 0;
     // Full compaction task.
-    FULL_COMPACTION = 0;
-    SMALL_DATA_FILE_COMPACTION = 1;
+    FULL_COMPACTION = 1;
+
+    // Small data file compaction task.
+    SMALL_DATA_FILE_COMPACTION = 2;
   }
 
   TaskType task_type = 3;
