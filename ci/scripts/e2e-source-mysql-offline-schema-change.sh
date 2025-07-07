@@ -2,9 +2,7 @@
 
 set -euo pipefail
 
-export MYSQL_HOST="127.0.0.1"
-export MYSQL_TCP_PORT="3306"
-export MYSQL_PWD="123456"
+export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
 
 echo "\n\n\n-------------Run mysql offline schema change test------------\n\n\n"
 
