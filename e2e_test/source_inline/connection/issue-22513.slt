@@ -4,7 +4,7 @@ statement ok
 create schema test_schema;
 
 statement ok
-create secret test_schema.secret_s with ( backend = 'meta') as '127.0.0.1:9092';
+create secret test_schema.secret_s with ( backend = 'meta' ) as '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}';
 
 statement ok
 create connection conn1 with (type = 'kafka', properties.bootstrap.server = secret test_schema.secret_s );
