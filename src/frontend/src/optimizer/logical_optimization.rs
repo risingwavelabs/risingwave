@@ -503,6 +503,14 @@ static REWRITE_SOURCE_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::new(|| 
     )
 });
 
+static TOP_N_TO_VECTOR_SEARCH: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "TopN to Vector Search",
+        vec![ProjectMergeRule::create(), TopNToVectorSearchRule::create()],
+        ApplyOrder::BottomUp,
+    )
+});
+
 impl LogicalOptimizer {
     pub fn predicate_pushdown(
         plan: LogicalPlanRef,
@@ -810,6 +818,8 @@ impl LogicalOptimizer {
 
         // Push down the calculation of inputs of join's condition.
         plan = plan.optimize_by_rules(&PUSH_CALC_OF_JOIN)?;
+
+        plan = plan.optimize_by_rules(&TOP_N_TO_VECTOR_SEARCH)?;
 
         plan = plan.optimize_by_rules(&SPLIT_OVER_WINDOW)?;
         // Must push down predicates again after split over window so that OverWindow can be
