@@ -319,11 +319,10 @@ impl ConnectorSourceWorker {
                     }
                 }
                 _ = interval.tick() => {
-                    if self.fail_cnt > MAX_FAIL_CNT {
-                        if let Err(e) = self.refresh().await {
+                    if self.fail_cnt > MAX_FAIL_CNT
+                        && let Err(e) = self.refresh().await {
                             tracing::error!(error = %e.as_report(), "error happened when refresh from connector source worker");
                         }
-                    }
                     if let Err(e) = self.tick().await {
                         tracing::error!(error = %e.as_report(), "error happened when tick from connector source worker");
                     }

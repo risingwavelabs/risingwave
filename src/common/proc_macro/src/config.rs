@@ -31,14 +31,14 @@ pub struct OverrideOpts {
 
 // TODO(bugen): the implementation is not robust but it works for now.
 fn type_is_option(ty: &syn::Type) -> bool {
-    if let syn::Type::Path(syn::TypePath { path, .. }) = ty {
-        if let Some(segment) = path.segments.last() {
-            if segment.ident == "Option" {
-                return true;
-            }
-        }
+    if let syn::Type::Path(syn::TypePath { path, .. }) = ty
+        && let Some(segment) = path.segments.last()
+        && segment.ident == "Option"
+    {
+        true
+    } else {
+        false
     }
-    false
 }
 
 pub fn produce_override_config(input: DeriveInput) -> TokenStream {

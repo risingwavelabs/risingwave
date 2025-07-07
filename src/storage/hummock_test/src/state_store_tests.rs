@@ -1248,8 +1248,8 @@ async fn test_clear_shared_buffer() {
 }
 
 /// Test the following behaviours:
-/// 1. LocalStateStore can read replicated ReadVersion.
-/// 2. GlobalStateStore cannot read replicated ReadVersion.
+/// 1. `LocalStateStore` can read replicated `ReadVersion`.
+/// 2. `GlobalStateStore` cannot read replicated `ReadVersion`.
 #[tokio::test]
 async fn test_replicated_local_hummock_storage() {
     use risingwave_storage::store::ReadOptions;

@@ -17,7 +17,6 @@ use std::io::{Error, ErrorKind};
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use fixedbitset::FixedBitSet;
 use iceberg::spec::Transform;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
@@ -49,6 +48,7 @@ use super::{
 use crate::TableCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, FunctionCall, InputRef};
+use crate::optimizer::StreamOptimizedLogicalPlanRoot;
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::plan_can_use_background_ddl;
@@ -233,16 +233,19 @@ impl StreamSink {
 
     #[allow(clippy::too_many_arguments)]
     pub fn create(
-        mut input: PlanRef,
+        StreamOptimizedLogicalPlanRoot {
+            plan: mut input,
+            required_dist: user_distributed_by,
+            required_order: user_order_by,
+            out_fields: user_cols,
+            out_names,
+            ..
+        }: StreamOptimizedLogicalPlanRoot,
         name: String,
         db_name: String,
         sink_from_table_name: String,
         target_table: Option<Arc<TableCatalog>>,
         target_table_mapping: Option<Vec<Option<usize>>>,
-        user_distributed_by: RequiredDist,
-        user_order_by: Order,
-        user_cols: FixedBitSet,
-        out_names: Vec<String>,
         definition: String,
         properties: WithOptionsSecResolved,
         format_desc: Option<SinkFormatDesc>,

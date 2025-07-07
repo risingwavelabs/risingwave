@@ -326,9 +326,11 @@ impl StreamingJob {
                     return Err(MetaError::permission_denied("source version is stale"));
                 }
             }
-            StreamingJob::MaterializedView(_)
-            | StreamingJob::Sink(_, _)
-            | StreamingJob::Index(_, _) => {
+            StreamingJob::MaterializedView(_) => {
+                // No version check for materialized view, since `ALTER MATERIALIZED VIEW AS QUERY`
+                // is a full rewrite.
+            }
+            StreamingJob::Sink(_, _) | StreamingJob::Index(_, _) => {
                 bail_not_implemented!("schema change for {}", self.job_type_str())
             }
         }

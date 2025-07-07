@@ -46,16 +46,16 @@ pub fn wait(
             }
         }
 
-        if let Some(ref timeout) = timeout {
-            if std::time::Instant::now() - start_time >= *timeout {
-                let context = "timeout when trying to connect";
+        if let Some(ref timeout) = timeout
+            && std::time::Instant::now() - start_time >= *timeout
+        {
+            let context = "timeout when trying to connect";
 
-                return Err(if let Some(last_error) = last_error {
-                    last_error.context(context)
-                } else {
-                    anyhow!(context)
-                });
-            }
+            return Err(if let Some(last_error) = last_error {
+                last_error.context(context)
+            } else {
+                anyhow!(context)
+            });
         }
 
         if detect_failure && p.exists() {
@@ -98,13 +98,13 @@ pub fn wait_tcp_available(
             }
         }
 
-        if let Some(ref timeout) = timeout {
-            if std::time::Instant::now() - start_time >= *timeout {
-                return Err(anyhow!(
-                    "Failed to wait for port closing on {}. The port may still be in use by another process or application. Please ensure the port is not being used elsewhere and try again.",
-                    server
-                ));
-            }
+        if let Some(ref timeout) = timeout
+            && std::time::Instant::now() - start_time >= *timeout
+        {
+            return Err(anyhow!(
+                "Failed to wait for port closing on {}. The port may still be in use by another process or application. Please ensure the port is not being used elsewhere and try again.",
+                server
+            ));
         }
 
         sleep(Duration::from_millis(100));

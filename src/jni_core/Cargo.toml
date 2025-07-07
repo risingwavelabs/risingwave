@@ -1,7 +1,7 @@
 [package]
 name = "risingwave_jni_core"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 anyhow = "1"
@@ -10,7 +10,7 @@ cfg-or-panic = "0.2"
 chrono = { workspace = true }
 fs-err = "3"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-jni = { version = "0.21.1", features = ["invocation"] }
+jni = { workspace = true }
 paste = "1"
 prost = { workspace = true }
 risingwave_common = { workspace = true }

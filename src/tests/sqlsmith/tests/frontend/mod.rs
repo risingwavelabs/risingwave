@@ -197,19 +197,19 @@ fn run_batch_query(
         .bind(stmt)
         .map_err(|e| Failed::from(format!("Failed to bind:\nReason:\n{}", e.as_report())))?;
     let mut planner = Planner::new_for_batch(context);
-    let mut plan_root = planner.plan(bound).map_err(|e| {
+    let plan_root = planner.plan(bound).map_err(|e| {
         Failed::from(format!(
             "Failed to generate logical plan:\nReason:\n{}",
             e.as_report()
         ))
     })?;
-    plan_root.gen_batch_plan().map_err(|e| {
+    let batch_plan = plan_root.gen_batch_plan().map_err(|e| {
         Failed::from(format!(
             "Failed to generate batch plan:\nReason:\n{}",
             e.as_report()
         ))
     })?;
-    plan_root.gen_batch_distributed_plan().map_err(|e| {
+    batch_plan.gen_batch_distributed_plan().map_err(|e| {
         Failed::from(format!(
             "Failed to generate batch distributed plan:\nReason:\n{}",
             e.as_report()

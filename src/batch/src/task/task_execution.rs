@@ -277,10 +277,10 @@ impl ShutdownToken {
     /// # Cancel safety
     /// This method is cancel safe.
     pub async fn cancelled(&mut self) {
-        if matches!(*self.0.borrow(), ShutdownMsg::Init) {
-            if let Err(_err) = self.0.changed().await {
-                std::future::pending::<()>().await;
-            }
+        if matches!(*self.0.borrow(), ShutdownMsg::Init)
+            && let Err(_err) = self.0.changed().await
+        {
+            std::future::pending::<()>().await;
         }
     }
 

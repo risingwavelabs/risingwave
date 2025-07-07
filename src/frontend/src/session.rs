@@ -1687,6 +1687,10 @@ impl Session for SessionImpl {
         }
     }
 
+    fn get_config(&self, key: &str) -> std::result::Result<String, BoxedError> {
+        self.config().get(key).map_err(Into::into)
+    }
+
     fn set_config(&self, key: &str, value: String) -> std::result::Result<String, BoxedError> {
         Self::set_config(self, key, value).map_err(Into::into)
     }
@@ -1736,10 +1740,9 @@ impl Session for SessionImpl {
                     // Idle timeout.
                     if let Some(elapse_since_last_idle_instant) =
                         self.elapse_since_last_idle_instant()
+                        && elapse_since_last_idle_instant > idle_in_transaction_session_timeout
                     {
-                        if elapse_since_last_idle_instant > idle_in_transaction_session_timeout {
-                            return Err(PsqlError::IdleInTxnTimeout);
-                        }
+                        return Err(PsqlError::IdleInTxnTimeout);
                     }
                 }
             }

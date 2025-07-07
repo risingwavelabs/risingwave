@@ -385,18 +385,15 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 }
                             }
                             Mutation::ConnectorPropsChange(config) => {
-                                if let Some(map) = config.get(&sink_id.sink_id) {
-                                    if let Err(e) = rebuild_sink_tx
+                                if let Some(map) = config.get(&sink_id.sink_id)
+                                    && let Err(e) = rebuild_sink_tx
                                         .send(RebuildSinkMessage::UpdateConfig(map.clone()))
-                                    {
-                                        error!(
-                                            error = %e.as_report(),
-                                            "fail to send sink alter props"
-                                        );
-                                        return Err(StreamExecutorError::from(
-                                            e.to_report_string(),
-                                        ));
-                                    }
+                                {
+                                    error!(
+                                        error = %e.as_report(),
+                                        "fail to send sink alter props"
+                                    );
+                                    return Err(StreamExecutorError::from(e.to_report_string()));
                                 }
                             }
                             _ => (),

@@ -4,7 +4,7 @@
 [package]
 name = "risingwave_libpq_test"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 libpq = "3.0"

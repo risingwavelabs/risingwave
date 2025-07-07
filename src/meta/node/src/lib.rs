@@ -245,7 +245,7 @@ pub fn start(
                     .sql_endpoint
                     .expect("sql endpoint is required")
                     .expose_secret()
-                    .to_string(),
+                    .clone(),
                 config: meta_store_config,
             },
             MetaBackend::Sqlite => MetaStoreBackend::Sql {

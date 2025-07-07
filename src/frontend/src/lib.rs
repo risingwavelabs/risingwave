@@ -27,12 +27,10 @@
 #![feature(extend_one)]
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(result_flattening)]
 #![feature(error_generic_member_access)]
 #![feature(iterator_try_collect)]
 #![feature(used_with_arg)]
 #![feature(try_trait_v2)]
-#![feature(cell_update)]
 #![recursion_limit = "256"]
 
 #[cfg(test)]

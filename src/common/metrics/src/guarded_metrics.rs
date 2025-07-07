@@ -123,18 +123,21 @@ mod tait {
     pub type VecBuilderOfGauge<P: Atomic> = impl MetricVecBuilder<M = GenericGauge<P>>;
     pub type VecBuilderOfHistogram = impl MetricVecBuilder<M = Histogram>;
 
+    #[define_opaque(VecBuilderOfCounter)]
     pub fn __extract_counter_builder<P: Atomic>(
         vec: GenericCounterVec<P>,
     ) -> MetricVec<VecBuilderOfCounter<P>> {
         vec
     }
 
+    #[define_opaque(VecBuilderOfGauge)]
     pub fn __extract_gauge_builder<P: Atomic>(
         vec: GenericGaugeVec<P>,
     ) -> MetricVec<VecBuilderOfGauge<P>> {
         vec
     }
 
+    #[define_opaque(VecBuilderOfHistogram)]
     pub fn __extract_histogram_builder(vec: HistogramVec) -> MetricVec<VecBuilderOfHistogram> {
         vec
     }

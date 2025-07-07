@@ -258,11 +258,11 @@ impl Task for MetaNodeService {
 
         Self::apply_command_args(&mut cmd, &self.config, HummockInMemoryStrategy::Allowed)?;
 
-        if let MetaBackend::Env = self.config.meta_backend {
-            if is_env_set("RISEDEV_CLEAN_START") {
-                ctx.pb.set_message("initializing meta store from env...");
-                initialize_meta_store()?;
-            }
+        if let MetaBackend::Env = self.config.meta_backend
+            && is_env_set("RISEDEV_CLEAN_START")
+        {
+            ctx.pb.set_message("initializing meta store from env...");
+            initialize_meta_store()?;
         }
 
         if !self.config.user_managed {

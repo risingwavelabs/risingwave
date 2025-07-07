@@ -37,7 +37,7 @@ jobs:
           rustup override set nightly
           rustup update nightly
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y make build-essential cmake protobuf-compiler curl openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config postgresql-client tmux lld
+        run: sudo apt-get update && sudo apt-get install -y make build-essential cmake protobuf-compiler curl openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config postgresql-client tmux lld libblas-dev liblapack-dev libomp-dev
       - name: cargo check
         run: |
           export CARGO_INCREMENTAL=0

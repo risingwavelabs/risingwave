@@ -314,7 +314,6 @@ impl VectorFileMeta {
         encoded_footer
     }
 
-    #[expect(dead_code)]
     pub fn decode_footer(buf: &[u8]) -> HummockResult<Self> {
         if buf.len() < Self::preserved_footer_len() {
             return Err(HummockError::decode_error("footer too short"));
@@ -451,10 +450,10 @@ impl VectorFileBuilder {
     }
 
     pub async fn try_flush(&mut self) -> HummockResult<()> {
-        if let Some((builder, _)) = &self.building_block {
-            if builder.encoded_len() >= self.max_block_size {
-                self.flush_inner().await?;
-            }
+        if let Some((builder, _)) = &self.building_block
+            && builder.encoded_len() >= self.max_block_size
+        {
+            self.flush_inner().await?;
         }
         Ok(())
     }

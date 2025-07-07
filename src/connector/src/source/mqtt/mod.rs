@@ -51,8 +51,8 @@ pub struct MqttProperties {
     /// The topic name to subscribe or publish to. When subscribing, it can be a wildcard topic. e.g /topic/#
     pub topic: String,
 
-    /// The quality of service to use when publishing messages. Defaults to at_most_once.
-    /// Could be at_most_once, at_least_once or exactly_once
+    /// The quality of service to use when publishing messages. Defaults to `at_most_once`.
+    /// Could be `at_most_once`, `at_least_once` or `exactly_once`
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub qos: Option<MqttQualityOfService>,
 
