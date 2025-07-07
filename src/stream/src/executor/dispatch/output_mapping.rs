@@ -146,6 +146,7 @@ mod type_mapping {
 
         match (from_type, into_type) {
             (data_types::simple!(), data_types::simple!()) => DatumCow::Borrowed(Some(scalar)),
+            (DataType::Vector(_), DataType::Vector(_)) => todo!("VECTOR_PLACEHOLDER"),
 
             (DataType::List(from_inner_type), DataType::List(into_inner_type)) => {
                 let list = scalar.into_list();

@@ -43,6 +43,20 @@ pub enum StreamingJob {
     Source(PbSource),
 }
 
+impl std::fmt::Display for StreamingJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StreamingJob::MaterializedView(table) => {
+                write!(f, "MaterializedView: {}({})", table.name, table.id)
+            }
+            StreamingJob::Sink(sink, _) => write!(f, "Sink: {}({})", sink.name, sink.id),
+            StreamingJob::Table(_, table, _) => write!(f, "Table: {}({})", table.name, table.id),
+            StreamingJob::Index(index, _) => write!(f, "Index: {}({})", index.name, index.id),
+            StreamingJob::Source(source) => write!(f, "Source: {}({})", source.name, source.id),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StreamingJobType {
     MaterializedView,
@@ -312,9 +326,11 @@ impl StreamingJob {
                     return Err(MetaError::permission_denied("source version is stale"));
                 }
             }
-            StreamingJob::MaterializedView(_)
-            | StreamingJob::Sink(_, _)
-            | StreamingJob::Index(_, _) => {
+            StreamingJob::MaterializedView(_) => {
+                // No version check for materialized view, since `ALTER MATERIALIZED VIEW AS QUERY`
+                // is a full rewrite.
+            }
+            StreamingJob::Sink(_, _) | StreamingJob::Index(_, _) => {
                 bail_not_implemented!("schema change for {}", self.job_type_str())
             }
         }

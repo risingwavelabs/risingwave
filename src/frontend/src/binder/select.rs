@@ -129,11 +129,20 @@ impl BoundSelect {
             .chain(self.having.iter_mut())
     }
 
-    pub fn is_correlated(&self, depth: Depth) -> bool {
+    pub fn is_correlated_by_depth(&self, depth: Depth) -> bool {
         self.exprs()
             .any(|expr| expr.has_correlated_input_ref_by_depth(depth))
             || match self.from.as_ref() {
-                Some(relation) => relation.is_correlated(depth),
+                Some(relation) => relation.is_correlated_by_depth(depth),
+                None => false,
+            }
+    }
+
+    pub fn is_correlated_by_correlated_id(&self, correlated_id: CorrelatedId) -> bool {
+        self.exprs()
+            .any(|expr| expr.has_correlated_input_ref_by_correlated_id(correlated_id))
+            || match self.from.as_ref() {
+                Some(relation) => relation.is_correlated_by_correlated_id(correlated_id),
                 None => false,
             }
     }
@@ -301,15 +310,15 @@ impl Binder {
             })
             .collect::<Result<Vec<Field>>>()?;
 
-        if let Some(Relation::Share(bound)) = &from {
-            if matches!(bound.input, BoundShareInput::ChangeLog(_))
-                && fields.iter().filter(|&x| x.name.eq(CHANGELOG_OP)).count() > 1
-            {
-                return Err(ErrorCode::BindError(
-                    "The source table of changelog cannot have `changelog_op`, please rename it first".to_owned()
-                )
-                .into());
-            }
+        if let Some(Relation::Share(bound)) = &from
+            && matches!(bound.input, BoundShareInput::ChangeLog(_))
+            && fields.iter().filter(|&x| x.name.eq(CHANGELOG_OP)).count() > 1
+        {
+            return Err(ErrorCode::BindError(
+                "The source table of changelog cannot have `changelog_op`, please rename it first"
+                    .to_owned(),
+            )
+            .into());
         }
 
         Ok(BoundSelect {
@@ -733,6 +742,7 @@ fn data_type_to_alias(data_type: &AstDataType) -> Option<String> {
         AstDataType::Jsonb => "jsonb".to_owned(),
         AstDataType::Array(ty) => return data_type_to_alias(ty),
         AstDataType::Custom(ty) => format!("{}", ty),
+        AstDataType::Vector(_) => "vector".to_owned(),
         AstDataType::Struct(_) | AstDataType::Map(_) => {
             // It doesn't bother to derive aliases for these types.
             return None;

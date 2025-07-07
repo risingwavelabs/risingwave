@@ -79,10 +79,10 @@ impl Rule for ApplyEliminateRule {
         // TODO: Do some transformation for IN, and try to remove DAG for it.
         let mut column_mapping = HashMap::new();
         on.conjunctions.iter().for_each(|expr| {
-            if let ExprImpl::FunctionCall(func_call) = expr {
-                if let Some((left, right, data_type)) = Self::check(func_call, apply_left_len) {
-                    column_mapping.insert(left, (right, data_type));
-                }
+            if let ExprImpl::FunctionCall(func_call) = expr
+                && let Some((left, right, data_type)) = Self::check(func_call, apply_left_len)
+            {
+                column_mapping.insert(left, (right, data_type));
             }
         });
         if column_mapping.len() == apply_left_len {

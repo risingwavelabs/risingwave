@@ -22,7 +22,8 @@ use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    CDC_SOURCE_COLUMN_NUM, TableId, generate_internal_table_name_with_type,
+    CDC_SOURCE_COLUMN_NUM, FragmentTypeFlag, FragmentTypeMask, TableId,
+    generate_internal_table_name_with_type,
 };
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -39,9 +40,8 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    BackfillOrder, DispatchOutputMapping, DispatchStrategy, DispatcherType, FragmentTypeFlag,
-    PbStreamNode, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode,
-    StreamScanType,
+    BackfillOrder, DispatchOutputMapping, DispatchStrategy, DispatcherType, PbStreamNode,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode, StreamScanType,
 };
 
 use crate::barrier::SnapshotBackfillInfo;
@@ -138,14 +138,11 @@ impl BuildingFragment {
             NodeBody::Materialize(materialize_node) => {
                 materialize_node.table_id = job_id;
 
-                // Fill the ID of the `Table`.
-                let table = materialize_node.table.as_mut().unwrap();
-                table.id = job_id;
-                table.database_id = job.database_id();
-                table.schema_id = job.schema_id();
-                table.fragment_id = fragment_id;
-                #[cfg(not(debug_assertions))]
-                {
+                // Fill the table field of `MaterializeNode` from the job.
+                let table = materialize_node.table.insert(job.table().unwrap().clone());
+                table.fragment_id = fragment_id; // this will later be synced back to `job.table` with `set_info_from_graph`
+                // In production, do not include full definition in the table in plan node.
+                if cfg!(not(debug_assertions)) {
                     table.definition = job.name();
                 }
 
@@ -161,12 +158,11 @@ impl BuildingFragment {
                 dml_node.table_version_id = job.table_version_id().unwrap();
             }
             NodeBody::StreamFsFetch(fs_fetch_node) => {
-                if let StreamingJob::Table(table_source, _, _) = job {
-                    if let Some(node_inner) = fs_fetch_node.node_inner.as_mut()
-                        && let Some(source) = table_source
-                    {
-                        node_inner.source_id = source.id;
-                    }
+                if let StreamingJob::Table(table_source, _, _) = job
+                    && let Some(node_inner) = fs_fetch_node.node_inner.as_mut()
+                    && let Some(source) = table_source
+                {
+                    node_inner.source_id = source.id;
                 }
             }
             NodeBody::Source(source_node) => {
@@ -174,11 +170,11 @@ impl BuildingFragment {
                     // Note: For table without connector, it has a dummy Source node.
                     // Note: For table with connector, it's source node has a source id different with the table id (job id), assigned in create_job_catalog.
                     StreamingJob::Table(source, _table, _table_job_type) => {
-                        if let Some(source_inner) = source_node.source_inner.as_mut() {
-                            if let Some(source) = source {
-                                debug_assert_ne!(source.id, job_id);
-                                source_inner.source_id = source.id;
-                            }
+                        if let Some(source_inner) = source_node.source_inner.as_mut()
+                            && let Some(source) = source
+                        {
+                            debug_assert_ne!(source.id, job_id);
+                            source_inner.source_id = source.id;
                         }
                     }
                     StreamingJob::Source(source) => {
@@ -552,7 +548,9 @@ impl StreamFragmentGraph {
     pub fn dml_fragment_id(&self) -> Option<FragmentId> {
         self.fragments
             .values()
-            .filter(|b| b.fragment_type_mask & FragmentTypeFlag::Dml as u32 != 0)
+            .filter(|b| {
+                FragmentTypeMask::from(b.fragment_type_mask).contains(FragmentTypeFlag::Dml)
+            })
             .map(|b| b.fragment_id)
             .at_most_one()
             .expect("require at most 1 dml node when creating the streaming job")
@@ -592,16 +590,17 @@ impl StreamFragmentGraph {
     pub fn collect_snapshot_backfill_info(
         &self,
     ) -> MetaResult<(Option<SnapshotBackfillInfo>, SnapshotBackfillInfo)> {
-        Self::collect_snapshot_backfill_info_impl(
-            self.fragments
-                .values()
-                .map(|fragment| (fragment.node.as_ref().unwrap(), fragment.fragment_type_mask)),
-        )
+        Self::collect_snapshot_backfill_info_impl(self.fragments.values().map(|fragment| {
+            (
+                fragment.node.as_ref().unwrap(),
+                fragment.fragment_type_mask.into(),
+            )
+        }))
     }
 
     /// Returns `Ok((Some(``snapshot_backfill_info``), ``cross_db_snapshot_backfill_info``))`
     pub fn collect_snapshot_backfill_info_impl(
-        fragments: impl IntoIterator<Item = (&PbStreamNode, u32)>,
+        fragments: impl IntoIterator<Item = (&PbStreamNode, FragmentTypeMask)>,
     ) -> MetaResult<(Option<SnapshotBackfillInfo>, SnapshotBackfillInfo)> {
         let mut prev_stream_scan: Option<(Option<SnapshotBackfillInfo>, StreamScanNode)> = None;
         let mut cross_db_info = SnapshotBackfillInfo {
@@ -616,17 +615,15 @@ impl StreamFragmentGraph {
                     let is_snapshot_backfill = match stream_scan_type {
                         StreamScanType::SnapshotBackfill => {
                             assert!(
-                                (fragment_type_mask
-                                    & (FragmentTypeFlag::SnapshotBackfillStreamScan as u32))
-                                    > 0
+                                fragment_type_mask
+                                    .contains(FragmentTypeFlag::SnapshotBackfillStreamScan)
                             );
                             true
                         }
                         StreamScanType::CrossDbSnapshotBackfill => {
                             assert!(
-                                (fragment_type_mask
-                                    & (FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32))
-                                    > 0
+                                fragment_type_mask
+                                    .contains(FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan)
                             );
                             cross_db_info.upstream_mv_table_id_to_backfill_epoch.insert(
                                 TableId::new(stream_scan.table_id),
@@ -697,8 +694,7 @@ impl StreamFragmentGraph {
         for (fragment_id, fragment) in &self.fragments {
             let fragment_id = fragment_id.as_global_id();
             let fragment_mask = fragment.fragment_type_mask;
-            // TODO(kwannoel): Support source scan
-            let candidates = [FragmentTypeFlag::StreamScan];
+            let candidates = [FragmentTypeFlag::StreamScan, FragmentTypeFlag::SourceScan];
             let has_some_scan = candidates
                 .into_iter()
                 .any(|flag| (fragment_mask & flag as u32) > 0);
@@ -712,7 +708,13 @@ impl StreamFragmentGraph {
                             // each fragment should have only 1 scan node.
                             false
                         }
-                        // TODO(kwannoel): Support source scan
+                        Some(NodeBody::SourceBackfill(source_backfill)) => {
+                            let source_id = source_backfill.upstream_source_id;
+                            let fragments: &mut Vec<_> = mapping.entry(source_id).or_default();
+                            fragments.push(fragment_id);
+                            // each fragment should have only 1 scan node.
+                            false
+                        }
                         _ => true,
                     }
                 })
@@ -993,8 +995,9 @@ impl CompleteStreamFragmentGraph {
                         | StreamingJobType::Index => {
                             // Build the extra edges between the upstream `Materialize` and
                             // the downstream `StreamScan` of the new job.
-                            if upstream_fragment.fragment_type_mask & FragmentTypeFlag::Mview as u32
-                                != 0
+                            if upstream_fragment
+                                .fragment_type_mask
+                                .contains(FragmentTypeFlag::Mview)
                             {
                                 // Resolve the required output columns from the upstream materialized view.
                                 let (dist_key_indices, output_mapping) = {
@@ -1028,9 +1031,9 @@ impl CompleteStreamFragmentGraph {
                             }
                             // Build the extra edges between the upstream `Source` and
                             // the downstream `SourceBackfill` of the new job.
-                            else if upstream_fragment.fragment_type_mask
-                                & FragmentTypeFlag::Source as u32
-                                != 0
+                            else if upstream_fragment
+                                .fragment_type_mask
+                                .contains(FragmentTypeFlag::Source)
                             {
                                 let output_mapping = {
                                     let nodes = &upstream_fragment.nodes;
@@ -1112,7 +1115,7 @@ impl CompleteStreamFragmentGraph {
                 let output_columns = {
                     let mut res = None;
 
-                    stream_graph_visitor::visit_stream_node(&fragment.nodes, |node_body| {
+                    stream_graph_visitor::visit_stream_node_body(&fragment.nodes, |node_body| {
                         let columns = match node_body {
                             NodeBody::StreamScan(stream_scan) => stream_scan.upstream_columns(),
                             NodeBody::SourceBackfill(source_backfill) => {
@@ -1131,7 +1134,7 @@ impl CompleteStreamFragmentGraph {
                 let nodes = table_fragment.node.as_ref().unwrap();
 
                 let (dist_key_indices, output_mapping) = match job_type {
-                    StreamingJobType::Table(_) => {
+                    StreamingJobType::Table(_) | StreamingJobType::MaterializedView => {
                         let mview_node = nodes.get_node_body().unwrap().as_materialize().unwrap();
                         let all_columns = mview_node.column_descs();
                         let dist_key_indices = mview_node.dist_key_indices();
@@ -1366,7 +1369,7 @@ impl CompleteStreamFragmentGraph {
         let vnode_count = distribution.vnode_count();
 
         let materialized_fragment_id =
-            if inner.fragment_type_mask & FragmentTypeFlag::Mview as u32 != 0 {
+            if FragmentTypeMask::from(inner.fragment_type_mask).contains(FragmentTypeFlag::Mview) {
                 job_id
             } else {
                 None
@@ -1380,7 +1383,7 @@ impl CompleteStreamFragmentGraph {
 
         Fragment {
             fragment_id: inner.fragment_id,
-            fragment_type_mask: inner.fragment_type_mask,
+            fragment_type_mask: inner.fragment_type_mask.into(),
             distribution_type,
             actors,
             state_table_ids,

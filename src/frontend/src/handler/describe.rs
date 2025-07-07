@@ -34,6 +34,7 @@ use super::{RwPgResponse, fields_to_descriptors};
 use crate::binder::{Binder, Relation};
 use crate::catalog::CatalogError;
 use crate::error::{ErrorCode, Result};
+use crate::handler::show::ShowColumnName;
 use crate::handler::{HandlerArgs, RwPgResponseBuilderExt};
 
 pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Result<RwPgResponse> {
@@ -184,7 +185,7 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
     // Convert primary key to rows
     if !pk_columns.is_empty() {
         rows.push(ShowColumnRow {
-            name: "primary key".into(),
+            name: ShowColumnName::special("primary key"),
             r#type: concat(pk_columns.iter().map(|x| &x.name)),
             is_hidden: None,
             description: None,
@@ -194,7 +195,7 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
     // Convert distribution keys to rows
     if !dist_columns.is_empty() {
         rows.push(ShowColumnRow {
-            name: "distribution key".into(),
+            name: ShowColumnName::special("distribution key"),
             r#type: concat(dist_columns.iter().map(|x| &x.name)),
             is_hidden: None,
             description: None,
@@ -206,7 +207,7 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
         let index_display = index.display();
 
         ShowColumnRow {
-            name: index.name.clone(),
+            name: ShowColumnName::special(&index.name),
             r#type: if index_display.include_columns.is_empty() {
                 format!(
                     "index({}) distributed by({})",
@@ -228,7 +229,7 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
     }));
 
     rows.push(ShowColumnRow {
-        name: "table description".into(),
+        name: ShowColumnName::special("table description"),
         r#type: relname,
         is_hidden: None,
         description,
@@ -263,7 +264,8 @@ pub async fn handle_describe_fragments(
         Binder::validate_cross_db_reference(&session.database(), &object_name)?;
         let not_found_err = CatalogError::NotFound("stream job", object_name.to_string());
 
-        if let Ok(relation) = binder.bind_relation_by_name(object_name.clone(), None, None, false) {
+        if let Ok(relation) = binder.bind_catalog_relation_by_object_name(object_name.clone(), true)
+        {
             match relation {
                 Relation::Source(s) => {
                     if s.is_shared() {
@@ -271,7 +273,7 @@ pub async fn handle_describe_fragments(
                     } else {
                         bail!(ErrorCode::NotSupported(
                             "non shared source has no fragments to describe".to_owned(),
-                            "Use `DESCRIBE` instead.".to_owned(),
+                            "Use `DESCRIBE` instead of `DESCRIBE FRAGMENTS`".to_owned(),
                         ));
                     }
                 }
@@ -279,13 +281,13 @@ pub async fn handle_describe_fragments(
                 Relation::SystemTable(_t) => {
                     bail!(ErrorCode::NotSupported(
                         "system table has no fragments to describe".to_owned(),
-                        "Use `DESCRIBE` instead.".to_owned(),
+                        "Use `DESCRIBE` instead of `DESCRIBE FRAGMENTS`".to_owned(),
                     ));
                 }
                 Relation::Share(_s) => {
                     bail!(ErrorCode::NotSupported(
                         "view has no fragments to describe".to_owned(),
-                        "Use `DESCRIBE` instead.".to_owned(),
+                        "Use `DESCRIBE` instead of `DESCRIBE FRAGMENTS`".to_owned(),
                     ));
                 }
                 _ => {

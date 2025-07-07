@@ -289,6 +289,7 @@ pub type DynamoDbSinkDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError>
 impl AsyncTruncateSinkWriter for DynamoDbSinkWriter {
     type DeliveryFuture = DynamoDbSinkDeliveryFuture;
 
+    #[define_opaque(DynamoDbSinkDeliveryFuture)]
     async fn write_chunk<'a>(
         &'a mut self,
         chunk: StreamChunk,
@@ -363,6 +364,7 @@ fn map_data(scalar_ref: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Resu
         DataType::Map(_m) => {
             return Err(SinkError::DynamoDb(anyhow!("map is not supported yet")));
         }
+        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
     };
     Ok(attr)
 }
@@ -455,6 +457,7 @@ mod write_chunk_future {
             request_items.push(r_req);
         }
 
+        #[define_opaque(WriteChunkFuture)]
         pub fn write_chunk(&mut self, request_items: Vec<DynamoDbRequest>) -> WriteChunkFuture {
             let table = self.table.clone();
             let chunks = request_items

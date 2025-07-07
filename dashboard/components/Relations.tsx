@@ -110,7 +110,23 @@ export const vnodeCountColumn: Column<RwTable> = {
   content: (r) => r.maybeVnodeCount ?? "?",
 }
 
-export const tableColumns = [primaryKeyColumn, vnodeCountColumn]
+// Helper function to format bytes into human readable format
+function formatBytes(bytes: number | undefined): string {
+  if (bytes === undefined) return "unknown"
+  if (bytes === 0) return "0 B"
+  const k = 1024
+  const sizes = ["B", "KB", "MB", "GB", "TB"]
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + " " + sizes[i]
+}
+
+export const dataSizeColumn: Column<Relation> = {
+  name: "Data Size",
+  width: 2,
+  content: (r) => formatBytes(r.totalSizeBytes),
+}
+
+export const tableColumns = [primaryKeyColumn, vnodeCountColumn, dataSizeColumn]
 
 export const connectorColumnSource: Column<RwSource> = {
   name: "Connector",
@@ -156,6 +172,12 @@ export function Relations<R extends Relation>(
   const table = (
     <Box p={3}>
       <Title>{title}</Title>
+      {relationList && (
+        <Box mb={3} fontSize="sm" color="gray.600">
+          Total: {relationList.length}{" "}
+          {relationList.length === 1 ? "item" : "items"}
+        </Box>
+      )}
       <TableContainer>
         <Table variant="simple" size="sm" maxWidth="full">
           <Thead>

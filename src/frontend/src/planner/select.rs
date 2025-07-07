@@ -33,8 +33,8 @@ use crate::expr::{
 pub use crate::optimizer::plan_node::LogicalFilter;
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef, Project, ProjectBuilder};
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalApply, LogicalDedup, LogicalOverWindow, LogicalProject, LogicalProjectSet,
-    LogicalTopN, LogicalValues, PlanAggCall, PlanRef,
+    LogicalAgg, LogicalApply, LogicalDedup, LogicalJoin, LogicalOverWindow, LogicalProject,
+    LogicalProjectSet, LogicalTopN, LogicalValues, PlanAggCall, PlanRef,
 };
 use crate::optimizer::property::Order;
 use crate::planner::Planner;
@@ -112,7 +112,8 @@ impl Planner {
         }
 
         if select_items.iter().any(|e| e.has_subquery()) {
-            (root, select_items) = self.substitute_subqueries(root, select_items)?;
+            (root, select_items) =
+                self.substitute_subqueries_in_cross_join_way(root, select_items)?;
         }
         if select_items.iter().any(|e| e.has_window_function()) {
             (root, select_items) = LogicalOverWindow::create(root, select_items)?;
@@ -221,7 +222,7 @@ impl Planner {
     /// For `(NOT) EXISTS subquery` or `(NOT) IN subquery`, we can plan it as
     /// `LeftSemi/LeftAnti` [`LogicalApply`]
     /// For other subqueries, we plan it as `LeftOuter` [`LogicalApply`] using
-    /// [`Self::substitute_subqueries`].
+    /// [`Self::substitute_subqueries_in_left_deep_tree_way`].
     pub(super) fn plan_where(
         &mut self,
         mut input: PlanRef,
@@ -261,7 +262,8 @@ impl Planner {
         if others.always_true() {
             Ok(input)
         } else {
-            let (input, others) = self.substitute_subqueries(input, others.conjunctions)?;
+            let (input, others) =
+                self.substitute_subqueries_in_left_deep_tree_way(input, others.conjunctions)?;
             Ok(LogicalFilter::create(
                 input,
                 Condition {
@@ -288,8 +290,14 @@ impl Planner {
         };
         let correlated_id = self.ctx.next_correlated_id();
         let mut subquery = expr.into_subquery().unwrap();
-        let correlated_indices =
-            subquery.collect_correlated_indices_by_depth_and_assign_id(0, correlated_id);
+        // we should call `subquery.query.collect_correlated_indices_by_depth_and_assign_id`
+        // instead of `subquery.collect_correlated_indices_by_depth_and_assign_id`.
+        // because current subquery containing struct `kind` expr which should never be correlated with the current subquery.
+        let mut correlated_indices = subquery
+            .query
+            .collect_correlated_indices_by_depth_and_assign_id(0, correlated_id);
+        correlated_indices.sort();
+        correlated_indices.dedup();
         let output_column_type = subquery.query.data_types()[0].clone();
         let right_plan = self.plan_query(subquery.query)?.into_unordered_subplan();
         let on = match subquery.kind {
@@ -312,7 +320,7 @@ impl Planner {
         Ok(())
     }
 
-    /// Substitutes all [`Subquery`] in `exprs`.
+    /// Substitutes all [`Subquery`] in `exprs` in a left deep tree way.
     ///
     /// Each time a [`Subquery`] is found, it is replaced by a new [`InputRef`]. And `root` is
     /// replaced by a new `LeftOuter` [`LogicalApply`] whose left side is `root` and right side is
@@ -320,7 +328,22 @@ impl Planner {
     ///
     /// The [`InputRef`]s' indexes start from `root.schema().len()`,
     /// which means they are additional columns beyond the original `root`.
-    pub(super) fn substitute_subqueries(
+    ///
+    /// The left-deep tree way only meaningful when there are multiple subqueries
+    ///
+    /// ```text
+    ///             Apply
+    ///            /    \
+    ///          Apply  Subquery3
+    ///         /    \
+    ///     Apply    Subquery2
+    ///     /   \
+    ///   left  Subquery1
+    /// ```
+    ///
+    /// Typically, this is used for subqueries in `WHERE` clause, because it is unlikely that users would write subqueries in the same where clause multiple times.
+    /// But our dynamic filter sometimes generates subqueries in the same where clause multiple times (which couldn't work in the cross join way), so we need to support this case.
+    pub(super) fn substitute_subqueries_in_left_deep_tree_way(
         &mut self,
         mut root: PlanRef,
         mut exprs: Vec<ExprImpl>,
@@ -404,6 +427,140 @@ impl Planner {
                 true,
             );
         }
+        Ok((root, exprs))
+    }
+
+    /// Substitutes all [`Subquery`] in `exprs` in a cross join way.
+    ///
+    /// Each time a [`Subquery`] is found, it is replaced by a new [`InputRef`]. And `root` is
+    /// replaced by a new `LeftOuter` [`LogicalApply`] whose left side is `root` and right side is
+    /// the planned subquery.
+    ///
+    /// The [`InputRef`]s' indexes start from `root.schema().len()`,
+    /// which means they are additional columns beyond the original `root`.
+    ///
+    ///
+    /// The cross join way only meaningful when there are multiple subqueries
+    ///
+    /// ```text
+    ///            Apply
+    ///           /    \
+    ///         left   CrossJoin
+    ///                   /   \
+    ///           Subquery1   CrossJoin
+    ///                         /   \
+    ///                 Subquery2   Subquery3
+    /// ```
+    /// Typically, this is used for scalar subqueries in select clauses, because users might write subqueries in exprs multiple times.
+    /// If we use the left-deep tree way, it will generate a lot of `Apply` nodes, which is not efficient.
+    pub(super) fn substitute_subqueries_in_cross_join_way(
+        &mut self,
+        mut root: PlanRef,
+        mut exprs: Vec<ExprImpl>,
+    ) -> Result<(PlanRef, Vec<ExprImpl>)> {
+        struct SubstituteSubQueries {
+            input_col_num: usize,
+            subqueries: Vec<Subquery>,
+            correlated_id: Option<CorrelatedId>,
+            correlated_indices_collection: Vec<Vec<usize>>,
+            ctx: OptimizerContextRef,
+        }
+
+        impl ExprRewriter for SubstituteSubQueries {
+            fn rewrite_subquery(&mut self, mut subquery: Subquery) -> ExprImpl {
+                if self.correlated_id.is_none() {
+                    self.correlated_id = Some(self.ctx.next_correlated_id());
+                }
+                let input_ref = InputRef::new(self.input_col_num, subquery.return_type()).into();
+                self.input_col_num += 1;
+                self.correlated_indices_collection.push(
+                    subquery.collect_correlated_indices_by_depth_and_assign_id(
+                        0,
+                        self.correlated_id.unwrap(),
+                    ),
+                );
+                self.subqueries.push(subquery);
+                input_ref
+            }
+        }
+
+        let mut rewriter = SubstituteSubQueries {
+            input_col_num: root.schema().len(),
+            subqueries: vec![],
+            correlated_id: None,
+            correlated_indices_collection: vec![],
+            ctx: self.ctx.clone(),
+        };
+        exprs = exprs
+            .into_iter()
+            .map(|e| rewriter.rewrite_expr(e))
+            .collect();
+
+        let mut right = None;
+
+        for subquery in rewriter.subqueries {
+            let return_type = subquery.return_type();
+            let subroot = self.plan_query(subquery.query)?;
+
+            let subplan = match subquery.kind {
+                SubqueryKind::Scalar => subroot.into_unordered_subplan(),
+                SubqueryKind::UpdateSet => {
+                    let plan = subroot.into_unordered_subplan();
+
+                    // Compose all input columns into a struct with `ROW` function.
+                    let all_input_refs = plan
+                        .schema()
+                        .data_types()
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, data_type)| InputRef::new(i, data_type).into())
+                        .collect::<Vec<_>>();
+                    let call =
+                        FunctionCall::new_unchecked(ExprType::Row, all_input_refs, return_type);
+
+                    LogicalProject::create(plan, vec![call.into()])
+                }
+                SubqueryKind::Existential => {
+                    self.create_exists(subroot.into_unordered_subplan())?
+                }
+                SubqueryKind::Array => subroot.into_array_agg()?,
+                _ => bail_not_implemented!(issue = 1343, "{:?}", subquery.kind),
+            };
+            if right.is_none() {
+                right = Some(subplan);
+            } else {
+                right = Some(LogicalJoin::create(
+                    right.clone().unwrap(),
+                    subplan,
+                    JoinType::FullOuter,
+                    ExprImpl::literal_bool(true),
+                ));
+            }
+        }
+
+        root = if let Some(right) = right {
+            let mut correlated_indices = rewriter
+                .correlated_indices_collection
+                .iter()
+                .flatten()
+                .cloned()
+                .collect::<Vec<_>>();
+            correlated_indices.sort();
+            correlated_indices.dedup();
+
+            Self::create_apply(
+                rewriter.correlated_id.expect("must have a correlated id"),
+                correlated_indices,
+                root,
+                right,
+                ExprImpl::literal_bool(true),
+                JoinType::LeftOuter,
+                true,
+            )
+        } else {
+            root
+        };
+
         Ok((root, exprs))
     }
 

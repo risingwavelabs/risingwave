@@ -16,17 +16,20 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
+use await_tree::{InstrumentAwait, span};
+use either::Either;
 use itertools::Itertools;
+use risingwave_common::catalog::{AlterDatabaseParam, FragmentTypeFlag};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::{
-    visit_stream_node, visit_stream_node_cont_mut,
+    visit_stream_node, visit_stream_node_body, visit_stream_node_cont_mut,
 };
 use risingwave_common::{bail, bail_not_implemented, must_match};
 use risingwave_connector::WithOptionsSecResolved;
@@ -51,11 +54,12 @@ use risingwave_pb::ddl_service::{
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    FragmentTypeFlag, MergeNode, PbDispatchOutputMapping, PbDispatcherType, PbStreamFragmentGraph,
+    MergeNode, PbDispatchOutputMapping, PbDispatcherType, PbStreamFragmentGraph,
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use strum::Display;
 use thiserror_ext::AsReport;
 use tokio::sync::{Semaphore, oneshot};
 use tokio::time::sleep;
@@ -99,11 +103,19 @@ impl DropMode {
     }
 }
 
+#[derive(strum::AsRefStr)]
 pub enum StreamingJobId {
     MaterializedView(TableId),
     Sink(SinkId),
     Table(Option<SourceId>, TableId),
     Index(IndexId),
+}
+
+impl std::fmt::Display for StreamingJobId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_ref())?;
+        write!(f, "({})", self.id())
+    }
 }
 
 impl StreamingJobId {
@@ -123,9 +135,9 @@ impl StreamingJobId {
 pub struct ReplaceStreamJobInfo {
     pub streaming_job: StreamingJob,
     pub fragment_graph: StreamFragmentGraphProto,
-    pub col_index_mapping: Option<ColIndexMapping>,
 }
 
+#[derive(Display)]
 pub enum DdlCommand {
     CreateDatabase(Database),
     DropDatabase(DatabaseId),
@@ -165,9 +177,44 @@ pub enum DdlCommand {
     CommentOn(Comment),
     CreateSubscription(Subscription),
     DropSubscription(SubscriptionId, DropMode),
+    AlterDatabaseParam(DatabaseId, AlterDatabaseParam),
 }
 
 impl DdlCommand {
+    /// Returns the name or ID of the object that this command operates on, for observability and debugging.
+    fn object(&self) -> Either<String, ObjectId> {
+        use Either::*;
+        match self {
+            DdlCommand::CreateDatabase(database) => Left(database.name.clone()),
+            DdlCommand::DropDatabase(id) => Right(*id),
+            DdlCommand::CreateSchema(schema) => Left(schema.name.clone()),
+            DdlCommand::DropSchema(id, _) => Right(*id),
+            DdlCommand::CreateNonSharedSource(source) => Left(source.name.clone()),
+            DdlCommand::DropSource(id, _) => Right(*id),
+            DdlCommand::CreateFunction(function) => Left(function.name.clone()),
+            DdlCommand::DropFunction(id) => Right(*id),
+            DdlCommand::CreateView(view) => Left(view.name.clone()),
+            DdlCommand::DropView(id, _) => Right(*id),
+            DdlCommand::CreateStreamingJob { stream_job, .. } => Left(stream_job.name()),
+            DdlCommand::DropStreamingJob { job_id, .. } => Right(job_id.id()),
+            DdlCommand::AlterName(object, _) => Left(format!("{object:?}")),
+            DdlCommand::AlterSwapRename(object) => Left(format!("{object:?}")),
+            DdlCommand::ReplaceStreamJob(info) => Left(info.streaming_job.name()),
+            DdlCommand::AlterNonSharedSource(source) => Left(source.name.clone()),
+            DdlCommand::AlterObjectOwner(object, _) => Left(format!("{object:?}")),
+            DdlCommand::AlterSetSchema(object, _) => Left(format!("{object:?}")),
+            DdlCommand::CreateConnection(connection) => Left(connection.name.clone()),
+            DdlCommand::DropConnection(id) => Right(*id),
+            DdlCommand::CreateSecret(secret) => Left(secret.name.clone()),
+            DdlCommand::AlterSecret(secret) => Left(secret.name.clone()),
+            DdlCommand::DropSecret(id) => Right(*id),
+            DdlCommand::CommentOn(comment) => Right(comment.table_id as _),
+            DdlCommand::CreateSubscription(subscription) => Left(subscription.name.clone()),
+            DdlCommand::DropSubscription(id, _) => Right(*id),
+            DdlCommand::AlterDatabaseParam(id, _) => Right(*id),
+        }
+    }
+
     fn allow_in_recovery(&self) -> bool {
         match self {
             DdlCommand::DropDatabase(_)
@@ -190,7 +237,8 @@ impl DdlCommand {
             | DdlCommand::CommentOn(_)
             | DdlCommand::CreateSecret(_)
             | DdlCommand::AlterSecret(_)
-            | DdlCommand::AlterSwapRename(_) => true,
+            | DdlCommand::AlterSwapRename(_)
+            | DdlCommand::AlterDatabaseParam(_, _) => true,
             DdlCommand::CreateStreamingJob { .. }
             | DdlCommand::CreateNonSharedSource(_)
             | DdlCommand::ReplaceStreamJob(_)
@@ -211,6 +259,9 @@ pub struct DdlController {
 
     // The semaphore is used to limit the number of concurrent streaming job creation.
     pub(crate) creating_streaming_job_permits: Arc<CreatingStreamingJobPermit>,
+
+    /// Sequence number for DDL commands, used for observability and debugging.
+    seq: Arc<AtomicU64>,
 }
 
 #[derive(Clone)]
@@ -287,7 +338,14 @@ impl DdlController {
             source_manager,
             barrier_manager,
             creating_streaming_job_permits,
+            seq: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// Obtains the next sequence number for DDL commands, for observability and debugging purposes.
+    pub fn next_seq(&self) -> u64 {
+        // This is a simple atomic increment operation.
+        self.seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }
 
     /// `run_command` spawns a tokio coroutine to execute the target ddl command. When the client
@@ -300,6 +358,10 @@ impl DdlController {
         if !command.allow_in_recovery() {
             self.barrier_manager.check_status_running()?;
         }
+
+        let await_tree_key = format!("DDL Command {}", self.next_seq());
+        let await_tree_span = await_tree::span!("{command}({})", command.object());
+
         let ctrl = self.clone();
         let fut = async move {
             match command {
@@ -351,11 +413,7 @@ impl DdlController {
                 DdlCommand::ReplaceStreamJob(ReplaceStreamJobInfo {
                     streaming_job,
                     fragment_graph,
-                    col_index_mapping,
-                }) => {
-                    ctrl.replace_job(streaming_job, fragment_graph, col_index_mapping)
-                        .await
-                }
+                }) => ctrl.replace_job(streaming_job, fragment_graph).await,
                 DdlCommand::AlterName(relation, name) => ctrl.alter_name(relation, &name).await,
                 DdlCommand::AlterObjectOwner(object, owner_id) => {
                     ctrl.alter_owner(object, owner_id).await
@@ -383,9 +441,15 @@ impl DdlController {
                     ctrl.drop_subscription(subscription_id, drop_mode).await
                 }
                 DdlCommand::AlterSwapRename(objects) => ctrl.alter_swap_rename(objects).await,
+                DdlCommand::AlterDatabaseParam(database_id, param) => {
+                    ctrl.alter_database_param(database_id, param).await
+                }
             }
         }
         .in_current_span();
+        let fut = (self.env.await_tree_reg())
+            .register(await_tree_key, await_tree_span)
+            .instrument(Box::pin(fut));
         let notification_version = tokio::spawn(fut).await.map_err(|e| anyhow!(e))??;
         Ok(Some(WaitVersion {
             catalog_version: notification_version,
@@ -398,10 +462,20 @@ impl DdlController {
     }
 
     async fn create_database(&self, database: Database) -> MetaResult<NotificationVersion> {
-        self.metadata_manager
+        let (version, updated_db) = self
+            .metadata_manager
             .catalog_controller
             .create_database(database)
-            .await
+            .await?;
+        // If persistent successfully, notify `GlobalBarrierManager` to create database asynchronously.
+        self.barrier_manager
+            .update_database_barrier(
+                updated_db.database_id,
+                updated_db.barrier_interval_ms.map(|v| v as u32),
+                updated_db.checkpoint_frequency.map(|v| v as u64),
+            )
+            .await?;
+        Ok(version)
     }
 
     #[tracing::instrument(skip(self), level = "debug")]
@@ -539,6 +613,27 @@ impl DdlController {
         .await
     }
 
+    async fn alter_database_param(
+        &self,
+        database_id: DatabaseId,
+        param: AlterDatabaseParam,
+    ) -> MetaResult<NotificationVersion> {
+        let (version, updated_db) = self
+            .metadata_manager
+            .catalog_controller
+            .alter_database_param(database_id, param)
+            .await?;
+        // If persistent successfully, notify `GlobalBarrierManager` to update param asynchronously.
+        self.barrier_manager
+            .update_database_barrier(
+                database_id,
+                updated_db.barrier_interval_ms.map(|v| v as u32),
+                updated_db.checkpoint_frequency.map(|v| v as u64),
+            )
+            .await?;
+        Ok(version)
+    }
+
     // The 'secret' part of the request we receive from the frontend is in plaintext;
     // here, we need to encrypt it before storing it in the catalog.
     fn get_encrypted_payload(&self, secret: &Secret) -> MetaResult<Vec<u8>> {
@@ -646,6 +741,7 @@ impl DdlController {
     }
 
     /// Validates the connect properties in the `cdc_table_desc` stored in the `StreamCdcScan` node
+    #[await_tree::instrument]
     pub(crate) async fn validate_cdc_table(
         table: &Table,
         table_fragments: &StreamJobFragments,
@@ -653,7 +749,7 @@ impl DdlController {
         let stream_scan_fragment = table_fragments
             .fragments
             .values()
-            .filter(|f| f.fragment_type_mask & FragmentTypeFlag::StreamScan as u32 != 0)
+            .filter(|f| f.fragment_type_mask.contains(FragmentTypeFlag::StreamScan))
             .exactly_one()
             .ok()
             .with_context(|| {
@@ -796,7 +892,7 @@ impl DdlController {
         for fragment in stream_job_fragments.fragments.values() {
             {
                 {
-                    visit_stream_node(&fragment.nodes, |node| {
+                    visit_stream_node_body(&fragment.nodes, |node| {
                         if let NodeBody::Merge(merge_node) = node {
                             let upstream_fragment_id = merge_node.upstream_fragment_id;
                             if let Some(external_upstream_fragment_downstreams) = replace_table_ctx
@@ -871,6 +967,12 @@ impl DdlController {
 
         let upstream_fragment_id = sink_fragment.fragment_id;
 
+        let mut max_operator_id = 0;
+
+        visit_stream_node(&union_fragment.nodes, |node| {
+            max_operator_id = max_operator_id.max(node.operator_id);
+        });
+
         {
             {
                 visit_stream_node_cont_mut(&mut union_fragment.nodes, |node| {
@@ -894,9 +996,11 @@ impl DdlController {
                                     {
                                         merge_stream_node.identity =
                                             format!("MergeExecutor(from sink {})", sink_id);
+                                        merge_stream_node.operator_id = max_operator_id + 1;
 
                                         input_project_node.identity =
                                             format!("ProjectExecutor(from sink {})", sink_id);
+                                        input_project_node.operator_id = max_operator_id + 2;
                                     }
 
                                     **merge_node = {
@@ -924,6 +1028,7 @@ impl DdlController {
 
     /// For [`CreateType::Foreground`], the function will only return after backfilling finishes
     /// ([`crate::manager::MetadataManager::wait_streaming_job_finished`]).
+    #[await_tree::instrument(boxed, "create_streaming_job({streaming_job})")]
     pub async fn create_streaming_job(
         &self,
         mut streaming_job: StreamingJob,
@@ -977,6 +1082,7 @@ impl DdlController {
             .creating_streaming_job_permits
             .semaphore
             .acquire()
+            .instrument_await("acquire_creating_streaming_job_permit")
             .await
             .unwrap();
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
@@ -1032,6 +1138,7 @@ impl DdlController {
         }
     }
 
+    #[await_tree::instrument(boxed)]
     async fn create_streaming_job_inner(
         &self,
         ctx: StreamContext,
@@ -1178,28 +1285,46 @@ impl DdlController {
         // create streaming jobs.
         let stream_job_id = streaming_job.id();
         match (streaming_job.create_type(), &streaming_job) {
+            // FIXME(kwannoel): Unify background stream's creation path with MV below.
             (CreateType::Unspecified, _)
             | (CreateType::Foreground, _)
-            // FIXME(kwannoel): Unify background stream's creation path with MV below.
             | (CreateType::Background, StreamingJob::Sink(_, _)) => {
-                let version = self.stream_manager
+                let version = self
+                    .stream_manager
                     .create_streaming_job(stream_job_fragments, ctx, None)
                     .await?;
                 Ok(version)
             }
             (CreateType::Background, _) => {
+                let await_tree_key = format!("Background DDL Worker ({})", streaming_job.id());
+                let await_tree_span =
+                    span!("{:?}({})", streaming_job.job_type(), streaming_job.name());
+
                 let ctrl = self.clone();
                 let (tx, rx) = oneshot::channel();
                 let fut = async move {
                     let _ = ctrl
                         .stream_manager
                         .create_streaming_job(stream_job_fragments, ctx, Some(tx))
-                        .await.inspect_err(|err| {
-                        tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to create background streaming job");
-                    });
+                        .await
+                        .inspect_err(|err| {
+                            tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to create background streaming job");
+                        });
                 };
+
+                let fut = (self.env.await_tree_reg())
+                    .register(await_tree_key, await_tree_span)
+                    .instrument(fut);
                 tokio::spawn(fut);
-                rx.await.map_err(|_| anyhow!("failed to receive create streaming job result of job: {}", stream_job_id))??;
+
+                rx.instrument_await("wait_background_streaming_job_creation_started")
+                    .await
+                    .map_err(|_| {
+                        anyhow!(
+                            "failed to receive create streaming job result of job: {}",
+                            stream_job_id
+                        )
+                    })??;
                 Ok(IGNORED_NOTIFICATION_VERSION)
             }
         }
@@ -1301,7 +1426,6 @@ impl DdlController {
                             tmp_id as _,
                             streaming_job,
                             replace_upstream,
-                            None,
                             SinkIntoTableContext {
                                 creating_sink_id: None,
                                 dropping_sink_id: Some(sink_id),
@@ -1383,17 +1507,17 @@ impl DdlController {
     }
 
     /// This is used for `ALTER TABLE ADD/DROP COLUMN` / `ALTER SOURCE ADD COLUMN`.
+    #[await_tree::instrument(boxed, "replace_streaming_job({streaming_job})")]
     pub async fn replace_job(
         &self,
         mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
-        col_index_mapping: Option<ColIndexMapping>,
     ) -> MetaResult<NotificationVersion> {
         match &mut streaming_job {
-            StreamingJob::Table(..) | StreamingJob::Source(..) => {}
-            StreamingJob::MaterializedView(..)
-            | StreamingJob::Sink(..)
-            | StreamingJob::Index(..) => {
+            StreamingJob::Table(..)
+            | StreamingJob::Source(..)
+            | StreamingJob::MaterializedView(..) => {}
+            StreamingJob::Sink(..) | StreamingJob::Index(..) => {
                 bail_not_implemented!("schema change for {}", streaming_job.job_type_str())
             }
         }
@@ -1441,6 +1565,7 @@ impl DdlController {
                 .await?;
             drop_table_connector_ctx = ctx.drop_table_connector_ctx.clone();
 
+            // Handle sinks that sink into the table.
             if let StreamingJob::Table(_, table, ..) = &streaming_job {
                 let catalogs = self
                     .metadata_manager
@@ -1496,7 +1621,6 @@ impl DdlController {
                         tmp_id,
                         streaming_job,
                         replace_upstream,
-                        col_index_mapping,
                         SinkIntoTableContext {
                             creating_sink_id: None,
                             dropping_sink_id: None,
@@ -1527,6 +1651,7 @@ impl DdlController {
         }
     }
 
+    #[await_tree::instrument(boxed, "drop_streaming_job{}({job_id})", if let DropMode::Cascade = drop_mode { "_cascade" } else { "" })]
     async fn drop_streaming_job(
         &self,
         job_id: StreamingJobId,
@@ -1626,6 +1751,7 @@ impl DdlController {
     /// - Schedule the fragments based on their distribution
     /// - Expand each fragment into one or several actors
     /// - Construct the fragment level backfill order control.
+    #[await_tree::instrument]
     pub(crate) async fn build_stream_job(
         &self,
         stream_ctx: StreamContext,
@@ -1872,10 +1998,10 @@ impl DdlController {
         tmp_job_id: TableId,
     ) -> MetaResult<(ReplaceStreamJobContext, StreamJobFragmentsToCreate)> {
         match &stream_job {
-            StreamingJob::Table(..) | StreamingJob::Source(..) => {}
-            StreamingJob::MaterializedView(..)
-            | StreamingJob::Sink(..)
-            | StreamingJob::Index(..) => {
+            StreamingJob::Table(..)
+            | StreamingJob::Source(..)
+            | StreamingJob::MaterializedView(..) => {}
+            StreamingJob::Sink(..) | StreamingJob::Index(..) => {
                 bail_not_implemented!("schema change for {}", stream_job.job_type_str())
             }
         }
@@ -1900,7 +2026,7 @@ impl DdlController {
 
         // handle drop table's associated source
         let mut drop_table_connector_ctx = None;
-        if drop_table_associated_source_id.is_some() {
+        if let Some(to_remove_source_id) = drop_table_associated_source_id {
             // drop table's associated source means the fragment containing the table has just one internal table (associated source's state table)
             debug_assert!(old_internal_table_ids.len() == 1);
 
@@ -1909,13 +2035,14 @@ impl DdlController {
                 // just need to remove the ref to the state table
                 to_change_streaming_job_id: id as i32,
                 to_remove_state_table_id: old_internal_table_ids[0] as i32, // asserted before
-                to_remove_source_id: drop_table_associated_source_id.unwrap(),
+                to_remove_source_id,
             });
         } else {
             let old_internal_tables = self
                 .metadata_manager
                 .get_table_catalog_by_ids(old_internal_table_ids)
                 .await?;
+            // TODO(alter-mv): the current impl is very fragile for alter MV, be more strict here!
             fragment_graph.fit_internal_table_ids(old_internal_tables)?;
         }
 
@@ -1942,8 +2069,9 @@ impl DdlController {
                     job_type,
                 )?
             }
-            StreamingJobType::Table(TableJobType::SharedCdcSource) => {
-                // get the upstream fragment which should be the cdc source
+            StreamingJobType::Table(TableJobType::SharedCdcSource)
+            | StreamingJobType::MaterializedView => {
+                // CDC tables or materialized views can have upstream jobs as well.
                 let (upstream_root_fragments, upstream_actor_location) = self
                     .metadata_manager
                     .get_upstream_root_fragments(fragment_graph.dependent_table_ids())

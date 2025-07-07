@@ -19,11 +19,8 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::hash::VnodeCount;
-use risingwave_common::types::DataType;
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::sink::catalog::SinkCatalog;
-use risingwave_pb::catalog::{Source, Table};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ProjectNode, StreamFragmentGraph};
@@ -36,6 +33,7 @@ use super::create_table::{ColumnIdGenerator, generate_stream_graph_for_replace_t
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::purify::try_purify_table_source_create_sql_ast;
 use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, InputRef, Literal};
@@ -94,10 +92,9 @@ pub async fn get_replace_table_plan(
     old_catalog: &Arc<TableCatalog>,
     sql_column_strategy: SqlColumnStrategy,
 ) -> Result<(
-    Option<Source>,
-    Table,
+    Option<SourceCatalog>,
+    TableCatalog,
     StreamFragmentGraph,
-    ColIndexMapping,
     TableJobType,
 )> {
     // Create handler args as if we're creating a new table with the altered definition.
@@ -115,51 +112,11 @@ pub async fn get_replace_table_plan(
     )
     .await?;
 
-    // Calculate the mapping from the original columns to the new columns.
-    //
-    // Note: Previously, this will be used to map the output of the table in the dispatcher to make
-    // existing downstream jobs work correctly. This is no longer the case. We will generate mapping
-    // directly in the meta service by checking the new schema of this table and all downstream jobs,
-    // which simplifies handling `ALTER TABLE ALTER COLUMN TYPE`.
-    //
-    // TODO: However, we still generate this mapping and use it for rewriting downstream indexes'
-    // `index_item`. We should consider completely removing this in future works.
-    let col_index_mapping = ColIndexMapping::new(
-        old_catalog
-            .columns()
-            .iter()
-            .map(|old_c| {
-                table.columns.iter().position(|new_c| {
-                    let new_c = new_c.get_column_desc().unwrap();
-
-                    // We consider both the column ID and the data type.
-                    // If either of them does not match, we will treat it as a different column.
-                    //
-                    // Note that this does not hurt the ability for `ALTER TABLE ALTER COLUMN TYPE`,
-                    // because we don't rely on this mapping in dispatcher. However, if there's an
-                    // index on the column, currently it will fail to rewrite as the column is
-                    // considered as if it's dropped.
-                    let id_matches = || new_c.column_id == old_c.column_id().get_id();
-                    let type_matches = || {
-                        let original_data_type = old_c.data_type();
-                        let new_data_type = DataType::from(new_c.column_type.as_ref().unwrap());
-                        original_data_type == &new_data_type
-                    };
-
-                    id_matches() && type_matches()
-                })
-            })
-            .collect(),
-        table.columns.len(),
-    );
-
     let incoming_sink_ids: HashSet<_> = old_catalog.incoming_sinks.iter().copied().collect();
 
-    let target_columns = table
-        .columns
-        .iter()
-        .map(|col| ColumnCatalog::from(col.clone()))
+    let target_columns = (table.columns.iter())
         .filter(|col| !col.is_rw_timestamp_column())
+        .cloned()
         .collect_vec();
 
     for sink in fetch_incoming_sinks(session, &incoming_sink_ids)? {
@@ -174,9 +131,9 @@ pub async fn get_replace_table_plan(
     // Set some fields ourselves so that the meta service does not need to maintain them.
     let mut table = table;
     table.incoming_sinks = incoming_sink_ids.iter().copied().collect();
-    table.maybe_vnode_count = VnodeCount::set(old_catalog.vnode_count()).to_protobuf();
+    table.vnode_count = VnodeCount::set(old_catalog.vnode_count());
 
-    Ok((source, table, graph, col_index_mapping, job_type))
+    Ok((source, table, graph, job_type))
 }
 
 pub(crate) fn hijack_merger_for_target_table(
@@ -413,7 +370,7 @@ pub async fn handle_alter_table_column(
 
         _ => unreachable!(),
     };
-    let (source, table, graph, col_index_mapping, job_type) = get_replace_table_plan(
+    let (source, table, graph, job_type) = get_replace_table_plan(
         &session,
         table_name,
         definition,
@@ -425,7 +382,12 @@ pub async fn handle_alter_table_column(
     let catalog_writer = session.catalog_writer()?;
 
     catalog_writer
-        .replace_table(source, table, graph, col_index_mapping, job_type)
+        .replace_table(
+            source.map(|x| x.to_prost()),
+            table.to_prost(),
+            graph,
+            job_type,
+        )
         .await?;
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))
 }

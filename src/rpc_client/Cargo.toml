@@ -24,7 +24,7 @@ risingwave_hummock_sdk = { workspace = true }
 risingwave_pb = { workspace = true }
 rw_futures_util = { workspace = true }
 static_assertions = "1"
-thiserror = "2"
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -40,11 +40,11 @@ tonic = { workspace = true }
 tower = "0.5"
 tracing = "0.1"
 
-[dev-dependencies]
-risingwave_hummock_sdk = { workspace = true }
-
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
+
+[dev-dependencies]
+risingwave_hummock_sdk = { workspace = true }
 
 [lints]
 workspace = true

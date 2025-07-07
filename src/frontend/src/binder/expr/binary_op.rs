@@ -45,13 +45,15 @@ impl Binder {
 
         let bound_right = self.bind_expr_inner(right)?;
 
-        if matches!(op, BinaryOperator::PathMatch | BinaryOperator::PathExists) {
+        if let BinaryOperator::Custom(name) = &op
+            && matches!(name.as_str(), "@?" | "@@")
+        {
             // jsonb @? jsonpath => jsonb_path_exists(jsonb, jsonpath, '{}', silent => true)
             // jsonb @@ jsonpath => jsonb_path_match(jsonb, jsonpath, '{}', silent => true)
             return Ok(FunctionCall::new_unchecked(
-                match op {
-                    BinaryOperator::PathMatch => ExprType::JsonbPathMatch,
-                    BinaryOperator::PathExists => ExprType::JsonbPathExists,
+                match name.as_str() {
+                    "@?" => ExprType::JsonbPathExists,
+                    "@@" => ExprType::JsonbPathMatch,
                     _ => unreachable!(),
                 },
                 vec![
@@ -94,29 +96,8 @@ impl Binder {
             BinaryOperator::GtEq => ExprType::GreaterThanOrEqual,
             BinaryOperator::And => ExprType::And,
             BinaryOperator::Or => ExprType::Or,
-            BinaryOperator::PGLikeMatch => ExprType::Like,
-            BinaryOperator::PGNotLikeMatch => {
-                func_types.push(ExprType::Not);
-                ExprType::Like
-            }
-            BinaryOperator::PGILikeMatch => ExprType::ILike,
-            BinaryOperator::PGNotILikeMatch => {
-                func_types.push(ExprType::Not);
-                ExprType::ILike
-            }
-            BinaryOperator::BitwiseOr => ExprType::BitwiseOr,
-            BinaryOperator::BitwiseAnd => ExprType::BitwiseAnd,
-            BinaryOperator::BitwiseXor => ExprType::Pow,
-            BinaryOperator::PGBitwiseXor => ExprType::BitwiseXor,
-            BinaryOperator::PGBitwiseShiftLeft => ExprType::BitwiseShiftLeft,
-            BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
-            BinaryOperator::Arrow => ExprType::JsonbAccess,
-            BinaryOperator::LongArrow => ExprType::JsonbAccessStr,
-            BinaryOperator::HashMinus => ExprType::JsonbDeletePath,
-            BinaryOperator::HashArrow => ExprType::JsonbExtractPathVariadic,
-            BinaryOperator::HashLongArrow => ExprType::JsonbExtractPathTextVariadic,
-            BinaryOperator::Prefix => ExprType::StartsWith,
-            BinaryOperator::Contains => {
+            BinaryOperator::Pow => ExprType::Pow,
+            BinaryOperator::Custom(name) if name == "@>" => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
                 match (left_type, right_type) {
@@ -136,7 +117,7 @@ impl Binder {
                     }
                 }
             }
-            BinaryOperator::Contained => {
+            BinaryOperator::Custom(name) if name == "<@" => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
                 match (left_type, right_type) {
@@ -156,10 +137,7 @@ impl Binder {
                     }
                 }
             }
-            BinaryOperator::Exists => ExprType::JsonbExists,
-            BinaryOperator::ExistsAny => ExprType::JsonbExistsAny,
-            BinaryOperator::ExistsAll => ExprType::JsonbExistsAll,
-            BinaryOperator::Concat => {
+            BinaryOperator::Custom(name) if name == "||" => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
                 match (left_type, right_type) {
@@ -180,14 +158,9 @@ impl Binder {
                     | (None, Some(DataType::Jsonb)) => ExprType::JsonbConcat,
 
                     // bytea (and varbit, tsvector, tsquery)
-                    (Some(t @ DataType::Bytea), Some(DataType::Bytea))
-                    | (Some(t @ DataType::Bytea), None)
-                    | (None, Some(t @ DataType::Bytea)) => {
-                        return Err(ErrorCode::BindError(format!(
-                            "operator not implemented yet: {t} || {t}"
-                        ))
-                        .into());
-                    }
+                    (Some(DataType::Bytea), Some(DataType::Bytea))
+                    | (Some(DataType::Bytea), None)
+                    | (None, Some(DataType::Bytea)) => ExprType::ByteaConcatOp,
 
                     // string concatenation
                     (None, _) | (_, None) => ExprType::ConcatOp,
@@ -202,12 +175,46 @@ impl Binder {
                     }
                 }
             }
-            BinaryOperator::PGRegexMatch => ExprType::RegexpEq,
-            BinaryOperator::PGRegexNotMatch => {
-                func_types.push(ExprType::Not);
-                ExprType::RegexpEq
+            BinaryOperator::Custom(name) => match name.as_str() {
+                // number
+                "&" => ExprType::BitwiseAnd,
+                "|" => ExprType::BitwiseOr,
+                "#" => ExprType::BitwiseXor,
+                "<<" => ExprType::BitwiseShiftLeft,
+                ">>" => ExprType::BitwiseShiftRight,
+                // string
+                "^@" => ExprType::StartsWith,
+                "~" => ExprType::RegexpEq,
+                "~~" => ExprType::Like,
+                "~~*" => ExprType::ILike,
+                "!~" => {
+                    func_types.push(ExprType::Not);
+                    ExprType::RegexpEq
+                }
+                "!~~" => {
+                    func_types.push(ExprType::Not);
+                    ExprType::Like
+                }
+                "!~~*" => {
+                    func_types.push(ExprType::Not);
+                    ExprType::ILike
+                }
+                // jsonb
+                "->" => ExprType::JsonbAccess,
+                "->>" => ExprType::JsonbAccessStr,
+                "#-" => ExprType::JsonbDeletePath,
+                "#>" => ExprType::JsonbExtractPathVariadic,
+                "#>>" => ExprType::JsonbExtractPathTextVariadic,
+                "?" => ExprType::JsonbExists,
+                "?|" => ExprType::JsonbExistsAny,
+                "?&" => ExprType::JsonbExistsAll,
+                // vector
+                "<->" => ExprType::L2Distance,
+                _ => bail_not_implemented!(issue = 112, "binary op: {:?}", name),
+            },
+            BinaryOperator::Xor | BinaryOperator::PGQualified(_) => {
+                bail_not_implemented!(issue = 112, "binary op: {:?}", op)
             }
-            _ => bail_not_implemented!(issue = 112, "binary op: {:?}", op),
         };
         func_types.push(final_type);
         Ok(func_types)

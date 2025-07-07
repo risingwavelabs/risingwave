@@ -128,12 +128,13 @@ pub struct IcebergConfig {
     /// Commit every n(>0) checkpoints, default is 10.
     #[serde(default = "default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub commit_checkpoint_interval: u64,
 
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,
 
-    /// Whether it is exactly_once, the default is not.
+    /// Whether it is `exactly_once`, the default is not.
     #[serde(default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub is_exactly_once: Option<bool>,
@@ -146,12 +147,19 @@ pub struct IcebergConfig {
 
     /// Whether to enable iceberg compaction.
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    #[with_option(allow_alter_on_fly)]
     pub enable_compaction: bool,
 
     /// The interval of iceberg compaction
     #[serde(default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub compaction_interval_sec: Option<u64>,
+
+    /// Whether to enable iceberg expired snapshots.
+    #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    #[with_option(allow_alter_on_fly)]
+    pub enable_snapshot_expiration: bool,
 }
 
 impl EnforceSecret for IcebergConfig {
@@ -209,7 +217,7 @@ impl IcebergConfig {
                     && k != &"catalog.type"
                     && k != &"catalog.name"
             })
-            .map(|(k, v)| (k[8..].to_string(), v.to_string()))
+            .map(|(k, v)| (k[8..].to_string(), v.clone()))
             .collect();
 
         if config.commit_checkpoint_interval == 0 {
@@ -241,6 +249,10 @@ impl IcebergConfig {
 
     pub fn full_table_name(&self) -> Result<TableIdent> {
         self.common.full_table_name().map_err(Into::into)
+    }
+
+    pub fn catalog_name(&self) -> String {
+        self.common.catalog_name()
     }
 
     pub fn compaction_interval_sec(&self) -> u64 {
@@ -480,11 +492,6 @@ impl Sink for IcebergSink {
     type Coordinator = IcebergSinkCommitter;
     type LogSinker = CoordinatedLogSinker<IcebergSinkWriter>;
 
-    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &[
-        "commit_checkpoint_interval",
-        "enable_compaction",
-        "compaction_interval_sec",
-    ];
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
     async fn validate(&self) -> Result<()> {
@@ -2239,6 +2246,7 @@ mod test {
             ("table.name", "demo_table"),
             ("enable_compaction", "true"),
             ("compaction_interval_sec", "1800"),
+            ("enable_snapshot_expiration", "true"),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_owned(), v.to_owned()))
@@ -2288,6 +2296,7 @@ mod test {
             commit_retry_num: 8,
             enable_compaction: true,
             compaction_interval_sec: Some(DEFAULT_ICEBERG_COMPACTION_INTERVAL / 2),
+            enable_snapshot_expiration: true,
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);

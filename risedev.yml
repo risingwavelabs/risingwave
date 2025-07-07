@@ -353,7 +353,7 @@ profile:
         address: db
         database: metadata
         user: postgres
-        password: postgres
+        password: post\tgres
         user-managed: true
         application: metastore
       - use: meta-node
@@ -809,7 +809,7 @@ profile:
         port: 5432
         address: db
         user: postgres
-        password: postgres
+        password: post\tgres
         user-managed: true
 
   ci-redis:
@@ -941,6 +941,15 @@ profile:
       - use: compactor
       - use: prometheus
       - use: grafana
+
+  postgres-with-latency:
+    steps:
+      - use: postgres
+        port: 8432
+        user: postgres
+        database: metadata
+        # Add 100ms latency to any network call to the pg service
+        latency-ms: 100
 
 # The `use` field specified in the above `risedev` section will refer to the templates below.
 template:
@@ -1393,6 +1402,9 @@ template:
     # If `user-managed` is true, user is responsible for starting the service
     # to serve at the above address and port in any way they see fit.
     user-managed: false
+
+    # New optional field for latency
+    latency-ms: 0  # Optional: latency in milliseconds
 
   # Sql Server service backed by docker.
   sqlserver:

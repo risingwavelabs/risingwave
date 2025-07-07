@@ -19,9 +19,8 @@ use anyhow::anyhow;
 use rand::rng as thread_rng;
 use rand::seq::IndexedRandom;
 use replace_job_plan::{ReplaceSource, ReplaceTable};
-use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
 use risingwave_common::types::DataType;
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager};
 use risingwave_meta::model::TableParallelism;
@@ -34,6 +33,7 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
+use risingwave_pb::ddl_service::replace_job_plan::ReplaceMaterializedView;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::frontend_service::GetTableReplacePlanRequest;
 use risingwave_pb::meta::event_log;
@@ -90,14 +90,9 @@ impl DdlServiceImpl {
     fn extract_replace_table_info(
         ReplaceJobPlan {
             fragment_graph,
-            table_col_index_mapping,
             replace_job,
         }: ReplaceJobPlan,
     ) -> ReplaceStreamJobInfo {
-        let col_index_mapping = table_col_index_mapping
-            .as_ref()
-            .map(ColIndexMapping::from_protobuf);
-
         let replace_streaming_job: StreamingJob = match replace_job.unwrap() {
             replace_job_plan::ReplaceJob::ReplaceTable(ReplaceTable {
                 table,
@@ -111,12 +106,14 @@ impl DdlServiceImpl {
             replace_job_plan::ReplaceJob::ReplaceSource(ReplaceSource { source }) => {
                 StreamingJob::Source(source.unwrap())
             }
+            replace_job_plan::ReplaceJob::ReplaceMaterializedView(ReplaceMaterializedView {
+                table,
+            }) => StreamingJob::MaterializedView(table.unwrap()),
         };
 
         ReplaceStreamJobInfo {
             streaming_job: replace_streaming_job,
             fragment_graph: fragment_graph.unwrap(),
-            col_index_mapping,
         }
     }
 }
@@ -875,7 +872,6 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn get_tables(
         &self,
         request: Request<GetTablesRequest>,
@@ -1171,6 +1167,32 @@ impl DdlService for DdlServiceImpl {
             .await?;
 
         Ok(Response::new(AlterResourceGroupResponse {}))
+    }
+
+    async fn alter_database_param(
+        &self,
+        request: Request<AlterDatabaseParamRequest>,
+    ) -> Result<Response<AlterDatabaseParamResponse>, Status> {
+        let req = request.into_inner();
+        let database_id = req.database_id;
+
+        let param = match req.param.unwrap() {
+            alter_database_param_request::Param::BarrierIntervalMs(value) => {
+                AlterDatabaseParam::BarrierIntervalMs(value.value)
+            }
+            alter_database_param_request::Param::CheckpointFrequency(value) => {
+                AlterDatabaseParam::CheckpointFrequency(value.value)
+            }
+        };
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterDatabaseParam(database_id as _, param))
+            .await?;
+
+        return Ok(Response::new(AlterDatabaseParamResponse {
+            status: None,
+            version,
+        }));
     }
 }
 

@@ -22,6 +22,7 @@ use futures::future::try_join_all;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::must_match;
+use risingwave_common::util::deployment::Deployment;
 use risingwave_pb::hummock::HummockVersionStats;
 use tokio::task::JoinHandle;
 
@@ -163,6 +164,12 @@ impl CompleteBarrierTask {
                 .unwrap_or_else(|| "barrier".to_owned()),
             barrier_kind: command_ctx.barrier_info.kind.as_str_name().to_owned(),
         };
+        if cfg!(debug_assertions) || Deployment::current().is_ci() {
+            // Add a warning log so that debug mode / CI can observe it
+            if duration_sec > 5.0 {
+                tracing::warn!(event = ?event,"high barrier latency observed!")
+            }
+        }
         env.event_log_manager_ref()
             .add_event_logs(vec![event_log::Event::BarrierComplete(event)]);
     }
@@ -186,21 +193,26 @@ impl CompletingTask {
     ) -> impl Future<Output = MetaResult<BarrierCompleteOutput>> + 'a {
         // If there is no completing barrier, try to start completing the earliest barrier if
         // it has been collected.
-        if let CompletingTask::None = self {
-            if let Some(task) = checkpoint_control
+        if let CompletingTask::None = self
+            && let Some(task) = checkpoint_control
                 .next_complete_barrier_task(Some((periodic_barriers, control_stream_manager)))
+        {
             {
-                {
-                    let epochs_to_ack = task.epochs_to_ack();
-                    let context = context.clone();
-                    let env = env.clone();
-                    let join_handle =
-                        tokio::spawn(async move { task.complete_barrier(&*context, env).await });
-                    *self = CompletingTask::Completing {
-                        epochs_to_ack,
-                        join_handle,
-                    };
-                }
+                let epochs_to_ack = task.epochs_to_ack();
+                let context = context.clone();
+                let await_tree_reg = env.await_tree_reg().clone();
+                let env = env.clone();
+
+                let fut = async move { task.complete_barrier(&*context, env).await };
+                let fut = await_tree_reg
+                    .register_derived_root("Barrier Completion Task")
+                    .instrument(fut);
+                let join_handle = tokio::spawn(fut);
+
+                *self = CompletingTask::Completing {
+                    epochs_to_ack,
+                    join_handle,
+                };
             }
         }
 
@@ -212,6 +224,7 @@ impl CompletingTask {
         }
     }
 
+    #[await_tree::instrument]
     pub(super) async fn wait_completing_task(
         &mut self,
     ) -> MetaResult<Option<BarrierCompleteOutput>> {

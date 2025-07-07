@@ -173,7 +173,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     ))
                 })?;
 
-            let sink_type_str = sink_type.to_string().to_lowercase();
+            let sink_type_str = sink_type.to_lowercase();
             match_sink_name_str!(
                 sink_type_str.as_str(),
                 SinkType,
@@ -281,6 +281,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     table,
                     params.vnode_bitmap.clone().map(Arc::new),
                     65536,
+                    params.env.config().developer.chunk_size,
                     metrics,
                     log_store_identity,
                     pk_info,

@@ -121,6 +121,7 @@ pub struct Ident {
 impl Ident {
     /// Create a new identifier with the given value and no quotes.
     /// the given value must not be a empty string.
+    // FIXME: should avoid using this function unless it's a literal or for testing.
     pub fn new_unchecked<S>(value: S) -> Self
     where
         S: Into<String>,
@@ -179,7 +180,8 @@ impl Ident {
         }
     }
 
-    /// Convert a real value back to Ident. Behaves the same as SQL function `quote_ident`.
+    /// Convert a real value back to Ident. Behaves the same as SQL function `quote_ident` or
+    /// `QuoteIdent` wrapper in `common` crate.
     pub fn from_real_value(value: &str) -> Self {
         let needs_quotes = value
             .chars()
@@ -198,13 +200,8 @@ impl Ident {
 }
 
 impl From<&str> for Ident {
-    // FIXME: the result is wrong if value contains quote or is case sensitive,
-    //        should use `Ident::from_real_value` instead.
     fn from(value: &str) -> Self {
-        Ident {
-            value: value.to_owned(),
-            quote_style: None,
-        }
+        Self::from_real_value(value)
     }
 }
 
@@ -684,11 +681,7 @@ impl fmt::Display for Expr {
             Expr::SomeOp(expr) => write!(f, "SOME({})", expr),
             Expr::AllOp(expr) => write!(f, "ALL({})", expr),
             Expr::UnaryOp { op, expr } => {
-                if op == &UnaryOperator::PGPostfixFactorial {
-                    write!(f, "{}{}", expr, op)
-                } else {
-                    write!(f, "{} {}", op, expr)
-                }
+                write!(f, "{} {}", op, expr)
             }
             Expr::Cast { expr, data_type } => write!(f, "CAST({} AS {})", expr, data_type),
             Expr::TryCast { expr, data_type } => write!(f, "TRY_CAST({} AS {})", expr, data_type),
@@ -1509,6 +1502,13 @@ pub enum Statement {
         operation: AlterFragmentOperation,
     },
     /// DESCRIBE relation
+    /// ALTER DEFAULT PRIVILEGES
+    AlterDefaultPrivileges {
+        target_users: Option<Vec<Ident>>,
+        schema_names: Option<Vec<ObjectName>>,
+        operation: DefaultPrivilegeOperation,
+    },
+    /// DESCRIBE relation
     Describe {
         /// relation name
         name: ObjectName,
@@ -1619,6 +1619,8 @@ pub enum Statement {
         if_not_exists: bool,
         owner: Option<ObjectName>,
         resource_group: Option<SetVariableValue>,
+        barrier_interval_ms: Option<u32>,
+        checkpoint_frequency: Option<u64>,
     },
     /// GRANT privileges ON objects TO grantees
     Grant {
@@ -1641,7 +1643,7 @@ pub enum Statement {
     ///
     /// Note: this is a PostgreSQL-specific statement.
     Deallocate {
-        name: Ident,
+        name: Option<Ident>,
         prepare: bool,
     },
     /// `EXECUTE name [ ( parameter [, ...] ) ]`
@@ -1910,6 +1912,8 @@ impl Statement {
                 if_not_exists,
                 owner,
                 resource_group,
+                barrier_interval_ms,
+                checkpoint_frequency,
             } => {
                 write!(f, "CREATE DATABASE")?;
                 if *if_not_exists {
@@ -1921,6 +1925,12 @@ impl Statement {
                 }
                 if let Some(resource_group) = resource_group {
                     write!(f, " RESOURCE_GROUP = {}", resource_group)?;
+                }
+                if let Some(barrier_interval_ms) = barrier_interval_ms {
+                    write!(f, " BARRIER_INTERVAL_MS = {}", barrier_interval_ms)?;
+                }
+                if let Some(checkpoint_frequency) = checkpoint_frequency {
+                    write!(f, " CHECKPOINT_FREQUENCY = {}", checkpoint_frequency)?;
                 }
 
                 Ok(())
@@ -2344,12 +2354,22 @@ impl Statement {
                 write!(f, " {}", if *cascade { "CASCADE" } else { "RESTRICT" })?;
                 Ok(())
             }
-            Statement::Deallocate { name, prepare } => write!(
-                f,
-                "DEALLOCATE {prepare}{name}",
-                prepare = if *prepare { "PREPARE " } else { "" },
-                name = name,
-            ),
+            Statement::Deallocate { name, prepare } => {
+                if let Some(name) = name {
+                    write!(
+                        f,
+                        "DEALLOCATE {prepare}{name}",
+                        prepare = if *prepare { "PREPARE " } else { "" },
+                        name = name,
+                    )
+                } else {
+                    write!(
+                        f,
+                        "DEALLOCATE {prepare}ALL",
+                        prepare = if *prepare { "PREPARE " } else { "" },
+                    )
+                }
+            }
             Statement::Execute { name, parameters } => {
                 write!(f, "EXECUTE {}", name)?;
                 if !parameters.is_empty() {
@@ -2425,6 +2445,20 @@ impl Statement {
                 operation,
             } => {
                 write!(f, "ALTER FRAGMENT {} {}", fragment_id, operation)
+            }
+            Statement::AlterDefaultPrivileges {
+                target_users,
+                schema_names,
+                operation,
+            } => {
+                write!(f, "ALTER DEFAULT PRIVILEGES")?;
+                if let Some(target_users) = target_users {
+                    write!(f, " FOR {}", display_comma_separated(target_users))?;
+                }
+                if let Some(schema_names) = schema_names {
+                    write!(f, " IN SCHEMA {}", display_comma_separated(schema_names))?;
+                }
+                write!(f, " {}", operation)
             }
         }
     }
@@ -2734,6 +2768,115 @@ impl fmt::Display for GrantObjects {
             }
             GrantObjects::Secrets(secrets) => {
                 write!(f, "SECRET {}", display_comma_separated(secrets))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum PrivilegeObjectType {
+    Tables,
+    Sources,
+    Sinks,
+    Mviews,
+    Views,
+    Functions,
+    Connections,
+    Secrets,
+    Subscriptions,
+    Schemas,
+}
+
+impl fmt::Display for PrivilegeObjectType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PrivilegeObjectType::Tables => f.write_str("TABLES")?,
+            PrivilegeObjectType::Sources => f.write_str("SOURCES")?,
+            PrivilegeObjectType::Sinks => f.write_str("SINKS")?,
+            PrivilegeObjectType::Mviews => f.write_str("MATERIALIZED VIEWS")?,
+            PrivilegeObjectType::Views => f.write_str("VIEWS")?,
+            PrivilegeObjectType::Functions => f.write_str("FUNCTIONS")?,
+            PrivilegeObjectType::Connections => f.write_str("CONNECTIONS")?,
+            PrivilegeObjectType::Secrets => f.write_str("SECRETS")?,
+            PrivilegeObjectType::Subscriptions => f.write_str("SUBSCRIPTIONS")?,
+            PrivilegeObjectType::Schemas => f.write_str("SCHEMAS")?,
+        };
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum DefaultPrivilegeOperation {
+    Grant {
+        privileges: Privileges,
+        object_type: PrivilegeObjectType,
+        grantees: Vec<Ident>,
+        with_grant_option: bool,
+    },
+    Revoke {
+        privileges: Privileges,
+        object_type: PrivilegeObjectType,
+        grantees: Vec<Ident>,
+        revoke_grant_option: bool,
+        cascade: bool,
+    },
+}
+
+impl fmt::Display for DefaultPrivilegeOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DefaultPrivilegeOperation::Grant {
+                privileges,
+                object_type,
+                grantees,
+                with_grant_option,
+            } => {
+                write!(
+                    f,
+                    "GRANT {} ON {} TO {}",
+                    privileges,
+                    object_type,
+                    display_comma_separated(grantees)
+                )?;
+                if *with_grant_option {
+                    write!(f, " WITH GRANT OPTION")?;
+                }
+            }
+            DefaultPrivilegeOperation::Revoke {
+                privileges,
+                object_type,
+                grantees,
+                revoke_grant_option,
+                cascade,
+            } => {
+                write!(f, "REVOKE")?;
+                if *revoke_grant_option {
+                    write!(f, " GRANT OPTION FOR")?;
+                }
+                write!(
+                    f,
+                    " {} ON {} FROM {}",
+                    privileges,
+                    object_type,
+                    display_comma_separated(grantees)
+                )?;
+                write!(f, " {}", if *cascade { "CASCADE" } else { "RESTRICT" })?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl DefaultPrivilegeOperation {
+    pub fn for_schemas(&self) -> bool {
+        match &self {
+            DefaultPrivilegeOperation::Grant { object_type, .. } => {
+                object_type == &PrivilegeObjectType::Schemas
+            }
+            DefaultPrivilegeOperation::Revoke { object_type, .. } => {
+                object_type == &PrivilegeObjectType::Schemas
             }
         }
     }
@@ -3072,7 +3215,7 @@ impl fmt::Display for SqlOption {
             })
             .unwrap_or(false);
         if should_redact {
-            write!(f, "{} = '[REDACTED]'", self.name)
+            write!(f, "{} = [REDACTED]", self.name)
         } else {
             write!(f, "{} = {}", self.name, self.value)
         }
@@ -3596,6 +3739,19 @@ impl fmt::Display for CreateFunctionUsing {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ConfigParam {
+    pub param: Ident,
+    pub value: SetVariableValue,
+}
+
+impl fmt::Display for ConfigParam {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "SET {} = {}", self.param, self.value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SetVariableValue {
     Single(SetVariableValueSingle),
     List(Vec<SetVariableValueSingle>),
@@ -3724,7 +3880,7 @@ impl fmt::Display for BackfillOrderStrategy {
 
 impl Statement {
     pub fn to_redacted_string(&self, keywords: RedactSqlOptionKeywordsRef) -> String {
-        REDACT_SQL_OPTION_KEYWORDS.sync_scope(keywords, || self.to_string())
+        REDACT_SQL_OPTION_KEYWORDS.sync_scope(keywords, || self.to_string_unchecked())
     }
 
     /// Create a new `CREATE TABLE` statement with the given `name` and empty fields.

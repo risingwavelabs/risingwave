@@ -18,7 +18,7 @@ anyhow = "1"
 apache-avro = { workspace = true }
 assert_matches = "1"
 async-compression = { version = "0.4.5", features = ["gzip", "tokio"] }
-async-nats = "0.41"
+async-nats = { version = "0.42", features = ["websockets"] }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
@@ -71,7 +71,7 @@ iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }
 indexmap = { version = "2.9.0", features = ["serde"] }
 itertools = { workspace = true }
-jni = { version = "0.21.1", features = ["invocation"] }
+jni = { workspace = true }
 maplit = "1.0.2"
 moka = { version = "0.12.10", features = ["future"] }
 mongodb = "3.2.3"
@@ -155,7 +155,7 @@ sqlx = { workspace = true }
 strum = "0.27"
 strum_macros = "0.27"
 tempfile = "3"
-thiserror = "2"
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 # To easiy get the type_name and impl IntoSql for rust_decimal, we fork the crate.
 # Another reason is that we are planning to refactor their IntoSql trait to allow specifying the type to convert.
@@ -194,11 +194,6 @@ yup-oauth2 = "8.3"
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
-[build-dependencies]
-# Workaround for datafusion. Feel free to remove it if you can.
-# https://gist.github.com/xiangjinwu/65c310adf84c381c17d99cb4439e1908
-chrono-tz = { version = "0.10", features = ["case-insensitive"] }
-
 [dev-dependencies]
 assert_matches = "1"
 criterion = { workspace = true, features = ["async_tokio", "async"] }
@@ -217,6 +212,11 @@ tempfile = "3"
 tracing-subscriber = "0.3"
 tracing-test = "0.2"
 walkdir = "2"
+
+[build-dependencies]
+# Workaround for datafusion. Feel free to remove it if you can.
+# https://gist.github.com/xiangjinwu/65c310adf84c381c17d99cb4439e1908
+chrono-tz = { version = "0.10", features = ["case-insensitive"] }
 
 [[bench]]
 name = "debezium_json_parser"

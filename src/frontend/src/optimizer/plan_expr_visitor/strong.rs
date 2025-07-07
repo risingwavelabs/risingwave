@@ -108,6 +108,7 @@ impl Strong {
             | ExprType::Ceil
             | ExprType::Floor
             | ExprType::Extract
+            | ExprType::L2Distance
             | ExprType::Greatest
             | ExprType::Least => self.any_null(func_call),
             // ALL: This kind of expression is null if and only if all of its arguments are null.
@@ -162,6 +163,7 @@ impl Strong {
             | ExprType::CharLength
             | ExprType::Repeat
             | ExprType::ConcatOp
+            | ExprType::ByteaConcatOp
             | ExprType::BoolOut
             | ExprType::OctetLength
             | ExprType::BitLength
@@ -308,6 +310,7 @@ impl Strong {
             | ExprType::MapCat
             | ExprType::MapContains
             | ExprType::MapDelete
+            | ExprType::MapFilter
             | ExprType::MapInsert
             | ExprType::MapLength
             | ExprType::Vnode
@@ -337,7 +340,9 @@ impl Strong {
             | ExprType::HasSchemaPrivilege
             | ExprType::InetAton
             | ExprType::InetNtoa
-            | ExprType::RwEpochToTs => false,
+            | ExprType::CompositeCast
+            | ExprType::RwEpochToTs
+            | ExprType::OpenaiEmbedding => false,
             ExprType::Unspecified => unreachable!(),
         }
     }

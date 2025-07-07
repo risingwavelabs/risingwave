@@ -720,11 +720,10 @@ where
 
                         timeout_ticker.reset();
 
-                        if is_leader {
-                            if let Err(e) = self.driver.trim_candidates(META_ELECTION_KEY, ttl * 2).await {
+                        if is_leader
+                            && let Err(e) = self.driver.trim_candidates(META_ELECTION_KEY, ttl * 2).await {
                                 tracing::warn!(error = %e.as_report(), "trim candidates failed");
                             }
-                        }
                     }
                 _ = timeout_ticker.tick() => {
                     tracing::error!("member {} election timeout", self.id);

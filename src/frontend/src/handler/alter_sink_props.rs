@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::bail;
+use pgwire::pg_response::StatementType;
 use risingwave_sqlparser::ast::{ObjectName, SqlOption};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
-use crate::error::Result;
+use crate::error::{ErrorCode, Result};
+use crate::handler::alter_source_props::ensure_alter_props_not_set_by_connection;
 use crate::utils::resolve_connection_ref_and_secret_ref;
 use crate::{Binder, WithOptions};
 
@@ -42,9 +42,20 @@ pub async fn handle_alter_sink_props(
             reader.get_sink_by_name(db_name, schema_path, &real_table_name)?;
 
         if sink.target_table.is_some() {
-            bail!("ALTER sink config is not for sink into table")
+            return Err(ErrorCode::InvalidInputSyntax(
+                "ALTER SINK CONNECTOR is not for SINK INTO TABLE".to_owned(),
+            )
+            .into());
         }
         session.check_privilege_for_drop_alter(schema_name, &**sink)?;
+
+        ensure_alter_props_not_set_by_connection(
+            &reader,
+            db_name,
+            sink.connection_id.map(|id| id.connection_id()),
+            &changed_props,
+        )?;
+
         sink.id.sink_id
     };
 
@@ -55,17 +66,21 @@ pub async fn handle_alter_sink_props(
         None,
     )?;
     let (changed_props, changed_secret_refs) = resolved_with_options.into_parts();
-    if !changed_secret_refs.is_empty() || connector_conn_ref.is_some() {
-        bail!("ALTER SINK does not support SECRET or CONNECTION now")
+    if connector_conn_ref.is_some() {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "ALTER SINK does not support CONNECTION".to_owned(),
+        )
+        .into());
     }
+
     meta_client
         .alter_sink_props(
             sink_id,
             changed_props,
             changed_secret_refs,
-            connector_conn_ref,
+            connector_conn_ref, // always None, keep the interface for future extension
         )
         .await?;
 
-    Ok(PgResponse::empty_result(StatementType::ALTER_SINK))
+    Ok(RwPgResponse::empty_result(StatementType::ALTER_SINK))
 }

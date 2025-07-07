@@ -176,7 +176,7 @@ fn make_unary_op(func: ExprType, expr: &Expr) -> Option<Expr> {
     let unary_op = match func {
         E::Neg => U::Minus,
         E::Not => U::Not,
-        E::BitwiseNot => U::PGBitwiseNot,
+        E::BitwiseNot => U::Custom("~".to_owned()),
         _ => return None,
     };
     Some(Expr::UnaryOp {
@@ -197,7 +197,6 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
         E::IsNotTrue => Some(Expr::IsNotTrue(Box::new(exprs[0].clone()))),
         E::IsFalse => Some(Expr::IsFalse(Box::new(exprs[0].clone()))),
         E::IsNotFalse => Some(Expr::IsNotFalse(Box::new(exprs[0].clone()))),
-        E::Position => Some(Expr::Function(make_simple_func("strpos", &exprs))),
         E::RoundDigit => Some(Expr::Function(make_simple_func("round", &exprs))),
         E::Pow => Some(Expr::Function(make_simple_func("pow", &exprs))),
         E::Repeat => Some(Expr::Function(make_simple_func("repeat", &exprs))),
@@ -217,6 +216,8 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
         E::Sha256 => Some(Expr::Function(make_simple_func("sha256", &exprs))),
         E::Sha384 => Some(Expr::Function(make_simple_func("sha384", &exprs))),
         E::Sha512 => Some(Expr::Function(make_simple_func("sha512", &exprs))),
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7328
+        // E::Position => Some(Expr::Function(make_simple_func("strpos", &exprs))),
         // TODO: Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
         // E::Translate => Some(Expr::Function(make_simple_func("translate", &exprs))),
         // NOTE(kwannoel): I disabled `Overlay`, its arguments require special handling.
@@ -281,12 +282,12 @@ fn make_bin_op(func: ExprType, exprs: &[Expr]) -> Option<Expr> {
         E::NotEqual => B::NotEq,
         E::And => B::And,
         E::Or => B::Or,
-        E::Like => B::PGLikeMatch,
-        E::BitwiseAnd => B::BitwiseAnd,
-        E::BitwiseOr => B::BitwiseOr,
-        E::BitwiseXor => B::PGBitwiseXor,
-        E::BitwiseShiftLeft => B::PGBitwiseShiftLeft,
-        E::BitwiseShiftRight => B::PGBitwiseShiftRight,
+        E::Like => B::Custom("~~".to_owned()),
+        E::BitwiseAnd => B::Custom("&".to_owned()),
+        E::BitwiseOr => B::Custom("|".to_owned()),
+        E::BitwiseXor => B::Custom("#".to_owned()),
+        E::BitwiseShiftLeft => B::Custom("<<".to_owned()),
+        E::BitwiseShiftRight => B::Custom(">>".to_owned()),
         _ => return None,
     };
     Some(Expr::BinaryOp {

@@ -19,8 +19,8 @@ pub use mqtt_common::{MqttCommon, QualityOfService as MqttQualityOfService};
 
 mod common;
 pub use common::{
-    AwsAuthProps, AwsPrivateLinkItem, KafkaCommon, KafkaConnectionProps, KafkaPrivateLinkCommon,
-    KinesisCommon, KinesisSdkOptions, MongodbCommon, NatsCommon,
+    AwsAuthProps, AwsPrivateLinkItem, DISABLE_DEFAULT_CREDENTIAL, KafkaCommon,
+    KafkaConnectionProps, KafkaPrivateLinkCommon, KinesisCommon, MongodbCommon, NatsCommon,
     PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY, PulsarCommon, PulsarOauthCommon,
     RdKafkaPropertiesCommon,
 };
@@ -38,3 +38,6 @@ pub mod postgres;
 
 pub use iceberg::IcebergCommon;
 pub use postgres::{PostgresExternalTable, SslMode, create_pg_client};
+
+#[cfg(test)]
+mod common_test;

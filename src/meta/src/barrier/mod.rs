@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_connector::source::SplitImpl;
+use risingwave_pb::catalog::Database;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PbRecoveryStatus;
@@ -40,6 +41,8 @@ mod notifier;
 mod progress;
 mod rpc;
 mod schedule;
+#[cfg(test)]
+mod tests;
 mod trace;
 mod utils;
 mod worker;
@@ -99,6 +102,12 @@ impl From<&BarrierManagerStatus> for PbRecoveryStatus {
 pub(crate) enum BarrierManagerRequest {
     GetDdlProgress(Sender<HashMap<u32, DdlProgress>>),
     AdhocRecovery(Sender<()>),
+    UpdateDatabaseBarrier {
+        database_id: DatabaseId,
+        barrier_interval_ms: Option<u32>,
+        checkpoint_frequency: Option<u64>,
+        sender: Sender<()>,
+    },
 }
 
 #[derive(Debug)]
@@ -114,6 +123,7 @@ struct BarrierWorkerRuntimeInfoSnapshot {
     source_splits: HashMap<ActorId, Vec<SplitImpl>>,
     background_jobs: HashMap<TableId, (String, StreamJobFragments)>,
     hummock_version_stats: HummockVersionStats,
+    database_infos: Vec<Database>,
 }
 
 impl BarrierWorkerRuntimeInfoSnapshot {

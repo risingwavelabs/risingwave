@@ -93,13 +93,28 @@ impl RewriteExprsRecursive for Relation {
 }
 
 impl Relation {
-    pub fn is_correlated(&self, depth: Depth) -> bool {
+    pub fn is_correlated_by_depth(&self, depth: Depth) -> bool {
         match self {
-            Relation::Subquery(subquery) => subquery.query.is_correlated(depth),
+            Relation::Subquery(subquery) => subquery.query.is_correlated_by_depth(depth),
             Relation::Join(join) | Relation::Apply(join) => {
                 join.cond.has_correlated_input_ref_by_depth(depth)
-                    || join.left.is_correlated(depth)
-                    || join.right.is_correlated(depth)
+                    || join.left.is_correlated_by_depth(depth)
+                    || join.right.is_correlated_by_depth(depth)
+            }
+            _ => false,
+        }
+    }
+
+    pub fn is_correlated_by_correlated_id(&self, correlated_id: CorrelatedId) -> bool {
+        match self {
+            Relation::Subquery(subquery) => {
+                subquery.query.is_correlated_by_correlated_id(correlated_id)
+            }
+            Relation::Join(join) | Relation::Apply(join) => {
+                join.cond
+                    .has_correlated_input_ref_by_correlated_id(correlated_id)
+                    || join.left.is_correlated_by_correlated_id(correlated_id)
+                    || join.right.is_correlated_by_correlated_id(correlated_id)
             }
             _ => false,
         }
@@ -475,12 +490,13 @@ impl Binder {
                 },
             }
         } else {
-            self.bind_relation_by_name_inner(
+            self.bind_catalog_relation_by_name(
                 db_name.as_deref(),
                 schema_name.as_deref(),
                 &table_name,
                 alias,
                 as_of,
+                false,
             )
         }
     }
@@ -548,7 +564,7 @@ impl Binder {
         let schema = args.get(1).map(|arg| arg.to_string());
 
         let table_name = self.catalog.get_table_name_by_id(table_id)?;
-        self.bind_relation_by_name_inner(None, schema.as_deref(), &table_name, alias, None)
+        self.bind_catalog_relation_by_name(None, schema.as_deref(), &table_name, alias, None, false)
     }
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {

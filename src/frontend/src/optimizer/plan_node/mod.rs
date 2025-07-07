@@ -1140,7 +1140,7 @@ use crate::utils::{ColIndexMapping, Condition, DynEq, DynHash, Endo, Layer, Visi
 /// See the following implementations for example.
 #[macro_export]
 macro_rules! for_all_plan_nodes {
-    ($macro:ident) => {
+    ($macro:path $(,$rest:tt)*) => {
         $macro! {
               { Logical, Agg }
             , { Logical, Apply }
@@ -1251,6 +1251,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, AsOfJoin }
             , { Stream, SyncLogStore }
             , { Stream, MaterializedExprs }
+            $(,$rest)*
         }
     };
 }
@@ -1259,143 +1260,67 @@ macro_rules! for_all_plan_nodes {
 #[macro_export]
 macro_rules! for_logical_plan_nodes {
     ($macro:ident) => {
-        $macro! {
-              { Logical, Agg }
-            , { Logical, Apply }
-            , { Logical, Filter }
-            , { Logical, Project }
-            , { Logical, Scan }
-            , { Logical, CdcScan }
-            , { Logical, SysScan }
-            , { Logical, Source }
-            , { Logical, Insert }
-            , { Logical, Delete }
-            , { Logical, Update }
-            , { Logical, Join }
-            , { Logical, Values }
-            , { Logical, Limit }
-            , { Logical, TopN }
-            , { Logical, HopWindow }
-            , { Logical, TableFunction }
-            , { Logical, MultiJoin }
-            , { Logical, Expand }
-            , { Logical, ProjectSet }
-            , { Logical, Union }
-            , { Logical, OverWindow }
-            , { Logical, Share }
-            , { Logical, Now }
-            , { Logical, Dedup }
-            , { Logical, Intersect }
-            , { Logical, Except }
-            , { Logical, MaxOneRow }
-            , { Logical, KafkaScan }
-            , { Logical, IcebergScan }
-            , { Logical, RecursiveUnion }
-            , { Logical, CteRef }
-            , { Logical, ChangeLog }
-            , { Logical, FileScan }
-            , { Logical, PostgresQuery }
-            , { Logical, MySqlQuery }
+        $crate::for_all_plan_nodes! {
+              $crate::for_logical_plan_nodes, $macro
         }
     };
+    (
+        $( { Logical, $logical_name:ident } ),*
+        , $( { Batch, $batch_name:ident } ),*
+        , $( { Stream, $stream_name:ident } ),*
+        , $macro:ident
+    ) => {
+        $macro! {
+            $( { Logical, $logical_name } ),*
+        }
+    }
 }
 
 /// `for_batch_plan_nodes` includes all plan nodes with batch convention.
 #[macro_export]
 macro_rules! for_batch_plan_nodes {
     ($macro:ident) => {
-        $macro! {
-              { Batch, SimpleAgg }
-            , { Batch, HashAgg }
-            , { Batch, SortAgg }
-            , { Batch, Project }
-            , { Batch, Filter }
-            , { Batch, SeqScan }
-            , { Batch, SysSeqScan }
-            , { Batch, LogSeqScan }
-            , { Batch, HashJoin }
-            , { Batch, NestedLoopJoin }
-            , { Batch, Values }
-            , { Batch, Limit }
-            , { Batch, Sort }
-            , { Batch, TopN }
-            , { Batch, Exchange }
-            , { Batch, Insert }
-            , { Batch, Delete }
-            , { Batch, Update }
-            , { Batch, HopWindow }
-            , { Batch, TableFunction }
-            , { Batch, Expand }
-            , { Batch, LookupJoin }
-            , { Batch, ProjectSet }
-            , { Batch, Union }
-            , { Batch, GroupTopN }
-            , { Batch, Source }
-            , { Batch, OverWindow }
-            , { Batch, MaxOneRow }
-            , { Batch, KafkaScan }
-            , { Batch, IcebergScan }
-            , { Batch, FileScan }
-            , { Batch, PostgresQuery }
-            , { Batch, MySqlQuery }
+        $crate::for_all_plan_nodes! {
+              $crate::for_batch_plan_nodes, $macro
         }
     };
+    (
+        $( { Logical, $logical_name:ident } ),*
+        , $( { Batch, $batch_name:ident } ),*
+        , $( { Stream, $stream_name:ident } ),*
+        , $macro:ident
+    ) => {
+        $macro! {
+            $( { Batch, $batch_name } ),*
+        }
+    }
 }
 
 /// `for_stream_plan_nodes` includes all plan nodes with stream convention.
 #[macro_export]
 macro_rules! for_stream_plan_nodes {
     ($macro:ident) => {
-        $macro! {
-              { Stream, Project }
-            , { Stream, Filter }
-            , { Stream, HashJoin }
-            , { Stream, Exchange }
-            , { Stream, TableScan }
-            , { Stream, CdcTableScan }
-            , { Stream, Sink }
-            , { Stream, Source }
-            , { Stream, SourceScan }
-            , { Stream, HashAgg }
-            , { Stream, SimpleAgg }
-            , { Stream, StatelessSimpleAgg }
-            , { Stream, Materialize }
-            , { Stream, TopN }
-            , { Stream, HopWindow }
-            , { Stream, DeltaJoin }
-            , { Stream, Expand }
-            , { Stream, DynamicFilter }
-            , { Stream, ProjectSet }
-            , { Stream, GroupTopN }
-            , { Stream, Union }
-            , { Stream, RowIdGen }
-            , { Stream, Dml }
-            , { Stream, Now }
-            , { Stream, Share }
-            , { Stream, WatermarkFilter }
-            , { Stream, TemporalJoin }
-            , { Stream, Values }
-            , { Stream, Dedup }
-            , { Stream, EowcOverWindow }
-            , { Stream, EowcSort }
-            , { Stream, OverWindow }
-            , { Stream, FsFetch }
-            , { Stream, ChangeLog }
-            , { Stream, GlobalApproxPercentile }
-            , { Stream, LocalApproxPercentile }
-            , { Stream, RowMerge }
-            , { Stream, AsOfJoin }
-            , { Stream, SyncLogStore }
-            , { Stream, MaterializedExprs }
+        $crate::for_all_plan_nodes! {
+              $crate::for_stream_plan_nodes, $macro
         }
     };
+    (
+        $( { Logical, $logical_name:ident } ),*
+        , $( { Batch, $batch_name:ident } ),*
+        , $( { Stream, $stream_name:ident } ),*
+        , $macro:ident
+    ) => {
+        $macro! {
+            $( { Stream, $stream_name } ),*
+        }
+    }
 }
 
 /// impl [`PlanNodeType`] fn for each node.
 macro_rules! impl_plan_node_meta {
     ($( { $convention:ident, $name:ident }),*) => {
         paste!{
-            /// each enum value represent a PlanNode struct type, help us to dispatch and downcast
+            /// each enum value represent a `PlanNode` struct type, help us to dispatch and downcast
             #[derive(Copy, Clone, PartialEq, Debug, Hash, Eq, Serialize)]
             pub enum PlanNodeType {
                 $( [<$convention $name>] ),*

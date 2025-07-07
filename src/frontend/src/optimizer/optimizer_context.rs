@@ -143,19 +143,23 @@ impl OptimizerContext {
     }
 
     pub fn next_plan_node_id(&self) -> PlanNodeId {
-        PlanNodeId(self.last_plan_node_id.update(|id| id + 1))
+        self.last_plan_node_id.update(|id| id + 1);
+        PlanNodeId(self.last_plan_node_id.get())
     }
 
     pub fn next_correlated_id(&self) -> CorrelatedId {
-        self.last_correlated_id.update(|id| id + 1)
+        self.last_correlated_id.update(|id| id + 1);
+        self.last_correlated_id.get()
     }
 
     pub fn next_expr_display_id(&self) -> usize {
-        self.last_expr_display_id.update(|id| id + 1)
+        self.last_expr_display_id.update(|id| id + 1);
+        self.last_expr_display_id.get()
     }
 
     pub fn next_watermark_group_id(&self) -> WatermarkGroupId {
-        self.last_watermark_group_id.update(|id| id + 1)
+        self.last_watermark_group_id.update(|id| id + 1);
+        self.last_watermark_group_id.get()
     }
 
     pub(in crate::optimizer) fn backup_elem_ids(&self) -> LastAssignedIds {
@@ -222,7 +226,7 @@ impl OptimizerContext {
         }
         let mut optimizer_trace = self.optimizer_trace.borrow_mut();
         let string = str.into();
-        tracing::warn!(target: "explain_trace", "\n{}", string);
+        tracing::info!(target: "explain_trace", "\n{}", string);
         optimizer_trace.push(string);
         optimizer_trace.push("\n".to_owned());
     }

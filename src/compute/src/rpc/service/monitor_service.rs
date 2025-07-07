@@ -73,7 +73,6 @@ impl MonitorServiceImpl {
 
 #[async_trait::async_trait]
 impl MonitorService for MonitorServiceImpl {
-    #[cfg_attr(coverage, coverage(off))]
     async fn stack_trace(
         &self,
         request: Request<StackTraceRequest>,
@@ -151,10 +150,10 @@ impl MonitorService for MonitorServiceImpl {
                 }
                 None => BTreeMap::new(),
             },
+            meta_traces: Default::default(),
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn profiling(
         &self,
         request: Request<ProfilingRequest>,
@@ -184,7 +183,6 @@ impl MonitorService for MonitorServiceImpl {
         }
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn heap_profiling(
         &self,
         request: Request<HeapProfilingRequest>,
@@ -235,7 +233,6 @@ impl MonitorService for MonitorServiceImpl {
         }
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn list_heap_profiling(
         &self,
         _request: Request<ListHeapProfilingRequest>,
@@ -275,7 +272,6 @@ impl MonitorService for MonitorServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn analyze_heap(
         &self,
         request: Request<AnalyzeHeapRequest>,
@@ -345,7 +341,6 @@ impl MonitorService for MonitorServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn get_streaming_stats(
         &self,
         _request: Request<GetStreamingStatsRequest>,
@@ -478,7 +473,6 @@ impl MonitorService for MonitorServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn tiered_cache_tracing(
         &self,
         request: Request<TieredCacheTracingRequest>,

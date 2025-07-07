@@ -11,16 +11,21 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use std::fmt::Display;
 
-use tokio_retry::Condition;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CatalogBackfillType {
+    Source,
+    SnapshotBackfill,
+    ArrangementOrNoShuffle,
+}
 
-use crate::hummock::error::Error;
-
-#[derive(Default)]
-pub struct RetryableError {}
-
-impl Condition<Error> for RetryableError {
-    fn should_retry(&mut self, error: &Error) -> bool {
-        error.retryable()
+impl Display for CatalogBackfillType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CatalogBackfillType::Source => write!(f, "SOURCE"),
+            CatalogBackfillType::SnapshotBackfill => write!(f, "SNAPSHOT_BACKFILL"),
+            CatalogBackfillType::ArrangementOrNoShuffle => write!(f, "ARRANGEMENT_OR_NO_SHUFFLE"),
+        }
     }
 }

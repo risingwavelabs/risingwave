@@ -61,7 +61,7 @@ pub async fn handle_refresh_schema(
         .create_sql_ast_purified()
         .context("unable to parse original table definition")?;
 
-    let (source, table, graph, col_index_mapping, job_type) = {
+    let (source, table, graph, job_type) = {
         let result = get_replace_table_plan(
             &session,
             table_name,
@@ -71,9 +71,7 @@ pub async fn handle_refresh_schema(
         )
         .await;
         match result {
-            Ok((source, table, graph, col_index_mapping, job_type)) => {
-                Ok((source, table, graph, col_index_mapping, job_type))
-            }
+            Ok((source, table, graph, job_type)) => Ok((source, table, graph, job_type)),
             Err(e) => {
                 let report = e.to_report_string();
                 // NOTE(yuhao): This is a workaround for reporting errors when columns to drop is referenced by generated column.
@@ -95,7 +93,12 @@ pub async fn handle_refresh_schema(
     let catalog_writer = session.catalog_writer()?;
 
     catalog_writer
-        .replace_table(source, table, graph, col_index_mapping, job_type)
+        .replace_table(
+            source.map(|x| x.to_prost()),
+            table.to_prost(),
+            graph,
+            job_type,
+        )
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))

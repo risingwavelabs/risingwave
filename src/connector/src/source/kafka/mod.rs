@@ -53,16 +53,19 @@ pub struct RdKafkaPropertiesConsumer {
     /// consumer queue.
     #[serde(rename = "properties.queued.min.messages")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub queued_min_messages: Option<usize>,
 
     #[serde(rename = "properties.queued.max.messages.kbytes")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub queued_max_messages_kbytes: Option<usize>,
 
     /// Maximum time the broker may wait to fill the Fetch response with `fetch.min.`bytes of
     /// messages.
     #[serde(rename = "properties.fetch.wait.max.ms")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub fetch_wait_max_ms: Option<usize>,
 
     /// Minimum number of bytes the broker responds with. If fetch.wait.max.ms expires the accumulated data will be sent to the client regardless of this setting.
@@ -82,27 +85,30 @@ pub struct RdKafkaPropertiesConsumer {
     /// increase CPU utilization.
     #[serde(rename = "properties.fetch.queue.backoff.ms")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub fetch_queue_backoff_ms: Option<usize>,
 
     /// Maximum amount of data the broker shall return for a Fetch request. Messages are fetched in
     /// batches by the consumer and if the first message batch in the first non-empty partition of
     /// the Fetch request is larger than this value, then the message batch will still be returned
     /// to ensure the consumer can make progress. The maximum message batch size accepted by the
-    /// broker is defined via `message.max.bytes` (broker config) or `max.message.bytes` (broker
-    /// topic config). `fetch.max.bytes` is automatically adjusted upwards to be at least
-    /// `message.max.bytes` (consumer config).
+    /// broker is defined via `message.max.bytes` (broker config) or `max.message.bytes` (broker
+    /// topic config). `fetch.max.bytes` is automatically adjusted upwards to be at least
+    /// `message.max.bytes` (consumer config).
     #[serde(rename = "properties.fetch.max.bytes")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub fetch_max_bytes: Option<usize>,
 
     /// Whether to automatically and periodically commit offsets in the background.
     ///
-    /// Note that RisingWave does NOT rely on committed offsets. Committing offset is only for exposing the
+    /// Note that RisingWave does NOT rely on committed offsets. Committing offset is only for exposing the
     /// progress for monitoring. Setting this to false can avoid creating consumer groups.
     ///
     /// default: true
     #[serde(rename = "properties.enable.auto.commit")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub enable_auto_commit: Option<bool>,
 }
 
@@ -144,6 +150,7 @@ pub struct KafkaProperties {
     ///   offsets, and does not join the consumer group. It just reports offsets
     ///   to the group.
     #[serde(rename = "group.id.prefix")]
+    #[with_option(allow_alter_on_fly)]
     pub group_id_prefix: Option<String>,
 
     /// This parameter is used to tell `KafkaSplitReader` to produce `UpsertMessage`s, which

@@ -587,14 +587,13 @@ impl LogicalAggBuilder {
 
     /// check if the expression is a group by key, and try to return the group key
     pub fn try_as_group_expr(&self, expr: &ExprImpl) -> Option<usize> {
-        if let Some(input_index) = self.input_proj_builder.expr_index(expr) {
-            if let Some(index) = self
+        if let Some(input_index) = self.input_proj_builder.expr_index(expr)
+            && let Some(index) = self
                 .group_key
                 .indices()
                 .position(|group_key| group_key == input_index)
-            {
-                return Some(index);
-            }
+        {
+            return Some(index);
         }
         None
     }
@@ -983,7 +982,7 @@ impl ExprRewriter for LogicalAggBuilder {
     }
 
     fn rewrite_subquery(&mut self, subquery: crate::expr::Subquery) -> ExprImpl {
-        if subquery.is_correlated(0) {
+        if subquery.is_correlated_by_depth(0) {
             self.error = Some(
                 not_implemented!(
                     issue = 2275,

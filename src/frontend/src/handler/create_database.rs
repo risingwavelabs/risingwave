@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pgwire::pg_response::{PgResponse, StatementType};
+use pgwire::pg_response::StatementType;
+use risingwave_common::system_param::{NOTICE_BARRIER_INTERVAL_MS, NOTICE_CHECKPOINT_FREQUENCY};
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_sqlparser::ast::{ObjectName, SetVariableValue};
 
@@ -30,7 +31,11 @@ pub async fn handle_create_database(
     if_not_exist: bool,
     owner: Option<ObjectName>,
     resource_group: Option<SetVariableValue>,
+    barrier_interval_ms: Option<u32>,
+    checkpoint_frequency: Option<u64>,
 ) -> Result<RwPgResponse> {
+    let mut builder = RwPgResponse::builder(StatementType::CREATE_DATABASE);
+
     let session = handler_args.session;
     let database_name = Binder::resolve_database_name(database_name)?;
 
@@ -39,7 +44,9 @@ pub async fn handle_create_database(
         let reader = user_reader.read_guard();
         if let Some(info) = reader.get_user_by_name(&session.user_name()) {
             if !info.can_create_db && !info.is_super {
-                return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
+                return Err(
+                    PermissionDenied("permission denied to create database".to_owned()).into(),
+                );
             }
         } else {
             return Err(PermissionDenied("Session user is invalid".to_owned()).into());
@@ -52,7 +59,7 @@ pub async fn handle_create_database(
         if reader.get_database_by_name(&database_name).is_ok() {
             // If `if_not_exist` is true, not return error.
             return if if_not_exist {
-                Ok(PgResponse::builder(StatementType::CREATE_DATABASE)
+                Ok(builder
                     .notice(format!("database \"{}\" exists, skipping", database_name))
                     .into())
             } else {
@@ -87,12 +94,33 @@ pub async fn handle_create_database(
 
     let resource_group = resource_group.as_deref().unwrap_or(DEFAULT_RESOURCE_GROUP);
 
+    if let Some(interval) = barrier_interval_ms
+        && interval >= NOTICE_BARRIER_INTERVAL_MS
+    {
+        builder = builder.notice(
+                    format!("Barrier interval is set to {} ms >= {} ms. This can hurt freshness and potentially cause OOM.",
+                             interval, NOTICE_BARRIER_INTERVAL_MS));
+    }
+    if let Some(frequency) = checkpoint_frequency
+        && frequency >= NOTICE_CHECKPOINT_FREQUENCY
+    {
+        builder = builder.notice(
+                    format!("Checkpoint frequency is set to {} >= {}. This can hurt freshness and potentially cause OOM.",
+                             frequency, NOTICE_CHECKPOINT_FREQUENCY));
+    }
+
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_database(&database_name, database_owner, resource_group)
+        .create_database(
+            &database_name,
+            database_owner,
+            resource_group,
+            barrier_interval_ms,
+            checkpoint_frequency,
+        )
         .await?;
 
-    Ok(PgResponse::empty_result(StatementType::CREATE_DATABASE))
+    Ok(builder.into())
 }
 
 #[cfg(test)]

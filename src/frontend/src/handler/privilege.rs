@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::acl::AclMode;
+use risingwave_pb::user::PbAction;
 use risingwave_pb::user::grant_privilege::PbObject;
 
 use crate::catalog::OwnedByUserCatalog;
@@ -23,19 +24,42 @@ use crate::user::UserId;
 
 #[derive(Debug)]
 pub struct ObjectCheckItem {
-    owner: UserId,
-    mode: AclMode,
+    pub(crate) owner: UserId,
+    pub(crate) mode: AclMode,
+    pub(crate) name: String,
     // todo: change it to object id.
-    object: PbObject,
+    pub(crate) object: PbObject,
 }
 
 impl ObjectCheckItem {
-    pub fn new(owner: UserId, mode: AclMode, object: PbObject) -> Self {
+    pub fn new(owner: UserId, mode: AclMode, name: String, object: PbObject) -> Self {
         Self {
             owner,
             mode,
+            name,
             object,
         }
+    }
+
+    pub fn error_message(&self) -> String {
+        let object_type = match self.object {
+            PbObject::DatabaseId(_) => "database",
+            PbObject::SchemaId(_) => "schema",
+            PbObject::TableId(_) => "table or materialized view",
+            PbObject::ViewId(_) => "view",
+            PbObject::SourceId(_) => "source",
+            PbObject::SinkId(_) => "sink",
+            PbObject::FunctionId(_) => "function",
+            PbObject::SubscriptionId(_) => "subscription",
+            PbObject::ConnectionId(_) => "connection",
+            PbObject::SecretId(_) => "secret",
+        };
+        format!(
+            "permission denied for {} \"{}\": {:?}",
+            object_type,
+            self.name,
+            PbAction::from(self.mode).as_str_name()
+        )
     }
 }
 
@@ -55,7 +79,7 @@ impl SessionImpl {
                 }
                 let has_privilege = user.has_privilege(&item.object, item.mode);
                 if !has_privilege {
-                    return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
+                    return Err(PermissionDenied(item.error_message()).into());
                 }
             }
         } else {
@@ -159,6 +183,7 @@ mod tests {
         let check_items = vec![ObjectCheckItem::new(
             DEFAULT_SUPER_USER_ID,
             AclMode::Create,
+            "schema".to_owned(),
             PbObject::SchemaId(schema.id()),
         )];
         assert!(&session.check_privileges(&check_items).is_ok());
