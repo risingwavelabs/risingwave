@@ -22,10 +22,11 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::bail;
 use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
-use risingwave_connector::sink::catalog::{SinkCatalog, SinkId};
+use risingwave_connector::sink::catalog::{SinkCatalog, SinkId, SinkType};
 use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::sink::{SinkError, SinkParam};
 use risingwave_pb::catalog::PbSink;
+use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
 use risingwave_pb::iceberg_compaction::{
     IcebergCompactionTask, SubscribeIcebergCompactionEventRequest,
 };
@@ -130,11 +131,16 @@ impl IcebergCompactionHandle {
             .remove(0);
         let sink_catalog = SinkCatalog::from(prost_sink_catalog);
         let param = SinkParam::try_from_sink_catalog(sink_catalog)?;
+        let task_type: TaskType = match param.sink_type {
+            SinkType::AppendOnly | SinkType::ForceAppendOnly => TaskType::SmallDataFileCompaction,
+
+            _ => TaskType::FullCompaction,
+        };
         let result =
             compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {
-                // Todo! Use iceberg's compaction task ID
                 task_id,
                 props: param.properties,
+                task_type: task_type as i32,
             }));
 
         if result.is_ok() {

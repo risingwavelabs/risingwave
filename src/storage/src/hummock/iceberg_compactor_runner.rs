@@ -30,6 +30,7 @@ use parquet::file::properties::WriterProperties;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_pb::iceberg_compaction::IcebergCompactionTask;
+use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
@@ -51,6 +52,7 @@ pub struct IcebergCompactorRunner {
 
     config: IcebergCompactorRunnerConfig,
     metrics: Arc<CompactorMetrics>,
+    pub task_type: TaskType,
 }
 
 pub fn default_writer_properties() -> WriterProperties {
@@ -114,7 +116,11 @@ impl IcebergCompactorRunner {
         config: IcebergCompactorRunnerConfig,
         metrics: Arc<CompactorMetrics>,
     ) -> HummockResult<Self> {
-        let IcebergCompactionTask { task_id, props } = iceberg_compaction_task;
+        let IcebergCompactionTask {
+            task_id,
+            props,
+            task_type,
+        } = iceberg_compaction_task;
         let iceberg_config = IcebergConfig::from_btreemap(BTreeMap::from_iter(props.into_iter()))
             .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
         let catalog = iceberg_config
@@ -132,6 +138,9 @@ impl IcebergCompactorRunner {
             iceberg_config,
             config,
             metrics,
+            task_type: TaskType::try_from(task_type).map_err(|e| {
+                HummockError::compaction_executor(format!("Invalid task type: {}", e))
+            })?,
         })
     }
 
@@ -313,10 +322,15 @@ impl IcebergCompactorRunner {
                 "Iceberg compaction task started",
             );
 
+            let compaction_type = match self.task_type {
+                TaskType::SmallDataFileCompaction => CompactionType::SmallFiles, /* TODO: Use appropriate type for small data file compaction */
+                TaskType::FullCompaction => CompactionType::Full,
+            };
+
             let compaction = Compaction::builder()
                 .with_catalog(self.catalog.clone())
                 .with_catalog_name(self.iceberg_config.catalog_name())
-                .with_compaction_type(CompactionType::Full)
+                .with_compaction_type(compaction_type)
                 .with_config(compaction_config)
                 .with_table_ident(self.table_ident.clone())
                 .with_executor_type(iceberg_compaction_core::executor::ExecutorType::DataFusion)
