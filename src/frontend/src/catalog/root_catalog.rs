@@ -561,14 +561,18 @@ impl Catalog {
         secret_id: SecretId,
     ) -> CatalogResult<(String, String)> {
         let db = self.get_database_by_name(db_name)?;
-        db.iter_schemas()
-            .map_while(|schema| {
+        let schema_secret = db.iter_schemas()
+            .filter_map(|schema| {
                 schema
                     .get_secret_by_id(&secret_id)
                     .map(|secret| (schema.name(), secret.name.clone()))
-            })
-            .next()
-            .ok_or_else(|| CatalogError::NotFound("secret", secret_id.to_string()))
+            }).collect_vec();
+            if schema_secret.is_empty() {
+                Err(CatalogError::NotFound("secret", secret_id.to_string()))
+            } else {
+                debug_assert_eq!(schema_secret.len(), 1);
+                Ok(schema_secret.first().unwrap().to_owned())
+            }
     }
 
     pub fn get_all_schema_names(&self, db_name: &str) -> CatalogResult<Vec<String>> {
