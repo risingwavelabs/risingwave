@@ -63,7 +63,7 @@ where
                 .arg("--network")
                 .arg("host")
                 .arg("--cpus")
-                .arg("4") // release build has a paid license working with <= 4 cpus
+                .arg("4") // release build has a premium license working with <= 4 cpus
                 .arg("-v")
                 .arg(format!("{wd}:{wd}"))
                 .arg(&image)
