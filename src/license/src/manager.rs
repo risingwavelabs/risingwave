@@ -281,7 +281,7 @@ mod tests {
                 License {
                     sub: "rw-test",
                     iss: Test,
-                    tier: Paid,
+                    tier: AllAsOf2_5,
                     cpu_core_limit: None,
                     exp: 9999999999,
                 }
