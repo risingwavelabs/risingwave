@@ -117,7 +117,7 @@ statement ok
 create schema test_schema;
 
 statement ok
-create connection conn with (type = 'kafka', properties.bootstrap.server = ${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}, properties.security.protocol = 'plaintext');
+create connection conn with (type = 'kafka', properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}', properties.security.protocol = 'plaintext');
 
 statement ok
 ALTER CONNECTION conn SET SCHEMA test_schema;
