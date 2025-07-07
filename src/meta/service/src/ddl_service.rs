@@ -1008,10 +1008,11 @@ impl DdlService for DdlServiceImpl {
                         }
                     }));
 
-                // For subset/superset check, we need to add visible _rw columns defined by INCLUDE in the original table to new_columns
+                // For subset/superset check, we need to add visible connector additional columns defined by INCLUDE in the original table to new_columns
+                // This includes both _rw columns and user-defined INCLUDE columns (e.g., INCLUDE TIMESTAMP AS xxx)
                 for col in &table.columns {
                     let col = ColumnCatalog::from(col.clone());
-                    if col.column_desc.name.starts_with("_rw")
+                    if col.is_connector_additional_column()
                         && !col.is_hidden()
                         && !col.is_generated()
                     {
