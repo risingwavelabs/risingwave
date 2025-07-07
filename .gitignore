@@ -46,6 +46,9 @@ src/log/
 # srcy-tags
 **/srcy-tags.vi
 
+# rustc ice
+rustc-ice-*
+
 # ctags
 **/tags
 
@@ -91,3 +94,5 @@ e2e_test/iceberg/metastore_db
 book
 
 dhat-heap.json
+
+rustc-ice-*.txt
