@@ -1,0 +1,27 @@
+control substitution on
+
+statement ok
+create schema test_schema;
+
+statement ok
+create secret test_schema.secret_s with ( backend = 'meta' ) as '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}';
+
+statement ok
+create connection conn1 with (type = 'kafka', properties.bootstrap.server = secret test_schema.secret_s );
+
+query ?
+select connection_params from rw_connections;
+----
+{"properties.bootstrap.server":"SECRET test_schema.secret_s AS TEXT"}
+
+
+# clean up
+
+statement ok
+drop connection conn1;
+
+statement ok
+drop secret test_schema.secret_s;
+
+statement ok
+drop schema test_schema;
