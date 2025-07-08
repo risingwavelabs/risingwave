@@ -558,11 +558,24 @@ impl TableFunction {
                             MySqlColumnType::MYSQL_TYPE_JSON => DataType::Jsonb,
 
                             // Binary types
-                            MySqlColumnType::MYSQL_TYPE_BIT
-                            | MySqlColumnType::MYSQL_TYPE_BLOB
+                            MySqlColumnType::MYSQL_TYPE_BIT => DataType::Bytea,
+
+                            // BLOB types - these can be either binary or text, depending on the BINARY_FLAG
+                            // TEXT types (TEXT, TINYTEXT, MEDIUMTEXT, LONGTEXT) are represented as BLOB
+                            // types but should be treated as VARCHAR when they don't have the BINARY_FLAG
+                            MySqlColumnType::MYSQL_TYPE_BLOB
                             | MySqlColumnType::MYSQL_TYPE_TINY_BLOB
                             | MySqlColumnType::MYSQL_TYPE_MEDIUM_BLOB
-                            | MySqlColumnType::MYSQL_TYPE_LONG_BLOB => DataType::Bytea,
+                            | MySqlColumnType::MYSQL_TYPE_LONG_BLOB => {
+                                if column
+                                    .flags()
+                                    .contains(mysql_common::constants::ColumnFlags::BINARY_FLAG)
+                                {
+                                    DataType::Bytea
+                                } else {
+                                    DataType::Varchar
+                                }
+                            }
 
                             MySqlColumnType::MYSQL_TYPE_UNKNOWN
                             | MySqlColumnType::MYSQL_TYPE_TYPED_ARRAY
