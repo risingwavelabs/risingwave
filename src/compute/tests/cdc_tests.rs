@@ -310,6 +310,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
             pause: false,
             subscriptions_to_add: vec![],
             backfill_nodes_to_pause: Default::default(),
+            actor_cdc_table_snapshot_splits: Default::default(),
         }));
 
     tx.send_barrier(init_barrier);
