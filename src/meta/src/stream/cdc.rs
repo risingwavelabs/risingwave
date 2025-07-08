@@ -135,7 +135,7 @@ pub(crate) async fn assign_cdc_table_snapshot_splits(
             .values()
             .filter(|f| f.fragment_type_mask.contains(FragmentTypeFlag::StreamScan))
             .collect_vec();
-        if stream_scan_fragments.len() == 0 {
+        if stream_scan_fragments.is_empty() {
             continue;
         }
         if stream_scan_fragments.len() > 1 {
@@ -158,12 +158,11 @@ pub(crate) async fn assign_cdc_table_snapshot_splits(
         };
         if stream_scan_fragment.actors.is_empty() {
             return Err(anyhow::anyhow!(
-                "A stream scan fragment should have at least 1 actor".to_string()
+                "A stream scan fragment should have at least 1 actor".to_owned()
             )
             .into());
         }
-        let splits_per_actor = (splits.len() + stream_scan_fragment.actors.len() - 1)
-            / stream_scan_fragment.actors.len();
+        let splits_per_actor = splits.len().div_ceil(stream_scan_fragment.actors.len());
         for (actor_id, splits) in stream_scan_fragment
             .actors
             .iter()

@@ -357,27 +357,26 @@ impl PostgresExternalTableReader {
             Self::get_normalized_table_name(&self.schema_table_name),
         );
         let client = self.client.lock().await;
-        let mut rows = client.query(&sql, &[]).await?;
+        let rows = client.query(&sql, &[]).await?;
         if rows.is_empty() {
             Ok(None)
         } else {
             let row = &rows[0];
             let min = postgres_cell_to_scalar_impl(
-                &row,
+                row,
                 &self.split_column.data_type,
                 0,
                 &self.split_column.name,
             );
             let max = postgres_cell_to_scalar_impl(
-                &row,
+                row,
                 &self.split_column.data_type,
                 1,
                 &self.split_column.name,
             );
-            if min.is_none() || max.is_none() {
-                Ok(None)
-            } else {
-                Ok(Some((min.unwrap(), max.unwrap())))
+            match (min, max) {
+                (Some(min), Some(max)) => Ok(Some((min, max))),
+                _ => Ok(None),
             }
         }
     }
