@@ -109,6 +109,7 @@ pub trait CatalogWriter: Send + Sync {
         graph: StreamFragmentGraph,
         job_type: PbTableJobType,
         if_not_exists: bool,
+        dependencies: HashSet<ObjectId>,
     ) -> Result<()>;
 
     async fn replace_table(
@@ -374,10 +375,11 @@ impl CatalogWriter for CatalogWriterImpl {
         graph: StreamFragmentGraph,
         job_type: PbTableJobType,
         if_not_exists: bool,
+        dependencies: HashSet<ObjectId>,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .create_table(source, table, graph, job_type, if_not_exists)
+            .create_table(source, table, graph, job_type, if_not_exists, dependencies)
             .await?;
         self.wait_version(version).await
     }

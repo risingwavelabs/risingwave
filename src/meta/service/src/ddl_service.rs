@@ -578,17 +578,14 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<CreateTableResponse>, Status> {
         let request = request.into_inner();
         let job_type = request.get_job_type().unwrap_or_default();
+        let dependencies = request
+            .get_dependencies()
+            .iter()
+            .map(|id| *id as ObjectId)
+            .collect();
         let source = request.source;
         let mview = request.materialized_view.unwrap();
         let fragment_graph = request.fragment_graph.unwrap();
-        let dependencies = if job_type == PbTableJobType::SharedCdcSource {
-            HashSet::from([source
-                .as_ref()
-                .expect("shared cdc source catalog should exist")
-                .id as ObjectId])
-        } else {
-            HashSet::new()
-        };
 
         let stream_job = StreamingJob::Table(source, mview, job_type);
         let version = self

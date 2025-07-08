@@ -333,6 +333,7 @@ impl CatalogWriter for MockCatalogWriter {
         graph: StreamFragmentGraph,
         _job_type: PbTableJobType,
         if_not_exists: bool,
+        _dependencies: HashSet<ObjectId>,
     ) -> Result<()> {
         if let Some(source) = source {
             let source_id = self.create_source_inner(source)?;
