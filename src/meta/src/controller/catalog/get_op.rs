@@ -85,6 +85,19 @@ impl CatalogController {
             .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))
     }
 
+    pub async fn get_table_by_id(&self, table_id: TableId) -> MetaResult<PbTable> {
+        let inner = self.inner.read().await;
+        let table_obj = Table::find_by_id(table_id)
+            .find_also_related(Object)
+            .one(&inner.db)
+            .await?;
+        if let Some((table, obj)) = table_obj {
+            Ok(ObjectModel(table, obj.unwrap()).into())
+        } else {
+            Err(MetaError::catalog_id_not_found("table", table_id))
+        }
+    }
+
     pub async fn get_table_by_ids(
         &self,
         table_ids: Vec<TableId>,

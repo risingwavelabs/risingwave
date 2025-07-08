@@ -108,6 +108,7 @@ mod prepared_statement;
 pub mod privilege;
 pub mod query;
 mod recover;
+mod refresh;
 pub mod show;
 mod transaction;
 mod use_db;
@@ -370,17 +371,16 @@ pub async fn handle(
             columns,
             wildcard_idx,
             constraints,
-            query,
-            with_options: _, // It is put in OptimizerContext
-            // Not supported things
+            with_options,
             or_replace,
-            temporary,
             if_not_exists,
+            temporary,
             format_encode,
             source_watermarks,
             append_only,
             on_conflict,
             with_version_column,
+            query,
             cdc_table_info,
             include_column_options,
             webhook_info,
@@ -1280,6 +1280,9 @@ pub async fn handle(
         } => prepared_statement::handle_prepare(name, data_types, statement).await,
         Statement::Deallocate { name, prepare } => {
             prepared_statement::handle_deallocate(name, prepare).await
+        }
+        Statement::Refresh { table_name } => {
+            refresh::handle_refresh(handler_args, table_name).await
         }
         _ => bail_not_implemented!("Unhandled statement: {}", stmt),
     }
