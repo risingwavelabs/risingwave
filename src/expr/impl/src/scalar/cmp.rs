@@ -794,10 +794,14 @@ mod tests {
         use risingwave_common::types::{Int256, ScalarRefImpl, UInt256};
 
         // Test uint256 greatest function
-        let values =
-            [UInt256::from_str("0").unwrap(),
+        let values = [
+            UInt256::from_str("0").unwrap(),
             UInt256::from_str("123456789012345678901234567890").unwrap(),
-            UInt256::from_str("115792089237316195423570985008687907853269984665640564039457584007913129639935").unwrap()]; // max uint256
+            UInt256::from_str(
+                "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+            )
+            .unwrap(),
+        ]; // max uint256
 
         let expected_max = UInt256::from_str(
             "115792089237316195423570985008687907853269984665640564039457584007913129639935",
@@ -820,12 +824,14 @@ mod tests {
         assert_eq!(result_min, expected_min);
 
         // Test int256 as well for completeness
-        let int256_values = [Int256::from_str("-123456789012345678901234567890").unwrap(),
+        let int256_values = [
+            Int256::from_str("-123456789012345678901234567890").unwrap(),
             Int256::from_str("0").unwrap(),
             Int256::from_str(
                 "57896044618658097711785492504343953926634992332820282019728792003956564819967",
             )
-            .unwrap()]; // max int256
+            .unwrap(),
+        ]; // max int256
 
         let expected_int256_max = Int256::from_str(
             "57896044618658097711785492504343953926634992332820282019728792003956564819967",
