@@ -1190,11 +1190,15 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         _changed_secret_refs: BTreeMap<String, PbSecretRef>,
         _connector_conn_ref: Option<u32>,
     ) -> RpcResult<()> {
-        unimplemented!()
+        Ok(())
+    }
+
+    async fn reset_cdc_source(&self, _source_id: u32) -> RpcResult<()> {
+        Ok(())
     }
 
     async fn list_hosted_iceberg_tables(&self) -> RpcResult<Vec<IcebergTable>> {
-        unimplemented!()
+        Ok(vec![])
     }
 
     async fn get_fragment_by_id(

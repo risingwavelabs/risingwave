@@ -371,4 +371,44 @@ impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
         dispatch_cdc_split!(self, mut, update_offset(last_seen_offset)?);
         Ok(())
     }
+
+    /// Reset the CDC split state by clearing the offset and snapshot status
+    /// This will cause the CDC source to restart from the latest position
+    pub fn reset_to_latest(&mut self) {
+        match T::source_type() {
+            CdcSourceType::Mysql => {
+                if let Some(ref mut split) = self.mysql_split {
+                    split.inner.start_offset = None;
+                    split.inner.snapshot_done = false;
+                }
+            }
+            CdcSourceType::Postgres => {
+                if let Some(ref mut split) = self.postgres_split {
+                    split.inner.start_offset = None;
+                    split.inner.snapshot_done = false;
+                }
+            }
+            CdcSourceType::Citus => {
+                if let Some(ref mut split) = self.citus_split {
+                    split.inner.start_offset = None;
+                    split.inner.snapshot_done = false;
+                }
+            }
+            CdcSourceType::Mongodb => {
+                if let Some(ref mut split) = self.mongodb_split {
+                    split.inner.start_offset = None;
+                    split.inner.snapshot_done = false;
+                }
+            }
+            CdcSourceType::SqlServer => {
+                if let Some(ref mut split) = self.sql_server_split {
+                    split.inner.start_offset = None;
+                    split.inner.snapshot_done = false;
+                }
+            }
+            CdcSourceType::Unspecified => {
+                unreachable!("invalid debezium split")
+            }
+        }
+    }
 }

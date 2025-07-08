@@ -716,6 +716,19 @@ impl SplitImpl {
             _ => unreachable!("get_cdc_split_offset() is only for cdc split"),
         }
     }
+
+    /// Reset CDC split state by clearing offset and snapshot status
+    /// This will cause the CDC source to restart from the latest position
+    pub fn reset_cdc_split(&mut self) {
+        match self {
+            MysqlCdc(split) => split.reset_to_latest(),
+            PostgresCdc(split) => split.reset_to_latest(),
+            MongodbCdc(split) => split.reset_to_latest(),
+            CitusCdc(split) => split.reset_to_latest(),
+            SqlServerCdc(split) => split.reset_to_latest(),
+            _ => unreachable!("reset_cdc_split() is only for cdc split"),
+        }
+    }
 }
 
 impl SplitMetaData for SplitImpl {

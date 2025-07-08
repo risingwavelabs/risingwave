@@ -3702,9 +3702,12 @@ impl Parser<'_> {
             AlterSourceOperation::AlterConnectorProps {
                 alter_props: with_options,
             }
+        } else if self.parse_keyword(Keyword::RESET) {
+            AlterSourceOperation::Reset
         } else {
-            return self
-                .expected("RENAME, ADD COLUMN, OWNER TO, CONNECTOR or SET after ALTER SOURCE");
+            return self.expected(
+                "RENAME, ADD COLUMN, OWNER TO, CONNECTOR, RESET or SET after ALTER SOURCE",
+            );
         };
 
         Ok(Statement::AlterSource {

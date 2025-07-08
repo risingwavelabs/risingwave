@@ -256,6 +256,7 @@ pub enum AlterSourceOperation {
     AlterConnectorProps {
         alter_props: Vec<SqlOption>,
     },
+    Reset,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -592,6 +593,9 @@ impl fmt::Display for AlterSourceOperation {
                     "CONNECTOR WITH ({})",
                     display_comma_separated(alter_props)
                 )
+            }
+            AlterSourceOperation::Reset => {
+                write!(f, "RESET")
             }
         }
     }

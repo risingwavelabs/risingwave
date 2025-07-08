@@ -53,6 +53,7 @@ mod alter_set_schema;
 mod alter_sink_props;
 mod alter_source_column;
 mod alter_source_props;
+mod alter_source_reset;
 mod alter_source_with_sr;
 mod alter_streaming_enable_unaligned_join;
 mod alter_streaming_rate_limit;
@@ -1186,6 +1187,9 @@ pub async fn handle(
                     deferred,
                 )
                 .await
+            }
+            AlterSourceOperation::Reset => {
+                alter_source_reset::handle_alter_source_reset(handler_args, name).await
             }
         },
         Statement::AlterFunction {
