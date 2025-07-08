@@ -273,7 +273,7 @@ impl DdlService for DdlServiceImpl {
                         fragment_graph,
                         create_type: CreateType::Foreground,
                         affected_table_replace_info: None,
-                        dependencies: HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbSource`
+                        dependencies: HashSet::new(),
                         specific_resource_group: None,
                         if_not_exists: req.if_not_exists,
                     })
@@ -581,6 +581,14 @@ impl DdlService for DdlServiceImpl {
         let source = request.source;
         let mview = request.materialized_view.unwrap();
         let fragment_graph = request.fragment_graph.unwrap();
+        let dependencies = if job_type == PbTableJobType::SharedCdcSource {
+            HashSet::from([source
+                .as_ref()
+                .expect("shared cdc source catalog should exist")
+                .id as ObjectId])
+        } else {
+            HashSet::new()
+        };
 
         let stream_job = StreamingJob::Table(source, mview, job_type);
         let version = self
@@ -590,7 +598,7 @@ impl DdlService for DdlServiceImpl {
                 fragment_graph,
                 create_type: CreateType::Foreground,
                 affected_table_replace_info: None,
-                dependencies: HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbTable`
+                dependencies,
                 specific_resource_group: None,
                 if_not_exists: request.if_not_exists,
             })
@@ -635,10 +643,15 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<CreateViewResponse>, Status> {
         let req = request.into_inner();
         let view = req.get_view()?.clone();
+        let dependencies = req
+            .get_dependencies()
+            .iter()
+            .map(|id| *id as ObjectId)
+            .collect::<HashSet<_>>();
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreateView(view))
+            .run_command(DdlCommand::CreateView(view, dependencies))
             .await?;
 
         Ok(Response::new(CreateViewResponse {

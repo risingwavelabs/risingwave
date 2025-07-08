@@ -170,6 +170,9 @@ message DropMaterializedViewResponse {
 
 message CreateViewRequest {
   catalog.View view = 1;
+
+  // The list of object IDs that this view depends on.
+  repeated uint32 dependencies = 2;
 }
 
 message CreateViewResponse {

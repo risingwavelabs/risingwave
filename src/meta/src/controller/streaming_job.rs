@@ -146,14 +146,6 @@ impl CatalogController {
         )
         .await?;
 
-        // TODO(rc): pass all dependencies uniformly, deprecate `dependent_relations` and `dependent_secret_ids`.
-        dependencies.extend(
-            streaming_job
-                .dependent_relations()
-                .into_iter()
-                .map(|id| id as ObjectId),
-        );
-
         // check if any dependency is in altering status.
         if !dependencies.is_empty() {
             let altering_cnt = ObjectDependency::find()

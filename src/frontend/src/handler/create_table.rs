@@ -918,7 +918,6 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     let mut table = materialize.table().clone();
     table.owner = session.user_id();
     table.cdc_table_id = Some(cdc_table_id);
-    table.dependent_relations = vec![source.id.into()];
 
     Ok((materialize.into(), table))
 }

@@ -319,7 +319,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_view(&self, mut view: PbView) -> Result<()> {
+    async fn create_view(&self, mut view: PbView, _dependencies: HashSet<ObjectId>) -> Result<()> {
         view.id = self.gen_id();
         self.catalog.write().create_view(&view);
         self.add_table_or_source_id(view.id, view.schema_id, view.database_id);

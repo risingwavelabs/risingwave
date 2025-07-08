@@ -85,7 +85,7 @@ pub trait CatalogWriter: Send + Sync {
         owner: UserId,
     ) -> Result<()>;
 
-    async fn create_view(&self, view: PbView) -> Result<()>;
+    async fn create_view(&self, view: PbView, dependencies: HashSet<ObjectId>) -> Result<()>;
 
     async fn create_materialized_view(
         &self,
@@ -348,8 +348,8 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn create_view(&self, view: PbView) -> Result<()> {
-        let version = self.meta_client.create_view(view).await?;
+    async fn create_view(&self, view: PbView, dependencies: HashSet<ObjectId>) -> Result<()> {
+        let version = self.meta_client.create_view(view, dependencies).await?;
         self.wait_version(version).await
     }
 
