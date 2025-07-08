@@ -1247,6 +1247,7 @@ fn require_additional_exchange_on_root_in_distributed_mode(plan: PlanRef) -> boo
 fn require_additional_exchange_on_root_in_local_mode(plan: PlanRef) -> bool {
     fn is_user_table(plan: &PlanRef) -> bool {
         plan.node_type() == PlanNodeType::BatchSeqScan
+            || plan.node_type() == PlanNodeType::BatchVectorSearch
     }
 
     fn is_source(plan: &PlanRef) -> bool {

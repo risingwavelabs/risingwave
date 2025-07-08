@@ -14,7 +14,9 @@
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::array::VectorVal;
 use risingwave_common::bail;
+use risingwave_common::types::{DataType, Scalar, ScalarImpl};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::common::PbDistanceType;
@@ -23,13 +25,17 @@ use crate::PlanRef;
 use crate::expr::{
     Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, collect_input_refs,
 };
+use crate::optimizer::plan_node::batch_vector_search::BatchVectorSearchCore;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::{GenericPlanRef, TopNLimit, VectorSearch};
+use crate::optimizer::plan_node::generic::{
+    GenericPlanNode, GenericPlanRef, Project, TopNLimit, VectorSearch,
+};
 use crate::optimizer::plan_node::utils::{Distill, childless_record};
 use crate::optimizer::plan_node::{
-    BatchProject, BatchTopN, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
-    LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown, PredicatePushdownContext,
-    RewriteStreamContext, ToBatch, ToStream, ToStreamContext, gen_filter_and_pushdown, generic,
+    BatchProject, BatchTopN, BatchVectorSearch, ColPrunable, ColumnPruningContext, ExprRewritable,
+    Logical, LogicalProject, LogicalScan, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
+    PredicatePushdownContext, RewriteStreamContext, ToBatch, ToStream, ToStreamContext,
+    gen_filter_and_pushdown, generic,
 };
 use crate::optimizer::property::Order;
 use crate::utils::Condition;
@@ -209,8 +215,8 @@ impl ToStream for LogicalVectorSearch {
     }
 }
 
-impl ToBatch for LogicalVectorSearch {
-    fn to_batch(&self) -> crate::error::Result<PlanRef> {
+impl LogicalVectorSearch {
+    fn to_batch_top_n(&self) -> crate::error::Result<BatchTopN> {
         let input = self.input().to_batch()?;
         let mut exprs = self.core.cols_before_vector_distance.clone();
         let expr_type = match self.core.distance_type {
@@ -239,6 +245,137 @@ impl ToBatch for LogicalVectorSearch {
                 OrderType::ascending(),
             )]),
         );
-        Ok(BatchTopN::new(top_n).into())
+        Ok(BatchTopN::new(top_n))
+    }
+
+    fn may_vector_table_scan(&self) -> Option<(&LogicalScan, VectorVal, usize)> {
+        let scan = self.core.input.as_logical_scan()?;
+        let (input, vector_literal) = match (&self.core.left, &self.core.right) {
+            (ExprImpl::InputRef(input), ExprImpl::Literal(vector_literal))
+            | (ExprImpl::Literal(vector_literal), ExprImpl::InputRef(input)) => {
+                (input, vector_literal)
+            }
+            _ => return None,
+        };
+        let ScalarImpl::Vector(vec) = vector_literal.get_data().as_ref()? else {
+            unreachable!("input of vector search must be of vector type")
+        };
+        Some((scan, vec.clone(), input.index))
+    }
+}
+
+impl ToBatch for LogicalVectorSearch {
+    fn to_batch(&self) -> crate::error::Result<PlanRef> {
+        if let Some((scan, vector_literal, input_idx)) = self.may_vector_table_scan()
+            && !scan.vector_indexes().is_empty()
+        {
+            // let non_distance_inputs = collect_input_refs(
+            //     scan.output_col_idx().len(),
+            //     self.core
+            //         .cols_before_vector_distance
+            //         .iter()
+            //         .chain(&self.core.cols_after_vector_distance),
+            // );
+            let vector_col_idx = scan.output_col_idx()[input_idx];
+            // let non_distance_input_cols_idx: Vec<_> = non_distance_inputs
+            //     .ones()
+            //     .map(|input_idx| scan.output_col_idx()[input_idx])
+            //     .collect();
+            // println!(
+            //     "vector_col_idx: {}, non_distance_input_cols_idx: {:?}",
+            //     vector_col_idx, non_distance_input_cols_idx
+            // );
+            'next_index: for index in scan.vector_indexes() {
+                if index.vector_column_idx != vector_col_idx {
+                    continue;
+                }
+                let mut exprs = vec![];
+                for table_input in &self.core.cols_before_vector_distance {
+                    let ExprImpl::InputRef(input_ref) = table_input else {
+                        continue 'next_index;
+                    };
+                    let table_col_idx = scan.output_col_idx()[input_ref.index];
+                    if table_col_idx == vector_col_idx {
+                        exprs.push(ExprImpl::InputRef(
+                            InputRef::new(
+                                index.included_info_columns.len(),
+                                DataType::Vector(vector_literal.as_scalar_ref().into_slice().len()),
+                            )
+                            .into(),
+                        ));
+                    } else {
+                        let Some(index_col_idx) = index
+                            .included_info_columns
+                            .iter()
+                            .position(|col_idx| *col_idx == table_col_idx)
+                        else {
+                            continue 'next_index;
+                        };
+                        exprs.push(ExprImpl::InputRef(
+                            InputRef::new(
+                                index_col_idx,
+                                index.index_table.columns[index_col_idx + 1]
+                                    .data_type()
+                                    .clone(),
+                            )
+                            .into(),
+                        ));
+                    }
+                }
+                exprs.push(ExprImpl::InputRef(
+                    InputRef::new(index.included_info_columns.len() + 1, DataType::Float64).into(),
+                ));
+                for table_input in &self.core.cols_after_vector_distance {
+                    let ExprImpl::InputRef(input_ref) = table_input else {
+                        continue 'next_index;
+                    };
+                    let table_col_idx = scan.output_col_idx()[input_ref.index];
+                    if table_col_idx == vector_col_idx {
+                        exprs.push(ExprImpl::InputRef(
+                            InputRef::new(
+                                index.included_info_columns.len(),
+                                DataType::Vector(vector_literal.as_scalar_ref().into_slice().len()),
+                            )
+                            .into(),
+                        ));
+                    } else {
+                        let Some(index_col_idx) = index
+                            .included_info_columns
+                            .iter()
+                            .position(|col_idx| *col_idx == table_col_idx)
+                        else {
+                            continue 'next_index;
+                        };
+                        exprs.push(ExprImpl::InputRef(
+                            InputRef::new(
+                                index_col_idx,
+                                index.index_table.columns[index_col_idx + 1]
+                                    .data_type()
+                                    .clone(),
+                            )
+                            .into(),
+                        ));
+                    }
+                }
+                let core = BatchVectorSearchCore {
+                    top_n: self.core.top_n,
+                    distance_type: self.core.distance_type,
+                    index_name: index.index_table.name.clone(),
+                    index_table_id: index.index_table.id,
+                    vector_literal,
+                    info_column_desc: index.index_table.columns
+                        [1..(index.included_info_columns.len() + 1)]
+                        .iter()
+                        .map(|col| col.column_desc.clone())
+                        .collect(),
+                    ctx: self.core.ctx(),
+                    include_vector_col: true,
+                    include_distance_col: true,
+                };
+                let vector_search: PlanRef = BatchVectorSearch::with_core(core).into();
+                return Ok(BatchProject::new(Project::new(exprs, vector_search)).into());
+            }
+        }
+        Ok(self.to_batch_top_n()?.into())
     }
 }
