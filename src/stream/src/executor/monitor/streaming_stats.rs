@@ -94,8 +94,9 @@ pub struct StreamingMetrics {
     actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounterVec,
 
     // Streaming Join
-    pub join_lookup_miss_count: LabelGuardedIntCounterVec,
-    pub join_lookup_total_count: LabelGuardedIntCounterVec,
+    pub join_lookup_miss_in_operator_cache_count: LabelGuardedIntCounterVec,
+    pub join_lookup_total_in_operator_cache_count: LabelGuardedIntCounterVec,
+    pub join_lookup_in_storage_not_in_cache_count: LabelGuardedIntCounterVec,
     pub join_insert_cache_miss_count: LabelGuardedIntCounterVec,
     pub join_actor_input_waiting_duration_ns: LabelGuardedIntCounterVec,
     pub join_match_duration_ns: LabelGuardedIntCounterVec,
@@ -466,21 +467,32 @@ impl StreamingMetrics {
         .unwrap()
         .relabel_debug_1(level);
 
-        let join_lookup_miss_count = register_guarded_int_counter_vec_with_registry!(
-            "stream_join_lookup_miss_count",
-            "Join executor lookup miss duration",
-            &["side", "join_table_id", "actor_id", "fragment_id"],
-            registry
-        )
-        .unwrap();
+        let join_lookup_miss_in_operator_cache_count =
+            register_guarded_int_counter_vec_with_registry!(
+                "stream_join_lookup_miss_in_operator_cache_count",
+                "Number of Join executor lookup miss in operator cache",
+                &["side", "join_table_id", "actor_id", "fragment_id"],
+                registry
+            )
+            .unwrap();
 
-        let join_lookup_total_count = register_guarded_int_counter_vec_with_registry!(
-            "stream_join_lookup_total_count",
-            "Join executor lookup total operation",
-            &["side", "join_table_id", "actor_id", "fragment_id"],
-            registry
-        )
-        .unwrap();
+        let join_lookup_total_in_operator_cache_count =
+            register_guarded_int_counter_vec_with_registry!(
+                "stream_join_lookup_total_in_operator_cache_count",
+                "Number of Join executor total lookup in operator cache",
+                &["side", "join_table_id", "actor_id", "fragment_id"],
+                registry
+            )
+            .unwrap();
+
+        let join_lookup_in_storage_not_in_cache_count =
+            register_guarded_int_counter_vec_with_registry!(
+                "stream_join_lookup_in_storage_not_in_cache_count",
+                "Number of Join executor lookup in storage",
+                &["side", "join_table_id", "actor_id", "fragment_id"],
+                registry
+            )
+            .unwrap();
 
         let join_insert_cache_miss_count = register_guarded_int_counter_vec_with_registry!(
             "stream_join_insert_cache_miss_count",
@@ -1206,8 +1218,9 @@ impl StreamingMetrics {
             merge_barrier_align_duration,
             actor_output_buffer_blocking_duration_ns,
             actor_input_buffer_blocking_duration_ns,
-            join_lookup_miss_count,
-            join_lookup_total_count,
+            join_lookup_miss_in_operator_cache_count,
+            join_lookup_total_in_operator_cache_count,
+            join_lookup_in_storage_not_in_cache_count,
             join_insert_cache_miss_count,
             join_actor_input_waiting_duration_ns,
             join_match_duration_ns,

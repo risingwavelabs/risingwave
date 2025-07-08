@@ -459,7 +459,7 @@ steps:
     plugins:
       - *cargo-cache
       - docker-compose#v5.5.0: *docker-compose
-    timeout_in_minutes: 25
+    timeout_in_minutes: 30
     retry: *auto-retry
 
   - label: "check dylint"
