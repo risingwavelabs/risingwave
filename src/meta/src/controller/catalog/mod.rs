@@ -510,7 +510,7 @@ impl CatalogController {
             .into_iter()
             .collect();
 
-        let dirty_background_jobs: Vec<ObjectId> = streaming_job::Entity::find()
+        let dirty_background_jobs: HashSet<ObjectId> = streaming_job::Entity::find()
             .select_only()
             .column(streaming_job::Column::JobId)
             .filter(
@@ -520,7 +520,9 @@ impl CatalogController {
             )
             .into_tuple()
             .all(&txn)
-            .await?;
+            .await?
+            .into_iter()
+            .collect();
 
         // notify delete for failed materialized views and background jobs.
         let to_notify_objs = dirty_job_objs

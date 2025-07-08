@@ -19,7 +19,7 @@ use anyhow::Context;
 use arc_swap::ArcSwap;
 use risingwave_common::bail;
 use risingwave_hummock_sdk::HummockVersionId;
-use risingwave_meta_model::DatabaseId;
+use risingwave_meta_model::{CreateType, DatabaseId};
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::meta::PbRecoveryStatus;
 use tokio::sync::mpsc::unbounded_channel;
@@ -67,7 +67,7 @@ impl GlobalBarrierManager {
                 e.insert(DdlProgress {
                     id: job_id as u64,
                     statement: definition,
-                    create_type: "BACKGROUND".into(),
+                    create_type: CreateType::Background.as_str().into(),
                     progress: "0.0%".into(),
                 });
             }
