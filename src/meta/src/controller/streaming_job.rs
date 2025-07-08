@@ -536,19 +536,17 @@ impl CatalogController {
             .ok_or_else(|| anyhow!("obj has no database id: {:?}", obj))?;
         let streaming_job = streaming_job::Entity::find_by_id(job_id).one(&txn).await?;
 
-        if !is_cancelled {
-            if let Some(streaming_job) = &streaming_job {
-                assert_ne!(streaming_job.job_status, JobStatus::Created);
-                if streaming_job.create_type == CreateType::Background
-                    && streaming_job.job_status == JobStatus::Creating
-                {
-                    // If the job is created in background and still in creating status, we should not abort it and let recovery to handle it.
-                    tracing::warn!(
-                        id = job_id,
-                        "streaming job is created in background and still in creating status"
-                    );
-                    return Ok((false, Some(database_id)));
-                }
+        if !is_cancelled && let Some(streaming_job) = &streaming_job {
+            assert_ne!(streaming_job.job_status, JobStatus::Created);
+            if streaming_job.create_type == CreateType::Background
+                && streaming_job.job_status == JobStatus::Creating
+            {
+                // If the job is created in background and still in creating status, we should not abort it and let recovery handle it.
+                tracing::warn!(
+                    id = job_id,
+                    "streaming job is created in background and still in creating status"
+                );
+                return Ok((false, Some(database_id)));
             }
         }
 
@@ -561,7 +559,7 @@ impl CatalogController {
             // If the job is a materialized view, we need to notify the frontend.
             table.table_type == TableType::MaterializedView
         } else {
-            streaming_job.map_or(false, |job| job.create_type == CreateType::Background)
+            streaming_job.is_some_and(|job| job.create_type == CreateType::Background)
         };
         if need_notify {
             let obj: Option<PartialObject> = Object::find_by_id(job_id)
