@@ -413,6 +413,9 @@ fn build_fragment(
                 current_fragment
                     .fragment_type_mask
                     .add(FragmentTypeFlag::StreamScan);
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::StreamCdcScan);
                 // the backfill algorithm is not parallel safe
                 current_fragment.requires_singleton = true;
                 state.has_source_backfill = true;
