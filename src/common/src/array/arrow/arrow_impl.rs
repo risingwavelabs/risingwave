@@ -1933,7 +1933,7 @@ mod tests {
             UInt256Array::from_iter(values.iter().map(|r| r.as_ref().map(|x| x.as_scalar_ref())));
 
         // Convert to Arrow using the current implementation (FixedSizeBinary)
-        let converter = DefaultArrowConvert::default();
+        let converter = DefaultArrowConvert;
         let arrow = converter.uint256_to_arrow(&array).unwrap();
 
         // Critical test: verify that Arrow conversion preserves unsigned integer sorting order
