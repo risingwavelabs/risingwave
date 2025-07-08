@@ -147,7 +147,6 @@ impl WaitCheckpointTask {
                         .map(|x| x.to_owned())
                         .next()
                         .unwrap();
-                    tracing::info!("ack message id tx: {:?}", encode_message_id_data);
                     if let Some(ack_tx) = PULSAR_ACK_CHANNEL.get(ack_channel_id).await {
                         let _ = ack_tx.send(encode_message_id_data);
                     }

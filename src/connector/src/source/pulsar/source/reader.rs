@@ -156,7 +156,7 @@ impl SplitReader for PulsarBrokerReader {
 
         tracing::debug!("creating consumer for pulsar split topic {}", topic,);
 
-        let builder: ConsumerBuilder<TokioExecutor> = pulsar
+        let mut builder: ConsumerBuilder<TokioExecutor> = pulsar
             .consumer()
             .with_topic(&topic)
             .with_subscription_type(SubType::Exclusive)
@@ -168,6 +168,10 @@ impl SplitReader for PulsarBrokerReader {
                 source_ctx.fragment_id,
                 source_ctx.actor_id
             ));
+
+        if let Some(delay) = props.subscription_unacked_resend_delay {
+            builder = builder.with_unacked_message_resend_delay(Some(delay));
+        }
 
         let builder = match split.start_offset.clone() {
             PulsarEnumeratorOffset::Earliest => {
@@ -294,7 +298,7 @@ impl PulsarConsumeStream {
             }
         };
         let topic = self.topic.clone();
-        tracing::info!(
+        tracing::debug!(
             "ack message id: {:?} from channel {}",
             message_id,
             build_pulsar_ack_channel_id(&self.source_ctx.source_id, &self.split_id)
