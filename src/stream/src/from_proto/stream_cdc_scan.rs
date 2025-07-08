@@ -109,7 +109,6 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
 
         let output_columns = table_desc.columns.iter().map(Into::into).collect_vec();
         if scan_options.is_parallelized_backfill() {
-            // TODO(zw): review correctness
             // Set state table's vnodes to None to allow splits to be assigned to any actors, without following vnode constraints.
             let vnodes = None;
             let state_table =

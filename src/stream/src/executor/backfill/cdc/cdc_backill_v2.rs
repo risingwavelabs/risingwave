@@ -135,8 +135,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         let upstream_table_name = self.external_table.qualified_table_name();
         let schema_table_name = self.external_table.schema_table_name().clone();
         let external_database_name = self.external_table.database_name().to_owned();
-
-        // TODO(zw): test generated columns
         let additional_columns = self
             .output_columns
             .iter()
