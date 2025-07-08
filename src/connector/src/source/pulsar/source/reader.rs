@@ -80,8 +80,14 @@ impl SplitReader for PulsarSplitReader {
     }
 }
 
-// entry_id, batch_index
-type PulsarFilterOffset = (u64, Option<i32>);
+/// Filter offset for pulsar messages
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PulsarFilterOffset {
+    /// Entry ID of the message
+    pub entry_id: u64,
+    /// Batch index of the message, if any
+    pub batch_index: Option<i32>,
+}
 
 /// This reader reads from pulsar broker
 pub struct PulsarBrokerReader {
@@ -202,8 +208,10 @@ impl SplitReader for PulsarBrokerReader {
                     )
                 } else {
                     let start_message_id = parse_message_id(m.as_str())?;
-                    already_read_offset =
-                        Some((start_message_id.entry_id, start_message_id.batch_index));
+                    already_read_offset = Some(PulsarFilterOffset {
+                        entry_id: start_message_id.entry_id,
+                        batch_index: start_message_id.batch_index,
+                    });
                     builder.with_options(pulsar::ConsumerOptions {
                         durable: Some(false),
                         start_message_id: Some(start_message_id),
@@ -252,8 +260,15 @@ impl PulsarBrokerReader {
             for msg in msgs {
                 let msg = msg?;
 
-                if let Some((entry_id, batch_index)) = already_read_offset {
+                if let Some(PulsarFilterOffset {
+                    entry_id,
+                    batch_index,
+                }) = already_read_offset
+                {
                     let message_id = msg.message_id();
+
+                    // for most case, we only compare `entry_id`
+                    // but for batch message, we need to compare `batch_index` if the `entry_id` is the same
                     if message_id.entry_id <= entry_id && message_id.batch_index <= batch_index {
                         tracing::info!(
                             "skipping message with entry_id: {}, batch_index: {:?} as expected offset after entry_id {} batch_index {:?}",
