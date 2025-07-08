@@ -143,9 +143,9 @@ impl WaitCheckpointTask {
                     let encode_message_id_data = to_cumulative_ack
                         .as_bytea()
                         .iter()
+                        .last()
                         .flatten()
                         .map(|x| x.to_owned())
-                        .next()
                         .unwrap();
                     if let Some(ack_tx) = PULSAR_ACK_CHANNEL.get(ack_channel_id).await {
                         let _ = ack_tx.send(encode_message_id_data);

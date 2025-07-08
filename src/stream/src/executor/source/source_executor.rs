@@ -868,6 +868,7 @@ impl WaitCheckpointTaskBuilder {
                 arrays.push(offset_col);
             }
             WaitCheckpointTask::AckPulsarMessage(arrays) => {
+                // each pulsar chunk will only contain one split
                 let split_id = latest_state.keys().next().unwrap();
                 let pulsar_ack_channel_id = build_pulsar_ack_channel_id(source_id, split_id);
                 arrays.push((pulsar_ack_channel_id, offset_col));

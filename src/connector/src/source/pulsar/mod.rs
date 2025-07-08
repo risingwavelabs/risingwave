@@ -99,7 +99,8 @@ pub struct PulsarProperties {
 
     #[serde(
         rename = "subscription.unacked.resend.delay",
-        deserialize_with = "deserialize_optional_duration_from_string"
+        deserialize_with = "deserialize_optional_duration_from_string",
+        default
     )]
     pub subscription_unacked_resend_delay: Option<Duration>,
 
