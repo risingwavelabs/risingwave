@@ -50,5 +50,5 @@ select count(distinct f1), count(*) from t_ack;
 statement ok
 drop table t_ack;
 
-statement ok
+system ok
 python3 e2e_test/commands/pulsar_util.py drop-topic -t "persistent://public/default/check_ack" --force

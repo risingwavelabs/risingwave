@@ -1191,6 +1191,7 @@ PulsarProperties:
   - name: subscription.unacked.resend.delay
     field_type: Duration
     required: false
+    default: Default::default
 TestSourceProperties:
   fields:
   - name: properties
