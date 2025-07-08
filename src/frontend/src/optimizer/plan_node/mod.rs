@@ -1071,6 +1071,7 @@ mod logical_file_scan;
 mod logical_iceberg_scan;
 mod logical_postgres_query;
 
+mod batch_vector_search;
 mod logical_mysql_query;
 mod logical_vector_search;
 mod stream_cdc_table_scan;
@@ -1113,6 +1114,7 @@ pub use batch_topn::BatchTopN;
 pub use batch_union::BatchUnion;
 pub use batch_update::BatchUpdate;
 pub use batch_values::BatchValues;
+pub use batch_vector_search::BatchVectorSearch;
 pub use logical_agg::LogicalAgg;
 pub use logical_apply::LogicalApply;
 pub use logical_cdc_scan::LogicalCdcScan;
@@ -1288,6 +1290,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, FileScan }
             , { Batch, PostgresQuery }
             , { Batch, MySqlQuery }
+            , { Batch, VectorSearch }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
