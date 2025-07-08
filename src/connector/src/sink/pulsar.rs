@@ -249,6 +249,7 @@ mod opaque_type {
     use super::*;
     pub type PulsarDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
 
+    #[define_opaque(PulsarDeliveryFuture)]
     pub(super) fn may_delivery_future(future: SendFuture) -> PulsarDeliveryFuture {
         future.map(|result| {
             result

@@ -927,6 +927,8 @@ mod tests {
     }
 
     type TestFuture = impl TryFuture<Ok = (), Error = anyhow::Error> + Unpin + 'static;
+
+    #[define_opaque(TestFuture)]
     fn to_test_future(rx: Receiver<LogStoreResult<()>>) -> TestFuture {
         async move { rx.await.unwrap() }.boxed()
     }

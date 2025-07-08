@@ -122,7 +122,7 @@ impl DataType {
                         DataType::Struct(_) => 2287, // pseudo-type of array[struct] (see `pg_type.dat`)
                         DataType::List { .. } => unreachable!("Never reach here!"),
                         DataType::Map(_) => 1304,
-                        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+                        DataType::Vector(_) => 1306,
                     }
                     DataType::Serial => 20,
                     // XXX: what does the oid mean here? Why we don't have from_oid for them?
@@ -130,7 +130,7 @@ impl DataType {
                     DataType::Map(_) => 1303,
                     // TODO: Support to give a new oid for custom struct type. #9434
                     DataType::Struct(_) => 2249,  // pseudo-type of struct (see `pg_type.dat`)
-                    DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+                    DataType::Vector(_) => 1305,
                 }
             }
         }

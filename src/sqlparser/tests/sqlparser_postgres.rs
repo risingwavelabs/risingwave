@@ -482,7 +482,7 @@ fn parse_deallocate() {
     assert_eq!(
         stmt,
         Statement::Deallocate {
-            name: "a".into(),
+            name: Some("a".into()),
             prepare: false,
         }
     );
@@ -492,7 +492,7 @@ fn parse_deallocate() {
     assert_eq!(
         stmt,
         Statement::Deallocate {
-            name: Ident::new_unchecked("ALL"),
+            name: None,
             prepare: false,
         }
     );
@@ -501,7 +501,7 @@ fn parse_deallocate() {
     assert_eq!(
         stmt,
         Statement::Deallocate {
-            name: "a".into(),
+            name: Some("a".into()),
             prepare: true,
         }
     );
@@ -511,7 +511,7 @@ fn parse_deallocate() {
     assert_eq!(
         stmt,
         Statement::Deallocate {
-            name: Ident::new_unchecked("ALL"),
+            name: None,
             prepare: true,
         }
     );
@@ -608,9 +608,9 @@ fn parse_prepare() {
 #[test]
 fn parse_pg_bitwise_binary_ops() {
     let bitwise_ops = &[
-        ("#", BinaryOperator::PGBitwiseXor),
-        (">>", BinaryOperator::PGBitwiseShiftRight),
-        ("<<", BinaryOperator::PGBitwiseShiftLeft),
+        ("#", BinaryOperator::Custom("#".to_owned())),
+        (">>", BinaryOperator::Custom(">>".to_owned())),
+        ("<<", BinaryOperator::Custom("<<".to_owned())),
     ];
 
     for (str_op, op) in bitwise_ops {
@@ -629,11 +629,10 @@ fn parse_pg_bitwise_binary_ops() {
 #[test]
 fn parse_pg_unary_ops() {
     let pg_unary_ops = &[
-        ("~", UnaryOperator::PGBitwiseNot),
-        ("|/", UnaryOperator::PGSquareRoot),
-        ("||/", UnaryOperator::PGCubeRoot),
-        ("!!", UnaryOperator::PGPrefixFactorial),
-        ("@", UnaryOperator::PGAbs),
+        ("~", UnaryOperator::Custom("~".to_owned())),
+        ("|/", UnaryOperator::Custom("|/".to_owned())),
+        ("||/", UnaryOperator::Custom("||/".to_owned())),
+        ("@", UnaryOperator::Custom("@".to_owned())),
     ];
 
     for (str_op, op) in pg_unary_ops {
@@ -649,28 +648,12 @@ fn parse_pg_unary_ops() {
 }
 
 #[test]
-fn parse_pg_postfix_factorial() {
-    let postfix_factorial = &[("!", UnaryOperator::PGPostfixFactorial)];
-
-    for (str_op, op) in postfix_factorial {
-        let select = verified_only_select(&format!("SELECT a{}", &str_op));
-        assert_eq!(
-            SelectItem::UnnamedExpr(Expr::UnaryOp {
-                op: op.clone(),
-                expr: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
-            }),
-            select.projection[0]
-        );
-    }
-}
-
-#[test]
 fn parse_pg_regex_match_ops() {
     let pg_regex_match_ops = &[
-        ("~", BinaryOperator::PGRegexMatch),
-        ("~*", BinaryOperator::PGRegexIMatch),
-        ("!~", BinaryOperator::PGRegexNotMatch),
-        ("!~*", BinaryOperator::PGRegexNotIMatch),
+        ("~", BinaryOperator::Custom("~".to_owned())),
+        ("~*", BinaryOperator::Custom("~*".to_owned())),
+        ("!~", BinaryOperator::Custom("!~".to_owned())),
+        ("!~*", BinaryOperator::Custom("!~*".to_owned())),
     ];
 
     for (str_op, op) in pg_regex_match_ops {

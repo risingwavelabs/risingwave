@@ -90,7 +90,7 @@ impl CdcTableType {
     ) -> ConnectorResult<ExternalTableReaderImpl> {
         match self {
             Self::MySql => Ok(ExternalTableReaderImpl::MySql(
-                MySqlExternalTableReader::new(config, schema).await?,
+                MySqlExternalTableReader::new(config, schema)?,
             )),
             Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
                 PostgresExternalTableReader::new(config, schema, pk_indices).await?,
@@ -199,8 +199,14 @@ pub struct DebeziumSourceOffset {
 
 pub type CdcOffsetParseFunc = Box<dyn Fn(&str) -> ConnectorResult<CdcOffset> + Send>;
 
-pub trait ExternalTableReader {
+pub trait ExternalTableReader: Sized {
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset>;
+
+    // Currently, MySQL cdc uses a connection pool to manage connections to MySQL, and other CDC processes do not require the disconnect step for now.
+    #[allow(clippy::unused_async)]
+    async fn disconnect(self) -> ConnectorResult<()> {
+        Ok(())
+    }
 
     fn snapshot_read(
         &self,

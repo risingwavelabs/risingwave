@@ -126,7 +126,7 @@ fn schema_or_search_path(
                 if s.eq(USER_NAME_WILD_CARD) {
                     session.user_name()
                 } else {
-                    s.to_string()
+                    s.clone()
                 }
             })
             .collect()
@@ -589,7 +589,7 @@ pub async fn handle_show_object(
                         }
                         connection::Info::ConnectionParams(params) => {
                             // todo: show dep relations
-                            print_connection_params(params, schema)
+                            print_connection_params(&session.database(), params, &reader)
                         }
                     };
                     ShowConnectionRow {

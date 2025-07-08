@@ -14,10 +14,9 @@
 
 use std::sync::Arc;
 
-use risingwave_common::catalog::DatabaseId;
+use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::stream_plan::PbFragmentTypeFlag;
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
 
@@ -150,6 +149,15 @@ impl CommandContext {
                     .unregister_table_ids(unregistered_state_table_ids.iter().cloned())
                     .await?;
             }
+            Command::ConnectorPropsChange(obj_id_map_props) => {
+                // todo: we dont know the type of the object id, it can be a source or a sink. Should carry more info in the barrier command.
+                barrier_manager_context
+                    .source_manager
+                    .apply_source_change(SourceChange::UpdateSourceProps {
+                        source_id_map_new_props: obj_id_map_props.clone(),
+                    })
+                    .await;
+            }
             Command::CreateStreamingJob {
                 info,
                 job_type,
@@ -192,10 +200,9 @@ impl CommandContext {
                             .fill_snapshot_backfill_epoch(
                                 info.stream_job_fragments.fragments.iter().filter_map(
                                     |(fragment_id, fragment)| {
-                                        if (fragment.fragment_type_mask
-                                            & PbFragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32)
-                                            != 0
-                                        {
+                                        if fragment.fragment_type_mask.contains(
+                                            FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan,
+                                        ) {
                                             Some(*fragment_id as _)
                                         } else {
                                             None
@@ -214,10 +221,10 @@ impl CommandContext {
                             .fill_snapshot_backfill_epoch(
                                 info.stream_job_fragments.fragments.iter().filter_map(
                                     |(fragment_id, fragment)| {
-                                        if (fragment.fragment_type_mask
-                                            & (PbFragmentTypeFlag::SnapshotBackfillStreamScan as u32 | PbFragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32))
-                                            != 0
-                                        {
+                                        if fragment.fragment_type_mask.contains_any([
+                                            FragmentTypeFlag::SnapshotBackfillStreamScan,
+                                            FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan,
+                                        ]) {
                                             Some(*fragment_id as _)
                                         } else {
                                             None
@@ -323,7 +330,6 @@ impl CommandContext {
             }
             Command::DropSubscription { .. } => {}
             Command::MergeSnapshotBackfillStreamingJobs(_) => {}
-            Command::ConnectorPropsChange(_) => {}
             Command::StartFragmentBackfill { .. } => {}
         }
 

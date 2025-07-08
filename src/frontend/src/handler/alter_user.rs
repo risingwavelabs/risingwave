@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::StatementType;
+use risingwave_common::catalog::{DEFAULT_SUPER_USER_FOR_ADMIN, is_reserved_admin_user};
 use risingwave_pb::user::UserInfo;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_sqlparser::ast::{AlterUserStatement, ObjectName, UserOption, UserOptions};
@@ -33,6 +34,21 @@ fn alter_prost_user_info(
     options: &UserOptions,
     session_user: &UserCatalog,
 ) -> Result<(UserInfo, Vec<UpdateField>, Option<String>)> {
+    let change_self_password_only = session_user.id == user_info.id
+        && options.0.len() == 1
+        && matches!(
+            &options.0[0],
+            UserOption::EncryptedPassword(_) | UserOption::Password(_) | UserOption::OAuth(_)
+        );
+
+    if !change_self_password_only && is_reserved_admin_user(&user_info.name) {
+        // The admin superuser cannot be altered except for changing its password by itself.
+        return Err(PermissionDenied(
+            format!("{} cannot be altered", DEFAULT_SUPER_USER_FOR_ADMIN).to_owned(),
+        )
+        .into());
+    }
+
     if !session_user.is_super {
         let require_super = user_info.is_super
             || options
@@ -46,15 +62,8 @@ fn alter_prost_user_info(
             )
             .into());
         }
-
-        let change_self_password = session_user.id == user_info.id
-            && options.0.len() == 1
-            && matches!(
-                &options.0[0],
-                UserOption::EncryptedPassword(_) | UserOption::Password(_)
-            );
-        if !session_user.can_create_user && !change_self_password {
-            return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
+        if !session_user.can_create_user && !change_self_password_only {
+            return Err(PermissionDenied("permission denied to alter user".to_owned()).into());
         }
     }
 
@@ -141,20 +150,24 @@ fn alter_rename_prost_user_info(
     }
 
     if !session_user.is_super {
-        if user_info.is_super {
-            return Err(
-                PermissionDenied("must be superuser to rename superusers".to_owned()).into(),
-            );
-        }
-
-        if !session_user.can_create_user {
-            return Err(
-                PermissionDenied("Do not have the privilege to rename user".to_owned()).into(),
-            );
-        }
+        return Err(PermissionDenied("must be superuser to rename users".to_owned()).into());
     }
 
-    user_info.name = Binder::resolve_user_name(new_name)?;
+    let new_name = Binder::resolve_user_name(new_name)?;
+    if is_reserved_admin_user(&new_name) {
+        return Err(PermissionDenied(
+            format!("{} is reserved for admin", DEFAULT_SUPER_USER_FOR_ADMIN).to_owned(),
+        )
+        .into());
+    }
+    if is_reserved_admin_user(&user_info.name) {
+        return Err(PermissionDenied(
+            format!("{} cannot be renamed", DEFAULT_SUPER_USER_FOR_ADMIN).to_owned(),
+        )
+        .into());
+    }
+
+    user_info.name = new_name;
     user_info.auth_info = None;
     Ok((user_info, vec![UpdateField::Rename, UpdateField::AuthInfo]))
 }

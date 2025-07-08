@@ -25,12 +25,12 @@ use std::ops::Deref;
 use std::rc::Rc;
 
 use educe::Educe;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{FragmentTypeFlag, TableId};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::session_config::parallelism::ConfigParallelism;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
-    BackfillOrder, DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag, NoOpNode,
+    BackfillOrder, DispatchStrategy, DispatcherType, ExchangeNode, NoOpNode,
     PbDispatchOutputMapping, StreamContext, StreamFragmentGraph as StreamFragmentGraphProto,
     StreamNode, StreamScanType,
 };
@@ -70,6 +70,7 @@ pub struct BuildFragmentGraphState {
 
     has_source_backfill: bool,
     has_snapshot_backfill: bool,
+    has_cross_db_snapshot_backfill: bool,
 }
 
 impl BuildFragmentGraphState {
@@ -170,6 +171,15 @@ pub fn build_graph_with_strategy(
             "`SET streaming_use_shared_source = false` to disable shared source backfill, or \
                     `SET streaming_use_snapshot_backfill = false` to disable snapshot backfill"
                 .to_owned(),
+        )));
+    }
+    if state.has_cross_db_snapshot_backfill
+        && let Some(ref backfill_order) = backfill_order
+        && !backfill_order.order.is_empty()
+    {
+        return Err(RwError::from(NotSupported(
+            "Backfill order control with cross-db snapshot backfill is not supported".to_owned(),
+            "Please remove backfill order specification from your query".to_owned(),
         )));
     }
 
@@ -330,12 +340,14 @@ fn build_fragment(
     recursive::tracker!().recurse(|_t| {
         // Update current fragment based on the node we're visiting.
         match stream_node.get_node_body()? {
-            NodeBody::BarrierRecv(_) => {
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::BarrierRecv as u32
-            }
+            NodeBody::BarrierRecv(_) => current_fragment
+                .fragment_type_mask
+                .add(FragmentTypeFlag::BarrierRecv),
 
             NodeBody::Source(node) => {
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::Source as u32;
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::Source);
 
                 if let Some(source) = node.source_inner.as_ref()
                     && let Some(source_info) = source.info.as_ref()
@@ -348,30 +360,39 @@ fn build_fragment(
             }
 
             NodeBody::Dml(_) => {
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::Dml as u32;
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::Dml);
             }
 
             NodeBody::Materialize(_) => {
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::Mview as u32;
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::Mview);
             }
 
-            NodeBody::Sink(_) => {
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::Sink as u32
-            }
+            NodeBody::Sink(_) => current_fragment
+                .fragment_type_mask
+                .add(FragmentTypeFlag::Sink),
 
             NodeBody::TopN(_) => current_fragment.requires_singleton = true,
 
             NodeBody::StreamScan(node) => {
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::StreamScan as u32;
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::StreamScan);
                 match node.stream_scan_type() {
                     StreamScanType::SnapshotBackfill => {
-                        current_fragment.fragment_type_mask |=
-                            FragmentTypeFlag::SnapshotBackfillStreamScan as u32;
+                        current_fragment
+                            .fragment_type_mask
+                            .add(FragmentTypeFlag::SnapshotBackfillStreamScan);
                         state.has_snapshot_backfill = true;
                     }
                     StreamScanType::CrossDbSnapshotBackfill => {
-                        current_fragment.fragment_type_mask |=
-                            FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32;
+                        current_fragment
+                            .fragment_type_mask
+                            .add(FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan);
+                        state.has_cross_db_snapshot_backfill = true;
                     }
                     StreamScanType::Unspecified
                     | StreamScanType::Chain
@@ -389,14 +410,18 @@ fn build_fragment(
             }
 
             NodeBody::StreamCdcScan(_) => {
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::StreamScan as u32;
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::StreamScan);
                 // the backfill algorithm is not parallel safe
                 current_fragment.requires_singleton = true;
                 state.has_source_backfill = true;
             }
 
             NodeBody::CdcFilter(node) => {
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::CdcFilter as u32;
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::CdcFilter);
                 // memorize upstream source id for later use
                 state
                     .dependent_table_ids
@@ -406,7 +431,9 @@ fn build_fragment(
                     .push(node.upstream_source_id);
             }
             NodeBody::SourceBackfill(node) => {
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::SourceScan as u32;
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::SourceScan);
                 // memorize upstream source id for later use
                 let source_id = node.upstream_source_id;
                 state.dependent_table_ids.insert(source_id.into());
@@ -416,17 +443,23 @@ fn build_fragment(
 
             NodeBody::Now(_) => {
                 // TODO: Remove this and insert a `BarrierRecv` instead.
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::Now as u32;
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::Now);
                 current_fragment.requires_singleton = true;
             }
 
             NodeBody::Values(_) => {
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::Values as u32;
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::Values);
                 current_fragment.requires_singleton = true;
             }
 
             NodeBody::StreamFsFetch(_) => {
-                current_fragment.fragment_type_mask |= FragmentTypeFlag::FsFetch as u32;
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::FsFetch);
             }
 
             _ => {}

@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use pgwire::pg_response::StatementType;
-use risingwave_pb::user::grant_privilege::{Action, ActionWithGrantOption, Object};
-use risingwave_pb::user::{GrantPrivilege, UserInfo};
+use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
+use risingwave_pb::user::{Action, GrantPrivilege, UserInfo};
 use risingwave_sqlparser::ast::{CreateUserStatement, UserOption};
 
 use super::RwPgResponse;
@@ -71,7 +71,7 @@ pub async fn handle_create_user(
             }
 
             if !session_user.can_create_user {
-                return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
+                return Err(PermissionDenied("permission denied to create user".to_owned()).into());
             }
         }
 

@@ -174,7 +174,7 @@ mod new_serde {
             DataType::Struct(struct_def) => new_deserialize_struct(struct_def, data)?,
             DataType::List(item_type) => new_deserialize_list(item_type, data)?,
             DataType::Map(map_type) => new_deserialize_map(map_type, data)?,
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::Vector(_) => plain::deserialize_value(ty, data)?,
 
             data_types::simple!() => plain::deserialize_value(ty, data)?,
         })
@@ -300,10 +300,14 @@ impl RowEncoding {
         // Use 0 if there's no data.
         let max_offset = usize_offsets.last().copied().unwrap_or(0);
 
+        const U8_MAX: usize = u8::MAX as usize;
+        const U16_MAX: usize = u16::MAX as usize;
+        const U32_MAX: usize = u32::MAX as usize;
+
         let offset_width = match max_offset {
-            _n @ ..=const { u8::MAX as usize } => OffsetWidth::Offset8,
-            _n @ ..=const { u16::MAX as usize } => OffsetWidth::Offset16,
-            _n @ ..=const { u32::MAX as usize } => OffsetWidth::Offset32,
+            _n @ ..=U8_MAX => OffsetWidth::Offset8,
+            _n @ ..=U16_MAX => OffsetWidth::Offset16,
+            _n @ ..=U32_MAX => OffsetWidth::Offset32,
             _ => panic!("encoding length {} exceeds u32", max_offset),
         };
         self.header.set_offset(offset_width);

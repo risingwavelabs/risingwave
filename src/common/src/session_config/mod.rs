@@ -219,6 +219,10 @@ pub struct SessionConfig {
     #[parameter(default = true)]
     streaming_enable_materialized_expressions: bool,
 
+    /// Separate consecutive `StreamHashJoin` by no-shuffle `StreamExchange`
+    #[parameter(default = false)]
+    streaming_separate_consecutive_join: bool,
+
     /// Enable join ordering for streaming and batch queries. Defaults to true.
     #[parameter(default = true, alias = "rw_enable_join_ordering")]
     enable_join_ordering: bool,
@@ -375,7 +379,7 @@ pub struct SessionConfig {
     streaming_max_parallelism: usize,
 
     /// Used to provide the connection information for the iceberg engine.
-    /// Format: iceberg_engine_connection = schema_name.connection_name.
+    /// Format: `iceberg_engine_connection` = `schema_name.connection_name`.
     #[parameter(default = "", check_hook = check_iceberg_engine_connection)]
     iceberg_engine_connection: String,
 

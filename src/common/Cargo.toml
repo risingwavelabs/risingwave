@@ -51,6 +51,7 @@ humantime = "2.2"
 itertools = { workspace = true }
 itoa = "1.0"
 jiff = "0.1.15"
+jni = { workspace = true }
 jsonbb = { workspace = true }
 lru = { workspace = true }
 memcomparable = { version = "0.2", features = ["decimal"] }
@@ -99,7 +100,7 @@ static_assertions = "1"
 strum = "0.27"
 strum_macros = "0.27"
 sysinfo = { version = "0.35", default-features = false, features = ["system"] }
-thiserror = "2"
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tinyvec = { version = "1", features = ["rustc_1_55", "grab_spare_slice"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [

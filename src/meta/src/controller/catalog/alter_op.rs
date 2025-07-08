@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::AlterDatabaseParam;
+use risingwave_common::system_param::{OverrideValidate, Validate};
 use sea_orm::DatabaseTransaction;
 
 use super::*;
@@ -862,9 +863,17 @@ impl CatalogController {
         };
         match param {
             AlterDatabaseParam::BarrierIntervalMs(interval) => {
+                if let Some(ref interval) = interval {
+                    OverrideValidate::barrier_interval_ms(interval)
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                }
                 database.barrier_interval_ms = Set(interval.map(|i| i as i32));
             }
             AlterDatabaseParam::CheckpointFrequency(frequency) => {
+                if let Some(ref frequency) = frequency {
+                    OverrideValidate::checkpoint_frequency(frequency)
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                }
                 database.checkpoint_frequency = Set(frequency.map(|f| f as i64));
             }
         }

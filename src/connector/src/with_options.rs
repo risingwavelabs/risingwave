@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use risingwave_pb::secret::PbSecretRef;
 
+use crate::error::ConnectorResult;
 use crate::sink::catalog::SinkFormatDesc;
 use crate::source::cdc::MYSQL_CDC_CONNECTOR;
 use crate::source::cdc::external::CdcTableType;
@@ -231,6 +232,60 @@ impl WithOptionsSecResolved {
         Self { inner, secret_ref }
     }
 
+    pub fn as_plaintext(&self) -> &BTreeMap<String, String> {
+        &self.inner
+    }
+
+    pub fn as_secret(&self) -> &BTreeMap<String, PbSecretRef> {
+        &self.secret_ref
+    }
+
+    pub fn handle_update(
+        &mut self,
+        update_alter_props: BTreeMap<String, String>,
+        update_alter_secret_refs: BTreeMap<String, PbSecretRef>,
+    ) -> ConnectorResult<(Vec<u32>, Vec<u32>)> {
+        let to_add_secret_dep = update_alter_secret_refs
+            .values()
+            .map(|new_rely_secret| new_rely_secret.secret_id)
+            .collect();
+        let mut to_remove_secret_dep: Vec<u32> = vec![];
+
+        // make sure the key in update_alter_props and update_alter_secret_refs not collide
+        for key in update_alter_props.keys() {
+            if update_alter_secret_refs.contains_key(key) {
+                return Err(
+                    anyhow::anyhow!("the key {} is set both in plaintext and secret", key).into(),
+                );
+            }
+        }
+
+        // remove legacy key if it's set in both plaintext and secret
+        for k in update_alter_props.keys() {
+            if let Some(removed_secret) = self.secret_ref.remove(k) {
+                to_remove_secret_dep.push(removed_secret.secret_id);
+            }
+        }
+        for (k, v) in &update_alter_secret_refs {
+            self.inner.remove(k);
+
+            if let Some(old_secret_ref) = self.secret_ref.get(k) {
+                // no need to remove, do extend later
+                if old_secret_ref.secret_id != v.secret_id {
+                    to_remove_secret_dep.push(old_secret_ref.secret_id);
+                } else {
+                    // If the secret ref is the same, we don't need to update it.
+                    continue;
+                }
+            }
+        }
+
+        self.inner.extend(update_alter_props);
+        self.secret_ref.extend(update_alter_secret_refs);
+
+        Ok((to_add_secret_dep, to_remove_secret_dep))
+    }
+
     /// Create a new [`WithOptions`] from a [`BTreeMap`].
     pub fn without_secrets(inner: BTreeMap<String, String>) -> Self {
         Self {
@@ -245,10 +300,10 @@ impl WithOptionsSecResolved {
     }
 
     pub fn value_eq_ignore_case(&self, key: &str, val: &str) -> bool {
-        if let Some(inner_val) = self.inner.get(key) {
-            if inner_val.eq_ignore_ascii_case(val) {
-                return true;
-            }
+        if let Some(inner_val) = self.inner.get(key)
+            && inner_val.eq_ignore_ascii_case(val)
+        {
+            return true;
         }
         false
     }

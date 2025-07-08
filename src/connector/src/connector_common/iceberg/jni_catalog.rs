@@ -36,8 +36,9 @@ use itertools::Itertools;
 use jni::JavaVM;
 use jni::objects::{GlobalRef, JObject};
 use risingwave_common::bail;
+use risingwave_common::global_jvm::JVM;
 use risingwave_jni_core::call_method;
-use risingwave_jni_core::jvm_runtime::{JVM, execute_with_jni_env, jobj_to_str};
+use risingwave_jni_core::jvm_runtime::{execute_with_jni_env, jobj_to_str};
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 
@@ -363,28 +364,42 @@ impl Catalog for JniCatalog {
 
     /// Drop a table from the catalog.
     async fn drop_table(&self, table: &TableIdent) -> iceberg::Result<()> {
-        execute_with_jni_env(self.jvm, |env| {
-            let table_name_str = format!(
-                "{}.{}",
-                table.namespace().clone().inner().into_iter().join("."),
-                table.name()
-            );
+        let jvm = self.jvm;
+        let table = table.to_owned();
+        let java_catalog = self.java_catalog.clone();
+        // spawn blocking the drop table task, since dropping a table by default would purge the data which may take a long time.
+        tokio::task::spawn_blocking(move || -> iceberg::Result<()> {
+            execute_with_jni_env(jvm, |env| {
+                let table_name_str = format!(
+                    "{}.{}",
+                    table.namespace().clone().inner().into_iter().join("."),
+                    table.name()
+                );
 
-            let table_name_jstr = env.new_string(&table_name_str).unwrap();
+                let table_name_jstr = env.new_string(&table_name_str).unwrap();
 
-            call_method!(env, self.java_catalog.as_obj(), {boolean dropTable(String)},
-            &table_name_jstr)
-            .with_context(|| format!("Failed to drop iceberg table: {table_name_str}"))?;
+                call_method!(env, java_catalog.as_obj(), {boolean dropTable(String)},
+                &table_name_jstr)
+                .with_context(|| format!("Failed to drop iceberg table: {table_name_str}"))?;
 
-            Ok(())
+                Ok(())
+            })
+            .map_err(|e| {
+                iceberg::Error::new(
+                    iceberg::ErrorKind::Unexpected,
+                    "Failed to drop iceberg table.",
+                )
+                .with_source(e)
+            })
         })
+        .await
         .map_err(|e| {
             iceberg::Error::new(
                 iceberg::ErrorKind::Unexpected,
                 "Failed to drop iceberg table.",
             )
             .with_source(e)
-        })
+        })?
     }
 
     /// Check if a table exists in the catalog.

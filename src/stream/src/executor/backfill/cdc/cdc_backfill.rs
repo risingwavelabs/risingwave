@@ -354,13 +354,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     schema_table_name.clone(),
                     external_database_name.clone(),
                 );
-
                 let right_snapshot = pin!(
                     upstream_table_reader
                         .snapshot_read_full_table(read_args, self.options.snapshot_batch_size)
                         .map(Either::Right)
                 );
-
                 let (right_snapshot, snapshot_valve) = pausable(right_snapshot);
                 if is_snapshot_paused {
                     snapshot_valve.pause();
@@ -409,7 +407,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                                     rate_limit_to_zero = self
                                                         .rate_limit_rps
                                                         .is_some_and(|val| val == 0);
-
                                                     // update and persist current backfill progress without draining the buffered upstream chunks
                                                     state_impl
                                                         .mutate_state(
@@ -499,17 +496,16 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     // Since we don't need changelog before the
                                     // `last_binlog_offset`, skip the chunk that *only* contains
                                     // events before `last_binlog_offset`.
-                                    if let Some(last_binlog_offset) = last_binlog_offset.as_ref() {
-                                        if let Some(chunk_offset) = chunk_binlog_offset
-                                            && chunk_offset < *last_binlog_offset
-                                        {
-                                            tracing::trace!(
-                                                "skip changelog chunk: chunk_offset {:?}, capacity {}",
-                                                chunk_offset,
-                                                chunk.capacity()
-                                            );
-                                            continue;
-                                        }
+                                    if let Some(last_binlog_offset) = last_binlog_offset.as_ref()
+                                        && let Some(chunk_offset) = chunk_binlog_offset
+                                        && chunk_offset < *last_binlog_offset
+                                    {
+                                        tracing::trace!(
+                                            "skip changelog chunk: chunk_offset {:?}, capacity {}",
+                                            chunk_offset,
+                                            chunk.capacity()
+                                        );
+                                        continue;
                                     }
                                     // Buffer the upstream chunk.
                                     upstream_chunk_buffer.push(chunk.compact());
@@ -707,8 +703,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 .await?;
         }
 
-        // drop reader to release db connection
-        drop(upstream_table_reader);
+        upstream_table_reader.disconnect().await?;
 
         tracing::info!(
             table_id,

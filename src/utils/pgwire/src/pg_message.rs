@@ -447,6 +447,7 @@ pub enum BeParameterStatusMessage<'a> {
     StandardConformingString(&'a str),
     ServerVersion(&'a str),
     ApplicationName(&'a str),
+    TimeZone(&'a str),
 }
 
 #[derive(Debug)]
@@ -513,6 +514,8 @@ impl BeMessage<'_> {
                     }
                     ServerVersion(val) => [b"server_version", val.as_bytes()],
                     ApplicationName(val) => [b"application_name", val.as_bytes()],
+                    // psycopg3 is case-sensitive, so we use "TimeZone" instead of "timezone" #18079
+                    TimeZone(val) => [b"TimeZone", val.as_bytes()],
                 };
 
                 // Parameter names and values are passed as null-terminated strings
@@ -698,15 +701,10 @@ impl BeMessage<'_> {
             }
 
             BeMessage::ErrorResponse(error) => {
-                use thiserror_ext::AsReport;
-                // For all the errors set Severity to Error and error code to
-                // 'internal error'.
-
                 // 'E' signalizes ErrorResponse messages
                 buf.put_u8(b'E');
                 // Format the error as a pretty report.
-                let msg = error.to_report_string_pretty();
-                write_err_or_notice(buf, &ErrorOrNoticeMessage::internal_error(&msg))?;
+                write_err_or_notice(buf, &ErrorOrNoticeMessage::error(error))?;
             }
 
             BeMessage::BackendKeyData((process_id, secret_key)) => {
@@ -782,7 +780,7 @@ fn write_err_or_notice(buf: &mut BytesMut, msg: &ErrorOrNoticeMessage<'_>) -> Re
         write_cstr(buf, msg.severity.as_str().as_bytes())?;
 
         buf.put_u8(b'C'); // SQLSTATE error code
-        write_cstr(buf, msg.state.code().as_bytes())?;
+        write_cstr(buf, msg.error_code.sqlstate().as_bytes())?;
 
         buf.put_u8(b'M'); // the message
         write_cstr(buf, msg.message.as_bytes())?;
