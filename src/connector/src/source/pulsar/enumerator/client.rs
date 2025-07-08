@@ -92,7 +92,7 @@ impl SplitEnumerator for PulsarSplitEnumerator {
 
         let topics_on_broker = self
             .client
-            .get_topics_of_namespace(self.topic.namespace.clone(), LookupMode::All)
+            .get_topics_of_namespace(format!("{}/{}", self.topic.tenant, self.topic.namespace), LookupMode::All)
             .await?;
         if !topics_on_broker.contains(&self.topic.to_string()) {
             bail!("topic {} not found on broker, available topics: {:?}", self.topic, topics_on_broker);
@@ -121,36 +121,5 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         };
 
         Ok(splits)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use super::*;
-    use crate::source::SourceEnumeratorContext;
-
-    #[ignore]
-    #[tokio::test]
-    async fn test_list_splits() {
-        let props = serde_json::from_str::<PulsarProperties>(
-            r#"
-            {
-                "service.url": "pulsar://127.0.0.1:6650",
-                "topic": "persistent://public/default/test_topic",
-                "scan.startup.mode": "earliest"
-            }
-            "#,
-        )
-        .unwrap();
-        let mut enumerator =
-            PulsarSplitEnumerator::new(props, Arc::new(SourceEnumeratorContext::dummy()))
-                .await
-                .unwrap();
-        let splits = enumerator.list_splits().await.unwrap();
-        println!("{:?}", splits);
-
-        panic!()
     }
 }
