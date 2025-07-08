@@ -23,7 +23,12 @@ use risingwave_common::hash::{
 };
 use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node_body};
 use risingwave_connector::source::SplitImpl;
-use risingwave_meta_model::{DispatcherType, SourceId, StreamingParallelism, WorkerId};
+use risingwave_meta_model::fragment::DistributionType;
+use risingwave_meta_model::prelude::Actor;
+use risingwave_meta_model::{
+    DispatcherType, SourceId, StreamingParallelism, VnodeBitmap, WorkerId, actor, fragment,
+};
+use risingwave_meta_model_migration::JoinType;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::{ActorInfo, PbActorLocation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -35,7 +40,7 @@ use risingwave_pb::meta::table_parallelism::{
     FixedParallelism, Parallelism, PbAdaptiveParallelism, PbCustomParallelism, PbFixedParallelism,
     PbParallelism,
 };
-use risingwave_pb::meta::{PbTableFragments, PbTableParallelism};
+use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbTableFragments, PbTableParallelism};
 use risingwave_pb::plan_common::PbExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -44,6 +49,9 @@ use risingwave_pb::stream_plan::{
 };
 
 use super::{ActorId, FragmentId};
+use crate::controller::utils::{
+    rebuild_fragment_mapping_from_actors, rebuild_fragment_mapping_from_actors_helper,
+};
 use crate::model::MetadataModelResult;
 use crate::stream::{SplitAssignment, build_actor_connector_splits};
 
@@ -728,6 +736,40 @@ impl StreamJobFragments {
                 }),
             )
         })
+    }
+
+    pub fn get_fragment_mappings(&self) -> Vec<PbFragmentWorkerSlotMapping> {
+        let mut job_actors: Vec<(
+            risingwave_meta_model::FragmentId,
+            DistributionType,
+            risingwave_meta_model::ActorId,
+            Option<VnodeBitmap>,
+            WorkerId,
+            risingwave_meta_model::actor::ActorStatus,
+        )> = vec![];
+
+        for fragment in self.fragments.values() {
+            for actor in &fragment.actors {
+                let actor_status = self
+                    .actor_status
+                    .get(&actor.actor_id)
+                    .expect("should exist")
+                    .clone();
+                job_actors.push((
+                    fragment.fragment_id as _,
+                    fragment.distribution_type.into(),
+                    actor.actor_id as _,
+                    actor
+                        .vnode_bitmap
+                        .as_ref()
+                        .map(|bitmap| (&bitmap.to_protobuf()).into()),
+                    actor_status.worker_id() as WorkerId,
+                    risingwave_meta_model::actor::ActorStatus::from(actor_status.state()),
+                ));
+            }
+        }
+
+        rebuild_fragment_mapping_from_actors_helper(job_actors, true)
     }
 
     pub fn mv_table_id(&self) -> Option<u32> {

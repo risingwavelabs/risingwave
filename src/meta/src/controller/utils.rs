@@ -1518,7 +1518,7 @@ where
     Ok(rebuild_fragment_mapping_from_actors(job_actors))
 }
 
-pub fn rebuild_fragment_mapping_from_actors(
+pub fn rebuild_fragment_mapping_from_actors_helper(
     job_actors: Vec<(
         FragmentId,
         DistributionType,
@@ -1527,6 +1527,7 @@ pub fn rebuild_fragment_mapping_from_actors(
         WorkerId,
         ActorStatus,
     )>,
+    ignore_actor_status: bool,
 ) -> Vec<FragmentWorkerSlotMapping> {
     let mut all_actor_locations = HashMap::new();
     let mut actor_bitmaps = HashMap::new();
@@ -1534,7 +1535,7 @@ pub fn rebuild_fragment_mapping_from_actors(
     let mut fragment_dist = HashMap::new();
 
     for (fragment_id, dist, actor_id, bitmap, worker_id, actor_status) in job_actors {
-        if actor_status == ActorStatus::Inactive {
+        if !ignore_actor_status && actor_status == ActorStatus::Inactive {
             continue;
         }
 
@@ -1593,6 +1594,19 @@ pub fn rebuild_fragment_mapping_from_actors(
         })
     }
     result
+}
+
+pub fn rebuild_fragment_mapping_from_actors(
+    job_actors: Vec<(
+        FragmentId,
+        DistributionType,
+        ActorId,
+        Option<VnodeBitmap>,
+        WorkerId,
+        ActorStatus,
+    )>,
+) -> Vec<FragmentWorkerSlotMapping> {
+    rebuild_fragment_mapping_from_actors_helper(job_actors, false)
 }
 
 /// `get_fragment_actor_ids` returns the fragment actor ids of the given fragments.

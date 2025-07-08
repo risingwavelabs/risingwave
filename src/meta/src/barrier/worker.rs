@@ -294,6 +294,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 if sender.send(()).is_err() {
                                     warn!("failed to notify finish of adhoc recovery");
                                 }
+                                //
+                                //
+                                // self.context.
                             }
                             BarrierManagerRequest::UpdateDatabaseBarrier {
                                 database_id,

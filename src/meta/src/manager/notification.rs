@@ -142,6 +142,19 @@ impl NotificationManager {
         operation: Operation,
         info: Info,
     ) -> NotificationVersion {
+
+
+        println!("noti with target {:?}  op {:?} info {:?}", target, operation, info);
+        // match info {
+        //     Info::StreamingWorkerSlotMapping(_) => {
+        //         panic!()
+        //     }
+        //     Info::ServingWorkerSlotMappings(_) => {
+        //         panic!()
+        //     }
+        //     _ => {}
+        // }
+
         let mut version_guard = self.version_generator.lock().await;
         version_guard.increase_version().await;
         let version = version_guard.current_version();

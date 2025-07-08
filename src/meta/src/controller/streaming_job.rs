@@ -463,6 +463,7 @@ impl CatalogController {
 
         insert_fragment_relations(&txn, &stream_job_fragments.downstreams).await?;
 
+        // todo
         // Add actors and actor dispatchers.
         for actors in actors {
             for actor in actors {
@@ -715,15 +716,10 @@ impl CatalogController {
         .update(&txn)
         .await?;
 
-        let fragment_mapping = if is_mv {
-            get_fragment_mappings(&txn, job_id as _).await?
-        } else {
-            vec![]
-        };
-
         txn.commit().await?;
-        self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
-            .await;
+        // todo note, first time?
+        // self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
+        //     .await;
 
         Ok(())
     }
@@ -1032,8 +1028,9 @@ impl CatalogController {
         }
         txn.commit().await?;
 
-        self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
-            .await;
+        // // todo, note, mapping here
+        // self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
+        //     .await;
 
         let mut version = self
             .notify_frontend(
@@ -1047,22 +1044,23 @@ impl CatalogController {
             version = self.notify_users_update(updated_user_info).await;
         }
 
-        if let Some((objects, fragment_mapping)) = replace_table_mapping_update {
-            self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
-                .await;
-            version = self
-                .notify_frontend(
-                    NotificationOperation::Update,
-                    NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
-                )
-                .await;
-        }
+        // if let Some((objects, fragment_mapping)) = replace_table_mapping_update {
+        //     self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
+        //         .await;
+        //     version = self
+        //         .notify_frontend(
+        //             NotificationOperation::Update,
+        //             NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
+        //         )
+        //         .await;
+        // }
         inner
             .creating_table_finish_notifier
             .values_mut()
             .for_each(|creating_tables| {
                 if let Some(txs) = creating_tables.remove(&job_id) {
                     for tx in txs {
+                        println!("sending finish notification for job {}", job_id);
                         let _ = tx.send(Ok(version));
                     }
                 }
@@ -2139,7 +2137,7 @@ impl CatalogController {
 
         let txn = inner.db.begin().await?;
 
-        let mut fragment_mapping_to_notify = vec![];
+        // let mut fragment_mapping_to_notify = vec![];
 
         for (
             fragment_id,
@@ -2231,24 +2229,24 @@ impl CatalogController {
                 .await?
                 .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
 
-            let job_actors = fragment
-                .find_related(Actor)
-                .all(&txn)
-                .await?
-                .into_iter()
-                .map(|actor| {
-                    (
-                        fragment_id,
-                        fragment.distribution_type,
-                        actor.actor_id,
-                        actor.vnode_bitmap,
-                        actor.worker_id,
-                        actor.status,
-                    )
-                })
-                .collect_vec();
-
-            fragment_mapping_to_notify.extend(rebuild_fragment_mapping_from_actors(job_actors));
+            // let job_actors = fragment
+            //     .find_related(Actor)
+            //     .all(&txn)
+            //     .await?
+            //     .into_iter()
+            //     .map(|actor| {
+            //         (
+            //             fragment_id,
+            //             fragment.distribution_type,
+            //             actor.actor_id,
+            //             actor.vnode_bitmap,
+            //             actor.worker_id,
+            //             actor.status,
+            //         )
+            //     })
+            //     .collect_vec();
+            //
+            // fragment_mapping_to_notify.extend(rebuild_fragment_mapping_from_actors(job_actors));
         }
 
         let JobReschedulePostUpdates {
@@ -2279,8 +2277,8 @@ impl CatalogController {
         }
 
         txn.commit().await?;
-        self.notify_fragment_mapping(Operation::Update, fragment_mapping_to_notify)
-            .await;
+        // self.notify_fragment_mapping(Operation::Update, fragment_mapping_to_notify)
+        //     .await;
 
         Ok(())
     }

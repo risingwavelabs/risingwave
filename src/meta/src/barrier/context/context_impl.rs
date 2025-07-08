@@ -17,6 +17,7 @@ use std::sync::Arc;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::meta::subscribe_response::Operation;
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
 
@@ -30,6 +31,8 @@ use crate::barrier::{
     CreateStreamingJobType, DatabaseRuntimeInfoSnapshot, RecoveryReason, ReplaceStreamJobPlan,
     Scheduled,
 };
+use crate::controller::catalog::CatalogController;
+use crate::controller::utils::get_fragment_mappings;
 use crate::hummock::CommitEpochInfo;
 use crate::stream::SourceChange;
 
@@ -247,11 +250,12 @@ impl CommandContext {
                     streaming_job,
                     ..
                 } = info;
+                let job_id = stream_job_fragments.stream_job_id().table_id;
                 barrier_manager_context
                     .metadata_manager
                     .catalog_controller
                     .post_collect_job_fragments_inner(
-                        stream_job_fragments.stream_job_id().table_id as _,
+                        job_id as _,
                         stream_job_fragments.actor_ids(),
                         upstream_fragment_downstreams,
                         init_split_assignment,
@@ -279,6 +283,25 @@ impl CommandContext {
                     .scale_controller
                     .post_apply_reschedule(reschedules, post_updates)
                     .await?;
+
+                // let job_actors = fragment
+                //     .find_related(Actor)
+                //     .all(&txn)
+                //     .await?
+                //     .into_iter()
+                //     .map(|actor| {
+                //         (
+                //             fragment_id,
+                //             fragment.distribution_type,
+                //             actor.actor_id,
+                //             actor.vnode_bitmap,
+                //             actor.worker_id,
+                //             actor.status,
+                //         )
+                //     })
+                //     .collect_vec();
+                //
+                // fragment_mapping_to_notify.extend(rebuild_fragment_mapping_from_actors(job_actors));
             }
 
             Command::ReplaceStreamJob(
@@ -331,6 +354,62 @@ impl CommandContext {
             Command::DropSubscription { .. } => {}
             Command::MergeSnapshotBackfillStreamingJobs(_) => {}
             Command::StartFragmentBackfill { .. } => {}
+        }
+
+        match command {
+            Command::CreateStreamingJob { info, job_type, .. } => {
+                // match job_type {
+                //     // CreateStreamingJobType::SinkIntoTable(
+                //     //     replace_plan @ ReplaceStreamJobPlan {
+                //     //         old_fragments,
+                //     //         new_fragments,
+                //     //         upstream_fragment_downstreams,
+                //     //         init_split_assignment,
+                //     //         ..
+                //     //     },
+                //     // ) => {
+                //     //     barrier_manager_context
+                //     //         .metadata_manager
+                //     //         .catalog_controller
+                //     //         .post_collect_job_fragments(
+                //     //             new_fragments.stream_job_id.table_id as _,
+                //     //             new_fragments.actor_ids(),
+                //     //             upstream_fragment_downstreams,
+                //     //             init_split_assignment,
+                //     //         )
+                //     //         .await?;
+                //     //     barrier_manager_context
+                //     //         .source_manager
+                //     //         .handle_replace_job(
+                //     //             old_fragments,
+                //     //             new_fragments.stream_source_fragments(),
+                //     //             init_split_assignment.clone(),
+                //     //             replace_plan,
+                //     //         )
+                //     //         .await;
+                //     // }
+                // }
+
+                let fragment_mapping = info.stream_job_fragments.get_fragment_mappings();
+
+                CatalogController::notify_fragment_mapping_helper(
+                    Operation::Add,
+                    fragment_mapping,
+                    barrier_manager_context.env.notification_manager(),
+                )
+                .await;
+            }
+            Command::MergeSnapshotBackfillStreamingJobs(_) => {}
+            Command::RescheduleFragment { .. } => {}
+            Command::ReplaceStreamJob(_) => {
+
+                // mappint
+            }
+            Command::CreateSubscription { .. } => {}
+            Command::DropSubscription { .. } => {}
+            Command::ConnectorPropsChange(_) => {}
+            Command::StartFragmentBackfill { .. } => {}
+            _ => {}
         }
 
         Ok(())
