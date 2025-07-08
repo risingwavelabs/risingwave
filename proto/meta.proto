@@ -178,6 +178,14 @@ message ResumeRequest {}
 
 message ResumeResponse {}
 
+message RefreshRequest {
+  uint32 table_id = 1;
+}
+
+message RefreshResponse {
+  common.Status status = 1;
+}
+
 message CancelCreatingJobsRequest {
   message CreatingJobInfo {
     uint32 database_id = 1;
@@ -366,6 +374,7 @@ service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
   rpc Pause(PauseRequest) returns (PauseResponse);
   rpc Resume(ResumeRequest) returns (ResumeResponse);
+  rpc Refresh(RefreshRequest) returns (RefreshResponse);
   rpc CancelCreatingJobs(CancelCreatingJobsRequest) returns (CancelCreatingJobsResponse);
   rpc ListTableFragments(ListTableFragmentsRequest) returns (ListTableFragmentsResponse);
   rpc ListStreamingJobStates(ListStreamingJobStatesRequest) returns (ListStreamingJobStatesResponse);

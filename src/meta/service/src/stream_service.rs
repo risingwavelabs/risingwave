@@ -512,6 +512,26 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(ListRateLimitsResponse { rate_limits }))
     }
 
+    #[cfg_attr(coverage, coverage(off))]
+    async fn refresh(
+        &self,
+        request: Request<RefreshRequest>,
+    ) -> Result<Response<RefreshResponse>, Status> {
+        let req = request.into_inner();
+
+        tracing::info!("Refreshing table with id: {}", req.table_id);
+
+        // Create refresh manager and execute refresh
+        let refresh_manager = risingwave_meta::stream::RefreshManager::new(
+            self.metadata_manager.clone(),
+            self.barrier_scheduler.clone(),
+        );
+
+        let response = refresh_manager.refresh_table(req).await?;
+
+        Ok(Response::new(response))
+    }
+
     async fn alter_connector_props(
         &self,
         request: Request<AlterConnectorPropsRequest>,

@@ -108,6 +108,7 @@ mod prepared_statement;
 pub mod privilege;
 pub mod query;
 mod recover;
+mod refresh;
 pub mod show;
 mod transaction;
 mod use_db;
@@ -1280,6 +1281,9 @@ pub async fn handle(
         } => prepared_statement::handle_prepare(name, data_types, statement).await,
         Statement::Deallocate { name, prepare } => {
             prepared_statement::handle_deallocate(name, prepare).await
+        }
+        Statement::Refresh { table_name } => {
+            refresh::handle_refresh(handler_args, table_name).await
         }
         _ => bail_not_implemented!("Unhandled statement: {}", stmt),
     }

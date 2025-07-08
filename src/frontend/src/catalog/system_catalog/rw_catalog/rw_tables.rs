@@ -28,6 +28,7 @@ struct RwTable {
     owner: i32,
     definition: String,
     append_only: bool,
+    refreshable: bool,
     acl: Vec<String>,
     initialized_at: Option<Timestamptz>,
     created_at: Option<Timestamptz>,
@@ -57,6 +58,7 @@ fn read_rw_table_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwTable>> {
                     owner: table.owner as i32,
                     definition: table.create_sql_purified(),
                     append_only: table.append_only,
+                    refreshable: table.refreshable,
                     acl: get_acl_items(
                         &GrantObject::TableId(table.id.table_id),
                         true,

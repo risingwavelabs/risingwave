@@ -496,6 +496,10 @@ message Table {
   // NOTICE: when it is "None", the watermark column should be the first column in the pk
   optional int32 clean_watermark_index_in_pk = 44;
 
+  // Whether the table supports manual refresh operation:
+  // reload data from external source and emit messages based on the diff with current data.
+  bool refreshable = 45;
+
   // Per-table catalog version, used by schema change. `None` for internal
   // tables and tests. Not to be confused with the global catalog version for
   // notification service.

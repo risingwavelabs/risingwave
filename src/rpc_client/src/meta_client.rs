@@ -1715,6 +1715,10 @@ impl MetaClient {
         self.inner.set_sync_log_store_aligned(request).await?;
         Ok(())
     }
+
+    pub async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse> {
+        self.inner.refresh(request).await
+    }
 }
 
 #[async_trait]
@@ -2310,6 +2314,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, alter_connector_props, AlterConnectorPropsRequest, AlterConnectorPropsResponse }
             ,{ stream_client, get_fragment_by_id, GetFragmentByIdRequest, GetFragmentByIdResponse }
             ,{ stream_client, set_sync_log_store_aligned, SetSyncLogStoreAlignedRequest, SetSyncLogStoreAlignedResponse }
+            ,{ stream_client, refresh, RefreshRequest, RefreshResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }

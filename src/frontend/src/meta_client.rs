@@ -36,7 +36,10 @@ use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::{EventLog, FragmentDistribution, PbThrottleTarget, RecoveryStatus};
+use risingwave_pb::meta::{
+    EventLog, FragmentDistribution, PbThrottleTarget, RecoveryStatus, RefreshRequest,
+    RefreshResponse,
+};
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
@@ -159,6 +162,8 @@ pub trait FrontendMetaClient: Send + Sync {
     fn worker_id(&self) -> u32;
 
     async fn set_sync_log_store_aligned(&self, job_id: u32, aligned: bool) -> Result<()>;
+
+    async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -395,5 +400,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn set_sync_log_store_aligned(&self, job_id: u32, aligned: bool) -> Result<()> {
         self.0.set_sync_log_store_aligned(job_id, aligned).await
+    }
+
+    async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse> {
+        self.0.refresh(request).await
     }
 }

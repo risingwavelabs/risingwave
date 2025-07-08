@@ -123,6 +123,11 @@ message StartFragmentBackfillMutation {
   repeated uint32 fragment_ids = 1;
 }
 
+message RefreshStartMutation {
+  // Table ID to start refresh operation.
+  uint32 table_id = 1;
+}
+
 message BarrierMutation {
   oneof mutation {
     // Add new dispatchers to some actors, used for creating materialized views.
@@ -150,6 +155,8 @@ message BarrierMutation {
     // If we use rate limit to pause / resume backfill fragments, if user manually
     // resumes some fragments, this will overwrite the backfill order configuration.
     StartFragmentBackfillMutation start_fragment_backfill = 14;
+    // Start refresh signal for refreshing tables
+    RefreshStartMutation refresh_start = 15;
     // Combined mutation.
     // Currently, it can only be Add & Update, which is for sink into table.
     CombinedMutation combined = 100;

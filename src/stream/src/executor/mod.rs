@@ -42,8 +42,8 @@ use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate}
 use risingwave_pb::stream_plan::{
     BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation, Dispatchers,
     DropSubscriptionsMutation, PauseMutation, PbAddMutation, PbBarrier, PbBarrierMutation,
-    PbDispatcher, PbStreamMessageBatch, PbUpdateMutation, PbWatermark, ResumeMutation,
-    SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
+    PbDispatcher, PbStreamMessageBatch, PbUpdateMutation, PbWatermark, RefreshStartMutation,
+    ResumeMutation, SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
     SubscriptionUpstreamInfo, ThrottleMutation,
 };
 use smallvec::SmallVec;
@@ -323,6 +323,9 @@ pub enum Mutation {
     StartFragmentBackfill {
         fragment_ids: HashSet<FragmentId>,
     },
+    RefreshStart {
+        table_id: TableId,
+    },
 }
 
 /// The generic type `M` is the mutation type of the barrier.
@@ -533,7 +536,8 @@ impl Barrier {
             | Mutation::Throttle(_)
             | Mutation::DropSubscriptions { .. }
             | Mutation::ConnectorPropsChange(_)
-            | Mutation::StartFragmentBackfill { .. } => false,
+            | Mutation::StartFragmentBackfill { .. }
+            | Mutation::RefreshStart { .. } => false,
         }
     }
 
@@ -803,6 +807,9 @@ impl Mutation {
                     fragment_ids: fragment_ids.iter().copied().collect(),
                 })
             }
+            Mutation::RefreshStart { table_id } => PbMutation::RefreshStart(RefreshStartMutation {
+                table_id: table_id.table_id,
+            }),
         }
     }
 
@@ -970,6 +977,9 @@ impl Mutation {
                 }
 
                 _ => unreachable!(),
+            },
+            PbMutation::RefreshStart(refresh_start) => Mutation::RefreshStart {
+                table_id: TableId::new(refresh_start.table_id),
             },
         };
         Ok(mutation)

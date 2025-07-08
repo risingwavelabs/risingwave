@@ -262,7 +262,8 @@ impl InflightDatabaseInfo {
                 | Command::CreateSubscription { .. }
                 | Command::DropSubscription { .. }
                 | Command::ConnectorPropsChange(_)
-                | Command::StartFragmentBackfill { .. } => {
+                | Command::StartFragmentBackfill { .. }
+                | Command::Refresh { .. } => {
                     return None;
                 }
                 Command::CreateStreamingJob { info, job_type, .. } => {
