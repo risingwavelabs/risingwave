@@ -39,6 +39,8 @@ pub enum TableType {
     Index,
     #[sea_orm(string_value = "INTERNAL")]
     Internal,
+    #[sea_orm(string_value = "VECTOR_INDEX")]
+    VectorIndex,
 }
 
 impl From<TableType> for PbTableType {
@@ -48,6 +50,7 @@ impl From<TableType> for PbTableType {
             TableType::MaterializedView => Self::MaterializedView,
             TableType::Index => Self::Index,
             TableType::Internal => Self::Internal,
+            TableType::VectorIndex => Self::VectorIndex,
         }
     }
 }
@@ -59,6 +62,7 @@ impl From<PbTableType> for TableType {
             PbTableType::MaterializedView => Self::MaterializedView,
             PbTableType::Index => Self::Index,
             PbTableType::Internal => Self::Internal,
+            PbTableType::VectorIndex => Self::VectorIndex,
             PbTableType::Unspecified => unreachable!("Unspecified table type"),
         }
     }
