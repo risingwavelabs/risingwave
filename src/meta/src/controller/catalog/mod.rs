@@ -42,7 +42,7 @@ use risingwave_meta_model::{
     ActorId, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId, I32Array,
     IndexId, JobStatus, ObjectId, Property, SchemaId, SecretId, SinkFormatDesc, SinkId, SourceId,
     StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, UserId, ViewId,
-    connection, database, fragment, function, index, object, object_dependency, schema, secret,
+    actor, connection, database, fragment, function, index, object, object_dependency, schema, secret,
     sink, source, streaming_job, subscription, table, user_privilege, view,
 };
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
@@ -665,6 +665,110 @@ impl CatalogController {
     ) -> Vec<PbTable> {
         let mut inner = self.inner.write().await;
         inner.complete_dropped_tables(table_ids)
+    }
+
+    pub async fn reset_cdc_source(&self, source_id: SourceId) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        // First, verify that this is a CDC source
+        let source = Source::find_by_id(source_id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("source", source_id))?;
+
+        // Verify it's a CDC source by checking if it has associated tables
+        let associated_table_count: i64 = Table::find()
+            .select_only()
+            .column_as(table::Column::TableId.count(), "count")
+            .join(JoinType::InnerJoin, table::Relation::ObjectDependency.def())
+            .join(JoinType::InnerJoin, object_dependency::Relation::Source.def())
+            .filter(source::Column::SourceId.eq(source_id))
+            .into_tuple()
+            .one(&txn)
+            .await?
+            .unwrap_or(0);
+
+        if associated_table_count == 0 {
+            return Err(MetaError::permission_denied(
+                "Only CDC sources with associated tables can be reset",
+            ));
+        }
+
+        // Find all tables that depend on this CDC source
+        // In object_dependency: oid is the dependency, used_by is the user
+        // So we need to find records where oid = source_id (source is the dependency)
+        let dependent_table_ids: Vec<TableId> = ObjectDependency::find()
+            .select_only()
+            .column(object_dependency::Column::UsedBy)
+            .join(JoinType::InnerJoin, object_dependency::Relation::Object1.def())
+            .filter(
+                object_dependency::Column::Oid.eq(source_id)
+                    .and(object::Column::ObjType.eq(ObjectType::Table))
+            )
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        if dependent_table_ids.is_empty() {
+            tracing::warn!("No dependent tables found for CDC source {}", source_id);
+            txn.commit().await?;
+            return Ok(self.current_notification_version().await);
+        }
+
+        // Find all actors that belong to fragments of these tables and have splits (CDC actors)
+        let source_actors: Vec<ActorId> = Actor::find()
+            .select_only()
+            .column(actor::Column::ActorId)
+            .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
+            .filter(
+                fragment::Column::JobId.is_in(dependent_table_ids.clone())
+                    .and(actor::Column::Splits.is_not_null())
+            )
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        tracing::info!(
+            "Found {} actors across {} dependent tables for CDC source {}",
+            source_actors.len(),
+            dependent_table_ids.len(),
+            source_id
+        );
+
+        // TODO: Remove this sleep in production - only for testing reset duration
+        tracing::warn!("🔄 Simulating slow reset operation - sleeping for 5 seconds...");
+        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+        tracing::warn!("🔄 Reset sleep completed, proceeding with split clearing...");
+
+        // Clear splits for all source actors - this is the core reset operation
+        // Setting splits to NULL will cause the actors to restart from latest position
+        if !source_actors.is_empty() {
+            let affected_rows = Actor::update_many()
+                .col_expr(actor::Column::Splits, SimpleExpr::Value(Value::Bytes(None)))
+                .filter(actor::Column::ActorId.is_in(source_actors.clone()))
+                .exec(&txn)
+                .await?;
+
+            tracing::info!(
+                "Cleared splits for {} actors (affected {} rows) of CDC source {}",
+                source_actors.len(),
+                affected_rows.rows_affected,
+                source_id
+            );
+        }
+
+        txn.commit().await?;
+
+        tracing::info!("CDC source {} reset completed - splits cleared for all actors", source_id);
+
+        // TODO: In future iterations, we can add:
+        // 1. Restart the source connector worker
+        // 2. Trigger immediate split reallocation
+        // 3. Notify compute nodes about the reset
+
+        // Return a notification version to indicate the operation completed
+        Ok(self.current_notification_version().await)
     }
 }
 

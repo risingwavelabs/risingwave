@@ -1194,6 +1194,24 @@ impl DdlService for DdlServiceImpl {
             version,
         }));
     }
+
+    async fn reset_cdc_source(
+        &self,
+        request: Request<ResetCdcSourceRequest>,
+    ) -> Result<Response<ResetCdcSourceResponse>, Status> {
+        let req = request.into_inner();
+        let source_id = req.source_id;
+
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::ResetCdcSource(source_id as _))
+            .await?;
+
+        Ok(Response::new(ResetCdcSourceResponse {
+            status: None,
+            version,
+        }))
+    }
 }
 
 fn add_auto_schema_change_fail_event_log(

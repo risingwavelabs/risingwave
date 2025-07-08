@@ -85,6 +85,15 @@ message AlterSourceResponse {
   WaitVersion version = 2;
 }
 
+message ResetCdcSourceRequest {
+  uint32 source_id = 1;
+}
+
+message ResetCdcSourceResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
 message CreateSinkRequest {
   catalog.Sink sink = 1;
   stream_plan.StreamFragmentGraph fragment_graph = 2;
@@ -606,4 +615,5 @@ service DdlService {
   rpc AutoSchemaChange(AutoSchemaChangeRequest) returns (AutoSchemaChangeResponse);
   rpc AlterSwapRename(AlterSwapRenameRequest) returns (AlterSwapRenameResponse);
   rpc AlterDatabaseParam(AlterDatabaseParamRequest) returns (AlterDatabaseParamResponse);
+  rpc ResetCdcSource(ResetCdcSourceRequest) returns (ResetCdcSourceResponse);
 }

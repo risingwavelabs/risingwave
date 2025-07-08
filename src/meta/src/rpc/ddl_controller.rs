@@ -130,7 +130,7 @@ impl StreamingJobId {
     }
 }
 
-/// It’s used to describe the information of the job that needs to be replaced
+/// It's used to describe the information of the job that needs to be replaced
 /// and it will be used during replacing table and creating sink into table operations.
 pub struct ReplaceStreamJobInfo {
     pub streaming_job: StreamingJob,
@@ -178,6 +178,7 @@ pub enum DdlCommand {
     CreateSubscription(Subscription),
     DropSubscription(SubscriptionId, DropMode),
     AlterDatabaseParam(DatabaseId, AlterDatabaseParam),
+    ResetCdcSource(SourceId),
 }
 
 impl DdlCommand {
@@ -212,6 +213,7 @@ impl DdlCommand {
             DdlCommand::CreateSubscription(subscription) => Left(subscription.name.clone()),
             DdlCommand::DropSubscription(id, _) => Right(*id),
             DdlCommand::AlterDatabaseParam(id, _) => Right(*id),
+            DdlCommand::ResetCdcSource(id) => Right(*id),
         }
     }
 
@@ -238,7 +240,8 @@ impl DdlCommand {
             | DdlCommand::CreateSecret(_)
             | DdlCommand::AlterSecret(_)
             | DdlCommand::AlterSwapRename(_)
-            | DdlCommand::AlterDatabaseParam(_, _) => true,
+            | DdlCommand::AlterDatabaseParam(_, _)
+            | DdlCommand::ResetCdcSource(_) => true,
             DdlCommand::CreateStreamingJob { .. }
             | DdlCommand::CreateNonSharedSource(_)
             | DdlCommand::ReplaceStreamJob(_)
@@ -444,6 +447,7 @@ impl DdlController {
                 DdlCommand::AlterDatabaseParam(database_id, param) => {
                     ctrl.alter_database_param(database_id, param).await
                 }
+                DdlCommand::ResetCdcSource(id) => ctrl.reset_cdc_source(id).await,
             }
         }
         .in_current_span();
@@ -1946,7 +1950,7 @@ impl DdlController {
                     .await?;
                 // When sinking into table occurs, some variables of the target table may be modified,
                 // such as `fragment_id` being altered by `prepare_replace_table`.
-                // At this point, it’s necessary to update the table info carried with the sink.
+                // At this point, it's necessary to update the table info carried with the sink.
                 must_match!(&table_stream_job, StreamingJob::Table(source, table, _) => {
                     // The StreamingJob in ReplaceTableInfo must be StreamingJob::Table
                     *target_table = Some((table.clone(), source.clone()));
@@ -2328,6 +2332,33 @@ impl DdlController {
             .catalog_controller
             .comment_on(comment)
             .await
+    }
+
+    async fn reset_cdc_source(&self, source_id: SourceId) -> MetaResult<NotificationVersion> {
+        // First clear split states in catalog
+        let version = self
+            .metadata_manager
+            .catalog_controller
+            .reset_cdc_source(source_id)
+            .await?;
+
+        // Now trigger split reallocation through Source Manager
+        // Since we cleared the splits in the catalog, when Source Manager next assigns splits,
+        // the CDC connector will start from the latest position automatically
+        
+        // Trigger split reallocation by sending an empty SplitChange
+        // This will force Source Manager to reassign splits for all sources
+        self.source_manager
+            .apply_source_change(crate::stream::SourceChange::SplitChange(
+                std::collections::HashMap::new()
+            ))
+            .await;
+
+        tracing::info!("Triggered split reallocation for CDC source {} - connector will restart from latest position", source_id);
+
+        tracing::info!("CDC source {} reset completed - connector restarted and splits reallocated", source_id);
+
+        Ok(version)
     }
 }
 

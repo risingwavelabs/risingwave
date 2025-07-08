@@ -1400,22 +1400,13 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn reset_cdc_source(&self, source_id: u32) -> Result<()> {
-        // For now, we'll implement this by triggering a source change split mutation
-        // This will effectively reset the CDC split state by clearing offsets
+        pub async fn reset_cdc_source(&self, source_id: u32) -> Result<()> {
         tracing::info!("Resetting CDC source: {}", source_id);
-
-        // Create an empty split assignment to trigger state reset
-        // The actual implementation will be handled by the stream manager
-        // when it detects this is a CDC source reset operation
-
-        // Placeholder: For basic implementation, we simulate a source change
-        // that will clear the split state and restart from latest position
-
-        // TODO: Implement proper CDC reset through meta service RPC
-        // For now, this serves as the interface that will be properly implemented
-        // when we add the protobuf definitions and meta service handling
-
+        
+        // Call the new ResetCdcSource RPC
+        let request = risingwave_pb::ddl_service::ResetCdcSourceRequest { source_id };
+        self.inner.reset_cdc_source(request).await?;
+        
         Ok(())
     }
 
@@ -2361,6 +2352,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, auto_schema_change, AutoSchemaChangeRequest, AutoSchemaChangeResponse }
             ,{ ddl_client, alter_swap_rename, AlterSwapRenameRequest, AlterSwapRenameResponse }
             ,{ ddl_client, alter_secret, AlterSecretRequest, AlterSecretResponse }
+            ,{ ddl_client, reset_cdc_source, ResetCdcSourceRequest, ResetCdcSourceResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }
