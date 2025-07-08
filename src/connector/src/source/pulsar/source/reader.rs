@@ -81,7 +81,7 @@ impl SplitReader for PulsarSplitReader {
 }
 
 /// Filter offset for pulsar messages
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct PulsarFilterOffset {
     /// Entry ID of the message
     pub entry_id: u64,
