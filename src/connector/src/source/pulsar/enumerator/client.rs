@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Debug;
+
 use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
+use pulsar::proto::command_get_topics_of_namespace::Mode as LookupMode;
 use pulsar::{Pulsar, TokioExecutor};
 use risingwave_common::bail;
 use serde::{Deserialize, Serialize};
@@ -87,6 +90,14 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         // MessageId is only used when recovering from a State
         assert!(!matches!(offset, PulsarEnumeratorOffset::MessageId(_)));
 
+        let topics_on_broker = self
+            .client
+            .get_topics_of_namespace(self.topic.namespace.clone(), LookupMode::All)
+            .await?;
+        if !topics_on_broker.contains(&self.topic.to_string()) {
+            bail!("topic {} not found on broker, available topics: {:?}", self.topic, topics_on_broker);
+        }
+
         let topic_partitions = self
             .client
             .lookup_partitioned_topic_number(&self.topic.to_string())
@@ -110,5 +121,36 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         };
 
         Ok(splits)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::source::SourceEnumeratorContext;
+
+    #[ignore]
+    #[tokio::test]
+    async fn test_list_splits() {
+        let props = serde_json::from_str::<PulsarProperties>(
+            r#"
+            {
+                "service.url": "pulsar://127.0.0.1:6650",
+                "topic": "persistent://public/default/test_topic",
+                "scan.startup.mode": "earliest"
+            }
+            "#,
+        )
+        .unwrap();
+        let mut enumerator =
+            PulsarSplitEnumerator::new(props, Arc::new(SourceEnumeratorContext::dummy()))
+                .await
+                .unwrap();
+        let splits = enumerator.list_splits().await.unwrap();
+        println!("{:?}", splits);
+
+        panic!()
     }
 }
