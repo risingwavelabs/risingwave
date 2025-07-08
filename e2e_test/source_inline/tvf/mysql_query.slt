@@ -280,7 +280,7 @@ from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQ
 
 # Test uint256 casting edge cases
 statement error
-select '-1'::rw_uint256 
+select '-1'::rw_uint256
 from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'uint256_test', 'select 1;');
 
 # Test uint256 ordering with large values
