@@ -281,7 +281,6 @@ pub struct CdcScanOptions {
     pub disable_backfill: bool,
     pub snapshot_barrier_interval: u32,
     pub snapshot_batch_size: u32,
-    // TODO(zw): set parallelism of StreamCdcScanExecutor to backfill_parallelism
     pub backfill_parallelism: u32,
     pub backfill_num_rows_per_split: u64,
 }
