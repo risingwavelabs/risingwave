@@ -127,6 +127,8 @@ pub trait Session: Send + Sync {
 
     fn id(&self) -> SessionId;
 
+    fn get_config(&self, key: &str) -> Result<String, BoxedError>;
+
     fn set_config(&self, key: &str, value: String) -> Result<String, BoxedError>;
 
     fn transaction_status(&self) -> TransactionStatus;
@@ -479,6 +481,13 @@ mod tests {
 
         fn id(&self) -> SessionId {
             (0, 0)
+        }
+
+        fn get_config(&self, key: &str) -> Result<String, BoxedError> {
+            match key {
+                "timezone" => Ok("UTC".to_owned()),
+                _ => Err(format!("Unknown config key: {key}").into()),
+            }
         }
 
         fn set_config(&self, _key: &str, _value: String) -> Result<String, BoxedError> {
