@@ -55,6 +55,10 @@ const fn _default_stream_load_http_timeout_ms() -> u64 {
     30 * 1000
 }
 
+const fn default_use_https() -> bool {
+    false
+}
+
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct StarrocksCommon {
     /// The `StarRocks` host address.
@@ -78,6 +82,11 @@ pub struct StarrocksCommon {
     /// The `StarRocks` table you want to sink data to.
     #[serde(rename = "starrocks.table")]
     pub table: String,
+
+    /// Whether to use https to connect to the `StarRocks` server.
+    #[serde(rename = "starrocks.use_https")]
+    #[serde(default = "default_use_https")]
+    pub use_https: bool,
 }
 
 impl EnforceSecret for StarrocksCommon {
@@ -406,11 +415,13 @@ impl StarrocksSinkWriter {
             .set_table(config.common.table.clone())
             .build();
 
-        let txn_request_builder = StarrocksTxnRequestBuilder::new(
-            format!("http://{}:{}", config.common.host, config.common.http_port),
-            header,
-            config.stream_load_http_timeout_ms,
-        )?;
+        let url = if config.common.use_https {
+            format!("https://{}:{}", config.common.host, config.common.http_port)
+        } else {
+            format!("http://{}:{}", config.common.host, config.common.http_port)
+        };
+        let txn_request_builder =
+            StarrocksTxnRequestBuilder::new(url, header, config.stream_load_http_timeout_ms)?;
 
         Ok(Self {
             config,

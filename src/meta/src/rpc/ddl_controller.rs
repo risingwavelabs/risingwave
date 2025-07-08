@@ -82,7 +82,7 @@ use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
     CreateStreamingJobContext, CreateStreamingJobOption, GlobalStreamManagerRef,
     JobRescheduleTarget, ReplaceStreamJobContext, SourceChange, SourceManagerRef,
-    StreamFragmentGraph, create_source_worker, validate_sink,
+    StreamFragmentGraph, create_source_worker, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
@@ -2037,13 +2037,31 @@ impl DdlController {
                 to_remove_state_table_id: old_internal_table_ids[0] as i32, // asserted before
                 to_remove_source_id,
             });
+        } else if stream_job.is_materialized_view() {
+            // If it's ALTER MV, use `state::match` to match the internal tables, which is more complicated
+            // but more robust.
+            let old_fragments_upstreams = self
+                .metadata_manager
+                .catalog_controller
+                .upstream_fragments(old_fragments.fragment_ids())
+                .await?;
+
+            let old_state_graph =
+                state_match::Graph::from_existing(&old_fragments, &old_fragments_upstreams);
+            let new_state_graph = state_match::Graph::from_building(&fragment_graph);
+            let mapping =
+                state_match::match_graph_internal_tables(&new_state_graph, &old_state_graph)
+                    .context("incompatible altering on the streaming job states")?;
+
+            fragment_graph.fit_internal_table_ids_with_mapping(mapping);
         } else {
+            // If it's ALTER TABLE or SOURCE, use a trivial table id matching algorithm to keep the original behavior.
+            // TODO(alter-mv): this is actually a special case of ALTER MV, can we merge the two branches?
             let old_internal_tables = self
                 .metadata_manager
                 .get_table_catalog_by_ids(old_internal_table_ids)
                 .await?;
-            // TODO(alter-mv): the current impl is very fragile for alter MV, be more strict here!
-            fragment_graph.fit_internal_table_ids(old_internal_tables)?;
+            fragment_graph.fit_internal_tables_trivial(old_internal_tables)?;
         }
 
         // 1. Resolve the edges to the downstream fragments, extend the fragment graph to a complete

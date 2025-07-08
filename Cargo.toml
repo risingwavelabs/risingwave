@@ -175,6 +175,7 @@ iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "a
 iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "a43641762eafe135498b886db2257102f3069484" }
 iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "a43641762eafe135498b886db2257102f3069484" }
 itertools = "0.14.0"
+jni = { version = "0.21.1", features = ["invocation"] }
 jsonbb = "0.1.4"
 linkme = { version = "0.3.32", features = ["used_linker"] }
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "2682b85" }
@@ -342,7 +343,8 @@ redundant_explicit_links = "allow"
 lto = "off"
 # use parallel frontend to speed up build
 # TODO: may consider applying to release/production profile as well
-rustflags = ["-Z", "threads=8"]
+# TODO: re-enable this after it's more stable. It causes many ICE in current version. https://github.com/rust-lang/rust/issues/143342
+# rustflags = ["-Z", "threads=8"]
 
 [profile.release]
 debug = "full"
@@ -390,7 +392,7 @@ debug = "line-tables-only"
 opt-level = 2
 
 [patch.crates-io]
-faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "1d2f43c96a54ae6bb88642db7ef420d0b098fc30" }
+faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "793d612e8f660fcb29c06b689177c588a9c2dd81" }
 # Patch third-party crates for deterministic simulation.
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae" }
 # Don't patch `tokio-stream`, but only use the madsim version for **direct** dependencies.
