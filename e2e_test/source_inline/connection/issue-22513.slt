@@ -21,4 +21,4 @@ statement ok
 drop connection conn1;
 
 statement ok
-drop schema test_schema;
+drop schema test_schema cascade;
