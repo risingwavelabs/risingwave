@@ -126,7 +126,7 @@ pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
 }
 
 fn is_cdc_scan_fragment(fragment: &Fragment) -> bool {
-    return match &fragment.nodes.node_body {
+    match &fragment.nodes.node_body {
         Some(NodeBody::StreamCdcScan(_)) => true,
         Some(NodeBody::Project(_)) => {
             for input in &fragment.nodes.input {
@@ -137,7 +137,7 @@ fn is_cdc_scan_fragment(fragment: &Fragment) -> bool {
             false
         }
         _ => false,
-    };
+    }
 }
 
 pub(crate) async fn assign_cdc_table_snapshot_splits(
