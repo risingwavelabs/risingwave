@@ -20,7 +20,9 @@ use indexmap::IndexMap;
 use itertools::Itertools;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
-use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_mut};
+use risingwave_common::util::stream_graph_visitor::{
+    visit_stream_node_body, visit_stream_node_mut,
+};
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
@@ -106,6 +108,7 @@ impl CatalogController {
     ///
     /// Some of the fields in the given streaming job are placeholders, which will
     /// be updated later in `prepare_streaming_job` and notify again in `finish_streaming_job`.
+    #[await_tree::instrument]
     pub async fn create_job_catalog(
         &self,
         streaming_job: &mut StreamingJob,
@@ -394,6 +397,7 @@ impl CatalogController {
     // Given that we've ensured the tables inside `TableFragments` are complete, shall we consider
     // making them the source of truth and performing a full replacement for those in the meta store?
     /// Insert fragments and actors to meta store. Used both for creating new jobs and replacing jobs.
+    #[await_tree::instrument("prepare_streaming_job_for_{}", if for_replace { "replace" } else { "create" })]
     pub async fn prepare_streaming_job(
         &self,
         stream_job_fragments: &StreamJobFragmentsToCreate,
@@ -488,6 +492,7 @@ impl CatalogController {
     /// `try_abort_creating_streaming_job` is used to abort the job that is under initial status or in `FOREGROUND` mode.
     /// It returns (true, _) if the job is not found or aborted.
     /// It returns (_, Some(`database_id`)) is the `database_id` of the `job_id` exists
+    #[await_tree::instrument]
     pub async fn try_abort_creating_streaming_job(
         &self,
         job_id: ObjectId,
@@ -638,6 +643,7 @@ impl CatalogController {
         Ok((true, Some(database_id)))
     }
 
+    #[await_tree::instrument]
     pub async fn post_collect_job_fragments(
         &self,
         job_id: ObjectId,
@@ -2004,7 +2010,7 @@ impl CatalogController {
             let mut rate_limit = None;
             let mut node_name = None;
 
-            visit_stream_node(&stream_node, |node| {
+            visit_stream_node_body(&stream_node, |node| {
                 match node {
                     // source rate limit
                     PbNodeBody::Source(node) => {

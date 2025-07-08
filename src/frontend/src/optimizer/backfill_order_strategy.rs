@@ -350,7 +350,7 @@ mod common {
     }
 
     fn bind_table(schema_catalog: &SchemaCatalog, name: &String) -> crate::error::Result<ObjectId> {
-        if let Some(table) = schema_catalog.get_created_table_or_any_internal_table_by_name(name) {
+        if let Some(table) = schema_catalog.get_created_table_by_name(name) {
             Ok(table.id().table_id)
         } else {
             Err(CatalogError::NotFound("table", name.to_owned()).into())

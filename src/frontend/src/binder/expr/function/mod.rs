@@ -38,6 +38,7 @@ use crate::expr::{
     Expr, ExprImpl, ExprType, FunctionCallWithLambda, InputRef, TableFunction, TableFunctionType,
     UserDefinedFunction,
 };
+use crate::handler::privilege::ObjectCheckItem;
 
 mod aggregate;
 mod builtin_scalar;
@@ -178,10 +179,13 @@ impl Binder {
                 // record the dependency upon the UDF
                 referred_udfs.insert(func.id);
                 self.check_privilege(
-                    PbObject::FunctionId(func.id.function_id()),
+                    ObjectCheckItem::new(
+                        func.owner,
+                        AclMode::Execute,
+                        func.name.clone(),
+                        PbObject::FunctionId(func.id.function_id()),
+                    ),
                     self.database_id,
-                    AclMode::Execute,
-                    func.owner,
                 )?;
 
                 if !func.kind.is_scalar() {
@@ -217,10 +221,13 @@ impl Binder {
             // record the dependency upon the UDF
             referred_udfs.insert(func.id);
             self.check_privilege(
-                PbObject::FunctionId(func.id.function_id()),
+                ObjectCheckItem::new(
+                    func.owner,
+                    AclMode::Execute,
+                    func.name.clone(),
+                    PbObject::FunctionId(func.id.function_id()),
+                ),
                 self.database_id,
-                AclMode::Execute,
-                func.owner,
             )?;
             Some(func.clone())
         } else {
@@ -352,6 +359,24 @@ impl Binder {
                 )
                 .context("mysql_query error")?
                 .into());
+            }
+            // `internal_backfill_progress` table function
+            if func_name.eq("internal_backfill_progress") {
+                reject_syntax!(
+                    arg_list.variadic,
+                    "`VARIADIC` is not allowed in table function call"
+                );
+                self.ensure_table_function_allowed()?;
+                return Ok(TableFunction::new_internal_backfill_progress().into());
+            }
+            // `internal_source_backfill_progress` table function
+            if func_name.eq("internal_source_backfill_progress") {
+                reject_syntax!(
+                    arg_list.variadic,
+                    "`VARIADIC` is not allowed in table function call"
+                );
+                self.ensure_table_function_allowed()?;
+                return Ok(TableFunction::new_internal_source_backfill_progress().into());
             }
             // UDTF
             if let Some(ref udf) = udf

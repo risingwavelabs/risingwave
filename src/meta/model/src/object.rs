@@ -17,7 +17,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{DatabaseId, ObjectId, SchemaId, UserId};
 
-#[derive(Clone, Debug, PartialEq, Eq, Copy, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, Hash, PartialEq, Eq, Copy, EnumIter, DeriveActiveEnum, Serialize, Deserialize,
+)]
 #[sea_orm(rs_type = "String", db_type = "string(None)")]
 pub enum ObjectType {
     #[sea_orm(string_value = "DATABASE")]
@@ -137,6 +139,14 @@ pub enum Relation {
     UserPrivilege,
     #[sea_orm(has_many = "super::view::Entity")]
     View,
+    #[sea_orm(
+        belongs_to = "super::schema::Entity",
+        from = "Column::SchemaId",
+        to = "super::schema::Column::SchemaId",
+        on_update = "NoAction",
+        on_delete = "NoAction"
+    )]
+    Schema2,
 }
 
 impl Related<super::connection::Entity> for Entity {

@@ -15,6 +15,8 @@
 mod compaction_executor;
 mod compaction_filter;
 pub mod compaction_utils;
+use parquet::basic::Compression;
+use parquet::file::properties::WriterProperties;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ValidationTask};
 use risingwave_pb::compactor::{DispatchCompactionTaskRequest, dispatch_compaction_task_request};
 use risingwave_pb::hummock::PbCompactTask;
@@ -38,7 +40,7 @@ mod iterator;
 mod shared_buffer_compact;
 pub(super) mod task_progress;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -89,11 +91,13 @@ use crate::compaction_catalog_manager::{
 };
 use crate::hummock::compactor::compaction_utils::calculate_task_parallelism;
 use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, compact_done};
-use crate::hummock::iceberg_compactor_runner::IcebergCompactorRunner;
+use crate::hummock::iceberg_compactor_runner::{
+    IcebergCompactorRunner, IcebergCompactorRunnerConfigBuilder, RunnerContext,
+};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::{
-    BlockedXor16FilterBuilder, FilterBuilder, HummockError, SharedComapctorObjectIdManager,
-    SstableWriterFactory, UnifiedSstableWriterFactory, validate_ssts,
+    BlockedXor16FilterBuilder, FilterBuilder, SharedComapctorObjectIdManager, SstableWriterFactory,
+    UnifiedSstableWriterFactory, validate_ssts,
 };
 use crate::monitor::CompactorMetrics;
 
@@ -284,16 +288,16 @@ impl Compactor {
 /// manager and runs compaction tasks.
 #[cfg_attr(coverage, coverage(off))]
 #[must_use]
-pub fn start_compactor_iceberg(
+pub fn start_iceberg_compactor(
     compactor_context: CompactorContext,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 ) -> (JoinHandle<()>, Sender<()>) {
-    type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let stream_retry_interval = Duration::from_secs(30);
     let periodic_event_update_interval = Duration::from_millis(1000);
+    let worker_num = compactor_context.compaction_executor.worker_num();
 
-    let max_task_parallelism: u32 = (compactor_context.compaction_executor.worker_num() as f32
+    let max_task_parallelism: u32 = (worker_num as f32
         * compactor_context.storage_opts.compactor_max_task_multiplier)
         .ceil() as u32;
     let running_task_parallelism = Arc::new(AtomicU32::new(0));
@@ -307,7 +311,9 @@ pub fn start_compactor_iceberg(
     );
 
     let join_handle = tokio::spawn(async move {
-        let shutdown_map = CompactionShutdownMap::default();
+        // TODO: It's a workaround to use HashSet for filtering out duplicate tasks.
+        let iceberg_compaction_running_task_tracker =
+            Arc::new(Mutex::new((HashMap::new(), HashSet::new())));
         let mut min_interval = tokio::time::interval(stream_retry_interval);
         let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
 
@@ -418,55 +424,102 @@ pub fn start_compactor_iceberg(
                             Some(event) => event,
                             None => continue 'consume_stream,
                         };
-                        // todo!: add metrics
-                        let shutdown = shutdown_map.clone();
+
+                        let iceberg_running_task_tracker =
+                            iceberg_compaction_running_task_tracker.clone();
                         match event {
                             risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::CompactTask(iceberg_compaction_task) => {
                                 let task_id = iceberg_compaction_task.task_id;
-                                let(parallelism,iceberg_runner) = match async move {
-                                    let iceberg_runner = IcebergCompactorRunner::new(
-                                        iceberg_compaction_task,
-                                    ).await?;
-                                    let parallelism = iceberg_runner.calculate_task_parallelism().await?.min(max_task_parallelism);
-                                    Ok::<(u32,IcebergCompactorRunner),HummockError>((parallelism, iceberg_runner))
-                                }.await{
-                                    Ok((parallelism, iceberg_runner)) => {
-                                        (parallelism, iceberg_runner)
-                                    }
+                                 let write_parquet_properties = WriterProperties::builder()
+                                        .set_created_by(concat!(
+                                            "risingwave version ",
+                                            env!("CARGO_PKG_VERSION")
+                                        )
+                                        .to_owned())
+                                        .set_max_row_group_size(
+                                            compactor_context.storage_opts.iceberg_compaction_write_parquet_max_row_group_rows
+                                        )
+                                        .set_compression(Compression::SNAPPY) // TODO: make it configurable
+                                        .build();
+
+                                let compactor_runner_config = match IcebergCompactorRunnerConfigBuilder::default()
+                                    .max_parallelism(worker_num as u32)
+                                    .min_size_per_partition(compactor_context.storage_opts.iceberg_compaction_min_size_per_partition_mb as u64 * 1024 * 1024)
+                                    .max_file_count_per_partition(compactor_context.storage_opts.iceberg_compaction_max_file_count_per_partition)
+                                    .target_file_size_bytes(compactor_context.storage_opts.iceberg_compaction_target_file_size_mb as u64 * 1024 * 1024)
+                                    .enable_validate_compaction(compactor_context.storage_opts.iceberg_compaction_enable_validate)
+                                    .max_record_batch_rows(compactor_context.storage_opts.iceberg_compaction_max_record_batch_rows)
+                                    .write_parquet_properties(write_parquet_properties)
+                                    .build() {
+                                    Ok(config) => config,
                                     Err(e) => {
-                                        tracing::warn!(error = %e.as_report(), "Failed to calculate iceberg task parallelism {}", task_id);
+                                        tracing::warn!(error = %e.as_report(), "Failed to build iceberg compactor runner config {}", task_id);
                                         continue 'consume_stream;
                                     }
                                 };
 
-                                if (max_task_parallelism
-                                    - running_task_parallelism.load(Ordering::SeqCst))
-                                    < parallelism
+
+                                let iceberg_runner = match IcebergCompactorRunner::new(
+                                    iceberg_compaction_task,
+                                    compactor_runner_config,
+                                    compactor_context.compactor_metrics.clone(),
+                                ).await {
+                                    Ok(runner) => runner,
+                                    Err(e) => {
+                                        tracing::warn!(error = %e.as_report(), "Failed to create iceberg compactor runner {}", task_id);
+                                        continue 'consume_stream;
+                                    }
+                                };
+
+                                let task_unique_ident = format!(
+                                    "{}-{:?}",
+                                    iceberg_runner.iceberg_config.catalog_name(),
+                                    iceberg_runner.table_ident
+                                );
+
                                 {
-                                    tracing::warn!(
-                                        "Not enough core parallelism to serve the iceberg compaction task{} task_parallelism {} running_task_parallelism {} max_task_parallelism {}",
-                                        task_id,
-                                        parallelism,
-                                        max_task_parallelism,
-                                        running_task_parallelism.load(Ordering::Relaxed),
-                                    );
-                                    continue 'consume_stream;
+                                    let running_task_tracker_guard = iceberg_compaction_running_task_tracker
+                                        .lock()
+                                        .unwrap();
+
+                                    if running_task_tracker_guard.1.contains(&task_unique_ident) {
+                                        tracing::warn!(
+                                            task_id = %task_id,
+                                            task_unique_ident = %task_unique_ident,
+                                            "Iceberg compaction task already running, skip",
+                                        );
+                                        continue 'consume_stream;
+                                    }
                                 }
 
-                                running_task_parallelism
-                                    .fetch_add(parallelism, Ordering::SeqCst);
                                 executor.spawn(async move {
                                     let (tx, rx) = tokio::sync::oneshot::channel();
-                                    shutdown.lock().unwrap().insert(task_id, tx);
+                                    {
+                                        let mut running_task_tracker_guard =
+                                            iceberg_running_task_tracker.lock().unwrap();
+                                        running_task_tracker_guard.0.insert(task_id, tx);
+                                        running_task_tracker_guard.1.insert(task_unique_ident.clone());
+                                    }
 
-                                    iceberg_runner.compact_iceberg(
+                                    let _release_guard = scopeguard::guard(
+                                        iceberg_running_task_tracker.clone(),
+                                        move |tracker| {
+                                            let mut running_task_tracker_guard = tracker.lock().unwrap();
+                                            running_task_tracker_guard.0.remove(&task_id);
+                                            running_task_tracker_guard.1.remove(&task_unique_ident);
+                                        },
+                                    );
+
+                                    if let Err(e) = iceberg_runner.compact(
+                                        RunnerContext::new(
+                                            max_task_parallelism,
+                                            running_task_parallelism.clone(),
+                                        ),
                                         rx,
-                                        parallelism as usize,
                                     )
-                                    .await;
-
-                                    shutdown.lock().unwrap().remove(&task_id);
-                                    running_task_parallelism.fetch_sub(parallelism, Ordering::SeqCst);
+                                    .await {
+                                        tracing::warn!(error = %e.as_report(), "Failed to compact iceberg runner {}", task_id);
+                                    }
                                 });
                             },
                             risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::PullTaskAck(_) => {

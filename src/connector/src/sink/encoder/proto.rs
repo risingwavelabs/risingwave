@@ -458,6 +458,7 @@ fn on_field<D: MaybeData>(
                 return no_match_err();
             }
         }
+        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
     };
 
     Ok(value)

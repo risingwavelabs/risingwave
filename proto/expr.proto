@@ -108,6 +108,7 @@ message ExprNode {
     CHAR_LENGTH = 225;
     REPEAT = 226;
     CONCAT_OP = 227;
+    BYTEA_CONCAT_OP = 290;
     CONCAT = 286;
     CONCAT_VARIADIC = 287;
     // BOOL_OUT is different from CAST-bool-to-varchar in PostgreSQL.
@@ -344,6 +345,9 @@ message ExprNode {
 
     // EXTERNAL
     ICEBERG_TRANSFORM = 2201;
+
+    // AI model functions
+    OPENAI_EMBEDDING = 2501;
   }
   // Only use this field for function call. For other types of expression, it should be UNSPECIFIED.
   Type function_type = 1;
@@ -383,6 +387,10 @@ message TableFunction {
     POSTGRES_QUERY = 20;
     // mysql query
     MYSQL_QUERY = 21;
+    // Internal backfill table function
+    INTERNAL_BACKFILL_PROGRESS = 30;
+    // Internal source backfill table function
+    INTERNAL_SOURCE_BACKFILL_PROGRESS = 31;
     // User defined table function
     USER_DEFINED = 100;
   }
