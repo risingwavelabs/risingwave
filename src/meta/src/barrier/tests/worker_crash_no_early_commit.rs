@@ -252,6 +252,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
             barrier_interval_ms: None,
             checkpoint_frequency: None,
         }],
+        cdc_table_snapshot_split_assignment: Default::default(),
     })
     .unwrap();
     let make_control_stream_handle = || {
