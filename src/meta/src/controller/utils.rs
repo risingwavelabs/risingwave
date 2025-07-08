@@ -1040,9 +1040,9 @@ where
                 ObjectType::Sink => PbGrantObject::SinkId(oid),
                 ObjectType::View => PbGrantObject::ViewId(oid),
                 ObjectType::Function => PbGrantObject::FunctionId(oid),
-                ObjectType::Connection => unreachable!("connection is not supported yet"),
+                ObjectType::Connection => PbGrantObject::ConnectionId(oid),
                 ObjectType::Subscription => PbGrantObject::SubscriptionId(oid),
-                ObjectType::Secret => unreachable!("secret is not supported yet"),
+                ObjectType::Secret => PbGrantObject::SecretId(oid),
             };
             PbGrantPrivilege {
                 action_with_opts: vec![PbActionWithGrantOption {

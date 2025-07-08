@@ -595,10 +595,10 @@ pub(crate) async fn wait_for_epoch(
     notifier: &tokio::sync::watch::Sender<PinnedVersion>,
     wait_epoch: u64,
     table_id: TableId,
-) -> StorageResult<()> {
+) -> StorageResult<PinnedVersion> {
     let mut prev_committed_epoch = None;
     let prev_committed_epoch = &mut prev_committed_epoch;
-    wait_for_update(
+    let version = wait_for_update(
         notifier,
         |version| {
             let committed_epoch = version.table_committed_epoch(table_id);
@@ -627,17 +627,20 @@ pub(crate) async fn wait_for_epoch(
         },
     )
     .await?;
-    Ok(())
+    Ok(version)
 }
 
 pub(crate) async fn wait_for_update(
     notifier: &tokio::sync::watch::Sender<PinnedVersion>,
     mut inspect_fn: impl FnMut(&PinnedVersion) -> HummockResult<bool>,
     mut periodic_debug_info: impl FnMut() -> String,
-) -> HummockResult<()> {
+) -> HummockResult<PinnedVersion> {
     let mut receiver = notifier.subscribe();
-    if inspect_fn(&receiver.borrow_and_update())? {
-        return Ok(());
+    {
+        let version = receiver.borrow_and_update();
+        if inspect_fn(&version)? {
+            return Ok(version.clone());
+        }
     }
     let start_time = Instant::now();
     loop {
@@ -669,8 +672,9 @@ pub(crate) async fn wait_for_update(
                 return Err(HummockError::wait_epoch("tx dropped"));
             }
             Ok(Ok(_)) => {
-                if inspect_fn(&receiver.borrow_and_update())? {
-                    return Ok(());
+                let version = receiver.borrow_and_update();
+                if inspect_fn(&version)? {
+                    return Ok(version.clone());
                 }
             }
         }

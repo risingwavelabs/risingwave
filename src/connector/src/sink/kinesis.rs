@@ -221,6 +221,7 @@ mod opaque_type {
         impl TryFuture<Ok = (), Error = SinkError> + Unpin + Send + 'static;
 
     impl KinesisSinkPayloadWriter {
+        #[define_opaque(KinesisSinkPayloadWriterDeliveryFuture)]
         pub(super) fn finish(self) -> KinesisSinkPayloadWriterDeliveryFuture {
             // For reference to the behavior of `put_records`
             // https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/kinesis/client/put_records.html

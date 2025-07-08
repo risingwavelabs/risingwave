@@ -25,10 +25,11 @@ use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node_body, visit_stream_node_mut,
 };
 use risingwave_common::{bail, current_cluster_version};
+use risingwave_connector::allow_alter_on_fly_fields::check_sink_allow_alter_on_fly_fields;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
-use risingwave_connector::source::{ALTER_CONNECTOR_PROPS_ALLOWED, ConnectorProperties};
+use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, match_sink_name_str};
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::object::ObjectType;
@@ -205,16 +206,15 @@ impl CatalogController {
                 Table::insert(table_model).exec(&txn).await?;
             }
             StreamingJob::Sink(sink, _) => {
-                if let Some(target_table_id) = sink.target_table {
-                    if check_sink_into_table_cycle(
+                if let Some(target_table_id) = sink.target_table
+                    && check_sink_into_table_cycle(
                         target_table_id as ObjectId,
                         dependencies.iter().cloned().collect(),
                         &txn,
                     )
                     .await?
-                    {
-                        bail!("Creating such a sink will result in circular dependency.");
-                    }
+                {
+                    bail!("Creating such a sink will result in circular dependency.");
                 }
 
                 let job_id = Self::create_streaming_job_obj(
@@ -1213,6 +1213,11 @@ impl CatalogController {
                 let source = source::ActiveModel::from(source);
                 source.update(txn).await?;
             }
+            StreamingJob::MaterializedView(table) => {
+                // Update the table catalog with the new one.
+                let table = table::ActiveModel::from(table);
+                table.update(txn).await?;
+            }
             _ => unreachable!(
                 "invalid streaming job type: {:?}",
                 streaming_job.job_type_str()
@@ -1290,7 +1295,7 @@ impl CatalogController {
         // 4. update catalogs and notify.
         let mut objects = vec![];
         match job_type {
-            StreamingJobType::Table(_) => {
+            StreamingJobType::Table(_) | StreamingJobType::MaterializedView => {
                 let (table, table_obj) = Table::find_by_id(original_job_id)
                     .find_also_related(Object)
                     .one(txn)
@@ -1443,13 +1448,12 @@ impl CatalogController {
             let mut found = false;
             if fragment_type_mask.contains(FragmentTypeFlag::Source) {
                 visit_stream_node_mut(stream_node, |node| {
-                    if let PbNodeBody::Source(node) = node {
-                        if let Some(node_inner) = &mut node.source_inner
-                            && node_inner.source_id == source_id as u32
-                        {
-                            node_inner.rate_limit = rate_limit;
-                            found = true;
-                        }
+                    if let PbNodeBody::Source(node) = node
+                        && let Some(node_inner) = &mut node.source_inner
+                        && node_inner.source_id == source_id as u32
+                    {
+                        node_inner.rate_limit = rate_limit;
+                        found = true;
                     }
                 });
             }
@@ -1718,33 +1722,15 @@ impl CatalogController {
             })?;
         let connector = source.with_properties.0.get_connector().unwrap();
 
-        {
-            let allow_props_set =
-                ALTER_CONNECTOR_PROPS_ALLOWED
-                    .get(&connector)
-                    .ok_or_else(|| {
-                        MetaError::invalid_parameter(format!(
-                            "connector {} does not support alter properties",
-                            connector
-                        ))
-                    })?;
-            for k in alter_props.keys().chain(alter_secret_refs.keys()) {
-                if !allow_props_set.contains(k) {
-                    return Err(MetaError::invalid_parameter(format!(
-                        "connector {} does not support alter property `{}`, allowed props: {}",
-                        connector,
-                        k,
-                        {
-                            allow_props_set
-                                .iter()
-                                .map(|s| format!("`{}`", s))
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        }
-                    )));
-                }
-            }
-        }
+        // Use check_source_allow_alter_on_fly_fields to validate allowed properties
+        let prop_keys: Vec<String> = alter_props
+            .keys()
+            .chain(alter_secret_refs.keys())
+            .cloned()
+            .collect();
+        risingwave_connector::allow_alter_on_fly_fields::check_source_allow_alter_on_fly_fields(
+            &connector, &prop_keys,
+        )?;
 
         let mut options_with_secret = WithOptionsSecResolved::new(
             source.with_properties.0.clone(),
@@ -1964,20 +1950,14 @@ impl CatalogController {
         match sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) {
             Some(connector) => {
                 let connector_type = connector.to_lowercase();
+                let field_names: Vec<String> = props.keys().cloned().collect();
+                check_sink_allow_alter_on_fly_fields(&connector_type, &field_names)
+                    .map_err(|e| SinkError::Config(anyhow!(e)))?;
+
                 match_sink_name_str!(
                     connector_type.as_str(),
                     SinkType,
                     {
-                        for (k, v) in &props {
-                            if !SinkType::SINK_ALTER_CONFIG_LIST.contains(&k.as_str()) {
-                                return Err(SinkError::Config(anyhow!(
-                                    "unsupported alter config: {}={}",
-                                    k,
-                                    v
-                                ))
-                                .into());
-                            }
-                        }
                         let mut new_props = sink.properties.0.clone();
                         new_props.extend(props.clone());
                         SinkType::validate_alter_config(&new_props)

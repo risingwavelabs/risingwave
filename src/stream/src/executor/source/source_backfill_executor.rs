@@ -721,28 +721,27 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     // yield barrier after reporting progress
                                     yield Message::Barrier(barrier);
 
-                                    if let Some(to_apply_mutation) = maybe_muatation {
-                                        if self
+                                    if let Some(to_apply_mutation) = maybe_muatation
+                                        && self
                                             .apply_split_change_after_yield_barrier(
                                                 barrier_epoch,
                                                 &mut backfill_stage,
                                                 to_apply_mutation,
                                             )
                                             .await?
-                                        {
-                                            let reader = rebuild_reader_on_split_changed(
-                                                &self,
-                                                &backfill_stage,
-                                                &source_desc,
-                                            )
-                                            .await?;
+                                    {
+                                        let reader = rebuild_reader_on_split_changed(
+                                            &self,
+                                            &backfill_stage,
+                                            &source_desc,
+                                        )
+                                        .await?;
 
-                                            backfill_stream = select_with_strategy(
-                                                input.by_ref().map(Either::Left),
-                                                reader.map(Either::Right),
-                                                select_strategy,
-                                            );
-                                        }
+                                        backfill_stream = select_with_strategy(
+                                            input.by_ref().map(Either::Left),
+                                            reader.map(Either::Right),
+                                            select_strategy,
+                                        );
                                     }
                                 }
                             }

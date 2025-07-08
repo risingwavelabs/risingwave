@@ -158,12 +158,11 @@ impl BuildingFragment {
                 dml_node.table_version_id = job.table_version_id().unwrap();
             }
             NodeBody::StreamFsFetch(fs_fetch_node) => {
-                if let StreamingJob::Table(table_source, _, _) = job {
-                    if let Some(node_inner) = fs_fetch_node.node_inner.as_mut()
-                        && let Some(source) = table_source
-                    {
-                        node_inner.source_id = source.id;
-                    }
+                if let StreamingJob::Table(table_source, _, _) = job
+                    && let Some(node_inner) = fs_fetch_node.node_inner.as_mut()
+                    && let Some(source) = table_source
+                {
+                    node_inner.source_id = source.id;
                 }
             }
             NodeBody::Source(source_node) => {
@@ -171,11 +170,11 @@ impl BuildingFragment {
                     // Note: For table without connector, it has a dummy Source node.
                     // Note: For table with connector, it's source node has a source id different with the table id (job id), assigned in create_job_catalog.
                     StreamingJob::Table(source, _table, _table_job_type) => {
-                        if let Some(source_inner) = source_node.source_inner.as_mut() {
-                            if let Some(source) = source {
-                                debug_assert_ne!(source.id, job_id);
-                                source_inner.source_id = source.id;
-                            }
+                        if let Some(source_inner) = source_node.source_inner.as_mut()
+                            && let Some(source) = source
+                        {
+                            debug_assert_ne!(source.id, job_id);
+                            source_inner.source_id = source.id;
                         }
                     }
                     StreamingJob::Source(source) => {
@@ -346,13 +345,14 @@ pub type FragmentBackfillOrder = HashMap<FragmentId, Vec<FragmentId>>;
 #[derive(Default, Debug)]
 pub struct StreamFragmentGraph {
     /// stores all the fragments in the graph.
-    fragments: HashMap<GlobalFragmentId, BuildingFragment>,
+    pub(super) fragments: HashMap<GlobalFragmentId, BuildingFragment>,
 
     /// stores edges between fragments: upstream => downstream.
-    downstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, StreamFragmentEdge>>,
+    pub(super) downstreams:
+        HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, StreamFragmentEdge>>,
 
     /// stores edges between fragments: downstream -> upstream.
-    upstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, StreamFragmentEdge>>,
+    pub(super) upstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, StreamFragmentEdge>>,
 
     /// Dependent relations of this job.
     dependent_table_ids: HashSet<TableId>,
@@ -495,8 +495,9 @@ impl StreamFragmentGraph {
         }
     }
 
-    /// Set internal tables' `table_id`s according to a list of internal tables
-    pub fn fit_internal_table_ids(
+    /// Use a trivial algorithm to match the internal tables of the new graph for
+    /// `ALTER TABLE` or `ALTER SOURCE`.
+    pub fn fit_internal_tables_trivial(
         &mut self,
         mut old_internal_tables: Vec<Table>,
     ) -> MetaResult<()> {
@@ -533,6 +534,20 @@ impl StreamFragmentGraph {
         }
 
         Ok(())
+    }
+
+    /// Fit the internal tables' `table_id`s according to the given mapping.
+    pub fn fit_internal_table_ids_with_mapping(&mut self, matches: HashMap<u32, u32>) {
+        for fragment in self.fragments.values_mut() {
+            stream_graph_visitor::visit_internal_tables(
+                &mut fragment.inner,
+                |table, _table_type_name| {
+                    let target = matches.get(&table.id).cloned().unwrap();
+                    // TODO(alter-mv): some other fields may also need to be aligned, like `vnode_count`?
+                    table.id = target;
+                },
+            );
+        }
     }
 
     /// Returns the fragment id where the streaming job node located.
@@ -1135,7 +1150,7 @@ impl CompleteStreamFragmentGraph {
                 let nodes = table_fragment.node.as_ref().unwrap();
 
                 let (dist_key_indices, output_mapping) = match job_type {
-                    StreamingJobType::Table(_) => {
+                    StreamingJobType::Table(_) | StreamingJobType::MaterializedView => {
                         let mview_node = nodes.get_node_body().unwrap().as_materialize().unwrap();
                         let all_columns = mview_node.column_descs();
                         let dist_key_indices = mview_node.dist_key_indices();

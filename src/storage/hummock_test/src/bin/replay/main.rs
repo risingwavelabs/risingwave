@@ -28,7 +28,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use clap::Parser;
-use foyer::{Engine, HybridCacheBuilder, LargeEngineOptions};
+use foyer::{CacheBuilder, Engine, HybridCacheBuilder, LargeEngineOptions};
 use replay_impl::{GlobalReplayImpl, get_replay_notification_client};
 use risingwave_common::config::{
     NoOverride, ObjectStoreConfig, extract_storage_memory_config, load_config,
@@ -137,6 +137,8 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         use_new_object_prefix_strategy: args.use_new_object_prefix_strategy,
         meta_cache,
         block_cache,
+        vector_meta_cache: CacheBuilder::new(1 << 10).build(),
+        vector_block_cache: CacheBuilder::new(1 << 10).build(),
     }));
 
     let (hummock_meta_client, notification_client, notifier) = {

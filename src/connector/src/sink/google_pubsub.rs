@@ -54,6 +54,7 @@ mod delivery_future {
     pub type GooglePubSubSinkDeliveryFuture =
         impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
 
+    #[define_opaque(GooglePubSubSinkDeliveryFuture)]
     pub(super) fn may_delivery_future(awaiter: Vec<Awaiter>) -> GooglePubSubSinkDeliveryFuture {
         try_join_all(awaiter.into_iter().map(|awaiter| {
             awaiter.get().map(|result| {

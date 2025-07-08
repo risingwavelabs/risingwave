@@ -43,6 +43,7 @@ use risingwave_common_service::{MetricsManager, ObserverManager, TracingExtractL
 use risingwave_connector::source::iceberg::GLOBAL_ICEBERG_SCAN_METRICS;
 use risingwave_connector::source::monitor::GLOBAL_SOURCE_METRICS;
 use risingwave_dml::dml_manager::DmlManager;
+use risingwave_jni_core::jvm_runtime::register_jvm_builder;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
@@ -83,7 +84,6 @@ use crate::rpc::service::health_service::HealthServiceImpl;
 use crate::rpc::service::monitor_service::{AwaitTreeMiddlewareLayer, MonitorServiceImpl};
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::telemetry::ComputeTelemetryCreator;
-
 /// Bootstraps the compute-node.
 ///
 /// Returns when the `shutdown` token is triggered.
@@ -106,7 +106,7 @@ pub async fn compute_node_serve(
     // Initialize all the configs
     let stream_config = Arc::new(config.streaming.clone());
     let batch_config = Arc::new(config.batch.clone());
-
+    register_jvm_builder();
     // Initialize operator lru cache global sequencer args.
     init_global_sequencer_args(
         config

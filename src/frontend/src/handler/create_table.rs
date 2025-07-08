@@ -29,11 +29,11 @@ use risingwave_common::catalog::{
     RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, TableId,
 };
 use risingwave_common::config::MetaBackend;
+use risingwave_common::global_jvm::JVM;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
-use risingwave_connector::jvm_runtime::JVM;
 use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
 use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::cdc::external::{
@@ -1600,19 +1600,17 @@ pub async fn create_iceberg_engine_table(
                 with_common.insert("database.name".to_owned(), iceberg_database_name.to_owned());
                 with_common.insert("table.name".to_owned(), iceberg_table_name.to_owned());
 
-                if let Some(s) = params.properties.get("hosted_catalog") {
-                    if s.eq_ignore_ascii_case("true") {
-                        with_common.insert("catalog.type".to_owned(), "jdbc".to_owned());
-                        with_common.insert("catalog.uri".to_owned(), catalog_uri.to_owned());
-                        with_common
-                            .insert("catalog.jdbc.user".to_owned(), meta_store_user.to_owned());
-                        with_common.insert(
-                            "catalog.jdbc.password".to_owned(),
-                            meta_store_password.clone(),
-                        );
-                        with_common
-                            .insert("catalog.name".to_owned(), iceberg_catalog_name.to_owned());
-                    }
+                if let Some(s) = params.properties.get("hosted_catalog")
+                    && s.eq_ignore_ascii_case("true")
+                {
+                    with_common.insert("catalog.type".to_owned(), "jdbc".to_owned());
+                    with_common.insert("catalog.uri".to_owned(), catalog_uri.to_owned());
+                    with_common.insert("catalog.jdbc.user".to_owned(), meta_store_user.to_owned());
+                    with_common.insert(
+                        "catalog.jdbc.password".to_owned(),
+                        meta_store_password.clone(),
+                    );
+                    with_common.insert("catalog.name".to_owned(), iceberg_catalog_name.to_owned());
                 }
 
                 with_common

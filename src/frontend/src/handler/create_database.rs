@@ -94,19 +94,19 @@ pub async fn handle_create_database(
 
     let resource_group = resource_group.as_deref().unwrap_or(DEFAULT_RESOURCE_GROUP);
 
-    if let Some(interval) = barrier_interval_ms {
-        if interval >= NOTICE_BARRIER_INTERVAL_MS {
-            builder = builder.notice(
+    if let Some(interval) = barrier_interval_ms
+        && interval >= NOTICE_BARRIER_INTERVAL_MS
+    {
+        builder = builder.notice(
                     format!("Barrier interval is set to {} ms >= {} ms. This can hurt freshness and potentially cause OOM.",
                              interval, NOTICE_BARRIER_INTERVAL_MS));
-        }
     }
-    if let Some(frequency) = checkpoint_frequency {
-        if frequency >= NOTICE_CHECKPOINT_FREQUENCY {
-            builder = builder.notice(
+    if let Some(frequency) = checkpoint_frequency
+        && frequency >= NOTICE_CHECKPOINT_FREQUENCY
+    {
+        builder = builder.notice(
                     format!("Checkpoint frequency is set to {} >= {}. This can hurt freshness and potentially cause OOM.",
                              frequency, NOTICE_CHECKPOINT_FREQUENCY));
-        }
     }
 
     let catalog_writer = session.catalog_writer()?;

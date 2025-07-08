@@ -57,9 +57,7 @@ pub mod nexmark;
 pub mod pulsar;
 mod util;
 
-use std::collections::{HashMap, HashSet};
 use std::future::IntoFuture;
-use std::sync::LazyLock;
 
 pub use base::{UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR, *};
 pub(crate) use common::*;
@@ -67,7 +65,6 @@ use google_cloud_pubsub::subscription::Subscription;
 pub use google_pubsub::GOOGLE_PUBSUB_CONNECTOR;
 pub use kafka::KAFKA_CONNECTOR;
 pub use kinesis::KINESIS_CONNECTOR;
-use maplit::{hashmap, hashset};
 pub use mqtt::MQTT_CONNECTOR;
 pub use nats::NATS_CONNECTOR;
 use risingwave_common::catalog::TableId;
@@ -228,34 +225,6 @@ impl WaitCheckpointTask {
         }
     }
 }
-
-pub static ALTER_CONNECTOR_PROPS_ALLOWED: LazyLock<HashMap<String, HashSet<String>>> =
-    LazyLock::new(|| {
-        hashmap! {
-            "kafka".to_owned() => hashset! {
-                "properties.client.id".to_owned(),
-                "properties.sync.call.timeout".to_owned(),
-                "properties.enable.auto.commit".to_owned(),
-                "properties.enable.ssl.certificate.verification".to_owned(),
-                "properties.fetch.max.bytes".to_owned(),
-                "properties.fetch.queue.backoff.ms".to_owned(),
-                "properties.fetch.wait.max.ms".to_owned(),
-                "properties.message.max.bytes".to_owned(),
-                "properties.queued.max.messages.kbytes".to_owned(),
-                "properties.queued.min.messages".to_owned(),
-                "properties.receive.message.max.bytes".to_owned(),
-                "properties.statistics.interval.ms".to_owned(),
-                "properties.ssl.endpoint.identification.algorithm".to_owned(),
-                // need to rebuild source enumerator
-                "properties.security.protocol".to_owned(),
-                "properties.sasl.mechanism".to_owned(),
-                "properties.sasl.username".to_owned(),
-                "properties.sasl.password".to_owned(),
-            },
-            "pulsar".to_owned() => hashset! {},
-            "kinesis".to_owned() => hashset! {},
-        }
-    });
 
 #[inline]
 pub fn build_pulsar_ack_channel_id(source_id: &TableId, split_id: &SplitId) -> String {
