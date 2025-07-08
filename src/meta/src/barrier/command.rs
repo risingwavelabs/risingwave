@@ -36,7 +36,7 @@ use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation, Dispatcher,
-    Dispatchers, DropSubscriptionsMutation, PauseMutation, ResumeMutation,
+    Dispatchers, DropSubscriptionsMutation, LoadFinishMutation, PauseMutation, ResumeMutation,
     SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
     SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
@@ -359,6 +359,17 @@ pub enum Command {
     StartFragmentBackfill {
         fragment_ids: Vec<FragmentId>,
     },
+
+    /// `Refresh` command generates a barrier to refresh a table by truncating state
+    /// and reloading data from source.
+    Refresh {
+        table_id: TableId,
+        associated_source_id: TableId,
+    },
+    LoadFinish {
+        table_id: TableId,
+        associated_source_id: TableId,
+    },
 }
 
 // For debugging and observability purposes. Can add more details later if needed.
@@ -398,6 +409,22 @@ impl std::fmt::Display for Command {
             } => write!(f, "DropSubscription: {subscription_id}"),
             Command::ConnectorPropsChange(_) => write!(f, "ConnectorPropsChange"),
             Command::StartFragmentBackfill { .. } => write!(f, "StartFragmentBackfill"),
+            Command::Refresh {
+                table_id,
+                associated_source_id,
+            } => write!(
+                f,
+                "Refresh: {} (source: {})",
+                table_id, associated_source_id
+            ),
+            Command::LoadFinish {
+                table_id,
+                associated_source_id,
+            } => write!(
+                f,
+                "LoadFinish: {} (source: {})",
+                table_id, associated_source_id
+            ),
         }
     }
 }
@@ -515,6 +542,8 @@ impl Command {
             Command::DropSubscription { .. } => None,
             Command::ConnectorPropsChange(_) => None,
             Command::StartFragmentBackfill { .. } => None,
+            Command::Refresh { .. } => None, // Refresh doesn't change fragment structure
+            Command::LoadFinish { .. } => None, // LoadFinish doesn't change fragment structure
         }
     }
 
@@ -1128,6 +1157,21 @@ impl Command {
                     fragment_ids: fragment_ids.clone(),
                 }),
             ),
+            Command::Refresh {
+                table_id,
+                associated_source_id,
+            } => Some(Mutation::RefreshStart(
+                risingwave_pb::stream_plan::RefreshStartMutation {
+                    table_id: table_id.table_id,
+                    associated_source_id: associated_source_id.table_id,
+                },
+            )),
+            Command::LoadFinish {
+                table_id: _,
+                associated_source_id,
+            } => Some(Mutation::LoadFinish(LoadFinishMutation {
+                associated_source_id: associated_source_id.table_id,
+            })),
         }
     }
 

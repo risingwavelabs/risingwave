@@ -123,6 +123,7 @@ impl StreamMaterialize {
             create_type,
             None,
             Engine::Hummock,
+            false,
         )?;
 
         Ok(Self::new(input, table))
@@ -151,6 +152,7 @@ impl StreamMaterialize {
         retention_seconds: Option<NonZeroU32>,
         webhook_info: Option<PbWebhookSourceInfo>,
         engine: Engine,
+        refreshable: bool,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, TableType::Table)?;
 
@@ -173,6 +175,7 @@ impl StreamMaterialize {
             CreateType::Foreground,
             webhook_info,
             engine,
+            refreshable,
         )?;
 
         Ok(Self::new(input, table))
@@ -249,6 +252,7 @@ impl StreamMaterialize {
         create_type: CreateType,
         webhook_info: Option<PbWebhookSourceInfo>,
         engine: Engine,
+        refreshable: bool,
     ) -> Result<TableCatalog> {
         let input = rewritten_input;
 
@@ -320,6 +324,7 @@ impl StreamMaterialize {
                 }
             },
             clean_watermark_index_in_pk: None, // TODO: fill this field
+            refreshable,
         })
     }
 

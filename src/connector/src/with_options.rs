@@ -201,6 +201,10 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
             })
             .unwrap_or(false)
     }
+
+    fn is_refreshable_connector(&self) -> bool {
+        false
+    }
 }
 
 impl<T: Get + GetKeyIter> WithPropertiesExt for T {}

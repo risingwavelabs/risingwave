@@ -108,6 +108,7 @@ mod prepared_statement;
 pub mod privilege;
 pub mod query;
 mod recover;
+mod refresh;
 pub mod show;
 mod transaction;
 mod use_db;
@@ -1283,6 +1284,9 @@ pub async fn handle(
             prepared_statement::handle_deallocate(name, prepare).await
         }
         Statement::Vacuum { object_name } => vacuum::handle_vacuum(handler_args, object_name).await,
+        Statement::Refresh { table_name } => {
+            refresh::handle_refresh(handler_args, table_name).await
+        }
         _ => bail_not_implemented!("Unhandled statement: {}", stmt),
     }
 }
