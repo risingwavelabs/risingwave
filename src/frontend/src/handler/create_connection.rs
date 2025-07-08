@@ -25,6 +25,7 @@ use risingwave_pb::catalog::connection_params::ConnectionType;
 use risingwave_pb::catalog::{ConnectionParams, PbConnectionParams};
 use risingwave_pb::ddl_service::create_connection_request;
 use risingwave_pb::secret::SecretRef;
+use risingwave_pb::secret::secret_ref::RefAsType;
 use risingwave_sqlparser::ast::CreateConnectionStatement;
 
 use super::RwPgResponse;
@@ -158,12 +159,12 @@ pub fn print_connection_params(
         let (schema_name, secret_name) = catalog_reader
             .find_schema_secret_by_secret_id(db_name, SecretId::from(secret_ref.secret_id))
             .unwrap();
-        format!(
-            "SECRET {}.{} AS {}",
-            schema_name,
-            secret_name,
-            secret_ref.get_ref_as().unwrap().as_str_name()
-        )
+        let maybe_print_as = match secret_ref.get_ref_as().unwrap() {
+            RefAsType::Text => "",
+            RefAsType::File => " AS FILE",
+            RefAsType::Unspecified => "",
+        };
+        format!("SECRET {}.{}{}", schema_name, secret_name, maybe_print_as,)
     };
     let deref_secrets = params
         .get_secret_refs()

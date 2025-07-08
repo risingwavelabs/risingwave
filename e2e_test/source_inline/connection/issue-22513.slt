@@ -12,7 +12,7 @@ create connection conn1 with (type = 'kafka', properties.bootstrap.server = secr
 query ?
 select connection_params from rw_connections;
 ----
-{"properties.bootstrap.server":"SECRET test_schema.secret_s AS TEXT"}
+{"properties.bootstrap.server":"SECRET test_schema.secret_s"}
 
 
 # clean up
