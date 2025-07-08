@@ -107,16 +107,12 @@ impl<S: StateStore> ParallelizedCdcBackfillState<S> {
         state[state_len - 2] = Some((row_count as i64).into());
         state[state_len - 1] = None;
 
-        tracing::debug!(?state, "!!!mutate_state");
-
         match self.state_table.get_row(row::once(split_id)).await? {
             Some(prev_row) => {
-                tracing::debug!(?prev_row, ?state, "!!!update");
                 self.state_table
                     .update(prev_row, self.cached_state.as_slice());
             }
             None => {
-                tracing::debug!(?state, "!!!insert");
                 self.state_table.insert(self.cached_state.as_slice());
             }
         }
@@ -125,7 +121,6 @@ impl<S: StateStore> ParallelizedCdcBackfillState<S> {
 
     /// Persist the state to storage
     pub async fn commit_state(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
-        tracing::debug!("!!!commit_state");
         self.state_table
             .commit_assert_no_update_vnode_bitmap(new_epoch)
             .await
