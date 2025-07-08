@@ -50,6 +50,7 @@ mod union;
 mod update;
 mod utils;
 mod values;
+mod vector_index_nearest;
 
 use azblob_file_scan::AzblobFileScanExecutorBuilder;
 pub use delete::*;
@@ -64,6 +65,7 @@ pub use iceberg_scan::*;
 pub use insert::*;
 pub use join::*;
 pub use limit::*;
+use log_row_seq_scan::LogStoreRowSeqScanExecutorBuilder;
 pub use max_one_row::*;
 pub use merge_sort::*;
 pub use merge_sort_exchange::*;
@@ -84,8 +86,7 @@ pub use union::*;
 pub use update::*;
 pub use utils::*;
 pub use values::*;
-
-use self::log_row_seq_scan::LogStoreRowSeqScanExecutorBuilder;
+use vector_index_nearest::VectorIndexNearestExecutorBuilder;
 
 register_executor!(RowSeqScan, RowSeqScanExecutorBuilder);
 register_executor!(Insert, InsertExecutor);
@@ -122,3 +123,4 @@ register_executor!(IcebergScan, IcebergScanExecutorBuilder);
 register_executor!(PostgresQuery, PostgresQueryExecutorBuilder);
 register_executor!(MysqlQuery, MySqlQueryExecutorBuilder);
 register_executor!(LogRowSeqScan, LogStoreRowSeqScanExecutorBuilder);
+register_executor!(VectorIndexNearest, VectorIndexNearestExecutorBuilder);
