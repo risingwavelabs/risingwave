@@ -1803,7 +1803,9 @@ impl ScaleController {
 
             for (fragment_id, fragment) in fragments {
                 // TODO(zw): re-enable cdc scan parallelism control
-                if FragmentTypeMask::from(fragment.fragment_type_mask).contains(FragmentTypeFlag::StreamCdcScan) {
+                if FragmentTypeMask::from(fragment.fragment_type_mask)
+                    .contains(FragmentTypeFlag::StreamCdcScan)
+                {
                     continue;
                 }
                 fragment_distribution_map.insert(
