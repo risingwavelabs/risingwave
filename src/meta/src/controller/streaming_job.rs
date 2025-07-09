@@ -440,7 +440,6 @@ impl CatalogController {
                         .unwrap_or_else(|| panic!("table {} not found", state_table_id));
                     assert_eq!(table.id, state_table_id as u32);
                     assert_eq!(table.fragment_id, fragment_id as u32);
-                    table.job_id = Some(streaming_job.id());
                     let vnode_count = table.vnode_count();
 
                     table::ActiveModel {
@@ -453,6 +452,10 @@ impl CatalogController {
                     .await?;
 
                     if is_materialized_view {
+                        // In production, definition was replaced but still needed for notification.
+                        if cfg!(not(debug_assertions)) && table.id == streaming_job.id() {
+                            table.definition = streaming_job.definition();
+                        }
                         objects.push(PbObject {
                             object_info: Some(PbObjectInfo::Table(table.clone())),
                         });
