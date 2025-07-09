@@ -875,6 +875,11 @@ mod tests {
                     8192,
                     "CROSS_DB_SNAPSHOT_BACKFILL_STREAM_SCAN",
                 ),
+                (
+                    StreamCdcScan,
+                    16384,
+                    "STREAM_CDC_SCAN",
+                ),
             ]
         "#]]
         .assert_debug_eq(
