@@ -20,6 +20,7 @@ import _ from "lodash"
 import sortBy from "lodash/sortBy"
 import {
   Database,
+  Function,
   Index,
   Schema,
   Sink,
@@ -27,7 +28,6 @@ import {
   Subscription,
   Table,
   View,
-  Function,
 } from "../../proto/gen/catalog"
 import {
   FragmentToRelationMap,
@@ -237,7 +237,9 @@ export async function getViews() {
 }
 
 export async function getFunctions() {
-  let functions: Function[] = (await api.get("/functions")).map(Function.fromJSON)
+  let functions: Function[] = (await api.get("/functions")).map(
+    Function.fromJSON
+  )
   functions = sortBy(functions, (x) => x.id)
   return functions
 }

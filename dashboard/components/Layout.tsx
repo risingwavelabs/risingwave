@@ -55,7 +55,7 @@ function NavButton({
 
   useEffect(() => {
     setMatch(router.asPath.startsWith(href.toString()))
-    return () => { }
+    return () => {}
   }, [href, router.asPath])
 
   const icon =
