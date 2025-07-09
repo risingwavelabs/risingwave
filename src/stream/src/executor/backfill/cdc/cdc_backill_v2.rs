@@ -38,13 +38,12 @@ use crate::executor::backfill::cdc::upstream_table::snapshot::{
     SplitSnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
 };
 use crate::executor::backfill::utils::{get_cdc_chunk_last_offset, mapping_chunk, mapping_message};
-use crate::executor::monitor::CdcBackfillMetrics;
 use crate::executor::prelude::*;
 use crate::executor::source::get_infinite_backoff_strategy;
 use crate::task::CreateMviewProgressReporter;
 
-/// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.
-const METADATA_STATE_LEN: usize = 4;
+/// `split_id`, `is_finished` all occupy 1 column each.
+const METADATA_STATE_LEN: usize = 1;
 
 pub struct ParallelizedCdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
@@ -65,8 +64,6 @@ pub struct ParallelizedCdcBackfillExecutor<S: StateStore> {
     // This object is just a stub right now
     progress: Option<CreateMviewProgressReporter>,
 
-    metrics: CdcBackfillMetrics,
-
     /// Rate limit in rows/s.
     rate_limit_rps: Option<u32>,
 
@@ -84,13 +81,11 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         output_indices: Vec<usize>,
         output_columns: Vec<ColumnDesc>,
         progress: Option<CreateMviewProgressReporter>,
-        metrics: Arc<StreamingMetrics>,
+        _metrics: Arc<StreamingMetrics>,
         state_table: StateTable<S>,
         rate_limit_rps: Option<u32>,
         options: CdcScanOptions,
     ) -> Self {
-        let metrics = metrics.new_cdc_backfill_metrics(external_table.table_id(), actor_ctx.id);
-
         Self {
             actor_ctx,
             external_table,
@@ -98,7 +93,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             output_indices,
             output_columns,
             progress,
-            metrics,
             rate_limit_rps,
             options,
             state_table,
@@ -346,9 +340,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                 }
 
                                 // update and persist current backfill progress
-                                state_impl
-                                    .mutate_state(split.split_id, None, None, 0, false)
-                                    .await?;
+                                state_impl.mutate_state(split.split_id, false).await?;
 
                                 state_impl.commit_state(barrier.epoch).await?;
 
@@ -434,12 +426,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             // // Otherwise, the result set of the new snapshot stream may become empty.
             // // It maybe a cancellation bug of the mysql driver.
 
-            // Self::report_metrics(
-            //     &self.metrics,
-            //     cur_barrier_snapshot_processed_rows,
-            //     cur_barrier_upstream_processed_rows,
-            // );
-
             extends_current_actor_bound(&mut current_actor_bounds, &split);
             // update and persist current backfill progress
             // Wait for first barrier to come after backfill is finished.
@@ -453,9 +439,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                             if let Some(progress) = self.progress.as_mut() {
                                 progress.update(barrier.epoch, 0, completed_split_count);
                             }
-                            state_impl
-                                .mutate_state(split.split_id, None, None, 0, true)
-                                .await?;
+                            state_impl.mutate_state(split.split_id, true).await?;
                             state_impl.commit_state(barrier.epoch).await?;
                             yield Message::Barrier(barrier);
                             // break after the state have been saved

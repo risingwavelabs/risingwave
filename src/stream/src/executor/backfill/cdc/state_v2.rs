@@ -14,10 +14,8 @@
 
 use anyhow::anyhow;
 use risingwave_common::row;
-use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_connector::source::cdc::external::CdcOffset;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
@@ -25,14 +23,10 @@ use crate::executor::StreamExecutorResult;
 
 #[derive(Debug, Default)]
 pub struct CdcStateRecord {
-    // pub current_pk_pos: Option<OwnedRow>,
     pub is_finished: bool,
-    // /// The last cdc offset that has been consumed by the cdc backfill executor
-    // pub last_cdc_offset: Option<CdcOffset>,
-    pub row_count: i64,
 }
 
-/// state schema: | `split_id` | `backfill_finished` | `row_count` | `cdc_offset` |
+/// state schema: | `split_id` | `backfill_finished` |
 pub struct ParallelizedCdcBackfillState<S: StateStore> {
     state_table: StateTable<S>,
     cached_state: Vec<Datum>,
@@ -64,23 +58,12 @@ impl<S: StateStore> ParallelizedCdcBackfillState<S> {
                 tracing::info!("restored cdc backfill state: {:?}", row);
                 self.cached_state = row.into_inner().into_vec();
                 let state = self.cached_state.as_slice();
-                let state_len = state.len();
-                // schema: | `split_id` | `backfill_finished` | `row_count` | `cdc_offset` |
-                let row_count = match state[state_len - 2] {
-                    Some(ScalarImpl::Int64(val)) => val,
-                    _ => return Err(anyhow!("invalid backfill state: row_count").into()),
-                };
-                let is_finished = match state[state_len - 3] {
+                let is_finished = match state[1] {
                     Some(ScalarImpl::Bool(val)) => val,
                     _ => return Err(anyhow!("invalid backfill state: backfill_finished").into()),
                 };
 
-                Ok(CdcStateRecord {
-                    // current_pk_pos: None,
-                    is_finished,
-                    // last_cdc_offset: None,
-                    row_count,
-                })
+                Ok(CdcStateRecord { is_finished })
             }
             None => {
                 self.cached_state = vec![None; self.state_len];
@@ -93,19 +76,13 @@ impl<S: StateStore> ParallelizedCdcBackfillState<S> {
     pub async fn mutate_state(
         &mut self,
         split_id: i64,
-        _current_pk_pos: Option<OwnedRow>,
-        _last_cdc_offset: Option<CdcOffset>,
-        row_count: u64,
         is_finished: bool,
     ) -> StreamExecutorResult<()> {
-        // schema: | `split_id` | `backfill_finished` | `row_count` | `cdc_offset` |
+        // schema: | `split_id` | `backfill_finished` |
         let state = self.cached_state.as_mut_slice();
         let split_id = Some(ScalarImpl::from(split_id));
-        let state_len = state.len();
         state[0].clone_from(&split_id);
-        state[state_len - 3] = Some(is_finished.into());
-        state[state_len - 2] = Some((row_count as i64).into());
-        state[state_len - 1] = None;
+        state[1] = Some(is_finished.into());
 
         match self.state_table.get_row(row::once(split_id)).await? {
             Some(prev_row) => {
