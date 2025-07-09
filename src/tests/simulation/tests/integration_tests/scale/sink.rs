@@ -103,6 +103,7 @@ async fn test_sink_append_only() -> Result<()> {
             }
 
             consumer.assign(&tpl).unwrap();
+
             consumer
         })
         .await;
@@ -185,6 +186,7 @@ async fn test_sink_debezium() -> Result<()> {
             }
 
             consumer.assign(&tpl).unwrap();
+
             consumer
         })
         .await;
