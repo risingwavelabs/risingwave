@@ -293,7 +293,7 @@ CREATE TABLE test_pk_uuid (
 
 statement ok
 CREATE TABLE test_pk_binary (
-    "id" BINARY(50) PRIMARY KEY,
+    "id" BYTEA PRIMARY KEY,
     "NAME" CHARACTER VARYING,
     PRIMARY KEY ("id")
 ) from mssql_source table 'mydb.dbo.test_pk_binary';
