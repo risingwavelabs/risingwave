@@ -24,11 +24,9 @@ use risingwave_common::hash::{
 use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node_body};
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::fragment::DistributionType;
-use risingwave_meta_model::prelude::Actor;
 use risingwave_meta_model::{
-    DispatcherType, SourceId, StreamingParallelism, VnodeBitmap, WorkerId, actor, fragment,
+    DispatcherType, SourceId, StreamingParallelism, VnodeBitmap, WorkerId,
 };
-use risingwave_meta_model_migration::JoinType;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::{ActorInfo, PbActorLocation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -49,9 +47,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use super::{ActorId, FragmentId};
-use crate::controller::utils::{
-    rebuild_fragment_mapping_from_actors, rebuild_fragment_mapping_from_actors_helper,
-};
+use crate::controller::utils::rebuild_fragment_mapping_from_actors_helper;
 use crate::model::MetadataModelResult;
 use crate::stream::{SplitAssignment, build_actor_connector_splits};
 
@@ -750,11 +746,10 @@ impl StreamJobFragments {
 
         for fragment in self.fragments.values() {
             for actor in &fragment.actors {
-                let actor_status = self
+                let actor_status = *self
                     .actor_status
                     .get(&actor.actor_id)
-                    .expect("should exist")
-                    .clone();
+                    .expect("should exist");
                 job_actors.push((
                     fragment.fragment_id as _,
                     fragment.distribution_type.into(),

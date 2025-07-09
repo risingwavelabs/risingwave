@@ -142,9 +142,10 @@ impl NotificationManager {
         operation: Operation,
         info: Info,
     ) -> NotificationVersion {
-
-
-        println!("noti with target {:?}  op {:?} info {:?}", target, operation, info);
+        println!(
+            "noti with target {:?}  op {:?} info {:?}",
+            target, operation, info
+        );
         // match info {
         //     Info::StreamingWorkerSlotMapping(_) => {
         //         panic!()
