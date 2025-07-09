@@ -507,6 +507,10 @@ impl StreamJobFragments {
             if fragment
                 .fragment_type_mask
                 .contains(FragmentTypeFlag::CdcFilter)
+                && self.fragments.values().all(|f| {
+                    !f.fragment_type_mask
+                        .contains(FragmentTypeFlag::StreamCdcScan)
+                })
             {
                 // Note: CDC table job contains a StreamScan fragment (StreamCdcScan node) and a CdcFilter fragment.
                 // We don't track any fragments' progress.
@@ -516,6 +520,7 @@ impl StreamJobFragments {
                 FragmentTypeFlag::Values,
                 FragmentTypeFlag::StreamScan,
                 FragmentTypeFlag::SourceScan,
+                FragmentTypeFlag::StreamCdcScan,
             ]) {
                 actor_ids.extend(fragment.actors.iter().map(|actor| {
                     (
@@ -808,19 +813,22 @@ pub enum BackfillUpstreamType {
     MView,
     Values,
     Source,
+    Cdc,
 }
 
 impl BackfillUpstreamType {
     pub fn from_fragment_type_mask(mask: FragmentTypeMask) -> Self {
-        let is_mview = mask.contains(FragmentTypeFlag::StreamScan);
+        let is_mview = mask.contains(FragmentTypeFlag::StreamScan)
+            && !mask.contains(FragmentTypeFlag::StreamCdcScan);
         let is_values = mask.contains(FragmentTypeFlag::Values);
         let is_source = mask.contains(FragmentTypeFlag::SourceScan);
+        let is_cdc = mask.contains(FragmentTypeFlag::StreamCdcScan);
 
         // Note: in theory we can have multiple backfill executors in one fragment, but currently it's not possible.
         // See <https://github.com/risingwavelabs/risingwave/issues/6236>.
         debug_assert!(
-            is_mview as u8 + is_values as u8 + is_source as u8 == 1,
-            "a backfill fragment should either be mview, value or source, found {:?}",
+            is_mview as u8 + is_values as u8 + is_source as u8 + is_cdc as u8 == 1,
+            "a backfill fragment should either be mview, value, source or cdc, found {:?}",
             mask
         );
 
@@ -830,6 +838,8 @@ impl BackfillUpstreamType {
             BackfillUpstreamType::Values
         } else if is_source {
             BackfillUpstreamType::Source
+        } else if is_cdc {
+            BackfillUpstreamType::Cdc
         } else {
             unreachable!("invalid fragment type mask: {:?}", mask);
         }

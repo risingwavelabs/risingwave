@@ -194,6 +194,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                 extends_current_actor_bound(&mut current_actor_bounds, &split);
             }
         }
+        let mut completed_split_count = next_split_idx as u64;
 
         // After init the state table and forward the initial barrier to downstream,
         // we now try to create the table reader with retry.
@@ -265,9 +266,8 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         let offset_parse_func = upstream_table_reader.reader.get_cdc_offset_parser();
 
         'split_backfill: for split in actor_snapshot_splits.iter().skip(next_split_idx) {
-            let state = state_impl.restore_state(split.split_id).await?;
+            // let state = state_impl.restore_state(split.split_id).await?;
             // Keep track of rows from the snapshot.
-            let mut total_snapshot_row_count = state.row_count as u64;
             tracing::info!(
                 table_id,
                 upstream_table_name,
@@ -277,7 +277,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             );
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
             let left_upstream = upstream.by_ref().map(Either::Left);
-            // let mut snapshot_read_row_cnt: usize = 0;
             let read_args = SplitSnapshotReadArgs::new(
                 split.left_bound_inclusive.clone(),
                 split.right_bound_exclusive.clone(),
@@ -302,8 +301,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                 select_with_strategy(left_upstream, right_snapshot, |_: &mut ()| {
                     stream::PollNext::Left
                 });
-            // let mut cur_barrier_snapshot_processed_rows: u64 = 0;
-            // let mut cur_barrier_upstream_processed_rows: u64 = 0;
             #[for_await]
             for either in &mut backfill_stream {
                 match either {
@@ -348,21 +345,9 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                     }
                                 }
 
-                                // Self::report_metrics(
-                                //     &self.metrics,
-                                //     cur_barrier_snapshot_processed_rows,
-                                //     cur_barrier_upstream_processed_rows,
-                                // );
-
                                 // update and persist current backfill progress
                                 state_impl
-                                    .mutate_state(
-                                        split.split_id,
-                                        None,
-                                        None,
-                                        total_snapshot_row_count,
-                                        false,
-                                    )
+                                    .mutate_state(split.split_id, None, None, 0, false)
                                     .await?;
 
                                 state_impl.commit_state(barrier.epoch).await?;
@@ -435,9 +420,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                 break;
                             }
                             Some(chunk) => {
-                                let chunk_cardinality = chunk.cardinality() as u64;
-                                // cur_barrier_snapshot_processed_rows += chunk_cardinality;
-                                total_snapshot_row_count += chunk_cardinality;
+                                // let chunk_cardinality = chunk.cardinality() as u64;
                                 yield Message::Chunk(mapping_chunk(chunk, &self.output_indices));
                             }
                         }
@@ -466,21 +449,14 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                     match msg {
                         Message::Barrier(barrier) => {
                             // finalized the backfill state
+                            completed_split_count += 1;
+                            if let Some(progress) = self.progress.as_mut() {
+                                progress.update(barrier.epoch, 0, completed_split_count);
+                            }
                             state_impl
-                                .mutate_state(
-                                    split.split_id,
-                                    None,
-                                    None,
-                                    total_snapshot_row_count,
-                                    true,
-                                )
+                                .mutate_state(split.split_id, None, None, 0, true)
                                 .await?;
                             state_impl.commit_state(barrier.epoch).await?;
-
-                            // mark progress as finished
-                            if let Some(progress) = self.progress.as_mut() {
-                                progress.finish(barrier.epoch, total_snapshot_row_count);
-                            }
                             yield Message::Barrier(barrier);
                             // break after the state have been saved
                             break;
@@ -507,6 +483,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         }
 
         upstream_table_reader.disconnect().await?;
+        let mut need_report_finish = true;
         tracing::info!(
             table_id,
             upstream_table_name,
@@ -523,6 +500,13 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             if let Some(msg) = mapping_message(msg?, &self.output_indices) {
                 match msg {
                     Message::Barrier(barrier) => {
+                        if need_report_finish {
+                            need_report_finish = false;
+                            // mark progress as finished
+                            if let Some(progress) = self.progress.as_mut() {
+                                progress.finish(barrier.epoch, actor_snapshot_splits.len() as u64);
+                            }
+                        }
                         // commit state just to bump the epoch of state table
                         state_impl.commit_state(barrier.epoch).await?;
                         yield Message::Barrier(barrier);

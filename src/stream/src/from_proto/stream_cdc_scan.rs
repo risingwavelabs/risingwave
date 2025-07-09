@@ -115,13 +115,16 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             let vnodes = None;
             let state_table =
                 StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes).await;
+            let progress = params
+                .local_barrier_manager
+                .register_create_mview_progress(params.actor_context.id);
             let exec = ParallelizedCdcBackfillExecutor::new(
                 params.actor_context.clone(),
                 external_table,
                 upstream,
                 output_indices,
                 output_columns,
-                None,
+                Some(progress),
                 params.executor_stats,
                 state_table,
                 node.rate_limit,
