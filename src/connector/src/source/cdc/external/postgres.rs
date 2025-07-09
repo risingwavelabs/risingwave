@@ -121,7 +121,16 @@ impl ExternalTableReader for PostgresExternalTableReader {
             return Ok(());
         }
         // TODO: for numeric types, use evenly-sized partition to optimize performance.
+
         let Some((min_value, max_value)) = self.min_and_max().await? else {
+            let left_bound_row = OwnedRow::new(vec![None]);
+            let right_bound_row = OwnedRow::new(vec![None]);
+            let split = CdcTableSnapshotSplit {
+                split_id,
+                left_bound_inclusive: left_bound_row,
+                right_bound_exclusive: right_bound_row,
+            };
+            yield split;
             return Ok(());
         };
         tracing::debug!(?self.schema_table_name, ?self.rw_schema, ?self.pk_indices, ?self.split_column, "get parallel cdc table snapshot splits");
@@ -165,9 +174,7 @@ impl ExternalTableReader for PostgresExternalTableReader {
             };
             let is_completed = right_bound_exclusive.is_none();
             if is_completed && left_bound_inclusive.is_none() {
-                // Corner case: (Null, Null) is not a valid split.
                 assert_eq!(split_id, 1);
-                break;
             }
             tracing::debug!(
                 split_id,
