@@ -207,8 +207,10 @@ system ok
 psql -c "
     ALTER TABLE test_include_ts ADD COLUMN new_col varchar DEFAULT 'new_column_default_value';
     INSERT INTO test_include_ts (id, name, new_col) values (2, 'name2', 'after_change');
+    SELECT pg_switch_wal();
+    CHECKPOINT;
 "
-sleep 5s
+sleep 10s
 
 # Verify both rows exist with correct data including new column
 query ITT
