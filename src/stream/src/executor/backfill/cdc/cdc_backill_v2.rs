@@ -43,7 +43,7 @@ use crate::executor::source::get_infinite_backoff_strategy;
 use crate::task::CreateMviewProgressReporter;
 
 /// `split_id`, `is_finished` all occupy 1 column each.
-const METADATA_STATE_LEN: usize = 1;
+const METADATA_STATE_LEN: usize = 2;
 
 pub struct ParallelizedCdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
