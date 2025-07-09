@@ -306,6 +306,7 @@ pub enum Command {
         fragment_actors: HashMap<FragmentId, HashSet<ActorId>>,
         // Used for updating additional metadata after the barrier ends
         post_updates: JobReschedulePostUpdates,
+        // TODO(zw): update cdc_table_snapshot_split_assignment
     },
 
     /// `ReplaceStreamJob` command generates a `Update` barrier with the given `replace_upstream`. This is
