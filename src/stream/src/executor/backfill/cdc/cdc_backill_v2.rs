@@ -257,12 +257,12 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                             if chunk.cardinality() == 0 {
                                 continue;
                             }
-                            let filtered_chunk = filter_stream_chunk(
+                            if let Some(filtered_chunk) = filter_stream_chunk(
                                 chunk,
                                 &current_actor_bounds,
                                 snapshot_split_column_index,
-                            );
-                            if filtered_chunk.cardinality() > 0 {
+                            ) && filtered_chunk.cardinality() > 0
+                            {
                                 yield Message::Chunk(filtered_chunk);
                             }
                         }
@@ -419,16 +419,15 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                     continue;
                                 }
 
-                                let filtered_chunk = filter_stream_chunk(
+                                if let Some(filtered_chunk) = filter_stream_chunk(
                                     chunk,
                                     &current_actor_bounds,
                                     snapshot_split_column_index,
-                                );
-                                if filtered_chunk.cardinality() == 0 {
-                                    continue;
+                                ) && filtered_chunk.cardinality() > 0
+                                {
+                                    // Buffer the upstream chunk.
+                                    upstream_chunk_buffer.push(filtered_chunk.compact());
                                 }
-                                // Buffer the upstream chunk.
-                                upstream_chunk_buffer.push(filtered_chunk.compact());
                             }
                             Message::Watermark(_) => {
                                 // Ignore watermark during backfill.
@@ -512,15 +511,14 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                             if chunk.cardinality() == 0 {
                                 continue;
                             }
-                            let filtered_chunk = filter_stream_chunk(
+                            if let Some(filtered_chunk) = filter_stream_chunk(
                                 chunk,
                                 &current_actor_bounds,
                                 snapshot_split_column_index,
-                            );
-                            if filtered_chunk.cardinality() == 0 {
-                                continue;
+                            ) && filtered_chunk.cardinality() > 0
+                            {
+                                yield Message::Chunk(filtered_chunk);
                             }
-                            yield Message::Chunk(filtered_chunk);
                         }
                         msg @ Message::Watermark(_) => {
                             yield msg;
@@ -555,15 +553,14 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                         if chunk.cardinality() == 0 {
                             continue;
                         }
-                        let filtered_chunk = filter_stream_chunk(
+                        if let Some(filtered_chunk) = filter_stream_chunk(
                             chunk,
                             &current_actor_bounds,
                             snapshot_split_column_index,
-                        );
-                        if filtered_chunk.cardinality() == 0 {
-                            continue;
+                        ) && filtered_chunk.cardinality() > 0
+                        {
+                            yield Message::Chunk(filtered_chunk);
                         }
-                        yield Message::Chunk(filtered_chunk);
                     }
                     msg @ Message::Watermark(_) => {
                         yield msg;
@@ -695,9 +692,9 @@ fn filter_stream_chunk(
     chunk: StreamChunk,
     bound: &Option<(OwnedRow, OwnedRow)>,
     snapshot_split_column_index: usize,
-) -> StreamChunk {
+) -> Option<StreamChunk> {
     let Some((left, right)) = bound else {
-        return chunk;
+        return None;
     };
     assert_eq!(left.len(), 1, "multiple split columns is not supported yet");
     assert_eq!(
@@ -710,7 +707,7 @@ fn filter_stream_chunk(
     let is_leftmost_bound = is_leftmost_bound(left);
     let is_rightmost_bound = is_rightmost_bound(right);
     if is_leftmost_bound && is_rightmost_bound {
-        return chunk;
+        return Some(chunk);
     }
     let mut new_bitmap = BitmapBuilder::with_capacity(chunk.capacity());
     let (ops, columns, visibility) = chunk.into_inner();
@@ -744,7 +741,11 @@ fn filter_stream_chunk(
         }
         new_bitmap.append(is_in_range);
     }
-    StreamChunk::with_visibility(ops, columns, new_bitmap.finish())
+    Some(StreamChunk::with_visibility(
+        ops,
+        columns,
+        new_bitmap.finish(),
+    ))
 }
 
 fn is_leftmost_bound(row: &OwnedRow) -> bool {
