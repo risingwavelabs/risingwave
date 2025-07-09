@@ -28,6 +28,7 @@ use risingwave_pb::connector_service::{PbSourceType, PbTableSchema, SourceType, 
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::source::{PbCdcTableSnapshotSplit, PbCdcTableSnapshotSplits};
+use risingwave_pb::stream_plan::StreamCdcScanOptions;
 use simd_json::prelude::ArrayTrait;
 pub use source::*;
 
@@ -273,4 +274,52 @@ pub fn build_actor_cdc_table_snapshot_splits(
             (actor_id, splits)
         })
         .collect()
+}
+
+#[derive(Debug, Clone, Hash, PartialEq)]
+pub struct CdcScanOptions {
+    pub disable_backfill: bool,
+    pub snapshot_barrier_interval: u32,
+    pub snapshot_batch_size: u32,
+    // TODO(zw): set parallelism of StreamCdcScanExecutor to backfill_parallelism
+    pub backfill_parallelism: u32,
+    pub backfill_num_rows_per_split: u64,
+}
+
+impl Default for CdcScanOptions {
+    fn default() -> Self {
+        Self {
+            disable_backfill: false,
+            snapshot_barrier_interval: 1,
+            snapshot_batch_size: 1000,
+            backfill_parallelism: 0,
+            backfill_num_rows_per_split: 0,
+        }
+    }
+}
+
+impl CdcScanOptions {
+    pub fn to_proto(&self) -> StreamCdcScanOptions {
+        StreamCdcScanOptions {
+            disable_backfill: self.disable_backfill,
+            snapshot_barrier_interval: self.snapshot_barrier_interval,
+            snapshot_batch_size: self.snapshot_batch_size,
+            backfill_parallelism: self.backfill_parallelism,
+            backfill_num_rows_per_split: self.backfill_num_rows_per_split,
+        }
+    }
+
+    pub fn from_proto(proto: &StreamCdcScanOptions) -> Self {
+        Self {
+            disable_backfill: proto.disable_backfill,
+            snapshot_barrier_interval: proto.snapshot_barrier_interval,
+            snapshot_batch_size: proto.snapshot_batch_size,
+            backfill_parallelism: proto.backfill_parallelism,
+            backfill_num_rows_per_split: proto.backfill_num_rows_per_split,
+        }
+    }
+
+    pub fn is_parallelized_backfill(&self) -> bool {
+        self.backfill_num_rows_per_split > 0 && self.backfill_parallelism > 0
+    }
 }

@@ -79,7 +79,9 @@ use crate::model::{
     DownstreamFragmentRelation, Fragment, StreamContext, StreamJobFragments,
     StreamJobFragmentsToCreate, TableParallelism,
 };
-use crate::stream::cdc::try_init_parallel_cdc_table_snapshot_splits;
+use crate::stream::cdc::{
+    is_parallelized_backfill_enabled, try_init_parallel_cdc_table_snapshot_splits,
+};
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
     CreateStreamingJobContext, CreateStreamingJobOption, GlobalStreamManagerRef,
@@ -825,14 +827,16 @@ impl DdlController {
                 .create_split_enumerator(SourceEnumeratorContext::dummy().into())
                 .await?;
 
-            // Create parallel splits for a CDC table. The resulted split assignments are persisted and immutable.
-            try_init_parallel_cdc_table_snapshot_splits(
-                table_id,
-                cdc_table_desc,
-                meta_store,
-                &stream_cdc_scan.options,
-            )
-            .await?;
+            if is_parallelized_backfill_enabled(stream_cdc_scan) {
+                // Create parallel splits for a CDC table. The resulted split assignments are persisted and immutable.
+                try_init_parallel_cdc_table_snapshot_splits(
+                    table_id,
+                    cdc_table_desc,
+                    meta_store,
+                    &stream_cdc_scan.options,
+                )
+                .await?;
+            }
 
             tracing::debug!(?table_id, "validate cdc table success");
             Ok(true)
