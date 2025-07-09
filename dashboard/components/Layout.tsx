@@ -55,7 +55,7 @@ function NavButton({
 
   useEffect(() => {
     setMatch(router.asPath.startsWith(href.toString()))
-    return () => {}
+    return () => { }
   }, [href, router.asPath])
 
   const icon =
@@ -141,6 +141,7 @@ function Layout({ children }: { children: React.ReactNode }) {
             <NavButton href="/sinks/">Sinks</NavButton>
             <NavButton href="/views/">Views</NavButton>
             <NavButton href="/subscriptions/">Subscriptions</NavButton>
+            <NavButton href="/functions/">Functions</NavButton>
           </Section>
           <Section>
             <NavTitle>Streaming</NavTitle>
