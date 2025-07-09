@@ -414,13 +414,13 @@ fn build_fragment(
                 current_fragment
                     .fragment_type_mask
                     .add(FragmentTypeFlag::StreamScan);
-                current_fragment
-                    .fragment_type_mask
-                    .add(FragmentTypeFlag::StreamCdcScan);
                 if let Some(o) = node.options
                     && CdcScanOptions::from_proto(&o).is_parallelized_backfill()
                 {
                     // Use parallel CDC backfill.
+                    current_fragment
+                        .fragment_type_mask
+                        .add(FragmentTypeFlag::StreamCdcScan);
                 } else {
                     // the backfill algorithm is not parallel safe
                     current_fragment.requires_singleton = true;
