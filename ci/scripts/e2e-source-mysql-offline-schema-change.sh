@@ -10,7 +10,7 @@ echo "\n\n\n-------------Run mysql offline schema change test------------\n\n\n"
 risedev k && risedev clean-data
 
 # Setup CDC table with initial schema
-risedev d mysql-offline-schema-change-test
+risedev ci-start mysql-offline-schema-change-test
 echo "\n\n\n-------------RW started------------\n\n\n"
 
 mysql -e "
@@ -97,7 +97,7 @@ mysql -u root -D test_db -e "insert into t1 values (2, 'def'); alter table t1 ad
 echo "\n\n\n-------------Resume RW CDC------------\n\n\n"
 sleep 5
 # Resume RW CDC
-risedev d mysql-offline-schema-change-test
+risedev ci-resume mysql-offline-schema-change-test
 
 # Verify data
 # If the bug is reproduced, you won't see rows with k=2 and k=3, check the logs of compute-node!
