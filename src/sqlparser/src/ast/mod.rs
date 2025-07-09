@@ -681,11 +681,7 @@ impl fmt::Display for Expr {
             Expr::SomeOp(expr) => write!(f, "SOME({})", expr),
             Expr::AllOp(expr) => write!(f, "ALL({})", expr),
             Expr::UnaryOp { op, expr } => {
-                if op == &UnaryOperator::PGPostfixFactorial {
-                    write!(f, "{}{}", expr, op)
-                } else {
-                    write!(f, "{} {}", op, expr)
-                }
+                write!(f, "{} {}", op, expr)
             }
             Expr::Cast { expr, data_type } => write!(f, "CAST({} AS {})", expr, data_type),
             Expr::TryCast { expr, data_type } => write!(f, "TRY_CAST({} AS {})", expr, data_type),
@@ -1504,6 +1500,13 @@ pub enum Statement {
     AlterFragment {
         fragment_id: u32,
         operation: AlterFragmentOperation,
+    },
+    /// DESCRIBE relation
+    /// ALTER DEFAULT PRIVILEGES
+    AlterDefaultPrivileges {
+        target_users: Option<Vec<Ident>>,
+        schema_names: Option<Vec<ObjectName>>,
+        operation: DefaultPrivilegeOperation,
     },
     /// DESCRIBE relation
     Describe {
@@ -2443,6 +2446,20 @@ impl Statement {
             } => {
                 write!(f, "ALTER FRAGMENT {} {}", fragment_id, operation)
             }
+            Statement::AlterDefaultPrivileges {
+                target_users,
+                schema_names,
+                operation,
+            } => {
+                write!(f, "ALTER DEFAULT PRIVILEGES")?;
+                if let Some(target_users) = target_users {
+                    write!(f, " FOR {}", display_comma_separated(target_users))?;
+                }
+                if let Some(schema_names) = schema_names {
+                    write!(f, " IN SCHEMA {}", display_comma_separated(schema_names))?;
+                }
+                write!(f, " {}", operation)
+            }
         }
     }
 
@@ -2751,6 +2768,115 @@ impl fmt::Display for GrantObjects {
             }
             GrantObjects::Secrets(secrets) => {
                 write!(f, "SECRET {}", display_comma_separated(secrets))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum PrivilegeObjectType {
+    Tables,
+    Sources,
+    Sinks,
+    Mviews,
+    Views,
+    Functions,
+    Connections,
+    Secrets,
+    Subscriptions,
+    Schemas,
+}
+
+impl fmt::Display for PrivilegeObjectType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PrivilegeObjectType::Tables => f.write_str("TABLES")?,
+            PrivilegeObjectType::Sources => f.write_str("SOURCES")?,
+            PrivilegeObjectType::Sinks => f.write_str("SINKS")?,
+            PrivilegeObjectType::Mviews => f.write_str("MATERIALIZED VIEWS")?,
+            PrivilegeObjectType::Views => f.write_str("VIEWS")?,
+            PrivilegeObjectType::Functions => f.write_str("FUNCTIONS")?,
+            PrivilegeObjectType::Connections => f.write_str("CONNECTIONS")?,
+            PrivilegeObjectType::Secrets => f.write_str("SECRETS")?,
+            PrivilegeObjectType::Subscriptions => f.write_str("SUBSCRIPTIONS")?,
+            PrivilegeObjectType::Schemas => f.write_str("SCHEMAS")?,
+        };
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum DefaultPrivilegeOperation {
+    Grant {
+        privileges: Privileges,
+        object_type: PrivilegeObjectType,
+        grantees: Vec<Ident>,
+        with_grant_option: bool,
+    },
+    Revoke {
+        privileges: Privileges,
+        object_type: PrivilegeObjectType,
+        grantees: Vec<Ident>,
+        revoke_grant_option: bool,
+        cascade: bool,
+    },
+}
+
+impl fmt::Display for DefaultPrivilegeOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DefaultPrivilegeOperation::Grant {
+                privileges,
+                object_type,
+                grantees,
+                with_grant_option,
+            } => {
+                write!(
+                    f,
+                    "GRANT {} ON {} TO {}",
+                    privileges,
+                    object_type,
+                    display_comma_separated(grantees)
+                )?;
+                if *with_grant_option {
+                    write!(f, " WITH GRANT OPTION")?;
+                }
+            }
+            DefaultPrivilegeOperation::Revoke {
+                privileges,
+                object_type,
+                grantees,
+                revoke_grant_option,
+                cascade,
+            } => {
+                write!(f, "REVOKE")?;
+                if *revoke_grant_option {
+                    write!(f, " GRANT OPTION FOR")?;
+                }
+                write!(
+                    f,
+                    " {} ON {} FROM {}",
+                    privileges,
+                    object_type,
+                    display_comma_separated(grantees)
+                )?;
+                write!(f, " {}", if *cascade { "CASCADE" } else { "RESTRICT" })?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl DefaultPrivilegeOperation {
+    pub fn for_schemas(&self) -> bool {
+        match &self {
+            DefaultPrivilegeOperation::Grant { object_type, .. } => {
+                object_type == &PrivilegeObjectType::Schemas
+            }
+            DefaultPrivilegeOperation::Revoke { object_type, .. } => {
+                object_type == &PrivilegeObjectType::Schemas
             }
         }
     }

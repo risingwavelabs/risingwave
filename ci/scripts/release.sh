@@ -21,7 +21,7 @@ dnf install -y lld
 ld.lld --version
 
 echo "--- Install dependencies"
-dnf install -y perl-core wget python3.12 python3.12-devel cyrus-sasl-devel rsync openssl-devel
+dnf install -y perl-core wget python3.12 python3.12-devel cyrus-sasl-devel rsync openssl-devel blas-devel lapack-devel libgomp
 # python udf compiling requires python3.12
 update-alternatives --install /usr/bin/python3 python3 /usr/local/bin/python3.12 3
 
@@ -38,6 +38,7 @@ source "$HOME/.cargo/env"
 rustup show
 source ci/scripts/common.sh
 unset RUSTC_WRAPPER # disable sccache
+unset RUSTC_WORKSPACE_WRAPPER
 
 echo "--- Install protoc3"
 PROTOC_ARCH=${ARCH}

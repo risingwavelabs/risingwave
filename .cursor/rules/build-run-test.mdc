@@ -16,6 +16,7 @@ You may need to learn how to build and test RisingWave when implementing feature
 - When a RisingWave instance is running, you can use `./risedev slt './path/to/e2e-test-file.slt'` to run end-to-end SLT tests. File globs like `/**/*.slt` is allowed.
 - Integration tests and unit tests are valid Rust/Tokio tests, you can locate and run those related in a standard Rust way.
 - `./risedev` command is safe to run automatically.
+- Never run `git` mutation command (`git add`, `git rebase`, `git commit`, `git push`, etc) unless user explicitly asks for it.
 
 ## Testing
 

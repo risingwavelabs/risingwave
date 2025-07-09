@@ -262,15 +262,15 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
             None => StreamChunk::from_rows(&[(Op::Insert, &[new_output])], &[DataType::Float64]),
             Some(last_output) if !self.output_changed => StreamChunk::from_rows(
                 &[
-                    (Op::UpdateDelete, &[last_output.clone()]),
-                    (Op::UpdateInsert, &[last_output]),
+                    (Op::UpdateDelete, std::slice::from_ref(&last_output)),
+                    (Op::UpdateInsert, std::slice::from_ref(&last_output)),
                 ],
                 &[DataType::Float64],
             ),
             Some(last_output) => StreamChunk::from_rows(
                 &[
-                    (Op::UpdateDelete, &[last_output.clone()]),
-                    (Op::UpdateInsert, &[new_output.clone()]),
+                    (Op::UpdateDelete, std::slice::from_ref(&last_output)),
+                    (Op::UpdateInsert, std::slice::from_ref(&new_output)),
                 ],
                 &[DataType::Float64],
             ),

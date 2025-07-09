@@ -488,7 +488,8 @@ pub struct KvLogStoreFactory<S: StateStore> {
 
     vnodes: Option<Arc<Bitmap>>,
 
-    max_row_count: usize,
+    max_buffer_row_count: usize,
+    chunk_size: usize,
 
     metrics: KvLogStoreMetrics,
 
@@ -498,11 +499,13 @@ pub struct KvLogStoreFactory<S: StateStore> {
 }
 
 impl<S: StateStore> KvLogStoreFactory<S> {
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         state_store: S,
         table_catalog: Table,
         vnodes: Option<Arc<Bitmap>>,
-        max_row_count: usize,
+        max_buffer_row_count: usize,
+        chunk_size: usize,
         metrics: KvLogStoreMetrics,
         identity: impl Into<String>,
         pk_info: &'static KvLogStorePkInfo,
@@ -511,7 +514,8 @@ impl<S: StateStore> KvLogStoreFactory<S> {
             state_store,
             table_catalog,
             vnodes,
-            max_row_count,
+            max_buffer_row_count,
+            chunk_size,
             metrics,
             identity: identity.into(),
             pk_info,
@@ -540,12 +544,18 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
                 },
                 is_replicated: false,
                 vnodes: serde.vnodes().clone(),
+                upload_on_flush: false,
             })
             .await;
 
-        let (tx, rx) = new_log_store_buffer(self.max_row_count, self.metrics.clone());
+        let (tx, rx) = new_log_store_buffer(
+            self.max_buffer_row_count,
+            self.chunk_size,
+            self.metrics.clone(),
+        );
 
-        let (read_state, write_state) = new_log_store_state(table_id, local_state_store, serde);
+        let (read_state, write_state) =
+            new_log_store_state(table_id, local_state_store, serde, self.chunk_size);
 
         let (init_epoch_tx, init_epoch_rx) = oneshot::channel();
         let (update_vnode_bitmap_tx, update_vnode_bitmap_rx) = unbounded_channel();
@@ -633,6 +643,7 @@ mod tests {
             table.clone(),
             Some(Arc::new(bitmap)),
             max_row_count,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
@@ -750,6 +761,7 @@ mod tests {
             table.clone(),
             Some(bitmap.clone()),
             max_row_count,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
@@ -845,6 +857,7 @@ mod tests {
             table.clone(),
             Some(bitmap),
             max_row_count,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
@@ -940,6 +953,7 @@ mod tests {
             table.clone(),
             Some(bitmap.clone()),
             max_row_count,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
@@ -1061,6 +1075,7 @@ mod tests {
             table.clone(),
             Some(bitmap),
             max_row_count,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
@@ -1159,6 +1174,7 @@ mod tests {
             table.clone(),
             Some(vnodes1),
             10 * TEST_DATA_SIZE,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
@@ -1168,6 +1184,7 @@ mod tests {
             table.clone(),
             Some(vnodes2),
             10 * TEST_DATA_SIZE,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
@@ -1305,6 +1322,7 @@ mod tests {
             table.clone(),
             Some(vnodes),
             10 * TEST_DATA_SIZE,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
@@ -1376,6 +1394,7 @@ mod tests {
             table.clone(),
             Some(Arc::new(bitmap)),
             0,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
@@ -1524,6 +1543,7 @@ mod tests {
             table.clone(),
             Some(bitmap.clone()),
             1024,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
@@ -1642,6 +1662,7 @@ mod tests {
             table.clone(),
             Some(bitmap.clone()),
             1024,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
@@ -1710,6 +1731,7 @@ mod tests {
             test_env.storage.clone(),
             table.clone(),
             Some(bitmap.clone()),
+            1024,
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
@@ -1883,6 +1905,7 @@ mod tests {
             table.clone(),
             Some(bitmap.clone()),
             max_row_count,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
@@ -1970,6 +1993,7 @@ mod tests {
             table.clone(),
             Some(bitmap.clone()),
             max_row_count,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
@@ -2042,6 +2066,7 @@ mod tests {
             table.clone(),
             Some(bitmap),
             max_row_count,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,

@@ -47,13 +47,13 @@ fn r#gen(tokens: TokenStream) -> Result<TokenStream> {
     };
 
     let style = get_style(&input);
-    if let Some(style) = &style {
-        if !["Title Case", "TITLE CASE", "snake_case"].contains(&style.value().as_str()) {
-            return Err(syn::Error::new_spanned(
-                style,
-                "only `Title Case`, `TITLE CASE`, and `snake_case` are supported",
-            ));
-        }
+    if let Some(style) = &style
+        && !["Title Case", "TITLE CASE", "snake_case"].contains(&style.value().as_str())
+    {
+        return Err(syn::Error::new_spanned(
+            style,
+            "only `Title Case`, `TITLE CASE`, and `snake_case` are supported",
+        ));
     }
 
     let fields_rw: Vec<TokenStream> = struct_

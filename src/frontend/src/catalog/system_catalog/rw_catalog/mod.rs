@@ -68,5 +68,6 @@ mod rw_fragment_backfill_progress;
 mod rw_fragment_id_to_ddl;
 mod rw_internal_table_info;
 mod rw_resource_groups;
+mod rw_streaming_job_info;
 mod rw_streaming_jobs;
 mod rw_worker_actor_count;

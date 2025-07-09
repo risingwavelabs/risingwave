@@ -39,14 +39,14 @@ pub enum QualityOfService {
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct MqttCommon {
-    /// The url of the broker to connect to. e.g. tcp://localhost.
+    /// The url of the broker to connect to. e.g. <tcp://localhost>.
     /// Must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,
     /// to denote the protocol for establishing a connection with the broker.
     /// `mqtts://`, `ssl://` will use the native certificates if no ca is specified
     pub url: String,
 
-    /// The quality of service to use when publishing messages. Defaults to at_most_once.
-    /// Could be at_most_once, at_least_once or exactly_once
+    /// The quality of service to use when publishing messages. Defaults to `at_most_once`.
+    /// Could be `at_most_once`, `at_least_once` or `exactly_once`
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub qos: Option<QualityOfService>,
 

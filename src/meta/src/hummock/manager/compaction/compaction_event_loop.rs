@@ -587,12 +587,11 @@ impl HummockCompactorDedicatedEventLoop {
                         _ => unreachable!(),
                         }
                     }
-                    if !report_events.is_empty() {
-                        if let Err(e) = self.hummock_compaction_event_handler.handle_report_task_event(report_events).await
+                    if !report_events.is_empty()
+                        && let Err(e) = self.hummock_compaction_event_handler.handle_report_task_event(report_events).await
                         {
                             tracing::error!(error = %e.as_report(), "report compact_tack fail")
                         }
-                    }
                 }
             } => {}
         }

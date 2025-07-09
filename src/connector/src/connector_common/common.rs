@@ -196,11 +196,13 @@ pub struct KafkaConnectionProps {
     pub brokers: String,
 
     /// Security protocol used for RisingWave to communicate with Kafka brokers. Could be
-    /// PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
+    /// PLAINTEXT, SSL, `SASL_PLAINTEXT` or `SASL_SSL`.
     #[serde(rename = "properties.security.protocol")]
+    #[with_option(allow_alter_on_fly)]
     security_protocol: Option<String>,
 
     #[serde(rename = "properties.ssl.endpoint.identification.algorithm")]
+    #[with_option(allow_alter_on_fly)]
     ssl_endpoint_identification_algorithm: Option<String>,
 
     // For the properties below, please refer to [librdkafka](https://github.com/edenhill/librdkafka/blob/master/CONFIGURATION.md) for more information.
@@ -232,16 +234,19 @@ pub struct KafkaConnectionProps {
     #[serde(rename = "properties.ssl.key.password")]
     ssl_key_password: Option<String>,
 
-    /// SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and AWS_MSK_IAM.
+    /// SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and `AWS_MSK_IAM`.
     #[serde(rename = "properties.sasl.mechanism")]
+    #[with_option(allow_alter_on_fly)]
     sasl_mechanism: Option<String>,
 
     /// SASL username for SASL/PLAIN and SASL/SCRAM.
     #[serde(rename = "properties.sasl.username")]
+    #[with_option(allow_alter_on_fly)]
     sasl_username: Option<String>,
 
     /// SASL password for SASL/PLAIN and SASL/SCRAM.
     #[serde(rename = "properties.sasl.password")]
+    #[with_option(allow_alter_on_fly)]
     sasl_password: Option<String>,
 
     /// Kafka server's Kerberos principal name under SASL/GSSAPI, not including /hostname@REALM.
@@ -289,6 +294,7 @@ pub struct KafkaCommon {
         deserialize_with = "deserialize_duration_from_string",
         default = "default_kafka_sync_call_timeout"
     )]
+    #[with_option(allow_alter_on_fly)]
     pub sync_call_timeout: Duration,
 }
 
@@ -314,10 +320,11 @@ const fn default_socket_keepalive_enable() -> bool {
 pub struct RdKafkaPropertiesCommon {
     /// Maximum Kafka protocol request message size. Due to differing framing overhead between
     /// protocol versions the producer is unable to reliably enforce a strict max message limit at
-    /// produce time and may exceed the maximum size by one message in protocol ProduceRequests,
+    /// produce time and may exceed the maximum size by one message in protocol `ProduceRequests`,
     /// the broker will enforce the topic's max.message.bytes limit
     #[serde(rename = "properties.message.max.bytes")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub message_max_bytes: Option<usize>,
 
     /// Maximum Kafka protocol response message size. This serves as a safety precaution to avoid
@@ -326,19 +333,23 @@ pub struct RdKafkaPropertiesCommon {
     /// configuration property is explicitly set.
     #[serde(rename = "properties.receive.message.max.bytes")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub receive_message_max_bytes: Option<usize>,
 
     #[serde(rename = "properties.statistics.interval.ms")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub statistics_interval_ms: Option<usize>,
 
     /// Client identifier
     #[serde(rename = "properties.client.id")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub client_id: Option<String>,
 
     #[serde(rename = "properties.enable.ssl.certificate.verification")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub enable_ssl_certificate_verification: Option<bool>,
 
     #[serde(
@@ -833,6 +844,9 @@ pub struct NatsCommon {
     #[serde(rename = "max_message_size")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_message_size: Option<i32>,
+    #[serde(rename = "allow_create_stream", default)]
+    #[serde_as(as = "DisplayFromStr")]
+    pub allow_create_stream: bool,
 }
 
 impl EnforceSecret for NatsCommon {
@@ -950,20 +964,31 @@ impl NatsCommon {
     pub(crate) async fn build_or_get_stream(
         &self,
         jetstream: jetstream::Context,
-        stream: String,
+        stream_str: String,
     ) -> ConnectorResult<jetstream::stream::Stream> {
         let subjects: Vec<String> = self.subject.split(',').map(|s| s.to_owned()).collect();
-        if let Ok(mut stream_instance) = jetstream.get_stream(&stream).await {
+
+        // In `SourceEnumerator`, we may create a stream
+        // In `SourceReader`, the desired stream MUST exist
+        if let Ok(mut stream_instance) = jetstream.get_stream(&stream_str).await {
             tracing::info!(
                 "load existing nats stream ({:?}) with config {:?}",
-                stream,
+                stream_str,
                 stream_instance.info().await?
             );
             return Ok(stream_instance);
         }
 
+        if !self.allow_create_stream {
+            return Err(anyhow!(
+                "stream {} not found, set `allow_create_stream` to true to create a stream",
+                stream_str
+            )
+            .into());
+        }
+
         let mut config = jetstream::stream::Config {
-            name: stream.clone(),
+            name: stream_str.clone(),
             max_bytes: 1000000,
             subjects,
             ..Default::default()
@@ -985,7 +1010,7 @@ impl NatsCommon {
         }
         tracing::info!(
             "create nats stream ({:?}) with config {:?}",
-            &stream,
+            &stream_str,
             config
         );
         let stream = jetstream.get_or_create_stream(config).await?;
@@ -1038,7 +1063,7 @@ pub(crate) fn load_private_key(
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct MongodbCommon {
-    /// The URL of MongoDB
+    /// The URL of `MongoDB`
     #[serde(rename = "mongodb.url")]
     pub connect_uri: String,
     /// The collection name where data should be written to or read from. For sinks, the format is

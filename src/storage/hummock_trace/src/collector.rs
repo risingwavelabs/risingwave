@@ -82,10 +82,10 @@ pub fn init_collector() {
         let path = Path::new(&path);
         tracing::info!("Hummock Tracing log path {}", path.to_string_lossy());
 
-        if let Some(parent) = path.parent() {
-            if !parent.exists() {
-                create_dir_all(parent).unwrap();
-            }
+        if let Some(parent) = path.parent()
+            && !parent.exists()
+        {
+            create_dir_all(parent).unwrap();
         }
         let f = OpenOptions::new()
             .write(true)

@@ -530,6 +530,7 @@ mod merge_vnode_stream {
 
     pub(super) type SortKeyType = Bytes; // TODO: may use Vec
 
+    #[define_opaque(MergedVnodeStream)]
     pub(super) fn merge_stream<
         R: Send,
         RowSt: Stream<Item = StorageResult<((), R)>> + Send,

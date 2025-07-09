@@ -333,17 +333,22 @@ impl Binder {
     }
 
     pub(super) fn bind_unary_expr(&mut self, op: UnaryOperator, expr: Expr) -> Result<ExprImpl> {
-        let func_type = match op {
+        let func_type = match &op {
             UnaryOperator::Not => ExprType::Not,
             UnaryOperator::Minus => ExprType::Neg,
-            UnaryOperator::PGAbs => ExprType::Abs,
-            UnaryOperator::PGBitwiseNot => ExprType::BitwiseNot,
             UnaryOperator::Plus => {
                 return self.rewrite_positive(expr);
             }
-            UnaryOperator::PGSquareRoot => ExprType::Sqrt,
-            UnaryOperator::PGCubeRoot => ExprType::Cbrt,
-            _ => bail_not_implemented!(issue = 112, "unsupported unary expression: {:?}", op),
+            UnaryOperator::Custom(name) => match name.as_str() {
+                "~" => ExprType::BitwiseNot,
+                "@" => ExprType::Abs,
+                "|/" => ExprType::Sqrt,
+                "||/" => ExprType::Cbrt,
+                _ => bail_not_implemented!(issue = 112, "unsupported unary expression: {:?}", op),
+            },
+            UnaryOperator::PGQualified(_) => {
+                bail_not_implemented!(issue = 112, "unsupported unary expression: {:?}", op)
+            }
         };
         let expr = self.bind_expr_inner(expr)?;
         FunctionCall::new(func_type, vec![expr]).map(|f| f.into())
@@ -504,10 +509,10 @@ impl Binder {
             }
             // Use the `bind_binary_op` path to handle the ALL|ANY pattern.
             let op = match (expr_type, negated) {
-                (ExprType::Like, false) => BinaryOperator::PGLikeMatch,
-                (ExprType::Like, true) => BinaryOperator::PGNotLikeMatch,
-                (ExprType::ILike, false) => BinaryOperator::PGILikeMatch,
-                (ExprType::ILike, true) => BinaryOperator::PGNotILikeMatch,
+                (ExprType::Like, false) => BinaryOperator::Custom("~~".to_owned()),
+                (ExprType::Like, true) => BinaryOperator::Custom("!~~".to_owned()),
+                (ExprType::ILike, false) => BinaryOperator::Custom("~~*".to_owned()),
+                (ExprType::ILike, true) => BinaryOperator::Custom("!~~*".to_owned()),
                 _ => unreachable!(),
             };
             return self.bind_binary_op(expr, op, pattern);

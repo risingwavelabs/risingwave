@@ -97,7 +97,7 @@ pub trait FrontendMetaClient: Send + Sync {
         include_dropped_table: bool,
     ) -> Result<HashMap<u32, Table>>;
 
-    /// Returns vector of (worker_id, min_pinned_version_id)
+    /// Returns vector of (`worker_id`, `min_pinned_version_id`)
     async fn list_hummock_pinned_versions(&self) -> Result<Vec<(u32, u64)>>;
 
     async fn get_hummock_current_version(&self) -> Result<HummockVersion>;
@@ -144,11 +144,21 @@ pub trait FrontendMetaClient: Send + Sync {
         connector_conn_ref: Option<u32>,
     ) -> Result<()>;
 
+    async fn alter_source_connector_props(
+        &self,
+        source_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        connector_conn_ref: Option<u32>,
+    ) -> Result<()>;
+
     async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>>;
 
     async fn get_fragment_by_id(&self, fragment_id: u32) -> Result<Option<FragmentDistribution>>;
 
     fn worker_id(&self) -> u32;
+
+    async fn set_sync_log_store_aligned(&self, job_id: u32, aligned: bool) -> Result<()>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -354,6 +364,23 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
             .await
     }
 
+    async fn alter_source_connector_props(
+        &self,
+        source_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        connector_conn_ref: Option<u32>,
+    ) -> Result<()> {
+        self.0
+            .alter_source_connector_props(
+                source_id,
+                changed_props,
+                changed_secret_refs,
+                connector_conn_ref,
+            )
+            .await
+    }
+
     async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>> {
         self.0.list_hosted_iceberg_tables().await
     }
@@ -364,5 +391,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     fn worker_id(&self) -> u32 {
         self.0.worker_id()
+    }
+
+    async fn set_sync_log_store_aligned(&self, job_id: u32, aligned: bool) -> Result<()> {
+        self.0.set_sync_log_store_aligned(job_id, aligned).await
     }
 }

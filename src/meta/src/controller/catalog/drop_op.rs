@@ -101,14 +101,28 @@ impl CatalogController {
             .all(&txn)
             .await?;
         if !removed_incoming_sinks.is_empty() {
+            let incoming_sink_ids = removed_incoming_sinks
+                .into_iter()
+                .flat_map(|arr| arr.into_inner().into_iter())
+                .collect_vec();
+
+            if self.env.opts.protect_drop_table_with_incoming_sink {
+                let sink_names: Vec<String> = Sink::find()
+                    .select_only()
+                    .column(sink::Column::Name)
+                    .filter(sink::Column::SinkId.is_in(incoming_sink_ids.clone()))
+                    .into_tuple()
+                    .all(&txn)
+                    .await?;
+
+                return Err(MetaError::permission_denied(format!(
+                    "Table used by incoming sinks: {:?}, please drop them manually",
+                    sink_names
+                )));
+            }
+
             let removed_sink_objs: Vec<PartialObject> = Object::find()
-                .filter(
-                    object::Column::Oid.is_in(
-                        removed_incoming_sinks
-                            .into_iter()
-                            .flat_map(|arr| arr.into_inner().into_iter()),
-                    ),
-                )
+                .filter(object::Column::Oid.is_in(incoming_sink_ids))
                 .into_partial_model()
                 .all(&txn)
                 .await?;
@@ -245,12 +259,12 @@ impl CatalogController {
 
         // TODO: Support drop cascade for cross-database query.
         for obj in removed_objects.values() {
-            if let Some(obj_database_id) = obj.database_id {
-                if obj_database_id != database_id {
-                    return Err(MetaError::permission_denied(format!(
-                        "Referenced by other objects in database {obj_database_id}, please drop them manually"
-                    )));
-                }
+            if let Some(obj_database_id) = obj.database_id
+                && obj_database_id != database_id
+            {
+                return Err(MetaError::permission_denied(format!(
+                    "Referenced by other objects in database {obj_database_id}, please drop them manually"
+                )));
             }
         }
 

@@ -31,6 +31,7 @@ use tower_http::add_extension::AddExtensionLayer;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::{self, CorsLayer};
 
+use crate::hummock::HummockManagerRef;
 use crate::manager::MetadataManager;
 use crate::manager::diagnose::DiagnoseCommandRef;
 
@@ -41,6 +42,7 @@ pub struct DashboardService {
     pub prometheus_client: Option<prometheus_http_query::Client>,
     pub prometheus_selector: String,
     pub metadata_manager: MetadataManager,
+    pub hummock_manager: HummockManagerRef,
     pub compute_clients: ComputeClientPool,
     pub diagnose_command: DiagnoseCommandRef,
     pub trace_state: otlp_embedded::StateRef,
@@ -57,7 +59,7 @@ pub(super) mod handlers {
     use axum::extract::Query;
     use futures::future::join_all;
     use itertools::Itertools;
-    use risingwave_common::catalog::TableId;
+    use risingwave_common::catalog::{FragmentTypeFlag, TableId};
     use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
     use risingwave_meta_model::WorkerId;
     use risingwave_pb::catalog::table::TableType;
@@ -65,6 +67,7 @@ pub(super) mod handlers {
         Index, PbDatabase, PbSchema, Sink, Source, Subscription, Table, View,
     };
     use risingwave_pb::common::{WorkerNode, WorkerType};
+    use risingwave_pb::hummock::TableStats;
     use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
     use risingwave_pb::meta::{
         ActorIds, FragmentIdToActorIdMap, FragmentToRelationMap, PbTableFragments, RelationIdInfos,
@@ -74,15 +77,48 @@ pub(super) mod handlers {
         GetStreamingStatsResponse, HeapProfilingResponse, ListHeapProfilingResponse,
         StackTraceResponse,
     };
-    use risingwave_pb::stream_plan::FragmentTypeFlag;
     use risingwave_pb::user::PbUserInfo;
-    use serde::Deserialize;
+    use serde::{Deserialize, Serialize};
     use serde_json::json;
     use thiserror_ext::AsReport;
 
     use super::*;
     use crate::controller::fragment::StreamingJobInfo;
     use crate::rpc::await_tree::{dump_cluster_await_tree, dump_worker_node_await_tree};
+
+    #[derive(Serialize)]
+    pub struct TableWithStats {
+        #[serde(flatten)]
+        pub table: Table,
+        pub total_size_bytes: i64,
+        pub total_key_count: i64,
+        pub total_key_size: i64,
+        pub total_value_size: i64,
+        pub compressed_size: u64,
+    }
+
+    impl TableWithStats {
+        pub fn from_table_and_stats(table: Table, stats: Option<&TableStats>) -> Self {
+            match stats {
+                Some(stats) => Self {
+                    total_size_bytes: stats.total_key_size + stats.total_value_size,
+                    total_key_count: stats.total_key_count,
+                    total_key_size: stats.total_key_size,
+                    total_value_size: stats.total_value_size,
+                    compressed_size: stats.total_compressed_size,
+                    table,
+                },
+                None => Self {
+                    total_size_bytes: 0,
+                    total_key_count: 0,
+                    total_key_size: 0,
+                    total_value_size: 0,
+                    compressed_size: 0,
+                    table,
+                },
+            }
+        }
+    }
 
     pub struct DashboardError(anyhow::Error);
     pub type Result<T> = std::result::Result<T, DashboardError>;
@@ -126,29 +162,60 @@ pub(super) mod handlers {
 
     async fn list_table_catalogs_inner(
         metadata_manager: &MetadataManager,
+        hummock_manager: &HummockManagerRef,
         table_type: TableType,
-    ) -> Result<Json<Vec<Table>>> {
+    ) -> Result<Json<Vec<TableWithStats>>> {
         let tables = metadata_manager
             .catalog_controller
             .list_tables_by_type(table_type.into())
             .await
             .map_err(err)?;
 
-        Ok(Json(tables))
+        // Get table statistics from hummock manager
+        let version_stats = hummock_manager.get_version_stats().await;
+
+        let tables_with_stats = tables
+            .into_iter()
+            .map(|table| {
+                let stats = version_stats.table_stats.get(&table.id);
+                TableWithStats::from_table_and_stats(table, stats)
+            })
+            .collect();
+
+        Ok(Json(tables_with_stats))
     }
 
     pub async fn list_materialized_views(
         Extension(srv): Extension<Service>,
-    ) -> Result<Json<Vec<Table>>> {
-        list_table_catalogs_inner(&srv.metadata_manager, TableType::MaterializedView).await
+    ) -> Result<Json<Vec<TableWithStats>>> {
+        list_table_catalogs_inner(
+            &srv.metadata_manager,
+            &srv.hummock_manager,
+            TableType::MaterializedView,
+        )
+        .await
     }
 
-    pub async fn list_tables(Extension(srv): Extension<Service>) -> Result<Json<Vec<Table>>> {
-        list_table_catalogs_inner(&srv.metadata_manager, TableType::Table).await
+    pub async fn list_tables(
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<Vec<TableWithStats>>> {
+        list_table_catalogs_inner(
+            &srv.metadata_manager,
+            &srv.hummock_manager,
+            TableType::Table,
+        )
+        .await
     }
 
-    pub async fn list_index_tables(Extension(srv): Extension<Service>) -> Result<Json<Vec<Table>>> {
-        list_table_catalogs_inner(&srv.metadata_manager, TableType::Index).await
+    pub async fn list_index_tables(
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<Vec<TableWithStats>>> {
+        list_table_catalogs_inner(
+            &srv.metadata_manager,
+            &srv.hummock_manager,
+            TableType::Index,
+        )
+        .await
     }
 
     pub async fn list_indexes(Extension(srv): Extension<Service>) -> Result<Json<Vec<Index>>> {
@@ -177,8 +244,13 @@ pub(super) mod handlers {
 
     pub async fn list_internal_tables(
         Extension(srv): Extension<Service>,
-    ) -> Result<Json<Vec<Table>>> {
-        list_table_catalogs_inner(&srv.metadata_manager, TableType::Internal).await
+    ) -> Result<Json<Vec<TableWithStats>>> {
+        list_table_catalogs_inner(
+            &srv.metadata_manager,
+            &srv.hummock_manager,
+            TableType::Internal,
+        )
+        .await
     }
 
     pub async fn list_sources(Extension(srv): Extension<Service>) -> Result<Json<Vec<Source>>> {
@@ -242,10 +314,16 @@ pub(super) mod handlers {
         let mut out_map = HashMap::new();
         for (relation_id, tf) in table_fragments {
             for (fragment_id, fragment) in &tf.fragments {
-                if (fragment.fragment_type_mask & FragmentTypeFlag::StreamScan as u32) != 0 {
+                if fragment
+                    .fragment_type_mask
+                    .contains(FragmentTypeFlag::StreamScan)
+                {
                     in_map.insert(*fragment_id, relation_id as u32);
                 }
-                if (fragment.fragment_type_mask & FragmentTypeFlag::Mview as u32) != 0 {
+                if fragment
+                    .fragment_type_mask
+                    .contains(FragmentTypeFlag::Mview)
+                {
                     out_map.insert(*fragment_id, relation_id as u32);
                 }
             }

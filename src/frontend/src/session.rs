@@ -329,7 +329,7 @@ impl FrontendEnv {
         let catalog = Arc::new(RwLock::new(Catalog::default()));
         let catalog_writer = Arc::new(CatalogWriterImpl::new(
             meta_client.clone(),
-            catalog_updated_rx,
+            catalog_updated_rx.clone(),
             hummock_snapshot_manager.clone(),
         ));
         let catalog_reader = CatalogReader::new(catalog.clone());
@@ -354,11 +354,10 @@ impl FrontendEnv {
         );
 
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
-        let (user_info_updated_tx, user_info_updated_rx) = watch::channel(0);
         let user_info_reader = UserInfoReader::new(user_info_manager.clone());
         let user_info_writer = Arc::new(UserInfoWriterImpl::new(
             meta_client.clone(),
-            user_info_updated_rx,
+            catalog_updated_rx,
         ));
 
         let system_params_manager =
@@ -380,7 +379,6 @@ impl FrontendEnv {
             catalog,
             catalog_updated_tx,
             user_info_manager,
-            user_info_updated_tx,
             hummock_snapshot_manager.clone(),
             system_params_manager.clone(),
             session_params.clone(),
@@ -1689,6 +1687,10 @@ impl Session for SessionImpl {
         }
     }
 
+    fn get_config(&self, key: &str) -> std::result::Result<String, BoxedError> {
+        self.config().get(key).map_err(Into::into)
+    }
+
     fn set_config(&self, key: &str, value: String) -> std::result::Result<String, BoxedError> {
         Self::set_config(self, key, value).map_err(Into::into)
     }
@@ -1738,10 +1740,9 @@ impl Session for SessionImpl {
                     // Idle timeout.
                     if let Some(elapse_since_last_idle_instant) =
                         self.elapse_since_last_idle_instant()
+                        && elapse_since_last_idle_instant > idle_in_transaction_session_timeout
                     {
-                        if elapse_since_last_idle_instant > idle_in_transaction_session_timeout {
-                            return Err(PsqlError::IdleInTxnTimeout);
-                        }
+                        return Err(PsqlError::IdleInTxnTimeout);
                     }
                 }
             }

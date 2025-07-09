@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use risingwave_common::acl::AclMode;
-use risingwave_pb::user::grant_privilege::{PbAction, PbObject};
+use risingwave_pb::user::PbAction;
+use risingwave_pb::user::grant_privilege::PbObject;
 
 use crate::catalog::OwnedByUserCatalog;
 use crate::error::ErrorCode::PermissionDenied;

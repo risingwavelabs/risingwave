@@ -1,3 +1,5 @@
+# ALTER CONNECTION SET SCHEMA is covered in `e2e_test/source_inline/connection/ddl.slt`
+
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 

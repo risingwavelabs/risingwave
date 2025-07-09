@@ -150,7 +150,8 @@ pub struct MetaOpts {
     pub periodic_compaction_interval_sec: u64,
     /// Interval of reporting the number of nodes in the cluster.
     pub node_num_monitor_interval_sec: u64,
-
+    /// Whether to protect the drop table operation with incoming sink.
+    pub protect_drop_table_with_incoming_sink: bool,
     /// The Prometheus endpoint for Meta Dashboard Service.
     /// The Dashboard service uses this in the following ways:
     /// 1. Query Prometheus for relevant metrics to find Stream Graph Bottleneck, and display it.
@@ -310,6 +311,7 @@ impl MetaOpts {
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 60,
             node_num_monitor_interval_sec: 10,
+            protect_drop_table_with_incoming_sink: false,
             prometheus_endpoint: None,
             prometheus_selector: None,
             vpc_id: None,
@@ -521,13 +523,18 @@ impl MetaSrvEnv {
 impl MetaSrvEnv {
     // Instance for test.
     pub async fn for_test() -> Self {
-        Self::for_test_opts(MetaOpts::test(false)).await
+        Self::for_test_opts(MetaOpts::test(false), |_| ()).await
     }
 
-    pub async fn for_test_opts(opts: MetaOpts) -> Self {
+    pub async fn for_test_opts(
+        opts: MetaOpts,
+        on_test_system_params: impl FnOnce(&mut risingwave_pb::meta::PbSystemParams),
+    ) -> Self {
+        let mut system_params = risingwave_common::system_param::system_params_for_test();
+        on_test_system_params(&mut system_params);
         Self::new(
             opts,
-            risingwave_common::system_param::system_params_for_test(),
+            system_params,
             Default::default(),
             SqlMetaStore::for_test().await,
         )

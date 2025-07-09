@@ -43,6 +43,7 @@ use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
 mod alter_database_param;
+mod alter_mv;
 mod alter_owner;
 mod alter_parallelism;
 mod alter_rename;
@@ -51,7 +52,9 @@ mod alter_secret;
 mod alter_set_schema;
 mod alter_sink_props;
 mod alter_source_column;
+mod alter_source_props;
 mod alter_source_with_sr;
+mod alter_streaming_enable_unaligned_join;
 mod alter_streaming_rate_limit;
 mod alter_swap_rename;
 mod alter_system;
@@ -855,6 +858,15 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterTableOperation::AlterConnectorProps { alter_props } => {
+                // If exists a associated source, it should be of the same name.
+                crate::handler::alter_source_props::handle_alter_table_connector_props(
+                    handler_args,
+                    name,
+                    alter_props,
+                )
+                .await
+            }
             AlterTableOperation::AddConstraint { .. }
             | AlterTableOperation::DropConstraint { .. }
             | AlterTableOperation::RenameColumn { .. }
@@ -980,6 +992,24 @@ pub async fn handle(
                     )
                     .await
                 }
+                AlterViewOperation::SetStreamingEnableUnalignedJoin { enable } => {
+                    if !materialized {
+                        bail!(
+                            "ALTER VIEW SET STREAMING_ENABLE_UNALIGNED_JOIN is not supported. Only supported for materialized views"
+                        );
+                    }
+                    alter_streaming_enable_unaligned_join::handle_alter_streaming_enable_unaligned_join(handler_args, name, enable).await
+                }
+                AlterViewOperation::AsQuery { query } => {
+                    if !materialized {
+                        bail_not_implemented!("ALTER VIEW AS QUERY");
+                    }
+                    // `ALTER MATERIALIZED VIEW AS QUERY` is only available in development build now.
+                    if !cfg!(debug_assertions) {
+                        bail_not_implemented!("ALTER MATERIALIZED VIEW AS QUERY");
+                    }
+                    alter_mv::handle_alter_mv(handler_args, name, query).await
+                }
             }
         }
 
@@ -1040,6 +1070,14 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterSinkOperation::SetStreamingEnableUnalignedJoin { enable } => {
+                alter_streaming_enable_unaligned_join::handle_alter_streaming_enable_unaligned_join(
+                    handler_args,
+                    name,
+                    enable,
+                )
+                .await
+            }
         },
         Statement::AlterSubscription { name, operation } => match operation {
             AlterSubscriptionOperation::RenameSubscription { subscription_name } => {
@@ -1078,6 +1116,14 @@ pub async fn handle(
             }
         },
         Statement::AlterSource { name, operation } => match operation {
+            AlterSourceOperation::AlterConnectorProps { alter_props } => {
+                alter_source_props::handle_alter_source_connector_props(
+                    handler_args,
+                    name,
+                    alter_props,
+                )
+                .await
+            }
             AlterSourceOperation::RenameSource { source_name } => {
                 alter_rename::handle_rename_source(handler_args, name, source_name).await
             }
@@ -1199,6 +1245,9 @@ pub async fn handle(
                 StatementType::SET_VARIABLE,
             )
             .await
+        }
+        Statement::AlterDefaultPrivileges { .. } => {
+            handle_privilege::handle_alter_default_privileges(handler_args, stmt).await
         }
         Statement::StartTransaction { modes } => {
             transaction::handle_begin(handler_args, START_TRANSACTION, modes).await

@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(coverage, feature(coverage_attribute))]
+#![feature(coverage_attribute)]
 
-#[cfg_attr(coverage, coverage(off))]
 fn main() {
     use clap::Parser;
 

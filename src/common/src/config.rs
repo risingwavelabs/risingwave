@@ -327,6 +327,10 @@ pub struct MetaConfig {
     #[deprecated]
     pub cut_table_size_limit: u64,
 
+    /// Whether to protect dropping a table with incoming sink.
+    #[serde(default = "default::meta::protect_drop_table_with_incoming_sink")]
+    pub protect_drop_table_with_incoming_sink: bool,
+
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -775,6 +779,21 @@ pub struct CacheConfig {
     #[serde(default)]
     #[config_doc(omitted)]
     pub meta_cache_eviction: CacheEvictionConfig,
+
+    #[serde(default = "default::storage::vector_block_cache_capacity_mb")]
+    pub vector_block_cache_capacity_mb: usize,
+    #[serde(default = "default::storage::vector_block_cache_shard_num")]
+    pub vector_block_cache_shard_num: usize,
+    #[serde(default)]
+    #[config_doc(omitted)]
+    pub vector_block_cache_eviction_config: CacheEvictionConfig,
+    #[serde(default = "default::storage::vector_meta_cache_capacity_mb")]
+    pub vector_meta_cache_capacity_mb: usize,
+    #[serde(default = "default::storage::vector_meta_cache_shard_num")]
+    pub vector_meta_cache_shard_num: usize,
+    #[serde(default)]
+    #[config_doc(omitted)]
+    pub vector_meta_cache_eviction_config: CacheEvictionConfig,
 }
 
 /// the section `[storage.cache.eviction]` in `risingwave.toml`.
@@ -968,6 +987,9 @@ pub struct StorageConfig {
     /// This is to prevent the compactor from consuming too much memory, but it may cause the compactor to be less efficient.
     #[serde(default = "default::storage::compactor_max_preload_meta_file_count")]
     pub compactor_max_preload_meta_file_count: usize,
+
+    #[serde(default = "default::storage::vector_file_block_size_kb")]
+    pub vector_file_block_size_kb: usize,
 
     /// Object storage configuration
     /// 1. General configuration
@@ -1693,6 +1715,10 @@ pub mod default {
             64 * 1024 * 1024 * 1024 // 64GB
         }
 
+        pub fn protect_drop_table_with_incoming_sink() -> bool {
+            false
+        }
+
         pub fn partition_vnode_count() -> u32 {
             16
         }
@@ -1978,6 +2004,26 @@ pub mod default {
 
         pub fn compactor_max_preload_meta_file_count() -> usize {
             32
+        }
+
+        pub fn vector_file_block_size_kb() -> usize {
+            1024
+        }
+
+        pub fn vector_block_cache_capacity_mb() -> usize {
+            16
+        }
+
+        pub fn vector_block_cache_shard_num() -> usize {
+            16
+        }
+
+        pub fn vector_meta_cache_capacity_mb() -> usize {
+            16
+        }
+
+        pub fn vector_meta_cache_shard_num() -> usize {
+            16
         }
 
         // deprecated
@@ -2782,11 +2828,17 @@ pub struct StorageMemoryConfig {
     pub block_cache_shard_num: usize,
     pub meta_cache_capacity_mb: usize,
     pub meta_cache_shard_num: usize,
+    pub vector_block_cache_capacity_mb: usize,
+    pub vector_block_cache_shard_num: usize,
+    pub vector_meta_cache_capacity_mb: usize,
+    pub vector_meta_cache_shard_num: usize,
     pub shared_buffer_capacity_mb: usize,
     pub compactor_memory_limit_mb: usize,
     pub prefetch_buffer_capacity_mb: usize,
     pub block_cache_eviction_config: EvictionConfig,
     pub meta_cache_eviction_config: EvictionConfig,
+    pub vector_block_cache_eviction_config: EvictionConfig,
+    pub vector_meta_cache_eviction_config: EvictionConfig,
     pub block_file_cache_flush_buffer_threshold_mb: usize,
     pub meta_file_cache_flush_buffer_threshold_mb: usize,
 }
@@ -2884,6 +2936,10 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
 
     let block_cache_eviction_config = get_eviction_config(&s.storage.cache.block_cache_eviction);
     let meta_cache_eviction_config = get_eviction_config(&s.storage.cache.meta_cache_eviction);
+    let vector_block_cache_eviction_config =
+        get_eviction_config(&s.storage.cache.vector_block_cache_eviction_config);
+    let vector_meta_cache_eviction_config =
+        get_eviction_config(&s.storage.cache.vector_meta_cache_eviction_config);
 
     let prefetch_buffer_capacity_mb =
         s.storage
@@ -2916,11 +2972,17 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         block_cache_shard_num,
         meta_cache_capacity_mb,
         meta_cache_shard_num,
+        vector_block_cache_capacity_mb: s.storage.cache.vector_block_cache_capacity_mb,
+        vector_block_cache_shard_num: s.storage.cache.vector_block_cache_shard_num,
+        vector_meta_cache_capacity_mb: s.storage.cache.vector_meta_cache_capacity_mb,
+        vector_meta_cache_shard_num: s.storage.cache.vector_meta_cache_shard_num,
         shared_buffer_capacity_mb,
         compactor_memory_limit_mb,
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,
         meta_cache_eviction_config,
+        vector_block_cache_eviction_config,
+        vector_meta_cache_eviction_config,
         block_file_cache_flush_buffer_threshold_mb,
         meta_file_cache_flush_buffer_threshold_mb,
     }
@@ -3109,10 +3171,10 @@ mod tests {
             section_configs
                 .into_iter()
                 .for_each(|(k, v)| set_default_values(sub_section.clone(), k, v, configs))
-        } else if let Some(t) = configs.get_mut(&section) {
-            if let Some(item_doc) = t.get_mut(&name) {
-                item_doc.default = format!("{}", value);
-            }
+        } else if let Some(t) = configs.get_mut(&section)
+            && let Some(item_doc) = t.get_mut(&name)
+        {
+            item_doc.default = format!("{}", value);
         }
     }
 

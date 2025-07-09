@@ -119,6 +119,14 @@ pub struct StorageOpts {
     pub meta_file_cache_runtime_config: foyer::RuntimeOptions,
     pub meta_file_cache_throttle: foyer::Throttle,
 
+    pub vector_file_block_size_kb: usize,
+    pub vector_block_cache_capacity_mb: usize,
+    pub vector_block_cache_shard_num: usize,
+    pub vector_block_cache_eviction_config: EvictionConfig,
+    pub vector_meta_cache_capacity_mb: usize,
+    pub vector_meta_cache_shard_num: usize,
+    pub vector_meta_cache_eviction_config: EvictionConfig,
+
     /// The storage url for storing backups.
     pub backup_storage_url: String,
     /// The storage directory for storing backups.
@@ -288,6 +296,13 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             iceberg_compaction_max_file_count_per_partition: c
                 .storage
                 .iceberg_compaction_max_file_count_per_partition,
+            vector_file_block_size_kb: c.storage.vector_file_block_size_kb,
+            vector_block_cache_capacity_mb: s.vector_block_cache_capacity_mb,
+            vector_block_cache_shard_num: s.vector_block_cache_shard_num,
+            vector_block_cache_eviction_config: s.vector_block_cache_eviction_config.clone(),
+            vector_meta_cache_capacity_mb: s.vector_meta_cache_capacity_mb,
+            vector_meta_cache_shard_num: s.vector_meta_cache_shard_num,
+            vector_meta_cache_eviction_config: s.vector_meta_cache_eviction_config.clone(),
         }
     }
 }

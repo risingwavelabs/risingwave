@@ -30,7 +30,7 @@ use risingwave_storage::table::batch_table::BatchTable;
 use crate::common::table::state_table::StateTable;
 use crate::common::table::test_utils::{gen_pbtable, gen_pbtable_with_value_indices};
 
-/// There are three struct in relational layer, StateTable, MemTable and StorageTable.
+/// There are three struct in relational layer, `StateTable`, `MemTable` and `StorageTable`.
 /// `StateTable` provides read/write interfaces to the upper layer streaming operator.
 /// `MemTable` is an in-memory buffer used to cache operator operations.
 #[tokio::test]

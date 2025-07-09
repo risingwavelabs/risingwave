@@ -19,6 +19,7 @@ use std::sync::Arc;
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
+use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::hash::{ActorMapping, VnodeBitmapExt, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_common::{bail, hash};
@@ -27,12 +28,13 @@ use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
+use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::{
     ActorId, DataTypeArray, DatabaseId, DispatcherType, FragmentId, I32Array, JobStatus, ObjectId,
     PrivilegeId, SchemaId, SourceId, StreamNode, StreamSourceInfo, TableId, UserId, VnodeBitmap,
     WorkerId, actor, connection, database, fragment, fragment_relation, function, index, object,
     object_dependency, schema, secret, sink, source, streaming_job, subscription, table, user,
-    user_privilege, view,
+    user_default_privilege, user_privilege, view,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
@@ -45,13 +47,9 @@ use risingwave_pb::meta::subscribe_response::Info as NotificationInfo;
 use risingwave_pb::meta::{
     FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup,
 };
-use risingwave_pb::stream_plan::{
-    PbDispatchOutputMapping, PbDispatcher, PbDispatcherType, PbFragmentTypeFlag,
-};
-use risingwave_pb::user::grant_privilege::{
-    PbAction, PbActionWithGrantOption, PbObject as PbGrantObject,
-};
-use risingwave_pb::user::{PbGrantPrivilege, PbUserInfo};
+use risingwave_pb::stream_plan::{PbDispatchOutputMapping, PbDispatcher, PbDispatcherType};
+use risingwave_pb::user::grant_privilege::{PbActionWithGrantOption, PbObject as PbGrantObject};
+use risingwave_pb::user::{PbAction, PbGrantPrivilege, PbUserInfo};
 use risingwave_sqlparser::ast::Statement as SqlStatement;
 use risingwave_sqlparser::parser::Parser;
 use sea_orm::sea_query::{
@@ -817,7 +815,10 @@ where
 }
 
 /// `list_user_info_by_ids` lists all users' info by their ids.
-pub async fn list_user_info_by_ids<C>(user_ids: Vec<UserId>, db: &C) -> MetaResult<Vec<PbUserInfo>>
+pub async fn list_user_info_by_ids<C>(
+    user_ids: impl IntoIterator<Item = UserId>,
+    db: &C,
+) -> MetaResult<Vec<PbUserInfo>>
 where
     C: ConnectionTrait,
 {
@@ -1039,9 +1040,9 @@ where
                 ObjectType::Sink => PbGrantObject::SinkId(oid),
                 ObjectType::View => PbGrantObject::ViewId(oid),
                 ObjectType::Function => PbGrantObject::FunctionId(oid),
-                ObjectType::Connection => unreachable!("connection is not supported yet"),
+                ObjectType::Connection => PbGrantObject::ConnectionId(oid),
                 ObjectType::Subscription => PbGrantObject::SubscriptionId(oid),
-                ObjectType::Secret => unreachable!("secret is not supported yet"),
+                ObjectType::Secret => PbGrantObject::SecretId(oid),
             };
             PbGrantPrivilege {
                 action_with_opts: vec![PbActionWithGrantOption {
@@ -1053,6 +1054,102 @@ where
             }
         })
         .collect())
+}
+
+/// `grant_default_privileges_automatically` grants default privileges automatically
+/// for the given new object. It returns the list of user infos whose privileges are updated.
+pub async fn grant_default_privileges_automatically<C>(
+    db: &C,
+    object_id: ObjectId,
+) -> MetaResult<Vec<PbUserInfo>>
+where
+    C: ConnectionTrait,
+{
+    let object = Object::find_by_id(object_id)
+        .one(db)
+        .await?
+        .ok_or_else(|| MetaError::catalog_id_not_found("object", object_id))?;
+    assert_ne!(object.obj_type, ObjectType::Database);
+
+    let for_mview_filter = if object.obj_type == ObjectType::Table {
+        let table_type = Table::find_by_id(object_id)
+            .select_only()
+            .column(table::Column::TableType)
+            .into_tuple::<TableType>()
+            .one(db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
+        user_default_privilege::Column::ForMaterializedView
+            .eq(table_type == TableType::MaterializedView)
+    } else {
+        user_default_privilege::Column::ForMaterializedView.eq(false)
+    };
+    let schema_filter = if let Some(schema_id) = &object.schema_id {
+        user_default_privilege::Column::SchemaId.eq(*schema_id)
+    } else {
+        user_default_privilege::Column::SchemaId.is_null()
+    };
+
+    let default_privileges: Vec<(UserId, UserId, Action, bool)> = UserDefaultPrivilege::find()
+        .select_only()
+        .columns([
+            user_default_privilege::Column::Grantee,
+            user_default_privilege::Column::GrantedBy,
+            user_default_privilege::Column::Action,
+            user_default_privilege::Column::WithGrantOption,
+        ])
+        .filter(
+            user_default_privilege::Column::DatabaseId
+                .eq(object.database_id.unwrap())
+                .and(schema_filter)
+                .and(user_default_privilege::Column::UserId.eq(object.owner_id))
+                .and(user_default_privilege::Column::ObjectType.eq(object.obj_type))
+                .and(for_mview_filter),
+        )
+        .into_tuple()
+        .all(db)
+        .await?;
+    if default_privileges.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let updated_user_ids = default_privileges
+        .iter()
+        .map(|(grantee, _, _, _)| *grantee)
+        .collect::<HashSet<_>>();
+
+    let internal_table_ids = get_internal_tables_by_id(object_id, db).await?;
+
+    for (grantee, granted_by, action, with_grant_option) in default_privileges {
+        UserPrivilege::insert(user_privilege::ActiveModel {
+            user_id: Set(grantee),
+            oid: Set(object_id),
+            granted_by: Set(granted_by),
+            action: Set(action),
+            with_grant_option: Set(with_grant_option),
+            ..Default::default()
+        })
+        .exec(db)
+        .await?;
+        if action == Action::Select && !internal_table_ids.is_empty() {
+            // Grant SELECT privilege for internal tables if the action is SELECT.
+            for internal_table_id in &internal_table_ids {
+                UserPrivilege::insert(user_privilege::ActiveModel {
+                    user_id: Set(grantee),
+                    oid: Set(*internal_table_id as _),
+                    granted_by: Set(granted_by),
+                    action: Set(Action::Select),
+                    with_grant_option: Set(with_grant_option),
+                    ..Default::default()
+                })
+                .exec(db)
+                .await?;
+            }
+        }
+    }
+
+    let updated_user_infos = list_user_info_by_ids(updated_user_ids, db).await?;
+    Ok(updated_user_infos)
 }
 
 // todo: remove it after migrated to sql backend.
@@ -1564,7 +1661,7 @@ where
 
     let mut source_fragment_ids: HashMap<SourceId, BTreeSet<FragmentId>> = HashMap::new();
     for (fragment_id, mask, stream_node) in fragments {
-        if mask & PbFragmentTypeFlag::Source as i32 == 0 {
+        if !FragmentTypeMask::from(mask).contains(FragmentTypeFlag::Source) {
             continue;
         }
         if let Some(source_id) = stream_node.to_protobuf().find_stream_source() {

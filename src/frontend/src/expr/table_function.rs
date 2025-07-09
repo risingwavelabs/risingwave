@@ -259,7 +259,7 @@ impl TableFunction {
                         let mut rw_types = vec![];
                         for field in &fields {
                             rw_types.push((
-                                field.name().to_string(),
+                                field.name().clone(),
                                 IcebergArrowConvert.type_from_field(field)?,
                             ));
                         }
@@ -539,9 +539,20 @@ impl TableFunction {
                             MySqlColumnType::MYSQL_TYPE_TIMESTAMP2 => DataType::Timestamptz,
 
                             // String types
-                            MySqlColumnType::MYSQL_TYPE_VARCHAR
-                            | MySqlColumnType::MYSQL_TYPE_STRING
-                            | MySqlColumnType::MYSQL_TYPE_VAR_STRING => DataType::Varchar,
+                            MySqlColumnType::MYSQL_TYPE_VARCHAR => DataType::Varchar,
+                            // mysql_async does not have explicit `varbinary` and `binary` types,
+                            // we need to check the `ColumnFlags` to distinguish them.
+                            MySqlColumnType::MYSQL_TYPE_STRING
+                            | MySqlColumnType::MYSQL_TYPE_VAR_STRING => {
+                                if column
+                                    .flags()
+                                    .contains(mysql_common::constants::ColumnFlags::BINARY_FLAG)
+                                {
+                                    DataType::Bytea
+                                } else {
+                                    DataType::Varchar
+                                }
+                            }
 
                             // JSON types
                             MySqlColumnType::MYSQL_TYPE_JSON => DataType::Jsonb,

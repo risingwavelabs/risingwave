@@ -17,15 +17,14 @@ use std::collections::HashSet;
 use either::Either;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{FunctionId, ObjectId, TableId};
-use risingwave_pb::catalog::PbTable;
 use risingwave_pb::serverless_backfill_controller::{
     ProvisionRequest, node_group_controller_service_client,
 };
+use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
-use crate::WithOptions;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::catalog::check_column_name_not_reserved;
 use crate::error::ErrorCode::{InvalidInputSyntax, ProtocolError};
@@ -40,6 +39,7 @@ use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::{SESSION_MANAGER, SessionImpl};
 use crate::stream_fragmenter::{GraphJobType, build_graph_with_strategy};
 use crate::utils::ordinal;
+use crate::{TableCatalog, WithOptions};
 
 pub const RESOURCE_GROUP_KEY: &str = "resource_group";
 pub const CLOUD_SERVERLESS_BACKFILL_ENABLED: &str = "cloud.serverless_backfill_enabled";
@@ -89,7 +89,7 @@ pub fn gen_create_mv_plan(
     name: ObjectName,
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
-) -> Result<(PlanRef, PbTable)> {
+) -> Result<(PlanRef, TableCatalog)> {
     let mut binder = Binder::new_for_stream(session);
     let bound = binder.bind_query(query)?;
     gen_create_mv_plan_bound(session, context, bound, name, columns, emit_mode)
@@ -103,7 +103,7 @@ pub fn gen_create_mv_plan_bound(
     name: ObjectName,
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
-) -> Result<(PlanRef, PbTable)> {
+) -> Result<(PlanRef, TableCatalog)> {
     if session.config().create_compaction_group_for_mv() {
         context.warn_to_user("The session variable CREATE_COMPACTION_GROUP_FOR_MV has been deprecated. It will not take effect.");
     }
@@ -136,11 +136,11 @@ pub fn gen_create_mv_plan_bound(
         definition,
         emit_on_window_close,
     )?;
-    let mut table = materialize.table().to_prost();
+
+    let mut table = materialize.table().clone();
+    table.owner = session.user_id();
 
     let plan: PlanRef = materialize.into();
-
-    table.owner = session.user_id();
 
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();
@@ -236,112 +236,16 @@ pub async fn handle_create_mv_bound(
     }
 
     let (table, graph, dependencies, resource_group) = {
-        let mut with_options = get_with_options(handler_args.clone());
-        let mut resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
-
-        if resource_group.is_some() {
-            risingwave_common::license::Feature::ResourceGroup
-                .check_available()
-                .map_err(|e| anyhow::anyhow!(e))?;
-        }
-
-        let is_serverless_backfill = with_options
-            .remove(&CLOUD_SERVERLESS_BACKFILL_ENABLED.to_owned())
-            .unwrap_or_default()
-            .parse::<bool>()
-            .unwrap_or(false);
-
-        if resource_group.is_some() && is_serverless_backfill {
-            return Err(RwError::from(InvalidInputSyntax(
-                "Please do not specify serverless backfilling and resource group together"
-                    .to_owned(),
-            )));
-        }
-
-        if !with_options.is_empty() {
-            // get other useful fields by `remove`, the logic here is to reject unknown options.
-            return Err(RwError::from(ProtocolError(format!(
-                "unexpected options in WITH clause: {:?}",
-                with_options.keys()
-            ))));
-        }
-
-        let sbc_addr = match SESSION_MANAGER.get() {
-            Some(manager) => manager.env().sbc_address(),
-            None => "",
-        }
-        .to_owned();
-
-        if is_serverless_backfill && sbc_addr.is_empty() {
-            return Err(RwError::from(InvalidInputSyntax(
-                "Serverless Backfill is disabled on-premise. Use RisingWave cloud at https://cloud.risingwave.com/auth/signup to try this feature".to_owned(),
-            )));
-        }
-
-        if is_serverless_backfill {
-            match provision_resource_group(sbc_addr).await {
-                Err(e) => {
-                    return Err(RwError::from(ProtocolError(format!(
-                        "failed to provision serverless backfill nodes: {}",
-                        e.as_report()
-                    ))));
-                }
-                Ok(val) => resource_group = Some(val),
-            }
-        }
-        tracing::debug!(
-            resource_group = resource_group,
-            "provisioning on resource group"
-        );
-
-        let context = OptimizerContext::from_handler_args(handler_args);
-        let has_order_by = !query.order.is_empty();
-        if has_order_by {
-            context.warn_to_user(r#"The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
-It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view.
-"#.to_owned());
-        }
-
-        if resource_group.is_some()
-            && !context
-                .session_ctx()
-                .config()
-                .streaming_use_arrangement_backfill()
-        {
-            return Err(RwError::from(ProtocolError("The session config arrangement backfill must be enabled to use the resource_group option".to_owned())));
-        }
-
-        let context: OptimizerContextRef = context.into();
-
-        let (plan, table) =
-            gen_create_mv_plan_bound(&session, context.clone(), query, name, columns, emit_mode)?;
-
-        let backfill_order = plan_backfill_order(
-            context.session_ctx().as_ref(),
-            context.with_options().backfill_order_strategy(),
-            plan.clone(),
-        )?;
-
-        // TODO(rc): To be consistent with UDF dependency check, we should collect relation dependencies
-        // during binding instead of visiting the optimized plan.
-        let dependencies =
-            RelationCollectorVisitor::collect_with(dependent_relations, plan.clone())
-                .into_iter()
-                .map(|id| id.table_id() as ObjectId)
-                .chain(
-                    dependent_udfs
-                        .into_iter()
-                        .map(|id| id.function_id() as ObjectId),
-                )
-                .collect();
-
-        let graph = build_graph_with_strategy(
-            plan,
-            Some(GraphJobType::MaterializedView),
-            Some(backfill_order),
-        )?;
-
-        (table, graph, dependencies, resource_group)
+        gen_create_mv_graph(
+            handler_args,
+            name,
+            query,
+            dependent_relations,
+            dependent_udfs,
+            columns,
+            emit_mode,
+        )
+        .await?
     };
 
     // Ensure writes to `StreamJobTracker` are atomic.
@@ -356,15 +260,141 @@ It only indicates the physical clustering of the data, which may improve the per
                 table.name.clone(),
             ));
 
-    let session = session.clone();
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_materialized_view(table, graph, dependencies, resource_group, if_not_exists)
+        .create_materialized_view(
+            table.to_prost(),
+            graph,
+            dependencies,
+            resource_group,
+            if_not_exists,
+        )
         .await?;
 
     Ok(PgResponse::empty_result(
         StatementType::CREATE_MATERIALIZED_VIEW,
     ))
+}
+
+pub(crate) async fn gen_create_mv_graph(
+    handler_args: HandlerArgs,
+    name: ObjectName,
+    query: BoundQuery,
+    dependent_relations: HashSet<TableId>,
+    dependent_udfs: HashSet<FunctionId>,
+    columns: Vec<Ident>,
+    emit_mode: Option<EmitMode>,
+) -> Result<(
+    TableCatalog,
+    PbStreamFragmentGraph,
+    HashSet<u32>,
+    Option<String>,
+)> {
+    let mut with_options = get_with_options(handler_args.clone());
+    let mut resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
+
+    if resource_group.is_some() {
+        risingwave_common::license::Feature::ResourceGroup
+            .check_available()
+            .map_err(|e| anyhow::anyhow!(e))?;
+    }
+
+    let is_serverless_backfill = with_options
+        .remove(&CLOUD_SERVERLESS_BACKFILL_ENABLED.to_owned())
+        .unwrap_or_default()
+        .parse::<bool>()
+        .unwrap_or(false);
+
+    if resource_group.is_some() && is_serverless_backfill {
+        return Err(RwError::from(InvalidInputSyntax(
+            "Please do not specify serverless backfilling and resource group together".to_owned(),
+        )));
+    }
+
+    if !with_options.is_empty() {
+        // get other useful fields by `remove`, the logic here is to reject unknown options.
+        return Err(RwError::from(ProtocolError(format!(
+            "unexpected options in WITH clause: {:?}",
+            with_options.keys()
+        ))));
+    }
+
+    let sbc_addr = match SESSION_MANAGER.get() {
+        Some(manager) => manager.env().sbc_address(),
+        None => "",
+    }
+    .to_owned();
+
+    if is_serverless_backfill && sbc_addr.is_empty() {
+        return Err(RwError::from(InvalidInputSyntax(
+            "Serverless Backfill is disabled on-premise. Use RisingWave cloud at https://cloud.risingwave.com/auth/signup to try this feature".to_owned(),
+        )));
+    }
+
+    if is_serverless_backfill {
+        match provision_resource_group(sbc_addr).await {
+            Err(e) => {
+                return Err(RwError::from(ProtocolError(format!(
+                    "failed to provision serverless backfill nodes: {}",
+                    e.as_report()
+                ))));
+            }
+            Ok(val) => resource_group = Some(val),
+        }
+    }
+    tracing::debug!(
+        resource_group = resource_group,
+        "provisioning on resource group"
+    );
+
+    let context = OptimizerContext::from_handler_args(handler_args);
+    let has_order_by = !query.order.is_empty();
+    if has_order_by {
+        context.warn_to_user(r#"The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
+It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view.
+"#.to_owned());
+    }
+
+    if resource_group.is_some()
+        && !context
+            .session_ctx()
+            .config()
+            .streaming_use_arrangement_backfill()
+    {
+        return Err(RwError::from(ProtocolError("The session config arrangement backfill must be enabled to use the resource_group option".to_owned())));
+    }
+
+    let context: OptimizerContextRef = context.into();
+    let session = context.session_ctx().as_ref();
+
+    let (plan, table) =
+        gen_create_mv_plan_bound(session, context.clone(), query, name, columns, emit_mode)?;
+
+    let backfill_order = plan_backfill_order(
+        session,
+        context.with_options().backfill_order_strategy(),
+        plan.clone(),
+    )?;
+
+    // TODO(rc): To be consistent with UDF dependency check, we should collect relation dependencies
+    // during binding instead of visiting the optimized plan.
+    let dependencies = RelationCollectorVisitor::collect_with(dependent_relations, plan.clone())
+        .into_iter()
+        .map(|id| id.table_id() as ObjectId)
+        .chain(
+            dependent_udfs
+                .into_iter()
+                .map(|id| id.function_id() as ObjectId),
+        )
+        .collect();
+
+    let graph = build_graph_with_strategy(
+        plan,
+        Some(GraphJobType::MaterializedView),
+        Some(backfill_order),
+    )?;
+
+    Ok((table, graph, dependencies, resource_group))
 }
 
 #[cfg(test)]

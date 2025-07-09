@@ -38,8 +38,8 @@ use crate::handler::flush::do_flush;
 use crate::handler::util::{DataChunkToRowSetAdapter, to_pg_field};
 use crate::optimizer::plan_node::Explain;
 use crate::optimizer::{
-    ExecutionModeDecider, OptimizerContext, OptimizerContextRef, ReadStorageTableVisitor,
-    RelationCollectorVisitor, SysTableVisitor,
+    BatchPlanRoot, ExecutionModeDecider, OptimizerContext, OptimizerContextRef,
+    ReadStorageTableVisitor, RelationCollectorVisitor, SysTableVisitor,
 };
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
@@ -260,16 +260,16 @@ fn gen_batch_query_plan(
         Planner::new_for_batch(context)
     };
 
-    let mut logical = planner.plan(bound)?;
+    let logical = planner.plan(bound)?;
     let schema = logical.schema();
     let batch_plan = logical.gen_batch_plan()?;
 
     let dependent_relations =
-        RelationCollectorVisitor::collect_with(dependent_relations, batch_plan.clone());
+        RelationCollectorVisitor::collect_with(dependent_relations, batch_plan.plan.clone());
 
-    let read_storage_tables = ReadStorageTableVisitor::collect(batch_plan.clone());
+    let read_storage_tables = ReadStorageTableVisitor::collect(&batch_plan);
 
-    let must_local = must_run_in_local_mode(batch_plan.clone());
+    let must_local = must_run_in_local_mode(&batch_plan);
 
     let query_mode = match (must_dist, must_local) {
         (true, true) => {
@@ -281,7 +281,7 @@ fn gen_batch_query_plan(
         (true, false) => QueryMode::Distributed,
         (false, true) => QueryMode::Local,
         (false, false) => match session.config().query_mode() {
-            QueryMode::Auto => determine_query_mode(batch_plan.clone()),
+            QueryMode::Auto => determine_query_mode(&batch_plan),
             QueryMode::Local => QueryMode::Local,
             QueryMode::Distributed => QueryMode::Distributed,
         },
@@ -289,8 +289,8 @@ fn gen_batch_query_plan(
 
     let physical = match query_mode {
         QueryMode::Auto => unreachable!(),
-        QueryMode::Local => logical.gen_batch_local_plan()?,
-        QueryMode::Distributed => logical.gen_batch_distributed_plan()?,
+        QueryMode::Local => batch_plan.gen_batch_local_plan()?,
+        QueryMode::Distributed => batch_plan.gen_batch_distributed_plan()?,
     };
 
     Ok(BatchQueryPlanResult {
@@ -334,11 +334,11 @@ fn must_run_in_distributed_mode(stmt: &Statement) -> Result<bool> {
     ) | is_insert_using_select(stmt))
 }
 
-fn must_run_in_local_mode(batch_plan: PlanRef) -> bool {
+fn must_run_in_local_mode(batch_plan: &BatchPlanRoot) -> bool {
     SysTableVisitor::has_sys_table(batch_plan)
 }
 
-fn determine_query_mode(batch_plan: PlanRef) -> QueryMode {
+fn determine_query_mode(batch_plan: &BatchPlanRoot) -> QueryMode {
     if ExecutionModeDecider::run_in_local_mode(batch_plan) {
         QueryMode::Local
     } else {
