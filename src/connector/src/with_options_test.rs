@@ -52,21 +52,38 @@ fn common_files() -> impl IntoIterator<Item = walkdir::Result<DirEntry>> {
     ))
 }
 
+fn print_struct_info(struct_infos: &BTreeMap<String, StructInfo>) -> String {
+    // Generate the output
+    format!(
+        "# THIS FILE IS AUTO_GENERATED. DO NOT EDIT\n# UPDATE WITH: ./risedev generate-with-options\n\n{}",
+        serde_yaml::to_string(&struct_infos).unwrap()
+    )
+}
+
 pub fn generate_with_options_yaml_source() -> String {
-    generate_with_options_yaml_inner(&connector_crate_path().join("src").join("source"))
+    let struct_infos =
+        generate_with_options_yaml_inner(&connector_crate_path().join("src").join("source"));
+    print_struct_info(&struct_infos)
 }
 
 pub fn generate_with_options_yaml_connection() -> String {
-    generate_with_options_yaml_inner(
+    let mut struct_infos = generate_with_options_yaml_inner(
         &connector_crate_path()
             .join("src")
             .join("connector_common")
             .join("connection.rs"),
-    )
+    );
+
+    // the struct name should contain `Connection` to be collected
+    struct_infos.retain(|name, _| name.contains("Connection"));
+
+    print_struct_info(&struct_infos)
 }
 
 pub fn generate_with_options_yaml_sink() -> String {
-    generate_with_options_yaml_inner(&connector_crate_path().join("src").join("sink"))
+    let struct_infos =
+        generate_with_options_yaml_inner(&connector_crate_path().join("src").join("sink"));
+    print_struct_info(&struct_infos)
 }
 
 pub fn generate_allow_alter_on_fly_fields_combined() -> String {
@@ -80,7 +97,7 @@ pub fn generate_allow_alter_on_fly_fields_combined() -> String {
         &connector_crate_path().join("with_options_connection.yaml"),
     );
 
-    generate_rust_allow_alter_on_fly_fields_code_separate(source_info, sink_info)
+    generate_rust_allow_alter_on_fly_fields_code_separate(source_info, sink_info, connection_info)
 }
 
 /// Collect all structs with `#[derive(WithOptions)]` in the `.rs` files in `path` (plus `common.rs`),
@@ -92,7 +109,7 @@ pub fn generate_allow_alter_on_fly_fields_combined() -> String {
 ///
 /// - For sources, the parsing logic is in `TryFromBTreeMap`.
 /// - For sinks, the parsing logic is in `TryFrom<SinkParam>`.
-fn generate_with_options_yaml_inner(path: &Path) -> String {
+fn generate_with_options_yaml_inner(path: &Path) -> BTreeMap<String, StructInfo> {
     let mut structs = vec![];
     let mut functions = BTreeMap::<String, FunctionInfo>::new();
 
@@ -195,13 +212,7 @@ fn generate_with_options_yaml_inner(path: &Path) -> String {
     }
 
     // Flatten the nested options.
-    let struct_infos = flatten_nested_options(struct_infos);
-
-    // Generate the output
-    format!(
-        "# THIS FILE IS AUTO_GENERATED. DO NOT EDIT\n# UPDATE WITH: ./risedev generate-with-options\n\n{}",
-        serde_yaml::to_string(&struct_infos).unwrap()
-    )
+    flatten_nested_options(struct_infos)
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -475,18 +486,13 @@ fn extract_allow_alter_on_fly_fields_from_yaml(yaml_path: &Path) -> BTreeMap<Str
 fn generate_rust_allow_alter_on_fly_fields_code_separate(
     source_info: BTreeMap<String, Vec<String>>,
     sink_info: BTreeMap<String, Vec<String>>,
+    connection_info: BTreeMap<String, Vec<String>>,
 ) -> String {
     // Helper function to generate field entries for a single struct
-    let generate_struct_entries = |info: &BTreeMap<String, Vec<String>>,
-                                   is_source: bool|
-     -> String {
+    let generate_struct_entries = |info: &BTreeMap<String, Vec<String>>| -> String {
         info.iter()
                 .filter_map(|(struct_name, field_names)| {
-                    let key = if is_source {
-                        format!("std::any::type_name::<{}>().to_owned()", struct_name)
-                    } else {
-                        format!("\"{}\".to_owned()", struct_name)
-                    };
+                    let key = format!("std::any::type_name::<{}>().to_owned()", struct_name);
                     if field_names.is_empty() {
                         None
                     } else {
@@ -505,8 +511,9 @@ fn generate_rust_allow_alter_on_fly_fields_code_separate(
                 .join("")
     };
 
-    let source_entries = generate_struct_entries(&source_info, true);
-    let sink_entries = generate_struct_entries(&sink_info, true);
+    let source_entries = generate_struct_entries(&source_info);
+    let sink_entries = generate_struct_entries(&sink_info);
+    let connection_entries = generate_struct_entries(&connection_info);
 
     format!(
         r#"// Copyright 2025 RisingWave Labs
@@ -615,6 +622,13 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
     map
 }});
 
+/// Map of connection names to their `allow_alter_on_fly` field names
+pub static CONNECTION_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {{
+    use crate::connector_common::*;
+    let mut map = HashMap::new();{connection_entries}
+    map
+}});
+
 /// Get all source connector names that have `allow_alter_on_fly` fields
 pub fn get_source_connectors_with_allow_alter_on_fly_fields() -> Vec<&'static str> {{
     SOURCE_ALLOW_ALTER_ON_FLY_FIELDS.keys().map(|s| s.as_str()).collect()
@@ -623,6 +637,11 @@ pub fn get_source_connectors_with_allow_alter_on_fly_fields() -> Vec<&'static st
 /// Get all sink connector names that have `allow_alter_on_fly` fields
 pub fn get_sink_connectors_with_allow_alter_on_fly_fields() -> Vec<&'static str> {{
     SINK_ALLOW_ALTER_ON_FLY_FIELDS.keys().map(|s| s.as_str()).collect()
+}}
+
+/// Get all connection names that have `allow_alter_on_fly` fields
+pub fn get_connection_names_with_allow_alter_on_fly_fields() -> Vec<&'static str> {{
+    CONNECTION_ALLOW_ALTER_ON_FLY_FIELDS.keys().map(|s| s.as_str()).collect()
 }}
 
 /// Checks if all given fields are allowed to be altered on the fly for the specified source connector.
@@ -646,6 +665,33 @@ pub fn check_source_allow_alter_on_fly_fields(
         if !allowed_fields.contains(field) {{
             return Err(ConnectorError::from(anyhow::anyhow!(
                 "Field '{{field}}' is not allowed to be altered on the fly for connector: {{connector_name}}"
+            )));
+        }}
+    }}
+    Ok(())
+}}
+
+pub fn check_connection_allow_alter_on_fly_fields(
+    connection_name: &str,
+    fields: &[String],
+) -> crate::error::ConnectorResult<()> {{
+    use crate::source::connection_name_to_prop_type_name;
+
+    // Convert connection name to the type name key
+    let Some(type_name) = connection_name_to_prop_type_name(connection_name) else {{
+        return Err(ConnectorError::from(anyhow::anyhow!(
+            "Unknown connection: {{connection_name}}"
+        )));
+    }};
+    let Some(allowed_fields) = CONNECTION_ALLOW_ALTER_ON_FLY_FIELDS.get(type_name) else {{
+        return Err(ConnectorError::from(anyhow::anyhow!(
+            "No allow_alter_on_fly fields registered for connection: {{connection_name}}"
+        )));
+    }};
+    for field in fields {{
+        if !allowed_fields.contains(field) {{
+            return Err(ConnectorError::from(anyhow::anyhow!(
+                "Field '{{field}}' is not allowed to be altered on the fly for connection: {{connection_name}}"
             )));
         }}
     }}
