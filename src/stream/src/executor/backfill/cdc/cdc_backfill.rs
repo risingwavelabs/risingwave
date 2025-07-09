@@ -759,7 +759,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
     }
 }
 
-async fn build_reader_and_poll_upstream(
+pub(crate) async fn build_reader_and_poll_upstream(
     upstream: &mut BoxedMessageStream,
     table_reader: &mut Option<ExternalTableReaderImpl>,
     future: &mut Pin<Box<impl Future<Output = ExternalTableReaderImpl>>>,

@@ -12,34 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::future::Future;
-use std::pin::Pin;
-
 use either::Either;
 use futures::stream;
 use futures::stream::select_with_strategy;
 use itertools::Itertools;
-use risingwave_common::array::DataChunk;
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::row::RowDeserializer;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{OrderType, cmp_datum};
-use risingwave_connector::parser::{
-    ByteStreamSourceParser, DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties,
-    ProtocolProperties, SourceStreamChunkBuilder, SpecificParserConfig,
-};
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReaderImpl};
-use risingwave_connector::source::{
-    CdcTableSnapshotSplit, CdcTableSnapshotSplitRaw, SourceColumnDesc, SourceContext,
-    SourceCtrlOpts,
-};
+use risingwave_connector::source::{CdcTableSnapshotSplit, CdcTableSnapshotSplitRaw};
 use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
 use tracing::Instrument;
 
 use crate::executor::UpdateMutation;
+use crate::executor::backfill::cdc::cdc_backfill::{
+    build_reader_and_poll_upstream, transform_upstream,
+};
 use crate::executor::backfill::cdc::state_v2::ParallelizedCdcBackfillState;
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::cdc::upstream_table::snapshot::{
@@ -112,20 +104,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             state_table,
         }
     }
-
-    // fn report_metrics(
-    //     metrics: &CdcBackfillMetrics,
-    //     snapshot_processed_row_count: u64,
-    //     upstream_processed_row_count: u64,
-    // ) {
-    //     metrics
-    //         .cdc_backfill_snapshot_read_row_count
-    //         .inc_by(snapshot_processed_row_count);
-    //
-    //     metrics
-    //         .cdc_backfill_upstream_output_row_count
-    //         .inc_by(upstream_processed_row_count);
-    // }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
@@ -569,123 +547,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             }
         }
     }
-}
-
-async fn build_reader_and_poll_upstream(
-    upstream: &mut BoxedMessageStream,
-    table_reader: &mut Option<ExternalTableReaderImpl>,
-    future: &mut Pin<Box<impl Future<Output = ExternalTableReaderImpl>>>,
-) -> StreamExecutorResult<Option<Message>> {
-    if table_reader.is_some() {
-        return Ok(None);
-    }
-    tokio::select! {
-        biased;
-        reader = &mut *future => {
-            *table_reader = Some(reader);
-            Ok(None)
-        }
-        msg = upstream.next() => {
-            msg.transpose()
-        }
-    }
-}
-
-#[try_stream(ok = Message, error = StreamExecutorError)]
-pub async fn transform_upstream(upstream: BoxedMessageStream, output_columns: Vec<ColumnDesc>) {
-    let props = SpecificParserConfig {
-        encoding_config: EncodingProperties::Json(JsonProperties {
-            use_schema_registry: false,
-            timestamptz_handling: None,
-        }),
-        // the cdc message is generated internally so the key must exist.
-        protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
-    };
-
-    // convert to source column desc to feed into parser
-    let columns_with_meta = output_columns
-        .iter()
-        .map(SourceColumnDesc::from)
-        .collect_vec();
-
-    let mut parser = DebeziumParser::new(
-        props,
-        columns_with_meta.clone(),
-        Arc::new(SourceContext::dummy()),
-    )
-    .await
-    .map_err(StreamExecutorError::connector_error)?;
-
-    pin_mut!(upstream);
-    #[for_await]
-    for msg in upstream {
-        let mut msg = msg?;
-        if let Message::Chunk(chunk) = &mut msg {
-            let parsed_chunk = parse_debezium_chunk(&mut parser, chunk).await?;
-            let _ = std::mem::replace(chunk, parsed_chunk);
-        }
-        yield msg;
-    }
-}
-
-async fn parse_debezium_chunk(
-    parser: &mut DebeziumParser,
-    chunk: &StreamChunk,
-) -> StreamExecutorResult<StreamChunk> {
-    // here we transform the input chunk in `(payload varchar, _rw_offset varchar, _rw_table_name varchar)` schema
-    // to chunk with downstream table schema `info.schema` of MergeNode contains the schema of the
-    // table job with `_rw_offset` in the end
-    // see `gen_create_table_plan_for_cdc_source` for details
-
-    // use `SourceStreamChunkBuilder` for convenience
-    let mut builder = SourceStreamChunkBuilder::new(
-        parser.columns().to_vec(),
-        SourceCtrlOpts {
-            chunk_size: chunk.capacity(),
-            split_txn: false,
-        },
-    );
-
-    // The schema of input chunk `(payload varchar, _rw_offset varchar, _rw_table_name varchar, _row_id)`
-    // We should use the debezium parser to parse the first column,
-    // then chain the parsed row with `_rw_offset` row to get a new row.
-    let payloads = chunk.data_chunk().project(&[0]);
-    let offsets = chunk.data_chunk().project(&[1]).compact();
-
-    // TODO: preserve the transaction semantics
-    for payload in payloads.rows() {
-        let ScalarRefImpl::Jsonb(jsonb_ref) = payload.datum_at(0).expect("payload must exist")
-        else {
-            panic!("payload must be jsonb");
-        };
-
-        parser
-            .parse_inner(
-                None,
-                Some(jsonb_ref.to_string().as_bytes().to_vec()),
-                builder.row_writer(),
-            )
-            .await
-            .unwrap();
-    }
-    builder.finish_current_chunk();
-
-    let parsed_chunk = {
-        let mut iter = builder.consume_ready_chunks();
-        assert_eq!(1, iter.len());
-        iter.next().unwrap()
-    };
-    assert_eq!(parsed_chunk.capacity(), chunk.capacity()); // each payload is expected to generate one row
-    let (ops, mut columns, vis) = parsed_chunk.into_inner();
-    // note that `vis` is not necessarily the same as the original chunk's visibilities
-
-    // concat the rows in the parsed chunk with the `_rw_offset` column
-    columns.extend(offsets.into_parts().0);
-
-    Ok(StreamChunk::from_parts(
-        ops,
-        DataChunk::from_parts(columns.into(), vis),
-    ))
 }
 
 fn filter_stream_chunk(
