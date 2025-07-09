@@ -20,19 +20,19 @@ use anyhow::Context;
 use futures::pin_mut;
 use futures_async_stream::for_await;
 use itertools::Itertools;
-use risingwave_common::catalog::{FragmentTypeFlag, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignment;
 use risingwave_connector::source::cdc::external::{
     CdcTableSnapshotSplitOption, CdcTableType, ExternalTableConfig, ExternalTableReader,
     SchemaTableName,
 };
+use risingwave_connector::source::cdc::{CdcScanOptions, CdcTableSnapshotSplitAssignment};
 use risingwave_connector::source::{CdcTableSnapshotSplit, CdcTableSnapshotSplitRaw};
 use risingwave_meta_model::{TableId, cdc_table_snapshot_split};
 use risingwave_pb::plan_common::ExternalTableDesc;
-use risingwave_pb::stream_plan::StreamCdcScanOptions;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::{StreamCdcScanNode, StreamCdcScanOptions};
 use sea_orm::{EntityTrait, Set, TransactionTrait};
 
 use crate::MetaResult;
@@ -47,6 +47,16 @@ pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
     meta_store: &SqlMetaStore,
     per_table_options: &Option<StreamCdcScanOptions>,
 ) -> MetaResult<()> {
+    let split_options = if let Some(per_table_options) = per_table_options {
+        if !CdcScanOptions::from_proto(per_table_options).is_parallelized_backfill() {
+            return Ok(());
+        }
+        CdcTableSnapshotSplitOption {
+            backfill_num_rows_per_split: Some(per_table_options.backfill_num_rows_per_split),
+        }
+    } else {
+        return Ok(());
+    };
     let table_type = CdcTableType::from_properties(&table_desc.connect_properties);
     // Filter out additional columns to construct the external table schema
     let table_schema: Schema = table_desc
@@ -69,15 +79,6 @@ pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
         table_desc.secret_refs.clone(),
     )
     .context("failed to parse external table config")?;
-    let split_options = if let Some(per_table_options) = per_table_options {
-        CdcTableSnapshotSplitOption {
-            backfill_num_rows_per_split: Some(per_table_options.backfill_num_rows_per_split),
-        }
-    } else {
-        CdcTableSnapshotSplitOption {
-            backfill_num_rows_per_split: None,
-        }
-    };
     let schema_table_name = SchemaTableName::from_properties(&table_desc.connect_properties);
     let reader = table_type
         .create_table_reader(
@@ -125,19 +126,29 @@ pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
     Ok(())
 }
 
-fn is_cdc_scan_fragment(fragment: &Fragment) -> bool {
-    return match &fragment.nodes.node_body {
-        Some(NodeBody::StreamCdcScan(_)) => true,
+/// Returns true if the fragment is CDC scan and has parallelized backfill enabled.
+fn is_parallelized_backfill_enabled_cdc_scan_fragment(fragment: &Fragment) -> bool {
+    match &fragment.nodes.node_body {
+        Some(NodeBody::StreamCdcScan(node)) => is_parallelized_backfill_enabled(node),
         Some(NodeBody::Project(_)) => {
             for input in &fragment.nodes.input {
-                if let Some(NodeBody::StreamCdcScan(_)) = input.node_body {
-                    return true;
+                if let Some(NodeBody::StreamCdcScan(node)) = &input.node_body {
+                    return is_parallelized_backfill_enabled(node);
                 }
             }
             false
         }
         _ => false,
-    };
+    }
+}
+
+pub fn is_parallelized_backfill_enabled(node: &StreamCdcScanNode) -> bool {
+    if let Some(options) = &node.options
+        && CdcScanOptions::from_proto(options).is_parallelized_backfill()
+    {
+        return true;
+    }
+    false
 }
 
 pub(crate) async fn assign_cdc_table_snapshot_splits(
@@ -149,10 +160,7 @@ pub(crate) async fn assign_cdc_table_snapshot_splits(
         let mut stream_scan_fragments = jobs
             .fragments
             .values()
-            .filter(|f| {
-                is_cdc_scan_fragment(f)
-                    && f.fragment_type_mask.contains(FragmentTypeFlag::StreamScan)
-            })
+            .filter(|f| is_parallelized_backfill_enabled_cdc_scan_fragment(f))
             .collect_vec();
         if stream_scan_fragments.is_empty() {
             continue;
