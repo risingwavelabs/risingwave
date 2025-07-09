@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -26,7 +26,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use prost::Message as _;
 use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior, DEFAULT_SCHEMA_NAME, Engine,
-    RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, TableId,
+    ObjectId, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, TableId,
 };
 use risingwave_common::config::MetaBackend;
 use risingwave_common::global_jvm::JVM;
@@ -66,7 +66,7 @@ use crate::binder::{Clause, SecureCompareContext, bind_data_type};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::{ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX, TableVersion};
-use crate::catalog::{ColumnId, DatabaseId, SchemaId, check_column_name_not_reserved};
+use crate::catalog::{ColumnId, DatabaseId, SchemaId, SourceId, check_column_name_not_reserved};
 use crate::error::{ErrorCode, Result, RwError, bail_bind_error};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::handler::HandlerArgs;
@@ -918,7 +918,6 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     let mut table = materialize.table().clone();
     table.owner = session.user_id();
     table.cdc_table_id = Some(cdc_table_id);
-    table.dependent_relations = vec![source.id.into()];
 
     Ok((materialize.into(), table))
 }
@@ -1040,7 +1039,13 @@ pub(super) async fn handle_create_table_plan(
     include_column_options: IncludeOption,
     webhook_info: Option<WebhookSourceInfo>,
     engine: Engine,
-) -> Result<(PlanRef, Option<SourceCatalog>, TableCatalog, TableJobType)> {
+) -> Result<(
+    PlanRef,
+    Option<SourceCatalog>,
+    TableCatalog,
+    TableJobType,
+    Option<SourceId>,
+)> {
     let col_id_gen = ColumnIdGenerator::new_initial();
     let format_encode = check_create_table_with_source(
         &handler_args.with_options,
@@ -1061,7 +1066,10 @@ pub(super) async fn handle_create_table_plan(
         engine,
     };
 
-    let ((plan, source, table), job_type) = match (format_encode, cdc_table_info.as_ref()) {
+    let ((plan, source, table), job_type, shared_shource_id) = match (
+        format_encode,
+        cdc_table_info.as_ref(),
+    ) {
         (Some(format_encode), None) => (
             gen_create_table_plan_with_source(
                 handler_args,
@@ -1079,6 +1087,7 @@ pub(super) async fn handle_create_table_plan(
             )
             .await?,
             TableJobType::General,
+            None,
         ),
         (None, None) => {
             let context = OptimizerContext::new(handler_args, explain_options);
@@ -1093,7 +1102,7 @@ pub(super) async fn handle_create_table_plan(
                 false,
             )?;
 
-            ((plan, None, table), TableJobType::General)
+            ((plan, None, table), TableJobType::General, None)
         }
 
         (None, Some(cdc_table)) => {
@@ -1169,6 +1178,7 @@ pub(super) async fn handle_create_table_plan(
 
             let context: OptimizerContextRef =
                 OptimizerContext::new(handler_args, explain_options).into();
+            let shared_source_id = source.id;
             let (plan, table) = gen_create_table_plan_for_cdc_table(
                 context,
                 source,
@@ -1189,7 +1199,11 @@ pub(super) async fn handle_create_table_plan(
                 engine,
             )?;
 
-            ((plan, None, table), TableJobType::SharedCdcSource)
+            (
+                (plan, None, table),
+                TableJobType::SharedCdcSource,
+                Some(shared_source_id),
+            )
         }
         (Some(_), Some(_)) => {
             return Err(ErrorCode::NotSupported(
@@ -1200,7 +1214,7 @@ pub(super) async fn handle_create_table_plan(
             .into());
         }
     };
-    Ok((plan, source, table, job_type))
+    Ok((plan, source, table, job_type, shared_shource_id))
 }
 
 // For both table from cdc source and table with cdc connector
@@ -1403,8 +1417,8 @@ pub async fn handle_create_table(
         return Ok(resp);
     }
 
-    let (graph, source, hummock_table, job_type) = {
-        let (plan, source, table, job_type) = handle_create_table_plan(
+    let (graph, source, hummock_table, job_type, shared_source_id) = {
+        let (plan, source, table, job_type, shared_source_id) = handle_create_table_plan(
             handler_args.clone(),
             ExplainOptions::default(),
             format_encode,
@@ -1426,7 +1440,7 @@ pub async fn handle_create_table(
 
         let graph = build_graph(plan, Some(GraphJobType::Table))?;
 
-        (graph, source, table, job_type)
+        (graph, source, table, job_type, shared_source_id)
     };
 
     tracing::trace!(
@@ -1434,6 +1448,10 @@ pub async fn handle_create_table(
         table_name,
         serde_json::to_string_pretty(&graph).unwrap()
     );
+
+    let dependencies = shared_source_id
+        .map(|id| HashSet::from([id as ObjectId]))
+        .unwrap_or_default();
 
     // Handle engine
     match engine {
@@ -1446,6 +1464,7 @@ pub async fn handle_create_table(
                     graph,
                     job_type,
                     if_not_exists,
+                    dependencies,
                 )
                 .await?;
         }
@@ -1895,7 +1914,14 @@ pub async fn create_iceberg_engine_table(
     // TODO(iceberg): make iceberg engine table creation ddl atomic
     let has_connector = source.is_some();
     catalog_writer
-        .create_table(source, table.to_prost(), graph, job_type, if_not_exists)
+        .create_table(
+            source,
+            table.to_prost(),
+            graph,
+            job_type,
+            if_not_exists,
+            HashSet::default(),
+        )
         .await?;
     let res = create_sink::handle_create_sink(sink_handler_args, create_sink_stmt, true).await;
     if res.is_err() {
