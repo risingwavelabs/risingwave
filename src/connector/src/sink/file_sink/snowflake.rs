@@ -41,12 +41,13 @@ use crate::sink::encoder::{JsonEncoder, JsonbHandlingMode, TimeHandlingMode, Tim
 use crate::sink::file_sink::opendal_sink::OpendalSinkBackend;
 use crate::sink::file_sink::s3::{S3Config, S3Sink};
 use crate::sink::writer::SinkWriter;
-use crate::sink::{Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
+use crate::sink::{Result, Sink, SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::source::UnknownFields;
 
 pub const SNOWFLAKE_SINK: &str = "snowflake";
 const SNOWFLAKE_SINK_ROW_ID: &str = "__row_id";
 const SNOWFLAKE_SINK_OP: &str = "__op";
+const DEFAULT_SCHEDULE: &str = "1 HOUR";
 
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -267,4 +268,281 @@ impl SinkWriter for SnowflakeSinkWriter {
         Ok(())
     }
     
+}
+
+
+pub struct SnowflakeSinkCommitCoordinator {
+    task_name: String,
+    cdc_table_name: String,
+    target_table_name: String,
+    schedule: String,
+    warehouse: String,
+    pk_column_names: Vec<String>,
+    all_column_names: Vec<String>,
+    snowflake_client: SnowflakeClient,
+}
+
+impl SnowflakeSinkCommitCoordinator {
+    pub fn new(properties: SnowflakeConfig, schema: &Schema, pk_indices: &Vec<usize>) -> Result<Self> {
+        let cdc_table_name = properties.snowflake_cdc_table_name.ok_or(SinkError::Config(anyhow!("snowflake.cdc_table_name is required")))?;
+        let target_table_name = properties.snowflake_target_table_name.ok_or(SinkError::Config(anyhow!("snowflake.target_table_name is required")))?;
+        let task_name = format!("rw_snowflake_sink_from_{cdc_table_name}_to_{target_table_name}");
+        let schedule = properties.snowflake_schedule.unwrap_or(DEFAULT_SCHEDULE.to_owned());
+        let warehouse = properties.snowflake_warehouse.ok_or(SinkError::Config(anyhow!("snowflake.warehouse is required")))?;
+        let pk_column_names = schema.fields.iter().enumerate().filter(|(index, _)| pk_indices.contains(index)).map(|(_, field)| field.name.clone()).collect();
+        let all_column_names = schema.fields.iter().map(|field| field.name.clone()).collect();
+        let post = properties.snowflake_post.ok_or(SinkError::Config(anyhow!("snowflake.post is required")))?;
+        let token = properties.snowflake_token.ok_or(SinkError::Config(anyhow!("snowflake.token is required")))?;
+        Ok(Self {
+            task_name,
+            cdc_table_name,
+            target_table_name,
+            schedule,
+            warehouse,
+            pk_column_names,
+            all_column_names,
+            snowflake_client: SnowflakeClient::new(post, token),
+        })
+    }
+}
+
+#[async_trait]
+impl SinkCommitCoordinator for SnowflakeSinkCommitCoordinator {
+    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
+        let task_sql = build_create_snowflake_sink_task_sql(
+            &self.task_name,
+            &self.schedule,
+            &self.warehouse,
+            &self.cdc_table_name,
+            &self.target_table_name,
+            &self.pk_column_names,
+            &self.all_column_names,
+        );
+        self.snowflake_client.execute_sql_sync(&task_sql)?;
+        let start_sql = build_start_snowflake_sink_task_sql(&self.task_name);
+        self.snowflake_client.execute_sql_sync(&start_sql)?;
+        tracing::info!("Snowflake sink task {} created and started", self.task_name);
+        Ok(None)
+    }
+
+    async fn commit(&mut self, _epoch: u64, _metadata: Vec<SinkMetadata>) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl Drop for SnowflakeSinkCommitCoordinator {
+    fn drop(&mut self) {
+        let drop_sql = build_drop_snowflake_sink_task_sql(&self.task_name);
+        if let Err(e) = self.snowflake_client.execute_sql_sync(&drop_sql) {
+            tracing::error!("Failed to drop Snowflake sink task {}: {}", self.task_name, e);
+        } else {
+            tracing::info!("Snowflake sink task {} dropped", self.task_name);
+        }
+    }
+}
+
+pub struct SnowflakeClient{
+    snowflake_url: String,
+    snowflake_token: String,
+}
+
+impl SnowflakeClient {
+    pub fn new(snowflake_post: String, snowflake_token: String) -> Self {
+        let snowflake_url = format!("https://{}/api/v2/statements", snowflake_post);
+        Self {
+            snowflake_url,
+            snowflake_token,
+        }
+    }
+
+    pub fn execute_sql_sync(&self, sql: &str) -> Result<()> {
+        let client = reqwest::blocking::Client::new();
+        let body = json!({
+            "statement": sql,
+            "timeout": 60
+        });
+
+        let res = client
+            .post(&self.snowflake_url)
+            .bearer_auth(&self.snowflake_token)
+            .json(&body)
+            .send()
+            .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        
+        if res.status().is_success() {
+            Ok(())
+        } else {
+            Err(SinkError::Config(anyhow!("Failed to execute SQL: {}, err is {:?}", sql, res.text())))
+        }
+    }
+}
+
+fn build_start_snowflake_sink_task_sql(task_name: &str) -> String {
+    format!("ALTER TASK {} RESUME", task_name)
+}
+
+fn build_drop_snowflake_sink_task_sql(task_name: &str) -> String {
+    format!("DROP TASK IF EXISTS {}", task_name)
+}
+
+fn build_create_snowflake_sink_task_sql(
+    task_name: &str,
+    schedule: &str,
+    warehouse: &str,
+    cdc_table_name: &str,
+    target_table_name: &str,
+    pk_column_names: &[String],
+    all_column_names: &[String],
+) -> String {
+    let pk_names_str = pk_column_names.join(", ");
+    let pk_names_eq_str = pk_column_names
+        .iter()
+        .map(|name| format!("target.{name} = source.{name}", name = name))
+        .collect::<Vec<String>>()
+        .join(" AND ");
+    let all_column_names_set_str = all_column_names
+        .iter()
+        .map(|name| format!("target.{name} = source.{name}", name = name))
+        .collect::<Vec<String>>()
+        .join(", ");
+    let all_column_names_str = all_column_names.join(", ");
+    let all_column_names_insert_str = all_column_names
+        .iter()
+        .map(|name| format!("source.{name}", name = name))
+        .collect::<Vec<String>>()
+        .join(", ");
+
+    format!(
+r#"CREATE OR REPLACE TASK {task_name}
+WAREHOUSE = {warehouse}
+SCHEDULE = '{schedule}'
+AS
+BEGIN
+    LET max_row_id INT;
+
+    SELECT COALESCE(MAX(_changelog_row_id), 0) INTO :max_row_id
+    FROM {cdc_table_name};
+
+    MERGE INTO {target_table_name} AS target
+    USING (
+        SELECT *
+        FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_names_str} ORDER BY _changelog_row_id DESC) AS dedupe_id
+            FROM {cdc_table_name}
+            WHERE _changelog_row_id <= :max_row_id
+        ) AS subquery
+        WHERE dedupe_id = 1
+    ) AS source
+    ON {pk_names_eq_str}
+    WHEN MATCHED AND source.changelog_op IN (2, 4) THEN DELETE
+    WHEN MATCHED AND source.changelog_op IN (1, 3) THEN UPDATE SET {all_column_names_set_str}
+    WHEN NOT MATCHED AND source.changelog_op IN (1, 3) THEN INSERT ({all_column_names_str}) VALUES ({all_column_names_insert_str});
+
+    DELETE FROM {cdc_table_name}
+    WHERE _changelog_row_id <= :max_row_id;
+END;"#,
+        task_name = task_name,
+        warehouse = warehouse,
+        schedule = schedule,
+        cdc_table_name = cdc_table_name,
+        target_table_name = target_table_name,
+        pk_names_str = pk_names_str,
+        pk_names_eq_str = pk_names_eq_str,
+        all_column_names_set_str = all_column_names_set_str,
+        all_column_names_str = all_column_names_str,
+        all_column_names_insert_str = all_column_names_insert_str
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn normalize_sql(s: &str) -> String {
+        s.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    #[test]
+    fn test_snowflake_sink_commit_coordinator() {
+        let task_sql = build_create_snowflake_sink_task_sql(
+            "test_task",
+            "1 HOUR",
+            "test_warehouse",
+            "test_cdc_table",
+            "test_target_table",
+            &["v1".to_string()],
+            &["v1".to_string(), "v2".to_string()],
+        );
+        let expected = r#"CREATE OR REPLACE TASK test_task
+WAREHOUSE = test_warehouse
+SCHEDULE = '1 HOUR'
+AS
+BEGIN
+    LET max_row_id INT;
+
+    SELECT COALESCE(MAX(_changelog_row_id), 0) INTO :max_row_id
+    FROM test_cdc_table;
+
+    MERGE INTO test_target_table AS target
+    USING (
+        SELECT *
+        FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY v1 ORDER BY _changelog_row_id DESC) AS dedupe_id
+            FROM test_cdc_table
+            WHERE _changelog_row_id <= :max_row_id
+        ) AS subquery
+        WHERE dedupe_id = 1
+    ) AS source
+    ON target.v1 = source.v1
+    WHEN MATCHED AND source.changelog_op IN (2, 4) THEN DELETE
+    WHEN MATCHED AND source.changelog_op IN (1, 3) THEN UPDATE SET target.v1 = source.v1, target.v2 = source.v2
+    WHEN NOT MATCHED AND source.changelog_op IN (1, 3) THEN INSERT (v1, v2) VALUES (source.v1, source.v2);
+
+    DELETE FROM test_cdc_table
+    WHERE _changelog_row_id <= :max_row_id;
+END;"#;
+        assert_eq!(normalize_sql(&task_sql), normalize_sql(expected));
+    }
+
+    #[test]
+    fn test_snowflake_sink_commit_coordinator_multi_pk() {
+        let task_sql = build_create_snowflake_sink_task_sql(
+            "test_task_multi_pk",
+            "5 MINUTE",
+            "multi_pk_warehouse",
+            "cdc_multi_pk",
+            "target_multi_pk",
+            &["id1".to_string(), "id2".to_string()],
+            &["id1".to_string(), "id2".to_string(), "val".to_string()],
+        );
+        let expected = r#"CREATE OR REPLACE TASK test_task_multi_pk
+WAREHOUSE = multi_pk_warehouse
+SCHEDULE = '5 MINUTE'
+AS
+BEGIN
+    LET max_row_id INT;
+
+    SELECT COALESCE(MAX(_changelog_row_id), 0) INTO :max_row_id
+    FROM cdc_multi_pk;
+
+    MERGE INTO target_multi_pk AS target
+    USING (
+        SELECT *
+        FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY id1, id2 ORDER BY _changelog_row_id DESC) AS dedupe_id
+            FROM cdc_multi_pk
+            WHERE _changelog_row_id <= :max_row_id
+        ) AS subquery
+        WHERE dedupe_id = 1
+    ) AS source
+    ON target.id1 = source.id1 AND target.id2 = source.id2
+    WHEN MATCHED AND source.changelog_op IN (2, 4) THEN DELETE
+    WHEN MATCHED AND source.changelog_op IN (1, 3) THEN UPDATE SET target.id1 = source.id1, target.id2 = source.id2, target.val = source.val
+    WHEN NOT MATCHED AND source.changelog_op IN (1, 3) THEN INSERT (id1, id2, val) VALUES (source.id1, source.id2, source.val);
+
+    DELETE FROM cdc_multi_pk
+    WHERE _changelog_row_id <= :max_row_id;
+END;"#;
+        assert_eq!(normalize_sql(&task_sql), normalize_sql(expected));
+    }
 }
