@@ -92,11 +92,15 @@ impl CoordinatorStreamHandle {
         }
     }
 
-    pub async fn commit(&mut self, epoch: u64, metadata: SinkMetadata) -> anyhow::Result<()> {
+    pub async fn commit(
+        &mut self,
+        epoch: u64,
+        metadata: Option<SinkMetadata>,
+    ) -> anyhow::Result<()> {
         self.send_request(CoordinateRequest {
             msg: Some(coordinate_request::Msg::CommitRequest(CommitRequest {
                 epoch,
-                metadata: Some(metadata),
+                metadata,
             })),
         })
         .await?;

@@ -226,7 +226,7 @@ impl CoordinationHandleManager {
                         coordinate_request::Msg::CommitRequest(request) => {
                             CoordinationHandleManagerEvent::CommitRequest {
                                 epoch: request.epoch,
-                                metadata: request.metadata.ok_or_else(|| anyhow!("empty sink metadata"))?,
+                                metadata: request.metadata.unwrap_or_default(),
                             }
                         }
                         coordinate_request::Msg::AlignInitialEpochRequest(epoch) => {

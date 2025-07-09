@@ -25,8 +25,7 @@ use risingwave_pb::connector_service::SinkMetadata;
 use tracing::{info, warn};
 
 use super::{
-    LogSinker, SinkCoordinationRpcClientEnum, SinkError, SinkLogReader, SinkWriterMetrics,
-    SinkWriterParam,
+    LogSinker, SinkCoordinationRpcClientEnum, SinkLogReader, SinkWriterMetrics, SinkWriterParam,
 };
 use crate::sink::writer::SinkWriter;
 use crate::sink::{LogStoreReadItem, Result, SinkParam, TruncateOffset};
@@ -207,11 +206,6 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                         {
                             let start_time = Instant::now();
                             let metadata = sink_writer.barrier(true).await?;
-                            let metadata = metadata.ok_or_else(|| {
-                                SinkError::Coordinator(anyhow!(
-                                    "should get metadata on checkpoint barrier"
-                                ))
-                            })?;
                             coordinator_stream_handle.commit(epoch, metadata).await?;
                             sink_writer_metrics
                                 .sink_commit_duration

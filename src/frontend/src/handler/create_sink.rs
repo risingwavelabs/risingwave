@@ -815,7 +815,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
         use risingwave_connector::sink::file_sink::fs::FsSink;
         use risingwave_connector::sink::file_sink::gcs::GcsSink;
         use risingwave_connector::sink::file_sink::opendal_sink::FileSink;
-        use risingwave_connector::sink::file_sink::s3::{S3Sink, SnowflakeSink};
+        use risingwave_connector::sink::file_sink::s3::S3Sink;
         use risingwave_connector::sink::file_sink::webhdfs::WebhdfsSink;
         use risingwave_connector::sink::google_pubsub::GooglePubSubSink;
         use risingwave_connector::sink::kafka::KafkaSink;
@@ -834,9 +834,6 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Debezium => vec![Encode::Json],
                 ),
                 FileSink::<S3Sink>::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Parquet, Encode::Json],
-                ),
-                FileSink::<SnowflakeSink>::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Parquet, Encode::Json],
                 ),
                 FileSink::<GcsSink>::SINK_NAME => hashmap!(
