@@ -17,7 +17,6 @@ use std::fmt::Debug;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
-use pulsar::proto::command_get_topics_of_namespace::Mode as LookupMode;
 use pulsar::{Pulsar, TokioExecutor};
 use risingwave_common::bail;
 use serde::{Deserialize, Serialize};
@@ -25,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::ConnectorResult;
 use crate::source::pulsar::PulsarProperties;
 use crate::source::pulsar::split::PulsarSplit;
-use crate::source::pulsar::topic::{Topic, parse_topic};
+use crate::source::pulsar::topic::{PERSISTENT_DOMAIN, Topic, check_topic_exists, parse_topic};
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 pub struct PulsarSplitEnumerator {
@@ -90,14 +89,6 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         // MessageId is only used when recovering from a State
         assert!(!matches!(offset, PulsarEnumeratorOffset::MessageId(_)));
 
-        let topics_on_broker = self
-            .client
-            .get_topics_of_namespace(format!("{}/{}", self.topic.tenant, self.topic.namespace), LookupMode::All)
-            .await?;
-        if !topics_on_broker.contains(&self.topic.to_string()) {
-            bail!("topic {} not found on broker, available topics: {:?}", self.topic, topics_on_broker);
-        }
-
         let topic_partitions = self
             .client
             .lookup_partitioned_topic_number(&self.topic.to_string())
@@ -106,6 +97,7 @@ impl SplitEnumerator for PulsarSplitEnumerator {
 
         let splits = if topic_partitions > 0 {
             // partitioned topic
+            // if we can know the number of partitions, the topic must exist
             (0..topic_partitions as i32)
                 .map(|p| PulsarSplit {
                     topic: self.topic.sub_topic(p).unwrap(),
@@ -113,6 +105,14 @@ impl SplitEnumerator for PulsarSplitEnumerator {
                 })
                 .collect_vec()
         } else {
+            // only do existence check for persistent non-partitioned topic
+            //
+            // for non-persistent topic, all metadata is in broker memory
+            // unless there's a live producer/consumer, the broker may not be aware of the non-persistent topic.
+            if self.topic.domain == PERSISTENT_DOMAIN {
+                // if the topic is non-partitioned, we need to check if the topic exists on the broker
+                check_topic_exists(&self.client, &self.topic).await?;
+            }
             // non partitioned topic
             vec![PulsarSplit {
                 topic: self.topic.clone(),
