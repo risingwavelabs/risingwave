@@ -1409,6 +1409,23 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn alter_connection_connector_props(
+        &self,
+        connection_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+    ) -> Result<()> {
+        let req = AlterConnectorPropsRequest {
+            object_id: connection_id,
+            changed_props: changed_props.into_iter().collect(),
+            changed_secret_refs: changed_secret_refs.into_iter().collect(),
+            connector_conn_ref: None, // Connections don't reference other connections
+            object_type: AlterConnectorPropsObject::Connection as i32,
+        };
+        let _resp = self.inner.alter_connector_props(req).await?;
+        Ok(())
+    }
+
     pub async fn set_system_param(
         &self,
         param: String,
