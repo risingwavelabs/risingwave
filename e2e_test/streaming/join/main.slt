@@ -1,0 +1,16 @@
+statement ok
+set streaming_join_encoding to cpu_optimized;
+
+include ./join.slt.part
+include ./join-3way.slt.part
+include ./asof_join.slt.part
+
+statement ok
+set streaming_join_encoding to memory_optimized;
+
+include ./join.slt.part
+include ./join-3way.slt.part
+include ./asof_join.slt.part
+
+statement ok
+set streaming_join_encoding to default;
