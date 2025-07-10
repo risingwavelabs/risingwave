@@ -170,7 +170,7 @@ pub enum DdlCommand {
     AlterObjectOwner(Object, UserId),
     AlterSetSchema(alter_set_schema_request::Object, SchemaId),
     CreateConnection(Connection),
-    DropConnection(ConnectionId),
+    DropConnection(ConnectionId, DropMode),
     CreateSecret(Secret),
     AlterSecret(Secret),
     DropSecret(SecretId),
@@ -204,7 +204,7 @@ impl DdlCommand {
             DdlCommand::AlterObjectOwner(object, _) => Left(format!("{object:?}")),
             DdlCommand::AlterSetSchema(object, _) => Left(format!("{object:?}")),
             DdlCommand::CreateConnection(connection) => Left(connection.name.clone()),
-            DdlCommand::DropConnection(id) => Right(*id),
+            DdlCommand::DropConnection(id, _) => Right(*id),
             DdlCommand::CreateSecret(secret) => Left(secret.name.clone()),
             DdlCommand::AlterSecret(secret) => Left(secret.name.clone()),
             DdlCommand::DropSecret(id) => Right(*id),
@@ -223,7 +223,7 @@ impl DdlCommand {
             | DdlCommand::DropFunction(_)
             | DdlCommand::DropView(_, _)
             | DdlCommand::DropStreamingJob { .. }
-            | DdlCommand::DropConnection(_)
+            | DdlCommand::DropConnection(_, _)
             | DdlCommand::DropSecret(_)
             | DdlCommand::DropSubscription(_, _)
             | DdlCommand::AlterName(_, _)
@@ -426,8 +426,8 @@ impl DdlController {
                 DdlCommand::CreateConnection(connection) => {
                     ctrl.create_connection(connection).await
                 }
-                DdlCommand::DropConnection(connection_id) => {
-                    ctrl.drop_connection(connection_id).await
+                DdlCommand::DropConnection(connection_id, drop_mode) => {
+                    ctrl.drop_connection(connection_id, drop_mode).await
                 }
                 DdlCommand::CreateSecret(secret) => ctrl.create_secret(secret).await,
                 DdlCommand::DropSecret(secret_id) => ctrl.drop_secret(secret_id).await,
@@ -609,14 +609,10 @@ impl DdlController {
     async fn drop_connection(
         &self,
         connection_id: ConnectionId,
+        drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(
-            ObjectType::Connection,
-            connection_id as _,
-            DropMode::Restrict,
-            None,
-        )
-        .await
+        self.drop_object(ObjectType::Connection, connection_id as _, drop_mode, None)
+            .await
     }
 
     async fn alter_database_param(

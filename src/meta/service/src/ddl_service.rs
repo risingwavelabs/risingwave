@@ -846,10 +846,14 @@ impl DdlService for DdlServiceImpl {
         request: Request<DropConnectionRequest>,
     ) -> Result<Response<DropConnectionResponse>, Status> {
         let req = request.into_inner();
+        let drop_mode = DropMode::from_request_setting(req.cascade);
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropConnection(req.connection_id as _))
+            .run_command(DdlCommand::DropConnection(
+                req.connection_id as _,
+                drop_mode,
+            ))
             .await?;
 
         Ok(Response::new(DropConnectionResponse {

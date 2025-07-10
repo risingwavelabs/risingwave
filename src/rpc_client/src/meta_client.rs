@@ -230,8 +230,15 @@ impl MetaClient {
         Ok(resp.connections)
     }
 
-    pub async fn drop_connection(&self, connection_id: ConnectionId) -> Result<WaitVersion> {
-        let request = DropConnectionRequest { connection_id };
+    pub async fn drop_connection(
+        &self,
+        connection_id: ConnectionId,
+        cascade: bool,
+    ) -> Result<WaitVersion> {
+        let request = DropConnectionRequest {
+            connection_id,
+            cascade,
+        };
         let resp = self.inner.drop_connection(request).await?;
         Ok(resp
             .version

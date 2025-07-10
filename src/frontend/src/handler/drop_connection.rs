@@ -25,6 +25,7 @@ pub async fn handle_drop_connection(
     handler_args: HandlerArgs,
     connection_name: ObjectName,
     if_exists: bool,
+    cascade: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let db_name = &session.database();
@@ -59,7 +60,9 @@ pub async fn handle_drop_connection(
     };
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.drop_connection(connection_id).await?;
+    catalog_writer
+        .drop_connection(connection_id, cascade)
+        .await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_CONNECTION))
 }
