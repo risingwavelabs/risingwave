@@ -1674,7 +1674,12 @@ pub async fn create_iceberg_engine_table(
     let mut sink_with = with_common.clone();
 
     sink_with.insert("primary_key".to_owned(), pks.join(","));
-    sink_with.insert("type".to_owned(), "upsert".to_owned());
+
+    if table.append_only {
+        sink_with.insert("type".to_owned(), "append-only".to_owned());
+    } else {
+        sink_with.insert("type".to_owned(), "upsert".to_owned());
+    }
     // sink_with.insert(SINK_SNAPSHOT_OPTION.to_owned(), "false".to_owned());
     //
     // Note: in theory, we don't need to backfill from the table to the sink,

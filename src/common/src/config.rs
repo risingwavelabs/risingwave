@@ -1012,9 +1012,12 @@ pub struct StorageConfig {
     pub iceberg_compaction_min_size_per_partition_mb: u32,
     #[serde(default = "default::storage::iceberg_compaction_max_file_count_per_partition")]
     pub iceberg_compaction_max_file_count_per_partition: u32,
-
     #[serde(default = "default::storage::iceberg_compaction_write_parquet_max_row_group_rows")]
     pub iceberg_compaction_write_parquet_max_row_group_rows: usize,
+    #[serde(default = "default::storage::iceberg_compaction_small_file_threshold_mb")]
+    pub iceberg_compaction_small_file_threshold_mb: u32,
+    #[serde(default = "default::storage::iceberg_compaction_max_task_total_size_mb")]
+    pub iceberg_compaction_max_task_total_size_mb: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
@@ -2065,6 +2068,14 @@ pub mod default {
 
         pub fn iceberg_compaction_max_file_count_per_partition() -> u32 {
             32
+        }
+
+        pub fn iceberg_compaction_small_file_threshold_mb() -> u32 {
+            32
+        }
+
+        pub fn iceberg_compaction_max_task_total_size_mb() -> u32 {
+            50 * 1024 // 50GB
         }
     }
 

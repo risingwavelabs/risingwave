@@ -19,11 +19,13 @@ use std::sync::{Arc, LazyLock};
 
 use derive_builder::Builder;
 use iceberg::{Catalog, TableIdent};
+use iceberg_compaction_core::FileStrategyFactory;
 use iceberg_compaction_core::compaction::{
     Compaction, CompactionType, RewriteDataFilesCommitManagerRetryConfig,
 };
 use iceberg_compaction_core::config::CompactionConfigBuilder;
 use iceberg_compaction_core::executor::RewriteFilesStat;
+use iceberg_compaction_core::file_selection::FileSelector;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
@@ -78,6 +80,10 @@ pub struct IcebergCompactorRunnerConfig {
     pub max_record_batch_rows: usize,
     #[builder(default = "default_writer_properties()")]
     pub write_parquet_properties: WriterProperties,
+    #[builder(default = "32 * 1024 * 1024")] // 32MB
+    pub small_file_threshold: u64,
+    #[builder(default = "50 * 1024 * 1024 * 1024")] // 50GB
+    pub max_task_total_size: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -269,8 +275,20 @@ impl IcebergCompactorRunner {
 
         let compact = async move {
             let retry_config = RewriteDataFilesCommitManagerRetryConfig::default();
+
+            let compaction_type = match self.task_type {
+                TaskType::SmallDataFileCompaction => CompactionType::MergeSmallDataFiles,
+                TaskType::FullCompaction => CompactionType::Full,
+                _ => {
+                    unreachable!(
+                        "Unexpected task type for Iceberg compaction: {:?}",
+                        self.task_type
+                    )
+                }
+            };
+
             let statistics = self
-                .analyze_task_statistics()
+                .analyze_task_input(compaction_type)
                 .await
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
@@ -303,6 +321,8 @@ impl IcebergCompactorRunner {
                     .enable_validate_compaction(self.config.enable_validate_compaction)
                     .max_record_batch_rows(self.config.max_record_batch_rows)
                     .write_parquet_properties(self.config.write_parquet_properties.clone())
+                    .small_file_threshold(self.config.small_file_threshold)
+                    .max_task_total_size(self.config.max_task_total_size)
                     .build()
                     .unwrap_or_else(|e| {
                         panic!(
@@ -314,6 +334,7 @@ impl IcebergCompactorRunner {
 
             tracing::info!(
                 task_id = task_id,
+                task_type = ?self.task_type,
                 table = ?self.table_ident,
                 input_parallelism,
                 output_parallelism,
@@ -321,17 +342,6 @@ impl IcebergCompactorRunner {
                 compaction_config = ?compaction_config,
                 "Iceberg compaction task started",
             );
-
-            let compaction_type = match self.task_type {
-                TaskType::SmallDataFileCompaction => CompactionType::SmallFiles,
-                TaskType::FullCompaction => CompactionType::Full,
-                _ => {
-                    unreachable!(
-                        "Unexpected task type for Iceberg compaction: {:?}",
-                        self.task_type
-                    )
-                }
-            };
 
             let compaction = Compaction::builder()
                 .with_catalog(self.catalog.clone())
@@ -397,58 +407,69 @@ impl IcebergCompactorRunner {
         Ok(())
     }
 
-    async fn analyze_task_statistics(&self) -> HummockResult<IcebergCompactionTaskStatistics> {
+    // This function analyzes the input files for the compaction task is a workaround
+    // Refactor it after selecting input files in meta node
+    async fn analyze_task_input(
+        &self,
+        compaction_type: CompactionType,
+    ) -> HummockResult<IcebergCompactionTaskStatistics> {
         let table = self
             .catalog
             .load_table(&self.table_ident)
             .await
             .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-        let manifest_list = table
-            .metadata()
-            .current_snapshot()
-            .ok_or_else(|| HummockError::compaction_executor("Don't find current_snapshot"))?
-            .load_manifest_list(table.file_io(), table.metadata())
+
+        let current_snapshot = table.metadata().current_snapshot().ok_or_else(|| {
+            HummockError::compaction_executor("Don't find current_snapshot".to_owned())
+        })?;
+
+        let snapshot_id = current_snapshot.snapshot_id();
+
+        let compaction_config = CompactionConfigBuilder::default()
+            .target_file_size(self.config.target_file_size_bytes)
+            .enable_validate_compaction(self.config.enable_validate_compaction)
+            .max_record_batch_rows(self.config.max_record_batch_rows)
+            .write_parquet_properties(self.config.write_parquet_properties.clone())
+            .build()
+            .unwrap_or_else(|e| {
+                panic!(
+                    "Failed to build iceberg compaction write props: {:?}",
+                    e.as_report()
+                );
+            });
+
+        let strategy =
+            FileStrategyFactory::create_files_strategy(compaction_type, &compaction_config);
+        let input_files = FileSelector::get_scan_tasks_with_strategy(&table, snapshot_id, strategy)
             .await
             .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
-        let mut total_data_file_size: u64 = 0;
-        let mut total_data_file_count = 0;
-        let mut total_pos_del_file_size: u64 = 0;
-        let mut total_pos_del_file_count = 0;
-        let mut total_eq_del_file_size: u64 = 0;
-        let mut total_eq_del_file_count = 0;
-
-        for manifest_file in manifest_list.entries() {
-            let manifest = manifest_file
-                .load_manifest(table.file_io())
-                .await
-                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-            let (entry, _) = manifest.into_parts();
-            for i in entry {
-                match i.content_type() {
-                    iceberg::spec::DataContentType::Data => {
-                        total_data_file_size += i.data_file().file_size_in_bytes();
-                        total_data_file_count += 1;
-                    }
-                    iceberg::spec::DataContentType::EqualityDeletes => {
-                        total_eq_del_file_size += i.data_file().file_size_in_bytes();
-                        total_eq_del_file_count += 1;
-                    }
-                    iceberg::spec::DataContentType::PositionDeletes => {
-                        total_pos_del_file_size += i.data_file().file_size_in_bytes();
-                        total_pos_del_file_count += 1;
-                    }
-                }
-            }
-        }
+        let total_data_file_size: u64 = input_files
+            .data_files
+            .iter()
+            .map(|f| f.file_size_in_bytes)
+            .sum();
+        let total_data_file_count = input_files.data_files.len() as u32;
+        let total_pos_del_file_size: u64 = input_files
+            .position_delete_files
+            .iter()
+            .map(|f| f.file_size_in_bytes)
+            .sum();
+        let total_pos_del_file_count = input_files.position_delete_files.len() as u32;
+        let total_eq_del_file_size: u64 = input_files
+            .equality_delete_files
+            .iter()
+            .map(|f| f.file_size_in_bytes)
+            .sum();
+        let total_eq_del_file_count = input_files.equality_delete_files.len() as u32;
 
         Ok(IcebergCompactionTaskStatistics {
             total_data_file_size,
-            total_data_file_count: total_data_file_count as u32,
+            total_data_file_count,
             total_pos_del_file_size,
-            total_pos_del_file_count: total_pos_del_file_count as u32,
+            total_pos_del_file_count,
             total_eq_del_file_size,
-            total_eq_del_file_count: total_eq_del_file_count as u32,
+            total_eq_del_file_count,
         })
     }
 }

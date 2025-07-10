@@ -3187,6 +3187,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ctor"
+version = "0.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32a2785755761f3ddc1492979ce1e48d2c00d09311c39e4466429188f3dd6501"
+dependencies = [
+ "quote",
+ "syn 2.0.101",
+]
+
+[[package]]
 name = "curve25519-dalek"
 version = "4.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6886,21 +6896,25 @@ dependencies = [
 [[package]]
 name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=13d0d9f4a05010673ff899f4af59c7757d788232#13d0d9f4a05010673ff899f4af59c7757d788232"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=f5aa44169edb6ee70c5fa8b8f6afd8932b72d5fc#f5aa44169edb6ee70c5fa8b8f6afd8932b72d5fc"
 dependencies = [
  "async-stream",
  "async-trait",
  "backon 1.2.0",
+ "ctor",
  "datafusion 45.0.0",
  "derive_builder",
  "futures",
- "futures-async-stream",
  "iceberg",
+ "iceberg-catalog-glue",
  "iceberg-catalog-memory",
+ "iceberg-catalog-rest",
  "iceberg-datafusion",
  "itertools 0.13.0",
  "mixtrics",
  "parquet 54.2.0",
+ "port_scanner",
+ "rand 0.9.0",
  "sqlx",
  "tempfile",
  "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -9814,6 +9828,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
 
 [[package]]
+name = "port_scanner"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "325a6d2ac5dee293c3b2612d4993b98aec1dff096b0a2dae70ed7d95784a05da"
+
+[[package]]
 name = "portable-atomic"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11666,6 +11686,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_common_heap_profiling",
  "risingwave_common_service",
+ "risingwave_jni_core",
  "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
