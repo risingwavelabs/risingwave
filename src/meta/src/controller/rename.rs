@@ -96,7 +96,7 @@ pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> Str
         | Statement::CreateSink {
             stmt:
             CreateSinkStatement {
-                sink_from: CreateSink::From(table_name),
+                sink_from: CreateSink::From { from_name: table_name, ..},
                 into_table_name: None,
                 ..
             },
@@ -119,7 +119,7 @@ pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> Str
                 table_name.0[idx] = Ident::from_real_value(to);
             } else {
                 match sink_from {
-                    CreateSink::From(table_name) => replace_table_name(table_name, to),
+                    CreateSink::From { from_name: table_name, ..} => replace_table_name(table_name, to),
                     CreateSink::AsQuery(query) => QueryRewriter::rewrite_query(query, from, to),
                 }
             }

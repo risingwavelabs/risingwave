@@ -1029,6 +1029,7 @@ impl LogicalPlanRoot {
         target_table: Option<Arc<TableCatalog>>,
         partition_info: Option<PartitionComputeInfo>,
         user_specified_columns: bool,
+        auto_refresh_schema_from_table: Option<Arc<TableCatalog>>,
     ) -> Result<StreamSink> {
         let stream_scan_type = if without_backfill {
             StreamScanType::UpstreamOnly
@@ -1059,6 +1060,7 @@ impl LogicalPlanRoot {
             properties,
             format_desc,
             partition_info,
+            auto_refresh_schema_from_table,
         )
     }
 }

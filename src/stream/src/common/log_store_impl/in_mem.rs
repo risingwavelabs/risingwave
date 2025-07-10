@@ -15,6 +15,7 @@
 use anyhow::{Context, anyhow};
 use await_tree::InstrumentAwait;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::util::epoch::{EpochExt, EpochPair, INVALID_EPOCH};
 use risingwave_connector::sink::log_store::{
@@ -27,6 +28,7 @@ use tokio::sync::mpsc::{
 use tokio::sync::oneshot;
 
 use crate::common::log_store_impl::in_mem::LogReaderEpochProgress::{AwaitingTruncate, Consuming};
+use crate::executor::StreamExecutorResult;
 
 enum InMemLogStoreItem {
     StreamChunk(StreamChunk),
@@ -53,6 +55,8 @@ pub struct BoundedInMemLogStoreWriter {
 
     /// Receiver for the epoch consumed by log reader.
     truncated_epoch_rx: UnboundedReceiver<u64>,
+
+    wait_init_epoch: Option<WaitInitEpochFn>,
 }
 
 #[derive(Eq, PartialEq, Debug)]
@@ -86,13 +90,33 @@ pub struct BoundedInMemLogStoreReader {
     truncate_offset: TruncateOffset,
 }
 
+type WaitInitEpochFn =
+    Box<dyn FnOnce(EpochPair) -> BoxFuture<'static, StreamExecutorResult<()>> + Send + 'static>;
+
 pub struct BoundedInMemLogStoreFactory {
     bound: usize,
+    wait_init_epoch: WaitInitEpochFn,
 }
 
 impl BoundedInMemLogStoreFactory {
-    pub fn new(bound: usize) -> Self {
-        Self { bound }
+    pub fn new(
+        bound: usize,
+        wait_init_epoch: impl FnOnce(EpochPair) -> BoxFuture<'static, StreamExecutorResult<()>>
+        + Send
+        + 'static,
+    ) -> Self {
+        Self {
+            bound,
+            wait_init_epoch: Box::new(wait_init_epoch),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn for_test(bound: usize) -> Self {
+        Self {
+            bound,
+            wait_init_epoch: Box::new(|_x| std::future::ready(Ok(())).boxed()),
+        }
     }
 }
 
@@ -120,6 +144,7 @@ impl LogStoreFactory for BoundedInMemLogStoreFactory {
             init_epoch_tx: Some(init_epoch_tx),
             item_tx,
             truncated_epoch_rx,
+            wait_init_epoch: Some(self.wait_init_epoch),
         };
         (reader, writer)
     }
@@ -257,6 +282,10 @@ impl LogWriter for BoundedInMemLogStoreWriter {
         _pause_read_on_bootstrap: bool,
     ) -> LogStoreResult<()> {
         let init_epoch_tx = self.init_epoch_tx.take().expect("cannot be init for twice");
+        self.wait_init_epoch
+            .take()
+            .expect("cannot be init for in-mem log store")(epoch)
+        .await?;
         init_epoch_tx
             .send(epoch.curr)
             .map_err(|_| anyhow!("unable to send init epoch"))?;
@@ -337,7 +366,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_in_memory_log_store() {
-        let factory = BoundedInMemLogStoreFactory::new(4);
+        let factory = BoundedInMemLogStoreFactory::for_test(4);
         let (mut reader, mut writer) = factory.build().await;
 
         let init_epoch = test_epoch(1);
