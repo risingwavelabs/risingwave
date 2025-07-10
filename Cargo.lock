@@ -9537,9 +9537,9 @@ dependencies = [
 
 [[package]]
 name = "peekable"
-version = "0.3.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "225f9651e475709164f871dc2f5724956be59cb9edb055372ffeeab01ec2d20b"
+checksum = "856f6fcbf377cb6bfb6af97dd3cf3fb82e1c6761e285568576ac5e8651a73160"
 dependencies = [
  "bytes",
  "pin-project-lite",
