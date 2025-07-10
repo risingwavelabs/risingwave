@@ -1,0 +1,16 @@
+control substitution on
+
+system ok
+curl "$PULSAR_HTTP_URL/admin/v2/brokers/ready"
+----
+ok
+
+
+system ok
+python3 e2e_test/commands/pulsar_util.py create-topic --topic 'persistent://public/default/test_pulsar_start_millis' --partitions 1
+
+system ok
+python e2e_test/source_inline/pulsar/pulsar_startup_millis.py --db-name $__DATABASE__ --topic test_pulsar_start_millis
+
+system ok
+python3 e2e_test/commands/pulsar_util.py drop-topic -t "persistent://public/default/test_pulsar_start_millis" --force 

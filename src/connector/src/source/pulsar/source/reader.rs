@@ -223,12 +223,11 @@ impl SplitReader for PulsarBrokerReader {
             PulsarEnumeratorOffset::Timestamp(_) => builder,
         };
 
-        let consumer: Consumer<Vec<u8>, _> = builder.build().await?;
-        if let PulsarEnumeratorOffset::Timestamp(_ts) = split.start_offset {
-            // FIXME: Here we need pulsar-rs to support the send + sync consumer
-            // consumer
-            //     .seek(None, None, Some(ts as u64), pulsar.clone())
-            //     .await?;
+        let mut consumer: Consumer<Vec<u8>, _> = builder.build().await?;
+        if let PulsarEnumeratorOffset::Timestamp(ts) = split.start_offset {
+            consumer
+                .seek(None, None, Some(ts as u64), pulsar.clone())
+                .await?;
         }
 
         Ok(Self {
