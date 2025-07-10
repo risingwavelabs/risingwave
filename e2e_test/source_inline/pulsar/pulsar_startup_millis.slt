@@ -13,4 +13,4 @@ system ok
 python e2e_test/source_inline/pulsar/pulsar_startup_millis.py --db-name $__DATABASE__ --topic test_pulsar_start_millis
 
 system ok
-python3 e2e_test/commands/pulsar_util.py drop-topic -t "persistent://public/default/test_pulsar_start_millis" --force 
+python3 e2e_test/commands/pulsar_util.py drop-topic -t "persistent://public/default/test_pulsar_start_millis" --force

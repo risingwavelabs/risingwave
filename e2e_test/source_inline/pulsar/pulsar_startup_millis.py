@@ -26,7 +26,7 @@ def main():
 
     pulsar_broker_url = os.environ.get("PULSAR_BROKER_URL", "pulsar://localhost:6650")
     topic_name = f"persistent://public/default/{args.topic}"
-    
+
     # Initialize Pulsar client and producer
     try:
         client = pulsar.Client(pulsar_broker_url)
@@ -140,4 +140,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()
