@@ -1032,7 +1032,7 @@ impl Catalog {
             Err(CatalogError::duplicated("source", relation_name.to_owned()))
         } else if let Some(sink) = schema.get_any_sink_by_name(relation_name) {
             Err(CatalogError::Duplicated(
-                "table",
+                "sink",
                 relation_name.to_owned(),
                 !sink.is_created(),
             ))

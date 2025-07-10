@@ -35,9 +35,7 @@ show jobs;
 statement ok
 alter sink sink1 set SINK_RATE_LIMIT to 10000;
 
-sleep 5s
-
-statement count 0
+statement count 0 retry 3 backoff 2s
 show jobs;
 
 statement ok
