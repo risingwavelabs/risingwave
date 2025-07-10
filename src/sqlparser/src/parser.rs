@@ -3752,8 +3752,13 @@ impl Parser<'_> {
             AlterConnectionOperation::ChangeOwner {
                 new_owner_name: owner_name,
             }
+        } else if self.parse_keyword(Keyword::CONNECTOR) {
+            let with_options = self.parse_with_properties()?;
+            AlterConnectionOperation::AlterConnectorProps {
+                alter_props: with_options,
+            }
         } else {
-            return self.expected("SET, or OWNER TO after ALTER CONNECTION");
+            return self.expected("SET, OWNER TO, or CONNECTOR WITH after ALTER CONNECTION");
         };
 
         Ok(Statement::AlterConnection {

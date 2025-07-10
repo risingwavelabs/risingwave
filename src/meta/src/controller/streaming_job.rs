@@ -2068,6 +2068,302 @@ impl CatalogController {
         Ok(new_config.into_iter().collect())
     }
 
+    pub async fn update_connection_props_by_connection_id(
+        &self,
+        connection_id: ConnectionId,
+        alter_props: BTreeMap<String, String>,
+        alter_secret_refs: BTreeMap<String, PbSecretRef>,
+    ) -> MetaResult<WithOptionsSecResolved> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let (connection, _obj) = Connection::find_by_id(connection_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found(ObjectType::Connection.as_str(), connection_id)
+            })?;
+
+        // Validate that props can be altered
+        let prop_keys: Vec<String> = alter_props
+            .keys()
+            .chain(alter_secret_refs.keys())
+            .cloned()
+            .collect();
+
+        // Map the connection type enum to the string name expected by the validation function
+        let connection_type_str = match connection.params.to_protobuf().connection_type() {
+            risingwave_pb::catalog::connection_params::PbConnectionType::Kafka => "kafka",
+            risingwave_pb::catalog::connection_params::PbConnectionType::Iceberg => "iceberg",
+            risingwave_pb::catalog::connection_params::PbConnectionType::SchemaRegistry => {
+                "schema_registry"
+            }
+            risingwave_pb::catalog::connection_params::PbConnectionType::Elasticsearch => {
+                "elasticsearch"
+            }
+            risingwave_pb::catalog::connection_params::PbConnectionType::Unspecified => {
+                return Err(MetaError::invalid_parameter("Unspecified connection type"));
+            }
+        };
+
+        risingwave_connector::allow_alter_on_fly_fields::check_connection_allow_alter_on_fly_fields(
+            connection_type_str, &prop_keys,
+        )?;
+
+        let connection_pb = connection.params.to_protobuf();
+        let mut options_with_secret = WithOptionsSecResolved::new(
+            connection_pb.properties.into_iter().collect(),
+            connection_pb.secret_refs.into_iter().collect(),
+        );
+
+        // Clone for validation before consuming in handle_update
+        let alter_props_clone = alter_props.clone();
+        let alter_secret_refs_clone = alter_secret_refs.clone();
+
+        let (to_add_secret_dep, to_remove_secret_dep) =
+            options_with_secret.handle_update(alter_props, alter_secret_refs)?;
+
+        tracing::info!(
+            "applying new properties to connection: connection_id={}, options_with_secret={:?}",
+            connection_id,
+            options_with_secret
+        );
+
+        // Validate that dependent sources/sinks don't have conflicting properties
+        self.validate_connection_property_conflicts(
+            connection_id,
+            &alter_props_clone,
+            &alter_secret_refs_clone,
+            &txn,
+        )
+        .await?;
+
+        // Validate the new connection properties actually work
+        self.validate_connection_properties_work(connection_id, &options_with_secret, &txn)
+            .await?;
+
+        // Update secret dependencies
+        if !to_add_secret_dep.is_empty() {
+            ObjectDependency::insert_many(to_add_secret_dep.into_iter().map(|secret_id| {
+                object_dependency::ActiveModel {
+                    oid: Set(secret_id as _),
+                    used_by: Set(connection_id as _),
+                    ..Default::default()
+                }
+            }))
+            .exec(&txn)
+            .await?;
+        }
+        if !to_remove_secret_dep.is_empty() {
+            let _ = ObjectDependency::delete_many()
+                .filter(
+                    object_dependency::Column::Oid
+                        .is_in(to_remove_secret_dep)
+                        .and(object_dependency::Column::UsedBy.eq::<ObjectId>(connection_id as _)),
+                )
+                .exec(&txn)
+                .await?;
+        }
+
+        // Update the connection with new properties
+        let updated_connection_params = risingwave_pb::catalog::ConnectionParams {
+            connection_type: connection_pb.connection_type,
+            properties: options_with_secret
+                .as_plaintext()
+                .clone()
+                .into_iter()
+                .collect(),
+            secret_refs: options_with_secret
+                .as_secret()
+                .clone()
+                .into_iter()
+                .collect(),
+        };
+        let active_connection_model = connection::ActiveModel {
+            connection_id: Set(connection_id),
+            params: Set(ConnectionParams::from(&updated_connection_params)),
+            ..Default::default()
+        };
+        active_connection_model.update(&txn).await?;
+
+        // Get the updated connection to notify frontend
+        let (connection, obj) = Connection::find_by_id(connection_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found(ObjectType::Connection.as_str(), connection_id)
+            })?;
+
+        txn.commit().await?;
+
+        self.notify_frontend(
+            NotificationOperation::Update,
+            NotificationInfo::ObjectGroup(PbObjectGroup {
+                objects: vec![PbObject {
+                    object_info: Some(PbObjectInfo::Connection(
+                        ObjectModel(connection, obj.unwrap()).into(),
+                    )),
+                }],
+            }),
+        )
+        .await;
+
+        Ok(options_with_secret)
+    }
+
+    /// Find all sources that depend on a given connection
+    pub async fn find_sources_by_connection_id(
+        &self,
+        connection_id: ConnectionId,
+    ) -> MetaResult<Vec<SourceId>> {
+        let inner = self.inner.read().await;
+        let source_ids: Vec<SourceId> = Source::find()
+            .select_only()
+            .column(source::Column::SourceId)
+            .filter(source::Column::ConnectionId.eq(connection_id))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        Ok(source_ids)
+    }
+
+    /// Find all sinks that depend on a given connection
+    pub async fn find_sinks_by_connection_id(
+        &self,
+        connection_id: ConnectionId,
+    ) -> MetaResult<Vec<SinkId>> {
+        let inner = self.inner.read().await;
+        let sink_ids: Vec<SinkId> = Sink::find()
+            .select_only()
+            .column(sink::Column::SinkId)
+            .filter(sink::Column::ConnectionId.eq(connection_id))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        Ok(sink_ids)
+    }
+
+    /// Validate that dependent sources/sinks don't have conflicting property keys
+    async fn validate_connection_property_conflicts(
+        &self,
+        connection_id: ConnectionId,
+        alter_props: &BTreeMap<String, String>,
+        alter_secret_refs: &BTreeMap<String, PbSecretRef>,
+        txn: &DatabaseTransaction,
+    ) -> MetaResult<()> {
+        let property_keys: HashSet<String> = alter_props
+            .keys()
+            .chain(alter_secret_refs.keys())
+            .cloned()
+            .collect();
+
+        // Check sources for conflicts
+        let conflicting_sources: Vec<(SourceId, String)> = Source::find()
+            .filter(source::Column::ConnectionId.eq(connection_id))
+            .all(txn)
+            .await?
+            .into_iter()
+            .filter_map(|source| {
+                for prop_key in &property_keys {
+                    if source.with_properties.0.contains_key(prop_key) {
+                        return Some((source.source_id, prop_key.clone()));
+                    }
+                }
+                None
+            })
+            .collect();
+
+        if !conflicting_sources.is_empty() {
+            let conflicts: Vec<String> = conflicting_sources
+                .into_iter()
+                .map(|(source_id, prop)| format!("source {} has property '{}'", source_id, prop))
+                .collect();
+            return Err(MetaError::invalid_parameter(format!(
+                "Cannot alter connection properties that are also set in dependent objects: {}",
+                conflicts.join(", ")
+            )));
+        }
+
+        // Check sinks for conflicts
+        let conflicting_sinks: Vec<(SinkId, String)> = Sink::find()
+            .filter(sink::Column::ConnectionId.eq(connection_id))
+            .all(txn)
+            .await?
+            .into_iter()
+            .filter_map(|sink| {
+                for prop_key in &property_keys {
+                    if sink.properties.0.contains_key(prop_key) {
+                        return Some((sink.sink_id, prop_key.clone()));
+                    }
+                }
+                None
+            })
+            .collect();
+
+        if !conflicting_sinks.is_empty() {
+            let conflicts: Vec<String> = conflicting_sinks
+                .into_iter()
+                .map(|(sink_id, prop)| format!("sink {} has property '{}'", sink_id, prop))
+                .collect();
+            return Err(MetaError::invalid_parameter(format!(
+                "Cannot alter connection properties that are also set in dependent objects: {}",
+                conflicts.join(", ")
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Validate the new connection properties work by testing with a dependent source
+    async fn validate_connection_properties_work(
+        &self,
+        connection_id: ConnectionId,
+        options_with_secret: &WithOptionsSecResolved,
+        txn: &DatabaseTransaction,
+    ) -> MetaResult<()> {
+        // Find a dependent source to test with
+        let test_source = Source::find()
+            .filter(source::Column::ConnectionId.eq(connection_id))
+            .one(txn)
+            .await?;
+
+        if let Some(source) = test_source {
+            // Create a merged properties map for validation
+            let connection_props = options_with_secret.as_plaintext().clone();
+            let mut merged_props = source.with_properties.0.clone();
+
+            // Connection properties override source properties
+            merged_props.extend(connection_props);
+
+            // Add the connector type for validation
+            if let Some(_connector) = merged_props.get("connector") {
+                let merged_options = WithOptionsSecResolved::without_secrets(merged_props);
+
+                // Try to extract and validate connector properties
+                match ConnectorProperties::extract(merged_options, true) {
+                    Ok(_) => {
+                        tracing::debug!(
+                            "Connection property validation successful using source {}",
+                            source.source_id
+                        );
+                    }
+                    Err(e) => {
+                        return Err(MetaError::invalid_parameter(format!(
+                            "Invalid connection properties: {}",
+                            e
+                        )));
+                    }
+                }
+            }
+        }
+        // If no dependent sources found, we can't validate but that's okay
+        // The connection itself was already validated when created
+
+        Ok(())
+    }
+
     pub async fn update_fragment_rate_limit_by_fragment_id(
         &self,
         fragment_id: FragmentId,

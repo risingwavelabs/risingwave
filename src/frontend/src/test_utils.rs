@@ -1194,6 +1194,15 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
+    async fn alter_connection_connector_props(
+        &self,
+        _connection_id: u32,
+        _changed_props: BTreeMap<String, String>,
+        _changed_secret_refs: BTreeMap<String, PbSecretRef>,
+    ) -> RpcResult<()> {
+        Ok(())
+    }
+
     async fn list_hosted_iceberg_tables(&self) -> RpcResult<Vec<IcebergTable>> {
         unimplemented!()
     }
