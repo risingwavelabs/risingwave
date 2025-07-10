@@ -143,7 +143,7 @@ pub enum DataType {
     #[from_str(regex = "(?i)^date$")]
     Date,
     #[display("character varying")]
-    #[from_str(regex = "(?i)^character varying$|^varchar$")]
+    #[from_str(regex = "(?i)^character varying$|^varchar$|^text$")]
     Varchar,
     #[display("time without time zone")]
     #[from_str(regex = "(?i)^time$|^time without time zone$")]
@@ -1480,6 +1480,8 @@ mod tests {
 
         assert_eq!(DataType::from_str("varchar").unwrap(), DataType::Varchar);
         assert_eq!(DataType::from_str("VARCHAR").unwrap(), DataType::Varchar);
+        assert_eq!(DataType::from_str("text").unwrap(), DataType::Varchar);
+        assert_eq!(DataType::from_str("TEXT").unwrap(), DataType::Varchar);
 
         assert_eq!(DataType::from_str("time").unwrap(), DataType::Time);
         assert_eq!(
@@ -1555,6 +1557,10 @@ mod tests {
         );
         assert_eq!(
             DataType::from_str("varchar[]").unwrap(),
+            DataType::List(Box::new(DataType::Varchar))
+        );
+        assert_eq!(
+            DataType::from_str("text[]").unwrap(),
             DataType::List(Box::new(DataType::Varchar))
         );
         assert_eq!(
