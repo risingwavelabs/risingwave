@@ -106,17 +106,20 @@ type JoinHashMapInner<K> =
     ManagedLruCache<K, HashValueWrapper, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
 
 pub struct JoinHashMapMetrics {
-    /// Basic information
-    /// How many times have we hit the cache of join executor
-    lookup_miss_count: usize,
-    total_lookup_count: usize,
-    /// How many times have we miss the cache when insert row
+    /// How many times have we found that a does not exist in the operator cache
+    lookup_miss_in_operator_count: usize,
+    /// How many times have we looked up a key in the operator cache
+    total_lookup_in_operator_count: usize,
+    /// How many times have we looked up a key in storage, which implies that it is not in the operator cache
+    lookup_in_storage_not_in_cache_count: usize,
+    /// How many times have we missed the cache when insert row
     insert_cache_miss_count: usize,
 
     // Metrics
     join_lookup_total_count_metric: LabelGuardedIntCounter,
     join_lookup_miss_count_metric: LabelGuardedIntCounter,
-    join_insert_cache_miss_count_metrics: LabelGuardedIntCounter,
+    join_lookup_in_storage_not_in_cache_count_metric: LabelGuardedIntCounter,
+    join_insert_cache_miss_count_metric: LabelGuardedIntCounter,
 }
 
 impl JoinHashMapMetrics {
@@ -131,34 +134,39 @@ impl JoinHashMapMetrics {
         let fragment_id = fragment_id.to_string();
         let join_table_id = join_table_id.to_string();
         let join_lookup_total_count_metric = metrics
-            .join_lookup_total_count
+            .join_lookup_total_in_operator_cache_count
             .with_guarded_label_values(&[(side), &join_table_id, &actor_id, &fragment_id]);
         let join_lookup_miss_count_metric = metrics
-            .join_lookup_miss_count
+            .join_lookup_miss_in_operator_cache_count
             .with_guarded_label_values(&[(side), &join_table_id, &actor_id, &fragment_id]);
-        let join_insert_cache_miss_count_metrics = metrics
+        let join_insert_cache_miss_count_metric = metrics
             .join_insert_cache_miss_count
+            .with_guarded_label_values(&[(side), &join_table_id, &actor_id, &fragment_id]);
+        let join_lookup_in_storage_not_in_cache_count_metric = metrics
+            .join_lookup_in_storage_not_in_cache_count
             .with_guarded_label_values(&[(side), &join_table_id, &actor_id, &fragment_id]);
 
         Self {
-            lookup_miss_count: 0,
-            total_lookup_count: 0,
+            lookup_miss_in_operator_count: 0,
+            lookup_in_storage_not_in_cache_count: 0,
+            total_lookup_in_operator_count: 0,
             insert_cache_miss_count: 0,
             join_lookup_total_count_metric,
+            join_lookup_in_storage_not_in_cache_count_metric,
             join_lookup_miss_count_metric,
-            join_insert_cache_miss_count_metrics,
+            join_insert_cache_miss_count_metric,
         }
     }
 
     pub fn flush(&mut self) {
         self.join_lookup_total_count_metric
-            .inc_by(self.total_lookup_count as u64);
+            .inc_by(self.total_lookup_in_operator_count as u64);
         self.join_lookup_miss_count_metric
-            .inc_by(self.lookup_miss_count as u64);
-        self.join_insert_cache_miss_count_metrics
+            .inc_by(self.lookup_miss_in_operator_count as u64);
+        self.join_insert_cache_miss_count_metric
             .inc_by(self.insert_cache_miss_count as u64);
-        self.total_lookup_count = 0;
-        self.lookup_miss_count = 0;
+        self.total_lookup_in_operator_count = 0;
+        self.lookup_miss_in_operator_count = 0;
         self.insert_cache_miss_count = 0;
     }
 }
@@ -532,7 +540,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     ///
     /// Note: This will NOT remove anything from remote storage.
     pub fn take_state_opt(&mut self, key: &K) -> CacheResult {
-        self.metrics.total_lookup_count += 1;
+        self.metrics.total_lookup_in_operator_count += 1;
         if self.inner.contains(key) {
             tracing::trace!("hit cache for join key: {:?}", key);
             // Do not update the LRU statistics here with `peek_mut` since we will put the state
@@ -541,6 +549,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             CacheResult::Hit(state.take())
         } else {
             tracing::trace!("miss cache for join key: {:?}", key);
+            self.metrics.lookup_miss_in_operator_count += 1;
             CacheResult::Miss
         }
     }
@@ -554,14 +563,14 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     ///
     /// Note: This will NOT remove anything from remote storage.
     pub async fn take_state(&mut self, key: &K) -> StreamExecutorResult<HashValueType> {
-        self.metrics.total_lookup_count += 1;
+        self.metrics.total_lookup_in_operator_count += 1;
         let state = if self.inner.contains(key) {
             // Do not update the LRU statistics here with `peek_mut` since we will put the state
             // back.
             let mut state = self.inner.peek_mut(key).unwrap();
             state.take()
         } else {
-            self.metrics.lookup_miss_count += 1;
+            self.metrics.lookup_miss_in_operator_count += 1;
             self.fetch_cached_state(key).await?.into()
         };
         Ok(state)

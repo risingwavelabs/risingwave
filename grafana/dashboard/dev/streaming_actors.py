@@ -293,6 +293,16 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Join Executor Cache",
+                    "",
+                    [
+                        panels.target(
+                            f"(sum(rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, fragment_id) ) / (sum(rate({metric('stream_join_lookup_total_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, fragment_id)) >= 0",
+                            "Join executor cache miss ratio - - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} fragment {{fragment_id}}",
+                        ),
+                    ],
+                ),
                 panels.subheader("Aggregation"),
                 panels.timeseries_actor_ops(
                     "Aggregation Executor Cache Statistics For Each StreamChunk",
