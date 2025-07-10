@@ -161,10 +161,15 @@ impl SplitReader for PulsarBrokerReader {
 
         tracing::debug!("creating consumer for pulsar split topic {}", topic,);
 
+        let subscription_type = match split.start_offset {
+            PulsarEnumeratorOffset::Timestamp(_) => SubType::Failover,
+            _ => SubType::Exclusive,
+        };
+
         let builder: ConsumerBuilder<TokioExecutor> = pulsar
             .consumer()
             .with_topic(&topic)
-            .with_subscription_type(SubType::Exclusive)
+            .with_subscription_type(subscription_type)
             .with_subscription(format!(
                 "{}-{}-{}",
                 props
@@ -220,11 +225,33 @@ impl SplitReader for PulsarBrokerReader {
                 }
             }
 
-            PulsarEnumeratorOffset::Timestamp(_) => builder,
+            PulsarEnumeratorOffset::Timestamp(_) => {
+                // For timestamp positioning, start from earliest and seek later
+                if topic.starts_with("non-persistent://") {
+                    tracing::warn!(
+                        "Timestamp offset is not supported for non-persistent topic, use Latest instead"
+                    );
+                    builder.with_options(
+                        ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
+                    )
+                } else {
+                    builder.with_options(
+                        ConsumerOptions::default()
+                            .with_initial_position(InitialPosition::Earliest)
+                            .durable(false),
+                    )
+                }
+            }
         };
 
         let mut consumer: Consumer<Vec<u8>, _> = builder.build().await?;
-        if let PulsarEnumeratorOffset::Timestamp(ts) = split.start_offset {
+
+        // Handle timestamp seeking after consumer creation
+        if let PulsarEnumeratorOffset::Timestamp(ts) = split.start_offset
+            && !topic.starts_with("non-persistent://")
+        {
+            // according to https://pulsar.apache.org/api/client/3.1.x/org/apache/pulsar/client/api/Reader.html
+            // the timestamp is in milliseconds
             consumer
                 .seek(None, None, Some(ts as u64), pulsar.clone())
                 .await?;

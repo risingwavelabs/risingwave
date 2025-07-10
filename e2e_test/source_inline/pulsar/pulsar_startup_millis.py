@@ -44,6 +44,7 @@ def main():
             for i in range(1, 6)
         ]
         produce_records(producer, initial_records)
+        producer.flush()
 
         # Step 2: Sleep 1 second
         print("Sleeping for 1 second...")
@@ -62,6 +63,7 @@ def main():
         if not args.produce_after_table:
             print("Producing more data before table is created")
             produce_records(producer, additional_records)
+            producer.flush()
 
         # Connect to RisingWave
         try:
@@ -102,25 +104,38 @@ def main():
             if args.produce_after_table:
                 print("Producing more data after table is created")
                 produce_records(producer, additional_records)
+                producer.flush()
 
             # Wait a moment for the table to start consuming
             time.sleep(3)
 
-            # Step 6: Select count(*) from the table
-            cur.execute(f"SELECT COUNT(*) FROM {table_name}")
-            count_result = cur.fetchone()[0]
-            print(f"Count from table {table_name}: {count_result}")
-
-            # Also show the actual records for verification
-            cur.execute(f"SELECT * FROM {table_name} ORDER BY id")
-            records = cur.fetchall()
-            print(f"Records in table:")
-            for record in records:
-                print(f"  {record}")
-
-            # Expected: Should only see records with timestamps >= current_timestamp_millis
+            # Step 6: Select count(*) from the table with retry logic
             expected_count = len([r for r in additional_records])
-            assert count_result == expected_count, f"❌ Test FAILED: Expected count {expected_count}, got {count_result}"
+            max_retries = 3
+            retry_delay = 1  # 1 second backoff
+
+            for retry_attempt in range(max_retries + 1):
+                cur.execute(f"SELECT COUNT(*) FROM {table_name}")
+                count_result = cur.fetchone()[0]
+                print(f"Count from table {table_name}: {count_result} (attempt {retry_attempt + 1}/{max_retries + 1})")
+
+                # Also show the actual records for verification
+                cur.execute(f"SELECT * FROM {table_name} ORDER BY id")
+                records = cur.fetchall()
+                print(f"Records in table:")
+                for record in records:
+                    print(f"  {record}")
+
+                # Check if we got the expected count
+                if count_result == expected_count:
+                    print(f"✅ Test PASSED: Expected count {expected_count}, got {count_result}")
+                    break
+                elif retry_attempt < max_retries:
+                    print(f"⏳ Retrying in {retry_delay} seconds... (expected {expected_count}, got {count_result})")
+                    time.sleep(retry_delay)
+                else:
+                    # Final attempt failed
+                    assert count_result == expected_count, f"❌ Test FAILED: Expected count {expected_count}, got {count_result}"
 
         finally:
             # Step 7: Drop the table
