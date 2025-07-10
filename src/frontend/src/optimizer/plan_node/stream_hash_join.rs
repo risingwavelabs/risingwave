@@ -224,10 +224,7 @@ impl StreamHashJoin {
             is_append_only: append_only,
             clean_left_state_conjunction_idx,
             clean_right_state_conjunction_idx,
-            join_encoding_type: ctx
-                .session_ctx()
-                .config()
-                .streaming_join_encoding_optimized_for(),
+            join_encoding_type: ctx.session_ctx().config().streaming_join_encoding(),
         }
     }
 

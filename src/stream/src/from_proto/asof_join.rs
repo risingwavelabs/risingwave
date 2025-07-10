@@ -173,7 +173,7 @@ impl<S: StateStore> HashKeyDispatcher for AsOfJoinExecutorDispatcherArgs<S> {
         }
 
         macro_rules! build_match {
-            ($(($join_type:ident)),*) => {
+            ($($join_type:ident),*) => {
                 match (self.join_type_proto, self.join_encoding_type) {
                     (JoinTypeProto::Unspecified, _) | (_, JoinEncodingTypeProto::Unspecified) => unreachable!(),
                     $(
@@ -185,8 +185,8 @@ impl<S: StateStore> HashKeyDispatcher for AsOfJoinExecutorDispatcherArgs<S> {
         }
 
         build_match! {
-            (Inner),
-            (LeftOuter)
+            Inner,
+            LeftOuter
         }
     }
 

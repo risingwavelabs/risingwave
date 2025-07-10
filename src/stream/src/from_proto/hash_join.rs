@@ -228,7 +228,7 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
         }
 
         macro_rules! build_match {
-            ($(($join_type:ident)),*) => {
+            ($($join_type:ident),*) => {
                 match (self.join_type_proto, self.join_encoding_type) {
                     (JoinTypeProto::AsofInner, _)
                     | (JoinTypeProto::AsofLeftOuter, _)
@@ -242,14 +242,14 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
             };
         }
         build_match! {
-            (Inner),
-            (LeftOuter),
-            (RightOuter),
-            (FullOuter),
-            (LeftSemi),
-            (LeftAnti),
-            (RightSemi),
-            (RightAnti)
+            Inner,
+            LeftOuter,
+            RightOuter,
+            FullOuter,
+            LeftSemi,
+            LeftAnti,
+            RightSemi,
+            RightAnti
         }
     }
 

@@ -26,12 +26,12 @@ impl FromStr for JoinEncodingType {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.eq_ignore_ascii_case("memory") {
+        if s.eq_ignore_ascii_case("memory_optimized") {
             Ok(Self::Memory)
-        } else if s.eq_ignore_ascii_case("cpu") {
+        } else if s.eq_ignore_ascii_case("cpu_optimized") {
             Ok(Self::Cpu)
         } else {
-            Err("expect one of [Memory, CPU]")
+            Err("expect one of [memory_optimized, cpu_optimized]")
         }
     }
 }
@@ -39,8 +39,8 @@ impl FromStr for JoinEncodingType {
 impl std::fmt::Display for JoinEncodingType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Memory => write!(f, "Memory"),
-            Self::Cpu => write!(f, "CPU"),
+            Self::Memory => write!(f, "memory_optimized"),
+            Self::Cpu => write!(f, "cpu_optimized"),
         }
     }
 }

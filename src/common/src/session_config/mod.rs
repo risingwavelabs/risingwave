@@ -228,7 +228,7 @@ pub struct SessionConfig {
     /// Determine which encoding will be used to encode join rows in operator cache.
     #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = JoinEncodingType::default())]
-    streaming_join_encoding_optimized_for: JoinEncodingType,
+    streaming_join_encoding: JoinEncodingType,
 
     /// Enable join ordering for streaming and batch queries. Defaults to true.
     #[parameter(default = true, alias = "rw_enable_join_ordering")]
