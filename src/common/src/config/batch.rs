@@ -17,7 +17,6 @@ use serde::{Deserialize, Serialize};
 use serde_default::DefaultFromSerde;
 
 use super::types::{RpcClientConfig, Unrecognized};
-use crate::config::defaults as default;
 
 serde_with::with_prefix!(batch_prefix "batch_");
 
@@ -106,4 +105,28 @@ pub struct BatchDeveloperConfig {
 
     #[serde(default = "default::developer::batch_local_execute_buffer_size")]
     pub local_execute_buffer_size: usize,
+}
+
+mod default {
+    pub mod batch {
+        pub fn enable_barrier_read() -> bool { false }
+        pub fn enable_spill() -> bool { false }
+        pub fn statement_timeout_in_sec() -> u32 { 3600 }
+        pub fn mask_worker_temporary_secs() -> usize { 30 }
+        pub fn redact_sql_option_keywords() -> Vec<String> {
+            vec!["credential".to_string(), "key".to_string(), "secret".to_string(), 
+                 "password".to_string(), "token".to_string()]
+        }
+    }
+
+    pub mod developer {
+        pub fn connector_message_buffer_size() -> usize { 16 }
+        pub fn batch_output_channel_size() -> usize { 64 }
+        pub fn batch_receiver_channel_size() -> usize { 64 }
+        pub fn batch_root_stage_channel_size() -> usize { 1000 }
+        pub fn batch_chunk_size() -> usize { 1024 }
+        pub fn batch_local_execute_buffer_size() -> usize { 64 }
+        pub fn batch_exchange_connection_pool_size() -> Option<u16> { None }
+        pub fn rpc_client_connect_timeout_secs() -> u64 { 5 }
+    }
 }

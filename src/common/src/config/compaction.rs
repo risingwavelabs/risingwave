@@ -16,8 +16,6 @@ use risingwave_common_proc_macro::ConfigDoc;
 use serde::{Deserialize, Serialize};
 use serde_default::DefaultFromSerde;
 
-use crate::config::defaults as default;
-
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct CompactionConfig {
     #[serde(default = "default::compaction_config::max_bytes_for_level_base")]
@@ -74,4 +72,35 @@ pub struct CompactionConfig {
     pub level0_stop_write_threshold_max_size: u64,
     #[serde(default = "default::compaction_config::enable_optimize_l0_interval_selection")]
     pub enable_optimize_l0_interval_selection: bool,
+}
+
+mod default {
+    pub mod compaction_config {
+        pub fn max_bytes_for_level_base() -> u64 { 536870912 }
+        pub fn max_bytes_for_level_multiplier() -> u64 { 5 }
+        pub fn max_compaction_bytes() -> u64 { 2147483648 }
+        pub fn sub_level_max_compaction_bytes() -> u64 { 134217728 }
+        pub fn level0_tier_compact_file_number() -> u64 { 12 }
+        pub fn target_file_size_base() -> u64 { 33554432 }
+        pub fn compaction_filter_mask() -> u32 { 6 }
+        pub fn max_sub_compaction() -> u32 { 4 }
+        pub fn level0_stop_write_threshold_sub_level_number() -> u64 { 300 }
+        pub fn level0_sub_level_compact_level_count() -> u32 { 3 }
+        pub fn level0_overlapping_sub_level_compact_level_count() -> u32 { 12 }
+        pub fn max_space_reclaim_bytes() -> u64 { 536870912 }
+        pub fn level0_max_compact_file_number() -> u64 { 40 }
+        pub fn tombstone_reclaim_ratio() -> u32 { 40 }
+        pub fn enable_emergency_picker() -> bool { true }
+        pub fn max_level() -> u32 { 6 }
+        pub fn max_l0_compact_level_count() -> u32 { 42 }
+        pub fn sst_allowed_trivial_move_min_size() -> u64 { 134217728 }
+        pub fn disable_auto_group_scheduling() -> bool { false }
+        pub fn max_overlapping_level_size() -> u64 { 10737418240 }
+        pub fn sst_allowed_trivial_move_max_count() -> u32 { 2 }
+        pub fn emergency_level0_sst_file_count() -> u32 { 100 }
+        pub fn emergency_level0_sub_level_partition() -> u32 { 4 }
+        pub fn level0_stop_write_threshold_max_sst_count() -> u32 { 800 }
+        pub fn level0_stop_write_threshold_max_size() -> u64 { 21474836480 }
+        pub fn enable_optimize_l0_interval_selection() -> bool { true }
+    }
 }

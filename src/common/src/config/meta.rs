@@ -18,7 +18,6 @@ use serde_default::DefaultFromSerde;
 
 use super::compaction::CompactionConfig;
 use super::types::{DefaultParallelism, MetaBackend, RpcClientConfig, Unrecognized};
-use crate::config::defaults as default;
 
 serde_with::with_prefix!(meta_prefix "meta_");
 
@@ -378,4 +377,88 @@ pub struct MetaStoreConfig {
     /// Acquire timeout in seconds for a meta store connection.
     #[serde(default = "default::meta_store_config::acquire_timeout_sec")]
     pub acquire_timeout_sec: u64,
+}
+
+mod default {
+    use super::*;
+
+    pub mod meta {
+        use super::*;
+
+        pub fn min_sst_retention_time_sec() -> u64 { 3600 * 6 }
+        pub fn full_gc_interval_sec() -> u64 { 3600 }
+        pub fn full_gc_object_limit() -> u64 { 100_000 }
+        pub fn gc_history_retention_time_sec() -> u64 { 3600 * 6 }
+        pub fn max_inflight_time_travel_query() -> u64 { 1000 }
+        pub fn periodic_compaction_interval_sec() -> u64 { 60 }
+        pub fn vacuum_interval_sec() -> u64 { 30 }
+        pub fn vacuum_spin_interval_ms() -> u64 { 50 }
+        pub fn hummock_version_checkpoint_interval_sec() -> u64 { 30 }
+        pub fn enable_hummock_data_archive() -> bool { false }
+        pub fn hummock_time_travel_snapshot_interval() -> u64 { 100 }
+        pub fn min_delta_log_num_for_hummock_version_checkpoint() -> u64 { 10 }
+        pub fn max_heartbeat_interval_sec() -> u32 { 300 }
+        pub fn meta_leader_lease_secs() -> u64 { 30 }
+        pub fn default_parallelism() -> DefaultParallelism { DefaultParallelism::Full }
+        pub fn node_num_monitor_interval_sec() -> u64 { 10 }
+        pub fn backend() -> MetaBackend { MetaBackend::Mem }
+        pub fn periodic_space_reclaim_compaction_interval_sec() -> u64 { 3600 }
+        pub fn periodic_ttl_reclaim_compaction_interval_sec() -> u64 { 1800 }
+        pub fn periodic_scheduling_compaction_group_split_interval_sec() -> u64 { 10 }
+        pub fn periodic_tombstone_reclaim_compaction_interval_sec() -> u64 { 600 }
+        #[deprecated] pub fn move_table_size_limit() -> u64 { 68719476736 }
+        #[deprecated] pub fn split_group_size_limit() -> u64 { 68719476736 }
+        pub fn protect_drop_table_with_incoming_sink() -> bool { true }
+        pub fn partition_vnode_count() -> u32 { 32 }
+        pub fn table_high_write_throughput_threshold() -> u64 { 16777216 }
+        pub fn table_low_write_throughput_threshold() -> u64 { 4194304 }
+        pub fn compaction_task_max_heartbeat_interval_secs() -> u64 { 120 }
+        pub fn compaction_task_max_progress_interval_secs() -> u64 { 120 }
+        #[deprecated] pub fn cut_table_size_limit() -> u64 { 1073741824 }
+        pub fn hybrid_partition_vnode_count() -> u32 { 4 }
+        pub fn compact_task_table_size_partition_threshold_low() -> u64 { 134217728 }
+        pub fn compact_task_table_size_partition_threshold_high() -> u64 { 402653184 }
+        pub fn event_log_enabled() -> bool { true }
+        pub fn event_log_channel_max_size() -> u32 { 10 }
+        pub fn parallelism_control_batch_size() -> usize { 10 }
+        pub fn parallelism_control_trigger_period_sec() -> u64 { 10 }
+        pub fn parallelism_control_trigger_first_delay_sec() -> u64 { 30 }
+        pub fn enable_dropped_column_reclaim() -> bool { false }
+        pub fn split_group_size_ratio() -> f64 { 2.0 }
+        pub fn table_stat_high_write_throughput_ratio_for_split() -> f64 { 0.8 }
+        pub fn table_stat_low_write_throughput_ratio_for_merge() -> f64 { 0.8 }
+        pub fn table_stat_throuput_window_seconds_for_split() -> usize { 60 }
+        pub fn table_stat_throuput_window_seconds_for_merge() -> usize { 240 }
+        pub fn periodic_scheduling_compaction_group_merge_interval_sec() -> u64 { 30 }
+        pub fn compaction_group_merge_dimension_threshold() -> f64 { 0.8 }
+    }
+
+    pub mod developer {
+        pub fn meta_cached_traces_num() -> u32 { 256 }
+        pub fn meta_cached_traces_memory_limit_bytes() -> usize { 64 * 1024 * 1024 }
+        pub fn enable_trivial_move() -> bool { true }
+        pub fn enable_check_task_level_overlap() -> bool { true }
+        pub fn max_trivial_move_task_count_per_loop() -> usize { 256 }
+        pub fn max_get_task_probe_times() -> usize { 5 }
+        pub fn actor_cnt_per_worker_parallelism_soft_limit() -> usize { 100 }
+        pub fn actor_cnt_per_worker_parallelism_hard_limit() -> usize { 400 }
+        pub fn hummock_time_travel_sst_info_fetch_batch_size() -> usize { 1000 }
+        pub fn hummock_time_travel_sst_info_insert_batch_size() -> usize { 1000 }
+        pub fn time_travel_vacuum_interval_sec() -> u64 { 600 }
+        pub fn hummock_time_travel_epoch_version_insert_batch_size() -> usize { 10000 }
+        pub fn hummock_gc_history_insert_batch_size() -> usize { 10000 }
+        pub fn hummock_time_travel_filter_out_objects_batch_size() -> usize { 1000 }
+        pub fn hummock_time_travel_filter_out_objects_v1() -> bool { false }
+        pub fn hummock_time_travel_filter_out_objects_list_version_batch_size() -> usize { 1000 }
+        pub fn hummock_time_travel_filter_out_objects_list_delta_batch_size() -> usize { 500 }
+        pub fn rpc_client_connect_timeout_secs() -> u64 { 5 }
+    }
+
+    pub mod meta_store_config {
+        pub fn max_connections() -> u32 { 10 }
+        pub fn min_connections() -> u32 { 1 }
+        pub fn connection_timeout_sec() -> u64 { 30 }
+        pub fn idle_timeout_sec() -> u64 { 600 }
+        pub fn acquire_timeout_sec() -> u64 { 30 }
+    }
 }

@@ -17,7 +17,6 @@ use serde::{Deserialize, Serialize};
 use serde_default::DefaultFromSerde;
 
 use super::types::{AsyncStackTraceOption, RpcClientConfig, Unrecognized};
-use crate::config::defaults as default;
 
 serde_with::with_prefix!(streaming_prefix "stream_");
 
@@ -198,4 +197,53 @@ pub struct StreamingDeveloperConfig {
     /// `IcebergSink`: The size of the cache for positional delete in the sink.
     #[serde(default = "default::developer::iceberg_sink_positional_delete_cache_size")]
     pub iceberg_sink_positional_delete_cache_size: usize,
+}
+
+mod default {
+    use super::*;
+
+    pub mod streaming {
+        use super::*;
+
+        pub fn in_flight_barrier_nums() -> usize { 10000 }
+        pub fn async_stack_trace() -> AsyncStackTraceOption { AsyncStackTraceOption::ReleaseVerbose }
+        pub fn unique_user_stream_errors() -> usize { 10 }
+        pub fn unsafe_enable_strict_consistency() -> bool { false }
+    }
+
+    pub mod developer {
+        pub fn stream_enable_executor_row_count() -> bool { false }
+        pub fn connector_message_buffer_size() -> usize { 16 }
+        pub fn unsafe_stream_extreme_cache_size() -> usize { 10 }
+        pub fn stream_chunk_size() -> usize { 256 }
+        pub fn stream_exchange_initial_permits() -> usize { 8192 }
+        pub fn stream_exchange_batched_permits() -> usize { 1024 }
+        pub fn stream_exchange_concurrent_barriers() -> usize { 1 }
+        pub fn stream_exchange_concurrent_dispatchers() -> usize { 1 }
+        pub fn stream_dml_channel_initial_permits() -> usize { 32768 }
+        pub fn stream_hash_agg_max_dirty_groups_heap_size() -> usize { 64 << 20 }
+        pub fn memory_controller_threshold_aggressive() -> f64 { 0.9 }
+        pub fn memory_controller_threshold_graceful() -> f64 { 0.8 }
+        pub fn memory_controller_threshold_stable() -> f64 { 0.7 }
+        pub fn memory_controller_eviction_factor_aggressive() -> f64 { 2.0 }
+        pub fn memory_controller_eviction_factor_graceful() -> f64 { 1.5 }
+        pub fn memory_controller_eviction_factor_stable() -> f64 { 1.0 }
+        pub fn memory_controller_update_interval_ms() -> usize { 50 }
+        pub fn memory_controller_sequence_tls_step() -> u64 { 32 }
+        pub fn memory_controller_sequence_tls_lag() -> u64 { 128 }
+        pub fn stream_enable_arrangement_backfill() -> bool { true }
+        pub fn stream_high_join_amplification_threshold() -> usize { 2048 }
+        pub fn enable_actor_tokio_metrics() -> bool { false }
+        pub fn stream_exchange_connection_pool_size() -> Option<u16> { None }
+        pub fn stream_enable_auto_schema_change() -> bool { true }
+        pub fn enable_shared_source() -> bool { true }
+        pub fn switch_jdbc_pg_to_native() -> bool { false }
+        pub fn stream_max_barrier_batch_size() -> u32 { 8 }
+        pub fn streaming_hash_join_entry_state_max_rows() -> usize { 100000 }
+        pub fn enable_explain_analyze_stats() -> bool { false }
+        pub fn iceberg_list_interval_sec() -> u64 { 120 }
+        pub fn iceberg_fetch_batch_size() -> u64 { 10 }
+        pub fn iceberg_sink_positional_delete_cache_size() -> usize { 1000 }
+        pub fn rpc_client_connect_timeout_secs() -> u64 { 5 }
+    }
 }

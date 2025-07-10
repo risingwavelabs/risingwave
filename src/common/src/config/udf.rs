@@ -16,8 +16,6 @@ use risingwave_common_proc_macro::ConfigDoc;
 use serde::{Deserialize, Serialize};
 use serde_default::DefaultFromSerde;
 
-use crate::config::defaults as default;
-
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct UdfConfig {
     /// Allow embedded Python UDFs to be created.
@@ -31,4 +29,12 @@ pub struct UdfConfig {
     /// Allow embedded WASM UDFs to be created.
     #[serde(default = "default::udf::enable_embedded_wasm_udf")]
     pub enable_embedded_wasm_udf: bool,
+}
+
+mod default {
+    pub mod udf {
+        pub fn enable_embedded_python_udf() -> bool { false }
+        pub fn enable_embedded_javascript_udf() -> bool { false }
+        pub fn enable_embedded_wasm_udf() -> bool { false }
+    }
 }

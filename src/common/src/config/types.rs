@@ -240,4 +240,8 @@ impl From<EvictionConfig> for foyer::EvictionConfig {
     }
 }
 
-use crate::config::defaults as default;
+mod default {
+    pub mod developer {
+        pub fn rpc_client_connect_timeout_secs() -> u64 { 5 }
+    }
+}

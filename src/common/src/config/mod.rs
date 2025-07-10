@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 // Re-export all configuration types
 pub use batch::*;
 pub use compaction::*;
-pub use defaults::*;
+
 pub use frontend::*;
 pub use meta::*;
 pub use object_store::*;
@@ -42,7 +42,7 @@ pub use udf::*;
 // Submodules
 mod batch;
 mod compaction;
-mod defaults;
+
 mod frontend;
 mod meta;
 mod object_store;

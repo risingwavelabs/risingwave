@@ -16,8 +16,6 @@ use risingwave_common_proc_macro::ConfigDoc;
 use serde::{Deserialize, Serialize};
 use serde_default::DefaultFromSerde;
 
-use crate::config::defaults as default;
-
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct FrontendConfig {
     /// Total memory constraints for running queries.
@@ -31,4 +29,12 @@ pub struct FrontendConfig {
     /// A query of size exceeding this threshold will always be rejected due to memory constraints.
     #[serde(default = "default::frontend::max_single_query_size_bytes")]
     pub max_single_query_size_bytes: u64,
+}
+
+mod default {
+    pub mod frontend {
+        pub fn max_total_query_size_bytes() -> u64 { 2147483648 }
+        pub fn min_single_query_size_bytes() -> u64 { 67108864 }
+        pub fn max_single_query_size_bytes() -> u64 { 1073741824 }
+    }
 }

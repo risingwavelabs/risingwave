@@ -19,7 +19,7 @@ use serde_default::DefaultFromSerde;
 
 use super::object_store::ObjectStoreConfig;
 use super::types::{EvictionConfig, Unrecognized, MAX_BLOCK_CACHE_SHARD_BITS, MAX_META_CACHE_SHARD_BITS, MIN_BUFFER_SIZE_PER_SHARD};
-use crate::config::{RwConfig, defaults as default};
+use crate::config::RwConfig;
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct StorageConfig {
@@ -688,5 +688,99 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         vector_meta_cache_eviction_config,
         block_file_cache_flush_buffer_threshold_mb,
         meta_file_cache_flush_buffer_threshold_mb,
+    }
+}
+
+mod default {
+    use foyer::{Compression, RecoverMode, RuntimeOptions, Throttle};
+
+    pub mod storage {
+        pub fn share_buffers_sync_parallelism() -> u32 { 2 }
+        pub fn share_buffer_compaction_worker_threads_number() -> u32 { 4 }
+        pub fn shared_buffer_capacity_mb() -> usize { 1024 }
+        pub fn shared_buffer_flush_ratio() -> f32 { 0.8 }
+        pub fn shared_buffer_min_batch_flush_size_mb() -> usize { 800 }
+        #[deprecated] pub fn imm_merge_threshold() -> usize { 4 }
+        pub fn write_conflict_detection_enabled() -> bool { true }
+        pub fn max_cached_recent_versions_number() -> usize { 100 }
+        pub fn block_cache_capacity_mb() -> usize { 512 }
+        pub fn high_priority_ratio_in_percent() -> usize { 50 }
+        pub fn window_capacity_ratio_in_percent() -> usize { 10 }
+        pub fn protected_capacity_ratio_in_percent() -> usize { 50 }
+        pub fn cmsketch_eps() -> f64 { 0.001 }
+        pub fn cmsketch_confidence() -> f64 { 0.9 }
+        pub fn small_queue_capacity_ratio_in_percent() -> usize { 10 }
+        pub fn ghost_queue_capacity_ratio_in_percent() -> usize { 90 }
+        pub fn small_to_main_freq_threshold() -> u8 { 2 }
+        pub fn meta_cache_capacity_mb() -> usize { 128 }
+        pub fn disable_remote_compactor() -> bool { false }
+        pub fn share_buffer_upload_concurrency() -> usize { 8 }
+        pub fn compactor_memory_limit_mb() -> usize { 512 }
+        pub fn compactor_max_task_multiplier() -> f32 { 2.5 }
+        pub fn compactor_memory_available_proportion() -> f64 { 0.8 }
+        pub fn sstable_id_remote_fetch_number() -> u32 { 10 }
+        pub fn min_sstable_size_mb() -> u32 { 32 }
+        pub fn min_sst_size_for_streaming_upload() -> u64 { 32 * 1024 * 1024 }
+        pub fn max_concurrent_compaction_task_number() -> u64 { 16 }
+        pub fn max_preload_wait_time_mill() -> u64 { 0 }
+        pub fn max_version_pinning_duration_sec() -> u64 { 3 * 3600 }
+        pub fn compactor_max_sst_key_count() -> u64 { 2097152 }
+        pub fn compact_iter_recreate_timeout_ms() -> u64 { 60000 }
+        pub fn compactor_iter_max_io_retry_times() -> usize { 8 }
+        pub fn compactor_max_sst_size() -> u64 { 512 * 1024 * 1024 }
+        pub fn enable_fast_compaction() -> bool { true }
+        pub fn check_compaction_result() -> bool { false }
+        pub fn max_preload_io_retry_times() -> usize { 3 }
+        pub fn mem_table_spill_threshold() -> usize { 4194304 }
+        pub fn compactor_fast_max_compact_delete_ratio() -> u32 { 40 }
+        pub fn compactor_fast_max_compact_task_size() -> u64 { 2147483648 }
+        pub fn max_prefetch_block_number() -> usize { 16 }
+        pub fn compactor_concurrent_uploading_sst_count() -> Option<usize> { None }
+        pub fn compactor_max_overlap_sst_count() -> usize { 10 }
+        pub fn compactor_max_preload_meta_file_count() -> usize { 1024 }
+        pub fn vector_file_block_size_kb() -> usize { 16 }
+        pub fn vector_block_cache_capacity_mb() -> usize { 64 }
+        pub fn vector_block_cache_shard_num() -> usize { 64 }
+        pub fn vector_meta_cache_capacity_mb() -> usize { 64 }
+        pub fn vector_meta_cache_shard_num() -> usize { 16 }
+        #[deprecated] pub fn table_info_statistic_history_times() -> usize { 240 }
+        pub fn block_file_cache_flush_buffer_threshold_mb() -> usize { 32 }
+        pub fn meta_file_cache_flush_buffer_threshold_mb() -> usize { 8 }
+        pub fn time_travel_version_cache_capacity() -> u64 { 100 }
+        pub fn iceberg_compaction_target_file_size_mb() -> u32 { 128 }
+        pub fn iceberg_compaction_enable_validate() -> bool { false }
+        pub fn iceberg_compaction_max_record_batch_rows() -> usize { 4096 }
+        pub fn iceberg_compaction_write_parquet_max_row_group_rows() -> usize { 10000 }
+        pub fn iceberg_compaction_min_size_per_partition_mb() -> u32 { 128 }
+        pub fn iceberg_compaction_max_file_count_per_partition() -> u32 { 10 }
+    }
+
+    pub mod file_cache {
+        use super::*;
+        #[allow(clippy::disallowed_methods)]
+        pub fn dir() -> String { std::env::temp_dir().join("foyer").to_string_lossy().to_string() }
+        pub fn capacity_mb() -> usize { 256 }
+        pub fn file_capacity_mb() -> usize { 64 }
+        pub fn flushers() -> usize { 1 }
+        pub fn reclaimers() -> usize { 1 }
+        pub fn recover_concurrency() -> usize { 8 }
+        pub fn insert_rate_limit_mb() -> usize { 0 }
+        pub fn indexer_shards() -> usize { 64 }
+        pub fn compression() -> Compression { Compression::None }
+        pub fn flush_buffer_threshold_mb() -> Option<usize> { None }
+        pub fn fifo_probation_ratio() -> f64 { 0.1 }
+        pub fn recover_mode() -> RecoverMode { RecoverMode::Quiet }
+        pub fn runtime_config() -> RuntimeOptions { RuntimeOptions::default() }
+        pub fn throttle() -> Throttle { Throttle::new(0, 0) }
+    }
+
+    pub mod cache_refill {
+        pub fn data_refill_levels() -> Vec<u32> { vec![] }
+        pub fn timeout_ms() -> u64 { 6000 }
+        pub fn concurrency() -> usize { 4 }
+        pub fn unit() -> usize { 64 }
+        pub fn threshold() -> f64 { 0.5 }
+        pub fn recent_filter_layers() -> usize { 6 }
+        pub fn recent_filter_rotate_interval_ms() -> usize { 10000 }
     }
 }

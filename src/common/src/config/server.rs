@@ -17,7 +17,6 @@ use serde::{Deserialize, Serialize};
 use serde_default::DefaultFromSerde;
 
 use super::types::{MetricLevel, Unrecognized};
-use crate::config::defaults as default;
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct ServerConfig {
@@ -67,4 +66,25 @@ pub struct HeapProfilingConfig {
     /// The directory to dump heap profile. If empty, the prefix in `MALLOC_CONF` will be used
     #[serde(default = "default::heap_profiling::dir")]
     pub dir: String,
+}
+
+mod default {
+    use super::*;
+
+    pub mod server {
+        use super::*;
+
+        pub fn heartbeat_interval_ms() -> u32 { 1000 }
+        pub fn connection_pool_size() -> u16 { 16 }
+        pub fn metrics_level() -> MetricLevel { MetricLevel::Info }
+        pub fn telemetry_enabled() -> bool { true }
+        pub fn grpc_max_reset_stream_size() -> u32 { 2048 }
+    }
+
+    pub mod heap_profiling {
+        pub fn enable_auto() -> bool { false }
+        pub fn threshold_auto() -> f32 { 0.9 }
+        #[allow(clippy::disallowed_methods)]
+        pub fn dir() -> String { std::env::temp_dir().to_string_lossy().to_string() }
+    }
 }

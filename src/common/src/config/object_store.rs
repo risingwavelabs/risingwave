@@ -15,8 +15,6 @@
 use serde::{Deserialize, Serialize};
 use serde_default::DefaultFromSerde;
 
-use crate::config::defaults as default;
-
 /// The subsections `[storage.object_store]`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct ObjectStoreConfig {
@@ -197,4 +195,45 @@ pub struct ObjectStoreRetryConfig {
     /// Total counts of `list` operation retries
     #[serde(default = "default::object_store_config::object_store_list_retry_attempts")]
     pub list_retry_attempts: usize,
+}
+
+mod default {
+    pub mod object_store_config {
+        pub fn set_atomic_write_dir() -> bool { false }
+        pub fn object_store_req_backoff_interval_ms() -> u64 { 1000 }
+        pub fn object_store_req_backoff_max_delay_ms() -> u64 { 10000 }
+        pub fn object_store_req_backoff_factor() -> u64 { 2 }
+        pub fn object_store_upload_attempt_timeout_ms() -> u64 { 8000 }
+        pub fn object_store_upload_retry_attempts() -> usize { 3 }
+        pub fn object_store_streaming_upload_attempt_timeout_ms() -> u64 { 480000 }
+        pub fn object_store_streaming_upload_retry_attempts() -> usize { 3 }
+        pub fn object_store_read_attempt_timeout_ms() -> u64 { 8000 }
+        pub fn object_store_read_retry_attempts() -> usize { 3 }
+        pub fn object_store_streaming_read_attempt_timeout_ms() -> u64 { 480000 }
+        pub fn object_store_streaming_read_retry_attempts() -> usize { 3 }
+        pub fn object_store_metadata_attempt_timeout_ms() -> u64 { 8000 }
+        pub fn object_store_metadata_retry_attempts() -> usize { 3 }
+        pub fn object_store_delete_attempt_timeout_ms() -> u64 { 5000 }
+        pub fn object_store_delete_retry_attempts() -> usize { 3 }
+        pub fn object_store_delete_objects_attempt_timeout_ms() -> u64 { 5000 }
+        pub fn object_store_delete_objects_retry_attempts() -> usize { 3 }
+        pub fn object_store_list_attempt_timeout_ms() -> u64 { 8000 }
+        pub fn object_store_list_retry_attempts() -> usize { 3 }
+        pub fn opendal_upload_concurrency() -> usize { 8 }
+        pub fn upload_part_size() -> usize { 16 * 1024 * 1024 }
+
+        pub mod s3 {
+            pub fn keepalive_ms() -> Option<u64> { None }
+            pub fn recv_buffer_size() -> Option<usize> { None }
+            pub fn send_buffer_size() -> Option<usize> { None }
+            pub fn nodelay() -> Option<bool> { None }
+            pub fn identity_resolution_timeout_s() -> u64 { 5 }
+
+            pub mod developer {
+                pub fn retry_unknown_service_error() -> bool { false }
+                pub fn retryable_service_error_codes() -> Vec<String> { vec![] }
+                pub fn use_opendal() -> bool { true }
+            }
+        }
+    }
 }
