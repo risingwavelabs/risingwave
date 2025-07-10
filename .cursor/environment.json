@@ -1,0 +1,7 @@
+{
+  "terminals": [],
+  "build": {
+    "context": ".",
+    "dockerfile": "Dockerfile"
+  }
+}
