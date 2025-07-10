@@ -272,7 +272,7 @@ impl DdlService for DdlServiceImpl {
                         stream_job,
                         fragment_graph,
                         affected_table_replace_info: None,
-                        dependencies: HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbSource`
+                        dependencies: HashSet::new(),
                         specific_resource_group: None,
                         if_not_exists: req.if_not_exists,
                     })
@@ -573,6 +573,11 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<CreateTableResponse>, Status> {
         let request = request.into_inner();
         let job_type = request.get_job_type().unwrap_or_default();
+        let dependencies = request
+            .get_dependencies()
+            .iter()
+            .map(|id| *id as ObjectId)
+            .collect();
         let source = request.source;
         let mview = request.materialized_view.unwrap();
         let fragment_graph = request.fragment_graph.unwrap();
@@ -584,7 +589,7 @@ impl DdlService for DdlServiceImpl {
                 stream_job,
                 fragment_graph,
                 affected_table_replace_info: None,
-                dependencies: HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbTable`
+                dependencies,
                 specific_resource_group: None,
                 if_not_exists: request.if_not_exists,
             })
@@ -629,10 +634,15 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<CreateViewResponse>, Status> {
         let req = request.into_inner();
         let view = req.get_view()?.clone();
+        let dependencies = req
+            .get_dependencies()
+            .iter()
+            .map(|id| *id as ObjectId)
+            .collect::<HashSet<_>>();
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreateView(view))
+            .run_command(DdlCommand::CreateView(view, dependencies))
             .await?;
 
         Ok(Response::new(CreateViewResponse {

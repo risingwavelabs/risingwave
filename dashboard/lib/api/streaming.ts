@@ -106,10 +106,6 @@ export class StreamingJob {
   }
 }
 
-export interface StreamingRelation extends Relation {
-  dependentRelations: number[]
-}
-
 export function relationType(x: Relation) {
   if ((x as Table).tableType !== undefined) {
     return (x as Table).tableType
@@ -129,7 +125,7 @@ export function relationTypeTitleCase(x: Relation) {
   return _.startCase(_.toLower(relationType(x)))
 }
 
-export function relationIsStreamingJob(x: Relation): x is StreamingRelation {
+export function relationIsStreamingJob(x: Relation) {
   const type = relationType(x)
   return type !== "UNKNOWN" && type !== "SOURCE" && type !== "INTERNAL"
 }

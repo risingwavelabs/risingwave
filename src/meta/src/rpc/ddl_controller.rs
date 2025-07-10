@@ -147,7 +147,7 @@ pub enum DdlCommand {
     DropSource(SourceId, DropMode),
     CreateFunction(Function),
     DropFunction(FunctionId),
-    CreateView(View),
+    CreateView(View, HashSet<ObjectId>),
     DropView(ViewId, DropMode),
     CreateStreamingJob {
         stream_job: StreamingJob,
@@ -192,7 +192,7 @@ impl DdlCommand {
             DdlCommand::DropSource(id, _) => Right(*id),
             DdlCommand::CreateFunction(function) => Left(function.name.clone()),
             DdlCommand::DropFunction(id) => Right(*id),
-            DdlCommand::CreateView(view) => Left(view.name.clone()),
+            DdlCommand::CreateView(view, _) => Left(view.name.clone()),
             DdlCommand::DropView(id, _) => Right(*id),
             DdlCommand::CreateStreamingJob { stream_job, .. } => Left(stream_job.name()),
             DdlCommand::DropStreamingJob { job_id, .. } => Right(job_id.id()),
@@ -231,7 +231,7 @@ impl DdlCommand {
             | DdlCommand::CreateDatabase(_)
             | DdlCommand::CreateSchema(_)
             | DdlCommand::CreateFunction(_)
-            | DdlCommand::CreateView(_)
+            | DdlCommand::CreateView(_, _)
             | DdlCommand::CreateConnection(_)
             | DdlCommand::CommentOn(_)
             | DdlCommand::CreateSecret(_)
@@ -378,7 +378,9 @@ impl DdlController {
                 }
                 DdlCommand::CreateFunction(function) => ctrl.create_function(function).await,
                 DdlCommand::DropFunction(function_id) => ctrl.drop_function(function_id).await,
-                DdlCommand::CreateView(view) => ctrl.create_view(view).await,
+                DdlCommand::CreateView(view, dependencies) => {
+                    ctrl.create_view(view, dependencies).await
+                }
                 DdlCommand::DropView(view_id, drop_mode) => {
                     ctrl.drop_view(view_id, drop_mode).await
                 }
@@ -574,10 +576,14 @@ impl DdlController {
         .await
     }
 
-    async fn create_view(&self, view: View) -> MetaResult<NotificationVersion> {
+    async fn create_view(
+        &self,
+        view: View,
+        dependencies: HashSet<ObjectId>,
+    ) -> MetaResult<NotificationVersion> {
         self.metadata_manager
             .catalog_controller
-            .create_view(view)
+            .create_view(view, dependencies)
             .await
     }
 
