@@ -47,16 +47,17 @@ use risingwave_pb::stream_plan::{MergeNode, StreamFragmentGraph, StreamNode};
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
     CreateSink, CreateSinkStatement, EmitMode, Encode, ExplainOptions, Format, FormatEncodeOptions,
-    Query, Statement,
+    ObjectName, Query, Statement,
 };
 
 use super::RwPgResponse;
 use super::create_mv::get_column_names;
 use super::create_source::{SqlColumnStrategy, UPSTREAM_SOURCE_KEY};
 use super::util::gen_query_from_table_name;
-use crate::binder::Binder;
+use crate::binder::{Binder, Relation};
 use crate::catalog::SinkId;
 use crate::catalog::source_catalog::SourceCatalog;
+use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef, rewrite_now_to_proctime};
 use crate::handler::HandlerArgs;
@@ -160,16 +161,24 @@ pub async fn gen_sink_plan(
     let sink_from_table_name;
     // `true` means that sink statement has the form: `CREATE SINK s1 FROM ...`
     // `false` means that sink statement has the form: `CREATE SINK s1 AS <query>`
-    let direct_sink;
+    let direct_sink_from_name: Option<(ObjectName, bool)>;
     let query = match stmt.sink_from {
-        CreateSink::From(from_name) => {
+        CreateSink::From {
+            from_name,
+            auto_refresh_schema,
+        } => {
             sink_from_table_name = from_name.0.last().unwrap().real_value();
-            direct_sink = true;
+            direct_sink_from_name = Some((from_name.clone(), auto_refresh_schema));
+            if auto_refresh_schema && stmt.into_table_name.is_some() {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "AUTO REFRESH SCHEMA not supported for sink-into-table".to_owned(),
+                )));
+            }
             Box::new(gen_query_from_table_name(from_name))
         }
         CreateSink::AsQuery(query) => {
             sink_from_table_name = sink_table_name.clone();
-            direct_sink = false;
+            direct_sink_from_name = None;
             query
         }
     };
@@ -179,13 +188,42 @@ pub async fn gen_sink_plan(
     let (sink_database_id, sink_schema_id) =
         session.get_database_and_schema_id_for_create(sink_schema_name.clone())?;
 
-    let (dependent_relations, dependent_udfs, bound) = {
+    let (dependent_relations, dependent_udfs, bound, auto_refresh_schema_from_table) = {
         let mut binder = Binder::new_for_stream(session);
+        let auto_refresh_schema_from_table = if let Some((from_name, true)) = &direct_sink_from_name
+        {
+            let from_relation =
+                binder.bind_relation_by_name(from_name.clone(), None, None, false)?;
+            if let Relation::BaseTable(table) = from_relation {
+                if table.table_catalog.table_type != TableType::Table {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "AUTO REFRESH SCHEMA only support on TABLE, but got {:?}",
+                        table.table_catalog.table_type
+                    ))
+                    .into());
+                }
+                for col in &table.table_catalog.columns {
+                    if !col.is_hidden() && (col.is_generated() || col.is_rw_sys_column()) {
+                        return Err(ErrorCode::InvalidInputSyntax(format!("AUTO REFRESH SCHEMA not supported for table with non-hidden generated column or sys column, but got {}", col.name())).into());
+                    }
+                }
+                Some(table.table_catalog)
+            } else {
+                return Err(RwError::from(ErrorCode::NotSupported(
+                    "AUTO REFRESH SCHEMA only supported for TABLE".to_owned(),
+                    "try recreating the sink from table".to_owned(),
+                )));
+            }
+        } else {
+            None
+        };
         let bound = binder.bind_query(*query.clone())?;
+
         (
             binder.included_relations().clone(),
             binder.included_udfs().clone(),
             bound,
+            auto_refresh_schema_from_table,
         )
     };
 
@@ -248,7 +286,7 @@ pub async fn gen_sink_plan(
 
     let without_backfill = match resolved_with_options.remove(SINK_SNAPSHOT_OPTION) {
         Some(flag) if flag.eq_ignore_ascii_case("false") => {
-            if direct_sink || is_iceberg_engine_internal {
+            if direct_sink_from_name.is_some() || is_iceberg_engine_internal {
                 true
             } else {
                 return Err(ErrorCode::BindError(
@@ -307,6 +345,7 @@ pub async fn gen_sink_plan(
         target_table_catalog.clone(),
         partition_info,
         user_specified_columns,
+        auto_refresh_schema_from_table,
     )?;
 
     let sink_desc = sink_plan.sink_desc().clone();

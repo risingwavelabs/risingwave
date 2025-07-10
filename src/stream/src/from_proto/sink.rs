@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use futures::FutureExt;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnCatalog, Schema};
 use risingwave_common::secret::LocalSecretManager;
@@ -26,9 +27,11 @@ use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SinkError, SinkMetaClient, SinkParam, SinkWriterParam,
     build_sink,
 };
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::stream_plan::{SinkLogStoreType, SinkNode};
+use risingwave_storage::store::TryWaitEpochOptions;
 use url::Url;
 
 use super::*;
@@ -246,7 +249,26 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             // Default value is the normal in memory log store to be backward compatible with the
             // previously unset value
             SinkLogStoreType::InMemoryLogStore | SinkLogStoreType::Unspecified => {
-                let factory = BoundedInMemLogStoreFactory::new(1);
+                let factory = BoundedInMemLogStoreFactory::new(1, {
+                    let state_store = state_store.clone();
+                    let table_id = node.table.as_ref().map(|table| table.id);
+                    move |epoch| {
+                        async move {
+                            if let Some(table_id) = table_id {
+                                state_store
+                                    .try_wait_epoch(
+                                        HummockReadEpoch::Committed(epoch.prev),
+                                        TryWaitEpochOptions {
+                                            table_id: table_id.into(),
+                                        },
+                                    )
+                                    .await?;
+                            }
+                            Ok(())
+                        }
+                        .boxed()
+                    }
+                });
                 SinkExecutor::new(
                     params.actor_context,
                     params.info.clone(),

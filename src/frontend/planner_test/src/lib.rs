@@ -877,6 +877,7 @@ impl TestCase {
                     None,
                     None,
                     false,
+                    None,
                 ) {
                     Ok(sink_plan) => {
                         ret.sink_plan = Some(explain_plan(&sink_plan.into()));

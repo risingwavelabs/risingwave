@@ -493,14 +493,29 @@ impl fmt::Display for CreateSourceStatement {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CreateSink {
-    From(ObjectName),
+    From {
+        from_name: ObjectName,
+        auto_refresh_schema: bool,
+    },
     AsQuery(Box<Query>),
 }
 
 impl fmt::Display for CreateSink {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::From(mv) => write!(f, "FROM {}", mv),
+            Self::From {
+                from_name,
+                auto_refresh_schema,
+            } => write!(
+                f,
+                "FROM {}{}",
+                from_name,
+                if *auto_refresh_schema {
+                    " AUTO REFRESH SCHEMA"
+                } else {
+                    ""
+                }
+            ),
             Self::AsQuery(query) => write!(f, "AS {}", query),
         }
     }
@@ -546,7 +561,11 @@ impl ParseTo for CreateSinkStatement {
 
         let sink_from = if p.parse_keyword(Keyword::FROM) {
             impl_parse_to!(from_name: ObjectName, p);
-            CreateSink::From(from_name)
+            impl_parse_to!(auto_refresh_schema => [Keyword::AUTO, Keyword::REFRESH, Keyword::SCHEMA], p);
+            CreateSink::From {
+                from_name,
+                auto_refresh_schema,
+            }
         } else if p.parse_keyword(Keyword::AS) {
             let query = Box::new(p.parse_query()?);
             CreateSink::AsQuery(query)

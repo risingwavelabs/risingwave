@@ -75,6 +75,7 @@ pub struct Model {
     // `secret_ref` stores the mapping info mapping from property name to secret id and type.
     pub secret_ref: Option<SecretRef>,
     pub original_target_columns: Option<ColumnCatalogArray>,
+    pub auto_refresh_schema_from_table: Option<TableId>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -132,6 +133,9 @@ impl From<PbSink> for ActiveModel {
             target_table: Set(pb_sink.target_table.map(|x| x as _)),
             secret_ref: Set(Some(SecretRef::from(pb_sink.secret_refs))),
             original_target_columns: Set(Some(pb_sink.original_target_columns.into())),
+            auto_refresh_schema_from_table: Set(pb_sink
+                .auto_refresh_schema_from_table
+                .map(|id| id as _)),
         }
     }
 }

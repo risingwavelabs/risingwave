@@ -1670,7 +1670,10 @@ pub async fn create_iceberg_engine_table(
         };
         CreateSink::AsQuery(query.clone())
     } else {
-        CreateSink::From(table_name.clone())
+        CreateSink::From {
+            from_name: table_name.clone(),
+            auto_refresh_schema: false,
+        }
     };
 
     let mut sink_name = table_name.clone();
@@ -2059,7 +2062,7 @@ pub async fn generate_stream_graph_for_replace_table(
         engine,
     };
 
-    let ((plan, mut source, table), job_type) = match (format_encode, cdc_table_info.as_ref()) {
+    let ((plan, mut source, mut table), job_type) = match (format_encode, cdc_table_info.as_ref()) {
         (Some(format_encode), None) => (
             gen_create_table_plan_with_source(
                 handler_args,
@@ -2147,10 +2150,7 @@ pub async fn generate_stream_graph_for_replace_table(
     let graph = build_graph(plan, Some(GraphJobType::Table))?;
 
     // Fill the original table ID.
-    let mut table = TableCatalog {
-        id: original_catalog.id(),
-        ..table
-    };
+    table.id = original_catalog.id();
     if !is_drop_connector && let Some(source_id) = original_catalog.associated_source_id() {
         table.associated_source_id = Some(source_id);
 
