@@ -845,3 +845,14 @@
       └─BatchExchange { order: [], dist: Single }
         └─BatchLimit { limit: 10, offset: 0 }
           └─BatchScan { table: idx3, columns: [idx3.a, idx3.b, idx3.c, idx3.d], scan_ranges: [idx3.a = Int32(2) AND idx3.c = Int32(1) AND idx3.d = Int32(3)], limit: 10, distribution: UpstreamHashShard(idx3.a) }
+- name: topn index selection + limit pushdown with point get
+  sql: |
+    create table t1 (a int, b int, c int);
+    create index idx1 on t1(a asc, b);
+    select * from t1 where a = 1 order by b limit 10;
+  batch_plan: |-
+    BatchSort { order: [idx1.b ASC] }
+    └─BatchTopN { order: [idx1.a ASC, idx1.b ASC], limit: 10, offset: 0 }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchLimit { limit: 10, offset: 0 }
+          └─BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], scan_ranges: [idx1.a = Int32(1)], limit: 10, distribution: UpstreamHashShard(idx1.a) }

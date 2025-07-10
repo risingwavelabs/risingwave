@@ -59,10 +59,16 @@ impl TopNOnIndexRule {
         let input_refs = scan_predicates.get_eq_const_input_refs();
         let prefix = input_refs
             .into_iter()
-            .map(|input_ref| ColumnOrder {
-                column_index: input_ref.index,
-                order_type: OrderType::ascending(),
-            })
+            .flat_map(|input_ref| vec![
+                ColumnOrder {
+                    column_index: input_ref.index,
+                    order_type: OrderType::ascending(),
+                },
+                ColumnOrder {
+                    column_index: input_ref.index,
+                    order_type: OrderType::descending(),
+                },
+            ])
             .collect();
         let order_satisfied_index =
             logical_scan.indexes_satisfy_order_with_prefix(required_order, &prefix);
