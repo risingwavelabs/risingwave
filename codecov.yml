@@ -1,7 +1,7 @@
 # codecov config
 # Reference: https://docs.codecov.com/docs/codecovyml-reference
 # Tips. You may run following command to validate before committing any changes
-#   curl --data-binary @codecov.yml https://codecov.io/validate
+#   curl -X POST --data-binary @codecov.yml https://codecov.io/validate
 coverage:
   status:
     patch: off # disable patch status
@@ -15,9 +15,8 @@ coverage:
         threshold: 0.1% # allow the coverage to drop by 0.1% and posting a success status
 codecov:
   allow_coverage_offsets: true
-ignore:
-  - "src/risedevtooltool"
-  - "src/bench/s3_bench"
-  # Remove this after #4754
-  - "src/storage/src/hummock/store"
-comment: false
+# ignore:
+#   -
+comment:
+  layout: "condensed_header, condensed_files, condensed_footer"
+  hide_project_coverage: true
