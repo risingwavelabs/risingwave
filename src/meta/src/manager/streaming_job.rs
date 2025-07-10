@@ -245,21 +245,6 @@ impl StreamingJob {
         }
     }
 
-    // TODO: to be removed, pass all objects uniformly through `dependencies` field instead.
-    pub fn dependent_relations(&self) -> Vec<u32> {
-        match self {
-            StreamingJob::MaterializedView(table) => table.dependent_relations.clone(),
-            StreamingJob::Sink(_sink, _) => vec![], /* sink dependencies are now passed via `dependencies` field in `CreateSinkRequest` */
-            StreamingJob::Table(_, table, _) => table.dependent_relations.clone(), /* TODO(rc): record table dependencies via `dependencies` field */
-            StreamingJob::Index(index, index_table) => {
-                // TODO(rc): record index dependencies via `dependencies` field
-                assert_eq!(index.primary_table_id, index_table.dependent_relations[0]);
-                vec![]
-            }
-            StreamingJob::Source(_) => vec![],
-        }
-    }
-
     pub fn dependent_connection_ids(&self) -> MetaResult<HashSet<u32>> {
         match self {
             StreamingJob::Source(source) => Ok(get_referred_connection_ids_from_source(source)),
@@ -326,9 +311,11 @@ impl StreamingJob {
                     return Err(MetaError::permission_denied("source version is stale"));
                 }
             }
-            StreamingJob::MaterializedView(_)
-            | StreamingJob::Sink(_, _)
-            | StreamingJob::Index(_, _) => {
+            StreamingJob::MaterializedView(_) => {
+                // No version check for materialized view, since `ALTER MATERIALIZED VIEW AS QUERY`
+                // is a full rewrite.
+            }
+            StreamingJob::Sink(_, _) | StreamingJob::Index(_, _) => {
                 bail_not_implemented!("schema change for {}", self.job_type_str())
             }
         }

@@ -650,23 +650,19 @@ impl Condition {
         }
 
         // It's an OR.
-        if self.conjunctions.len() == 1 {
-            if let Some(disjunctions) = self.conjunctions[0].as_or_disjunctions() {
-                if let Some((scan_ranges, maintaining_condition)) =
-                    Self::disjunctions_to_scan_ranges(
-                        table_desc,
-                        max_split_range_gap,
-                        disjunctions,
-                    )?
-                {
-                    if maintaining_condition {
-                        return Ok((scan_ranges, self));
-                    } else {
-                        return Ok((scan_ranges, Condition::true_cond()));
-                    }
+        if self.conjunctions.len() == 1
+            && let Some(disjunctions) = self.conjunctions[0].as_or_disjunctions()
+        {
+            if let Some((scan_ranges, maintaining_condition)) =
+                Self::disjunctions_to_scan_ranges(table_desc, max_split_range_gap, disjunctions)?
+            {
+                if maintaining_condition {
+                    return Ok((scan_ranges, self));
                 } else {
-                    return Ok((vec![], self));
+                    return Ok((scan_ranges, Condition::true_cond()));
                 }
+            } else {
+                return Ok((vec![], self));
             }
         }
         if let Some((scan_ranges, other_condition)) =
@@ -1180,12 +1176,12 @@ impl Condition {
         });
         // if there is a `false` in conjunctions, the whole condition will be `false`
         for expr in &mut res {
-            if let Some(v) = try_get_bool_constant(expr) {
-                if !v {
-                    res.clear();
-                    res.push(ExprImpl::literal_bool(false));
-                    break;
-                }
+            if let Some(v) = try_get_bool_constant(expr)
+                && !v
+            {
+                res.clear();
+                res.push(ExprImpl::literal_bool(false));
+                break;
             }
         }
         Self { conjunctions: res }

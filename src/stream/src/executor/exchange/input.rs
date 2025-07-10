@@ -121,6 +121,7 @@ mod local_input {
 
     pub(super) type LocalInputStreamInner = impl crate::executor::DispatcherMessageStream;
 
+    #[define_opaque(LocalInputStreamInner)]
     pub(super) fn run(channel: Receiver, upstream_actor_id: ActorId) -> LocalInputStreamInner {
         run_inner(channel, upstream_actor_id)
     }
@@ -237,6 +238,7 @@ mod remote_input {
 
     pub(super) type RemoteInputStreamInner = impl crate::executor::DispatcherMessageStream;
 
+    #[define_opaque(RemoteInputStreamInner)]
     pub(super) fn run(
         stream: Streaming<GetStreamResponse>,
         permits_tx: mpsc::UnboundedSender<permits::Value>,

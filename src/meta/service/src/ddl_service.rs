@@ -33,6 +33,7 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
+use risingwave_pb::ddl_service::replace_job_plan::ReplaceMaterializedView;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::frontend_service::GetTableReplacePlanRequest;
 use risingwave_pb::meta::event_log;
@@ -105,6 +106,9 @@ impl DdlServiceImpl {
             replace_job_plan::ReplaceJob::ReplaceSource(ReplaceSource { source }) => {
                 StreamingJob::Source(source.unwrap())
             }
+            replace_job_plan::ReplaceJob::ReplaceMaterializedView(ReplaceMaterializedView {
+                table,
+            }) => StreamingJob::MaterializedView(table.unwrap()),
         };
 
         ReplaceStreamJobInfo {
@@ -269,7 +273,7 @@ impl DdlService for DdlServiceImpl {
                         fragment_graph,
                         create_type: CreateType::Foreground,
                         affected_table_replace_info: None,
-                        dependencies: HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbSource`
+                        dependencies: HashSet::new(),
                         specific_resource_group: None,
                         if_not_exists: req.if_not_exists,
                     })
@@ -574,6 +578,11 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<CreateTableResponse>, Status> {
         let request = request.into_inner();
         let job_type = request.get_job_type().unwrap_or_default();
+        let dependencies = request
+            .get_dependencies()
+            .iter()
+            .map(|id| *id as ObjectId)
+            .collect();
         let source = request.source;
         let mview = request.materialized_view.unwrap();
         let fragment_graph = request.fragment_graph.unwrap();
@@ -586,7 +595,7 @@ impl DdlService for DdlServiceImpl {
                 fragment_graph,
                 create_type: CreateType::Foreground,
                 affected_table_replace_info: None,
-                dependencies: HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbTable`
+                dependencies,
                 specific_resource_group: None,
                 if_not_exists: request.if_not_exists,
             })
@@ -631,10 +640,15 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<CreateViewResponse>, Status> {
         let req = request.into_inner();
         let view = req.get_view()?.clone();
+        let dependencies = req
+            .get_dependencies()
+            .iter()
+            .map(|id| *id as ObjectId)
+            .collect::<HashSet<_>>();
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreateView(view))
+            .run_command(DdlCommand::CreateView(view, dependencies))
             .await?;
 
         Ok(Response::new(CreateViewResponse {

@@ -187,7 +187,7 @@ pub mod tests {
             let trivial_move_picker =
                 super::TrivialMovePicker::new(0, 1, overlap_strategy.clone(), 200, 1);
             let trivial_move_task = trivial_move_picker.pick_multi_trivial_move_ssts(
-                &[sst.clone()],
+                std::slice::from_ref(&sst),
                 &[],
                 &levels_handler,
                 &mut Default::default(),
@@ -201,7 +201,7 @@ pub mod tests {
                 super::TrivialMovePicker::new(0, 1, overlap_strategy.clone(), 50, 1);
 
             let trivial_move_task = trivial_move_picker.pick_multi_trivial_move_ssts(
-                &[sst.clone()],
+                std::slice::from_ref(&sst),
                 &[],
                 &levels_handler,
                 &mut Default::default(),

@@ -12,17 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
 use clippy_utils::diagnostics::span_lint_and_help;
 use clippy_utils::macros::{
     FormatArgsStorage, find_format_arg_expr, is_format_macro, macro_backtrace,
 };
-use clippy_utils::ty::{implements_trait, match_type};
-use clippy_utils::{is_in_cfg_test, is_in_test_function, is_trait_method, match_def_path};
+use clippy_utils::paths::{PathLookup, PathNS};
+use clippy_utils::ty::implements_trait;
+use clippy_utils::{is_in_cfg_test, is_in_test_function, is_trait_method};
 use rustc_ast::FormatArgsPiece;
 use rustc_hir::{Expr, ExprKind};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_session::{declare_tool_lint, impl_lint_pass};
 use rustc_span::{Span, sym};
+
+use crate::utils::path::def_path_lookup;
 
 declare_tool_lint! {
     /// ### What it does
@@ -66,27 +71,31 @@ impl FormatError {
 
 impl_lint_pass!(FormatError => [FORMAT_ERROR]);
 
-const TRACING_FIELD_DEBUG: [&str; 3] = ["tracing_core", "field", "debug"];
-const TRACING_FIELD_DISPLAY: [&str; 3] = ["tracing_core", "field", "display"];
-const TRACING_MACROS_EVENT: [&str; 3] = ["tracing", "macros", "event"];
-const ANYHOW_MACROS_ANYHOW: [&str; 3] = ["anyhow", "macros", "anyhow"];
-const ANYHOW_ERROR: [&str; 2] = ["anyhow", "Error"];
-const THISERROR_IMPL_ERROR: [&str; 2] = ["thiserror_impl", "Error"];
-const THISERROR_EXT_REPORT_REPORT: [&str; 3] = ["thiserror_ext", "report", "Report"];
+def_path_lookup!(TRACING_FIELD_DEBUG, Value, "tracing_core::field::debug");
+def_path_lookup!(TRACING_FIELD_DISPLAY, Value, "tracing_core::field::display");
+def_path_lookup!(TRACING_EVENT, Macro, "tracing::event");
+def_path_lookup!(ANYHOW_ANYHOW, Macro, "anyhow::anyhow");
+def_path_lookup!(ANYHOW_ERROR, Type, "anyhow::Error");
+def_path_lookup!(THISERROR_IMPL_ERROR, Macro, "thiserror_impl::Error");
+def_path_lookup!(
+    THISERROR_EXT_REPORT_REPORT,
+    Type,
+    "thiserror_ext::report::Report"
+);
+
 fn match_function_call<'tcx>(
     cx: &LateContext<'tcx>,
     expr: &'tcx Expr<'_>,
-    path: &[&str],
+    path_lookup: &PathLookup,
 ) -> Option<&'tcx [Expr<'tcx>]> {
-    if let ExprKind::Call(path_expr, args) = expr.kind {
-        if let ExprKind::Path(qpath) = path_expr.kind {
-            if let Some(def_id) = cx.qpath_res(&qpath, path_expr.hir_id).opt_def_id() {
-                if match_def_path(cx, def_id, path) {
-                    return Some(args);
-                }
-            }
-        }
+    if let ExprKind::Call(path_expr, args) = expr.kind
+        && let ExprKind::Path(qpath) = path_expr.kind
+        && let Some(def_id) = cx.qpath_res(&qpath, path_expr.hir_id).opt_def_id()
+        && path_lookup.matches(cx, def_id)
+    {
+        return Some(args);
     }
+
     None
 }
 
@@ -107,11 +116,11 @@ impl<'tcx> LateLintPass<'tcx> for FormatError {
 
         // Indirect `{}`, `{:?}` from other macros.
         let in_tracing_event_macro = macro_backtrace(expr.span)
-            .any(|macro_call| match_def_path(cx, macro_call.def_id, &TRACING_MACROS_EVENT));
+            .any(|macro_call| TRACING_EVENT.matches(cx, macro_call.def_id));
         let in_anyhow_macro = macro_backtrace(expr.span)
-            .any(|macro_call| match_def_path(cx, macro_call.def_id, &ANYHOW_MACROS_ANYHOW));
+            .any(|macro_call| ANYHOW_ANYHOW.matches(cx, macro_call.def_id));
         let in_thiserror_macro = macro_backtrace(expr.span)
-            .any(|macro_call| match_def_path(cx, macro_call.def_id, &THISERROR_IMPL_ERROR));
+            .any(|macro_call| THISERROR_IMPL_ERROR.matches(cx, macro_call.def_id));
 
         for macro_call in macro_backtrace(expr.span) {
             if is_format_macro(cx, macro_call.def_id)
@@ -219,9 +228,9 @@ fn check_arg(cx: &LateContext<'_>, arg_expr: &Expr<'_>, span: Span, help: impl H
 
     let help = if implements_trait(cx, ty, error_trait_id, &[]) {
         help.normal_help()
-    } else if match_type(cx, ty, &ANYHOW_ERROR) {
+    } else if ANYHOW_ERROR.matches_ty(cx, ty) {
         help.anyhow_help()
-    } else if match_type(cx, ty, &THISERROR_EXT_REPORT_REPORT) {
+    } else if THISERROR_EXT_REPORT_REPORT.matches_ty(cx, ty) {
         if let Some(help) = help.report_help() {
             help
         } else {

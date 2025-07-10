@@ -384,7 +384,6 @@ pub struct SinkCatalog {
 
 impl SinkCatalog {
     pub fn to_proto(&self) -> PbSink {
-        #[allow(deprecated)] // for `dependent_relations`
         PbSink {
             id: self.id.into(),
             schema_id: self.schema_id.schema_id,
@@ -398,7 +397,6 @@ impl SinkCatalog {
                 .iter()
                 .map(|idx| *idx as i32)
                 .collect_vec(),
-            dependent_relations: vec![],
             distribution_key: self
                 .distribution_key
                 .iter()

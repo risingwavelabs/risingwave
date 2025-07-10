@@ -18,7 +18,7 @@ anyhow = "1"
 apache-avro = { workspace = true }
 assert_matches = "1"
 async-compression = { version = "0.4.5", features = ["gzip", "tokio"] }
-async-nats = "0.41"
+async-nats = { version = "0.42", features = ["websockets"] }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
@@ -71,7 +71,7 @@ iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }
 indexmap = { version = "2.9.0", features = ["serde"] }
 itertools = { workspace = true }
-jni = { version = "0.21.1", features = ["invocation"] }
+jni = { workspace = true }
 maplit = "1.0.2"
 moka = { version = "0.12.10", features = ["future"] }
 mongodb = "3.2.3"

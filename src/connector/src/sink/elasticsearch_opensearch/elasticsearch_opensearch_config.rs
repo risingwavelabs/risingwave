@@ -39,6 +39,20 @@ pub const ES_OPTION_ROUTING_COLUMN: &str = "routing_column";
 
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
+pub struct ElasticSearchConfig {
+    #[serde(flatten)]
+    pub inner: ElasticSearchOpenSearchConfig,
+}
+
+#[serde_as]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
+pub struct OpenSearchConfig {
+    #[serde(flatten)]
+    pub inner: ElasticSearchOpenSearchConfig,
+}
+
+#[serde_as]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct ElasticSearchOpenSearchConfig {
     #[serde(rename = "url")]
     pub url: String,
@@ -133,6 +147,25 @@ impl TryFrom<&ElasticsearchConnection> for ElasticSearchOpenSearchConfig {
             serde_json::to_value(value.0.clone()).unwrap(),
         )
         .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        Ok(config)
+    }
+}
+
+impl ElasticSearchConfig {
+    pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
+        let config = serde_json::from_value::<ElasticSearchConfig>(
+            serde_json::to_value(properties).unwrap(),
+        )
+        .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        Ok(config)
+    }
+}
+
+impl OpenSearchConfig {
+    pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
+        let config =
+            serde_json::from_value::<OpenSearchConfig>(serde_json::to_value(properties).unwrap())
+                .map_err(|e| SinkError::Config(anyhow!(e)))?;
         Ok(config)
     }
 }

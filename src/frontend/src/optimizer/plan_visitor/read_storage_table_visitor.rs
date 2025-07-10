@@ -17,7 +17,7 @@ use std::collections::HashSet;
 use risingwave_common::catalog::TableId;
 
 use super::{DefaultBehavior, DefaultValue};
-use crate::PlanRef;
+use crate::optimizer::BatchPlanRoot;
 use crate::optimizer::plan_node::{BatchLogSeqScan, BatchLookupJoin};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
@@ -27,9 +27,9 @@ pub struct ReadStorageTableVisitor {
 }
 
 impl ReadStorageTableVisitor {
-    pub fn collect(plan: PlanRef) -> HashSet<TableId> {
+    pub fn collect(plan: &BatchPlanRoot) -> HashSet<TableId> {
         let mut visitor = Self::default();
-        visitor.visit(plan);
+        visitor.visit(plan.plan.clone());
         visitor.tables
     }
 }
