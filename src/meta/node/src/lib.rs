@@ -518,6 +518,15 @@ pub fn start(
                         .into_iter()
                         .collect(),
                 ),
+                cdc_table_split_init_sleep_interval_splits: config
+                    .meta
+                    .cdc_table_split_init_sleep_interval_splits,
+                cdc_table_split_init_sleep_duration_millis: config
+                    .meta
+                    .cdc_table_split_init_sleep_duration_millis,
+                cdc_table_split_init_insert_batch_size: config
+                    .meta
+                    .cdc_table_split_init_insert_batch_size,
             },
             config.system.into_init_system_params(),
             Default::default(),

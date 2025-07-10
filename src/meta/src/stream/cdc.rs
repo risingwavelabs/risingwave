@@ -46,6 +46,9 @@ pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
     table_desc: &ExternalTableDesc,
     meta_store: &SqlMetaStore,
     per_table_options: &Option<StreamCdcScanOptions>,
+    insert_batch_size: u64,
+    sleep_split_interval: u64,
+    sleep_duration_millis: u64,
 ) -> MetaResult<()> {
     let split_options = if let Some(per_table_options) = per_table_options {
         if !CdcScanOptions::from_proto(per_table_options).is_parallelized_backfill() {
@@ -90,11 +93,6 @@ pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
         .await?;
     let stream = reader.get_parallel_cdc_splits(split_options);
     let mut insert_batch = vec![];
-    // TODO(zw): make these configurable
-    let insert_batch_size = 1000;
-    let sleep_interval = 1000;
-    let sleep_duration_millis = 500;
-
     let mut splits_num = 0;
     let txn = meta_store.conn.begin().await?;
     pin_mut!(stream);
@@ -108,12 +106,12 @@ pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
             left: Set(split.left_bound_inclusive.value_serialize()),
             right: Set(split.right_bound_exclusive.value_serialize()),
         });
-        if insert_batch.len() >= insert_batch_size {
+        if insert_batch.len() >= insert_batch_size as usize {
             cdc_table_snapshot_split::Entity::insert_many(std::mem::take(&mut insert_batch))
                 .exec(&txn)
                 .await?;
         }
-        if splits_num % sleep_interval == 0 {
+        if splits_num % sleep_split_interval == 0 {
             tokio::time::sleep(Duration::from_millis(sleep_duration_millis)).await;
         }
     }

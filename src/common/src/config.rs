@@ -443,6 +443,18 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::compaction_group_merge_dimension_threshold")]
     pub compaction_group_merge_dimension_threshold: f64,
 
+    /// The interval that the CDC table splits initialization should yield to avoid overloading upstream system.
+    #[serde(default = "default::meta::cdc_table_split_init_sleep_interval_splits")]
+    pub cdc_table_split_init_sleep_interval_splits: u64,
+
+    /// The duration that the CDC table splits initialization should yield to avoid overloading upstream system.
+    #[serde(default = "default::meta::cdc_table_split_init_sleep_duration_millis")]
+    pub cdc_table_split_init_sleep_duration_millis: u64,
+
+    /// The batch size that the CDC table splits initialization should use when persisting to meta store.
+    #[serde(default = "default::meta::cdc_table_split_init_insert_batch_size")]
+    pub cdc_table_split_init_insert_batch_size: u64,
+
     #[serde(default)]
     #[config_doc(nested)]
     pub meta_store_config: MetaStoreConfig,
@@ -1805,6 +1817,18 @@ pub mod default {
 
         pub fn compaction_group_merge_dimension_threshold() -> f64 {
             1.2
+        }
+
+        pub fn cdc_table_split_init_sleep_interval_splits() -> u64 {
+            1000
+        }
+
+        pub fn cdc_table_split_init_sleep_duration_millis() -> u64 {
+            500
+        }
+
+        pub fn cdc_table_split_init_insert_batch_size() -> u64 {
+            100
         }
     }
 

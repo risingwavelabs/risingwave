@@ -67,7 +67,6 @@ use tokio::time::sleep;
 use tracing::Instrument;
 
 use crate::barrier::BarrierManagerRef;
-use crate::controller::SqlMetaStore;
 use crate::controller::catalog::{DropTableConnectorContext, ReleaseContext};
 use crate::controller::cluster::StreamingClusterInfo;
 use crate::controller::streaming_job::SinkIntoTableContext;
@@ -783,12 +782,9 @@ impl DdlController {
         match &stream_scan_fragment.nodes.node_body {
             Some(NodeBody::StreamCdcScan(_)) => {
                 assert_parallelism(&stream_scan_fragment, &stream_scan_fragment.nodes.node_body);
-                if Self::validate_cdc_table_inner(
-                    &stream_scan_fragment.nodes.node_body,
-                    table.id,
-                    self.env.meta_store_ref(),
-                )
-                .await?
+                if self
+                    .validate_cdc_table_inner(&stream_scan_fragment.nodes.node_body, table.id)
+                    .await?
                 {
                     found_cdc_scan = true;
                 }
@@ -797,12 +793,9 @@ impl DdlController {
             Some(NodeBody::Project(_)) => {
                 for input in &stream_scan_fragment.nodes.input {
                     assert_parallelism(&stream_scan_fragment, &input.node_body);
-                    if Self::validate_cdc_table_inner(
-                        &input.node_body,
-                        table.id,
-                        self.env.meta_store_ref(),
-                    )
-                    .await?
+                    if self
+                        .validate_cdc_table_inner(&input.node_body, table.id)
+                        .await?
                     {
                         found_cdc_scan = true;
                     }
@@ -819,10 +812,11 @@ impl DdlController {
     }
 
     async fn validate_cdc_table_inner(
+        &self,
         node_body: &Option<NodeBody>,
         table_id: u32,
-        meta_store: &SqlMetaStore,
     ) -> MetaResult<bool> {
+        let meta_store = self.env.meta_store_ref();
         if let Some(NodeBody::StreamCdcScan(stream_cdc_scan)) = node_body
             && let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc
         {
@@ -846,6 +840,9 @@ impl DdlController {
                     cdc_table_desc,
                     meta_store,
                     &stream_cdc_scan.options,
+                    self.env.opts.cdc_table_split_init_insert_batch_size,
+                    self.env.opts.cdc_table_split_init_sleep_interval_splits,
+                    self.env.opts.cdc_table_split_init_sleep_duration_millis,
                 )
                 .await?;
             }
