@@ -14,7 +14,7 @@
 
 use anyhow::anyhow;
 use risingwave_common::row;
-use risingwave_common::types::{ScalarImpl};
+use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::StateStore;
 

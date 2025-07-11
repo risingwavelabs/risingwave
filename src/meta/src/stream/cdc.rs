@@ -21,7 +21,7 @@ use futures::pin_mut;
 use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::Row;
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::source::cdc::external::{
     CdcTableSnapshotSplitOption, CdcTableType, ExternalTableConfig, ExternalTableReader,
@@ -172,12 +172,19 @@ pub(crate) async fn assign_cdc_table_snapshot_splits(
             .into());
         }
         let stream_scan_fragment = stream_scan_fragments.swap_remove(0);
-        let splits =
+        let mut splits =
             try_get_cdc_table_snapshot_splits(jobs.stream_job_id.table_id, meta_store).await?;
         if splits.is_empty() {
-            tracing::error!("Expect at least one CDC table snapshot splits, 0 was found.");
-            // TODO(zw): or fall back to a (null, null) split?
-            continue;
+            tracing::error!(
+                "Expect at least one CDC table snapshot splits, 0 was found. Fall back to one (null, null) split."
+            );
+            // Fall back to one (null, null) split to avoid missing read.
+            let null = OwnedRow::new(vec![None]).value_serialize();
+            splits = vec![CdcTableSnapshotSplitRaw {
+                split_id: i64::MAX,
+                left_bound_inclusive: null.clone(),
+                right_bound_exclusive: null,
+            }];
         };
         if stream_scan_fragment.actors.is_empty() {
             return Err(anyhow::anyhow!(

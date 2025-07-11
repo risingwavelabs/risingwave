@@ -312,11 +312,10 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                         }
                                         Mutation::Throttle(some) => {
                                             // TODO(zw): improve throttle.
-                                            // 1. handle rate limit 0.
-                                            // 2. apply new rate limit immediately.
+                                            // 1. Handle rate limit 0. Currently, to resume the process, the actor must be rebuilt.
+                                            // 2. Apply new rate limit immediately.
                                             if let Some(new_rate_limit) =
                                                 some.get(&self.actor_ctx.id)
-                                                && new_rate_limit.map(|r| r > 0).unwrap_or(true)
                                                 && *new_rate_limit != self.rate_limit_rps
                                             {
                                                 // The new rate limit will take effect since next split.
