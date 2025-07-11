@@ -24,9 +24,10 @@ use crate::executor::StreamExecutorResult;
 #[derive(Debug, Default)]
 pub struct CdcStateRecord {
     pub is_finished: bool,
+    pub row_count: i64,
 }
 
-/// state schema: | `split_id` | `backfill_finished` |
+/// state schema: | `split_id` | `backfill_finished` | `row_count` |
 pub struct ParallelizedCdcBackfillState<S: StateStore> {
     state_table: StateTable<S>,
     cached_state: Vec<Datum>,
@@ -62,8 +63,15 @@ impl<S: StateStore> ParallelizedCdcBackfillState<S> {
                     Some(ScalarImpl::Bool(val)) => val,
                     _ => return Err(anyhow!("invalid backfill state: backfill_finished").into()),
                 };
+                let row_count = match state[2] {
+                    Some(ScalarImpl::Int64(val)) => val,
+                    _ => return Err(anyhow!("invalid backfill state: row_count").into()),
+                };
 
-                Ok(CdcStateRecord { is_finished })
+                Ok(CdcStateRecord {
+                    is_finished,
+                    row_count,
+                })
             }
             None => {
                 self.cached_state = vec![None; self.state_len];
@@ -77,12 +85,14 @@ impl<S: StateStore> ParallelizedCdcBackfillState<S> {
         &mut self,
         split_id: i64,
         is_finished: bool,
+        row_count: u64,
     ) -> StreamExecutorResult<()> {
         // schema: | `split_id` | `backfill_finished` |
         let state = self.cached_state.as_mut_slice();
         let split_id = Some(ScalarImpl::from(split_id));
         state[0].clone_from(&split_id);
         state[1] = Some(is_finished.into());
+        state[2] = Some((row_count as i64).into());
 
         match self.state_table.get_row(row::once(split_id)).await? {
             Some(prev_row) => {

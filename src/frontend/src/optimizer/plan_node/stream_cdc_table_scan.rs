@@ -75,9 +75,9 @@ impl StreamCdcTableScan {
             // Use `split_id` as primary key in state table.
             catalog_builder.add_column(&Field::with_name(DataType::Int64, "split_id"));
             catalog_builder.add_order_column(0, OrderType::ascending());
-
             catalog_builder.add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
-
+            // `row_count` column, the number of rows read from snapshot
+            catalog_builder.add_column(&Field::with_name(DataType::Int64, "row_count"));
             catalog_builder
                 .build(vec![], 1)
                 .with_id(state.gen_table_id_wrapped())

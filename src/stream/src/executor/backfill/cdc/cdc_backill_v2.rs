@@ -42,8 +42,8 @@ use crate::executor::prelude::*;
 use crate::executor::source::get_infinite_backoff_strategy;
 use crate::task::CreateMviewProgressReporter;
 
-/// `split_id`, `is_finished` all occupy 1 column each.
-const METADATA_STATE_LEN: usize = 2;
+/// `split_id`, `is_finished`, `row_count` all occupy 1 column each.
+const METADATA_STATE_LEN: usize = 3;
 
 pub struct ParallelizedCdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
@@ -295,6 +295,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                 select_with_strategy(left_upstream, right_snapshot, |_: &mut ()| {
                     stream::PollNext::Left
                 });
+            let mut row_count = 0;
             #[for_await]
             for either in &mut backfill_stream {
                 match either {
@@ -340,7 +341,9 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                 }
 
                                 // update and persist current backfill progress
-                                state_impl.mutate_state(split.split_id, false).await?;
+                                state_impl
+                                    .mutate_state(split.split_id, false, row_count)
+                                    .await?;
 
                                 state_impl.commit_state(barrier.epoch).await?;
 
@@ -412,7 +415,8 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                 break;
                             }
                             Some(chunk) => {
-                                // let chunk_cardinality = chunk.cardinality() as u64;
+                                let chunk_cardinality = chunk.cardinality() as u64;
+                                row_count = row_count.saturating_add(chunk_cardinality);
                                 yield Message::Chunk(mapping_chunk(chunk, &self.output_indices));
                             }
                         }
@@ -439,7 +443,9 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                             if let Some(progress) = self.progress.as_mut() {
                                 progress.update(barrier.epoch, 0, completed_split_count);
                             }
-                            state_impl.mutate_state(split.split_id, true).await?;
+                            state_impl
+                                .mutate_state(split.split_id, true, row_count)
+                                .await?;
                             state_impl.commit_state(barrier.epoch).await?;
                             yield Message::Barrier(barrier);
                             // break after the state have been saved
