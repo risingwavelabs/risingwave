@@ -14,7 +14,7 @@
 
 #![allow(clippy::doc_markdown)]
 
-use strum::VariantArray;
+use strum::{EnumMessage, VariantArray};
 use thiserror::Error;
 
 use super::{LicenseError, LicenseManager, report_telemetry};
@@ -40,17 +40,26 @@ use super::{LicenseError, LicenseManager, report_telemetry};
 // Check the e2e test cases under `error_ui` for examples.
 typify::import_types!(
     schema = "src/feature.json",
-    derives = [strum::VariantArray, strum::IntoStaticStr],
+    derives = [
+        strum::VariantArray,
+        strum::IntoStaticStr,
+        strum::EnumMessage,
+    ],
 );
 
 impl Feature {
     /// Name of the feature.
-    pub(crate) fn name(self) -> &'static str {
+    pub fn name(self) -> &'static str {
         self.into()
     }
 
+    /// Description of the feature.
+    pub fn description(self) -> &'static str {
+        self.get_documentation().unwrap_or_default()
+    }
+
     /// Get a slice of all features.
-    pub(crate) fn all() -> &'static [Feature] {
+    pub fn all() -> &'static [Feature] {
         Feature::VARIANTS
     }
 
