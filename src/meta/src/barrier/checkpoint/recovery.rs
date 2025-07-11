@@ -435,6 +435,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             fragment_relations,
             mut source_splits,
             mut background_jobs,
+            mut cdc_table_snapshot_split_assignment,
         } = runtime_info;
         let result: MetaResult<_> = try {
             let mut builder =
@@ -453,6 +454,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
                 subscription_info,
                 false,
                 &self.control.hummock_version_stats,
+                &mut cdc_table_snapshot_split_assignment,
             )?
         };
         match result {

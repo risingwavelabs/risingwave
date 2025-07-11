@@ -888,7 +888,8 @@ where
         let new_pk = (&new_value).project(self.pk_indices());
         debug_assert!(
             Row::eq(&old_pk, new_pk),
-            "pk should not change: {old_pk:?} vs {new_pk:?}",
+            "pk should not change: {old_pk:?} vs {new_pk:?}. {}",
+            self.table_id
         );
 
         let new_key_bytes =

@@ -34,6 +34,7 @@ use risingwave_common::util::stream_graph_visitor::{
 use risingwave_common::{bail, bail_not_implemented, must_match};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::connector_common::validate_connection;
+use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, UPSTREAM_SOURCE_KEY,
 };
@@ -77,6 +78,9 @@ use crate::manager::{
 use crate::model::{
     DownstreamFragmentRelation, Fragment, StreamContext, StreamJobFragments,
     StreamJobFragmentsToCreate, TableParallelism,
+};
+use crate::stream::cdc::{
+    is_parallelized_backfill_enabled, try_init_parallel_cdc_table_snapshot_splits,
 };
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
@@ -758,6 +762,7 @@ impl DdlController {
     /// Validates the connect properties in the `cdc_table_desc` stored in the `StreamCdcScan` node
     #[await_tree::instrument]
     pub(crate) async fn validate_cdc_table(
+        &self,
         table: &Table,
         table_fragments: &StreamJobFragments,
     ) -> MetaResult<()> {
@@ -773,16 +778,27 @@ impl DdlController {
                     table_fragments.fragments
                 )
             })?;
-
-        assert_eq!(
-            stream_scan_fragment.actors.len(),
-            1,
-            "Stream scan fragment should have only one actor"
-        );
+        fn assert_parallelism(stream_scan_fragment: &Fragment, node_body: &Option<NodeBody>) {
+            if let Some(NodeBody::StreamCdcScan(node)) = node_body {
+                if let Some(o) = node.options
+                    && CdcScanOptions::from_proto(&o).is_parallelized_backfill()
+                {
+                    // Use parallel CDC backfill.
+                } else {
+                    assert_eq!(
+                        stream_scan_fragment.actors.len(),
+                        1,
+                        "Stream scan fragment should have only one actor"
+                    );
+                }
+            }
+        }
         let mut found_cdc_scan = false;
         match &stream_scan_fragment.nodes.node_body {
             Some(NodeBody::StreamCdcScan(_)) => {
-                if Self::validate_cdc_table_inner(&stream_scan_fragment.nodes.node_body, table.id)
+                assert_parallelism(&stream_scan_fragment, &stream_scan_fragment.nodes.node_body);
+                if self
+                    .validate_cdc_table_inner(&stream_scan_fragment.nodes.node_body, table.id)
                     .await?
                 {
                     found_cdc_scan = true;
@@ -791,7 +807,11 @@ impl DdlController {
             // When there's generated columns, the cdc scan node is wrapped in a project node
             Some(NodeBody::Project(_)) => {
                 for input in &stream_scan_fragment.nodes.input {
-                    if Self::validate_cdc_table_inner(&input.node_body, table.id).await? {
+                    assert_parallelism(&stream_scan_fragment, &input.node_body);
+                    if self
+                        .validate_cdc_table_inner(&input.node_body, table.id)
+                        .await?
+                    {
                         found_cdc_scan = true;
                     }
                 }
@@ -807,9 +827,11 @@ impl DdlController {
     }
 
     async fn validate_cdc_table_inner(
+        &self,
         node_body: &Option<NodeBody>,
         table_id: u32,
     ) -> MetaResult<bool> {
+        let meta_store = self.env.meta_store_ref();
         if let Some(NodeBody::StreamCdcScan(stream_cdc_scan)) = node_body
             && let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc
         {
@@ -825,6 +847,20 @@ impl DdlController {
             let _enumerator = props
                 .create_split_enumerator(SourceEnumeratorContext::dummy().into())
                 .await?;
+
+            if is_parallelized_backfill_enabled(stream_cdc_scan) {
+                // Create parallel splits for a CDC table. The resulted split assignments are persisted and immutable.
+                try_init_parallel_cdc_table_snapshot_splits(
+                    table_id,
+                    cdc_table_desc,
+                    meta_store,
+                    &stream_cdc_scan.options,
+                    self.env.opts.cdc_table_split_init_insert_batch_size,
+                    self.env.opts.cdc_table_split_init_sleep_interval_splits,
+                    self.env.opts.cdc_table_split_init_sleep_duration_millis,
+                )
+                .await?;
+            }
 
             tracing::debug!(?table_id, "validate cdc table success");
             Ok(true)
@@ -1085,7 +1121,6 @@ impl DdlController {
             }
         }
         let job_id = streaming_job.id();
-
         tracing::debug!(
             id = job_id,
             definition = streaming_job.definition(),
@@ -1227,7 +1262,8 @@ impl DdlController {
 
         match streaming_job {
             StreamingJob::Table(None, table, TableJobType::SharedCdcSource) => {
-                Self::validate_cdc_table(table, &stream_job_fragments).await?;
+                self.validate_cdc_table(table, &stream_job_fragments)
+                    .await?;
             }
             StreamingJob::Table(Some(source), ..) => {
                 // Register the source on the connector node.

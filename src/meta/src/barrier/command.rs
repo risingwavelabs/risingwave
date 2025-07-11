@@ -24,6 +24,9 @@ use risingwave_common::must_match;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
+use risingwave_connector::source::cdc::{
+    CdcTableSnapshotSplitAssignment, build_pb_actor_cdc_table_snapshot_splits,
+};
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::{CreateType, Table};
@@ -183,6 +186,7 @@ pub struct CreateStreamingJobCommandInfo {
     pub streaming_job: StreamingJob,
     pub internal_tables: Vec<Table>,
     pub fragment_backfill_ordering: FragmentBackfillOrder,
+    pub cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignment,
 }
 
 impl StreamJobFragments {
@@ -769,6 +773,7 @@ impl Command {
                         init_split_assignment: split_assignment,
                         upstream_fragment_downstreams,
                         fragment_backfill_ordering,
+                        cdc_table_snapshot_split_assignment,
                         ..
                     },
                 job_type,
@@ -814,6 +819,9 @@ impl Command {
                     pause: is_currently_paused,
                     subscriptions_to_add,
                     backfill_nodes_to_pause,
+                    actor_cdc_table_snapshot_splits: build_pb_actor_cdc_table_snapshot_splits(
+                        cdc_table_snapshot_split_assignment.clone(),
+                    ),
                 }));
 
                 if let CreateStreamingJobType::SinkIntoTable(ReplaceStreamJobPlan {
@@ -1067,6 +1075,7 @@ impl Command {
                     subscriber_id: *subscription_id,
                 }],
                 backfill_nodes_to_pause: vec![],
+                actor_cdc_table_snapshot_splits: Default::default(),
             })),
             Command::DropSubscription {
                 upstream_mv_table_id,

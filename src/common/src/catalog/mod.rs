@@ -634,7 +634,8 @@ macro_rules! for_all_fragment_type_flags {
                 SourceScan,
                 SnapshotBackfillStreamScan,
                 FsFetch,
-                CrossDbSnapshotBackfillStreamScan
+                CrossDbSnapshotBackfillStreamScan,
+                StreamCdcScan
             },
             {},
             0
