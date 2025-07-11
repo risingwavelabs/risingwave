@@ -12,14 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::mem::take;
+use std::sync::Arc;
 
+use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 
-use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo, InflightSubscriptionInfo};
+use crate::barrier::info::{
+    BarrierInfo, CommandFragmentChanges, InflightDatabaseInfo, InflightSubscriptionInfo,
+};
+use crate::barrier::worker::SharedInflightDatabaseInfo;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
+use crate::manager::NotificationManager;
+use crate::model::FragmentId;
 
 /// The latest state of `GlobalBarrierWorker` after injecting the latest barrier.
 pub(crate) struct BarrierWorkerState {
@@ -35,6 +42,8 @@ pub(crate) struct BarrierWorkerState {
     /// Inflight running actors info.
     pub(super) inflight_graph_info: InflightDatabaseInfo,
 
+    pub shared_inflight_graph_info: SharedInflightDatabaseInfo,
+
     pub(super) inflight_subscription_info: InflightSubscriptionInfo,
 
     /// Whether the cluster is paused.
@@ -47,6 +56,9 @@ impl BarrierWorkerState {
             in_flight_prev_epoch: TracedEpoch::new(Epoch::now()),
             pending_non_checkpoint_barriers: vec![],
             inflight_graph_info: InflightDatabaseInfo::empty(),
+            shared_inflight_graph_info: Arc::new(parking_lot::RwLock::new(
+                InflightDatabaseInfo::empty(),
+            )),
             inflight_subscription_info: InflightSubscriptionInfo::default(),
             is_paused: false,
         }
@@ -61,7 +73,8 @@ impl BarrierWorkerState {
         Self {
             in_flight_prev_epoch,
             pending_non_checkpoint_barriers: vec![],
-            inflight_graph_info,
+            inflight_graph_info: inflight_graph_info.clone(),
+            shared_inflight_graph_info: Arc::new(parking_lot::RwLock::new(inflight_graph_info)),
             inflight_subscription_info,
             is_paused,
         }
@@ -134,30 +147,39 @@ impl BarrierWorkerState {
         HashSet<TableId>,
         HashSet<TableId>,
         bool,
+        Option<HashMap<FragmentId, CommandFragmentChanges>>,
     ) {
-        // update the fragment_infos outside pre_apply
-        let fragment_changes = if let Some(Command::CreateStreamingJob {
-            job_type: CreateStreamingJobType::SnapshotBackfill(_),
-            ..
-        }) = command
-        {
-            None
-        } else if let Some(fragment_changes) = command.and_then(Command::fragment_changes) {
-            self.inflight_graph_info.pre_apply(&fragment_changes);
-            Some(fragment_changes)
-        } else {
-            None
+        let (info, subscription_info, fragment_changes) = {
+            let mut shared_inflight_graph_info = self.shared_inflight_graph_info.write();
+
+            // update the fragment_infos outside pre_apply
+            let fragment_changes = if let Some(Command::CreateStreamingJob {
+                job_type: CreateStreamingJobType::SnapshotBackfill(_),
+                ..
+            }) = command
+            {
+                None
+            } else if let Some(fragment_changes) = command.and_then(Command::fragment_changes) {
+                self.inflight_graph_info.pre_apply(&fragment_changes);
+                shared_inflight_graph_info.pre_apply(&fragment_changes);
+                Some(fragment_changes)
+            } else {
+                None
+            };
+            if let Some(command) = &command {
+                self.inflight_subscription_info.pre_apply(command);
+            }
+
+            let info = self.inflight_graph_info.clone();
+            let subscription_info = self.inflight_subscription_info.clone();
+
+            if let Some(fragment_changes) = fragment_changes.as_ref() {
+                self.inflight_graph_info.post_apply(fragment_changes);
+                shared_inflight_graph_info.post_apply(fragment_changes);
+            }
+
+            (info, subscription_info, fragment_changes)
         };
-        if let Some(command) = &command {
-            self.inflight_subscription_info.pre_apply(command);
-        }
-
-        let info = self.inflight_graph_info.clone();
-        let subscription_info = self.inflight_subscription_info.clone();
-
-        if let Some(fragment_changes) = fragment_changes {
-            self.inflight_graph_info.post_apply(&fragment_changes);
-        }
 
         let mut table_ids_to_commit: HashSet<_> = info.existing_table_ids().collect();
         let mut jobs_to_wait = HashSet::new();
@@ -187,6 +209,7 @@ impl BarrierWorkerState {
             table_ids_to_commit,
             jobs_to_wait,
             prev_is_paused,
+            fragment_changes,
         )
     }
 }

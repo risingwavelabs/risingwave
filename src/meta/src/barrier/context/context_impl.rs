@@ -336,60 +336,6 @@ impl CommandContext {
             Command::StartFragmentBackfill { .. } => {}
         }
 
-        match command {
-            Command::CreateStreamingJob { info, job_type, .. } => {
-                let mut fragment_mapping = info.stream_job_fragments.get_fragment_mappings();
-
-                if let CreateStreamingJobType::SinkIntoTable(ReplaceStreamJobPlan {
-                    new_fragments,
-                    ..
-                }) = job_type
-                {
-                    fragment_mapping.extend(new_fragments.get_fragment_mappings());
-                }
-
-                CatalogController::notify_fragment_mapping_helper(
-                    Operation::Add,
-                    fragment_mapping,
-                    barrier_manager_context.env.notification_manager(),
-                )
-                .await;
-            }
-
-            Command::RescheduleFragment { .. } => {
-                // let job_actors = fragment
-                //     .find_related(Actor)
-                //     .all(&txn)
-                //     .await?
-                //     .into_iter()
-                //     .map(|actor| {
-                //         (
-                //             fragment_id,
-                //             fragment.distribution_type,
-                //             actor.actor_id,
-                //             actor.vnode_bitmap,
-                //             actor.worker_id,
-                //             actor.status,
-                //         )
-                //     })
-                //     .collect_vec();
-                //
-                // fragment_mapping_to_notify.extend(rebuild_fragment_mapping_from_actors(job_actors));
-            }
-            Command::ReplaceStreamJob(ReplaceStreamJobPlan { new_fragments, .. }) => {
-                let fragment_mapping = new_fragments.get_fragment_mappings();
-
-                CatalogController::notify_fragment_mapping_helper(
-                    Operation::Add,
-                    fragment_mapping,
-                    barrier_manager_context.env.notification_manager(),
-                )
-                .await;
-            }
-
-            _ => {}
-        }
-
         Ok(())
     }
 }
