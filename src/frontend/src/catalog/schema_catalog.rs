@@ -915,6 +915,7 @@ impl SchemaCatalog {
     }
 
     pub fn get_grant_object_by_oid(&self, oid: u32) -> Option<OwnedGrantObject> {
+        #[allow(clippy::manual_map)]
         if let Some(table) = self.get_created_table_by_id(&TableId::new(oid)) {
             Some(OwnedGrantObject {
                 owner: table.owner,
