@@ -565,18 +565,6 @@ dependencies = [
     "prepare-config",
 ]
 
-[tasks.pre-start-benchmark]
-category = "RiseDev - Prepare"
-description = "Download necessary tools to deploy a benchmark env"
-dependencies = [
-    "download-minio",
-    "download-mcli",
-    "download-grafana",
-    "download-prometheus",
-    "download-tempo",
-    "download-redis",
-]
-
 [tasks.pre-start-playground]
 category = "RiseDev - Prepare"
 description = "Preparation steps for playground"
@@ -1487,3 +1475,8 @@ eval "${COMMAND}"
 
 echo "Node ${NODE_NAME} restarted."
 '''
+
+[tasks.sql-bench]
+category = "RiseDev - Benchmark"
+description = "Run a local or remote sql benchmark on a RisingWave instance"
+script = "./develop/sql_bench/main.py $@"
