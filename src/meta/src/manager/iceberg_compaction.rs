@@ -487,7 +487,7 @@ impl IcebergCompactionManager {
             let current_table = self.load_iceberg_table(sink_id).await?;
 
             let metadata = current_table.metadata();
-            let mut new_snapshots: Vec<_> = metadata
+            let new_snapshots: Vec<_> = metadata
                 .snapshots()
                 .filter(|snapshot| {
                     let snapshot_timestamp = snapshot.timestamp_ms();
