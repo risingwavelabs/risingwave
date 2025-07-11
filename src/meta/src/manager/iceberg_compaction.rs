@@ -434,34 +434,15 @@ impl IcebergCompactionManager {
             task_id
         );
 
-        let completion_result = self
-            .wait_for_compaction_completion(
-                &sink_id,
-                initial_snapshot_id,
-                initial_timestamp,
-                task_id,
-            )
-            .await;
+        self.wait_for_compaction_completion(
+            &sink_id,
+            initial_snapshot_id,
+            initial_timestamp,
+            task_id,
+        )
+        .await?;
 
-        match completion_result {
-            Ok(()) => {
-                tracing::info!(
-                    "Manual compaction completed successfully for sink {} with task ID {}",
-                    sink_id.sink_id,
-                    task_id
-                );
-                Ok(task_id)
-            }
-            Err(e) => {
-                tracing::error!(
-                    "Manual compaction failed or timed out for sink {} with task ID {}: {}",
-                    sink_id.sink_id,
-                    task_id,
-                    e
-                );
-                Err(e)
-            }
-        }
+        Ok(task_id)
     }
 
     async fn wait_for_compaction_completion(
