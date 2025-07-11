@@ -134,7 +134,8 @@ impl<S: StateStore> NowExecutor<S> {
                 );
             }
             for barrier in barriers {
-                let new_timestamp = barrier.get_curr_epoch().as_timestamptz();
+                let curr_epoch = barrier.get_curr_epoch();
+                let new_timestamp = curr_epoch.as_timestamptz();
                 let pause_mutation =
                     barrier
                         .mutation
@@ -180,7 +181,7 @@ impl<S: StateStore> NowExecutor<S> {
                             "adjusted next now timestamp from {} to {}. curr_epoch: {}, barrier_interval_ms: {}, progress_ratio: {}",
                             new_timestamp.timestamp_millis(),
                             progress_timestamp,
-                            barrier.get_curr_epoch(),
+                            curr_epoch,
                             barrier_interval_ms,
                             progress_ratio
                         );
