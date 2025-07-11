@@ -133,7 +133,7 @@ impl ExternalTableReader for PostgresExternalTableReader {
             yield split;
             return Ok(());
         };
-        tracing::debug!(?self.schema_table_name, ?self.rw_schema, ?self.pk_indices, ?self.split_column, "get parallel cdc table snapshot splits");
+        tracing::info!(?self.schema_table_name, ?self.rw_schema, ?self.pk_indices, ?self.split_column, "get parallel cdc table snapshot splits");
         // left bound will never be NULL value.
         let mut next_left_bound_inclusive = min_value.clone();
         loop {
@@ -176,7 +176,7 @@ impl ExternalTableReader for PostgresExternalTableReader {
             if is_completed && left_bound_inclusive.is_none() {
                 assert_eq!(split_id, 1);
             }
-            tracing::debug!(
+            tracing::info!(
                 split_id,
                 ?left_bound_inclusive,
                 ?right_bound_exclusive,
