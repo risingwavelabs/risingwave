@@ -262,6 +262,7 @@ statement ok
 FLUSH;
 
 sleep 5s
+
 query ??
 select * from t_hosted_catalog;
 ----
@@ -282,6 +283,14 @@ insert into t_hosted_catalog values(2, 'yyy');
 
 statement ok
 FLUSH;
+
+sleep 5s
+
+query ??
+select * from t_hosted_catalog;
+----
+1 xxx
+2 yyy
 
 query ?
 select count(*) from rw_iceberg_files where  schema_name = 'public' and source_name = '__iceberg_source_t_hosted_catalog';
