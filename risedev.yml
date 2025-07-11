@@ -361,6 +361,10 @@ profile:
       - use: compute-node
       - use: frontend
       - use: compactor
+      - use: compactor
+        compactor-mode: "dedicated-iceberg"
+        port: 6661
+        exporter-port: 1261
 
   meta-1cn-1fe-sqlite-with-recovery:
     config-path: src/config/ci-recovery.toml

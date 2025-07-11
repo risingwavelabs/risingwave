@@ -1212,6 +1212,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     async fn set_sync_log_store_aligned(&self, _job_id: u32, _aligned: bool) -> RpcResult<()> {
         Ok(())
     }
+
+    async fn compact_table(&self, _table_id: TableId) -> RpcResult<u64> {
+        Ok(1)
+    }
 }
 
 #[cfg(test)]

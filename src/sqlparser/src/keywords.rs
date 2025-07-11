@@ -564,6 +564,7 @@ define_keywords!(
     USER,
     USING,
     UUID,
+    VACUUM,
     VALIDATE,
     VALUE,
     VALUES,

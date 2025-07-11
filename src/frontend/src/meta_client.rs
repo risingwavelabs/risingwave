@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use anyhow::Context;
+use risingwave_common::catalog::TableId;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
@@ -159,6 +160,8 @@ pub trait FrontendMetaClient: Send + Sync {
     fn worker_id(&self) -> u32;
 
     async fn set_sync_log_store_aligned(&self, job_id: u32, aligned: bool) -> Result<()>;
+
+    async fn compact_table(&self, table_id: TableId) -> Result<u64>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -395,5 +398,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn set_sync_log_store_aligned(&self, job_id: u32, aligned: bool) -> Result<()> {
         self.0.set_sync_log_store_aligned(job_id, aligned).await
+    }
+
+    async fn compact_table(&self, table_id: TableId) -> Result<u64> {
+        self.0.compact_table(table_id).await
     }
 }
