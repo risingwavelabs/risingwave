@@ -41,67 +41,71 @@ impl HeapProfiler {
     /// `total_memory` must be the total available memory for the process.
     /// It will be compared with the process resident memory.
     pub fn new(total_memory: usize, config: HeapProfilingConfig) -> Self {
-        let threshold_auto_dump_heap_profile =
-            (total_memory as f64 * config.threshold_auto as f64) as usize;
-        let jemalloc_dump_mib = jemalloc_prof::dump::mib().unwrap();
-        let opt_prof = jemalloc_opt::prof::read().unwrap();
+        todo!()
+        // let threshold_auto_dump_heap_profile =
+        //     (total_memory as f64 * config.threshold_auto as f64) as usize;
+        // let jemalloc_dump_mib = jemalloc_prof::dump::mib().unwrap();
+        // let opt_prof = jemalloc_opt::prof::read().unwrap();
 
-        Self {
-            config,
-            threshold_auto_dump_heap_profile,
-            jemalloc_dump_mib,
-            opt_prof,
-        }
+        // Self {
+        //     config,
+        //     threshold_auto_dump_heap_profile,
+        //     jemalloc_dump_mib,
+        //     opt_prof,
+        // }
     }
 
     fn auto_dump_heap_prof(&self) {
-        let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S");
-        let file_name = format!("{}.{}", time_prefix, AUTO_DUMP_SUFFIX);
+        todo!()
 
-        let file_path = Path::new(&self.config.dir)
-            .join(&file_name)
-            .to_str()
-            .expect("file path is not valid utf8")
-            .to_owned();
-        let file_path_c = CString::new(file_path).expect("0 byte in file path");
+        // let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S");
+        // let file_name = format!("{}.{}", time_prefix, AUTO_DUMP_SUFFIX);
 
-        // FIXME(yuhao): `unsafe` here because `jemalloc_dump_mib.write` requires static lifetime
-        if let Err(e) = self
-            .jemalloc_dump_mib
-            .write(unsafe { &*(file_path_c.as_c_str() as *const _) })
-        {
-            tracing::warn!("Auto Jemalloc dump heap file failed! {:?}", e);
-        } else {
-            tracing::info!("Successfully dumped heap profile to {}", file_name);
-        }
+        // let file_path = Path::new(&self.config.dir)
+        //     .join(&file_name)
+        //     .to_str()
+        //     .expect("file path is not valid utf8")
+        //     .to_owned();
+        // let file_path_c = CString::new(file_path).expect("0 byte in file path");
+
+        // // FIXME(yuhao): `unsafe` here because `jemalloc_dump_mib.write` requires static lifetime
+        // if let Err(e) = self
+        //     .jemalloc_dump_mib
+        //     .write(unsafe { &*(file_path_c.as_c_str() as *const _) })
+        // {
+        //     tracing::warn!("Auto Jemalloc dump heap file failed! {:?}", e);
+        // } else {
+        //     tracing::info!("Successfully dumped heap profile to {}", file_name);
+        // }
     }
 
     /// Start the daemon task of auto heap profiling.
     pub fn start(self) {
-        if !self.config.enable_auto || !self.opt_prof {
-            tracing::info!("Auto memory dump is disabled.");
-            return;
-        }
+        todo!()
+        // if !self.config.enable_auto || !self.opt_prof {
+        //     tracing::info!("Auto memory dump is disabled.");
+        //     return;
+        // }
 
-        static START: Once = Once::new();
-        START.call_once(|| {
-            fs::create_dir_all(&self.config.dir).unwrap();
-            tokio::spawn(async move {
-                let mut interval = time::interval(Duration::from_millis(500));
-                let mut prev_used_memory_bytes = 0;
-                loop {
-                    interval.tick().await;
-                    let cur_used_memory_bytes = resource_util::memory::total_memory_used_bytes();
+        // static START: Once = Once::new();
+        // START.call_once(|| {
+        //     fs::create_dir_all(&self.config.dir).unwrap();
+        //     tokio::spawn(async move {
+        //         let mut interval = time::interval(Duration::from_millis(500));
+        //         let mut prev_used_memory_bytes = 0;
+        //         loop {
+        //             interval.tick().await;
+        //             let cur_used_memory_bytes = resource_util::memory::total_memory_used_bytes();
 
-                    // Dump heap profile when memory usage is crossing the threshold.
-                    if cur_used_memory_bytes > self.threshold_auto_dump_heap_profile
-                        && prev_used_memory_bytes <= self.threshold_auto_dump_heap_profile
-                    {
-                        self.auto_dump_heap_prof();
-                    }
-                    prev_used_memory_bytes = cur_used_memory_bytes;
-                }
-            });
-        })
+        //             // Dump heap profile when memory usage is crossing the threshold.
+        //             if cur_used_memory_bytes > self.threshold_auto_dump_heap_profile
+        //                 && prev_used_memory_bytes <= self.threshold_auto_dump_heap_profile
+        //             {
+        //                 self.auto_dump_heap_prof();
+        //             }
+        //             prev_used_memory_bytes = cur_used_memory_bytes;
+        //         }
+        //     });
+        // })
     }
 }
