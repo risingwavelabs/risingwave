@@ -175,7 +175,7 @@ psql -c "
         name varchar(255),
         description text
     );
-    INSERT INTO test_include_ts(id, name, description) VALUES (1, 'name1', 'This is a text column for testing auto schema change with PostgreSQL text type');
+    INSERT INTO test_include_ts(id, name, description) VALUES (1, 'name1', 'name1');
     "
 
 statement ok
