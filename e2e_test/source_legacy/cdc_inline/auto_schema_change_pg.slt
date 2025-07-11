@@ -172,9 +172,10 @@ psql -c "
     DROP TABLE IF EXISTS test_include_ts;
     CREATE TABLE IF NOT EXISTS test_include_ts(
         id int PRIMARY KEY,
-        name varchar(255)
+        name varchar(255),
+        description text
     );
-    INSERT INTO test_include_ts(id, name) VALUES (1, 'name1');
+    INSERT INTO test_include_ts(id, name, description) VALUES (1, 'name1', 'This is a text column for testing auto schema change with PostgreSQL text type');
     "
 
 statement ok
@@ -206,18 +207,18 @@ SELECT count(*) from rw_test_include_ts WHERE cdc_timestamp IS NOT NULL;
 system ok
 psql -c "
     ALTER TABLE test_include_ts ADD COLUMN new_col varchar DEFAULT 'new_column_default_value';
-    INSERT INTO test_include_ts (id, name, new_col) values (2, 'name2', 'after_change');
+    INSERT INTO test_include_ts (id, name, description, new_col) values (2, 'name2', 'name2', 'after_change');
     SELECT pg_switch_wal();
     CHECKPOINT;
 "
 sleep 10s
 
 # Verify both rows exist with correct data including new column
-query ITT
-SELECT id, name, new_col from rw_test_include_ts order by id;
+query ITTT
+SELECT id, name, description, new_col from rw_test_include_ts order by id;
 ----
-1 name1 new_column_default_value
-2 name2 after_change
+1 name1 name1 new_column_default_value
+2 name2 name2 after_change
 
 
 statement ok
