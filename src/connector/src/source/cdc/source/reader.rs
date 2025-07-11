@@ -77,6 +77,14 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
 
         let mut properties = conn_props.properties.clone();
 
+        // Override CDC streaming start timeout to 300 seconds
+        // This helps with sources that need more time to start streaming
+        properties.insert(
+            "cdc.source.wait.streaming.start.timeout".to_owned(),
+            "300".to_string(),
+        );
+        tracing::info!("Set CDC streaming start timeout to 300 seconds");
+
         let mut citus_server_addr = None;
         // For citus, we need to rewrite the `table.name` to capture sharding tables
         if matches!(T::source_type(), CdcSourceType::Citus)
