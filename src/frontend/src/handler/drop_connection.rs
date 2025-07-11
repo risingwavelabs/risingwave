@@ -72,7 +72,7 @@ pub async fn handle_drop_connection(
     // Ban DROP CASCADE for Iceberg connections
     if is_iceberg_connection && cascade {
         return Err(ErrorCode::NotSupported(
-            "DROP CONNECTION CASCADE is not supported for Iceberg connections".to_owned(),
+            "DROP CONNECTION CASCADE".to_owned(),
             "Please drop dependent objects manually before dropping the Iceberg connection, or use DROP CONNECTION without CASCADE".to_owned(),
         )
         .into());
