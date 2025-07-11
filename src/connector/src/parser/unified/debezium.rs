@@ -302,10 +302,7 @@ pub fn parse_schema_change(
                             }
                             let snapshot_value: Datum = if let Some(value_text) = value_text {
                                 // 检测PostgreSQL函数表达式，跳过解析
-                                if value_text.starts_with("nextval(")
-                                    || value_text.starts_with("now(")
-                                    || value_text.starts_with("current_")
-                                    || value_text.contains("uuid_generate")
+                                if false
                                 {
                                     tracing::warn!(target: "auto_schema_change", 
                                                   "Skipping PostgreSQL function default value: {}", value_text);

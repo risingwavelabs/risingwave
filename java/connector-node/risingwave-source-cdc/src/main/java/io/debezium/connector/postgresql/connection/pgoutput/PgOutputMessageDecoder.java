@@ -363,6 +363,10 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
         columnDefaults =
                 readColumns.stream()
                         .filter(io.debezium.relational.Column::hasDefaultValue)
+                        .filter(
+                                column ->
+                                        isConstantDefaultValue(
+                                                column.defaultValueExpression().orElse(null)))
                         .collect(
                                 toMap(
                                         io.debezium.relational.Column::name,
@@ -1046,5 +1050,97 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
         if (connection != null) {
             connection.close();
         }
+    }
+
+    /**
+     * Checks if a given default value expression is a constant value. Constant values include:
+     * string literals, numeric literals, boolean literals, NULL, and type-cast literals. Function
+     * expressions (e.g., nextval(), now(), current_timestamp) are not considered constants.
+     *
+     * @param defaultValueExpression The default value expression to check
+     * @return true if the expression is a constant value, false otherwise
+     */
+    private boolean isConstantDefaultValue(String defaultValueExpression) {
+        if (defaultValueExpression == null || defaultValueExpression.trim().isEmpty()) {
+            return false;
+        }
+
+        String expr = defaultValueExpression.trim();
+
+        // Common function patterns that should be excluded
+        if (containsFunctionCall(expr)) {
+            LOGGER.trace("Skipping function expression: {}", expr);
+            return false;
+        }
+
+        // Check for constant patterns
+        return isLiteralConstant(expr);
+    }
+
+    /** Checks if the expression contains function call patterns. */
+    private boolean containsFunctionCall(String expr) {
+        // Common PostgreSQL function patterns
+        String[] functionPatterns = {
+            "nextval(",
+            "currval(",
+            "setval(",
+            "now()",
+            "current_timestamp",
+            "current_date",
+            "current_time",
+            "localtime",
+            "localtimestamp",
+            "gen_random_uuid()",
+            "random()",
+            "clock_timestamp()",
+            "statement_timestamp()",
+            "transaction_timestamp()",
+            "uuid_generate",
+            "extract(",
+            "date_part(",
+            "age(",
+            "justify_"
+        };
+
+        String lowerExpr = expr.toLowerCase();
+        for (String pattern : functionPatterns) {
+            if (lowerExpr.contains(pattern.toLowerCase())) {
+                return true;
+            }
+        }
+
+        // General pattern: word followed by parentheses (function call)
+        return expr.matches(".*\\w+\\s*\\(.*\\).*");
+    }
+
+    /** Checks if the expression is a literal constant. */
+    private boolean isLiteralConstant(String expr) {
+        // String literal: 'value' or 'value'::type
+        if (expr.matches("'[^']*'(::.*)?")) {
+            return true;
+        }
+
+        // Numeric literal: 123, 3.14, -42, 1.23e-4
+        if (expr.matches("-?\\d+(\\.\\d+)?([eE][+-]?\\d+)?")) {
+            return true;
+        }
+
+        // Boolean literal
+        if (expr.toLowerCase().matches("(true|false)(::.*)?")) {
+            return true;
+        }
+
+        // NULL literal
+        if (expr.toLowerCase().matches("null(::.*)?")) {
+            return true;
+        }
+
+        // Array literal: '{1,2,3}' or ARRAY['a','b','c']
+        if (expr.matches("\\{.*\\}(::.*)?")
+                || expr.toLowerCase().matches("array\\s*\\[.*\\](::.*)?")) {
+            return true;
+        }
+
+        return false;
     }
 }
