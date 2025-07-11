@@ -25,12 +25,9 @@ pub async fn handle_vacuum(
     table_name: ObjectName,
 ) -> Result<RwPgResponse> {
     let session = &handler_args.session;
-
-    // Parse table name
     let db_name = &session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
 
-    // Get table from catalog and perform checks
     let table_id = {
         let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
         let catalog_reader = session.env().catalog_reader().read_guard();
@@ -50,7 +47,6 @@ pub async fn handle_vacuum(
                 ))
             })?;
 
-        // Check if table uses Iceberg engine
         if table.engine() != Engine::Iceberg {
             return Err(ErrorCode::InvalidInputSyntax(format!(
                 "VACUUM can only be used on Iceberg engine tables, but table '{}' uses {:?} engine",
@@ -63,7 +59,6 @@ pub async fn handle_vacuum(
         table.id()
     };
 
-    // Call meta client to trigger vacuum/compaction
     session.env().meta_client().compact_table(table_id).await?;
 
     Ok(PgResponse::builder(StatementType::VACUUM).into())
