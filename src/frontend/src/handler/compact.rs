@@ -51,16 +51,8 @@ pub async fn handle_compact(
         TableId::new(table.id.table_id())
     };
 
-    // Call the meta client to trigger compaction
-    let task_id = session.env().meta_client().compact_table(table_id).await?;
+    session.env().meta_client().compact_table(table_id).await?;
 
-    let table_name = if let Some(schema) = &bound_compact.schema_name {
-        format!("{}.{}", schema, bound_compact.table_name)
-    } else {
-        bound_compact.table_name.clone()
-    };
-
-    // Return success response with task ID
     Ok(PgResponse::builder(StatementType::COMPACT)
         .row_cnt(1)
         .into())
