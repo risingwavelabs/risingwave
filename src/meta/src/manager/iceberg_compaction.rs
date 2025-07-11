@@ -496,8 +496,6 @@ impl IcebergCompactionManager {
                 })
                 .collect();
 
-            new_snapshots.sort_by(|a, b| b.timestamp_ms().cmp(&a.timestamp_ms()));
-
             for snapshot in new_snapshots {
                 let summary = snapshot.summary();
                 if matches!(summary.operation, Operation::Replace) {
