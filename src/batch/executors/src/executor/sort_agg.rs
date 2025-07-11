@@ -148,33 +148,32 @@ impl SortAggExecutor {
                     .map(|col| col.datum_at(range.start))
                     .collect();
 
-                if curr_group.as_ref() != Some(&group) {
-                    if let Some(group) = curr_group.replace(group) {
-                        group_builders
-                            .iter_mut()
-                            .zip_eq_fast(group.into_iter())
-                            .for_each(|(builder, datum)| {
-                                builder.append(datum);
-                            });
-                        Self::output_agg_states(&self.aggs, &mut agg_states, &mut agg_builders)
-                            .await?;
-                        left_capacity -= 1;
+                if curr_group.as_ref() != Some(&group)
+                    && let Some(group) = curr_group.replace(group)
+                {
+                    group_builders
+                        .iter_mut()
+                        .zip_eq_fast(group.into_iter())
+                        .for_each(|(builder, datum)| {
+                            builder.append(datum);
+                        });
+                    Self::output_agg_states(&self.aggs, &mut agg_states, &mut agg_builders).await?;
+                    left_capacity -= 1;
 
-                        if left_capacity == 0 {
-                            let output = DataChunk::new(
-                                group_builders
-                                    .into_iter()
-                                    .chain(agg_builders)
-                                    .map(|b| b.finish().into())
-                                    .collect(),
-                                self.output_size_limit,
-                            );
-                            yield output;
+                    if left_capacity == 0 {
+                        let output = DataChunk::new(
+                            group_builders
+                                .into_iter()
+                                .chain(agg_builders)
+                                .map(|b| b.finish().into())
+                                .collect(),
+                            self.output_size_limit,
+                        );
+                        yield output;
 
-                            (group_builders, agg_builders) =
-                                Self::create_builders(&self.group_key, &self.aggs);
-                            left_capacity = self.output_size_limit;
-                        }
+                        (group_builders, agg_builders) =
+                            Self::create_builders(&self.group_key, &self.aggs);
+                        left_capacity = self.output_size_limit;
                     }
                 }
 

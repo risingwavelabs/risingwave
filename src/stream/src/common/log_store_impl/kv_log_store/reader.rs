@@ -68,6 +68,8 @@ mod rewind_backoff_policy {
     };
 
     pub(super) type RewindBackoffPolicy = impl Iterator<Item = Duration>;
+
+    #[define_opaque(RewindBackoffPolicy)]
     pub(super) fn initial_rewind_backoff_policy() -> RewindBackoffPolicy {
         tokio_retry::strategy::ExponentialBackoff::from_millis(REWIND_BASE_DELAY.as_millis() as _)
             .factor(REWIND_BACKOFF_FACTOR)
@@ -264,6 +266,7 @@ pub(crate) mod timeout_auto_rebuild {
     pub(crate) type TimeoutAutoRebuildIter<S: StateStoreRead> =
         AutoRebuildStateStoreReadIter<S, impl FnMut() -> bool + Send>;
 
+    #[define_opaque(TimeoutAutoRebuildIter)]
     pub(super) async fn iter_with_timeout_rebuild<S: StateStoreRead>(
         state_store: Arc<S>,
         range: TableKeyRange,
@@ -612,28 +615,28 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
             ));
         }
         if offset.epoch() >= self.first_write_epoch.expect("should have init") {
-            if let Some(truncate_offset) = &self.truncate_offset {
-                if offset <= *truncate_offset {
-                    return Err(anyhow!(
-                        "truncate offset {:?} earlier than prev truncate offset {:?}",
-                        offset,
-                        truncate_offset
-                    ));
-                }
+            if let Some(truncate_offset) = &self.truncate_offset
+                && offset <= *truncate_offset
+            {
+                return Err(anyhow!(
+                    "truncate offset {:?} earlier than prev truncate offset {:?}",
+                    offset,
+                    truncate_offset
+                ));
             }
             self.rx.truncate_buffer(offset);
             self.truncate_offset = Some(offset);
         } else {
             // For historical data, no need to truncate at seq id level. Only truncate at barrier.
             if let TruncateOffset::Barrier { epoch } = &offset {
-                if let Some(truncate_offset) = &self.truncate_offset {
-                    if offset <= *truncate_offset {
-                        return Err(anyhow!(
-                            "truncate offset {:?} earlier than prev truncate offset {:?}",
-                            offset,
-                            truncate_offset
-                        ));
-                    }
+                if let Some(truncate_offset) = &self.truncate_offset
+                    && offset <= *truncate_offset
+                {
+                    return Err(anyhow!(
+                        "truncate offset {:?} earlier than prev truncate offset {:?}",
+                        offset,
+                        truncate_offset
+                    ));
                 }
                 self.rx.truncate_historical(*epoch);
                 self.truncate_offset = Some(offset);

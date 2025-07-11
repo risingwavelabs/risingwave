@@ -107,7 +107,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .type_attribute(
             "node_body",
-            "#[strum_discriminants(derive(::strum::Display))]",
+            "#[strum_discriminants(derive(::strum::Display, Hash))]",
         )
         .type_attribute("rex_node", "#[derive(::enum_as_inner::EnumAsInner)]")
         .type_attribute(

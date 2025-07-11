@@ -36,7 +36,7 @@ use crate::tokenizer::Token;
 #[derive(Default, Debug)]
 struct DataTypeParsingState {
     /// Since we can't distinguish between `>>` and `> >` in tokenizer, we need to handle this case in the parser.
-    /// When we want a [`>`][Token::Gt] but actually consumed a [`>>`][Token::ShiftRight], we set this to true.
+    /// When we want a [`>`][Token::Gt] but actually consumed a `>>` (ShiftRight), we set this to true.
     /// When the value was true and we want a [`>`][Token::Gt], we just set this to false instead of really consume it.
     remaining_close: Rc<RefCell<usize>>,
 }
@@ -50,7 +50,6 @@ where
 {
     let remaining_close1 = input.state.remaining_close.clone();
     let remaining_close2 = input.state.remaining_close.clone();
-    let remaining_close3 = input.state.remaining_close.clone();
 
     // Consume an abstract `>`, it may be the `remaining_close1` flag set by previous `>>`.
     let consume_close = trace(
@@ -71,21 +70,10 @@ where
             .void(),
             trace(
                 "produce_remaining_close",
-                (
-                    Token::ShiftRight,
-                    move |_input: &mut StatefulStream<S>| -> ModalResult<()> {
-                        *remaining_close2.borrow_mut() = 1;
-                        Ok(())
-                    },
-                )
-                    .void(),
-            ),
-            trace(
-                "produce_remaining_close",
                 super::token
                     .verify(|t| match &t.token {
                         Token::Op(op) if op.chars().all(|c| c == '>') => {
-                            *remaining_close3.borrow_mut() = op.len() - 1;
+                            *remaining_close2.borrow_mut() = op.len() - 1;
                             true
                         }
                         _ => false,

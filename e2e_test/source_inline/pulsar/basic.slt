@@ -6,31 +6,149 @@ curl "$PULSAR_HTTP_URL/admin/v2/brokers/ready"
 ok
 
 
+# test with partitioned topic
 system ok
-pulsar_produce.py 'persistent://public/default/topic-0' <<EOF
-{"f1":12,"f2":"foo"}
-{"f1":17,"f2":"bar"}
-EOF
+python3 e2e_test/commands/pulsar_util.py create-topic --topic 'persistent://public/default/topic' --partitions 3
 
+# test with unpartitioned topic
+system ok
+python3 e2e_test/commands/pulsar_util.py create-topic --topic 'persistent://public/default/unpartitioned' --partitions 0
 
-statement ok
-create table t (
+system ok
+python3 e2e_test/commands/pulsar_util.py create-topic --topic 'non-persistent://public/default/non-persistent' --partitions 0 --non-persistent
+
+statement error
+create table t_non_exist (
   f1 int,
   f2 varchar)
 with (
   connector = 'pulsar',
   service.url = '${PULSAR_BROKER_URL}',
-  topic = 'persistent://public/default/topic-0',
+  topic = 'persistent://public/default/topic-non-exist',
+) format plain encode json;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service (call `/ddl_service.DdlService/CreateTable`) failed: Internal error
+  2: failed to create source worker
+  3: topic persistent://public/default/topic-non-exist not found on broker, available topics: ["persistent://public/default/topic-partition-0", "persistent://public/default/topic-partition-1", "persistent://public/default/topic-partition-2", "persistent://public/default/unpartitioned"]
+
+
+# expected: skip existance check for non-persistent topic
+statement ok
+create table t_non_exist (
+  f1 int,
+  f2 varchar)
+with (
+  connector = 'pulsar',
+  service.url = '${PULSAR_BROKER_URL}',
+  topic = 'non-persistent://public/default/topic-non-exist',
 ) format plain encode json;
 
+statement ok
+drop table t_non_exist
+
+system ok
+python3 e2e_test/commands/pulsar_util.py produce -t "persistent://public/default/topic" <<EOF
+{"f1":12,"f2":"foo"}
+{"f1":17,"f2":"bar"}
+EOF
+
+system ok
+python3 e2e_test/commands/pulsar_util.py produce -t "persistent://public/default/unpartitioned" <<EOF
+{"f1":12,"f2":"foo"}
+{"f1":17,"f2":"bar"}
+EOF
+
+system ok
+python3 e2e_test/commands/pulsar_util.py produce -t "non-persistent://public/default/non-persistent" <<EOF
+{"f1":12,"f2":"foo"}
+{"f1":17,"f2":"bar"}
+EOF
+
+statement ok
+create table t_partitioned (
+  f1 int,
+  f2 varchar)
+with (
+  connector = 'pulsar',
+  service.url = '${PULSAR_BROKER_URL}',
+  topic = 'persistent://public/default/topic',
+) format plain encode json;
+
+
+statement ok
+create table t_unpartitioned (
+  f1 int,
+  f2 varchar)
+with (
+  connector = 'pulsar',
+  service.url = '${PULSAR_BROKER_URL}',
+  topic = 'persistent://public/default/unpartitioned',
+) format plain encode json;
+
+
+statement ok
+create table t_non_persistent (
+  f1 int,
+  f2 varchar)
+with (
+  connector = 'pulsar',
+  service.url = '${PULSAR_BROKER_URL}',
+  topic = 'non-persistent://public/default/non-persistent',
+) format plain encode json;
+
+
 query IT rowsort retry 3 backoff 2s
-select * from t;
+select * from t_partitioned;
 ----
 12 foo
 17 bar
 
-statement ok
-drop table t;
+
+query IT rowsort retry 3 backoff 2s
+select * from t_unpartitioned;
+----
+12 foo
+17 bar
+
+
+query I retry 3 backoff 2s
+select count(*) from t_non_persistent;
+----
+0
+
 
 system ok
-curl --fail-with-body -X DELETE "$PULSAR_HTTP_URL/admin/v2/persistent/public/default/topic-0"
+python3 e2e_test/commands/pulsar_util.py produce -t "non-persistent://public/default/non-persistent" <<EOF
+{"f1":12,"f2":"foo"}
+{"f1":17,"f2":"bar"}
+EOF
+
+sleep 1s
+
+query IT rowsort retry 3 backoff 2s
+select * from t_non_persistent;
+----
+12 foo
+17 bar
+
+
+statement ok
+drop table t_partitioned;
+
+statement ok
+drop table t_unpartitioned;
+
+statement ok
+drop table t_non_persistent;
+
+system ok
+python3 e2e_test/commands/pulsar_util.py drop-topic -t "persistent://public/default/topic" --force
+
+system ok
+python3 e2e_test/commands/pulsar_util.py drop-topic -t "persistent://public/default/unpartitioned" --force
+
+system ok
+python3 e2e_test/commands/pulsar_util.py drop-topic -t "non-persistent://public/default/non-persistent" --force

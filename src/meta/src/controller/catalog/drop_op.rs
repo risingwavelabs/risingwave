@@ -259,12 +259,12 @@ impl CatalogController {
 
         // TODO: Support drop cascade for cross-database query.
         for obj in removed_objects.values() {
-            if let Some(obj_database_id) = obj.database_id {
-                if obj_database_id != database_id {
-                    return Err(MetaError::permission_denied(format!(
-                        "Referenced by other objects in database {obj_database_id}, please drop them manually"
-                    )));
-                }
+            if let Some(obj_database_id) = obj.database_id
+                && obj_database_id != database_id
+            {
+                return Err(MetaError::permission_denied(format!(
+                    "Referenced by other objects in database {obj_database_id}, please drop them manually"
+                )));
             }
         }
 

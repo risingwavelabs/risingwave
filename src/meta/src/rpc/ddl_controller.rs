@@ -23,7 +23,7 @@ use anyhow::{Context, anyhow};
 use await_tree::{InstrumentAwait, span};
 use either::Either;
 use itertools::Itertools;
-use risingwave_common::catalog::AlterDatabaseParam;
+use risingwave_common::catalog::{AlterDatabaseParam, FragmentTypeFlag};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
@@ -54,7 +54,7 @@ use risingwave_pb::ddl_service::{
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    FragmentTypeFlag, MergeNode, PbDispatchOutputMapping, PbDispatcherType, PbStreamFragmentGraph,
+    MergeNode, PbDispatchOutputMapping, PbDispatcherType, PbStreamFragmentGraph,
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
@@ -82,7 +82,7 @@ use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
     CreateStreamingJobContext, CreateStreamingJobOption, GlobalStreamManagerRef,
     JobRescheduleTarget, ReplaceStreamJobContext, SourceChange, SourceManagerRef,
-    StreamFragmentGraph, create_source_worker, validate_sink,
+    StreamFragmentGraph, create_source_worker, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
@@ -147,7 +147,7 @@ pub enum DdlCommand {
     DropSource(SourceId, DropMode),
     CreateFunction(Function),
     DropFunction(FunctionId),
-    CreateView(View),
+    CreateView(View, HashSet<ObjectId>),
     DropView(ViewId, DropMode),
     CreateStreamingJob {
         stream_job: StreamingJob,
@@ -193,7 +193,7 @@ impl DdlCommand {
             DdlCommand::DropSource(id, _) => Right(*id),
             DdlCommand::CreateFunction(function) => Left(function.name.clone()),
             DdlCommand::DropFunction(id) => Right(*id),
-            DdlCommand::CreateView(view) => Left(view.name.clone()),
+            DdlCommand::CreateView(view, _) => Left(view.name.clone()),
             DdlCommand::DropView(id, _) => Right(*id),
             DdlCommand::CreateStreamingJob { stream_job, .. } => Left(stream_job.name()),
             DdlCommand::DropStreamingJob { job_id, .. } => Right(job_id.id()),
@@ -232,7 +232,7 @@ impl DdlCommand {
             | DdlCommand::CreateDatabase(_)
             | DdlCommand::CreateSchema(_)
             | DdlCommand::CreateFunction(_)
-            | DdlCommand::CreateView(_)
+            | DdlCommand::CreateView(_, _)
             | DdlCommand::CreateConnection(_)
             | DdlCommand::CommentOn(_)
             | DdlCommand::CreateSecret(_)
@@ -379,7 +379,9 @@ impl DdlController {
                 }
                 DdlCommand::CreateFunction(function) => ctrl.create_function(function).await,
                 DdlCommand::DropFunction(function_id) => ctrl.drop_function(function_id).await,
-                DdlCommand::CreateView(view) => ctrl.create_view(view).await,
+                DdlCommand::CreateView(view, dependencies) => {
+                    ctrl.create_view(view, dependencies).await
+                }
                 DdlCommand::DropView(view_id, drop_mode) => {
                     ctrl.drop_view(view_id, drop_mode).await
                 }
@@ -576,10 +578,14 @@ impl DdlController {
         .await
     }
 
-    async fn create_view(&self, view: View) -> MetaResult<NotificationVersion> {
+    async fn create_view(
+        &self,
+        view: View,
+        dependencies: HashSet<ObjectId>,
+    ) -> MetaResult<NotificationVersion> {
         self.metadata_manager
             .catalog_controller
-            .create_view(view)
+            .create_view(view, dependencies)
             .await
     }
 
@@ -749,7 +755,7 @@ impl DdlController {
         let stream_scan_fragment = table_fragments
             .fragments
             .values()
-            .filter(|f| f.fragment_type_mask & FragmentTypeFlag::StreamScan as u32 != 0)
+            .filter(|f| f.fragment_type_mask.contains(FragmentTypeFlag::StreamScan))
             .exactly_one()
             .ok()
             .with_context(|| {
@@ -1514,10 +1520,10 @@ impl DdlController {
         fragment_graph: StreamFragmentGraphProto,
     ) -> MetaResult<NotificationVersion> {
         match &mut streaming_job {
-            StreamingJob::Table(..) | StreamingJob::Source(..) => {}
-            StreamingJob::MaterializedView(..)
-            | StreamingJob::Sink(..)
-            | StreamingJob::Index(..) => {
+            StreamingJob::Table(..)
+            | StreamingJob::Source(..)
+            | StreamingJob::MaterializedView(..) => {}
+            StreamingJob::Sink(..) | StreamingJob::Index(..) => {
                 bail_not_implemented!("schema change for {}", streaming_job.job_type_str())
             }
         }
@@ -1565,6 +1571,7 @@ impl DdlController {
                 .await?;
             drop_table_connector_ctx = ctx.drop_table_connector_ctx.clone();
 
+            // Handle sinks that sink into the table.
             if let StreamingJob::Table(_, table, ..) = &streaming_job {
                 let catalogs = self
                     .metadata_manager
@@ -1997,10 +2004,10 @@ impl DdlController {
         tmp_job_id: TableId,
     ) -> MetaResult<(ReplaceStreamJobContext, StreamJobFragmentsToCreate)> {
         match &stream_job {
-            StreamingJob::Table(..) | StreamingJob::Source(..) => {}
-            StreamingJob::MaterializedView(..)
-            | StreamingJob::Sink(..)
-            | StreamingJob::Index(..) => {
+            StreamingJob::Table(..)
+            | StreamingJob::Source(..)
+            | StreamingJob::MaterializedView(..) => {}
+            StreamingJob::Sink(..) | StreamingJob::Index(..) => {
                 bail_not_implemented!("schema change for {}", stream_job.job_type_str())
             }
         }
@@ -2025,7 +2032,7 @@ impl DdlController {
 
         // handle drop table's associated source
         let mut drop_table_connector_ctx = None;
-        if drop_table_associated_source_id.is_some() {
+        if let Some(to_remove_source_id) = drop_table_associated_source_id {
             // drop table's associated source means the fragment containing the table has just one internal table (associated source's state table)
             debug_assert!(old_internal_table_ids.len() == 1);
 
@@ -2034,14 +2041,33 @@ impl DdlController {
                 // just need to remove the ref to the state table
                 to_change_streaming_job_id: id as i32,
                 to_remove_state_table_id: old_internal_table_ids[0] as i32, // asserted before
-                to_remove_source_id: drop_table_associated_source_id.unwrap(),
+                to_remove_source_id,
             });
+        } else if stream_job.is_materialized_view() {
+            // If it's ALTER MV, use `state::match` to match the internal tables, which is more complicated
+            // but more robust.
+            let old_fragments_upstreams = self
+                .metadata_manager
+                .catalog_controller
+                .upstream_fragments(old_fragments.fragment_ids())
+                .await?;
+
+            let old_state_graph =
+                state_match::Graph::from_existing(&old_fragments, &old_fragments_upstreams);
+            let new_state_graph = state_match::Graph::from_building(&fragment_graph);
+            let mapping =
+                state_match::match_graph_internal_tables(&new_state_graph, &old_state_graph)
+                    .context("incompatible altering on the streaming job states")?;
+
+            fragment_graph.fit_internal_table_ids_with_mapping(mapping);
         } else {
+            // If it's ALTER TABLE or SOURCE, use a trivial table id matching algorithm to keep the original behavior.
+            // TODO(alter-mv): this is actually a special case of ALTER MV, can we merge the two branches?
             let old_internal_tables = self
                 .metadata_manager
                 .get_table_catalog_by_ids(old_internal_table_ids)
                 .await?;
-            fragment_graph.fit_internal_table_ids(old_internal_tables)?;
+            fragment_graph.fit_internal_tables_trivial(old_internal_tables)?;
         }
 
         // 1. Resolve the edges to the downstream fragments, extend the fragment graph to a complete
@@ -2067,8 +2093,9 @@ impl DdlController {
                     job_type,
                 )?
             }
-            StreamingJobType::Table(TableJobType::SharedCdcSource) => {
-                // get the upstream fragment which should be the cdc source
+            StreamingJobType::Table(TableJobType::SharedCdcSource)
+            | StreamingJobType::MaterializedView => {
+                // CDC tables or materialized views can have upstream jobs as well.
                 let (upstream_root_fragments, upstream_actor_location) = self
                     .metadata_manager
                     .get_upstream_root_fragments(fragment_graph.dependent_table_ids())

@@ -19,6 +19,7 @@ use std::sync::Arc;
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
+use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::hash::{ActorMapping, VnodeBitmapExt, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_common::{bail, hash};
@@ -46,9 +47,7 @@ use risingwave_pb::meta::subscribe_response::Info as NotificationInfo;
 use risingwave_pb::meta::{
     FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup,
 };
-use risingwave_pb::stream_plan::{
-    PbDispatchOutputMapping, PbDispatcher, PbDispatcherType, PbFragmentTypeFlag,
-};
+use risingwave_pb::stream_plan::{PbDispatchOutputMapping, PbDispatcher, PbDispatcherType};
 use risingwave_pb::user::grant_privilege::{PbActionWithGrantOption, PbObject as PbGrantObject};
 use risingwave_pb::user::{PbAction, PbGrantPrivilege, PbUserInfo};
 use risingwave_sqlparser::ast::Statement as SqlStatement;
@@ -1041,9 +1040,9 @@ where
                 ObjectType::Sink => PbGrantObject::SinkId(oid),
                 ObjectType::View => PbGrantObject::ViewId(oid),
                 ObjectType::Function => PbGrantObject::FunctionId(oid),
-                ObjectType::Connection => unreachable!("connection is not supported yet"),
+                ObjectType::Connection => PbGrantObject::ConnectionId(oid),
                 ObjectType::Subscription => PbGrantObject::SubscriptionId(oid),
-                ObjectType::Secret => unreachable!("secret is not supported yet"),
+                ObjectType::Secret => PbGrantObject::SecretId(oid),
             };
             PbGrantPrivilege {
                 action_with_opts: vec![PbActionWithGrantOption {
@@ -1662,7 +1661,7 @@ where
 
     let mut source_fragment_ids: HashMap<SourceId, BTreeSet<FragmentId>> = HashMap::new();
     for (fragment_id, mask, stream_node) in fragments {
-        if mask & PbFragmentTypeFlag::Source as i32 == 0 {
+        if !FragmentTypeMask::from(mask).contains(FragmentTypeFlag::Source) {
             continue;
         }
         if let Some(source_id) = stream_node.to_protobuf().find_stream_source() {

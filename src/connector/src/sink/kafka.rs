@@ -85,59 +85,68 @@ pub struct RdKafkaPropertiesProducer {
     /// Allow automatic topic creation on the broker when subscribing to or assigning non-existent topics.
     #[serde(rename = "properties.allow.auto.create.topics")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub allow_auto_create_topics: Option<bool>,
 
     /// Maximum number of messages allowed on the producer queue. This queue is shared by all
     /// topics and partitions. A value of 0 disables this limit.
     #[serde(rename = "properties.queue.buffering.max.messages")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub queue_buffering_max_messages: Option<usize>,
 
     /// Maximum total message size sum allowed on the producer queue. This queue is shared by all
     /// topics and partitions. This property has higher priority than queue.buffering.max.messages.
     #[serde(rename = "properties.queue.buffering.max.kbytes")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     queue_buffering_max_kbytes: Option<usize>,
 
     /// Delay in milliseconds to wait for messages in the producer queue to accumulate before
-    /// constructing message batches (MessageSets) to transmit to brokers. A higher value allows
+    /// constructing message batches (`MessageSets`) to transmit to brokers. A higher value allows
     /// larger and more effective (less overhead, improved compression) batches of messages to
     /// accumulate at the expense of increased message delivery latency.
     #[serde(rename = "properties.queue.buffering.max.ms")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     queue_buffering_max_ms: Option<f64>,
 
     /// When set to true, the producer will ensure that messages are successfully produced exactly
     /// once and in the original produce order. The following configuration properties are adjusted
     /// automatically (if not modified by the user) when idempotence is enabled:
     /// max.in.flight.requests.per.connection=5 (must be less than or equal to 5),
-    /// retries=INT32_MAX (must be greater than 0), acks=all, queuing.strategy=fifo. Producer
+    /// `retries=INT32_MAX` (must be greater than 0), acks=all, queuing.strategy=fifo. Producer
     /// will fail if user-supplied configuration is incompatible.
     #[serde(rename = "properties.enable.idempotence")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     enable_idempotence: Option<bool>,
 
     /// How many times to retry sending a failing Message.
     #[serde(rename = "properties.message.send.max.retries")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     message_send_max_retries: Option<usize>,
 
     /// The backoff time in milliseconds before retrying a protocol request.
     #[serde(rename = "properties.retry.backoff.ms")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     retry_backoff_ms: Option<usize>,
 
-    /// Maximum number of messages batched in one MessageSet
+    /// Maximum number of messages batched in one `MessageSet`
     #[serde(rename = "properties.batch.num.messages")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     batch_num_messages: Option<usize>,
 
-    /// Maximum size (in bytes) of all messages batched in one MessageSet, including protocol
+    /// Maximum size (in bytes) of all messages batched in one `MessageSet`, including protocol
     /// framing overhead. This limit is applied after the first message has been added to the
     /// batch, regardless of the first message's size, this is to ensure that messages that exceed
     /// batch.size are produced.
     #[serde(rename = "properties.batch.size")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     batch_size: Option<usize>,
 
     /// Compression codec to use for compressing message sets.
@@ -150,6 +159,7 @@ pub struct RdKafkaPropertiesProducer {
     /// successful delivery (including retries).
     #[serde(rename = "properties.message.timeout.ms")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     message_timeout_ms: Option<usize>,
 
     /// The maximum number of unacknowledged requests the client will send on a single connection before blocking.
@@ -158,10 +168,12 @@ pub struct RdKafkaPropertiesProducer {
         default = "_default_max_in_flight_requests_per_connection"
     )]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     max_in_flight_requests_per_connection: usize,
 
     #[serde(rename = "properties.request.required.acks")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     request_required_acks: Option<i32>,
 }
 
@@ -337,22 +349,6 @@ impl Sink for KafkaSink {
     type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = AsyncTruncateLogSinkerOf<KafkaSinkWriter>;
 
-    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &[
-        "properties.allow.auto.create.topics",
-        "properties.batch.num.messages",
-        "properties.batch.size",
-        "properties.enable.idempotence",
-        "properties.max.in.flight.requests.per.connection",
-        "properties.message.max.bytes",
-        "properties.message.send.max.retries",
-        "properties.message.timeout.ms",
-        "properties.queue.buffering.max.kbytes",
-        "properties.queue.buffering.max.messages",
-        "properties.queue.buffering.max.ms",
-        "properties.request.required.acks",
-        "properties.retry.backoff.ms",
-        "properties.receive.message.max.bytes",
-    ];
     const SINK_NAME: &'static str = KAFKA_SINK;
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
@@ -440,6 +436,7 @@ mod opaque_type {
     use super::*;
     pub type KafkaSinkDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
 
+    #[define_opaque(KafkaSinkDeliveryFuture)]
     pub(super) fn map_delivery_future(future: DeliveryFuture) -> KafkaSinkDeliveryFuture {
         future.map(KafkaPayloadWriter::<'static>::map_future_result)
     }

@@ -128,12 +128,13 @@ pub struct IcebergConfig {
     /// Commit every n(>0) checkpoints, default is 10.
     #[serde(default = "default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub commit_checkpoint_interval: u64,
 
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,
 
-    /// Whether it is exactly_once, the default is not.
+    /// Whether it is `exactly_once`, the default is not.
     #[serde(default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub is_exactly_once: Option<bool>,
@@ -146,15 +147,18 @@ pub struct IcebergConfig {
 
     /// Whether to enable iceberg compaction.
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    #[with_option(allow_alter_on_fly)]
     pub enable_compaction: bool,
 
     /// The interval of iceberg compaction
     #[serde(default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub compaction_interval_sec: Option<u64>,
 
     /// Whether to enable iceberg expired snapshots.
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    #[with_option(allow_alter_on_fly)]
     pub enable_snapshot_expiration: bool,
 }
 
@@ -213,7 +217,7 @@ impl IcebergConfig {
                     && k != &"catalog.type"
                     && k != &"catalog.name"
             })
-            .map(|(k, v)| (k[8..].to_string(), v.to_string()))
+            .map(|(k, v)| (k[8..].to_string(), v.clone()))
             .collect();
 
         if config.commit_checkpoint_interval == 0 {
@@ -488,12 +492,6 @@ impl Sink for IcebergSink {
     type Coordinator = IcebergSinkCommitter;
     type LogSinker = CoordinatedLogSinker<IcebergSinkWriter>;
 
-    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &[
-        "commit_checkpoint_interval",
-        "enable_compaction",
-        "compaction_interval_sec",
-        "enable_snapshot_expiration",
-    ];
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
     async fn validate(&self) -> Result<()> {

@@ -405,10 +405,10 @@ impl DiagnoseCommand {
         ) {
             if heap.len() < top_k {
                 heap.push(Reverse(e));
-            } else if let Some(mut p) = heap.peek_mut() {
-                if e.delete_ratio > p.0.delete_ratio {
-                    *p = Reverse(e);
-                }
+            } else if let Some(mut p) = heap.peek_mut()
+                && e.delete_ratio > p.0.delete_ratio
+            {
+                *p = Reverse(e);
             }
         }
 

@@ -187,7 +187,8 @@ message Sink {
   repeated plan_common.ColumnCatalog columns = 5;
   // Primary key derived from the SQL by the frontend.
   repeated common.ColumnOrder plan_pk = 6;
-  repeated uint32 dependent_relations = 7 [deprecated = true];
+  reserved 7;
+  reserved "dependent_relations";
   repeated int32 distribution_key = 8;
   // User-defined primary key indices for the upsert sink.
   repeated int32 downstream_pk = 9;
@@ -390,8 +391,8 @@ message Table {
   string name = 4;
   repeated plan_common.ColumnCatalog columns = 5;
   repeated common.ColumnOrder pk = 6;
-  // For cdc table created from a cdc source, here records the source id.
-  repeated uint32 dependent_relations = 8; // TODO(rc): deprecate this by passing dependencies via `Request` message
+  reserved 8;
+  reserved "dependent_relations";
   oneof optional_associated_source_id {
     uint32 associated_source_id = 9;
   }
@@ -517,7 +518,8 @@ message View {
   uint32 owner = 5;
   map<string, string> properties = 6;
   string sql = 7;
-  repeated uint32 dependent_relations = 8;
+  reserved 8;
+  reserved "dependent_relations";
   // User-specified column names.
   repeated plan_common.Field columns = 9;
 }

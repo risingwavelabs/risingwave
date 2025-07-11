@@ -86,8 +86,6 @@ pub struct TableCatalog {
 
     pub name: String,
 
-    pub dependent_relations: Vec<TableId>,
-
     /// All columns in this table.
     pub columns: Vec<ColumnCatalog>,
 
@@ -544,9 +542,6 @@ impl TableCatalog {
                 .collect(),
             pk: self.pk.iter().map(|o| o.to_protobuf()).collect(),
             stream_key: self.stream_key.iter().map(|x| *x as _).collect(),
-            dependent_relations: (self.dependent_relations.iter())
-                .map(|t| t.table_id)
-                .collect(),
             optional_associated_source_id: self
                 .associated_source_id
                 .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
@@ -783,11 +778,6 @@ impl From<PbTable> for TableCatalog {
             created_at_cluster_version: tb.created_at_cluster_version.clone(),
             initialized_at_cluster_version: tb.initialized_at_cluster_version.clone(),
             retention_seconds: tb.retention_seconds,
-            dependent_relations: tb
-                .dependent_relations
-                .into_iter()
-                .map(TableId::from)
-                .collect_vec(),
             cdc_table_id: tb.cdc_table_id,
             vnode_count,
             webhook_info: tb.webhook_info,
@@ -848,7 +838,6 @@ mod tests {
             ],
             pk: vec![ColumnOrder::new(0, OrderType::ascending()).to_protobuf()],
             stream_key: vec![0],
-            dependent_relations: vec![114514],
             distribution_key: vec![0],
             optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)
                 .into(),
@@ -947,7 +936,6 @@ mod tests {
                 incoming_sinks: vec![],
                 created_at_cluster_version: None,
                 initialized_at_cluster_version: None,
-                dependent_relations: vec![114514.into()],
                 version_column_index: None,
                 cdc_table_id: None,
                 vnode_count: VnodeCount::set(233),

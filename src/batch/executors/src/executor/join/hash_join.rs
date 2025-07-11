@@ -1045,21 +1045,20 @@ impl<K: HashKey> HashJoinExecutor<K> {
             {
                 shutdown_rx.check()?;
                 if !ANTI_JOIN {
-                    if hash_map.contains_key(probe_key) {
-                        if let Some(spilled) = Self::append_one_probe_row(
+                    if hash_map.contains_key(probe_key)
+                        && let Some(spilled) = Self::append_one_probe_row(
                             &mut chunk_builder,
                             &probe_chunk,
                             probe_row_id,
-                        ) {
-                            yield spilled
-                        }
-                    }
-                } else if hash_map.get(probe_key).is_none() {
-                    if let Some(spilled) =
-                        Self::append_one_probe_row(&mut chunk_builder, &probe_chunk, probe_row_id)
+                        )
                     {
                         yield spilled
                     }
+                } else if hash_map.get(probe_key).is_none()
+                    && let Some(spilled) =
+                        Self::append_one_probe_row(&mut chunk_builder, &probe_chunk, probe_row_id)
+                {
+                    yield spilled
                 }
             }
         }
@@ -1069,12 +1068,12 @@ impl<K: HashKey> HashJoinExecutor<K> {
     }
 
     /// High-level idea:
-    /// 1. For each probe_row, append candidate rows to buffer.
-    ///    Candidate rows: Those satisfying equi_predicate (==).
+    /// 1. For each `probe_row`, append candidate rows to buffer.
+    ///    Candidate rows: Those satisfying `equi_predicate` (==).
     /// 2. If buffer becomes full, process it.
-    ///    Apply non_equi_join predicates e.g. `>=`, `<=` to filter rows.
-    ///    Track if probe_row is matched to avoid duplicates.
-    /// 3. If we matched probe_row in spilled chunk,
+    ///    Apply `non_equi_join` predicates e.g. `>=`, `<=` to filter rows.
+    ///    Track if `probe_row` is matched to avoid duplicates.
+    /// 3. If we matched `probe_row` in spilled chunk,
     ///    stop appending its candidate rows,
     ///    to avoid matching it again in next spilled chunk.
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
@@ -3267,8 +3266,8 @@ mod tests {
     }
 
     /// Tests handling of edge case:
-    /// Match is found for a probe_row,
-    /// but there are still candidate rows in the iterator for that probe_row.
+    /// Match is found for a `probe_row`,
+    /// but there are still candidate rows in the iterator for that `probe_row`.
     /// These should not be buffered or we will have duplicate rows in output.
     #[tokio::test]
     async fn test_left_semi_join_with_non_equi_condition_duplicates() {

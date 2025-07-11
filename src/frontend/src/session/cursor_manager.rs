@@ -1004,7 +1004,7 @@ impl SubscriptionCursor {
             query_mode,
             schema,
             stmt_type: StatementType::SELECT,
-            dependent_relations: table_catalog.dependent_relations.clone(),
+            dependent_relations: vec![],
             read_storage_tables: HashSet::from_iter([table_catalog.id]),
         })
     }
