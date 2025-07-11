@@ -475,15 +475,18 @@ impl IcebergCompactionManager {
         initial_timestamp: i64,
         task_id: u64,
     ) -> MetaResult<()> {
-        const POLL_INTERVAL_SECS: u64 = 10; // Poll every 10 seconds
-        const MAX_WAIT_TIME_SECS: u64 = 600; // Wait up to 10 minutes
+        const INITIAL_POLL_INTERVAL_SECS: u64 = 2; // Start with 2 second for quick tasks
+        const MAX_POLL_INTERVAL_SECS: u64 = 60; // Cap at 60 seconds for long-running tasks
+        const MAX_WAIT_TIME_SECS: u64 = 1800; // Wait up to 30 minutes
+        const BACKOFF_MULTIPLIER: f64 = 1.5; // Exponential backoff multiplier
 
         let mut elapsed_time = 0;
-        let poll_interval = std::time::Duration::from_secs(POLL_INTERVAL_SECS);
+        let mut current_interval_secs = INITIAL_POLL_INTERVAL_SECS;
 
         while elapsed_time < MAX_WAIT_TIME_SECS {
+            let poll_interval = std::time::Duration::from_secs(current_interval_secs);
             tokio::time::sleep(poll_interval).await;
-            elapsed_time += POLL_INTERVAL_SECS;
+            elapsed_time += current_interval_secs;
 
             // Load the current table state
             let current_table = self.load_iceberg_table(sink_id).await?;
@@ -515,6 +518,13 @@ impl IcebergCompactionManager {
                     return Ok(());
                 }
             }
+
+            // Exponential backoff: increase the polling interval for the next iteration
+            // but cap it at the maximum interval
+            current_interval_secs = std::cmp::min(
+                MAX_POLL_INTERVAL_SECS,
+                ((current_interval_secs as f64) * BACKOFF_MULTIPLIER) as u64,
+            );
         }
 
         Err(anyhow!(
