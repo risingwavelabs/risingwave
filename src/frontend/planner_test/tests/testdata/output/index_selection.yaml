@@ -845,7 +845,7 @@
       └─BatchExchange { order: [], dist: Single }
         └─BatchLimit { limit: 10, offset: 0 }
           └─BatchScan { table: idx3, columns: [idx3.a, idx3.b, idx3.c, idx3.d], scan_ranges: [idx3.a = Int32(2) AND idx3.c = Int32(1) AND idx3.d = Int32(3)], limit: 10, distribution: UpstreamHashShard(idx3.a) }
-- name: topn index selection + limit pushdown with point get
+- name: topn index selection + limit pushdown with point get + descending order point get
   sql: |
     create table t1 (a int, b int, c int);
     create index idx1 on t1(a asc, b);
@@ -856,3 +856,16 @@
       └─BatchExchange { order: [], dist: Single }
         └─BatchLimit { limit: 10, offset: 0 }
           └─BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], scan_ranges: [idx1.a = Int32(1)], limit: 10, distribution: UpstreamHashShard(idx1.a) }
+- name: topn index selection + limit pushdown with multi point get + various order combination point get
+  sql: |
+    create table t1 (a int, b int, c int);
+    create index idx1 on t1(a desc nulls first, c desc nulls last);
+    create index idx2 on t1(a desc nulls first, c asc nulls last, b desc nulls first);
+    create index idx3 on t1(a desc nulls last, c asc nulls first, b desc nulls last);
+    select * from t1 where c = 2 and a = 2 order by b desc nulls last limit 10;
+  batch_plan: |-
+    BatchSort { order: [idx3.b DESC NULLS LAST] }
+    └─BatchTopN { order: [idx3.a DESC NULLS LAST, idx3.c ASC NULLS FIRST, idx3.b DESC NULLS LAST], limit: 10, offset: 0 }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchLimit { limit: 10, offset: 0 }
+          └─BatchScan { table: idx3, columns: [idx3.a, idx3.b, idx3.c], scan_ranges: [idx3.a = Int32(2) AND idx3.c = Int32(2)], limit: 10, distribution: UpstreamHashShard(idx3.a) }

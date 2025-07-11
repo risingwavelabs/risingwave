@@ -60,14 +60,22 @@ impl TopNOnIndexRule {
         let prefix = input_refs
             .into_iter()
             .flat_map(|input_ref| {
-                vec![
+                [
                     ColumnOrder {
                         column_index: input_ref.index,
-                        order_type: OrderType::ascending(),
+                        order_type: OrderType::ascending_nulls_first(),
                     },
                     ColumnOrder {
                         column_index: input_ref.index,
-                        order_type: OrderType::descending(),
+                        order_type: OrderType::ascending_nulls_last(),
+                    },
+                    ColumnOrder {
+                        column_index: input_ref.index,
+                        order_type: OrderType::descending_nulls_first(),
+                    },
+                    ColumnOrder {
+                        column_index: input_ref.index,
+                        order_type: OrderType::descending_nulls_last(),
                     },
                 ]
             })

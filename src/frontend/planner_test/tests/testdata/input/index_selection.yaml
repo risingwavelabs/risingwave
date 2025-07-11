@@ -505,10 +505,19 @@
     select * from t1 where c = 1 and a = 2 and d = 3 order by b desc limit 10
   expected_outputs:
     - batch_plan
-- name: topn index selection + limit pushdown with point get
+- name: topn index selection + limit pushdown with point get + descending order point get
   sql: |
     create table t1 (a int, b int, c int);
     create index idx1 on t1(a asc, b);
     select * from t1 where a = 1 order by b limit 10;
+  expected_outputs:
+    - batch_plan
+- name: topn index selection + limit pushdown with multi point get + various order combination point get
+  sql: |
+    create table t1 (a int, b int, c int);
+    create index idx1 on t1(a desc nulls first, c desc nulls last);
+    create index idx2 on t1(a desc nulls first, c asc nulls last, b desc nulls first);
+    create index idx3 on t1(a desc nulls last, c asc nulls first, b desc nulls last);
+    select * from t1 where c = 2 and a = 2 order by b desc nulls last limit 10;
   expected_outputs:
     - batch_plan
