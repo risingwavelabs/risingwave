@@ -119,6 +119,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
 
         let mut actor_snapshot_splits = vec![];
         // Currently we hard code the split column to be the first column of primary keys.
+        // TODO(zw): configurable split columns
         let snapshot_split_column_index = pk_indices[0];
         let cdc_table_snapshot_split_column =
             vec![self.external_table.schema().fields[snapshot_split_column_index].clone()];
