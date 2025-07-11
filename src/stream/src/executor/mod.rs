@@ -129,6 +129,7 @@ pub use expand::ExpandExecutor;
 pub use filter::FilterExecutor;
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
+pub use join::row::{CachedJoinRow, CpuEncoding, JoinEncoding, MemoryEncoding};
 pub use join::{AsOfDesc, AsOfJoinType, JoinType};
 pub use lookup::*;
 pub use lookup_union::LookupUnionExecutor;

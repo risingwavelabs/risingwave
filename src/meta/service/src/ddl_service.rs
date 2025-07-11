@@ -1005,19 +1005,34 @@ impl DdlService for DdlServiceImpl {
                 let original_columns: HashSet<(String, DataType)> =
                     HashSet::from_iter(table.columns.iter().filter_map(|col| {
                         let col = ColumnCatalog::from(col.clone());
-                        let data_type = col.data_type().clone();
-                        if col.is_generated() {
+                        if col.is_generated() || col.is_hidden() {
                             None
                         } else {
-                            Some((col.column_desc.name, data_type))
+                            Some((col.column_desc.name.clone(), col.data_type().clone()))
                         }
                     }));
-                let new_columns: HashSet<(String, DataType)> =
-                    HashSet::from_iter(table_change.columns.iter().map(|col| {
+
+                let mut new_columns: HashSet<(String, DataType)> =
+                    HashSet::from_iter(table_change.columns.iter().filter_map(|col| {
                         let col = ColumnCatalog::from(col.clone());
-                        let data_type = col.data_type().clone();
-                        (col.column_desc.name, data_type)
+                        if col.is_generated() || col.is_hidden() {
+                            None
+                        } else {
+                            Some((col.column_desc.name.clone(), col.data_type().clone()))
+                        }
                     }));
+
+                // For subset/superset check, we need to add visible connector additional columns defined by INCLUDE in the original table to new_columns
+                // This includes both _rw columns and user-defined INCLUDE columns (e.g., INCLUDE TIMESTAMP AS xxx)
+                for col in &table.columns {
+                    let col = ColumnCatalog::from(col.clone());
+                    if col.is_connector_additional_column()
+                        && !col.is_hidden()
+                        && !col.is_generated()
+                    {
+                        new_columns.insert((col.column_desc.name.clone(), col.data_type().clone()));
+                    }
+                }
 
                 if !(original_columns.is_subset(&new_columns)
                     || original_columns.is_superset(&new_columns))
@@ -1028,9 +1043,9 @@ impl DdlService for DdlServiceImpl {
                                     upstraem_ddl = table_change.upstream_ddl,
                                     original_columns = ?original_columns,
                                     new_columns = ?new_columns,
-                                    "New columns should be a subset or superset of the original columns, since only `ADD COLUMN` and `DROP COLUMN` is supported");
+                                    "New columns should be a subset or superset of the original columns (including hidden columns), since only `ADD COLUMN` and `DROP COLUMN` is supported");
                     return Err(Status::invalid_argument(
-                        "New columns should be a subset or superset of the original columns",
+                        "New columns should be a subset or superset of the original columns (including hidden columns)",
                     ));
                 }
                 // skip the schema change if there is no change to original columns
