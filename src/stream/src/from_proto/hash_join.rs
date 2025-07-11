@@ -21,13 +21,13 @@ use risingwave_expr::expr::{
     InputRefExpression, NonStrictExpression, build_func_non_strict, build_non_strict_from_prost,
 };
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
-use risingwave_pb::stream_plan::HashJoinNode;
+use risingwave_pb::stream_plan::{HashJoinNode, JoinEncodingType as JoinEncodingTypeProto};
 
 use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::executor::hash_join::*;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{ActorContextRef, JoinType};
+use crate::executor::{ActorContextRef, CpuEncoding, JoinType, MemoryEncoding};
 use crate::task::AtomicU64Ref;
 
 pub struct HashJoinExecutorBuilder;
@@ -160,6 +160,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                 .config()
                 .developer
                 .high_join_amplification_threshold,
+            join_encoding_type: node.get_join_encoding_type()?,
         };
 
         let exec = args.dispatch()?;
@@ -189,6 +190,7 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     join_key_data_types: Vec<DataType>,
     chunk_size: usize,
     high_join_amplification_threshold: usize,
+    join_encoding_type: JoinEncodingTypeProto,
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
@@ -197,43 +199,57 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         /// This macro helps to fill the const generic type parameter.
         macro_rules! build {
-            ($join_type:ident) => {
-                Ok(HashJoinExecutor::<K, S, { JoinType::$join_type }>::new(
-                    self.ctx,
-                    self.info,
-                    self.source_l,
-                    self.source_r,
-                    self.params_l,
-                    self.params_r,
-                    self.null_safe,
-                    self.output_indices,
-                    self.cond,
-                    self.inequality_pairs,
-                    self.state_table_l,
-                    self.degree_state_table_l,
-                    self.state_table_r,
-                    self.degree_state_table_r,
-                    self.lru_manager,
-                    self.is_append_only,
-                    self.metrics,
-                    self.chunk_size,
-                    self.high_join_amplification_threshold,
+            ($join_type:ident, $join_encoding:ident) => {
+                Ok(
+                    HashJoinExecutor::<K, S, { JoinType::$join_type }, $join_encoding>::new(
+                        self.ctx,
+                        self.info,
+                        self.source_l,
+                        self.source_r,
+                        self.params_l,
+                        self.params_r,
+                        self.null_safe,
+                        self.output_indices,
+                        self.cond,
+                        self.inequality_pairs,
+                        self.state_table_l,
+                        self.degree_state_table_l,
+                        self.state_table_r,
+                        self.degree_state_table_r,
+                        self.lru_manager,
+                        self.is_append_only,
+                        self.metrics,
+                        self.chunk_size,
+                        self.high_join_amplification_threshold,
+                    )
+                    .boxed(),
                 )
-                .boxed())
             };
         }
-        match self.join_type_proto {
-            JoinTypeProto::AsofInner
-            | JoinTypeProto::AsofLeftOuter
-            | JoinTypeProto::Unspecified => unreachable!(),
-            JoinTypeProto::Inner => build!(Inner),
-            JoinTypeProto::LeftOuter => build!(LeftOuter),
-            JoinTypeProto::RightOuter => build!(RightOuter),
-            JoinTypeProto::FullOuter => build!(FullOuter),
-            JoinTypeProto::LeftSemi => build!(LeftSemi),
-            JoinTypeProto::LeftAnti => build!(LeftAnti),
-            JoinTypeProto::RightSemi => build!(RightSemi),
-            JoinTypeProto::RightAnti => build!(RightAnti),
+
+        macro_rules! build_match {
+            ($($join_type:ident),*) => {
+                match (self.join_type_proto, self.join_encoding_type) {
+                    (JoinTypeProto::AsofInner, _)
+                    | (JoinTypeProto::AsofLeftOuter, _)
+                    | (JoinTypeProto::Unspecified, _)
+                    | (_, JoinEncodingTypeProto::Unspecified ) => unreachable!(),
+                    $(
+                        (JoinTypeProto::$join_type, JoinEncodingTypeProto::MemoryOptimized) => build!($join_type, MemoryEncoding),
+                        (JoinTypeProto::$join_type, JoinEncodingTypeProto::CpuOptimized) => build!($join_type, CpuEncoding),
+                    )*
+                }
+            };
+        }
+        build_match! {
+            Inner,
+            LeftOuter,
+            RightOuter,
+            FullOuter,
+            LeftSemi,
+            LeftAnti,
+            RightSemi,
+            RightAnti
         }
     }
 

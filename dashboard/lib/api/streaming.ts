@@ -20,6 +20,7 @@ import _ from "lodash"
 import sortBy from "lodash/sortBy"
 import {
   Database,
+  Function,
   Index,
   Schema,
   Sink,
@@ -106,10 +107,6 @@ export class StreamingJob {
   }
 }
 
-export interface StreamingRelation extends Relation {
-  dependentRelations: number[]
-}
-
 export function relationType(x: Relation) {
   if ((x as Table).tableType !== undefined) {
     return (x as Table).tableType
@@ -119,6 +116,8 @@ export function relationType(x: Relation) {
     return "SOURCE"
   } else if ((x as Subscription).dependentTableId !== undefined) {
     return "SUBSCRIPTION"
+  } else if ((x as Function).language !== undefined) {
+    return "FUNCTION"
   } else {
     return "UNKNOWN"
   }
@@ -129,7 +128,7 @@ export function relationTypeTitleCase(x: Relation) {
   return _.startCase(_.toLower(relationType(x)))
 }
 
-export function relationIsStreamingJob(x: Relation): x is StreamingRelation {
+export function relationIsStreamingJob(x: Relation) {
   const type = relationType(x)
   return type !== "UNKNOWN" && type !== "SOURCE" && type !== "INTERNAL"
 }
@@ -231,6 +230,14 @@ export async function getViews() {
   let views: View[] = (await api.get("/views")).map(View.fromJSON)
   views = sortBy(views, (x) => x.id)
   return views
+}
+
+export async function getFunctions() {
+  let functions: Function[] = (await api.get("/functions")).map(
+    Function.fromJSON
+  )
+  functions = sortBy(functions, (x) => x.id)
+  return functions
 }
 
 export async function getSubscriptions() {

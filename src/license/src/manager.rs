@@ -261,9 +261,9 @@ mod tests {
     use expect_test::expect;
 
     use super::*;
-    use crate::{LicenseKey, TEST_PAID_LICENSE_KEY_CONTENT};
+    use crate::{LicenseKey, PROD_ALL_4_CORE_LICENSE_KEY_CONTENT, TEST_ALL_LICENSE_KEY_CONTENT};
 
-    fn do_test(key: &str, expect: expect_test::Expect) {
+    fn do_test(key: &str, expect: expect_test::Expect) -> LicenseManager {
         let manager = LicenseManager::new();
         manager.refresh(LicenseKey(key));
 
@@ -271,19 +271,39 @@ mod tests {
             Ok(license) => expect.assert_debug_eq(&license),
             Err(error) => expect.assert_eq(&error.to_report_string()),
         }
+
+        manager
     }
 
     #[test]
-    fn test_paid_license_key() {
+    fn test_all_license_key() {
         do_test(
-            TEST_PAID_LICENSE_KEY_CONTENT,
+            TEST_ALL_LICENSE_KEY_CONTENT,
             expect![[r#"
                 License {
-                    sub: "rw-test",
+                    sub: "rw-test-all",
                     iss: Test,
-                    tier: AllAsOf2_5,
+                    tier: All,
                     cpu_core_limit: None,
-                    exp: 9999999999,
+                    exp: 10000627200,
+                }
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_prod_all_4_core_license_key() {
+        do_test(
+            PROD_ALL_4_CORE_LICENSE_KEY_CONTENT,
+            expect![[r#"
+                License {
+                    sub: "rw-default-all-4-core",
+                    iss: Prod,
+                    tier: All,
+                    cpu_core_limit: Some(
+                        4,
+                    ),
+                    exp: 10000627200,
                 }
             "#]],
         );
@@ -323,6 +343,49 @@ mod tests {
                     exp: 18446744073709551615,
                 }
             "#]],
+        );
+    }
+
+    #[test]
+    fn test_custom_tier_license_key() {
+        const KEY: &str = "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
+          eyJzdWIiOiJydy11bml0LXRlc3QiLCJpc3MiOiJ0ZXN0LnJpc2luZ3dhdmUuY29tIiwiZXhwIjoxMDAwMDYyNzIwMCwiaWF0IjoxNzUxODY5OTI3LCJ0aWVyIjp7Im5hbWUiOiJzZWNyZXQtb25seSIsImZlYXR1cmVzIjpbIlNlY3JldE1hbmFnZW1lbnQiXX19.\
+          iZKNyAHxz1l24Qh4F9wauuQEtDPLAeOmW2m_ttlew2ENmP_XcGWCx_O8r50NXRDaKv66z-ibteWVL5XOUqaVgJw9EnCyfVuFNoKtFQu18Vt0l52Yw2zNh3iHNQFKwHuCUki5FlOHw-K57a5f414-gzfwAwQkO1bAYoyAFhtoX6QQ2jdbxctFg0NxTQqpjnP-h0k2myZ_IhxA8fKrQIAqBj5Y8tGljuxjTLJpoK7X0ESXNh7bhA8njEf2Hm4QCymI1uo8OYRaR1Siw87r0aZykw9wW15Q8VK58VxIQLS7b7gQOmDToBjJt9yIF3MT6YMfqMX_l3Dtn9bOS_htVd1bjQ";
+
+        let manager = do_test(
+            KEY,
+            expect![[r#"
+                License {
+                    sub: "rw-unit-test",
+                    iss: Test,
+                    tier: Custom {
+                        name: "secret-only",
+                        features: [
+                            Feature(
+                                SecretManagement,
+                            ),
+                        ],
+                    },
+                    cpu_core_limit: None,
+                    exp: 10000627200,
+                }
+            "#]],
+        );
+
+        let tier = manager.license().unwrap().tier;
+        assert_eq!(
+            tier.available_features().collect::<Vec<_>>(),
+            vec![Feature::SecretManagement]
+        );
+        assert!(
+            Feature::SecretManagement
+                .check_available_with(&manager)
+                .is_ok()
+        );
+        assert!(
+            Feature::BigQuerySink
+                .check_available_with(&manager)
+                .is_err()
         );
     }
 

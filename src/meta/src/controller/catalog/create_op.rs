@@ -415,7 +415,11 @@ impl CatalogController {
         Ok(version)
     }
 
-    pub async fn create_view(&self, mut pb_view: PbView) -> MetaResult<NotificationVersion> {
+    pub async fn create_view(
+        &self,
+        mut pb_view: PbView,
+        dependencies: HashSet<ObjectId>,
+    ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let owner_id = pb_view.owner as _;
         let txn = inner.db.begin().await?;
@@ -442,11 +446,9 @@ impl CatalogController {
         let view: view::ActiveModel = pb_view.clone().into();
         View::insert(view).exec(&txn).await?;
 
-        // todo: change `dependent_relations` to `dependent_objects`, which should includes connection and function as well.
-        // todo: shall we need to check existence of them Or let database handle it by FOREIGN KEY constraint.
-        for obj_id in &pb_view.dependent_relations {
+        for obj_id in dependencies {
             ObjectDependency::insert(object_dependency::ActiveModel {
-                oid: Set(*obj_id as _),
+                oid: Set(obj_id),
                 used_by: Set(view_obj.oid),
                 ..Default::default()
             })
