@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::iter;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use await_tree::{InstrumentAwait, span};
@@ -48,6 +50,7 @@ use crate::model::{
     ActorId, FragmentDownstreamRelation, FragmentId, FragmentNewNoShuffle, FragmentReplaceUpstream,
     StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
 };
+use crate::stream::cdc::assign_cdc_table_snapshot_splits;
 use crate::stream::{SourceChange, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
@@ -462,6 +465,12 @@ impl GlobalStreamManager {
                 .await?,
         );
 
+        let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits(
+            iter::once(stream_job_fragments.deref()),
+            self.env.meta_store_ref(),
+        )
+        .await?;
+
         let source_change = SourceChange::CreateJobFinished {
             finished_backfill_fragments: stream_job_fragments.source_backfill_fragments()?,
         };
@@ -476,6 +485,7 @@ impl GlobalStreamManager {
             job_type,
             create_type,
             fragment_backfill_ordering,
+            cdc_table_snapshot_split_assignment,
         };
 
         let job_type = if let Some(snapshot_backfill_info) = snapshot_backfill_info {
