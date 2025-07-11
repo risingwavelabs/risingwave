@@ -21,3 +21,12 @@ macro_rules! enable_jemalloc {
         static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
     };
 }
+
+#[macro_export]
+macro_rules! enable_mimalloc {
+    () => {
+        #[cfg(unix)]
+        #[global_allocator]
+        static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+    };
+}

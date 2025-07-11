@@ -34,7 +34,7 @@ use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString, IntoStaticStr};
 use tracing::Level;
 
-risingwave_common::enable_jemalloc!();
+risingwave_common::enable_mimalloc!();
 
 const BINARY_NAME: &str = "risingwave";
 const VERSION: &str = {

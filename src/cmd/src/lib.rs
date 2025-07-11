@@ -23,7 +23,7 @@ use risingwave_rt::{LoggerSettings, init_risingwave_logger, main_okk};
 #[macro_export]
 macro_rules! main {
     ($component:ident) => {
-        risingwave_common::enable_jemalloc!();
+        risingwave_common::enable_mimalloc!();
 
         fn main() {
             let opts = clap::Parser::parse();

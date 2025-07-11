@@ -39,6 +39,10 @@ clap = { workspace = true }
 console = "0.15"
 const-str = "0.6"
 home = "0.5"
+# tikv-jemallocator = { workspace = true, features = [
+#     "unprefixed_malloc_on_supported_platforms",
+# ] }
+mimalloc = { workspace = true }
 risingwave_batch_executors = { workspace = true }
 risingwave_cmd = { workspace = true }
 risingwave_common = { workspace = true }
@@ -54,9 +58,6 @@ risingwave_rt = { workspace = true }
 shell-words = "1.1.0"
 strum = "0.27"
 strum_macros = "0.27"
-tikv-jemallocator = { workspace = true, features = [
-    "unprefixed_malloc_on_supported_platforms",
-] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",

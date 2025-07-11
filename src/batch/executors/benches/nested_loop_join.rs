@@ -16,13 +16,13 @@ pub mod utils;
 use criterion::{Criterion, criterion_group, criterion_main};
 use risingwave_batch::task::ShutdownToken;
 use risingwave_batch_executors::executor::{BoxedExecutor, JoinType, NestedLoopJoinExecutor};
-use risingwave_common::enable_jemalloc;
+use risingwave_common::enable_mimalloc;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::build_from_pretty;
 use utils::{bench_join, create_input};
 
-enable_jemalloc!();
+enable_mimalloc!();
 
 fn create_nested_loop_join_executor(
     join_type: JoinType,

@@ -16,12 +16,12 @@ pub mod utils;
 
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use risingwave_batch_executors::{BoxedExecutor, LimitExecutor};
-use risingwave_common::enable_jemalloc;
+use risingwave_common::enable_mimalloc;
 use risingwave_common::types::DataType;
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};
 
-enable_jemalloc!();
+enable_mimalloc!();
 
 fn create_limit_executor(
     chunk_size: usize,
