@@ -13,12 +13,14 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_pb::catalog::connection::Info as ConnectionInfo;
+use risingwave_pb::catalog::connection_params::ConnectionType;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::error::Result;
+use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
 
 pub async fn handle_drop_connection(
@@ -36,7 +38,7 @@ pub async fn handle_drop_connection(
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let connection_id = {
+    let (connection_id, is_iceberg_connection) = {
         let reader = session.env().catalog_reader().read_guard();
         let (connection, schema_name) =
             match reader.get_connection_by_name(db_name, schema_path, connection_name.as_str()) {
@@ -56,8 +58,25 @@ pub async fn handle_drop_connection(
             };
         session.check_privilege_for_drop_alter(schema_name, &**connection)?;
 
-        connection.id
+        // Check if this is an Iceberg connection
+        let is_iceberg = match &connection.info {
+            ConnectionInfo::ConnectionParams(params) => {
+                params.connection_type == ConnectionType::Iceberg as i32
+            }
+            _ => false,
+        };
+
+        (connection.id, is_iceberg)
     };
+
+    // Ban DROP CASCADE for Iceberg connections
+    if is_iceberg_connection && cascade {
+        return Err(ErrorCode::NotSupported(
+            "DROP CONNECTION CASCADE is not supported for Iceberg connections".to_owned(),
+            "Please drop dependent objects manually before dropping the Iceberg connection, or use DROP CONNECTION without CASCADE".to_owned(),
+        )
+        .into());
+    }
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
