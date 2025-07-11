@@ -1802,6 +1802,7 @@ impl ScaleController {
             }
 
             for (fragment_id, fragment) in fragments {
+                // TODO(zw): CRITICAL bug. Should keep parallelism unchanged but reschedule actors.
                 // StreamCdcScan's parallelism is determined by CdcScanOptions::backfill_parallelism.
                 if FragmentTypeMask::from(fragment.fragment_type_mask)
                     .contains(FragmentTypeFlag::StreamCdcScan)
