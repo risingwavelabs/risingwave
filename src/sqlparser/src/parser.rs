@@ -356,6 +356,7 @@ impl Parser<'_> {
                 Keyword::WAIT => Ok(Statement::Wait),
                 Keyword::RECOVER => Ok(Statement::Recover),
                 Keyword::USE => Ok(self.parse_use()?),
+                Keyword::COMPACT => Ok(self.parse_compact()?),
                 _ => self.expected_at(checkpoint, "statement"),
             },
             Token::LParen => {
@@ -376,6 +377,12 @@ impl Parser<'_> {
         let table_name = self.parse_object_name()?;
 
         Ok(Statement::Analyze { table_name })
+    }
+
+    pub fn parse_compact(&mut self) -> ModalResult<Statement> {
+        let table_name = self.parse_object_name()?;
+
+        Ok(Statement::Compact { table_name })
     }
 
     /// Tries to parse a wildcard expression. If it is not a wildcard, parses an expression.
@@ -6049,5 +6056,41 @@ mod tests {
                 Expr::Value(Value::Number("-9223372036854775808".to_owned()))
             )
         });
+    }
+
+    #[test]
+    fn test_parse_compact_statement() {
+        // Test simple table name
+        let sql = "COMPACT table_name";
+        let result = Parser::parse_sql(sql).unwrap();
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            Statement::Compact { table_name } => {
+                assert_eq!(table_name.to_string(), "table_name");
+            }
+            _ => panic!("Expected COMPACT statement"),
+        }
+
+        // Test schema-qualified table name
+        let sql = "COMPACT schema.table_name";
+        let result = Parser::parse_sql(sql).unwrap();
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            Statement::Compact { table_name } => {
+                assert_eq!(table_name.to_string(), "schema.table_name");
+            }
+            _ => panic!("Expected COMPACT statement"),
+        }
+
+        // Test fully-qualified table name
+        let sql = "COMPACT database.schema.table_name";
+        let result = Parser::parse_sql(sql).unwrap();
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            Statement::Compact { table_name } => {
+                assert_eq!(table_name.to_string(), "database.schema.table_name");
+            }
+            _ => panic!("Expected COMPACT statement"),
+        }
     }
 }

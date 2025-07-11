@@ -117,6 +117,7 @@ pub enum StatementType {
     USE,
     PREPARE,
     DEALLOCATE,
+    COMPACT,
 }
 
 impl std::fmt::Display for StatementType {
@@ -327,6 +328,7 @@ impl StatementType {
             Statement::Flush => Ok(StatementType::FLUSH),
             Statement::Wait => Ok(StatementType::WAIT),
             Statement::Use { .. } => Ok(StatementType::USE),
+            Statement::Compact { .. } => Ok(StatementType::COMPACT),
             _ => Err("unsupported statement type".to_owned()),
         }
     }

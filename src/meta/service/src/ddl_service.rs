@@ -22,7 +22,7 @@ use replace_job_plan::{ReplaceSource, ReplaceTable};
 use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkId;
-use risingwave_meta::manager::{EventLogManagerRef, MetadataManager};
+use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
 use risingwave_meta::model::TableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
 use risingwave_meta::stream::{JobParallelismTarget, JobRescheduleTarget, JobResourceGroupTarget};
@@ -57,6 +57,7 @@ pub struct DdlServiceImpl {
     sink_manager: SinkCoordinatorManager,
     ddl_controller: DdlController,
     meta_metrics: Arc<MetaMetrics>,
+    iceberg_compaction_manager: iceberg_compaction::IcebergCompactionManagerRef,
 }
 
 impl DdlServiceImpl {
@@ -69,6 +70,7 @@ impl DdlServiceImpl {
         barrier_manager: BarrierManagerRef,
         sink_manager: SinkCoordinatorManager,
         meta_metrics: Arc<MetaMetrics>,
+        iceberg_compaction_manager: iceberg_compaction::IcebergCompactionManagerRef,
     ) -> Self {
         let ddl_controller = DdlController::new(
             env.clone(),
@@ -84,6 +86,7 @@ impl DdlServiceImpl {
             sink_manager,
             ddl_controller,
             meta_metrics,
+            iceberg_compaction_manager,
         }
     }
 
@@ -1218,6 +1221,62 @@ impl DdlService for DdlServiceImpl {
             status: None,
             version,
         }));
+    }
+
+    async fn compact_table(
+        &self,
+        request: Request<CompactTableRequest>,
+    ) -> Result<Response<CompactTableResponse>, Status> {
+        let req = request.into_inner();
+        let table_id = req.table_id;
+
+        // Find the associated iceberg sink for this table
+        let table = self
+            .metadata_manager
+            .catalog_controller
+            .get_table_by_ids(vec![table_id as i32], false)
+            .await?
+            .remove(0);
+
+        // For iceberg engine tables, we need to find the associated sink
+        // The sink name follows the pattern: _iceberg_sink_<table_name>
+        let sink_name = format!("__iceberg_sink_{}", table.name);
+
+        // Find the sink by name in the same database and schema
+        let sinks = self
+            .metadata_manager
+            .catalog_controller
+            .list_sinks()
+            .await?;
+
+        let sink = sinks
+            .into_iter()
+            .find(|s| {
+                s.name == sink_name
+                    && s.database_id == table.database_id
+                    && s.schema_id == table.schema_id
+            })
+            .ok_or_else(|| {
+                Status::not_found(format!(
+                    "No iceberg sink found for table {} (sink name: {})",
+                    table.name, sink_name
+                ))
+            })?;
+
+        // Get the sink ID and trigger manual compaction
+        let sink_id = risingwave_connector::sink::catalog::SinkId::new(sink.id);
+
+        // Use the new manual compaction method
+        let task_id = self
+            .iceberg_compaction_manager
+            .trigger_manual_compaction(sink_id)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to trigger compaction: {}", e)))?;
+
+        Ok(Response::new(CompactTableResponse {
+            status: None,
+            task_id,
+        }))
     }
 }
 

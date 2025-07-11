@@ -16,6 +16,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
+use anyhow::anyhow;
+use iceberg::spec::Operation;
 use iceberg::table::Table;
 use iceberg::transaction::Transaction;
 use itertools::Itertools;
@@ -390,6 +392,138 @@ impl IcebergCompactionManager {
         });
 
         (join_handle, shutdown_tx)
+    }
+
+    /// Trigger manual compaction for a specific sink and wait for completion
+    /// This method records the initial snapshot, sends a compaction task, then waits for a new snapshot with replace operation
+    pub async fn trigger_manual_compaction(&self, sink_id: SinkId) -> MetaResult<u64> {
+        use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
+
+        // Load the initial table state to get the current snapshot
+        let initial_table = self.load_iceberg_table(&sink_id).await?;
+        let initial_snapshot_id = initial_table
+            .metadata()
+            .current_snapshot()
+            .map(|s| s.snapshot_id())
+            .unwrap_or(0); // Use 0 if no snapshots exist
+        let initial_timestamp = chrono::Utc::now().timestamp_millis();
+
+        // Get a compactor to send the task to
+        let compactor = self
+            .iceberg_compactor_manager
+            .next_compactor()
+            .ok_or_else(|| anyhow!("No iceberg compactor available"))?;
+
+        // Generate a unique task ID
+        let task_id = self
+            .env
+            .hummock_seq
+            .next_interval("compaction_task", 1)
+            .await?;
+
+        // Get sink parameters
+        let sink_param = self.get_sink_param(&sink_id).await?;
+
+        // Send the compaction task directly to the compactor
+        compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {
+            task_id,
+            props: sink_param.properties,
+        }))?;
+
+        tracing::info!(
+            "Manual compaction triggered for sink {} with task ID {}, waiting for completion...",
+            sink_id.sink_id,
+            task_id
+        );
+
+        // Wait for compaction to complete by polling for new snapshots
+        let completion_result = self
+            .wait_for_compaction_completion(
+                &sink_id,
+                initial_snapshot_id,
+                initial_timestamp,
+                task_id,
+            )
+            .await;
+
+        match completion_result {
+            Ok(()) => {
+                tracing::info!(
+                    "Manual compaction completed successfully for sink {} with task ID {}",
+                    sink_id.sink_id,
+                    task_id
+                );
+                Ok(task_id)
+            }
+            Err(e) => {
+                tracing::error!(
+                    "Manual compaction failed or timed out for sink {} with task ID {}: {}",
+                    sink_id.sink_id,
+                    task_id,
+                    e
+                );
+                Err(e)
+            }
+        }
+    }
+
+    /// Wait for compaction completion by monitoring Iceberg snapshots
+    async fn wait_for_compaction_completion(
+        &self,
+        sink_id: &SinkId,
+        initial_snapshot_id: i64,
+        initial_timestamp: i64,
+        task_id: u64,
+    ) -> MetaResult<()> {
+        const POLL_INTERVAL_SECS: u64 = 10; // Poll every 10 seconds
+        const MAX_WAIT_TIME_SECS: u64 = 600; // Wait up to 10 minutes
+
+        let mut elapsed_time = 0;
+        let poll_interval = std::time::Duration::from_secs(POLL_INTERVAL_SECS);
+
+        while elapsed_time < MAX_WAIT_TIME_SECS {
+            tokio::time::sleep(poll_interval).await;
+            elapsed_time += POLL_INTERVAL_SECS;
+
+            // Load the current table state
+            let current_table = self.load_iceberg_table(sink_id).await?;
+
+            // Check for new snapshots created after the initial timestamp
+            let metadata = current_table.metadata();
+            let mut new_snapshots: Vec<_> = metadata
+                .snapshots()
+                .filter(|snapshot| {
+                    let snapshot_timestamp = snapshot.timestamp_ms();
+                    let snapshot_id = snapshot.snapshot_id();
+
+                    // Look for snapshots created after our initial timestamp
+                    // and different from the initial snapshot
+                    snapshot_timestamp > initial_timestamp && snapshot_id != initial_snapshot_id
+                })
+                .collect();
+
+            // Sort by timestamp to get the most recent snapshots first
+            new_snapshots.sort_by(|a, b| b.timestamp_ms().cmp(&a.timestamp_ms()));
+
+            // Check if any new snapshot indicates a compaction operation
+            for snapshot in new_snapshots {
+                // Check the snapshot summary for operation type
+                let summary = snapshot.summary();
+
+                // Look for replace operations which typically indicate compaction
+                if matches!(summary.operation, Operation::Replace) {
+                    return Ok(());
+                }
+            }
+        }
+
+        Err(anyhow!(
+            "Compaction did not complete within {} seconds for sink {} (task_id={})",
+            MAX_WAIT_TIME_SECS,
+            sink_id.sink_id,
+            task_id
+        )
+        .into())
     }
 
     /// Perform GC operations on all tracked Iceberg tables

@@ -1702,6 +1702,12 @@ pub enum Statement {
     Use {
         db_name: ObjectName,
     },
+    /// `COMPACT [database_name][schema_name][table_name]`
+    ///
+    /// Note: this is a RisingWave specific statement for iceberg table compaction.
+    Compact {
+        table_name: ObjectName,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -2438,6 +2444,10 @@ impl Statement {
             }
             Statement::Use { db_name } => {
                 write!(f, "USE {}", db_name)?;
+                Ok(())
+            }
+            Statement::Compact { table_name } => {
+                write!(f, "COMPACT {}", table_name)?;
                 Ok(())
             }
             Statement::AlterFragment {

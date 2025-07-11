@@ -65,6 +65,7 @@ pub mod alter_user;
 pub mod cancel_job;
 pub mod close_cursor;
 mod comment;
+pub mod compact;
 pub mod create_aggregate;
 pub mod create_connection;
 mod create_database;
@@ -1280,6 +1281,9 @@ pub async fn handle(
         } => prepared_statement::handle_prepare(name, data_types, statement).await,
         Statement::Deallocate { name, prepare } => {
             prepared_statement::handle_deallocate(name, prepare).await
+        }
+        Statement::Compact { table_name } => {
+            compact::handle_compact(handler_args, table_name).await
         }
         _ => bail_not_implemented!("Unhandled statement: {}", stmt),
     }
