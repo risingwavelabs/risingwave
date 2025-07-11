@@ -421,10 +421,8 @@ impl IcebergCompactionManager {
             .next_interval("compaction_task", 1)
             .await?;
 
-        // Get sink parameters
         let sink_param = self.get_sink_param(&sink_id).await?;
 
-        // Send the compaction task directly to the compactor
         compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {
             task_id,
             props: sink_param.properties,
@@ -436,7 +434,6 @@ impl IcebergCompactionManager {
             task_id
         );
 
-        // Wait for compaction to complete by polling for new snapshots
         let completion_result = self
             .wait_for_compaction_completion(
                 &sink_id,
@@ -467,7 +464,6 @@ impl IcebergCompactionManager {
         }
     }
 
-    /// Wait for compaction completion by monitoring Iceberg snapshots
     async fn wait_for_compaction_completion(
         &self,
         sink_id: &SinkId,
@@ -475,10 +471,10 @@ impl IcebergCompactionManager {
         initial_timestamp: i64,
         task_id: u64,
     ) -> MetaResult<()> {
-        const INITIAL_POLL_INTERVAL_SECS: u64 = 2; // Start with 2 second for quick tasks
-        const MAX_POLL_INTERVAL_SECS: u64 = 60; // Cap at 60 seconds for long-running tasks
-        const MAX_WAIT_TIME_SECS: u64 = 1800; // Wait up to 30 minutes
-        const BACKOFF_MULTIPLIER: f64 = 1.5; // Exponential backoff multiplier
+        const INITIAL_POLL_INTERVAL_SECS: u64 = 2;
+        const MAX_POLL_INTERVAL_SECS: u64 = 60;
+        const MAX_WAIT_TIME_SECS: u64 = 1800;
+        const BACKOFF_MULTIPLIER: f64 = 1.5;
 
         let mut elapsed_time = 0;
         let mut current_interval_secs = INITIAL_POLL_INTERVAL_SECS;
@@ -488,39 +484,27 @@ impl IcebergCompactionManager {
             tokio::time::sleep(poll_interval).await;
             elapsed_time += current_interval_secs;
 
-            // Load the current table state
             let current_table = self.load_iceberg_table(sink_id).await?;
 
-            // Check for new snapshots created after the initial timestamp
             let metadata = current_table.metadata();
             let mut new_snapshots: Vec<_> = metadata
                 .snapshots()
                 .filter(|snapshot| {
                     let snapshot_timestamp = snapshot.timestamp_ms();
                     let snapshot_id = snapshot.snapshot_id();
-
-                    // Look for snapshots created after our initial timestamp
-                    // and different from the initial snapshot
                     snapshot_timestamp > initial_timestamp && snapshot_id != initial_snapshot_id
                 })
                 .collect();
 
-            // Sort by timestamp to get the most recent snapshots first
             new_snapshots.sort_by(|a, b| b.timestamp_ms().cmp(&a.timestamp_ms()));
 
-            // Check if any new snapshot indicates a compaction operation
             for snapshot in new_snapshots {
-                // Check the snapshot summary for operation type
                 let summary = snapshot.summary();
-
-                // Look for replace operations which typically indicate compaction
                 if matches!(summary.operation, Operation::Replace) {
                     return Ok(());
                 }
             }
 
-            // Exponential backoff: increase the polling interval for the next iteration
-            // but cap it at the maximum interval
             current_interval_secs = std::cmp::min(
                 MAX_POLL_INTERVAL_SECS,
                 ((current_interval_secs as f64) * BACKOFF_MULTIPLIER) as u64,
@@ -536,9 +520,7 @@ impl IcebergCompactionManager {
         .into())
     }
 
-    /// Perform GC operations on all tracked Iceberg tables
     async fn perform_gc_operations(&self) -> MetaResult<()> {
-        // Get all sink IDs that are currently tracked
         let sink_ids = {
             let guard = self.inner.read();
             guard.iceberg_commits.keys().cloned().collect::<Vec<_>>()
@@ -548,7 +530,6 @@ impl IcebergCompactionManager {
 
         for sink_id in sink_ids {
             if let Err(e) = self.check_and_expire_snapshots(&sink_id).await {
-                // Continue with other tables even if one fails
                 tracing::error!(error = ?e.as_report(), "Failed to perform GC for sink {}", sink_id.sink_id);
             }
         }
@@ -557,10 +538,8 @@ impl IcebergCompactionManager {
         Ok(())
     }
 
-    /// Check snapshot count for a specific table and trigger expiration if needed
     async fn check_and_expire_snapshots(&self, sink_id: &SinkId) -> MetaResult<()> {
-        // Configurable thresholds - could be moved to config later
-        const MAX_SNAPSHOT_AGE_MS_DEFAULT: i64 = 24 * 60 * 60 * 1000; // 1 day
+        const MAX_SNAPSHOT_AGE_MS_DEFAULT: i64 = 24 * 60 * 60 * 1000;
         let now = chrono::Utc::now().timestamp_millis();
         let expired_older_than = now - MAX_SNAPSHOT_AGE_MS_DEFAULT;
 
