@@ -96,6 +96,8 @@ pub struct Reschedule {
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
     pub newly_created_actors: HashMap<ActorId, (StreamActorWithDispatchers, WorkerId)>,
+
+    pub cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignment,
 }
 
 /// Replacing an old job with a new one. All actors in the job will be rebuilt.
@@ -1034,6 +1036,7 @@ impl Command {
                     .flat_map(|r| r.removed_actors.iter().copied())
                     .collect();
                 let mut actor_splits = HashMap::new();
+                let mut actor_cdc_table_snapshot_splits = HashMap::new();
 
                 for reschedule in reschedules.values() {
                     for (actor_id, splits) in &reschedule.actor_splits {
@@ -1044,6 +1047,11 @@ impl Command {
                             },
                         );
                     }
+                    actor_cdc_table_snapshot_splits.extend(
+                        build_pb_actor_cdc_table_snapshot_splits(
+                            reschedule.cdc_table_snapshot_split_assignment.clone(),
+                        ),
+                    );
                 }
 
                 // we don't create dispatchers in reschedule scenario
@@ -1056,6 +1064,7 @@ impl Command {
                     dropped_actors,
                     actor_splits,
                     actor_new_dispatchers,
+                    actor_cdc_table_snapshot_splits,
                 });
                 tracing::debug!("update mutation: {mutation:?}");
                 Some(mutation)

@@ -319,6 +319,8 @@ impl CdcScanOptions {
     }
 
     pub fn is_parallelized_backfill(&self) -> bool {
-        self.backfill_num_rows_per_split > 0 && self.backfill_parallelism > 0
+        !self.disable_backfill
+            && self.backfill_num_rows_per_split > 0
+            && self.backfill_parallelism > 0
     }
 }

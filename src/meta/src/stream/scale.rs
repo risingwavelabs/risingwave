@@ -61,6 +61,7 @@ pub struct WorkerReschedule {
 }
 
 pub struct CustomFragmentInfo {
+    pub job_id: u32,
     pub fragment_id: u32,
     pub fragment_type_mask: FragmentTypeMask,
     pub distribution_type: PbFragmentDistributionType,
@@ -90,6 +91,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use super::SourceChange;
 use crate::controller::id::IdCategory;
 use crate::controller::utils::filter_workers_by_resource_group;
+use crate::stream::cdc::assign_cdc_table_snapshot_splits_impl;
 
 // The debug implementation is arbitrary. Just used in debug logs.
 #[derive(Educe)]
@@ -524,6 +526,7 @@ impl ScaleController {
                     related_jobs.get(&job_id).expect("job not found");
 
                 let fragment = CustomFragmentInfo {
+                    job_id: job_id as _,
                     fragment_id: fragment_id as _,
                     fragment_type_mask: fragment_type_mask.into(),
                     distribution_type: distribution_type.into(),
@@ -1351,6 +1354,25 @@ impl ScaleController {
                 .cloned()
                 .unwrap_or_default();
 
+            let cdc_table_snapshot_split_assignment = if fragment
+                .fragment_type_mask
+                .contains(FragmentTypeFlag::StreamCdcScan)
+            {
+                assign_cdc_table_snapshot_splits_impl(
+                    fragment.job_id,
+                    fragment_actors_after_reschedule
+                        .get(&fragment_id)
+                        .unwrap()
+                        .keys()
+                        .copied()
+                        .collect(),
+                    self.env.meta_store_ref(),
+                )
+                .await?
+            } else {
+                HashMap::default()
+            };
+
             reschedule_fragment.insert(
                 fragment_id,
                 Reschedule {
@@ -1362,6 +1384,7 @@ impl ScaleController {
                     downstream_fragment_ids,
                     actor_splits,
                     newly_created_actors: Default::default(),
+                    cdc_table_snapshot_split_assignment,
                 },
             );
         }
@@ -1771,7 +1794,7 @@ impl ScaleController {
             no_shuffle_target_fragment_ids: &mut HashSet<FragmentId>,
             fragment_distribution_map: &mut HashMap<
                 FragmentId,
-                (FragmentDistributionType, VnodeCount),
+                (FragmentDistributionType, VnodeCount, bool),
             >,
             actor_location: &mut HashMap<ActorId, WorkerId>,
             table_fragment_id_map: &mut HashMap<u32, HashSet<FragmentId>>,
@@ -1802,17 +1825,14 @@ impl ScaleController {
             }
 
             for (fragment_id, fragment) in fragments {
-                // StreamCdcScan's parallelism is determined by CdcScanOptions::backfill_parallelism.
-                if FragmentTypeMask::from(fragment.fragment_type_mask)
-                    .contains(FragmentTypeFlag::StreamCdcScan)
-                {
-                    continue;
-                }
+                let is_cdc_backfill_v2 = FragmentTypeMask::from(fragment.fragment_type_mask)
+                    .contains(FragmentTypeFlag::StreamCdcScan);
                 fragment_distribution_map.insert(
                     fragment_id as FragmentId,
                     (
                         FragmentDistributionType::from(fragment.distribution_type),
                         fragment.vnode_count as _,
+                        is_cdc_backfill_v2,
                     ),
                 );
 
@@ -1915,9 +1935,15 @@ impl ScaleController {
                     );
                 }
 
-                let (dist, vnode_count) = fragment_distribution_map[&fragment_id];
+                let (dist, vnode_count, is_cdc_backfill_v2) =
+                    fragment_distribution_map[&fragment_id];
                 let max_parallelism = vnode_count;
-
+                // TODO(zw): Support configuring the parallelism for CDC backfills.
+                let fragment_parallelism_strategy = if is_cdc_backfill_v2 {
+                    TableParallelism::Fixed(max_parallelism)
+                } else {
+                    parallelism.clone()
+                };
                 match dist {
                     FragmentDistributionType::Unspecified => unreachable!(),
                     FragmentDistributionType::Single => {
@@ -1957,7 +1983,7 @@ impl ScaleController {
                             },
                         );
                     }
-                    FragmentDistributionType::Hash => match parallelism {
+                    FragmentDistributionType::Hash => match fragment_parallelism_strategy {
                         TableParallelism::Adaptive => {
                             let target_slot_count = adaptive_parallelism_strategy
                                 .compute_target_parallelism(available_slot_count);

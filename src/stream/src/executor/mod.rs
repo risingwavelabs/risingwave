@@ -294,6 +294,7 @@ pub struct UpdateMutation {
     pub dropped_actors: HashSet<ActorId>,
     pub actor_splits: SplitAssignments,
     pub actor_new_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
+    pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignment,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -689,6 +690,7 @@ impl Mutation {
                 dropped_actors,
                 actor_splits,
                 actor_new_dispatchers,
+                actor_cdc_table_snapshot_splits,
             }) => PbMutation::Update(PbUpdateMutation {
                 dispatcher_update: dispatchers.values().flatten().cloned().collect(),
                 merge_update: merges.values().cloned().collect(),
@@ -709,6 +711,9 @@ impl Mutation {
                         )
                     })
                     .collect(),
+                actor_cdc_table_snapshot_splits: build_pb_actor_cdc_table_snapshot_splits(
+                    actor_cdc_table_snapshot_splits.clone(),
+                ),
             }),
             Mutation::Add(AddMutation {
                 adds,
@@ -858,6 +863,9 @@ impl Mutation {
                     .iter()
                     .map(|(&actor_id, dispatchers)| (actor_id, dispatchers.dispatchers.clone()))
                     .collect(),
+                actor_cdc_table_snapshot_splits: build_actor_cdc_table_snapshot_splits(
+                    update.actor_cdc_table_snapshot_splits.clone(),
+                ),
             }),
 
             PbMutation::Add(add) => Mutation::Add(AddMutation {

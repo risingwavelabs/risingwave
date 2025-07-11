@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::time::Duration;
 
@@ -155,8 +155,8 @@ pub(crate) async fn assign_cdc_table_snapshot_splits(
     meta_store: &SqlMetaStore,
 ) -> MetaResult<CdcTableSnapshotSplitAssignment> {
     let mut assignments = HashMap::default();
-    for jobs in table_fragments {
-        let mut stream_scan_fragments = jobs
+    for job in table_fragments {
+        let mut stream_scan_fragments = job
             .fragments
             .values()
             .filter(|f| is_parallelized_backfill_enabled_cdc_scan_fragment(f))
@@ -164,51 +164,58 @@ pub(crate) async fn assign_cdc_table_snapshot_splits(
         if stream_scan_fragments.is_empty() {
             continue;
         }
-        if stream_scan_fragments.len() > 1 {
-            return Err(anyhow::anyhow!(format!(
-                "expect exactly one stream scan fragment, got: {:?}",
-                jobs.fragments
-            ))
-            .into());
-        }
         let stream_scan_fragment = stream_scan_fragments.swap_remove(0);
-        let mut splits =
-            try_get_cdc_table_snapshot_splits(jobs.stream_job_id.table_id, meta_store).await?;
-        if splits.is_empty() {
-            tracing::error!(
-                "Expect at least one CDC table snapshot splits, 0 was found. Fall back to one (null, null) split."
-            );
-            // Fall back to one (null, null) split to avoid missing read.
-            let null = OwnedRow::new(vec![None]).value_serialize();
-            splits = vec![CdcTableSnapshotSplitRaw {
-                split_id: i64::MAX,
-                left_bound_inclusive: null.clone(),
-                right_bound_exclusive: null,
-            }];
-        };
-        if stream_scan_fragment.actors.is_empty() {
-            return Err(anyhow::anyhow!(
-                "A stream scan fragment should have at least 1 actor".to_owned()
-            )
-            .into());
-        }
-        let splits_per_actor = splits.len().div_ceil(stream_scan_fragment.actors.len());
-        for (actor_id, splits) in stream_scan_fragment
-            .actors
-            .iter()
-            .map(|a| a.actor_id)
-            .zip_eq_debug(
-                splits
-                    .into_iter()
-                    .chunks(splits_per_actor)
-                    .into_iter()
-                    .map(|c| c.collect_vec())
-                    .chain(iter::repeat(Vec::default()))
-                    .take(stream_scan_fragment.actors.len()),
-            )
-        {
-            assignments.insert(actor_id, splits);
-        }
+        let assignment = assign_cdc_table_snapshot_splits_impl(
+            job.stream_job_id.table_id,
+            stream_scan_fragment
+                .actors
+                .iter()
+                .map(|a| a.actor_id)
+                .collect(),
+            meta_store,
+        )
+        .await?;
+        assignments.extend(assignment);
+    }
+    Ok(assignments)
+}
+
+pub(crate) async fn assign_cdc_table_snapshot_splits_impl(
+    table_id: u32,
+    actor_ids: HashSet<u32>,
+    meta_store: &SqlMetaStore,
+) -> MetaResult<CdcTableSnapshotSplitAssignment> {
+    if actor_ids.is_empty() {
+        return Err(anyhow::anyhow!(
+            "A stream scan fragment should have at least 1 actor".to_owned()
+        )
+        .into());
+    }
+    let mut assignments = HashMap::default();
+    let mut splits = try_get_cdc_table_snapshot_splits(table_id, meta_store).await?;
+    if splits.is_empty() {
+        tracing::error!(
+            "Expect at least one CDC table snapshot splits, 0 was found. Fall back to one (null, null) split."
+        );
+        // Fall back to one (null, null) split to avoid missing read.
+        let null = OwnedRow::new(vec![None]).value_serialize();
+        splits = vec![CdcTableSnapshotSplitRaw {
+            split_id: i64::MAX,
+            left_bound_inclusive: null.clone(),
+            right_bound_exclusive: null,
+        }];
+    };
+    let splits_per_actor = splits.len().div_ceil(actor_ids.len());
+    for (actor_id, splits) in actor_ids.iter().copied().zip_eq_debug(
+        splits
+            .into_iter()
+            .chunks(splits_per_actor)
+            .into_iter()
+            .map(|c| c.collect_vec())
+            .chain(iter::repeat(Vec::default()))
+            .take(actor_ids.len()),
+    ) {
+        assignments.insert(actor_id, splits);
     }
     Ok(assignments)
 }

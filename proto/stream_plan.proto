@@ -81,6 +81,8 @@ message UpdateMutation {
   // When modifying the Materialized View, we need to recreate the Dispatcher from the old upstream to the new TableFragment.
   // Consistent with the semantics in AddMutation.
   map<uint32, Dispatchers> actor_new_dispatchers = 6;
+  // CDC table snapshot splits
+  map<uint32, source.CdcTableSnapshotSplits> actor_cdc_table_snapshot_splits = 7;
 }
 
 message SourceChangeSplitMutation {
