@@ -14,7 +14,7 @@
 
 use anyhow::anyhow;
 use risingwave_common::row;
-use risingwave_common::types::{Datum, ScalarImpl};
+use risingwave_common::types::{ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::StateStore;
 
@@ -24,13 +24,13 @@ use crate::executor::StreamExecutorResult;
 #[derive(Debug, Default)]
 pub struct CdcStateRecord {
     pub is_finished: bool,
+    #[expect(dead_code)]
     pub row_count: i64,
 }
 
 /// state schema: | `split_id` | `backfill_finished` | `row_count` |
 pub struct ParallelizedCdcBackfillState<S: StateStore> {
     state_table: StateTable<S>,
-    cached_state: Vec<Datum>,
     state_len: usize,
 }
 
@@ -38,7 +38,6 @@ impl<S: StateStore> ParallelizedCdcBackfillState<S> {
     pub fn new(state_table: StateTable<S>, state_len: usize) -> Self {
         Self {
             state_table,
-            cached_state: vec![None; state_len],
             state_len,
         }
     }
@@ -57,8 +56,7 @@ impl<S: StateStore> ParallelizedCdcBackfillState<S> {
         {
             Some(row) => {
                 tracing::info!("restored cdc backfill state: {:?}", row);
-                self.cached_state = row.into_inner().into_vec();
-                let state = self.cached_state.as_slice();
+                let state = row.into_inner().into_vec();
                 let is_finished = match state[1] {
                     Some(ScalarImpl::Bool(val)) => val,
                     _ => return Err(anyhow!("invalid backfill state: backfill_finished").into()),
@@ -73,10 +71,7 @@ impl<S: StateStore> ParallelizedCdcBackfillState<S> {
                     row_count,
                 })
             }
-            None => {
-                self.cached_state = vec![None; self.state_len];
-                Ok(CdcStateRecord::default())
-            }
+            None => Ok(CdcStateRecord::default()),
         }
     }
 
@@ -88,19 +83,17 @@ impl<S: StateStore> ParallelizedCdcBackfillState<S> {
         row_count: u64,
     ) -> StreamExecutorResult<()> {
         // schema: | `split_id` | `backfill_finished` |
-        let state = self.cached_state.as_mut_slice();
+        let mut state = vec![None; self.state_len];
         let split_id = Some(ScalarImpl::from(split_id));
         state[0].clone_from(&split_id);
         state[1] = Some(is_finished.into());
         state[2] = Some((row_count as i64).into());
-
         match self.state_table.get_row(row::once(split_id)).await? {
             Some(prev_row) => {
-                self.state_table
-                    .update(prev_row, self.cached_state.as_slice());
+                self.state_table.update(prev_row, state.as_slice());
             }
             None => {
-                self.state_table.insert(self.cached_state.as_slice());
+                self.state_table.insert(state.as_slice());
             }
         }
         Ok(())

@@ -182,6 +182,10 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                 extends_current_actor_bound(&mut current_actor_bounds, &split);
             }
         }
+        for split in actor_snapshot_splits.iter().skip(next_split_idx) {
+            // Initialize state so that overall progress can be measured.
+            state_impl.mutate_state(split.split_id, false, 0).await?;
+        }
         // After init the state table and forward the initial barrier to downstream,
         // we now try to create the table reader with retry.
         // If backfill hasn't finished, we can ignore upstream cdc events before we create the table reader;
