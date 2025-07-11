@@ -20,7 +20,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::CreateType;
-use risingwave_pb::ddl_service::{DdlProgress, TableJobType};
+use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::PbBarrierCompleteResponse;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
@@ -63,11 +63,9 @@ pub(super) struct Progress {
     upstream_mvs_total_key_count: u64,
     mv_backfill_consumed_rows: u64,
     source_backfill_consumed_rows: u64,
-    cdc_backfill_consumed_splits: u64,
 
     /// DDL definition
     definition: String,
-    is_cdc: bool,
 }
 
 impl Progress {
@@ -78,7 +76,6 @@ impl Progress {
         upstream_total_key_count: u64,
         definition: String,
         backfill_order_state: BackfillOrderState,
-        is_cdc: bool,
     ) -> Self {
         let mut states = HashMap::new();
         let mut backfill_upstream_types = HashMap::new();
@@ -96,10 +93,8 @@ impl Progress {
             upstream_mvs_total_key_count: upstream_total_key_count,
             mv_backfill_consumed_rows: 0,
             source_backfill_consumed_rows: 0,
-            cdc_backfill_consumed_splits: 0,
             definition,
             backfill_order_state,
-            is_cdc,
         }
     }
 
@@ -108,12 +103,10 @@ impl Progress {
         &mut self,
         actor: ActorId,
         new_state: BackfillState,
-        upstream_total_key_count: Option<u64>,
+        upstream_total_key_count: u64,
     ) -> Vec<FragmentId> {
         let mut next_backfill_nodes = vec![];
-        if let Some(upstream_total_key_count) = upstream_total_key_count {
-            self.upstream_mvs_total_key_count = upstream_total_key_count;
-        }
+        self.upstream_mvs_total_key_count = upstream_total_key_count;
         let total_actors = self.states.len();
         let backfill_upstream_type = self.backfill_upstream_types.get(&actor).unwrap();
         tracing::debug!(?actor, states = ?self.states, "update progress for actor");
@@ -155,9 +148,6 @@ impl Progress {
             BackfillUpstreamType::Values => {
                 // do not consider progress for values
             }
-            BackfillUpstreamType::Cdc => {
-                self.cdc_backfill_consumed_splits += new - old;
-            }
         }
         self.states.insert(actor, new_state);
         next_backfill_nodes
@@ -187,13 +177,11 @@ impl Progress {
         }
         let mut mv_count = 0;
         let mut source_count = 0;
-        let mut cdc_count = 0;
         for backfill_upstream_type in self.backfill_upstream_types.values() {
             match backfill_upstream_type {
                 BackfillUpstreamType::MView => mv_count += 1,
                 BackfillUpstreamType::Source => source_count += 1,
                 BackfillUpstreamType::Values => (),
-                BackfillUpstreamType::Cdc => cdc_count += 1,
             }
         }
 
@@ -218,21 +206,16 @@ impl Progress {
             "{} rows consumed",
             self.source_backfill_consumed_rows
         ));
-        let cdc_progress = (cdc_count > 0).then_some(format!(
-            "{} splits consumed. {} in total.",
-            self.cdc_backfill_consumed_splits, self.upstream_mvs_total_key_count,
-        ));
-        match (mv_progress, source_progress, cdc_progress) {
-            (Some(mv_progress), Some(source_progress), _) => {
+        match (mv_progress, source_progress) {
+            (Some(mv_progress), Some(source_progress)) => {
                 format!(
                     "MView Backfill: {}, Source Backfill: {}",
                     mv_progress, source_progress
                 )
             }
-            (Some(mv_progress), None, _) => mv_progress,
-            (None, Some(source_progress), _) => source_progress,
-            (None, None, Some(cdc_progress)) => cdc_progress,
-            (None, None, None) => "Unknown".to_owned(),
+            (Some(mv_progress), None) => mv_progress,
+            (None, Some(source_progress)) => source_progress,
+            (None, None) => "Unknown".to_owned(),
         }
     }
 }
@@ -393,7 +376,6 @@ impl CreateMviewProgressTracker {
         version_stats: &HummockVersionStats,
         backfill_order_state: BackfillOrderState,
     ) -> Progress {
-        // TODO(zw): set correct value for CDC
         let upstream_mvs_total_key_count =
             calculate_total_key_count(&upstream_mv_count, version_stats);
         Progress {
@@ -405,10 +387,7 @@ impl CreateMviewProgressTracker {
             upstream_mvs_total_key_count,
             mv_backfill_consumed_rows: 0, // Fill only after first barrier pass
             source_backfill_consumed_rows: 0, // Fill only after first barrier pass
-            cdc_backfill_consumed_splits: 0,
             definition,
-            // TODO(zw): set correct value for CDC
-            is_cdc: false,
         }
     }
 
@@ -592,23 +571,13 @@ impl CreateMviewProgressTracker {
             job_type,
             create_type,
             fragment_backfill_ordering,
-            cdc_table_snapshot_split_assignment,
             ..
         } = info;
 
         let creating_mv_id = table_fragments.stream_job_id();
         let upstream_mv_count = table_fragments.upstream_table_counts();
-        let is_cdc = job_type == StreamingJobType::Table(TableJobType::SharedCdcSource);
-        let upstream_total_key_count: u64 = if is_cdc {
-            let split_count = cdc_table_snapshot_split_assignment
-                .values()
-                .map(|s| s.len() as u64)
-                .sum();
-            tracing::debug!(split_count, "Add progress tracker for Cdc table.");
-            split_count
-        } else {
-            calculate_total_key_count(&upstream_mv_count, version_stats)
-        };
+        let upstream_total_key_count: u64 =
+            calculate_total_key_count(&upstream_mv_count, version_stats);
 
         for (actor, _backfill_upstream_type) in &actors {
             self.actor_map.insert(*actor, creating_mv_id);
@@ -622,7 +591,6 @@ impl CreateMviewProgressTracker {
             upstream_total_key_count,
             definition.clone(),
             backfill_order_state,
-            is_cdc,
         );
         if job_type == StreamingJobType::Sink && create_type == CreateType::Background {
             // We return the original tracking job immediately.
@@ -683,14 +651,10 @@ impl CreateMviewProgressTracker {
         match self.progress_map.entry(table_id) {
             Entry::Occupied(mut o) => {
                 let progress = &mut o.get_mut().0;
-                let upstream_total_key_count: Option<u64> = if progress.is_cdc {
-                    None
-                } else {
-                    Some(calculate_total_key_count(
-                        &progress.upstream_mv_count,
-                        version_stats,
-                    ))
-                };
+
+                let upstream_total_key_count: u64 =
+                    calculate_total_key_count(&progress.upstream_mv_count, version_stats);
+
                 tracing::debug!(?table_id, "updating progress for table");
                 let next_backfill_nodes =
                     progress.update(actor, new_state, upstream_total_key_count);

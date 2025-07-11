@@ -174,12 +174,9 @@ pub(crate) async fn assign_cdc_table_snapshot_splits(
         let stream_scan_fragment = stream_scan_fragments.swap_remove(0);
         let splits =
             try_get_cdc_table_snapshot_splits(jobs.stream_job_id.table_id, meta_store).await?;
-        let Some(splits) = splits else {
-            assert_eq!(
-                stream_scan_fragment.actors.len(),
-                1,
-                "A stream scan fragment should only have one actor if there are no splits."
-            );
+        if splits.is_empty() {
+            tracing::error!("Expect at least one CDC table snapshot splits, 0 was found.");
+            // TODO(zw): or fall back to a (null, null) split?
             continue;
         };
         if stream_scan_fragment.actors.is_empty() {
@@ -209,10 +206,10 @@ pub(crate) async fn assign_cdc_table_snapshot_splits(
     Ok(assignments)
 }
 
-async fn try_get_cdc_table_snapshot_splits(
+pub async fn try_get_cdc_table_snapshot_splits(
     table_id: u32,
     meta_store: &SqlMetaStore,
-) -> MetaResult<Option<Vec<CdcTableSnapshotSplitRaw>>> {
+) -> MetaResult<Vec<CdcTableSnapshotSplitRaw>> {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
     let splits: Vec<(i64, Vec<u8>, Vec<u8>)> = cdc_table_snapshot_split::Entity::find()
         .select_only()
@@ -241,8 +238,5 @@ async fn try_get_cdc_table_snapshot_splits(
             },
         )
         .collect();
-    if splits.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(splits))
+    Ok(splits)
 }

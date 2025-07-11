@@ -40,7 +40,6 @@ use crate::executor::backfill::cdc::upstream_table::snapshot::{
 use crate::executor::backfill::utils::{get_cdc_chunk_last_offset, mapping_chunk, mapping_message};
 use crate::executor::prelude::*;
 use crate::executor::source::get_infinite_backoff_strategy;
-use crate::task::CreateMviewProgressReporter;
 
 /// `split_id`, `is_finished`, `row_count` all occupy 1 column each.
 const METADATA_STATE_LEN: usize = 3;
@@ -60,10 +59,6 @@ pub struct ParallelizedCdcBackfillExecutor<S: StateStore> {
     /// The schema of output chunk, including additional columns if any
     output_columns: Vec<ColumnDesc>,
 
-    // TODO: introduce a CdcBackfillProgress to report finish to Meta
-    // This object is just a stub right now
-    progress: Option<CreateMviewProgressReporter>,
-
     /// Rate limit in rows/s.
     rate_limit_rps: Option<u32>,
 
@@ -80,7 +75,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         upstream: Executor,
         output_indices: Vec<usize>,
         output_columns: Vec<ColumnDesc>,
-        progress: Option<CreateMviewProgressReporter>,
         _metrics: Arc<StreamingMetrics>,
         state_table: StateTable<S>,
         rate_limit_rps: Option<u32>,
@@ -92,7 +86,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             upstream,
             output_indices,
             output_columns,
-            progress,
             rate_limit_rps,
             options,
             state_table,
@@ -189,8 +182,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                 extends_current_actor_bound(&mut current_actor_bounds, &split);
             }
         }
-        let mut completed_split_count = next_split_idx as u64;
-
         // After init the state table and forward the initial barrier to downstream,
         // we now try to create the table reader with retry.
         // If backfill hasn't finished, we can ignore upstream cdc events before we create the table reader;
@@ -316,8 +307,12 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                             snapshot_valve.resume();
                                         }
                                         Mutation::Throttle(some) => {
+                                            // TODO(zw): improve throttle.
+                                            // 1. handle rate limit 0.
+                                            // 2. apply new rate limit immediately.
                                             if let Some(new_rate_limit) =
                                                 some.get(&self.actor_ctx.id)
+                                                && new_rate_limit.map(|r| r > 0).unwrap_or(true)
                                                 && *new_rate_limit != self.rate_limit_rps
                                             {
                                                 // The new rate limit will take effect since next split.
@@ -440,10 +435,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                     match msg {
                         Message::Barrier(barrier) => {
                             // finalized the backfill state
-                            completed_split_count += 1;
-                            if let Some(progress) = self.progress.as_mut() {
-                                progress.update(barrier.epoch, 0, completed_split_count);
-                            }
                             state_impl
                                 .mutate_state(split.split_id, true, row_count)
                                 .await?;
@@ -474,7 +465,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         }
 
         upstream_table_reader.disconnect().await?;
-        let mut need_report_finish = true;
         tracing::info!(
             table_id,
             upstream_table_name,
@@ -491,13 +481,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             if let Some(msg) = mapping_message(msg?, &self.output_indices) {
                 match msg {
                     Message::Barrier(barrier) => {
-                        if need_report_finish {
-                            need_report_finish = false;
-                            // mark progress as finished
-                            if let Some(progress) = self.progress.as_mut() {
-                                progress.finish(barrier.epoch, actor_snapshot_splits.len() as u64);
-                            }
-                        }
                         // commit state just to bump the epoch of state table
                         state_impl.commit_state(barrier.epoch).await?;
                         yield Message::Barrier(barrier);

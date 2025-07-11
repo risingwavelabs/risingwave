@@ -32,9 +32,6 @@ pub(crate) enum BackfillState {
     DoneConsumingUpstreamTableOrSource(ConsumedRows),
     ConsumingLogStore { pending_epoch_lag: u64 },
     DoneConsumingLogStore,
-    // TODO(zw): impl
-    // ConsumingCdcSplits(ConsumedRows),
-    // DoneConsumingCdcSplits,
 }
 
 impl BackfillState {
