@@ -28,11 +28,6 @@ impl Planner {
             BoundStatement::DeclareSubscriptionCursor(_) => unimplemented!(),
             BoundStatement::FetchCursor(_) => unimplemented!(),
             BoundStatement::CreateView(c) => self.plan_query(*c.query),
-            BoundStatement::Compact(_) => {
-                // COMPACT statements don't need planning as they are handled directly
-                // by the handler. This should not be reached in normal execution.
-                unimplemented!("COMPACT statements should be handled by the compact handler")
-            }
         }
     }
 }

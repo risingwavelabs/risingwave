@@ -141,7 +141,6 @@ define_keywords!(
     COMMENT,
     COMMIT,
     COMMITTED,
-    COMPACT,
     CONCURRENTLY,
     CONDITION,
     CONFLICT,

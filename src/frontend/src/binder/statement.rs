@@ -22,13 +22,6 @@ use super::fetch_cursor::BoundFetchCursor;
 use super::update::BoundUpdate;
 use crate::binder::create_view::BoundCreateView;
 use crate::binder::{Binder, BoundInsert, BoundQuery};
-
-// Bound COMPACT statement
-#[derive(Debug, Clone)]
-pub struct BoundCompact {
-    pub table_name: String,
-    pub schema_name: Option<String>,
-}
 use crate::error::Result;
 use crate::expr::ExprRewriter;
 
@@ -42,7 +35,6 @@ pub enum BoundStatement {
     DeclareSubscriptionCursor(Box<BoundDeclareSubscriptionCursor>),
     FetchCursor(Box<BoundFetchCursor>),
     CreateView(Box<BoundCreateView>),
-    Compact(Box<BoundCompact>),
 }
 
 impl BoundStatement {
@@ -68,7 +60,6 @@ impl BoundStatement {
                 .as_ref()
                 .map_or(vec![], |s| s.fields().into()),
             BoundStatement::CreateView(_) => vec![],
-            BoundStatement::Compact(_) => vec![],
         }
     }
 }
@@ -154,59 +145,8 @@ impl Binder {
                 Ok(BoundStatement::CreateView(create_view.into()))
             }
 
-            Statement::Compact { table_name } => Ok(BoundStatement::Compact(
-                self.bind_compact(table_name)?.into(),
-            )),
-
             _ => bail_not_implemented!("unsupported statement {:?}", stmt),
         }
-    }
-
-    /// Bind COMPACT statement
-    pub fn bind_compact(
-        &mut self,
-        table_name: risingwave_sqlparser::ast::ObjectName,
-    ) -> Result<BoundCompact> {
-        use crate::error::ErrorCode;
-
-        // Resolve schema-qualified table name
-        let (schema_name, table_name) =
-            Self::resolve_schema_qualified_name(&self.db_name, table_name)?;
-
-        // Check if table exists and is an iceberg table
-        let schema_path = self.bind_schema_path(schema_name.as_deref());
-        let (table_catalog, _) =
-            self.catalog
-                .get_created_table_by_name(&self.db_name, schema_path, &table_name)?;
-
-        // Validate this is an iceberg table
-        if table_catalog.engine() != risingwave_common::catalog::Engine::Iceberg {
-            return Err(ErrorCode::InvalidInputSyntax(
-                format!("COMPACT can only be used on Iceberg engine tables, but table '{}' uses {:?} engine",
-                        table_name, table_catalog.engine())
-            ).into());
-        }
-
-        // Check permissions - user needs SELECT privilege to compact a table
-        use risingwave_common::acl::AclMode;
-        use risingwave_pb::user::grant_privilege::PbObject;
-
-        use crate::handler::privilege::ObjectCheckItem;
-
-        self.check_privilege(
-            ObjectCheckItem::new(
-                table_catalog.owner,
-                AclMode::Select,
-                table_name.clone(),
-                PbObject::TableId(table_catalog.id.table_id),
-            ),
-            table_catalog.database_id,
-        )?;
-
-        Ok(BoundCompact {
-            table_name,
-            schema_name,
-        })
     }
 }
 
@@ -225,7 +165,6 @@ impl RewriteExprsRecursive for BoundStatement {
             BoundStatement::FetchCursor(_) => {}
             BoundStatement::DeclareSubscriptionCursor(_) => {}
             BoundStatement::CreateView(inner) => inner.rewrite_exprs_recursive(rewriter),
-            BoundStatement::Compact(_) => {}
         }
     }
 }

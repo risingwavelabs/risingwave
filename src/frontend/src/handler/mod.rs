@@ -65,7 +65,6 @@ pub mod alter_user;
 pub mod cancel_job;
 pub mod close_cursor;
 mod comment;
-pub mod compact;
 pub mod create_aggregate;
 pub mod create_connection;
 mod create_database;
