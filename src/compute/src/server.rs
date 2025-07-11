@@ -341,12 +341,12 @@ pub async fn compute_node_serve(
         )),
     );
 
-    let heap_profiler = HeapProfiler::new(
-        opts.total_memory_bytes,
-        config.server.heap_profiling.clone(),
-    );
-    // Run a background heap profiler
-    heap_profiler.start();
+    // let heap_profiler = HeapProfiler::new(
+    //     opts.total_memory_bytes,
+    //     config.server.heap_profiling.clone(),
+    // );
+    // // Run a background heap profiler
+    // heap_profiler.start();
 
     let dml_mgr = Arc::new(DmlManager::new(
         worker_id,

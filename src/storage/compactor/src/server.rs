@@ -67,7 +67,7 @@ pub async fn prepare_start_parameters(
 ) -> (
     Arc<SstableStore>,
     Arc<MemoryLimiter>,
-    HeapProfiler,
+    // HeapProfiler,
     Option<CompactionAwaitTreeRegRef>,
     Arc<StorageOpts>,
     Arc<CompactorMetrics>,
@@ -153,10 +153,10 @@ pub async fn prepare_start_parameters(
         storage_memory_config,
     ));
 
-    let heap_profiler = HeapProfiler::new(
-        system_memory_available_bytes(),
-        config.server.heap_profiling.clone(),
-    );
+    // let heap_profiler = HeapProfiler::new(
+    //     system_memory_available_bytes(),
+    //     config.server.heap_profiling.clone(),
+    // );
 
     monitor_cache(memory_collector);
 
@@ -172,7 +172,7 @@ pub async fn prepare_start_parameters(
     (
         sstable_store,
         memory_limiter,
-        heap_profiler,
+        // heap_profiler,
         await_tree_reg,
         storage_opts,
         compactor_metrics,
@@ -220,7 +220,7 @@ pub async fn compactor_serve(
     let (
         sstable_store,
         memory_limiter,
-        heap_profiler,
+        // heap_profiler,
         await_tree_reg,
         storage_opts,
         compactor_metrics,
@@ -239,7 +239,7 @@ pub async fn compactor_serve(
         ObserverManager::new_with_meta_client(meta_client.clone(), compactor_observer_node).await;
 
     // Run a background heap profiler
-    heap_profiler.start();
+    // heap_profiler.start();
 
     // use half of limit because any memory which would hold in meta-cache will be allocate by
     // limited at first.
@@ -360,7 +360,7 @@ pub async fn shared_compactor_serve(
     let (
         sstable_store,
         memory_limiter,
-        heap_profiler,
+        // heap_profiler,
         await_tree_reg,
         storage_opts,
         compactor_metrics,
@@ -371,7 +371,7 @@ pub async fn shared_compactor_serve(
     let monitor_srv = MonitorServiceImpl::new(await_tree_reg.clone());
 
     // Run a background heap profiler
-    heap_profiler.start();
+    // heap_profiler.start();
 
     let compaction_executor = Arc::new(CompactionExecutor::new(
         opts.compaction_worker_threads_number,

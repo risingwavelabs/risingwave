@@ -475,10 +475,10 @@ impl FrontendEnv {
         }
 
         let total_memory_bytes = opts.frontend_total_memory_bytes;
-        let heap_profiler =
-            HeapProfiler::new(total_memory_bytes, config.server.heap_profiling.clone());
-        // Run a background heap profiler
-        heap_profiler.start();
+        // let heap_profiler =
+        //     HeapProfiler::new(total_memory_bytes, config.server.heap_profiling.clone());
+        // // Run a background heap profiler
+        // heap_profiler.start();
 
         let batch_memory_limit = total_memory_bytes as f64 * FRONTEND_BATCH_MEMORY_PROPORTION;
         let mem_context = MemoryContext::root(
