@@ -97,7 +97,7 @@ pub trait FrontendMetaClient: Send + Sync {
         include_dropped_table: bool,
     ) -> Result<HashMap<u32, Table>>;
 
-    /// Returns vector of (worker_id, min_pinned_version_id)
+    /// Returns vector of (`worker_id`, `min_pinned_version_id`)
     async fn list_hummock_pinned_versions(&self) -> Result<Vec<(u32, u64)>>;
 
     async fn get_hummock_current_version(&self) -> Result<HummockVersion>;

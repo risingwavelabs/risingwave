@@ -258,11 +258,11 @@ mod tests {
         };
 
         assert!(
-            place_vnode(None, &[worker_1.clone()], Some(0)).is_none(),
+            place_vnode(None, std::slice::from_ref(&worker_1), Some(0)).is_none(),
             "max_parallelism should >= 0"
         );
 
-        let re_worker_mapping_2 = place_vnode(None, &[worker_1.clone()], None).unwrap();
+        let re_worker_mapping_2 = place_vnode(None, std::slice::from_ref(&worker_1), None).unwrap();
         assert_eq!(re_worker_mapping_2.iter_unique().count(), 1);
 
         let mut property = serving_property.clone();

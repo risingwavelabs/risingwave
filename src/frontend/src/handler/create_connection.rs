@@ -25,13 +25,14 @@ use risingwave_pb::catalog::connection_params::ConnectionType;
 use risingwave_pb::catalog::{ConnectionParams, PbConnectionParams};
 use risingwave_pb::ddl_service::create_connection_request;
 use risingwave_pb::secret::SecretRef;
+use risingwave_pb::secret::secret_ref::RefAsType;
 use risingwave_sqlparser::ast::CreateConnectionStatement;
 
 use super::RwPgResponse;
 use crate::WithOptions;
 use crate::binder::Binder;
 use crate::catalog::SecretId;
-use crate::catalog::schema_catalog::SchemaCatalog;
+use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::error::ErrorCode::ProtocolError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
@@ -148,17 +149,22 @@ pub async fn handle_create_connection(
     Ok(PgResponse::empty_result(StatementType::CREATE_CONNECTION))
 }
 
-pub fn print_connection_params(params: &PbConnectionParams, schema: &SchemaCatalog) -> String {
+pub fn print_connection_params(
+    db_name: &str,
+    params: &PbConnectionParams,
+    catalog_reader: &CatalogReadGuard,
+) -> String {
     let print_secret_ref = |secret_ref: &SecretRef| -> String {
-        let secret_name = schema
-            .get_secret_by_id(&SecretId::from(secret_ref.secret_id))
-            .map(|s| s.name.as_str())
+        // the lookup across all schemas in the database but should guarantee the secret exists
+        let (schema_name, secret_name) = catalog_reader
+            .find_schema_secret_by_secret_id(db_name, SecretId::from(secret_ref.secret_id))
             .unwrap();
-        format!(
-            "SECRET {} AS {}",
-            secret_name,
-            secret_ref.get_ref_as().unwrap().as_str_name()
-        )
+        let maybe_print_as = match secret_ref.get_ref_as().unwrap() {
+            RefAsType::Text => "",
+            RefAsType::File => " AS FILE",
+            RefAsType::Unspecified => "",
+        };
+        format!("SECRET {}.{}{}", schema_name, secret_name, maybe_print_as,)
     };
     let deref_secrets = params
         .get_secret_refs()

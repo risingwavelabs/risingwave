@@ -724,6 +724,8 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
 
 pub(crate) type LogStoreItemMergeStream<S: StateStoreReadIter> =
     impl Stream<Item = LogStoreResult<(Epoch, KvLogStoreItem)>>;
+
+#[define_opaque(LogStoreItemMergeStream)]
 pub(crate) fn merge_log_store_item_stream<S: StateStoreReadIter>(
     iters: Vec<(VirtualNode, S)>,
     serde: LogStoreRowSerde,
@@ -765,6 +767,7 @@ mod stream_de {
     pub(super) type LogStoreItemStream<S: StateStoreReadIter> =
         impl Stream<Item = LogStoreResult<LogStoreRow>> + Send + Unpin;
 
+    #[define_opaque(LogStoreItemStream)]
     pub(super) fn deserialize_stream<S: StateStoreReadIter>(
         vnode: VirtualNode,
         iter: S,

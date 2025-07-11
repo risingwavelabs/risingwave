@@ -552,7 +552,24 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("db_id", db_id.to_string()))?;
         self.database_by_name
             .get(db_name)
-            .ok_or_else(|| CatalogError::NotFound("database", db_name.to_string()))
+            .ok_or_else(|| CatalogError::NotFound("database", db_name.clone()))
+    }
+
+    pub fn find_schema_secret_by_secret_id(
+        &self,
+        db_name: &str,
+        secret_id: SecretId,
+    ) -> CatalogResult<(String, String)> {
+        let db = self.get_database_by_name(db_name)?;
+        let schema_secret = db
+            .iter_schemas()
+            .find_map(|schema| {
+                schema
+                    .get_secret_by_id(&secret_id)
+                    .map(|secret| (schema.name(), secret.name.clone()))
+            })
+            .ok_or_else(|| CatalogError::NotFound("secret", secret_id.to_string()))?;
+        Ok(schema_secret)
     }
 
     pub fn get_all_schema_names(&self, db_name: &str) -> CatalogResult<Vec<String>> {

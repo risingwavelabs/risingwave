@@ -100,6 +100,25 @@ fn new_committed_epoch_subscriber(
 }
 
 impl SinkCoordinatorManager {
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        let (request_tx, mut request_rx) = mpsc::channel(BOUNDED_CHANNEL_SIZE);
+        let _join_handle = tokio::spawn(async move {
+            while let Some(req) = request_rx.recv().await {
+                let ManagerRequest::StopCoordinator {
+                    finish_notifier,
+                    sink_id,
+                } = req
+                else {
+                    unreachable!()
+                };
+                assert_eq!(sink_id, None);
+                finish_notifier.send(()).unwrap();
+            }
+        });
+        SinkCoordinatorManager { request_tx }
+    }
+
     pub fn start_worker(
         db: DatabaseConnection,
         hummock_manager: HummockManagerRef,

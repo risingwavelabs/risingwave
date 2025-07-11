@@ -170,6 +170,14 @@ impl OpendalSinkBackend for S3Sink {
     }
 }
 
+// Wrapper for expanding in the sink config type.
+#[serde_as]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
+pub struct SnowflakeConfig {
+    #[serde(flatten)]
+    pub inner: S3Config,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SnowflakeSink;
 
@@ -181,8 +189,10 @@ impl OpendalSinkBackend for SnowflakeSink {
     const SINK_NAME: &'static str = SNOWFLAKE_SINK;
 
     fn from_btreemap(btree_map: BTreeMap<String, String>) -> Result<Self::Properties> {
-        let config = serde_json::from_value::<S3Config>(serde_json::to_value(btree_map).unwrap())
-            .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        let config =
+            serde_json::from_value::<SnowflakeConfig>(serde_json::to_value(btree_map).unwrap())
+                .map_err(|e| SinkError::Config(anyhow!(e)))?
+                .inner;
         if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
             return Err(SinkError::Config(anyhow!(
                 "`{}` must be {}, or {}",

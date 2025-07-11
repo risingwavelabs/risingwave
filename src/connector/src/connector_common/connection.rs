@@ -189,7 +189,7 @@ pub struct IcebergConnection {
     #[serde(rename = "catalog.uri")]
     pub catalog_uri: Option<String>,
     /// Credential for accessing iceberg catalog, only applicable in rest catalog.
-    /// A credential to exchange for a token in the OAuth2 client credentials flow.
+    /// A credential to exchange for a token in the `OAuth2` client credentials flow.
     #[serde(rename = "catalog.credential")]
     pub credential: Option<String>,
     /// token for accessing iceberg catalog, only applicable in rest catalog.
@@ -201,7 +201,7 @@ pub struct IcebergConnection {
     #[serde(rename = "catalog.oauth2_server_uri")]
     pub oauth2_server_uri: Option<String>,
     /// scope for accessing iceberg catalog, only applicable in rest catalog.
-    /// Additional scope for OAuth2.
+    /// Additional scope for `OAuth2`.
     #[serde(rename = "catalog.scope")]
     pub scope: Option<String>,
 
@@ -213,7 +213,7 @@ pub struct IcebergConnection {
     #[serde(rename = "catalog.rest.signing_name")]
     pub rest_signing_name: Option<String>,
 
-    /// Whether to use SigV4 for signing requests to the REST catalog.
+    /// Whether to use `SigV4` for signing requests to the REST catalog.
     #[serde(
         rename = "catalog.rest.sigv4_enabled",
         default,
