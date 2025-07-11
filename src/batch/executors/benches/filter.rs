@@ -16,13 +16,13 @@ pub mod utils;
 
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use risingwave_batch_executors::{BoxedExecutor, FilterExecutor};
-use risingwave_common::enable_jemalloc;
+use risingwave_common::enable_mimalloc;
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::build_from_pretty;
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};
 
-enable_jemalloc!();
+enable_mimalloc!();
 
 fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor {
     const CHUNK_SIZE: usize = 1024;

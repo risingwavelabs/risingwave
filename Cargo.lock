@@ -7574,6 +7574,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f7012b1bbb0719e1097c47611d3898568c546d597c2e74d66f6087edd5233ff4"
 
 [[package]]
+name = "libmimalloc-sys"
+version = "0.1.43"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf88cd67e9de251c1781dbe2f641a1a3ad66eaae831b8a2c38fbdc5ddae16d4d"
+dependencies = [
+ "cc",
+ "libc",
+]
+
+[[package]]
 name = "libredox"
 version = "0.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8113,6 +8123,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.101",
+]
+
+[[package]]
+name = "mimalloc"
+version = "0.1.47"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1791cbe101e95af5764f06f20f6760521f7158f69dbf9d6baf941ee1bf6bc40"
+dependencies = [
+ "libmimalloc-sys",
 ]
 
 [[package]]
@@ -11390,6 +11409,7 @@ version = "2.6.0-alpha"
 dependencies = [
  "clap",
  "madsim-tokio",
+ "mimalloc",
  "risingwave_batch_executors",
  "risingwave_common",
  "risingwave_compactor",
@@ -11399,7 +11419,6 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_meta_node",
  "risingwave_rt",
- "tikv-jemallocator",
  "workspace-config",
  "workspace-hack",
 ]
@@ -11414,6 +11433,7 @@ dependencies = [
  "expect-test",
  "home",
  "madsim-tokio",
+ "mimalloc",
  "risingwave_batch_executors",
  "risingwave_cmd",
  "risingwave_common",
@@ -11429,7 +11449,6 @@ dependencies = [
  "strum 0.27.1",
  "strum_macros 0.27.1",
  "thiserror-ext",
- "tikv-jemallocator",
  "tracing",
  "vergen",
  "workspace-config",
@@ -11492,6 +11511,7 @@ dependencies = [
  "mach2",
  "madsim-tokio",
  "memcomparable",
+ "mimalloc",
  "more-asserts",
  "num-integer",
  "num-traits",

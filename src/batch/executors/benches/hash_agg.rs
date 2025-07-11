@@ -24,13 +24,13 @@ use risingwave_batch_executors::executor::{BoxedExecutor, HashAggExecutor};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
-use risingwave_common::{enable_jemalloc, hash};
+use risingwave_common::{enable_mimalloc, hash};
 use risingwave_expr::aggregate::{AggCall, AggType, PbAggKind};
 use risingwave_pb::expr::{PbAggCall, PbInputRef};
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};
 
-enable_jemalloc!();
+enable_mimalloc!();
 
 fn create_agg_call(
     input_schema: &Schema,

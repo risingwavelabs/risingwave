@@ -40,9 +40,12 @@ risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }
 risingwave_meta_node = { workspace = true }
 risingwave_rt = { workspace = true }
-tikv-jemallocator = { workspace = true, features = [
-    "unprefixed_malloc_on_supported_platforms",
-] }
+# tikv-jemallocator = { workspace = true, features = [
+#     "unprefixed_malloc_on_supported_platforms",
+# ] }
+
+mimalloc = { workspace = true }
+
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",

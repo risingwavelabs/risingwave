@@ -19,14 +19,14 @@ use std::sync::Arc;
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use risingwave_batch::monitor::BatchSpillMetrics;
 use risingwave_batch_executors::executor::{BoxedExecutor, SortExecutor};
-use risingwave_common::enable_jemalloc;
+use risingwave_common::enable_mimalloc;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};
 
-enable_jemalloc!();
+enable_mimalloc!();
 
 fn create_order_by_executor(
     chunk_size: usize,
