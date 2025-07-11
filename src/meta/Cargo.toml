@@ -83,7 +83,7 @@ tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tower = { version = "0.5", features = ["util", "load-shed"] }
 tracing = "0.1"
-twox-hash = "1.6.3"
+twox-hash = "2.1.0"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
