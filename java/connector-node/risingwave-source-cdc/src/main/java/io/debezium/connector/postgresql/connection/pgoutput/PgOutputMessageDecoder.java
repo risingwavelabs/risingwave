@@ -808,6 +808,28 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
                 editor.defaultValueExpression(columnMetadata.getDefaultValueExpression());
             }
 
+            // Check if this column is an enum type and set enum values
+            if (isEnumType(columnMetadata.getPostgresType())) {
+                try {
+                    List<String> enumValues =
+                            queryEnumValues(columnMetadata.getPostgresType().getName());
+                    if (!enumValues.isEmpty()) {
+                        editor.enumValues(enumValues);
+                        LOGGER.trace(
+                                "Found enum values for column '{}' of type '{}': {}",
+                                columnMetadata.getColumnName(),
+                                columnMetadata.getPostgresType().getName(),
+                                enumValues);
+                    }
+                } catch (SQLException e) {
+                    LOGGER.warn(
+                            "Failed to query enum values for column '{}' of type '{}': {}",
+                            columnMetadata.getColumnName(),
+                            columnMetadata.getPostgresType().getName(),
+                            e.getMessage());
+                }
+            }
+
             columns.add(editor.create());
         }
 
@@ -821,6 +843,81 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
         LOGGER.trace("Resolved '{}' as '{}'", table.id(), table);
 
         return table;
+    }
+
+    /**
+     * Checks if a PostgreSQL type is an enum type. In PostgreSQL, all enum types are user-defined
+     * and not built-in types.
+     *
+     * @param postgresType The PostgreSQL type to check
+     * @return true if the type is an enum, false otherwise
+     */
+    private boolean isEnumType(PostgresType postgresType) {
+        // Check if this is a user-defined type that's not a built-in type
+        // Enum types in PostgreSQL are always user-defined
+        if (postgresType == null) {
+            return false;
+        }
+
+        // Check if it's not a built-in type (built-in types have OIDs < 10000 typically)
+        int typeOid = postgresType.getOid();
+        if (typeOid < 10000) {
+            return false;
+        }
+
+        // For user-defined types, we need to query pg_type to check if it's an enum
+        try {
+            return isUserDefinedEnumType(postgresType.getName());
+        } catch (SQLException e) {
+            LOGGER.warn(
+                    "Failed to check if type '{}' is enum: {}",
+                    postgresType.getName(),
+                    e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Queries pg_type to check if a type name is an enum type.
+     *
+     * @param typeName The name of the type to check
+     * @return true if the type is an enum, false otherwise
+     * @throws SQLException if the query fails
+     */
+    private boolean isUserDefinedEnumType(String typeName) throws SQLException {
+        String sql = "SELECT EXISTS(SELECT 1 FROM pg_type WHERE typname = ? AND typcategory = 'E')";
+        try (var stmt = connection.connection().prepareStatement(sql)) {
+            stmt.setString(1, typeName);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next() && rs.getBoolean(1);
+            }
+        }
+    }
+
+    /**
+     * Queries the enum values for a given enum type from pg_enum system table.
+     *
+     * @param enumTypeName The name of the enum type
+     * @return List of enum values in the order they were defined
+     * @throws SQLException if the query fails
+     */
+    private List<String> queryEnumValues(String enumTypeName) throws SQLException {
+        String sql =
+                "SELECT enumlabel FROM pg_enum e "
+                        + "JOIN pg_type t ON e.enumtypid = t.oid "
+                        + "WHERE t.typname = ? "
+                        + "ORDER BY e.enumsortorder";
+
+        List<String> enumValues = new ArrayList<>();
+        try (var stmt = connection.connection().prepareStatement(sql)) {
+            stmt.setString(1, enumTypeName);
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    enumValues.add(rs.getString("enumlabel"));
+                }
+            }
+        }
+        return enumValues;
     }
 
     /**

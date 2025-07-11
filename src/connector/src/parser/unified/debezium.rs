@@ -200,21 +200,31 @@ pub fn parse_schema_change(
                 && let Some(columns) = table.access_object_field("columns")
             {
                 for col in columns.array_elements().unwrap() {
+                    println!("｜｜｜debeziumcol jsonb = {:?}", col);
                     let name = jsonb_access_field!(col, "name", string);
                     let type_name = jsonb_access_field!(col, "typeName", string);
+                    // enumValues 可能为 null，这里需要安全处理
+                    // 检查 enumValues 是否存在，并设置 is_enum 标志
+                    let is_enum = matches!(col.access_object_field("enumValues"), Some(val) if !val.is_jsonb_null());
 
                     let data_type = match *connector_props {
                         ConnectorProperties::PostgresCdc(_) => {
                             let ty = type_name_to_pg_type(type_name.as_str());
-                            match ty {
-                                Some(ty) => pg_type_to_rw_type(&ty).map_err(|err| {
-                                    tracing::warn!(error=%err.as_report(), "unsupported postgres type in schema change message");
-                                    AccessError::UnsupportedType {
-                                        ty: type_name.clone(),
+                            if is_enum {
+                                tracing::debug!(target: "auto_schema_change", 
+                                    "Convert PostgreSQL user defined enum type '{}' to VARCHAR", type_name);
+                                DataType::Varchar
+                            } else {
+                                match ty {
+                                    Some(ty) => pg_type_to_rw_type(&ty).map_err(|err| {
+                                        tracing::warn!(error=%err.as_report(), "unsupported postgres type in schema change message");
+                                        AccessError::UnsupportedType {
+                                            ty: type_name.clone(),
+                                        }
+                                    })?,
+                                    None => {
+                                        Err(AccessError::UnsupportedType { ty: type_name.clone() })?
                                     }
-                                })?,
-                                None => {
-                                    Err(AccessError::UnsupportedType { ty: type_name })?
                                 }
                             }
                         }
@@ -246,6 +256,10 @@ pub fn parse_schema_change(
                                 ConnectorProperties::PostgresCdc(_) => {
                                     // default value of non-number data type will be stored as
                                     // "'value'::type"
+                                    println!(
+                                        "这里default_val_expr_str = {:?}",
+                                        default_val_expr_str
+                                    );
                                     match default_val_expr_str
                                         .split("::")
                                         .map(|s| s.trim_matches('\''))
@@ -280,17 +294,34 @@ pub fn parse_schema_change(
                                 }
                             }
 
+                            if let Some(ref value_text) = value_text {
+                                println!(
+                                    "这里value_text: {:?}, data_type: {:?}",
+                                    value_text, data_type
+                                );
+                            }
                             let snapshot_value: Datum = if let Some(value_text) = value_text {
-                                Some(ScalarImpl::from_text(value_text.as_str(), &data_type).map_err(
-                                    |err| {
-                                        tracing::error!(target: "auto_schema_change", error=%err.as_report(), "failed to parse default value expression");
-                                        AccessError::TypeError {
-                                            expected: "constant expression".into(),
-                                            got: data_type.to_string(),
-                                            value: value_text,
-                                        }
-                                    },
-                                )?)
+                                // 检测PostgreSQL函数表达式，跳过解析
+                                if value_text.starts_with("nextval(")
+                                    || value_text.starts_with("now(")
+                                    || value_text.starts_with("current_")
+                                    || value_text.contains("uuid_generate")
+                                {
+                                    tracing::warn!(target: "auto_schema_change", 
+                                                  "Skipping PostgreSQL function default value: {}", value_text);
+                                    None
+                                } else {
+                                    Some(ScalarImpl::from_text(value_text.as_str(), &data_type).map_err(
+                                        |err| {
+                                            tracing::error!(target: "auto_schema_change", error=%err.as_report(), "failed to parse default value expression");
+                                            AccessError::TypeError {
+                                                expected: "constant expression".into(),
+                                                got: data_type.to_string(),
+                                                value: value_text,
+                                            }
+                                        },
+                                    )?)
+                                }
                             } else {
                                 None
                             };
