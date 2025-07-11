@@ -21,9 +21,10 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use serde_derive::{Deserialize, Serialize};
-use tokio_postgres::types::PgLsn;
+use tokio_postgres::types::{PgLsn, Type as PgType};
 
 use crate::connector_common::create_pg_client;
 use crate::error::{ConnectorError, ConnectorResult};
@@ -254,6 +255,56 @@ impl PostgresExternalTableReader {
     fn quote_column(column: &str) -> String {
         format!("\"{}\"", column)
     }
+}
+
+pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
+    match ty_name.to_lowercase().as_str() {
+        "smallint" | "int2" => Some(PgType::INT2),
+        "integer" | "int" | "int4" => Some(PgType::INT4),
+        "bigint" | "int8" => Some(PgType::INT8),
+        "real" | "float4" => Some(PgType::FLOAT4),
+        "double precision" | "float8" => Some(PgType::FLOAT8),
+        "numeric" | "decimal" => Some(PgType::NUMERIC),
+        "boolean" | "bool" => Some(PgType::BOOL),
+        "varchar" | "character varying" => Some(PgType::VARCHAR),
+        "char" | "character" | "bpchar" => Some(PgType::BPCHAR),
+        "text" => Some(PgType::TEXT),
+        "bytea" => Some(PgType::BYTEA),
+        "date" => Some(PgType::DATE),
+        "time" | "time without time zone" => Some(PgType::TIME),
+        "timestamp" | "timestamp without time zone" => Some(PgType::TIMESTAMP),
+        "timestamptz" | "timestamp with time zone" => Some(PgType::TIMESTAMPTZ),
+        "interval" => Some(PgType::INTERVAL),
+        "json" => Some(PgType::JSON),
+        "jsonb" => Some(PgType::JSONB),
+        "uuid" => Some(PgType::UUID),
+        "point" => Some(PgType::POINT),
+        _ => None,
+    }
+}
+
+pub fn pg_type_to_rw_type(pg_type: &PgType) -> ConnectorResult<DataType> {
+    let data_type = match *pg_type {
+        PgType::BOOL => DataType::Boolean,
+        PgType::INT2 => DataType::Int16,
+        PgType::INT4 => DataType::Int32,
+        PgType::INT8 => DataType::Int64,
+        PgType::FLOAT4 => DataType::Float32,
+        PgType::FLOAT8 => DataType::Float64,
+        PgType::NUMERIC => DataType::Decimal,
+        PgType::DATE => DataType::Date,
+        PgType::TIME => DataType::Time,
+        PgType::TIMESTAMP => DataType::Timestamp,
+        PgType::TIMESTAMPTZ => DataType::Timestamptz,
+        PgType::INTERVAL => DataType::Interval,
+        PgType::VARCHAR | PgType::TEXT | PgType::BPCHAR => DataType::Varchar,
+        PgType::BYTEA => DataType::Bytea,
+        PgType::JSON | PgType::JSONB => DataType::Jsonb,
+        _ => {
+            return Err(anyhow::anyhow!("unsupported postgres type: {}", pg_type).into());
+        }
+    };
+    Ok(data_type)
 }
 
 #[cfg(test)]

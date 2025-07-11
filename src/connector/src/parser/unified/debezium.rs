@@ -32,6 +32,7 @@ use crate::source::cdc::build_cdc_table_id;
 use crate::source::cdc::external::mysql::{
     mysql_type_to_rw_type, timestamp_val_to_timestamptz, type_name_to_mysql_type,
 };
+use crate::source::cdc::external::postgres::{pg_type_to_rw_type, type_name_to_pg_type};
 use crate::source::{ConnectorProperties, SourceColumnDesc};
 
 // Example of Debezium JSON value:
@@ -204,12 +205,18 @@ pub fn parse_schema_change(
 
                     let data_type = match *connector_props {
                         ConnectorProperties::PostgresCdc(_) => {
-                            DataType::from_str(type_name.as_str()).map_err(|err| {
-                                tracing::warn!(error=%err.as_report(), "unsupported postgres type in schema change message");
-                                AccessError::UnsupportedType {
-                                    ty: type_name.clone(),
+                            let ty = type_name_to_pg_type(type_name.as_str());
+                            match ty {
+                                Some(ty) => pg_type_to_rw_type(&ty).map_err(|err| {
+                                    tracing::warn!(error=%err.as_report(), "unsupported postgres type in schema change message");
+                                    AccessError::UnsupportedType {
+                                        ty: type_name.clone(),
+                                    }
+                                })?,
+                                None => {
+                                    Err(AccessError::UnsupportedType { ty: type_name })?
                                 }
-                            })?
+                            }
                         }
                         ConnectorProperties::MysqlCdc(_) => {
                             let ty = type_name_to_mysql_type(type_name.as_str());
