@@ -1271,7 +1271,9 @@ impl DdlService for DdlServiceImpl {
             .iceberg_compaction_manager
             .trigger_manual_compaction(sink_id)
             .await
-            .map_err(|e| Status::internal(format!("Failed to trigger compaction: {}", e)))?;
+            .map_err(|e| {
+                Status::internal(format!("Failed to trigger compaction: {}", e.as_report()))
+            })?;
 
         Ok(Response::new(CompactTableResponse {
             status: None,
