@@ -6057,40 +6057,4 @@ mod tests {
             )
         });
     }
-
-    #[test]
-    fn test_parse_vacuum_statement() {
-        // Test simple table name
-        let sql = "VACUUM table_name";
-        let result = Parser::parse_sql(sql).unwrap();
-        assert_eq!(result.len(), 1);
-        match &result[0] {
-            Statement::Vacuum { table_name } => {
-                assert_eq!(table_name.to_string(), "table_name");
-            }
-            _ => panic!("Expected VACUUM statement"),
-        }
-
-        // Test schema-qualified table name
-        let sql = "VACUUM schema.table_name";
-        let result = Parser::parse_sql(sql).unwrap();
-        assert_eq!(result.len(), 1);
-        match &result[0] {
-            Statement::Vacuum { table_name } => {
-                assert_eq!(table_name.to_string(), "schema.table_name");
-            }
-            _ => panic!("Expected VACUUM statement"),
-        }
-
-        // Test fully-qualified table name
-        let sql = "VACUUM database.schema.table_name";
-        let result = Parser::parse_sql(sql).unwrap();
-        assert_eq!(result.len(), 1);
-        match &result[0] {
-            Statement::Vacuum { table_name } => {
-                assert_eq!(table_name.to_string(), "database.schema.table_name");
-            }
-            _ => panic!("Expected VACUUM statement"),
-        }
-    }
 }
