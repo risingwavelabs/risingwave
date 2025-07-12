@@ -29,8 +29,8 @@ use risingwave_pb::meta::Recovery;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::stream_service::streaming_control_stream_response::Response;
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc;
 use tokio::sync::oneshot::{Receiver, Sender};
+use tokio::sync::{RwLock, mpsc};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tonic::Status;
@@ -51,7 +51,7 @@ use crate::hummock::HummockManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
-    MetadataManager,
+    MetadataManager, NotificationManager, NotificationManagerRef,
 };
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::{ScaleControllerRef, SourceManagerRef};
@@ -98,6 +98,96 @@ pub(super) struct GlobalBarrierWorker<C> {
     control_stream_manager: ControlStreamManager,
 
     term_id: String,
+
+    pub(super) actor_controller: ActorController,
+}
+
+pub type SharedInflightDatabaseInfo = Arc<parking_lot::RwLock<InflightDatabaseInfo>>;
+
+pub struct ActorController {
+    inflight_database_info: SharedInflightDatabaseInfo,
+    notification_manager: NotificationManagerRef,
+}
+
+impl ActorController {
+    pub(crate) async fn reset_shared_info(&self) {
+        todo!()
+    }
+}
+
+impl ActorController {
+    pub fn new(notification_manager_ref: NotificationManagerRef) -> Self {
+        // todo
+        Self {
+            inflight_database_info: Arc::new(parking_lot::RwLock::new(
+                InflightDatabaseInfo::empty(),
+            )),
+
+            notification_manager: notification_manager_ref,
+        }
+    }
+
+    pub fn shared_inflight_info(&self) -> SharedInflightDatabaseInfo {
+        self.inflight_database_info.clone()
+    }
+
+    pub(crate) async fn notify_fragment_changes(
+        &self,
+        fragment_changes: Option<HashMap<FragmentId, CommandFragmentChanges>>,
+    ) {
+        let Some(fragment_changes) = fragment_changes else {
+            return;
+        };
+
+        for (fragment_id, changes) in fragment_changes {
+            match changes {
+                // CommandFragmentChanges::NewFragment(_, _) => {}
+                // CommandFragmentChanges::Reschedule { to_remove, .. } => {
+                //     let job_id = self.fragment_location[fragment_id];
+                //     let info = self
+                //         .jobs
+                //         .get_mut(&job_id)
+                //         .expect("should exist")
+                //         .fragment_infos
+                //         .get_mut(fragment_id)
+                //         .expect("should exist");
+                //     for actor_id in to_remove {
+                //         assert!(info.actors.remove(&(*actor_id as _)).is_some());
+                //     }
+                // }
+                // CommandFragmentChanges::RemoveFragment => {
+                //     let job_id = self
+                //         .fragment_location
+                //         .remove(fragment_id)
+                //         .expect("should exist");
+                //     let job = self.jobs.get_mut(&job_id).expect("should exist");
+                //     job.fragment_infos
+                //         .remove(fragment_id)
+                //         .expect("should exist");
+                //     if job.fragment_infos.is_empty() {
+                //         self.jobs.remove(&job_id).expect("should exist");
+                //     }
+                // }
+                // CommandFragmentChanges::ReplaceNodeUpstream(_) => {}
+                CommandFragmentChanges::NewFragment(_, fragment_info) => {
+                    let fragment_mapping = fragment_info.fragment_mapping();
+
+                    CatalogController::notify_fragment_mapping_helper(
+                        Operation::Add,
+                        vec![fragment_mapping],
+                        notification_manager,
+                    );
+                }
+                CommandFragmentChanges::ReplaceNodeUpstream(_) => {}
+                CommandFragmentChanges::Reschedule {
+                    new_actors,
+                    actor_update_vnode_bitmap,
+                    to_remove,
+                } => {}
+                CommandFragmentChanges::RemoveFragment => {}
+            }
+        }
+    }
 }
 
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
@@ -119,7 +209,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         // Load config will be performed in bootstrap phase.
         let periodic_barriers = PeriodicBarriers::default();
 
-        let checkpoint_control = CheckpointControl::new(env.clone());
+        let actor_controller = ActorController::new();
+        let checkpoint_control =
+            CheckpointControl::new(env.clone(), actor_controller.shared_inflight_info());
         Self {
             enable_recovery,
             periodic_barriers,
@@ -134,6 +226,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             sink_manager,
             control_stream_manager,
             term_id: "uninitialized".into(),
+            actor_controller,
         }
     }
 }
@@ -484,29 +577,34 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         }
                     }
                     let database_id = new_barrier.database_id;
-                    if let Err(e) = self.checkpoint_control.handle_new_barrier(new_barrier, &mut self.control_stream_manager) {
-                        if !self.enable_recovery {
-                            panic!(
-                                "failed to inject barrier to some databases but recovery not enabled: {:?}", (
-                                    database_id,
-                                    e.as_report()
-                                )
-                            );
+                    match self.checkpoint_control.handle_new_barrier(new_barrier, &mut self.control_stream_manager) {
+                        Ok(changes) => {
+                            self.actor_controller.notify_fragment_changes(changes).await;
                         }
-                        let result: MetaResult<_> = try {
-                            if !self.enable_per_database_isolation() {
-                                let err = anyhow!("failed to inject barrier to databases: {:?}", (database_id, e.as_report()));
-                                Err(err)?;
-                            } else if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
-                                warn!(%database_id, e = %e.as_report(),"database entering recovery on inject failure");
-                                self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!(e).context("inject barrier failure").into()));
-                                // TODO: add log on blocking time
-                                let output = self.completing_task.wait_completing_task().await?;
-                                entering_recovery.enter(output, &mut self.control_stream_manager);
+                        Err(e) => {
+                            if !self.enable_recovery {
+                                panic!(
+                                    "failed to inject barrier to some databases but recovery not enabled: {:?}", (
+                                        database_id,
+                                        e.as_report()
+                                    )
+                                );
                             }
-                        };
-                        if let Err(e) = result {
-                            self.failure_recovery(e).await;
+                            let result: MetaResult<_> = try {
+                                if !self.enable_per_database_isolation() {
+                                    let err = anyhow!("failed to inject barrier to databases: {:?}", (database_id, e.as_report()));
+                                    Err(err)?;
+                                } else if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
+                                    warn!(%database_id, e = %e.as_report(),"database entering recovery on inject failure");
+                                    self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!(e).context("inject barrier failure").into()));
+                                    // TODO: add log on blocking time
+                                    let output = self.completing_task.wait_completing_task().await?;
+                                    entering_recovery.enter(output, &mut self.control_stream_manager);
+                                }
+                            };
+                            if let Err(e) = result {
+                                self.failure_recovery(e).await;
+                            }
                         }
                     }
                 }
@@ -710,7 +808,10 @@ use risingwave_meta_model::WorkerId;
 use risingwave_pb::meta::event_log::{Event, EventRecovery};
 
 use crate::barrier::edge_builder::FragmentEdgeBuilder;
+use crate::barrier::info::{CommandFragmentChanges, InflightDatabaseInfo};
+use crate::controller::catalog::CatalogController;
 use crate::controller::fragment::InflightFragmentInfo;
+use crate::model::FragmentId;
 
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// Recovery the whole cluster from the latest epoch.
@@ -919,6 +1020,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         failed_databases.iter().map(|database_id| database_id.database_id).collect_vec()).into()
                     );
                 }
+
                 let checkpoint_control = CheckpointControl::recover(
                     collected_databases,
                     failed_databases,
@@ -926,6 +1028,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     hummock_version_stats,
                     self.env.clone(),
                 );
+
+                self.actor_controller.reset_shared_info().await;
 
                 let reader = self.env.system_params_reader().await;
                 let checkpoint_frequency = reader.checkpoint_frequency();

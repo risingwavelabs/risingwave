@@ -64,6 +64,7 @@ use sea_orm::{
 use thiserror_ext::AsReport;
 
 use crate::controller::ObjectModel;
+use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::{FragmentActorDispatchers, FragmentDownstreamRelation};
 use crate::{MetaError, MetaResult};
 
@@ -1518,7 +1519,7 @@ where
     Ok(rebuild_fragment_mapping_from_actors(job_actors))
 }
 
-pub fn rebuild_fragment_mapping_from_actors(
+pub fn rebuild_fragment_mapping_from_actors_helper(
     job_actors: Vec<(
         FragmentId,
         DistributionType,
@@ -1527,6 +1528,7 @@ pub fn rebuild_fragment_mapping_from_actors(
         WorkerId,
         ActorStatus,
     )>,
+    ignore_actor_status: bool,
 ) -> Vec<FragmentWorkerSlotMapping> {
     let mut all_actor_locations = HashMap::new();
     let mut actor_bitmaps = HashMap::new();
@@ -1534,7 +1536,7 @@ pub fn rebuild_fragment_mapping_from_actors(
     let mut fragment_dist = HashMap::new();
 
     for (fragment_id, dist, actor_id, bitmap, worker_id, actor_status) in job_actors {
-        if actor_status == ActorStatus::Inactive {
+        if !ignore_actor_status && actor_status == ActorStatus::Inactive {
             continue;
         }
 
@@ -1593,6 +1595,60 @@ pub fn rebuild_fragment_mapping_from_actors(
         })
     }
     result
+}
+
+pub fn rebuild_fragment_mapping(fragment: &InflightFragmentInfo) -> FragmentWorkerSlotMapping {
+    let fragment_worker_slot_mapping = match fragment.distribution_type {
+        DistributionType::Single => {
+            let actor = fragment.actors.values().exactly_one().unwrap();
+            WorkerSlotMapping::new_single(WorkerSlotId::new(actor.worker_id as _, 0))
+        }
+        DistributionType::Hash => {
+            let actor_bitmaps: HashMap<_, _> = fragment
+                .actors
+                .iter()
+                .map(|(actor_id, actor_info)| {
+                    let vnode_bitmap = actor_info
+                        .vnode_bitmap
+                        .as_ref()
+                        .cloned()
+                        .expect("actor bitmap shouldn't be none in hash fragment");
+
+                    (*actor_id as hash::ActorId, vnode_bitmap)
+                })
+                .collect();
+
+            let actor_mapping = ActorMapping::from_bitmaps(&actor_bitmaps);
+
+            let actor_locations = fragment
+                .actors
+                .iter()
+                .map(|(actor_id, actor_info)| {
+                    (*actor_id as hash::ActorId, actor_info.worker_id as u32)
+                })
+                .collect();
+
+            actor_mapping.to_worker_slot(&actor_locations)
+        }
+    };
+
+    PbFragmentWorkerSlotMapping {
+        fragment_id: fragment.fragment_id as u32,
+        mapping: Some(fragment_worker_slot_mapping.to_protobuf()),
+    }
+}
+
+pub fn rebuild_fragment_mapping_from_actors(
+    job_actors: Vec<(
+        FragmentId,
+        DistributionType,
+        ActorId,
+        Option<VnodeBitmap>,
+        WorkerId,
+        ActorStatus,
+    )>,
+) -> Vec<FragmentWorkerSlotMapping> {
+    rebuild_fragment_mapping_from_actors_helper(job_actors, false)
 }
 
 /// `get_fragment_actor_ids` returns the fragment actor ids of the given fragments.

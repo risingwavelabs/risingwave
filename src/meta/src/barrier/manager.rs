@@ -159,6 +159,7 @@ impl GlobalBarrierManager {
             request_rx,
         )
         .await;
+
         let manager = Self {
             status: barrier_worker.context.status(),
             hummock_manager: hummock_manager_clone,
