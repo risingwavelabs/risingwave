@@ -72,7 +72,7 @@ impl Binder {
         selection: Option<Expr>,
         returning_items: Vec<SelectItem>,
     ) -> Result<BoundDelete> {
-        let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
+        let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, &name)?;
         let schema_name = schema_name.as_deref();
         let table = self.bind_table(schema_name, &table_name)?;
 
@@ -106,7 +106,7 @@ impl Binder {
             owner,
             table,
             selection: selection
-                .map(|expr| self.bind_expr(expr)?.enforce_bool_clause("WHERE"))
+                .map(|expr| self.bind_expr(&expr)?.enforce_bool_clause("WHERE"))
                 .transpose()?,
             returning_list,
             returning_schema: if returning {
