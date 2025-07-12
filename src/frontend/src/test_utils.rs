@@ -75,7 +75,7 @@ use tempfile::{Builder, NamedTempFile};
 use crate::FrontendOpts;
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
-use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SecretId};
+use crate::catalog::{DatabaseId, SchemaId, SecretId};
 use crate::error::{ErrorCode, Result};
 use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
@@ -589,7 +589,7 @@ impl CatalogWriter for MockCatalogWriter {
         unreachable!()
     }
 
-    async fn drop_connection(&self, _connection_id: ConnectionId) -> Result<()> {
+    async fn drop_connection(&self, _connection_id: u32, _cascade: bool) -> Result<()> {
         unreachable!()
     }
 

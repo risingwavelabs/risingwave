@@ -502,6 +502,7 @@ message ListConnectionsResponse {
 
 message DropConnectionRequest {
   uint32 connection_id = 1;
+  bool cascade = 2;
 }
 
 message DropConnectionResponse {
