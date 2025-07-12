@@ -109,7 +109,9 @@ impl StateStoreWriteEpochControl for HummockVectorWriter {
             self.table_id,
         )
         .await?;
-        let index = &version.vector_indexes[&self.table_id];
+        let index = &version.vector_indexes.get(&self.table_id).ok_or_else(|| {
+            HummockError::other(format!("vector index not found: {}", self.table_id))
+        })?;
         assert!(
             self.state
                 .replace(VectorWriterState {
