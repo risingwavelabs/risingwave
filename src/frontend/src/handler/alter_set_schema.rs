@@ -93,8 +93,11 @@ pub async fn handle_alter_set_schema(
                 Object::SourceId(source.id)
             }
             StatementType::ALTER_SINK => {
-                let (sink, old_schema_name) =
-                    catalog_reader.get_sink_by_name(db_name, schema_path, &real_obj_name)?;
+                let (sink, old_schema_name) = catalog_reader.get_created_sink_by_name(
+                    db_name,
+                    schema_path,
+                    &real_obj_name,
+                )?;
                 if old_schema_name == new_schema_name {
                     return Ok(RwPgResponse::empty_result(stmt_type));
                 }

@@ -44,7 +44,6 @@ use risingwave_pb::stream_plan::{
 };
 
 use super::{ActorId, FragmentId};
-use crate::model::MetadataModelResult;
 use crate::stream::{SplitAssignment, build_actor_connector_splits};
 
 /// The parallelism for a `TableFragments`.
@@ -595,7 +594,7 @@ impl StreamJobFragments {
     /// but only one of them is the upstream source fragment, which is what we return.
     pub fn source_backfill_fragments(
         &self,
-    ) -> MetadataModelResult<HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>> {
+    ) -> HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>> {
         let mut source_backfill_fragments = HashMap::new();
 
         for fragment in self.fragments() {
@@ -610,7 +609,7 @@ impl StreamJobFragments {
                 }
             }
         }
-        Ok(source_backfill_fragments)
+        source_backfill_fragments
     }
 
     /// Find the table job's `Union` fragment.

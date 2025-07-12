@@ -374,14 +374,14 @@ impl MetadataManager {
     }
 
     pub async fn list_background_creating_jobs(&self) -> MetaResult<Vec<TableId>> {
-        let tables = self
+        let jobs = self
             .catalog_controller
-            .list_background_creating_mviews(false)
+            .list_background_creating_jobs(false)
             .await?;
 
-        Ok(tables
+        Ok(jobs
             .into_iter()
-            .map(|table| TableId::from(table.table_id as u32))
+            .map(|(id, _, _)| TableId::from(id as u32))
             .collect())
     }
 

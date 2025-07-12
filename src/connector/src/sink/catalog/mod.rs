@@ -21,7 +21,7 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{
     ColumnCatalog, ConnectionId, CreateType, DatabaseId, Field, OBJECT_ID_PLACEHOLDER, Schema,
-    SchemaId, TableId, UserId,
+    SchemaId, StreamJobStatus, TableId, UserId,
 };
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -375,6 +375,10 @@ pub struct SinkCatalog {
     pub initialized_at_cluster_version: Option<String>,
     pub create_type: CreateType,
 
+    /// Indicate the stream job status, whether it is created or creating.
+    /// If it is creating, we should hide it.
+    pub stream_job_status: StreamJobStatus,
+
     /// The secret reference for the sink, mapping from property name to secret id.
     pub secret_refs: BTreeMap<String, PbSecretRef>,
 
@@ -411,7 +415,7 @@ impl SinkCatalog {
             created_at_epoch: self.created_at_epoch.map(|e| e.0),
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
-            stream_job_status: PbStreamJobStatus::Creating.into(),
+            stream_job_status: self.stream_job_status.to_proto().into(),
             target_table: self.target_table.map(|table_id| table_id.table_id()),
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
@@ -463,12 +467,19 @@ impl SinkCatalog {
         // We need to align with meta here, so we've utilized the proto method.
         self.to_proto().unique_identity()
     }
+
+    pub fn is_created(&self) -> bool {
+        self.stream_job_status == StreamJobStatus::Created
+    }
 }
 
 impl From<PbSink> for SinkCatalog {
     fn from(pb: PbSink) -> Self {
         let sink_type = pb.get_sink_type().unwrap();
         let create_type = pb.get_create_type().unwrap_or(PbCreateType::Foreground);
+        let stream_job_status = pb
+            .get_stream_job_status()
+            .unwrap_or(PbStreamJobStatus::Created);
         let format_desc = match pb.format_desc {
             Some(f) => f.try_into().ok(),
             None => {
@@ -515,6 +526,7 @@ impl From<PbSink> for SinkCatalog {
             initialized_at_cluster_version: pb.initialized_at_cluster_version,
             created_at_cluster_version: pb.created_at_cluster_version,
             create_type: CreateType::from_proto(create_type),
+            stream_job_status: StreamJobStatus::from_proto(stream_job_status),
             secret_refs: pb.secret_refs,
             original_target_columns: pb
                 .original_target_columns

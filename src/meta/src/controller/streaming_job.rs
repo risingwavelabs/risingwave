@@ -402,7 +402,7 @@ impl CatalogController {
         streaming_job: &StreamingJob,
         for_replace: bool,
     ) -> MetaResult<()> {
-        let is_materialized_view = streaming_job.is_materialized_view();
+        let need_notify = streaming_job.should_notify_creating();
         let fragment_actors =
             Self::extract_fragment_and_actors_from_fragments(stream_job_fragments)?;
         let mut all_tables = stream_job_fragments.all_tables();
@@ -443,7 +443,7 @@ impl CatalogController {
                     .update(&txn)
                     .await?;
 
-                    if is_materialized_view {
+                    if need_notify {
                         // In production, definition was replaced but still needed for notification.
                         if cfg!(not(debug_assertions)) && table.id == streaming_job.id() {
                             table.definition = streaming_job.definition();
@@ -452,6 +452,22 @@ impl CatalogController {
                             object_info: Some(PbObjectInfo::Table(table.clone())),
                         });
                     }
+                }
+            }
+        }
+
+        if need_notify {
+            match &streaming_job {
+                StreamingJob::MaterializedView(_) => {
+                    // Already added.
+                }
+                StreamingJob::Sink(sink, _) => objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Sink(sink.clone())),
+                }),
+                StreamingJob::Table(_, _, _)
+                | StreamingJob::Index(_, _)
+                | StreamingJob::Source(_) => {
+                    unreachable!("support background ddl for these kind of jobs")
                 }
             }
         }
@@ -482,7 +498,7 @@ impl CatalogController {
         txn.commit().await?;
 
         if !objects.is_empty() {
-            assert!(is_materialized_view);
+            assert!(need_notify);
             self.notify_frontend(Operation::Add, Info::ObjectGroup(PbObjectGroup { objects }))
                 .await;
         }
@@ -513,32 +529,34 @@ impl CatalogController {
         let database_id = obj
             .database_id
             .ok_or_else(|| anyhow!("obj has no database id: {:?}", obj))?;
+        let streaming_job = streaming_job::Entity::find_by_id(job_id).one(&txn).await?;
 
-        if !is_cancelled {
-            let streaming_job = streaming_job::Entity::find_by_id(job_id).one(&txn).await?;
-            if let Some(streaming_job) = streaming_job {
-                assert_ne!(streaming_job.job_status, JobStatus::Created);
-                if streaming_job.create_type == CreateType::Background
-                    && streaming_job.job_status == JobStatus::Creating
-                {
-                    // If the job is created in background and still in creating status, we should not abort it and let recovery to handle it.
-                    tracing::warn!(
-                        id = job_id,
-                        "streaming job is created in background and still in creating status"
-                    );
-                    return Ok((false, Some(database_id)));
-                }
+        if !is_cancelled && let Some(streaming_job) = &streaming_job {
+            assert_ne!(streaming_job.job_status, JobStatus::Created);
+            if streaming_job.create_type == CreateType::Background
+                && streaming_job.job_status == JobStatus::Creating
+            {
+                // If the job is created in background and still in creating status, we should not abort it and let recovery handle it.
+                tracing::warn!(
+                    id = job_id,
+                    "streaming job is created in background and still in creating status"
+                );
+                return Ok((false, Some(database_id)));
             }
         }
 
         let internal_table_ids = get_internal_tables_by_id(job_id, &txn).await?;
 
-        // Get the notification info if the job is a materialized view.
-        let table_obj = Table::find_by_id(job_id).one(&txn).await?;
+        // Get the notification info if the job is a materialized view or created in the background.
         let mut objs = vec![];
-        if let Some(table) = &table_obj
-            && table.table_type == TableType::MaterializedView
-        {
+        let table_obj = Table::find_by_id(job_id).one(&txn).await?;
+        let need_notify = if let Some(table) = &table_obj {
+            // If the job is a materialized view, we need to notify the frontend.
+            table.table_type == TableType::MaterializedView
+        } else {
+            streaming_job.is_some_and(|job| job.create_type == CreateType::Background)
+        };
+        if need_notify {
             let obj: Option<PartialObject> = Object::find_by_id(job_id)
                 .select_only()
                 .columns([
@@ -668,7 +686,7 @@ impl CatalogController {
         actor_ids: Vec<crate::model::ActorId>,
         upstream_fragment_new_downstreams: &FragmentDownstreamRelation,
         split_assignment: &SplitAssignment,
-        is_mv: bool,
+        notify_for_creating: bool,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -710,7 +728,7 @@ impl CatalogController {
         .update(&txn)
         .await?;
 
-        let fragment_mapping = if is_mv {
+        let fragment_mapping = if notify_for_creating {
             get_fragment_mappings(&txn, job_id as _).await?
         } else {
             vec![]
@@ -829,6 +847,14 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
 
+        let create_type: CreateType = StreamingJobModel::find_by_id(job_id)
+            .select_only()
+            .column(streaming_job::Column::CreateType)
+            .into_tuple()
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
+
         // update `created_at` as now() and `created_at_cluster_version` as current cluster version.
         let res = Object::update_many()
             .col_expr(object::Column::CreatedAt, Expr::current_timestamp().into())
@@ -865,7 +891,11 @@ impl CatalogController {
                 )),
             })
             .collect_vec();
-        let mut notification_op = NotificationOperation::Add;
+        let mut notification_op = if create_type == CreateType::Background {
+            NotificationOperation::Update
+        } else {
+            NotificationOperation::Add
+        };
         let mut updated_user_info = vec![];
 
         match job_type {

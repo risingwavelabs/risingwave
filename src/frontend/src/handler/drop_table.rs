@@ -89,7 +89,7 @@ pub async fn handle_drop_table(
                 .env()
                 .catalog_reader()
                 .read_guard()
-                .get_sink_by_name(
+                .get_created_sink_by_name(
                     db_name,
                     schema_path,
                     &(ICEBERG_SINK_PREFIX.to_owned() + &table_name),
