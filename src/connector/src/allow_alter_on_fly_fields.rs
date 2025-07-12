@@ -178,6 +178,13 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "properties.request.required.acks".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
+    // SnowflakeConfig
+    map.try_insert(
+        std::any::type_name::<SnowflakeConfig>().to_owned(),
+        [
+            "commit_checkpoint_interval".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
     // StarrocksConfig
     map.try_insert(
         std::any::type_name::<StarrocksConfig>().to_owned(),
