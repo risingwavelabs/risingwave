@@ -971,7 +971,7 @@ impl ScaleController {
                 .cloned()
                 .unwrap();
 
-            let fragment_actor_map = fragment_actors_after_reschedule
+            let actor_locations = fragment_actors_after_reschedule
                 .get(fragment_id)
                 .cloned()
                 .unwrap();
@@ -981,7 +981,7 @@ impl ScaleController {
             // first, find existing actor bitmap, copy them
             let mut fragment_bitmap = HashMap::new();
 
-            for (actor_id, worker_id) in &fragment_actor_map {
+            for (actor_id, worker_id) in &actor_locations {
                 if let Some((root_fragment, root_actor_id)) = actor_group_map.get(actor_id) {
                     let root_bitmap = fragment_updated_bitmap
                         .get(root_fragment)
@@ -1169,7 +1169,11 @@ impl ScaleController {
         // Because we are in the Pause state, so it's no problem to reallocate
         let mut fragment_actor_splits = HashMap::new();
         for fragment_id in reschedules.keys() {
-            let actors_after_reschedule = &fragment_actors_after_reschedule[fragment_id];
+            let actor_locations_after_reschedule: HashMap<_, _> = fragment_actors_after_reschedule
+                [fragment_id]
+                .iter()
+                .map(|(actor_id, worker_id)| (*actor_id, *worker_id))
+                .collect();
 
             if ctx.stream_source_fragment_ids.contains(fragment_id) {
                 let fragment = &ctx.fragment_map[fragment_id];
@@ -1180,7 +1184,10 @@ impl ScaleController {
                     .map(|actor| actor.actor_id)
                     .collect_vec();
 
-                let curr_actor_ids = actors_after_reschedule.keys().cloned().collect_vec();
+                let curr_actor_ids = actor_locations_after_reschedule
+                    .keys()
+                    .cloned()
+                    .collect_vec();
 
                 let actor_splits = self
                     .source_manager
@@ -1188,6 +1195,7 @@ impl ScaleController {
                         *fragment_id,
                         &prev_actor_ids,
                         &curr_actor_ids,
+                        &actor_locations_after_reschedule,
                     )
                     .await?;
 
