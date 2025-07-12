@@ -320,7 +320,7 @@ impl GlobalStreamManager {
                         })
                         .await
                         .inspect_err(|_| {
-                            tracing::warn!(error = %err.as_report(), "failed to notify failed: {table_id}")
+                            tracing::warn!(error = %err.as_report(), "failed to send notification for table: {table_id}")
                         });
                 }
             }
