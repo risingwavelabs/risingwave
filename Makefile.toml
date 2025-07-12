@@ -1318,6 +1318,14 @@ env = { RISEDEV_CLEAN_START = true }
 args = ["${@}"]
 description = "Clean data and start a full RisingWave dev cluster using risedev-dev"
 
+[tasks.ci-resume]
+category = "RiseDev - CI"
+dependencies = ["pre-start-dev"]
+command = "target/debug/risedev-dev" # `risedev-dev` is always built in dev profile
+env = { RISEDEV_CLEAN_START = false }
+args = ["${@}"]
+description = "Resume a full RisingWave dev cluster without cleaning data (useful for offline schema change tests)"
+
 [tasks.ci-kill]
 category = "RiseDev - CI"
 dependencies = ["k", "check-logs", "wait-processes-exit"]
