@@ -85,9 +85,10 @@ pub fn get_split_offset_mapping_from_chunk(
 
 pub fn get_split_offset_col_idx(
     column_descs: &[SourceColumnDesc],
-) -> (Option<usize>, Option<usize>) {
+) -> (Option<usize>, Option<usize>, Option<usize>) {
     let mut split_idx = None;
     let mut offset_idx = None;
+    let mut pulsar_message_id_idx = None;
     for (idx, column) in column_descs.iter().enumerate() {
         match column.additional_column {
             AdditionalColumn {
@@ -100,23 +101,25 @@ pub fn get_split_offset_col_idx(
             } => {
                 offset_idx = Some(idx);
             }
+            AdditionalColumn {
+                column_type: Some(ColumnType::PulsarMessageIdData(_)),
+            } => {
+                pulsar_message_id_idx = Some(idx);
+            }
             _ => (),
         }
     }
-    (split_idx, offset_idx)
+    (split_idx, offset_idx, pulsar_message_id_idx)
 }
 
 pub fn prune_additional_cols(
     chunk: &StreamChunk,
-    split_idx: usize,
-    offset_idx: usize,
+    to_prune_indices: &[usize],
     column_descs: &[SourceColumnDesc],
 ) -> StreamChunk {
     chunk.project(
         &(0..chunk.dimension())
-            .filter(|&idx| {
-                (idx != split_idx && idx != offset_idx) || column_descs[idx].is_visible()
-            })
+            .filter(|&idx| !to_prune_indices.contains(&idx) || column_descs[idx].is_visible())
             .collect_vec(),
     )
 }

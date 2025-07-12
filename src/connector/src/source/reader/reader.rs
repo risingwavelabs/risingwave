@@ -140,6 +140,7 @@ impl SourceReader {
                     AckPolicy::None => None,
                 }
             }
+            ConnectorProperties::Pulsar(_) => Some(WaitCheckpointTask::AckPulsarMessage(vec![])),
             _ => None,
         })
     }
