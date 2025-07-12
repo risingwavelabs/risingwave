@@ -216,15 +216,15 @@ mod tests {
     #[test]
     fn test_snowflake_sink_commit_coordinator() {
         let snowflake_task_context = SnowflakeTaskContext {
-            task_name: "test_task".to_string(),
-            cdc_table_name: "test_cdc_table".to_string(),
-            target_table_name: "test_target_table".to_string(),
-            schedule: "1 HOUR".to_string(),
-            warehouse: "test_warehouse".to_string(),
-            pk_column_names: vec!["v1".to_string()],
-            all_column_names: vec!["v1".to_string(), "v2".to_string()],
-            database: "test_db".to_string(),
-            schema: "test_schema".to_string(),
+            task_name: "test_task".to_owned(),
+            cdc_table_name: "test_cdc_table".to_owned(),
+            target_table_name: "test_target_table".to_owned(),
+            schedule: "1 HOUR".to_owned(),
+            warehouse: "test_warehouse".to_owned(),
+            pk_column_names: vec!["v1".to_owned()],
+            all_column_names: vec!["v1".to_owned(), "v2".to_owned()],
+            database: "test_db".to_owned(),
+            schema: "test_schema".to_owned(),
         };
         let task_sql = build_create_merge_into_task_sql(&snowflake_task_context);
         let expected = r#"CREATE OR REPLACE TASK test_db.test_schema.test_task
@@ -261,15 +261,15 @@ END;"#;
     #[test]
     fn test_snowflake_sink_commit_coordinator_multi_pk() {
         let snowflake_task_context = SnowflakeTaskContext {
-            task_name: "test_task_multi_pk".to_string(),
-            cdc_table_name: "cdc_multi_pk".to_string(),
-            target_table_name: "target_multi_pk".to_string(),
-            schedule: "5 MINUTE".to_string(),
-            warehouse: "multi_pk_warehouse".to_string(),
-            pk_column_names: vec!["id1".to_string(), "id2".to_string()],
-            all_column_names: vec!["id1".to_string(), "id2".to_string(), "val".to_string()],
-            database: "test_db".to_string(),
-            schema: "test_schema".to_string(),
+            task_name: "test_task_multi_pk".to_owned(),
+            cdc_table_name: "cdc_multi_pk".to_owned(),
+            target_table_name: "target_multi_pk".to_owned(),
+            schedule: "5 MINUTE".to_owned(),
+            warehouse: "multi_pk_warehouse".to_owned(),
+            pk_column_names: vec!["id1".to_owned(), "id2".to_owned()],
+            all_column_names: vec!["id1".to_owned(), "id2".to_owned(), "val".to_owned()],
+            database: "test_db".to_owned(),
+            schema: "test_schema".to_owned(),
         };
         let task_sql = build_create_merge_into_task_sql(&snowflake_task_context);
         let expected = r#"CREATE OR REPLACE TASK test_db.test_schema.test_task_multi_pk
