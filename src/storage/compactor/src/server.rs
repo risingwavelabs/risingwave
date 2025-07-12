@@ -198,6 +198,8 @@ pub async fn compactor_serve(
     );
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
+    register_jvm_builder();
+
     // Register to the cluster.
     let (meta_client, system_params_reader) = MetaClient::register_new(
         opts.meta_address.clone(),
