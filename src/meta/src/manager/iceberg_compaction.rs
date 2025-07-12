@@ -96,7 +96,7 @@ pub struct IcebergCompactionHandle {
     metadata_manager: MetadataManager,
     handle_success: bool,
 
-    /// The commit info of the iceberg compaction handle for recovery.
+    /// Stores commit state to restore on task failure.
     commit_info: CommitInfo,
 }
 
@@ -132,7 +132,6 @@ impl IcebergCompactionHandle {
         let param = SinkParam::try_from_sink_catalog(sink_catalog)?;
         let result =
             compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {
-                // Todo! Use iceberg's compaction task ID
                 task_id,
                 props: param.properties,
             }));
@@ -221,7 +220,10 @@ impl IcebergCompactionManager {
                         manager.update_iceberg_commit_info(stat);
                     },
                     _ = &mut shutdown_rx => {
-                        tracing::info!("Iceberg compaction manager is stopped");
+                        tracing::info!(
+                            event = "shutdown",
+                            "Iceberg compaction manager is stopped"
+                        );
                         return;
                     }
                 }
@@ -254,8 +256,7 @@ impl IcebergCompactionManager {
         }
     }
 
-    /// Get the top N iceberg commit sink ids
-    /// Sorted by commit count and next compaction time
+    /// Returns candidates for compaction based on commit activity and timing.
     pub fn get_top_n_iceberg_commit_sink_ids(&self, n: usize) -> Vec<IcebergCompactionHandle> {
         let now = Instant::now();
         let mut guard = self.inner.write();
@@ -312,6 +313,7 @@ impl IcebergCompactionManager {
         Ok(param)
     }
 
+    /// Loads table reference for debugging and testing purposes.
     #[allow(dead_code)]
     pub async fn load_iceberg_table(&self, sink_id: &SinkId) -> MetaResult<Table> {
         let sink_param = self.get_sink_param(sink_id).await?;
@@ -363,9 +365,7 @@ impl IcebergCompactionManager {
         join_handle_vec
     }
 
-    /// GC loop for expired snapshots management
-    /// This is a separate loop that periodically checks all tracked Iceberg tables
-    /// and performs garbage collection operations like expiring old snapshots
+    /// Periodically expires old snapshots to maintain storage efficiency.
     pub fn gc_loop(manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
@@ -378,11 +378,18 @@ impl IcebergCompactionManager {
                 tokio::select! {
                     _ = interval.tick() => {
                         if let Err(e) = manager.perform_gc_operations().await {
-                            tracing::error!(error = ?e.as_report(), "GC operations failed");
+                            tracing::error!(
+                                event = "gc_failed",
+                                error = ?e.as_report(),
+                                "GC operations failed"
+                            );
                         }
                     },
                     _ = &mut shutdown_rx => {
-                        tracing::info!("Iceberg GC loop is stopped");
+                        tracing::info!(
+                            event = "shutdown",
+                            "Iceberg GC loop is stopped"
+                        );
                         return;
                     }
                 }
@@ -392,7 +399,6 @@ impl IcebergCompactionManager {
         (join_handle, shutdown_tx)
     }
 
-    /// Perform GC operations on all tracked Iceberg tables
     async fn perform_gc_operations(&self) -> MetaResult<()> {
         // Get all sink IDs that are currently tracked
         let sink_ids = {
@@ -400,20 +406,29 @@ impl IcebergCompactionManager {
             guard.iceberg_commits.keys().cloned().collect::<Vec<_>>()
         };
 
-        tracing::info!("Starting GC operations for {} tables", sink_ids.len());
+        tracing::info!(
+            event = "gc_started",
+            table_count = sink_ids.len(),
+            "Starting GC operations"
+        );
 
         for sink_id in sink_ids {
             if let Err(e) = self.check_and_expire_snapshots(&sink_id).await {
                 // Continue with other tables even if one fails
-                tracing::error!(error = ?e.as_report(), "Failed to perform GC for sink {}", sink_id.sink_id);
+                tracing::error!(
+                    event = "gc_table_failed",
+                    sink_id = sink_id.sink_id,
+                    error = ?e.as_report(),
+                    "Failed to perform GC for sink"
+                );
             }
         }
 
-        tracing::info!("GC operations completed");
+        tracing::info!(event = "gc_completed", "GC operations completed");
         Ok(())
     }
 
-    /// Check snapshot count for a specific table and trigger expiration if needed
+    /// Expires snapshots older than configured threshold to reclaim storage.
     async fn check_and_expire_snapshots(&self, sink_id: &SinkId) -> MetaResult<()> {
         // Configurable thresholds - could be moved to config later
         const MAX_SNAPSHOT_AGE_MS_DEFAULT: i64 = 24 * 60 * 60 * 1000; // 1 day
@@ -425,9 +440,13 @@ impl IcebergCompactionManager {
             return Ok(());
         }
 
+        let catalog_name = iceberg_config.catalog_name();
+        let table_ident = iceberg_config.full_table_name()?;
+        let table_ident_name = table_ident.to_string();
+
         let catalog = iceberg_config.create_catalog().await?;
         let table = catalog
-            .load_table(&iceberg_config.full_table_name()?)
+            .load_table(&table_ident)
             .await
             .map_err(|e| SinkError::Iceberg(e.into()))?;
 
@@ -441,11 +460,12 @@ impl IcebergCompactionManager {
         }
 
         tracing::info!(
-            "Catalog {} table {} sink-id {} has {} snapshots try trigger expiration",
-            iceberg_config.catalog_name(),
-            iceberg_config.full_table_name()?,
-            sink_id.sink_id,
-            snapshots.len(),
+            event = "expiration_triggered",
+            catalog_name = catalog_name,
+            table_name = table_ident_name,
+            sink_id = sink_id.sink_id,
+            snapshot_count = snapshots.len(),
+            "Triggering snapshot expiration"
         );
 
         let tx = Transaction::new(&table);
@@ -460,15 +480,34 @@ impl IcebergCompactionManager {
             .apply()
             .await
             .map_err(|e| SinkError::Iceberg(e.into()))?;
-        tx.commit(catalog.as_ref())
+
+        let new_table = tx
+            .commit(catalog.as_ref())
             .await
             .map_err(|e| SinkError::Iceberg(e.into()))?;
 
+        self.metrics
+            .iceberg_expired_snapshot_count
+            .with_label_values(&[&catalog_name, &table_ident_name])
+            .inc();
+
+        // check the difference in snapshot count
+        let old_snapshot_count = snapshots.len();
+        let new_snapshot_count = new_table.metadata().snapshots().count();
+
+        self.metrics
+            .iceberg_remove_snapshot_count
+            .with_label_values(&[&catalog_name, &table_ident_name])
+            .inc_by((old_snapshot_count - new_snapshot_count) as _);
+
         tracing::info!(
-            "Expired snapshots for iceberg catalog {} table {} sink-id {}",
-            iceberg_config.catalog_name(),
-            iceberg_config.full_table_name()?,
-            sink_id.sink_id,
+            event = "expired_snapshots",
+            catalog_name = catalog_name,
+            table_name = table_ident_name,
+            sink_id = sink_id.sink_id,
+            old_snapshot_count = old_snapshot_count,
+            new_snapshot_count = new_snapshot_count,
+            "GC completed for table"
         );
 
         Ok(())
