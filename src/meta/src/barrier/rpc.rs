@@ -18,6 +18,7 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt::{Debug, Formatter};
 use std::future::poll_fn;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -63,6 +64,7 @@ use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo, InflightStreamingJobInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
+use crate::barrier::worker::SharedInflightDatabaseInfo;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetaSrvEnv;
 use crate::model::{ActorId, StreamActor, StreamJobActorsToCreate, StreamJobFragments};
@@ -381,6 +383,7 @@ pub(super) struct DatabaseInitialBarrierCollector {
     database_id: DatabaseId,
     node_to_collect: NodeToCollect,
     database_state: BarrierWorkerState,
+    shared_inflight_graph_info: SharedInflightDatabaseInfo,
     create_mview_tracker: CreateMviewProgressTracker,
     creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl>,
     committed_epoch: u64,
@@ -436,6 +439,7 @@ impl DatabaseInitialBarrierCollector {
             self.database_id,
             self.create_mview_tracker,
             self.database_state,
+            self.shared_inflight_graph_info,
             self.committed_epoch,
             self.creating_streaming_job_controls,
         )
@@ -733,12 +737,15 @@ impl ControlStreamManager {
         database_jobs
             .into_values()
             .for_each(|job| database.extend(job));
+
+        let shared_database_info = database.clone();
         let database_state =
             BarrierWorkerState::recovery(new_epoch, database, subscription_info, is_paused);
         Ok(DatabaseInitialBarrierCollector {
             database_id,
             node_to_collect,
             database_state,
+            shared_inflight_graph_info: Arc::new(parking_lot::RwLock::new(shared_database_info)),
             create_mview_tracker: tracker,
             creating_streaming_job_controls,
             committed_epoch,

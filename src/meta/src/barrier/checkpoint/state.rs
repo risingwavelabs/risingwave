@@ -42,8 +42,6 @@ pub(crate) struct BarrierWorkerState {
     /// Inflight running actors info.
     pub(super) inflight_graph_info: InflightDatabaseInfo,
 
-    pub shared_inflight_graph_info: SharedInflightDatabaseInfo,
-
     pub(super) inflight_subscription_info: InflightSubscriptionInfo,
 
     /// Whether the cluster is paused.
@@ -56,9 +54,6 @@ impl BarrierWorkerState {
             in_flight_prev_epoch: TracedEpoch::new(Epoch::now()),
             pending_non_checkpoint_barriers: vec![],
             inflight_graph_info: InflightDatabaseInfo::empty(),
-            shared_inflight_graph_info: Arc::new(parking_lot::RwLock::new(
-                InflightDatabaseInfo::empty(),
-            )),
             inflight_subscription_info: InflightSubscriptionInfo::default(),
             is_paused: false,
         }
@@ -74,7 +69,6 @@ impl BarrierWorkerState {
             in_flight_prev_epoch,
             pending_non_checkpoint_barriers: vec![],
             inflight_graph_info: inflight_graph_info.clone(),
-            shared_inflight_graph_info: Arc::new(parking_lot::RwLock::new(inflight_graph_info)),
             inflight_subscription_info,
             is_paused,
         }
@@ -141,6 +135,7 @@ impl BarrierWorkerState {
     pub fn apply_command(
         &mut self,
         command: Option<&Command>,
+        shared_inflight_graph_info: &mut InflightDatabaseInfo,
     ) -> (
         InflightDatabaseInfo,
         InflightSubscriptionInfo,
@@ -150,8 +145,6 @@ impl BarrierWorkerState {
         Option<HashMap<FragmentId, CommandFragmentChanges>>,
     ) {
         let (info, subscription_info, fragment_changes) = {
-            let mut shared_inflight_graph_info = self.shared_inflight_graph_info.write();
-
             // update the fragment_infos outside pre_apply
             let fragment_changes = if let Some(Command::CreateStreamingJob {
                 job_type: CreateStreamingJobType::SnapshotBackfill(_),

@@ -51,7 +51,7 @@ use crate::hummock::HummockManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
-    MetadataManager,
+    MetadataManager, NotificationManager, NotificationManagerRef,
 };
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::{ScaleControllerRef, SourceManagerRef};
@@ -99,79 +99,94 @@ pub(super) struct GlobalBarrierWorker<C> {
 
     term_id: String,
 
-    actor_controller: ActorController,
+    pub(super) actor_controller: ActorController,
 }
 
 pub type SharedInflightDatabaseInfo = Arc<parking_lot::RwLock<InflightDatabaseInfo>>;
 
 pub struct ActorController {
     inflight_database_info: SharedInflightDatabaseInfo,
+    notification_manager: NotificationManagerRef,
 }
 
 impl ActorController {
-    pub fn new() -> Self {
+    pub(crate) async fn reset_shared_info(&self) {
+        todo!()
+    }
+}
+
+impl ActorController {
+    pub fn new(notification_manager_ref: NotificationManagerRef) -> Self {
         // todo
         Self {
             inflight_database_info: Arc::new(parking_lot::RwLock::new(
                 InflightDatabaseInfo::empty(),
             )),
+
+            notification_manager: notification_manager_ref,
         }
+    }
+
+    pub fn shared_inflight_info(&self) -> SharedInflightDatabaseInfo {
+        self.inflight_database_info.clone()
     }
 
     pub(crate) async fn notify_fragment_changes(
         &self,
-        p0: Option<HashMap<FragmentId, CommandFragmentChanges>>,
+        fragment_changes: Option<HashMap<FragmentId, CommandFragmentChanges>>,
     ) {
-        let Some(fragment_changes) = p0 else { return };
+        let Some(fragment_changes) = fragment_changes else {
+            return;
+        };
 
-        // for (fragment_id, changes) in fragment_changes {
-        //     match changes {
-        //         // CommandFragmentChanges::NewFragment(_, _) => {}
-        //         // CommandFragmentChanges::Reschedule { to_remove, .. } => {
-        //         //     let job_id = self.fragment_location[fragment_id];
-        //         //     let info = self
-        //         //         .jobs
-        //         //         .get_mut(&job_id)
-        //         //         .expect("should exist")
-        //         //         .fragment_infos
-        //         //         .get_mut(fragment_id)
-        //         //         .expect("should exist");
-        //         //     for actor_id in to_remove {
-        //         //         assert!(info.actors.remove(&(*actor_id as _)).is_some());
-        //         //     }
-        //         // }
-        //         // CommandFragmentChanges::RemoveFragment => {
-        //         //     let job_id = self
-        //         //         .fragment_location
-        //         //         .remove(fragment_id)
-        //         //         .expect("should exist");
-        //         //     let job = self.jobs.get_mut(&job_id).expect("should exist");
-        //         //     job.fragment_infos
-        //         //         .remove(fragment_id)
-        //         //         .expect("should exist");
-        //         //     if job.fragment_infos.is_empty() {
-        //         //         self.jobs.remove(&job_id).expect("should exist");
-        //         //     }
-        //         // }
-        //         // CommandFragmentChanges::ReplaceNodeUpstream(_) => {}
-        //         CommandFragmentChanges::NewFragment(_, fragment_info) => {
-        //             let fragment_mapping = fragment_info.fragment_mapping();
-        //
-        //             CatalogController::notify_fragment_mapping_without_version(
-        //                 Operation::Add,
-        //                 vec![fragment_mapping],
-        //                 notification_manager,
-        //             );
-        //         }
-        //         CommandFragmentChanges::ReplaceNodeUpstream(_) => {}
-        //         CommandFragmentChanges::Reschedule {
-        //             new_actors,
-        //             actor_update_vnode_bitmap,
-        //             to_remove,
-        //         } => {}
-        //         CommandFragmentChanges::RemoveFragment => {}
-        //     }
-        // }
+        for (fragment_id, changes) in fragment_changes {
+            match changes {
+                // CommandFragmentChanges::NewFragment(_, _) => {}
+                // CommandFragmentChanges::Reschedule { to_remove, .. } => {
+                //     let job_id = self.fragment_location[fragment_id];
+                //     let info = self
+                //         .jobs
+                //         .get_mut(&job_id)
+                //         .expect("should exist")
+                //         .fragment_infos
+                //         .get_mut(fragment_id)
+                //         .expect("should exist");
+                //     for actor_id in to_remove {
+                //         assert!(info.actors.remove(&(*actor_id as _)).is_some());
+                //     }
+                // }
+                // CommandFragmentChanges::RemoveFragment => {
+                //     let job_id = self
+                //         .fragment_location
+                //         .remove(fragment_id)
+                //         .expect("should exist");
+                //     let job = self.jobs.get_mut(&job_id).expect("should exist");
+                //     job.fragment_infos
+                //         .remove(fragment_id)
+                //         .expect("should exist");
+                //     if job.fragment_infos.is_empty() {
+                //         self.jobs.remove(&job_id).expect("should exist");
+                //     }
+                // }
+                // CommandFragmentChanges::ReplaceNodeUpstream(_) => {}
+                CommandFragmentChanges::NewFragment(_, fragment_info) => {
+                    let fragment_mapping = fragment_info.fragment_mapping();
+
+                    CatalogController::notify_fragment_mapping_helper(
+                        Operation::Add,
+                        vec![fragment_mapping],
+                        notification_manager,
+                    );
+                }
+                CommandFragmentChanges::ReplaceNodeUpstream(_) => {}
+                CommandFragmentChanges::Reschedule {
+                    new_actors,
+                    actor_update_vnode_bitmap,
+                    to_remove,
+                } => {}
+                CommandFragmentChanges::RemoveFragment => {}
+            }
+        }
     }
 }
 
@@ -194,7 +209,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         // Load config will be performed in bootstrap phase.
         let periodic_barriers = PeriodicBarriers::default();
 
-        let checkpoint_control = CheckpointControl::new(env.clone());
+        let actor_controller = ActorController::new();
+        let checkpoint_control =
+            CheckpointControl::new(env.clone(), actor_controller.shared_inflight_info());
         Self {
             enable_recovery,
             periodic_barriers,
@@ -209,7 +226,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             sink_manager,
             control_stream_manager,
             term_id: "uninitialized".into(),
-            actor_controller: ActorController::new(),
+            actor_controller,
         }
     }
 }
@@ -1003,6 +1020,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         failed_databases.iter().map(|database_id| database_id.database_id).collect_vec()).into()
                     );
                 }
+
                 let checkpoint_control = CheckpointControl::recover(
                     collected_databases,
                     failed_databases,
@@ -1010,6 +1028,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     hummock_version_stats,
                     self.env.clone(),
                 );
+
+                self.actor_controller.reset_shared_info().await;
 
                 let reader = self.env.system_params_reader().await;
                 let checkpoint_frequency = reader.checkpoint_frequency();

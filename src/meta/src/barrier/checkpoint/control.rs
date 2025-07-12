@@ -16,10 +16,12 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::{Future, poll_fn};
 use std::mem::take;
+use std::sync::Arc;
 use std::task::Poll;
 
 use anyhow::anyhow;
 use fail::fail_point;
+use parking_lot::RwLock;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
@@ -39,7 +41,9 @@ use crate::barrier::checkpoint::recovery::{
 use crate::barrier::checkpoint::state::BarrierWorkerState;
 use crate::barrier::command::CommandContext;
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompleteBarrierTask};
-use crate::barrier::info::{CommandFragmentChanges, InflightStreamingJobInfo};
+use crate::barrier::info::{
+    CommandFragmentChanges, InflightDatabaseInfo, InflightStreamingJobInfo,
+};
 use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand, TrackingJob};
 use crate::barrier::rpc::{ControlStreamManager, from_partial_graph_id};
@@ -76,7 +80,6 @@ impl CheckpointControl {
         control_stream_manager: &mut ControlStreamManager,
         hummock_version_stats: HummockVersionStats,
         env: MetaSrvEnv,
-        shared_inflight_database_info: SharedInflightDatabaseInfo,
     ) -> Self {
         Self {
             env,
@@ -98,6 +101,7 @@ impl CheckpointControl {
                 }))
                 .collect(),
             hummock_version_stats,
+            // shared_inflight_info,
         }
     }
 
@@ -527,6 +531,7 @@ impl DatabaseCheckpointControlMetrics {
 pub(crate) struct DatabaseCheckpointControl {
     database_id: DatabaseId,
     state: BarrierWorkerState,
+    pub shared_inflight_database_info: SharedInflightDatabaseInfo,
 
     /// Save the state and message of barrier in order.
     /// Key is the `prev_epoch`.
@@ -548,6 +553,7 @@ impl DatabaseCheckpointControl {
         Self {
             database_id,
             state: BarrierWorkerState::new(),
+            shared_inflight_database_info: Arc::new(RwLock::new(InflightDatabaseInfo::empty())),
             command_ctx_queue: Default::default(),
             completing_barrier: None,
             committed_epoch: None,
@@ -561,12 +567,14 @@ impl DatabaseCheckpointControl {
         database_id: DatabaseId,
         create_mview_tracker: CreateMviewProgressTracker,
         state: BarrierWorkerState,
+        shared_inflight_database_info: SharedInflightDatabaseInfo,
         committed_epoch: u64,
         creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl>,
     ) -> Self {
         Self {
             database_id,
             state,
+            shared_inflight_database_info,
             command_ctx_queue: Default::default(),
             completing_barrier: None,
             committed_epoch: Some(committed_epoch),
@@ -1111,7 +1119,10 @@ impl DatabaseCheckpointControl {
             jobs_to_wait,
             prev_paused_reason,
             fragment_changes,
-        ) = self.state.apply_command(command.as_ref());
+        ) = {
+            let mut shared_info = self.shared_inflight_database_info.write();
+            self.state.apply_command(command.as_ref(), &mut shared_info)
+        };
 
         // Tracing related stuff
         barrier_info.prev_epoch.span().in_scope(|| {
