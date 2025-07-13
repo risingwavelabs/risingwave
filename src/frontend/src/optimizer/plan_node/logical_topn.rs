@@ -176,7 +176,7 @@ impl LogicalTopN {
     pub fn clone_with_input_and_prefix(&self, input: PlanRef, prefix: Order) -> Self {
         let mut core = self.core.clone();
         core.input = input;
-        core.order = prefix.concat(core.order);
+        core.full_order = prefix.concat(core.order.clone());
         core.into()
     }
 }
