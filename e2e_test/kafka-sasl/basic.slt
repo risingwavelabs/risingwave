@@ -1,0 +1,43 @@
+control substitution on
+
+# in the test file, you MUST interact with rpk with RPK_BROKERS to specify which kafka to interact
+# Options: message_queue_sasl_1:9092 and message_queue_sasl_2:9093
+
+system ok
+RPK_BROKERS="message_queue_sasl_1:9092" rpk -X sasl.mechanism=SCRAM-SHA-256 -X user=admin -X pass=admin123 topic create test_kafka_sasl_basic -p 3
+
+system ok
+cat <<EOF | RPK_BROKERS="message_queue_sasl_1:9092" rpk -X sasl.mechanism=SCRAM-SHA-256 -X user=admin -X pass=admin123 topic produce test_kafka_sasl_basic -f "%p %v\\n" -p 0
+0 {"x":"a"}
+1 {"x":"b"}
+2 {"x":"c"}
+EOF
+
+statement ok
+CREATE TABLE table_sasl(x varchar)
+WITH(
+    connector = 'kafka',
+    properties.bootstrap.server = 'message_queue_sasl_1:9092'
+    topic = 'test_kafka_sasl_basic',
+    scan.startup.mode = 'earliest',
+    properties.security.protocol = 'sasl_plaintext',
+    properties.sasl.mechanism = 'SCRAM-SHA-256',
+    properties.sasl.username = 'user1',
+    properties.sasl.password = 'password123',
+) FORMAT PLAIN ENCODE JSON;
+
+sleep 15s
+
+query I
+select count(*) from table_sasl;
+----
+3
+
+
+# clean up
+
+statement ok
+drop table table_sasl;
+
+system ok
+RPK_BROKERS="message_queue_sasl_1:9092" rpk -X sasl.mechanism=SCRAM-SHA-256 -X user=admin -X pass=admin123 topic delete 'test_kafka_sasl_basic'

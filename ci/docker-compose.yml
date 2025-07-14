@@ -86,6 +86,99 @@ services:
       timeout: 5s
       retries: 5
 
+  message_queue_sasl_1:
+    image: "redpandadata/redpanda:latest"
+    command:
+      - redpanda
+      - start
+      - "--smp"
+      - "1"
+      - "--reserve-memory"
+      - 0M
+      - "--memory"
+      - 4G
+      - "--overprovisioned"
+      - "--node-id"
+      - "1"
+      - "--check=false"
+      - "--kafka-addr"
+      - "PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092"
+      - "--advertise-kafka-addr"
+      - "PLAINTEXT://message_queue_sasl_1:29092,OUTSIDE://localhost:9092"
+    expose:
+      - "29092"
+      - "9092"
+      - "9644"
+    environment:
+      # Enable SASL authentication
+      REDPANDA_ENABLE_SASL: "true"
+      # Set SASL mechanisms to SCRAM-SHA-256
+      REDPANDA_SASL_MECHANISMS: "SCRAM-SHA-256"
+      # Require authentication for Admin API
+      REDPANDA_ADMIN_API_REQUIRE_AUTH: "true"
+      # Enable basic auth for HTTP APIs
+      REDPANDA_HTTP_AUTHENTICATION: '["BASIC"]'
+    ports:
+      - "29092:29092"
+      - "9092:9092"
+      - "9644:9644"
+    healthcheck:
+      test: curl -f localhost:9645/v1/status/ready
+      interval: 1s
+      timeout: 5s
+      retries: 5
+
+  message_queue_sasl_2:
+    image: "redpandadata/redpanda:latest"
+    command:
+      - redpanda
+      - start
+      - "--smp"
+      - "1"
+      - "--reserve-memory"
+      - 0M
+      - "--memory"
+      - 4G
+      - "--overprovisioned"
+      - "--node-id"
+      - "1"
+      - "--check=false"
+      - "--kafka-addr"
+      - "PLAINTEXT://0.0.0.0:29093,OUTSIDE://0.0.0.0:9093"
+      - "--advertise-kafka-addr"
+      - "PLAINTEXT://message_queue_sasl_2:29093,OUTSIDE://localhost:9093"
+    expose:
+      - "29093"
+      - "9093"
+      - "9645"
+    environment:
+      # Enable SASL authentication
+      REDPANDA_ENABLE_SASL: "true"
+      # Set SASL mechanisms to SCRAM-SHA-256
+      REDPANDA_SASL_MECHANISMS: "SCRAM-SHA-256"
+      # Require authentication for Admin API
+      REDPANDA_ADMIN_API_REQUIRE_AUTH: "true"
+      # Enable basic auth for HTTP APIs
+      REDPANDA_HTTP_AUTHENTICATION: '["BASIC"]'
+    ports:
+      - "29093:29093"
+      - "9093:9093"
+      - "9645:9645"
+    healthcheck:
+      test: curl -f localhost:9645/v1/status/ready
+      interval: 1s
+      timeout: 5s
+      retries: 5
+
+  source-kafka-sasl-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - message_queue_sasl_1
+      - message_queue_sasl_2
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
   source-test-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
