@@ -109,15 +109,6 @@ services:
       - "29092"
       - "9092"
       - "9644"
-    environment:
-      # Enable SASL authentication
-      REDPANDA_ENABLE_SASL: "true"
-      # Set SASL mechanisms to SCRAM-SHA-256
-      REDPANDA_SASL_MECHANISMS: "SCRAM-SHA-256"
-      # Require authentication for Admin API
-      REDPANDA_ADMIN_API_REQUIRE_AUTH: "true"
-      # Enable basic auth for HTTP APIs
-      REDPANDA_HTTP_AUTHENTICATION: '["BASIC"]'
     ports:
       - "29092:29092"
       - "9092:9092"
@@ -151,15 +142,6 @@ services:
       - "29093"
       - "9093"
       - "9645"
-    environment:
-      # Enable SASL authentication
-      REDPANDA_ENABLE_SASL: "true"
-      # Set SASL mechanisms to SCRAM-SHA-256
-      REDPANDA_SASL_MECHANISMS: "SCRAM-SHA-256"
-      # Require authentication for Admin API
-      REDPANDA_ADMIN_API_REQUIRE_AUTH: "true"
-      # Enable basic auth for HTTP APIs
-      REDPANDA_HTTP_AUTHENTICATION: '["BASIC"]'
     ports:
       - "29093:29093"
       - "9093:9093"

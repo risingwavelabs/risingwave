@@ -20,22 +20,22 @@ rpk -X sasl.mechanism=SCRAM-SHA-256 -X user=admin -X pass=admin123 security user
 
 # Create ACLs for the regular user
 echo "Setting up ACLs for user1..."
-rpk -X sasl.mechanism=SCRAM-SHA-256 -X user=admin -X pass=admin123 security acl create \
+rpk security acl create \
   --allow-principal=User:user1 \
   --operation=all \
   --topic="*"
 
-rpk -X sasl.mechanism=SCRAM-SHA-256 -X user=admin -X pass=admin123 security acl create \
+rpk security acl create \
   --allow-principal=User:user1 \
   --operation=all \
   --group="*"
 
 # List users
 echo "Created users:"
-rpk -X sasl.mechanism=SCRAM-SHA-256 -X user=admin -X pass=admin123 security user list
+rpk security user list
 
 echo "Created ACLs:"
-rpk -X sasl.mechanism=SCRAM-SHA-256 -X user=admin -X pass=admin123 security acl list
+rpk security acl list
 
 rpk -X sasl.mechanism=SCRAM-SHA-256 -X user=admin -X pass=admin123 cluster config set enable_sasl true
 
