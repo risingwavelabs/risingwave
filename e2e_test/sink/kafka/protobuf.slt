@@ -112,7 +112,7 @@ format plain encode protobuf (
   schema.registry = 'http://schemaregistry:8082',
   message = 'test.package.MessageH.MessageI');
 
-statement error fff
+statement error message test.package.Message not defined in proto
 create sink sink_invalid_message from into_kafka with (
   connector = 'kafka',
   topic = 'test-rw-sink-append-only-protobuf-csr-a',
