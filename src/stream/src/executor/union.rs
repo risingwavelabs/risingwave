@@ -12,17 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::time::Instant;
 
-use futures::stream::{FusedStream, FuturesUnordered};
 use pin_project::pin_project;
 
-use super::watermark::BufferedWatermarks;
+use crate::executor::DynamicReceivers;
+use crate::executor::exchange::input::Input;
 use crate::executor::prelude::*;
-use crate::task::FragmentId;
+use crate::task::InputId;
 
 /// `UnionExecutor` merges data from multiple inputs.
 pub struct UnionExecutor {
@@ -53,125 +51,50 @@ impl UnionExecutor {
 
 impl Execute for UnionExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        let streams = self.inputs.into_iter().map(|e| e.execute()).collect();
-        merge(
-            streams,
-            self.metrics,
-            self.actor_context.fragment_id,
-            self.actor_context.id,
-        )
-        .boxed()
+        let upstreams = self
+            .inputs
+            .into_iter()
+            .map(|e| e.execute())
+            .enumerate()
+            .map(|(id, input)| {
+                Box::pin(UnionExecutorInput { id, inner: input }) as Pin<Box<dyn Input<Item = _>>>
+            })
+            .collect();
+
+        let barrier_align = self
+            .metrics
+            .barrier_align_duration
+            .with_guarded_label_values(&[
+                self.actor_context.id.to_string().as_str(),
+                self.actor_context.fragment_id.to_string().as_str(),
+                "",
+                "Union",
+            ]);
+
+        let union_receivers = DynamicReceivers::new(upstreams, Some(barrier_align), None);
+
+        union_receivers.boxed()
     }
 }
 
 #[pin_project]
-struct Input {
+struct UnionExecutorInput {
+    id: usize,
     #[pin]
     inner: BoxedMessageStream,
-    id: usize,
 }
 
-impl Stream for Input {
+impl Input for UnionExecutorInput {
+    fn id(&self) -> InputId {
+        self.id as InputId
+    }
+}
+
+impl Stream for UnionExecutorInput {
     type Item = MessageStreamItem;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.project().inner.poll_next(cx)
-    }
-}
-
-/// Merges input streams and aligns with barriers.
-#[try_stream(ok = Message, error = StreamExecutorError)]
-async fn merge(
-    inputs: Vec<BoxedMessageStream>,
-    metrics: Arc<StreamingMetrics>,
-    fragment_id: FragmentId,
-    actor_id: ActorId,
-) {
-    let input_num = inputs.len();
-    let mut active: FuturesUnordered<_> = inputs
-        .into_iter()
-        .enumerate()
-        .map(|(idx, input)| {
-            (Input {
-                id: idx,
-                inner: input,
-            })
-            .into_future()
-        })
-        .collect();
-    let mut blocked = vec![];
-    let mut current_barrier: Option<Barrier> = None;
-
-    // watermark column index -> `BufferedWatermarks`
-    let mut watermark_buffers = BTreeMap::<usize, BufferedWatermarks<usize>>::new();
-
-    let mut start_time = Instant::now();
-    let barrier_align = metrics.barrier_align_duration.with_guarded_label_values(&[
-        actor_id.to_string().as_str(),
-        fragment_id.to_string().as_str(),
-        "",
-        "Union",
-    ]);
-    loop {
-        match active.next().await {
-            Some((Some(Ok(message)), remaining)) => {
-                match message {
-                    Message::Chunk(chunk) => {
-                        // Continue polling this upstream by pushing it back to `active`.
-                        active.push(remaining.into_future());
-                        yield Message::Chunk(chunk);
-                    }
-                    Message::Watermark(watermark) => {
-                        let id = remaining.id;
-                        // Continue polling this upstream by pushing it back to `active`.
-                        active.push(remaining.into_future());
-                        let buffers = watermark_buffers
-                            .entry(watermark.col_idx)
-                            .or_insert_with(|| BufferedWatermarks::with_ids(0..input_num));
-                        if let Some(selected_watermark) =
-                            buffers.handle_watermark(id, watermark.clone())
-                        {
-                            yield Message::Watermark(selected_watermark)
-                        }
-                    }
-                    Message::Barrier(barrier) => {
-                        // Block this upstream by pushing it to `blocked`.
-                        if blocked.is_empty() {
-                            start_time = Instant::now();
-                        }
-                        blocked.push(remaining);
-                        if let Some(cur_barrier) = current_barrier.as_ref() {
-                            if barrier.epoch != cur_barrier.epoch {
-                                return Err(StreamExecutorError::align_barrier(
-                                    cur_barrier.clone(),
-                                    barrier,
-                                ));
-                            }
-                        } else {
-                            current_barrier = Some(barrier);
-                        }
-                    }
-                }
-            }
-            Some((Some(Err(e)), _)) => return Err(e),
-            Some((None, remaining)) => {
-                // tracing::error!("Union from upstream {} closed unexpectedly", remaining.id);
-                return Err(StreamExecutorError::channel_closed(format!(
-                    "Union from upstream {} closed unexpectedly",
-                    remaining.id,
-                )));
-            }
-            None => {
-                assert!(active.is_terminated());
-                let barrier = current_barrier.take().unwrap();
-                barrier_align.inc_by(start_time.elapsed().as_nanos() as u64);
-
-                let upstreams = std::mem::take(&mut blocked);
-                active.extend(upstreams.into_iter().map(|upstream| upstream.into_future()));
-
-                yield Message::Barrier(barrier)
-            }
-        }
     }
 }
 
@@ -207,8 +130,15 @@ mod tests {
             }
             .boxed(),
         ];
+        let upstreams = streams
+            .into_iter()
+            .enumerate()
+            .map(|(id, input)| {
+                Box::pin(UnionExecutorInput { id, inner: input }) as Pin<Box<dyn Input<Item = _>>>
+            })
+            .collect();
         let mut output = vec![];
-        let mut merged = merge(streams, Arc::new(StreamingMetrics::unused()), 0, 0).boxed();
+        let mut union = DynamicReceivers::new(upstreams, None, None).boxed();
 
         let result = vec![
             Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
@@ -222,7 +152,7 @@ mod tests {
             Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
         ];
         for _ in 0..result.len() {
-            output.push(merged.next().await.unwrap().unwrap());
+            output.push(union.next().await.unwrap().unwrap());
         }
         assert_eq!(output, result);
     }
