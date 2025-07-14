@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod join_encoding_type;
 mod non_zero64;
 mod over_window;
 pub mod parallelism;
@@ -32,6 +33,7 @@ use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
 use crate::hash::VirtualNode;
+use crate::session_config::join_encoding_type::JoinEncodingType;
 use crate::session_config::parallelism::ConfigParallelism;
 use crate::session_config::sink_decouple::SinkDecouple;
 use crate::session_config::transaction_isolation_level::IsolationLevel;
@@ -222,6 +224,11 @@ pub struct SessionConfig {
     /// Separate consecutive `StreamHashJoin` by no-shuffle `StreamExchange`
     #[parameter(default = false)]
     streaming_separate_consecutive_join: bool,
+
+    /// Determine which encoding will be used to encode join rows in operator cache.
+    #[serde_as(as = "DisplayFromStr")]
+    #[parameter(default = JoinEncodingType::default())]
+    streaming_join_encoding: JoinEncodingType,
 
     /// Enable join ordering for streaming and batch queries. Defaults to true.
     #[parameter(default = true, alias = "rw_enable_join_ordering")]

@@ -702,12 +702,21 @@ impl DdlController {
             .catalog_controller
             .create_subscription_catalog(&mut subscription)
             .await?;
-        self.stream_manager
-            .create_subscription(&subscription)
-            .await
-            .inspect_err(|e| {
-                tracing::debug!(error = %e.as_report(), "cancel create subscription");
-            })?;
+        if let Err(err) = self.stream_manager.create_subscription(&subscription).await {
+            tracing::debug!(error = %err.as_report(), "failed to create subscription");
+            let _ = self
+                .metadata_manager
+                .catalog_controller
+                .try_abort_creating_subscription(subscription.id as _)
+                .await
+                .inspect_err(|e| {
+                    tracing::error!(
+                        error = %e.as_report(),
+                        "failed to abort create subscription after failure"
+                    );
+                });
+            return Err(err);
+        }
 
         let version = self
             .metadata_manager
