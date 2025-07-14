@@ -40,7 +40,7 @@ pub struct StreamSourceCore<S: StateStore> {
     /// Stores information of the splits.
     pub(crate) split_state_store: SourceStateTableHandler<S>,
 
-    /// Contains the latests offsets for the splits that are updated *in the current epoch*.
+    /// Contains the latest offsets for the splits that are updated *in the current epoch*.
     /// It is cleared after each barrier.
     ///
     /// Source messages will only write the cache.
