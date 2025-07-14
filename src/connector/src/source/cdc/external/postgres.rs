@@ -258,7 +258,6 @@ impl PostgresExternalTableReader {
 }
 
 pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
-    println!("这里ty_name = {:?}", ty_name);
     match ty_name.to_lowercase().as_str() {
         "smallint" | "int2" => Some(PgType::INT2),
         "integer" | "int" | "int4" => Some(PgType::INT4),
