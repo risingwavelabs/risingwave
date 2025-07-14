@@ -434,6 +434,7 @@ message DdlProgress {
   uint64 id = 1;
   string statement = 2;
   string progress = 3;
+  string create_type = 4;
 }
 
 message GetDdlProgressResponse {

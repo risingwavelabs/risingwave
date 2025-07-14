@@ -73,22 +73,24 @@ impl GlobalBarrierWorkerContextImpl {
         Ok(())
     }
 
-    async fn list_background_mv_progress(&self) -> MetaResult<Vec<(String, StreamJobFragments)>> {
+    async fn list_background_job_progress(&self) -> MetaResult<Vec<(String, StreamJobFragments)>> {
         let mgr = &self.metadata_manager;
-        let mviews = mgr
+        let job_info = mgr
             .catalog_controller
-            .list_background_creating_mviews(false)
+            .list_background_creating_jobs(false)
             .await?;
 
-        try_join_all(mviews.into_iter().map(|mview| async move {
-            let table_id = TableId::new(mview.table_id as _);
-            let stream_job_fragments = mgr
-                .catalog_controller
-                .get_job_fragments_by_id(mview.table_id)
-                .await?;
-            assert_eq!(stream_job_fragments.stream_job_id(), table_id);
-            Ok((mview.definition, stream_job_fragments))
-        }))
+        try_join_all(
+            job_info
+                .into_iter()
+                .map(|(id, definition, _init_at)| async move {
+                    let table_id = TableId::new(id as _);
+                    let stream_job_fragments =
+                        mgr.catalog_controller.get_job_fragments_by_id(id).await?;
+                    assert_eq!(stream_job_fragments.stream_job_id(), table_id);
+                    Ok((definition, stream_job_fragments))
+                }),
+        )
         .await
         // If failed, enter recovery mode.
     }
@@ -157,7 +159,14 @@ impl GlobalBarrierWorkerContextImpl {
         };
         let mut min_downstream_committed_epochs = HashMap::new();
         for (_, job) in background_jobs.values() {
-            let job_committed_epoch = get_table_committed_epoch(job.stream_job_id)?;
+            let Ok(job_committed_epoch) = get_table_committed_epoch(job.stream_job_id) else {
+                // Question: should we get the committed epoch from any state tables in the job?
+                warn!(
+                    "background job {} has no committed epoch, skip resolving epochs",
+                    job.stream_job_id
+                );
+                continue;
+            };
             if let (Some(snapshot_backfill_info), _) =
                 StreamFragmentGraph::collect_snapshot_backfill_info_impl(
                     job.fragments()
@@ -249,20 +258,20 @@ impl GlobalBarrierWorkerContextImpl {
                         .await
                         .context("clean dirty streaming jobs")?;
 
-                    // Mview progress needs to be recovered.
-                    tracing::info!("recovering mview progress");
+                    // Background job progress needs to be recovered.
+                    tracing::info!("recovering background job progress");
                     let background_jobs = {
                         let jobs = self
-                            .list_background_mv_progress()
+                            .list_background_job_progress()
                             .await
-                            .context("recover mview progress should not fail")?;
+                            .context("recover background job progress should not fail")?;
                         let mut background_jobs = HashMap::new();
                         for (definition, stream_job_fragments) in jobs {
                             if stream_job_fragments
                                 .tracking_progress_actor_ids()
                                 .is_empty()
                             {
-                                // If there's no tracking actor in the mview, we can finish the job directly.
+                                // If there's no tracking actor in the job, we can finish the job directly.
                                 self.metadata_manager
                                     .catalog_controller
                                     .finish_streaming_job(
@@ -282,7 +291,7 @@ impl GlobalBarrierWorkerContextImpl {
                         background_jobs
                     };
 
-                    tracing::info!("recovered mview progress");
+                    tracing::info!("recovered background job progress");
 
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
                     let _ = self.scheduled_barriers.pre_apply_drop_cancel(None);
@@ -411,9 +420,9 @@ impl GlobalBarrierWorkerContextImpl {
 
                     let background_jobs = {
                         let jobs = self
-                            .list_background_mv_progress()
+                            .list_background_job_progress()
                             .await
-                            .context("recover mview progress should not fail")?;
+                            .context("recover background job progress should not fail")?;
                         let mut background_jobs = HashMap::new();
                         for (definition, stream_job_fragments) in jobs {
                             background_jobs
@@ -460,13 +469,16 @@ impl GlobalBarrierWorkerContextImpl {
             .await
             .context("clean dirty streaming jobs")?;
 
-        // Mview progress needs to be recovered.
-        tracing::info!(?database_id, "recovering mview progress of database");
+        // Background job progress needs to be recovered.
+        tracing::info!(
+            ?database_id,
+            "recovering background job progress of database"
+        );
         let background_jobs = self
-            .list_background_mv_progress()
+            .list_background_job_progress()
             .await
-            .context("recover mview progress of database should not fail")?;
-        tracing::info!(?database_id, "recovered mview progress");
+            .context("recover background job progress of database should not fail")?;
+        tracing::info!(?database_id, "recovered background job progress");
 
         // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
         let _ = self
@@ -498,7 +510,7 @@ impl GlobalBarrierWorkerContextImpl {
                     .tracking_progress_actor_ids()
                     .is_empty()
                 {
-                    // If there's no tracking actor in the mview, we can finish the job directly.
+                    // If there's no tracking actor in the job, we can finish the job directly.
                     self.metadata_manager
                         .catalog_controller
                         .finish_streaming_job(
