@@ -183,6 +183,25 @@ steps:
     timeout_in_minutes: 14
     retry: *auto-retry
 
+  - label: "end-to-end kafka sasl test"
+    command: "ci/scripts/e2e-source-kafka-sasl-test.sh"
+    if: |
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-e2e-source-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-source-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: source-kafka-sasl-env
+          upload-container-logs: always
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    parallelism: 1
+    retry: *auto-retry
+
   - label: "end-to-end source test"
     command: "ci/scripts/e2e-source-test.sh -p ci-dev"
     if: |
