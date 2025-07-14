@@ -151,8 +151,5 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
 }
 
 fn is_parallelized_cdc_backfill_supported(cdc_table_type: &CdcTableType) -> bool {
-    match cdc_table_type {
-        CdcTableType::Postgres => true,
-        _ => false,
-    }
+    matches!(cdc_table_type, CdcTableType::Postgres)
 }

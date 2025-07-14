@@ -1963,12 +1963,10 @@ impl ScaleController {
                         .into());
                     }
                     TableParallelism::Fixed(new_parallelism)
+                } else if is_cdc_backfill_v2_fragment {
+                    TableParallelism::Fixed(fragment_actor_id_map[&fragment_id].len())
                 } else {
-                    if is_cdc_backfill_v2_fragment {
-                        TableParallelism::Fixed(fragment_actor_id_map[&fragment_id].len())
-                    } else {
-                        parallelism.clone()
-                    }
+                    parallelism
                 };
                 match dist {
                     FragmentDistributionType::Unspecified => unreachable!(),

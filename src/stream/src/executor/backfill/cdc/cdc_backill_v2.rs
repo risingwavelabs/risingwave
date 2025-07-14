@@ -178,7 +178,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                     next_split_idx = idx;
                     break;
                 }
-                extends_current_actor_bound(&mut current_actor_bounds, &split);
+                extends_current_actor_bound(&mut current_actor_bounds, split);
             }
             for split in actor_snapshot_splits.iter().skip(next_split_idx) {
                 // Initialize state so that overall progress can be measured.
@@ -437,7 +437,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                 // // Otherwise, the result set of the new snapshot stream may become empty.
                 // // It maybe a cancellation bug of the mysql driver.
 
-                extends_current_actor_bound(&mut current_actor_bounds, &split);
+                extends_current_actor_bound(&mut current_actor_bounds, split);
                 // update and persist current backfill progress
                 // Wait for first barrier to come after backfill is finished.
                 // So we can update our progress + persist the status.

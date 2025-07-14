@@ -795,7 +795,7 @@ impl DdlController {
         let mut found_cdc_scan = false;
         match &stream_scan_fragment.nodes.node_body {
             Some(NodeBody::StreamCdcScan(_)) => {
-                assert_parallelism(&stream_scan_fragment, &stream_scan_fragment.nodes.node_body);
+                assert_parallelism(stream_scan_fragment, &stream_scan_fragment.nodes.node_body);
                 if self
                     .validate_cdc_table_inner(&stream_scan_fragment.nodes.node_body, table.id)
                     .await?
@@ -806,7 +806,7 @@ impl DdlController {
             // When there's generated columns, the cdc scan node is wrapped in a project node
             Some(NodeBody::Project(_)) => {
                 for input in &stream_scan_fragment.nodes.input {
-                    assert_parallelism(&stream_scan_fragment, &input.node_body);
+                    assert_parallelism(stream_scan_fragment, &input.node_body);
                     if self
                         .validate_cdc_table_inner(&input.node_body, table.id)
                         .await?

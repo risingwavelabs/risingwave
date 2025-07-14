@@ -48,7 +48,7 @@ impl<S: StateStore> ParallelizedCdcBackfillState<S> {
 
     /// Restore the backfill state from storage
     pub async fn restore_state(&mut self, split_id: i64) -> StreamExecutorResult<CdcStateRecord> {
-        let key = Some(split_id.clone());
+        let key = Some(split_id);
         match self
             .state_table
             .get_row(row::once(key.map(ScalarImpl::from)))
