@@ -28,7 +28,7 @@ use risingwave_pb::catalog::{
 use risingwave_pb::user::grant_privilege::Object;
 
 use super::subscription_catalog::SubscriptionCatalog;
-use super::{OwnedByUserCatalog, SubscriptionId};
+use super::{OwnedByUserCatalog, OwnedGrantObject, SubscriptionId};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::catalog::index_catalog::IndexCatalog;
@@ -914,18 +914,53 @@ impl SchemaCatalog {
             .map(|s| s.to_owned())
     }
 
-    pub fn get_grant_object_by_oid(&self, oid: u32) -> Option<Object> {
+    pub fn get_grant_object_by_oid(&self, oid: u32) -> Option<OwnedGrantObject> {
         #[allow(clippy::manual_map)]
-        if self.get_created_table_by_id(&TableId::new(oid)).is_some()
-            || self.get_index_by_id(&IndexId::new(oid)).is_some()
-        {
-            Some(Object::TableId(oid))
-        } else if self.get_source_by_id(&oid).is_some() {
-            Some(Object::SourceId(oid))
-        } else if self.get_sink_by_id(&oid).is_some() {
-            Some(Object::SinkId(oid))
-        } else if self.get_view_by_id(&oid).is_some() {
-            Some(Object::ViewId(oid))
+        if let Some(table) = self.get_created_table_by_id(&TableId::new(oid)) {
+            Some(OwnedGrantObject {
+                owner: table.owner,
+                object: Object::TableId(oid),
+            })
+        } else if let Some(index) = self.get_index_by_id(&IndexId::new(oid)) {
+            Some(OwnedGrantObject {
+                owner: index.owner(),
+                object: Object::TableId(oid),
+            })
+        } else if let Some(source) = self.get_source_by_id(&oid) {
+            Some(OwnedGrantObject {
+                owner: source.owner,
+                object: Object::SourceId(oid),
+            })
+        } else if let Some(sink) = self.get_sink_by_id(&oid) {
+            Some(OwnedGrantObject {
+                owner: sink.owner.user_id,
+                object: Object::SinkId(oid),
+            })
+        } else if let Some(view) = self.get_view_by_id(&oid) {
+            Some(OwnedGrantObject {
+                owner: view.owner,
+                object: Object::ViewId(oid),
+            })
+        } else if let Some(function) = self.get_function_by_id(FunctionId::new(oid)) {
+            Some(OwnedGrantObject {
+                owner: function.owner(),
+                object: Object::FunctionId(oid),
+            })
+        } else if let Some(subscription) = self.get_subscription_by_id(&oid) {
+            Some(OwnedGrantObject {
+                owner: subscription.owner.user_id,
+                object: Object::SubscriptionId(oid),
+            })
+        } else if let Some(connection) = self.get_connection_by_id(&oid) {
+            Some(OwnedGrantObject {
+                owner: connection.owner,
+                object: Object::ConnectionId(oid),
+            })
+        } else if let Some(secret) = self.get_secret_by_id(&SecretId::new(oid)) {
+            Some(OwnedGrantObject {
+                owner: secret.owner,
+                object: Object::SecretId(oid),
+            })
         } else {
             None
         }
