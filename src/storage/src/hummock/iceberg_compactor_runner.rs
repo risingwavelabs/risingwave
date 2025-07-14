@@ -139,17 +139,10 @@ impl IcebergCompactorRunner {
         task_id_for_logging: u64,
         table_ident_for_logging: &TableIdent,
         task_statistics: &IcebergCompactionTaskStatistics,
-        max_parallelism: u32,
         min_size_per_partition: u64,
         max_file_count_per_partition: u32,
         target_file_size_bytes: u64,
     ) -> HummockResult<(u32, u32)> {
-        if max_parallelism == 0 {
-            return Err(HummockError::compaction_executor(
-                "Max parallelism cannot be 0".to_owned(),
-            ));
-        }
-
         let total_file_size_for_partitioning = task_statistics.total_data_file_size
             + task_statistics.total_pos_del_file_size
             + task_statistics.total_eq_del_file_size;
@@ -179,16 +172,12 @@ impl IcebergCompactorRunner {
             .div_ceil(max_file_count_per_partition)
             .max(1); // Ensure at least one partition.
 
-        let input_parallelism = partition_by_size
-            .max(partition_by_count)
-            .min(max_parallelism);
+        let input_parallelism = partition_by_size.max(partition_by_count);
 
         // `output_parallelism` should not exceed `input_parallelism`
         // and should also not exceed max_parallelism.
         // It's primarily driven by size to avoid small output files.
-        let mut output_parallelism = partition_by_size
-            .min(input_parallelism)
-            .min(max_parallelism);
+        let mut output_parallelism = partition_by_size.min(input_parallelism);
 
         // Heuristic: If the total task data size is very small (less than target_file_size_bytes),
         // force output_parallelism to 1 to encourage merging into a single, larger output file.
@@ -211,7 +200,6 @@ impl IcebergCompactorRunner {
             task_id = task_id_for_logging,
             table = ?table_ident_for_logging,
             stats = ?task_statistics,
-            config_max_parallelism = max_parallelism,
             config_min_size_per_partition = min_size_per_partition,
             config_max_file_count_per_partition = max_file_count_per_partition,
             config_target_file_size_bytes = target_file_size_bytes,
@@ -243,7 +231,6 @@ impl IcebergCompactorRunner {
             self.task_id,
             &self.table_ident,
             task_statistics,
-            max_parallelism,
             min_size_per_partition,
             max_file_count_per_partition,
             target_file_size_bytes,
