@@ -30,7 +30,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::stream_service::streaming_control_stream_response::Response;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::{Receiver, Sender};
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tonic::Status;
@@ -51,7 +51,7 @@ use crate::hummock::HummockManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
-    MetadataManager, NotificationManager, NotificationManagerRef,
+    MetadataManager, NotificationManagerRef,
 };
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::{ScaleControllerRef, SourceManagerRef};
@@ -111,18 +111,17 @@ pub struct ActorController {
 
 impl ActorController {
     pub(crate) async fn reset_shared_info(&self) {
-        todo!()
+        let mut inflight_info = self.inflight_database_info.write();
+        *inflight_info = InflightDatabaseInfo::empty();
     }
 }
 
 impl ActorController {
     pub fn new(notification_manager_ref: NotificationManagerRef) -> Self {
-        // todo
         Self {
             inflight_database_info: Arc::new(parking_lot::RwLock::new(
                 InflightDatabaseInfo::empty(),
             )),
-
             notification_manager: notification_manager_ref,
         }
     }
@@ -175,8 +174,9 @@ impl ActorController {
                     CatalogController::notify_fragment_mapping_helper(
                         Operation::Add,
                         vec![fragment_mapping],
-                        notification_manager,
-                    );
+                        &self.notification_manager,
+                    )
+                    .await;
                 }
                 CommandFragmentChanges::ReplaceNodeUpstream(_) => {}
                 CommandFragmentChanges::Reschedule {
@@ -209,7 +209,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         // Load config will be performed in bootstrap phase.
         let periodic_barriers = PeriodicBarriers::default();
 
-        let actor_controller = ActorController::new();
+        let actor_controller = ActorController::new(env.notification_manager_ref());
         let checkpoint_control =
             CheckpointControl::new(env.clone(), actor_controller.shared_inflight_info());
         Self {
@@ -1027,6 +1027,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     &mut control_stream_manager,
                     hummock_version_stats,
                     self.env.clone(),
+                    self.actor_controller.shared_inflight_info(),
                 );
 
                 self.actor_controller.reset_shared_info().await;

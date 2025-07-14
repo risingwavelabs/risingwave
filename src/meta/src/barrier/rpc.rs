@@ -738,14 +738,18 @@ impl ControlStreamManager {
             .into_values()
             .for_each(|job| database.extend(job));
 
-        let shared_database_info = database.clone();
-        let database_state =
-            BarrierWorkerState::recovery(new_epoch, database, subscription_info, is_paused);
+        let shared_database_info = Arc::new(parking_lot::RwLock::new(database.clone()));
+        let database_state = BarrierWorkerState::recovery(
+            new_epoch,
+            shared_database_info.clone(),
+            subscription_info,
+            is_paused,
+        );
         Ok(DatabaseInitialBarrierCollector {
             database_id,
             node_to_collect,
             database_state,
-            shared_inflight_graph_info: Arc::new(parking_lot::RwLock::new(shared_database_info)),
+            shared_inflight_graph_info: shared_database_info,
             create_mview_tracker: tracker,
             creating_streaming_job_controls,
             committed_epoch,

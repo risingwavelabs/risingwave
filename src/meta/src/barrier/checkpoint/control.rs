@@ -16,12 +16,10 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::{Future, poll_fn};
 use std::mem::take;
-use std::sync::Arc;
 use std::task::Poll;
 
 use anyhow::anyhow;
 use fail::fail_point;
-use parking_lot::RwLock;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
@@ -42,7 +40,7 @@ use crate::barrier::checkpoint::state::BarrierWorkerState;
 use crate::barrier::command::CommandContext;
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompleteBarrierTask};
 use crate::barrier::info::{
-    CommandFragmentChanges, InflightDatabaseInfo, InflightStreamingJobInfo,
+    CommandFragmentChanges, InflightStreamingJobInfo,
 };
 use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand, TrackingJob};
@@ -53,7 +51,7 @@ use crate::barrier::utils::{
 };
 use crate::barrier::worker::SharedInflightDatabaseInfo;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, InflightSubscriptionInfo};
-use crate::manager::{MetaSrvEnv, NotificationManagerRef};
+use crate::manager::MetaSrvEnv;
 use crate::model::FragmentId;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::fill_snapshot_backfill_epoch;
@@ -63,14 +61,16 @@ pub(crate) struct CheckpointControl {
     pub(crate) env: MetaSrvEnv,
     pub(super) databases: HashMap<DatabaseId, DatabaseCheckpointControlStatus>,
     pub(super) hummock_version_stats: HummockVersionStats,
+    shared_inflight_info: SharedInflightDatabaseInfo,
 }
 
 impl CheckpointControl {
-    pub fn new(env: MetaSrvEnv) -> Self {
+    pub fn new(env: MetaSrvEnv, shared_inflight_info: SharedInflightDatabaseInfo) -> Self {
         Self {
             env,
             databases: Default::default(),
             hummock_version_stats: Default::default(),
+            shared_inflight_info,
         }
     }
 
@@ -80,6 +80,7 @@ impl CheckpointControl {
         control_stream_manager: &mut ControlStreamManager,
         hummock_version_stats: HummockVersionStats,
         env: MetaSrvEnv,
+        shared_inflight_info: SharedInflightDatabaseInfo,
     ) -> Self {
         Self {
             env,
@@ -101,7 +102,7 @@ impl CheckpointControl {
                 }))
                 .collect(),
             hummock_version_stats,
-            // shared_inflight_info,
+            shared_inflight_info,
         }
     }
 
@@ -195,7 +196,11 @@ impl CheckpointControl {
                 {
                     for database in self.databases.values() {
                         if let Some(database) = database.running_state()
-                            && database.state.inflight_graph_info.contains_job(*table_id)
+                            && database
+                                .state
+                                .shared_inflight_graph_info
+                                .read()
+                                .contains_job(*table_id)
                         {
                             if let Some(committed_epoch) = database.committed_epoch {
                                 *snapshot_epoch = Some(committed_epoch);
@@ -233,7 +238,10 @@ impl CheckpointControl {
                         job_type: CreateStreamingJobType::Normal,
                         ..
                     } => {
-                        let new_database = DatabaseCheckpointControl::new(database_id);
+                        let new_database = DatabaseCheckpointControl::new(
+                            database_id,
+                            self.shared_inflight_info.clone(),
+                        );
                         control_stream_manager.add_partial_graph(database_id, None);
                         entry
                             .insert(DatabaseCheckpointControlStatus::Running(new_database))
@@ -338,7 +346,8 @@ impl CheckpointControl {
             if !database_checkpoint_control.is_valid_after_worker_err(worker_id as _)
                 || database_checkpoint_control
                     .state
-                    .inflight_graph_info
+                    .shared_inflight_graph_info
+                    .read()
                     .contains_worker(worker_id as _)
                 || database_checkpoint_control
                     .creating_streaming_job_controls
@@ -549,11 +558,11 @@ pub(crate) struct DatabaseCheckpointControl {
 }
 
 impl DatabaseCheckpointControl {
-    fn new(database_id: DatabaseId) -> Self {
+    fn new(database_id: DatabaseId, shared_inflight_info: SharedInflightDatabaseInfo) -> Self {
         Self {
             database_id,
-            state: BarrierWorkerState::new(),
-            shared_inflight_database_info: Arc::new(RwLock::new(InflightDatabaseInfo::empty())),
+            state: BarrierWorkerState::new(shared_inflight_info.clone()),
+            shared_inflight_database_info: shared_inflight_info,
             command_ctx_queue: Default::default(),
             completing_barrier: None,
             committed_epoch: None,
@@ -1018,7 +1027,8 @@ impl DatabaseCheckpointControl {
 
         let mut edges = self
             .state
-            .inflight_graph_info
+            .shared_inflight_graph_info
+            .read()
             .build_edge(command.as_ref(), &*control_stream_manager);
 
         // Insert newly added creating job
@@ -1119,10 +1129,7 @@ impl DatabaseCheckpointControl {
             jobs_to_wait,
             prev_paused_reason,
             fragment_changes,
-        ) = {
-            let mut shared_info = self.shared_inflight_database_info.write();
-            self.state.apply_command(command.as_ref(), &mut shared_info)
-        };
+        ) = self.state.apply_command(command.as_ref());
 
         // Tracing related stuff
         barrier_info.prev_epoch.span().in_scope(|| {
@@ -1140,7 +1147,7 @@ impl DatabaseCheckpointControl {
             &barrier_info,
             prev_paused_reason,
             &pre_applied_graph_info,
-            &self.state.inflight_graph_info,
+            &self.state.shared_inflight_graph_info.read(),
             &mut edges,
         ) {
             Ok(node_to_collect) => node_to_collect,

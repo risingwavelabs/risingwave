@@ -17,7 +17,6 @@ use std::sync::Arc;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::meta::subscribe_response::Operation;
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
 
@@ -31,7 +30,6 @@ use crate::barrier::{
     CreateStreamingJobType, DatabaseRuntimeInfoSnapshot, RecoveryReason, ReplaceStreamJobPlan,
     Scheduled,
 };
-use crate::controller::catalog::CatalogController;
 use crate::hummock::CommitEpochInfo;
 use crate::stream::SourceChange;
 

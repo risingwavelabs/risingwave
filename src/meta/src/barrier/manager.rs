@@ -28,7 +28,7 @@ use tokio::task::JoinHandle;
 use tracing::warn;
 
 use crate::MetaResult;
-use crate::barrier::worker::GlobalBarrierWorker;
+use crate::barrier::worker::{GlobalBarrierWorker, SharedInflightDatabaseInfo};
 use crate::barrier::{BarrierManagerRequest, BarrierManagerStatus, RecoveryReason, schedule};
 use crate::hummock::HummockManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
@@ -40,6 +40,7 @@ pub struct GlobalBarrierManager {
     hummock_manager: HummockManagerRef,
     request_tx: mpsc::UnboundedSender<BarrierManagerRequest>,
     metadata_manager: MetadataManager,
+    shared_inflight_info: SharedInflightDatabaseInfo,
 }
 
 pub type BarrierManagerRef = Arc<GlobalBarrierManager>;
@@ -109,6 +110,11 @@ impl GlobalBarrierManager {
     pub async fn get_hummock_version_id(&self) -> HummockVersionId {
         self.hummock_manager.get_version_id().await
     }
+
+    /// Get the shared inflight database info directly without going through the barrier worker
+    pub fn get_shared_inflight_info(&self) -> SharedInflightDatabaseInfo {
+        self.shared_inflight_info.clone()
+    }
 }
 
 impl GlobalBarrierManager {
@@ -165,6 +171,7 @@ impl GlobalBarrierManager {
             hummock_manager: hummock_manager_clone,
             request_tx,
             metadata_manager: metadata_manager_clone,
+            shared_inflight_info: barrier_worker.actor_controller.shared_inflight_info(),
         };
         let (join_handle, shutdown_tx) = barrier_worker.start();
         (Arc::new(manager), join_handle, shutdown_tx)

@@ -1633,7 +1633,7 @@ pub fn rebuild_fragment_mapping(fragment: &InflightFragmentInfo) -> FragmentWork
     };
 
     PbFragmentWorkerSlotMapping {
-        fragment_id: fragment.fragment_id as u32,
+        fragment_id: fragment.fragment_id,
         mapping: Some(fragment_worker_slot_mapping.to_protobuf()),
     }
 }

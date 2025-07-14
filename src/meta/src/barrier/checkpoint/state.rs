@@ -14,9 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::mem::take;
-use std::sync::Arc;
 
-use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 
@@ -25,7 +23,6 @@ use crate::barrier::info::{
 };
 use crate::barrier::worker::SharedInflightDatabaseInfo;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
-use crate::manager::NotificationManager;
 use crate::model::FragmentId;
 
 /// The latest state of `GlobalBarrierWorker` after injecting the latest barrier.
@@ -39,8 +36,8 @@ pub(crate) struct BarrierWorkerState {
     /// The `prev_epoch` of pending non checkpoint barriers
     pending_non_checkpoint_barriers: Vec<u64>,
 
-    /// Inflight running actors info.
-    pub(super) inflight_graph_info: InflightDatabaseInfo,
+    /// Shared inflight running actors info.
+    pub(super) shared_inflight_graph_info: SharedInflightDatabaseInfo,
 
     pub(super) inflight_subscription_info: InflightSubscriptionInfo,
 
@@ -49,11 +46,11 @@ pub(crate) struct BarrierWorkerState {
 }
 
 impl BarrierWorkerState {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(shared_inflight_graph_info: SharedInflightDatabaseInfo) -> Self {
         Self {
             in_flight_prev_epoch: TracedEpoch::new(Epoch::now()),
             pending_non_checkpoint_barriers: vec![],
-            inflight_graph_info: InflightDatabaseInfo::empty(),
+            shared_inflight_graph_info,
             inflight_subscription_info: InflightSubscriptionInfo::default(),
             is_paused: false,
         }
@@ -61,14 +58,14 @@ impl BarrierWorkerState {
 
     pub fn recovery(
         in_flight_prev_epoch: TracedEpoch,
-        inflight_graph_info: InflightDatabaseInfo,
+        shared_inflight_graph_info: SharedInflightDatabaseInfo,
         inflight_subscription_info: InflightSubscriptionInfo,
         is_paused: bool,
     ) -> Self {
         Self {
             in_flight_prev_epoch,
             pending_non_checkpoint_barriers: vec![],
-            inflight_graph_info: inflight_graph_info.clone(),
+            shared_inflight_graph_info,
             inflight_subscription_info,
             is_paused,
         }
@@ -100,7 +97,7 @@ impl BarrierWorkerState {
         is_checkpoint: bool,
         curr_epoch: TracedEpoch,
     ) -> Option<BarrierInfo> {
-        if self.inflight_graph_info.is_empty()
+        if self.shared_inflight_graph_info.read().is_empty()
             && !matches!(&command, Some(Command::CreateStreamingJob { .. }))
         {
             return None;
@@ -135,7 +132,6 @@ impl BarrierWorkerState {
     pub fn apply_command(
         &mut self,
         command: Option<&Command>,
-        shared_inflight_graph_info: &mut InflightDatabaseInfo,
     ) -> (
         InflightDatabaseInfo,
         InflightSubscriptionInfo,
@@ -153,8 +149,9 @@ impl BarrierWorkerState {
             {
                 None
             } else if let Some(fragment_changes) = command.and_then(Command::fragment_changes) {
-                self.inflight_graph_info.pre_apply(&fragment_changes);
-                shared_inflight_graph_info.pre_apply(&fragment_changes);
+                self.shared_inflight_graph_info
+                    .write()
+                    .pre_apply(&fragment_changes);
                 Some(fragment_changes)
             } else {
                 None
@@ -163,12 +160,13 @@ impl BarrierWorkerState {
                 self.inflight_subscription_info.pre_apply(command);
             }
 
-            let info = self.inflight_graph_info.clone();
+            let info = self.shared_inflight_graph_info.read().clone();
             let subscription_info = self.inflight_subscription_info.clone();
 
             if let Some(fragment_changes) = fragment_changes.as_ref() {
-                self.inflight_graph_info.post_apply(fragment_changes);
-                shared_inflight_graph_info.post_apply(fragment_changes);
+                self.shared_inflight_graph_info
+                    .write()
+                    .post_apply(fragment_changes);
             }
 
             (info, subscription_info, fragment_changes)
@@ -180,7 +178,9 @@ impl BarrierWorkerState {
             for (table_id, (_, graph_info)) in jobs_to_merge {
                 jobs_to_wait.insert(*table_id);
                 table_ids_to_commit.extend(graph_info.existing_table_ids());
-                self.inflight_graph_info.extend(graph_info.clone());
+                self.shared_inflight_graph_info
+                    .write()
+                    .extend(graph_info.clone());
             }
         }
 
