@@ -26,6 +26,8 @@ pub type ConsumableChannelPair = (Option<Sender>, Option<Receiver>);
 pub type ActorId = u32;
 pub type FragmentId = u32;
 pub type DispatcherId = u64;
+/// Used to identify an input in `IdentifiedInput` trait.
+pub type InputId = u64;
 /// (`upstream_actor_id`, `downstream_actor_id`)
 pub type UpDownActorIds = (ActorId, ActorId);
 pub type UpDownFragmentIds = (FragmentId, FragmentId);
