@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{Engine, TableId};
+use risingwave_common::catalog::Engine;
 use risingwave_sqlparser::ast::ObjectName;
 
 use crate::binder::Binder;
@@ -26,9 +26,9 @@ pub async fn handle_vacuum(
 ) -> Result<RwPgResponse> {
     let session = &handler_args.session;
     let db_name = &session.database();
-    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
 
     let table_id = {
+        let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
         let catalog_reader = session.env().catalog_reader().read_guard();
         let search_path = session.config().search_path();
         let user_name = session.user_name();
@@ -55,10 +55,10 @@ pub async fn handle_vacuum(
             .into());
         }
 
-        TableId::new(table.id().table_id)
+        table.id()
     };
 
     session.env().meta_client().compact_table(table_id).await?;
 
-    Ok(PgResponse::builder(StatementType::VACUUM).row_cnt(1).into())
+    Ok(PgResponse::builder(StatementType::VACUUM).into())
 }
