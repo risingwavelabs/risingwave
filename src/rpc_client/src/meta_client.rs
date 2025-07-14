@@ -639,6 +639,21 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn alter_cdc_table_backfill_parallelism(
+        &self,
+        table_id: u32,
+        parallelism: PbTableParallelism,
+    ) -> Result<()> {
+        let request = AlterCdcTableBackfillParallelismRequest {
+            table_id,
+            parallelism: Some(parallelism),
+        };
+        self.inner
+            .alter_cdc_table_backfill_parallelism(request)
+            .await?;
+        Ok(())
+    }
+
     pub async fn alter_resource_group(
         &self,
         table_id: u32,
@@ -2306,6 +2321,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
+            ,{ ddl_client, alter_cdc_table_backfill_parallelism, AlterCdcTableBackfillParallelismRequest, AlterCdcTableBackfillParallelismResponse }
             ,{ ddl_client, alter_resource_group, AlterResourceGroupRequest, AlterResourceGroupResponse }
             ,{ ddl_client, alter_database_param, AlterDatabaseParamRequest, AlterDatabaseParamResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }

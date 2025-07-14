@@ -502,6 +502,20 @@ impl DdlController {
             .await
     }
 
+    pub async fn reschedule_cdc_table_backfill(
+        &self,
+        job_id: u32,
+        target: JobRescheduleTarget,
+    ) -> MetaResult<()> {
+        tracing::info!("alter CDC table backfill parallelism");
+        if self.barrier_manager.check_status_running().is_err() {
+            return Err(anyhow::anyhow!("CDC table backfill reschedule is unavailable because the system is in recovery state").into());
+        }
+        self.stream_manager
+            .reschedule_cdc_table_backfill(job_id, target)
+            .await
+    }
+
     async fn drop_database(&self, database_id: DatabaseId) -> MetaResult<NotificationVersion> {
         self.drop_object(
             ObjectType::Database,

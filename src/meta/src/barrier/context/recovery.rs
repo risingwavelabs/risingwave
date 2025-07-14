@@ -858,9 +858,12 @@ impl GlobalBarrierWorkerContextImpl {
 
             let plan = self
                 .scale_controller
-                .generate_job_reschedule_plan(JobReschedulePolicy {
-                    targets: local_reschedule_targets,
-                })
+                .generate_job_reschedule_plan(
+                    JobReschedulePolicy {
+                        targets: local_reschedule_targets,
+                    },
+                    false,
+                )
                 .await?;
 
             // no need to update

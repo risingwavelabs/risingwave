@@ -901,6 +901,25 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(WaitResponse {}))
     }
 
+    async fn alter_cdc_table_backfill_parallelism(
+        &self,
+        request: Request<AlterCdcTableBackfillParallelismRequest>,
+    ) -> Result<Response<AlterCdcTableBackfillParallelismResponse>, Status> {
+        let req = request.into_inner();
+        let job_id = req.get_table_id();
+        let parallelism = *req.get_parallelism()?;
+        self.ddl_controller
+            .reschedule_cdc_table_backfill(
+                job_id,
+                JobRescheduleTarget {
+                    parallelism: JobParallelismTarget::Update(TableParallelism::from(parallelism)),
+                    resource_group: JobResourceGroupTarget::Keep,
+                },
+            )
+            .await?;
+        Ok(Response::new(AlterCdcTableBackfillParallelismResponse {}))
+    }
+
     async fn alter_parallelism(
         &self,
         request: Request<AlterParallelismRequest>,

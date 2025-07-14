@@ -281,6 +281,13 @@ message AlterParallelismRequest {
 
 message AlterParallelismResponse {}
 
+message AlterCdcTableBackfillParallelismRequest {
+  uint32 table_id = 1;
+  meta.TableParallelism parallelism = 2;
+}
+
+message AlterCdcTableBackfillParallelismResponse {}
+
 message AlterResourceGroupRequest {
   uint32 table_id = 1;
   optional string resource_group = 2;
@@ -606,4 +613,5 @@ service DdlService {
   rpc AutoSchemaChange(AutoSchemaChangeRequest) returns (AutoSchemaChangeResponse);
   rpc AlterSwapRename(AlterSwapRenameRequest) returns (AlterSwapRenameResponse);
   rpc AlterDatabaseParam(AlterDatabaseParamRequest) returns (AlterDatabaseParamResponse);
+  rpc AlterCdcTableBackfillParallelism(AlterCdcTableBackfillParallelismRequest) returns (AlterCdcTableBackfillParallelismResponse);
 }

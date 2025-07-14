@@ -94,6 +94,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
+        assert!(!self.options.disable_backfill);
         // The indices to primary key columns
         let pk_indices = self.external_table.pk_indices().to_vec();
         let table_id = self.external_table.table_id().table_id;

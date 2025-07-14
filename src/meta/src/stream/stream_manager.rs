@@ -827,15 +827,18 @@ impl GlobalStreamManager {
         } else {
             let reschedule_plan = self
                 .scale_controller
-                .generate_job_reschedule_plan(JobReschedulePolicy {
-                    targets: HashMap::from([(
-                        job_id.table_id,
-                        JobRescheduleTarget {
-                            parallelism: parallelism_change,
-                            resource_group: resource_group_change,
-                        },
-                    )]),
-                })
+                .generate_job_reschedule_plan(
+                    JobReschedulePolicy {
+                        targets: HashMap::from([(
+                            job_id.table_id,
+                            JobRescheduleTarget {
+                                parallelism: parallelism_change,
+                                resource_group: resource_group_change,
+                            },
+                        )]),
+                    },
+                    false,
+                )
                 .await?;
 
             if reschedule_plan.reschedules.is_empty() {
@@ -859,6 +862,83 @@ impl GlobalStreamManager {
                 .await?;
             }
         };
+
+        Ok(())
+    }
+
+    /// This method is copied from `GlobalStreamManager::reschedule_streaming_job` and modified to handle reschedule CDC table backfill.
+    pub(crate) async fn reschedule_cdc_table_backfill(
+        &self,
+        job_id: u32,
+        target: JobRescheduleTarget,
+    ) -> MetaResult<()> {
+        let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
+        let JobRescheduleTarget {
+            parallelism: parallelism_change,
+            resource_group: resource_group_change,
+        } = target;
+        let database_id = DatabaseId::new(
+            self.metadata_manager
+                .catalog_controller
+                .get_object_database_id(job_id as ObjectId)
+                .await? as _,
+        );
+        let job_id = TableId::new(job_id);
+        if let JobParallelismTarget::Update(parallelism) = &parallelism_change {
+            match parallelism {
+                TableParallelism::Fixed(_) => {}
+                TableParallelism::Custom => {
+                    bail_invalid_parameter!("should not alter parallelism to custom")
+                }
+                TableParallelism::Adaptive => {
+                    bail_invalid_parameter!("should not alter parallelism to adaptive")
+                }
+            }
+        } else {
+            bail_invalid_parameter!("should not refresh")
+        }
+        match &resource_group_change {
+            JobResourceGroupTarget::Update(_) => {
+                bail_invalid_parameter!("should not update resource group")
+            }
+            JobResourceGroupTarget::Keep => {}
+        };
+        // Only generate reschedule for fragment of CDC table backfill.
+        let reschedule_plan = self
+            .scale_controller
+            .generate_job_reschedule_plan(
+                JobReschedulePolicy {
+                    targets: HashMap::from([(
+                        job_id.table_id,
+                        JobRescheduleTarget {
+                            parallelism: parallelism_change,
+                            resource_group: resource_group_change,
+                        },
+                    )]),
+                },
+                true,
+            )
+            .await?;
+        if reschedule_plan.reschedules.is_empty() {
+            tracing::debug!(
+                ?job_id,
+                post_updates = ?reschedule_plan.post_updates,
+                "Empty reschedule plan generated for job.",
+            );
+            self.scale_controller
+                .post_apply_reschedule(&HashMap::new(), &reschedule_plan.post_updates)
+                .await?;
+        } else {
+            self.reschedule_actors(
+                database_id,
+                reschedule_plan,
+                RescheduleOptions {
+                    resolve_no_shuffle_upstream: false,
+                    skip_create_new_actors: false,
+                },
+            )
+            .await?;
+        }
 
         Ok(())
     }
