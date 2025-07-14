@@ -27,12 +27,12 @@ use risingwave_pb::plan_common::{
     PbColumnCatalog, PbEncodeType,
 };
 use risingwave_pb::stream_plan::SourceNode;
-use risingwave_storage::panic_store::PanicStateStore;
 
 use super::*;
 use crate::executor::TroublemakerExecutor;
 use crate::executor::source::{
-    FsListExecutor, IcebergListExecutor, SourceExecutor, SourceStateTableHandler, StreamSourceCore,
+    DummySourceExecutor, FsListExecutor, IcebergListExecutor, SourceExecutor,
+    SourceStateTableHandler, StreamSourceCore,
 };
 
 pub struct SourceExecutorBuilder;
@@ -203,7 +203,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 } else if is_fs_v2_connector {
                     FsListExecutor::new(
                         params.actor_context.clone(),
-                        Some(stream_source_core),
+                        stream_source_core,
                         params.executor_stats.clone(),
                         barrier_receiver,
                         system_params,
@@ -225,7 +225,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     let is_shared = source.info.as_ref().is_some_and(|info| info.is_shared());
                     SourceExecutor::new(
                         params.actor_context.clone(),
-                        Some(stream_source_core),
+                        stream_source_core,
                         params.executor_stats.clone(),
                         barrier_receiver,
                         system_params,
@@ -251,17 +251,9 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 Ok((params.info, exec).into())
             }
         } else {
-            // If there is no external stream source, then no data should be persisted. We pass a
-            // `PanicStateStore` type here for indication.
-            let exec = SourceExecutor::<PanicStateStore>::new(
-                params.actor_context,
-                None,
-                params.executor_stats,
-                barrier_receiver,
-                system_params,
-                None,
-                false,
-            );
+            // If there is no external stream source, then no data should be persisted.
+            // Use DummySourceExecutor which only forwards barrier messages.
+            let exec = DummySourceExecutor::new(params.actor_context, barrier_receiver);
             Ok((params.info, exec).into())
         }
     }
