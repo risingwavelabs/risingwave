@@ -14,10 +14,10 @@ psql -c "
         large_text TEXT,
         created_at TIMESTAMP DEFAULT NOW()
     );
-    
+
     -- Insert 4 records with large JSONB data that will trigger TOAST
-    INSERT INTO toast_test_table (name, large_jsonb, large_text) 
-    SELECT 
+    INSERT INTO toast_test_table (name, large_jsonb, large_text)
+    SELECT
         'toast_record_' || s,
         jsonb_build_object(
             'id', s,
@@ -63,7 +63,7 @@ select count(*) from toast_test_table;
 
 # Verify TOAST data integrity for backfill
 query TTTTT
-select 
+select
     id,
     name,
     octet_length(large_jsonb::text) + octet_length(large_text) as total_size_bytes,
@@ -79,7 +79,7 @@ order by id;
 
 # Test 2: Insert incremental data with TOAST in PostgreSQL
 system ok
-psql -c "insert into toast_test_table (name, large_jsonb, large_text) 
+psql -c "insert into toast_test_table (name, large_jsonb, large_text)
 values (
     'incremental_toast',
     jsonb_build_object(
@@ -94,7 +94,7 @@ sleep 3s
 
 # Verify incremental TOAST data
 query TTTTT
-select 
+select
     id,
     name,
     octet_length(large_jsonb::text) + octet_length(large_text) as total_size_bytes,
@@ -113,4 +113,4 @@ select count(*) from toast_test_table;
 
 # Clean up
 statement ok
-drop table toast_test_table; 
+drop table toast_test_table;
