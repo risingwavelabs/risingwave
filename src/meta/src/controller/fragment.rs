@@ -42,7 +42,7 @@ use risingwave_meta_model::{
 use risingwave_meta_model_migration::{Alias, SelectStatement};
 use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::subscribe_response::{
-    Info as NotificationInfo, Operation as NotificationOperation,
+    Info as NotificationInfo, Operation as NotificationOperation, Operation,
 };
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::meta::table_fragments::fragment::{
@@ -73,7 +73,7 @@ use crate::controller::utils::{
     get_fragment_mappings, rebuild_fragment_mapping_from_actors,
     resolve_no_shuffle_actor_dispatcher,
 };
-use crate::manager::LocalNotification;
+use crate::manager::{LocalNotification, NotificationManager};
 use crate::model::{
     DownstreamFragmentRelation, Fragment, FragmentActorDispatchers, FragmentDownstreamRelation,
     StreamActor, StreamContext, StreamJobFragments, TableParallelism,
@@ -150,14 +150,23 @@ impl CatalogController {
         operation: NotificationOperation,
         fragment_mappings: Vec<PbFragmentWorkerSlotMapping>,
     ) {
+        let manager = self.env.notification_manager();
+
+        Self::notify_fragment_mapping_helper(operation, fragment_mappings, manager).await;
+    }
+
+    pub async fn notify_fragment_mapping_helper(
+        operation: Operation,
+        fragment_mappings: Vec<PbFragmentWorkerSlotMapping>,
+        manager: &NotificationManager,
+    ) {
         let fragment_ids = fragment_mappings
             .iter()
             .map(|mapping| mapping.fragment_id)
             .collect_vec();
         // notify all fragment mappings to frontend.
         for fragment_mapping in fragment_mappings {
-            self.env
-                .notification_manager()
+            manager
                 .notify_frontend(
                     operation,
                     NotificationInfo::StreamingWorkerSlotMapping(fragment_mapping),
@@ -168,16 +177,14 @@ impl CatalogController {
         // update serving vnode mappings.
         match operation {
             NotificationOperation::Add | NotificationOperation::Update => {
-                self.env
-                    .notification_manager()
+                manager
                     .notify_local_subscribers(LocalNotification::FragmentMappingsUpsert(
                         fragment_ids,
                     ))
                     .await;
             }
             NotificationOperation::Delete => {
-                self.env
-                    .notification_manager()
+                manager
                     .notify_local_subscribers(LocalNotification::FragmentMappingsDelete(
                         fragment_ids,
                     ))

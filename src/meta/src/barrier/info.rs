@@ -19,6 +19,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_meta_model::WorkerId;
+use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
 use risingwave_pb::stream_plan::PbSubscriptionUpstreamInfo;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use tracing::warn;
@@ -27,6 +28,7 @@ use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder}
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
+use crate::controller::utils::rebuild_fragment_mapping;
 use crate::model::{ActorId, FragmentId, SubscriptionId};
 
 #[derive(Debug, Clone)]
@@ -484,6 +486,10 @@ impl InflightFragmentInfo {
             .flat_map(|info| info.actors.values())
             .map(|actor| actor.worker_id)
             .collect()
+    }
+
+    pub fn fragment_mapping(&self) -> PbFragmentWorkerSlotMapping {
+        rebuild_fragment_mapping(self)
     }
 }
 

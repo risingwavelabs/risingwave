@@ -39,7 +39,9 @@ use crate::barrier::checkpoint::recovery::{
 use crate::barrier::checkpoint::state::BarrierWorkerState;
 use crate::barrier::command::CommandContext;
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompleteBarrierTask};
-use crate::barrier::info::InflightStreamingJobInfo;
+use crate::barrier::info::{
+    CommandFragmentChanges, InflightStreamingJobInfo,
+};
 use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand, TrackingJob};
 use crate::barrier::rpc::{ControlStreamManager, from_partial_graph_id};
@@ -47,8 +49,10 @@ use crate::barrier::schedule::{NewBarrier, PeriodicBarriers};
 use crate::barrier::utils::{
     NodeToCollect, collect_creating_job_commit_epoch_info, is_valid_after_worker_err,
 };
+use crate::barrier::worker::SharedInflightDatabaseInfo;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, InflightSubscriptionInfo};
 use crate::manager::MetaSrvEnv;
+use crate::model::FragmentId;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::fill_snapshot_backfill_epoch;
 use crate::{MetaError, MetaResult};
@@ -57,14 +61,16 @@ pub(crate) struct CheckpointControl {
     pub(crate) env: MetaSrvEnv,
     pub(super) databases: HashMap<DatabaseId, DatabaseCheckpointControlStatus>,
     pub(super) hummock_version_stats: HummockVersionStats,
+    shared_inflight_info: SharedInflightDatabaseInfo,
 }
 
 impl CheckpointControl {
-    pub fn new(env: MetaSrvEnv) -> Self {
+    pub fn new(env: MetaSrvEnv, shared_inflight_info: SharedInflightDatabaseInfo) -> Self {
         Self {
             env,
             databases: Default::default(),
             hummock_version_stats: Default::default(),
+            shared_inflight_info,
         }
     }
 
@@ -74,6 +80,7 @@ impl CheckpointControl {
         control_stream_manager: &mut ControlStreamManager,
         hummock_version_stats: HummockVersionStats,
         env: MetaSrvEnv,
+        shared_inflight_info: SharedInflightDatabaseInfo,
     ) -> Self {
         Self {
             env,
@@ -95,6 +102,7 @@ impl CheckpointControl {
                 }))
                 .collect(),
             hummock_version_stats,
+            shared_inflight_info,
         }
     }
 
@@ -168,7 +176,7 @@ impl CheckpointControl {
         &mut self,
         new_barrier: NewBarrier,
         control_stream_manager: &mut ControlStreamManager,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<Option<HashMap<FragmentId, CommandFragmentChanges>>> {
         let NewBarrier {
             database_id,
             command,
@@ -188,7 +196,11 @@ impl CheckpointControl {
                 {
                     for database in self.databases.values() {
                         if let Some(database) = database.running_state()
-                            && database.state.inflight_graph_info.contains_job(*table_id)
+                            && database
+                                .state
+                                .shared_inflight_graph_info
+                                .read()
+                                .contains_job(*table_id)
                         {
                             if let Some(committed_epoch) = database.committed_epoch {
                                 *snapshot_epoch = Some(committed_epoch);
@@ -211,7 +223,8 @@ impl CheckpointControl {
                             notifier.notify_start_failed(err.clone());
                         }
 
-                        return Ok(());
+                        // todo
+                        return Ok(None);
                     }
                 }
             }
@@ -225,7 +238,10 @@ impl CheckpointControl {
                         job_type: CreateStreamingJobType::Normal,
                         ..
                     } => {
-                        let new_database = DatabaseCheckpointControl::new(database_id);
+                        let new_database = DatabaseCheckpointControl::new(
+                            database_id,
+                            self.shared_inflight_info.clone(),
+                        );
                         control_stream_manager.add_partial_graph(database_id, None);
                         entry
                             .insert(DatabaseCheckpointControlStatus::Running(new_database))
@@ -237,7 +253,7 @@ impl CheckpointControl {
                             notifier.notify_collected();
                         }
                         warn!(?command, "skip command for empty database");
-                        return Ok(());
+                        return Ok(None);
                     }
                     _ => {
                         panic!(
@@ -261,12 +277,12 @@ impl CheckpointControl {
                 Entry::Vacant(_) => {
                     // If it does not exist in the HashMap yet, it means that the first streaming
                     // job has not been created, and we do not need to send a barrier.
-                    return Ok(());
+                    return Ok(None);
                 }
             };
             let Some(database) = database.running_state_mut() else {
                 // Skip new barrier for database which is not running.
-                return Ok(());
+                return Ok(None);
             };
             database.handle_new_barrier(
                 None,
@@ -330,7 +346,8 @@ impl CheckpointControl {
             if !database_checkpoint_control.is_valid_after_worker_err(worker_id as _)
                 || database_checkpoint_control
                     .state
-                    .inflight_graph_info
+                    .shared_inflight_graph_info
+                    .read()
                     .contains_worker(worker_id as _)
                 || database_checkpoint_control
                     .creating_streaming_job_controls
@@ -523,6 +540,7 @@ impl DatabaseCheckpointControlMetrics {
 pub(crate) struct DatabaseCheckpointControl {
     database_id: DatabaseId,
     state: BarrierWorkerState,
+    pub shared_inflight_database_info: SharedInflightDatabaseInfo,
 
     /// Save the state and message of barrier in order.
     /// Key is the `prev_epoch`.
@@ -540,10 +558,11 @@ pub(crate) struct DatabaseCheckpointControl {
 }
 
 impl DatabaseCheckpointControl {
-    fn new(database_id: DatabaseId) -> Self {
+    fn new(database_id: DatabaseId, shared_inflight_info: SharedInflightDatabaseInfo) -> Self {
         Self {
             database_id,
-            state: BarrierWorkerState::new(),
+            state: BarrierWorkerState::new(shared_inflight_info.clone()),
+            shared_inflight_database_info: shared_inflight_info,
             command_ctx_queue: Default::default(),
             completing_barrier: None,
             committed_epoch: None,
@@ -557,12 +576,14 @@ impl DatabaseCheckpointControl {
         database_id: DatabaseId,
         create_mview_tracker: CreateMviewProgressTracker,
         state: BarrierWorkerState,
+        shared_inflight_database_info: SharedInflightDatabaseInfo,
         committed_epoch: u64,
         creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl>,
     ) -> Self {
         Self {
             database_id,
             state,
+            shared_inflight_database_info,
             command_ctx_queue: Default::default(),
             completing_barrier: None,
             committed_epoch: Some(committed_epoch),
@@ -945,7 +966,7 @@ impl DatabaseCheckpointControl {
         span: tracing::Span,
         control_stream_manager: &mut ControlStreamManager,
         hummock_version_stats: &HummockVersionStats,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<Option<HashMap<FragmentId, CommandFragmentChanges>>> {
         let curr_epoch = self.state.in_flight_prev_epoch().next();
 
         let (mut command, mut notifiers) = if let Some((command, notifiers)) = command {
@@ -972,7 +993,7 @@ impl DatabaseCheckpointControl {
                     notifier
                         .notify_start_failed(anyhow!("cannot cancel creating streaming job, the job will continue creating until created or recovery").into());
                 }
-                return Ok(());
+                return Ok(None);
             }
         }
 
@@ -988,7 +1009,8 @@ impl DatabaseCheckpointControl {
                         .into(),
                     );
             }
-            return Ok(());
+            // todo
+            return Ok(None);
         }
 
         let Some(barrier_info) =
@@ -1000,12 +1022,13 @@ impl DatabaseCheckpointControl {
                 notifier.notify_started();
                 notifier.notify_collected();
             }
-            return Ok(());
+            return Ok(None);
         };
 
         let mut edges = self
             .state
-            .inflight_graph_info
+            .shared_inflight_graph_info
+            .read()
             .build_edge(command.as_ref(), &*control_stream_manager);
 
         // Insert newly added creating job
@@ -1034,7 +1057,7 @@ impl DatabaseCheckpointControl {
                                     .into(),
                             );
                         }
-                        return Ok(());
+                        return Ok(None);
                     }
                     // set snapshot epoch of upstream table for snapshot backfill
                     for snapshot_backfill_epoch in snapshot_backfill_info
@@ -1057,7 +1080,7 @@ impl DatabaseCheckpointControl {
                             for notifier in notifiers {
                                 notifier.notify_start_failed(e.clone());
                             }
-                            return Ok(());
+                            return Ok(None);
                         };
                     }
                     let job_id = info.stream_job_fragments.stream_job_id();
@@ -1105,6 +1128,7 @@ impl DatabaseCheckpointControl {
             table_ids_to_commit,
             jobs_to_wait,
             prev_paused_reason,
+            fragment_changes,
         ) = self.state.apply_command(command.as_ref());
 
         // Tracing related stuff
@@ -1123,7 +1147,7 @@ impl DatabaseCheckpointControl {
             &barrier_info,
             prev_paused_reason,
             &pre_applied_graph_info,
-            &self.state.inflight_graph_info,
+            &self.state.shared_inflight_graph_info.read(),
             &mut edges,
         ) {
             Ok(node_to_collect) => node_to_collect,
@@ -1150,6 +1174,6 @@ impl DatabaseCheckpointControl {
         // Record the in-flight barrier.
         self.enqueue_command(command_ctx, notifiers, node_to_collect, jobs_to_wait);
 
-        Ok(())
+        Ok(fragment_changes)
     }
 }
