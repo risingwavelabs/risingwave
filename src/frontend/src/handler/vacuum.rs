@@ -26,7 +26,6 @@ pub async fn handle_vacuum(
 ) -> Result<RwPgResponse> {
     let session = &handler_args.session;
     let db_name = &session.database();
-    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
 
     let table_id = {
         let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
