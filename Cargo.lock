@@ -12466,7 +12466,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
- "twox-hash 1.6.3",
+ "twox-hash 2.1.0",
  "uuid",
  "workspace-hack",
 ]
