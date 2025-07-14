@@ -286,7 +286,7 @@ FLUSH;
 
 sleep 5s
 
-query ??
+query ?? rowsort
 select * from t_hosted_catalog;
 ----
 1 xxx
