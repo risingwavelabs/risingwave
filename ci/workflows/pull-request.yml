@@ -184,7 +184,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end kafka sasl test"
-    command: "ci/scripts/e2e-source-kafka-sasl-test.sh"
+    command: "ci/scripts/e2e-source-kafka-sasl-test.sh -p ci-dev"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-source-tests"
