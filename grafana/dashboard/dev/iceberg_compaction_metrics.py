@@ -91,6 +91,28 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+
+                panels.timeseries_count(
+                    "Iceberg Compaction Remove Snapshot Count",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('iceberg_remove_snapshot_count')}) by (catalog_name, table_ident)",
+                            "{{catalog_name}}-{{table_ident}}",
+                        ),
+                    ],
+                ),
+
+                panels.timeseries_count(
+                    "Iceberg Compaction Expired Snapshots Count",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('iceberg_expired_snapshot_count')}) by (catalog_name, table_ident)",
+                            "{{catalog_name}}-{{table_ident}}",
+                        ),
+                    ],
+                ),
             ],
         )
     ]
