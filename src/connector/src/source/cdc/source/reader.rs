@@ -81,7 +81,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         // This helps with sources that need more time to start streaming
         properties.insert(
             "cdc.source.wait.streaming.start.timeout".to_owned(),
-            "300".to_string(),
+            "300".to_owned(),
         );
         tracing::info!("Set CDC streaming start timeout to 300 seconds");
 

@@ -491,8 +491,9 @@ impl ControlStreamManager {
         fn resolve_jobs_committed_epoch(
             state_table_committed_epochs: &mut HashMap<TableId, u64>,
             jobs: impl IntoIterator<Item = &InflightStreamingJobInfo>,
-        ) -> u64 {
-            let mut epochs = jobs
+        ) -> MetaResult<u64> {
+            let mut table_epochs: HashMap<_, Vec<_>> = HashMap::new();
+            for (table_id, epoch) in jobs
                 .into_iter()
                 .flat_map(InflightStreamingJobInfo::existing_table_ids)
                 .map(|table_id| {
@@ -502,16 +503,17 @@ impl ControlStreamManager {
                             .remove(&table_id)
                             .expect("should exist"),
                     )
-                });
-            let (first_table_id, prev_epoch) = epochs.next().expect("non-empty");
-            for (table_id, epoch) in epochs {
-                assert_eq!(
-                    prev_epoch, epoch,
-                    "{} has different committed epoch to {}",
-                    first_table_id, table_id
-                );
+                })
+            {
+                table_epochs
+                    .entry(epoch)
+                    .or_default()
+                    .push(table_id.table_id);
             }
-            prev_epoch
+            if table_epochs.len() != 1 {
+                return Err(anyhow!("get different table epochs: {:?}", table_epochs).into());
+            }
+            Ok(*table_epochs.iter().next().unwrap().0)
         }
 
         let mut database_jobs = HashMap::new();
@@ -546,7 +548,7 @@ impl ControlStreamManager {
             .collect();
 
         let prev_epoch =
-            resolve_jobs_committed_epoch(state_table_committed_epochs, database_jobs.values());
+            resolve_jobs_committed_epoch(state_table_committed_epochs, database_jobs.values())?;
         let prev_epoch = TracedEpoch::new(Epoch(prev_epoch));
         // Use a different `curr_epoch` for each recovery attempt.
         let curr_epoch = prev_epoch.next();
@@ -559,7 +561,7 @@ impl ControlStreamManager {
         let mut ongoing_snapshot_backfill_jobs: HashMap<TableId, _> = HashMap::new();
         for (job_id, (info, definition, stream_job_fragments)) in snapshot_backfill_jobs {
             let committed_epoch =
-                resolve_jobs_committed_epoch(state_table_committed_epochs, [&info]);
+                resolve_jobs_committed_epoch(state_table_committed_epochs, [&info])?;
             if committed_epoch == barrier_info.prev_epoch() {
                 info!(
                     "recovered creating snapshot backfill job {} catch up with upstream already",
