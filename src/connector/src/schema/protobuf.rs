@@ -99,11 +99,12 @@ pub async fn fetch_from_registry(
             );
         }
     };
+    let message_descriptor = vpb
+        .parent_pool()
+        .get_message_by_name(message_name)
+        .ok_or_else(|| invalid_option_error!("message {message_name} not defined in proto"))?;
 
-    Ok((
-        vpb.parent_pool().get_message_by_name(message_name).unwrap(),
-        vid,
-    ))
+    Ok((message_descriptor, vid))
 }
 
 impl LoadedSchema for FileDescriptor {
