@@ -15,7 +15,6 @@ psql -c "
         created_at TIMESTAMP DEFAULT NOW()
     );
 
-    -- Insert 4 records with large JSONB data that will trigger TOAST
     INSERT INTO toast_test_table (name, large_jsonb, large_text)
     SELECT
         'toast_record_' || s,
