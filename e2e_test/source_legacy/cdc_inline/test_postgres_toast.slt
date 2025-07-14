@@ -1,0 +1,116 @@
+# Test PostgreSQL TOAST mechanism with CDC inline
+# This test verifies that RisingWave can properly handle TOAST data from PostgreSQL CDC
+
+control substitution on
+
+# Step 1: Create table and insert initial data in PostgreSQL
+system ok
+psql -c "
+    DROP TABLE IF EXISTS toast_test_table;
+    CREATE TABLE toast_test_table (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100),
+        large_jsonb JSONB,
+        large_text TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    -- Insert 4 records with large JSONB data that will trigger TOAST
+    INSERT INTO toast_test_table (name, large_jsonb, large_text) 
+    SELECT 
+        'toast_record_' || s,
+        jsonb_build_object(
+            'id', s,
+            'large_string', repeat('This is a very long string that will definitely trigger TOAST mechanism when combined with other data. ', 80),
+            'nested_object', jsonb_build_object(
+                'deep_content', repeat('Deep nested content that adds to the size. ', 40)
+            ),
+            'metadata', jsonb_build_object(
+                'description', repeat('Additional metadata content to ensure TOAST is triggered. ', 30)
+            )
+        ),
+        repeat('Large text field content that should also trigger TOAST when combined with the large JSON. ', 60)
+    FROM generate_series(1, 4) s;"
+
+# Step 2: Create RisingWave table from PostgreSQL CDC
+statement ok
+create table toast_test_table (
+    id int primary key,
+    name varchar,
+    large_jsonb jsonb,
+    large_text text,
+    created_at timestamp
+) with (
+  connector = 'postgres-cdc',
+  hostname = '${PGHOST:localhost}',
+  port = '${PGPORT:8432}',
+  username = '${PGUSER:$USER}',
+  password = '${PGPASSWORD:123456}',
+  database.name = '${PGDATABASE:mydb}',
+  schema.name = 'public',
+  table.name = 'toast_test_table',
+  slot.name = 'toast_test_slot'
+);
+
+# Wait for backfill data synchronization
+sleep 5s
+
+# Test 1: Verify backfill data (4 records with TOAST data)
+query TTTTT
+select count(*) from toast_test_table;
+----
+4
+
+# Verify TOAST data integrity for backfill
+query TTTTT
+select 
+    id,
+    name,
+    octet_length(large_jsonb::text) + octet_length(large_text) as total_size_bytes,
+    large_jsonb ? 'large_string' as has_large_string,
+    large_jsonb ? 'nested_object' as has_nested_object
+from toast_test_table
+order by id;
+----
+1	toast_record_1	[0-9]+	true	true
+2	toast_record_2	[0-9]+	true	true
+3	toast_record_3	[0-9]+	true	true
+4	toast_record_4	[0-9]+	true	true
+
+# Test 2: Insert incremental data with TOAST in PostgreSQL
+system ok
+psql -c "insert into toast_test_table (name, large_jsonb, large_text) 
+values (
+    'incremental_toast',
+    jsonb_build_object(
+        'incremental_data', repeat('This is incremental data that triggers TOAST. ', 100),
+        'timestamp', now()
+    ),
+    repeat('Incremental text content for TOAST testing. ', 80)
+);"
+
+# Wait for incremental data synchronization
+sleep 3s
+
+# Verify incremental TOAST data
+query TTTTT
+select 
+    id,
+    name,
+    octet_length(large_jsonb::text) + octet_length(large_text) as total_size_bytes,
+    large_jsonb ? 'incremental_data' as has_incremental_data,
+    large_jsonb ? 'timestamp' as has_timestamp
+from toast_test_table
+where name = 'incremental_toast';
+----
+5	incremental_toast	[0-9]+	true	true
+
+# Verify total count after incremental insert
+query TTTTT
+select count(*) from toast_test_table;
+----
+5
+
+# Clean up
+statement ok
+drop table toast_test_table; 

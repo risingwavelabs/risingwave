@@ -177,31 +177,4 @@ VALUES
   (3, '{}', '{}', array[]::json[], array[]::jsonb[]),
   (4, NULL, NULL, NULL, NULL);
 
--- Test PostgreSQL TOAST mechanism with large JSONB data
--- This test verifies that RisingWave can properly handle TOAST data from PostgreSQL CDC
 
-CREATE TABLE toast_test_table (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(100),
-    large_jsonb JSONB,
-    large_text TEXT,
-    created_at TIMESTAMP DEFAULT NOW()
-);
-
--- Insert large JSONB data that will trigger TOAST (data size > 2KB)
--- This data will be used for backfill testing
-INSERT INTO toast_test_table (name, large_jsonb, large_text)
-SELECT
-    'toast_record_' || s,
-    jsonb_build_object(
-        'id', s,
-        'large_string', repeat('This is a very long string that will definitely trigger TOAST mechanism when combined with other data. ', 80),
-        'nested_object', jsonb_build_object(
-            'deep_content', repeat('Deep nested content that adds to the size. ', 40)
-        ),
-        'metadata', jsonb_build_object(
-            'description', repeat('Additional metadata content to ensure TOAST is triggered. ', 30)
-        )
-    ),
-    repeat('Large text field content that should also trigger TOAST when combined with the large JSON. ', 60)
-FROM generate_series(1, 4) s;
