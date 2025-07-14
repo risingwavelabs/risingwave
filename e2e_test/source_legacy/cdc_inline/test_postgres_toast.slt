@@ -31,15 +31,9 @@ psql -c "
         repeat('Large text field content that should also trigger TOAST when combined with the large JSON. ', 60)
     FROM generate_series(1, 4) s;"
 
-# Step 2: Create RisingWave table from PostgreSQL CDC
+# Step 2: Create RisingWave source from PostgreSQL CDC
 statement ok
-create table toast_test_table (
-    id int primary key,
-    name varchar,
-    large_jsonb jsonb,
-    large_text text,
-    created_at timestamp
-) with (
+create source toast_test_source with (
   connector = 'postgres-cdc',
   hostname = '${PGHOST:localhost}',
   port = '${PGPORT:8432}',
@@ -47,9 +41,18 @@ create table toast_test_table (
   password = '${PGPASSWORD:123456}',
   database.name = '${PGDATABASE:mydb}',
   schema.name = 'public',
-  table.name = 'toast_test_table',
   slot.name = 'toast_test_slot'
 );
+
+# Step 3: Create table from source
+statement ok
+create table toast_test_table (
+    id int primary key,
+    name varchar,
+    large_jsonb jsonb,
+    large_text text,
+    created_at timestamp
+) from toast_test_source table 'public.toast_test_table';
 
 # Wait for backfill data synchronization
 sleep 5s
@@ -77,7 +80,7 @@ order by id;
 4	toast_record_4	[0-9]+	true	true
 
 # Test 2: Insert incremental data with TOAST in PostgreSQL
-system ok
+statement ok
 psql -c "insert into toast_test_table (name, large_jsonb, large_text)
 values (
     'incremental_toast',
@@ -111,5 +114,8 @@ select count(*) from toast_test_table;
 5
 
 # Clean up
+statement ok
+drop source toast_test_source;
+
 statement ok
 drop table toast_test_table;
