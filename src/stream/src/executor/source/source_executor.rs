@@ -193,6 +193,20 @@ impl<S: StateStore> SourceExecutor<S> {
         (column_ids, source_ctx)
     }
 
+    /// Check if this is a batch refreshable source.
+    fn is_batch_source(&self) -> bool {
+        self.stream_source_core.is_batch_source
+    }
+
+    /// Refresh splits
+    fn refresh_batch_splits(&mut self) -> StreamExecutorResult<Vec<SplitImpl>> {
+        debug_assert!(self.is_batch_source());
+        let core = &self.stream_source_core;
+        let mut split = core.get_batch_split();
+        split.refresh();
+        Ok(vec![split.into()])
+    }
+
     fn is_auto_schema_change_enable(&self) -> bool {
         self.actor_ctx
             .streaming_config
@@ -241,6 +255,12 @@ impl<S: StateStore> SourceExecutor<S> {
                     {
                         should_rebuild_stream = true;
                     }
+                }
+                ApplyMutationAfterBarrier::RefreshBatchSplits(splits) => {
+                    // Just override the latest split info with the refreshed splits. No need to check.
+                    self.stream_source_core.latest_split_info =
+                        splits.into_iter().map(|s| (s.id(), s)).collect();
+                    should_rebuild_stream = true;
                 }
                 ApplyMutationAfterBarrier::ConnectorPropsChange => {
                     should_rebuild_stream = true;
@@ -554,6 +574,8 @@ impl<S: StateStore> SourceExecutor<S> {
             .source_split_change_count
             .with_guarded_label_values(&self.get_metric_labels());
 
+        let mut load_finish_sent = false;
+
         while let Some(msg) = stream.next().await {
             let Ok(msg) = msg else {
                 tokio::time::sleep(Duration::from_millis(1000)).await;
@@ -563,7 +585,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
             match msg {
                 // This branch will be preferred.
-                Either::Left(Message::Barrier(barrier)) => {
+                Either::Left(Message::Barrier(mut barrier)) => {
                     last_barrier_time = Instant::now();
 
                     if self_paused {
@@ -575,6 +597,20 @@ impl<S: StateStore> SourceExecutor<S> {
                     }
 
                     let epoch = barrier.epoch;
+
+                    if self.is_batch_source() && !load_finish_sent {
+                        let batch_split = self.stream_source_core.get_batch_split();
+                        if batch_split.finished() {
+                            tracing::info!("data stream finished");
+                            if barrier.mutation.is_none() {
+                                tracing::info!("emitting load finish");
+                                barrier.mutation = Some(Arc::new(Mutation::LoadFinish {
+                                    table_id: source_id,
+                                }));
+                                load_finish_sent = true;
+                            }
+                        }
+                    }
 
                     let mut split_change = None;
 
@@ -657,6 +693,32 @@ impl<S: StateStore> SourceExecutor<S> {
                                     self.rebuild_stream_reader(&source_desc, &mut stream)?;
                                 }
                             }
+                            Mutation::RefreshStart { table_id } if table_id == &source_id => {
+                                debug_assert!(self.is_batch_source());
+
+                                // Similar to split_change, we need to update the split info, and rebuild source reader.
+
+                                // For batch sources, trigger re-enumeration of splits to detect file changes
+                                if let Ok(new_splits) = self.refresh_batch_splits() {
+                                    tracing::info!(
+                                        actor_id = self.actor_ctx.id,
+                                        table_id = %table_id,
+                                        new_splits_count = new_splits.len(),
+                                        "RefreshStart triggered split re-enumeration"
+                                    );
+                                    split_change = Some((
+                                        &source_desc,
+                                        &mut stream,
+                                        ApplyMutationAfterBarrier::RefreshBatchSplits(new_splits),
+                                    ));
+                                } else {
+                                    tracing::warn!(
+                                        actor_id = self.actor_ctx.id,
+                                        table_id = %table_id,
+                                        "Failed to refresh splits during RefreshStart"
+                                    );
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -730,10 +792,13 @@ impl<S: StateStore> SourceExecutor<S> {
                         .updated_splits_in_epoch
                         .extend(latest_state);
 
-                    source_output_row_count.inc_by(chunk.cardinality() as u64);
+                    let card = chunk.cardinality();
+                    source_output_row_count.inc_by(card as u64);
                     let chunk =
                         prune_additional_cols(&chunk, split_idx, offset_idx, &source_desc.columns);
-                    yield Message::Chunk(chunk);
+                    if card > 0 {
+                        yield Message::Chunk(chunk);
+                    }
                     self.try_flush_data().await?;
                 }
             }
@@ -754,6 +819,7 @@ enum ApplyMutationAfterBarrier<'a> {
         should_trim_state: bool,
         split_change_count: &'a LabelGuardedMetric<GenericCounter<AtomicU64>>,
     },
+    RefreshBatchSplits(Vec<SplitImpl>),
     ConnectorPropsChange,
 }
 
