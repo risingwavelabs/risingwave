@@ -1,0 +1,93 @@
+# Test PostgreSQL TOAST mechanism with CDC
+# This test verifies that RisingWave can properly handle TOAST data from PostgreSQL CDC
+
+control substitution on
+
+# Create CDC source for TOAST testing
+statement ok
+create source s with (
+  username = '${PGUSER:$USER}',
+  connector='postgres-cdc',
+  hostname='${PGHOST:localhost}',
+  port='${PGPORT:5432}',
+  password = '${PGPASSWORD:}',
+  database.name = '${PGDATABASE:postgres}',
+  schema.name = 'public',
+  slot.name = 'rw_slot_toast_test'
+);
+
+# Create RisingWave table from TOAST test table
+statement ok
+create table toast_test_table (
+    id int primary key,
+    name varchar,
+    large_jsonb jsonb,
+    large_text text,
+    created_at timestamp
+) from s table 'public.toast_test_table';
+
+# Wait for backfill data synchronization
+sleep 5
+
+# Test 1: Verify backfill data (existing TOAST data)
+query TTTTT
+select count(*) from toast_test_table;
+----
+4
+
+# Verify TOAST data integrity for backfill
+query TTTTT
+select
+    id,
+    name,
+    octet_length(large_jsonb::text) + octet_length(large_text) as total_size_bytes,
+    large_jsonb ? 'large_string' as has_large_string,
+    large_jsonb ? 'nested_object' as has_nested_object
+from toast_test_table
+order by id;
+----
+1	toast_record_1	[0-9]+	true	true
+2	toast_record_2	[0-9]+	true	true
+3	toast_record_3	[0-9]+	true	true
+4	toast_record_4	[0-9]+	true	true
+
+# Test 2: Insert incremental data with TOAST (execute in PostgreSQL)
+statement ok
+\psql -c "insert into toast_test_table (name, large_jsonb, large_text)
+values (
+    'incremental_toast',
+    jsonb_build_object(
+        'incremental_data', repeat('This is incremental data that triggers TOAST. ', 100),
+        'timestamp', now()
+    ),
+    repeat('Incremental text content for TOAST testing. ', 80)
+);"
+
+# Wait for incremental data synchronization
+sleep 3
+
+# Verify incremental TOAST data
+query TTTTT
+select
+    id,
+    name,
+    octet_length(large_jsonb::text) + octet_length(large_text) as total_size_bytes,
+    large_jsonb ? 'incremental_data' as has_incremental_data,
+    large_jsonb ? 'timestamp' as has_timestamp
+from toast_test_table
+where name = 'incremental_toast';
+----
+5	incremental_toast	[0-9]+	true	true
+
+# Verify total count after incremental insert
+query TTTTT
+select count(*) from toast_test_table;
+----
+5
+
+# Clean up
+statement ok
+drop table toast_test_table;
+
+statement ok
+drop source s;
