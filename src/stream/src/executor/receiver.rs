@@ -144,14 +144,14 @@ impl Execute for ReceiverExecutor {
                                 .unwrap_or(self.upstream_fragment_id);
                             let removed_upstream_actor_id: Vec<_> =
                                 if update.new_upstream_fragment_id.is_some() {
-                                    vec![self.input.actor_id()]
+                                    vec![self.input.id()]
                                 } else {
                                     update.removed_upstream_actor_id.clone()
                                 };
 
                             assert_eq!(
                                 removed_upstream_actor_id,
-                                vec![self.input.actor_id()],
+                                vec![self.input.id()],
                                 "the removed upstream actor should be the same as the current input"
                             );
                             let upstream_actor = update
