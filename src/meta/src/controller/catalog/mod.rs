@@ -866,11 +866,11 @@ impl CatalogControllerInner {
             .chain(internal_table_objs.into_iter())
             .map(|(table, obj)| {
                 // Correctly set the stream job status for creating materialized views and internal tables.
-                let mut status: PbStreamJobStatus =
-                    (*job_statuses.get(&table.table_id).unwrap()).into();
-                if table.table_type == TableType::Internal {
-                    status = (*job_statuses.get(&table.belongs_to_job_id.unwrap()).unwrap()).into();
-                }
+                let status: PbStreamJobStatus = if table.table_type == TableType::Internal {
+                    (*job_statuses.get(&table.belongs_to_job_id.unwrap()).unwrap()).into()
+                } else {
+                    (*job_statuses.get(&table.table_id).unwrap()).into()
+                };
                 let mut pb_table: PbTable = ObjectModel(table, obj.unwrap()).into();
                 pb_table.stream_job_status = status.into();
                 pb_table
