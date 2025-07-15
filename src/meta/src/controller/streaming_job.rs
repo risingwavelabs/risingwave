@@ -522,7 +522,7 @@ impl CatalogController {
         let Some(obj) = obj else {
             tracing::warn!(
                 id = job_id,
-                "streaming job not found when aborting creating, might be cleaned by recovery"
+                "streaming job not found when aborting creating, might be cancelled already or cleaned by recovery"
             );
             return Ok((true, None));
         };
@@ -669,41 +669,38 @@ impl CatalogController {
         actor_ids: Vec<crate::model::ActorId>,
         upstream_fragment_new_downstreams: &FragmentDownstreamRelation,
         split_assignment: &SplitAssignment,
-    ) -> MetaResult<()> {
-        self.post_collect_job_fragments_inner(
-            job_id,
-            actor_ids,
-            upstream_fragment_new_downstreams,
-            split_assignment,
-            false,
-        )
-        .await
-    }
-
-    pub async fn post_collect_job_fragments_inner(
-        &self,
-        job_id: ObjectId,
-        actor_ids: Vec<crate::model::ActorId>,
-        upstream_fragment_new_downstreams: &FragmentDownstreamRelation,
-        split_assignment: &SplitAssignment,
+        replace_plan: Option<&ReplaceStreamJobPlan>,
         notify_for_creating: bool,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
+
+        let actor_ids = actor_ids
+            .into_iter()
+            .chain(
+                replace_plan
+                    .iter()
+                    .flat_map(|plan| plan.new_fragments.actor_ids().into_iter()),
+            )
+            .map(|id| id as ActorId)
+            .collect_vec();
 
         Actor::update_many()
             .col_expr(
                 actor::Column::Status,
                 SimpleExpr::from(ActorStatus::Running.into_value()),
             )
-            .filter(
-                actor::Column::ActorId
-                    .is_in(actor_ids.into_iter().map(|id| id as ActorId).collect_vec()),
-            )
+            .filter(actor::Column::ActorId.is_in(actor_ids))
             .exec(&txn)
             .await?;
 
-        for splits in split_assignment.values() {
+        for splits in split_assignment.values().chain(
+            replace_plan
+                .as_ref()
+                .map(|plan| plan.init_split_assignment.values())
+                .into_iter()
+                .flatten(),
+        ) {
             for (actor_id, splits) in splits {
                 let splits = splits.iter().map(PbConnectorSplit::from).collect_vec();
                 let connector_splits = &PbConnectorSplits { splits };
@@ -728,13 +725,43 @@ impl CatalogController {
         .update(&txn)
         .await?;
 
-        let fragment_mapping = if notify_for_creating {
+        let mut fragment_mapping = if notify_for_creating {
             get_fragment_mappings(&txn, job_id as _).await?
         } else {
             vec![]
         };
 
+        let objects = if let Some(plan) = &replace_plan {
+            insert_fragment_relations(&txn, &plan.upstream_fragment_downstreams).await?;
+
+            let incoming_sink_id = job_id;
+            let (objects, replace_fragment_mapping, _) = Self::finish_replace_streaming_job_inner(
+                plan.tmp_id as _,
+                plan.replace_upstream.clone(),
+                SinkIntoTableContext {
+                    creating_sink_id: Some(incoming_sink_id),
+                    dropping_sink_id: None,
+                    updated_sink_catalogs: vec![],
+                },
+                &txn,
+                plan.streaming_job.clone(),
+                None,
+            )
+            .await?;
+            fragment_mapping.extend(replace_fragment_mapping.into_iter());
+            objects
+        } else {
+            vec![]
+        };
+
         txn.commit().await?;
+        if !objects.is_empty() {
+            self.notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
+            )
+            .await;
+        }
         self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
             .await;
 
@@ -831,11 +858,7 @@ impl CatalogController {
     }
 
     /// `finish_streaming_job` marks job related objects as `Created` and notify frontend.
-    pub async fn finish_streaming_job(
-        &self,
-        job_id: ObjectId,
-        replace_stream_job_info: Option<ReplaceStreamJobPlan>,
-    ) -> MetaResult<()> {
+    pub async fn finish_streaming_job(&self, job_id: ObjectId) -> MetaResult<()> {
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -1024,34 +1047,6 @@ impl CatalogController {
 
         let fragment_mapping = get_fragment_mappings(&txn, job_id).await?;
 
-        let replace_table_mapping_update = match replace_stream_job_info {
-            Some(ReplaceStreamJobPlan {
-                streaming_job,
-                replace_upstream,
-                tmp_id,
-                ..
-            }) => {
-                let incoming_sink_id = job_id;
-
-                let (relations, fragment_mapping, _) = Self::finish_replace_streaming_job_inner(
-                    tmp_id as ObjectId,
-                    replace_upstream,
-                    SinkIntoTableContext {
-                        creating_sink_id: Some(incoming_sink_id as _),
-                        dropping_sink_id: None,
-                        updated_sink_catalogs: vec![],
-                    },
-                    &txn,
-                    streaming_job,
-                    None, // will not drop table connector when creating a streaming job
-                )
-                .await?;
-
-                Some((relations, fragment_mapping))
-            }
-            None => None,
-        };
-
         if job_type != ObjectType::Index {
             updated_user_info = grant_default_privileges_automatically(&txn, job_id).await?;
         }
@@ -1072,16 +1067,6 @@ impl CatalogController {
             version = self.notify_users_update(updated_user_info).await;
         }
 
-        if let Some((objects, fragment_mapping)) = replace_table_mapping_update {
-            self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
-                .await;
-            version = self
-                .notify_frontend(
-                    NotificationOperation::Update,
-                    NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
-                )
-                .await;
-        }
         inner
             .creating_table_finish_notifier
             .values_mut()
