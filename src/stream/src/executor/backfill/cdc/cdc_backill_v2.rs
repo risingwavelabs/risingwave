@@ -264,6 +264,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                     is_snapshot_paused,
                     "start cdc backfill split"
                 );
+                extends_current_actor_bound(&mut current_actor_bounds, split);
                 let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
                 let left_upstream = upstream.by_ref().map(Either::Left);
                 let read_args = SplitSnapshotReadArgs::new(
@@ -437,7 +438,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                 // // Otherwise, the result set of the new snapshot stream may become empty.
                 // // It maybe a cancellation bug of the mysql driver.
 
-                extends_current_actor_bound(&mut current_actor_bounds, split);
                 // update and persist current backfill progress
                 // Wait for first barrier to come after backfill is finished.
                 // So we can update our progress + persist the status.
