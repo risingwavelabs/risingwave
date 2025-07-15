@@ -61,10 +61,12 @@ psql -c "insert into toast_test_table (name, large_jsonb, large_text)
 values (
     'incremental_toast',
     jsonb_build_object(
-        'incremental_data', repeat('This is incremental data that triggers TOAST. ', 100),
-        'timestamp', now()
+        'id', 5,
+        'large_string', repeat('This is a very long string that will definitely trigger TOAST mechanism when combined with other data. ', 80),
+        'nested_object', jsonb_build_object('deep_content', repeat('Deep nested content that adds to the size. ', 40)),
+        'metadata', jsonb_build_object('description', repeat('Additional metadata content to ensure TOAST is triggered. ', 30))
     ),
-    repeat('Incremental text content for TOAST testing. ', 80)
+    repeat('Large text field content that should also trigger TOAST when combined with the large JSON. ', 60)
 );"
 
 # Wait for incremental data synchronization
@@ -76,12 +78,12 @@ select
     id,
     name,
     octet_length(large_jsonb::text) + octet_length(large_text) as total_size_bytes,
-    large_jsonb ? 'incremental_data' as has_incremental_data,
-    large_jsonb ? 'timestamp' as has_timestamp
+    large_jsonb ? 'large_string' as has_large_string,
+    large_jsonb ? 'nested_object' as has_nested_object
 from toast_test_table
 where name = 'incremental_toast';
 ----
-5 incremental_toast	8192 t t
+5 incremental_toast	17261 t t
 
 # Verify total count after incremental insert
 query TTTTT
