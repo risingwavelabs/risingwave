@@ -185,7 +185,7 @@ pub(crate) async fn assign_cdc_table_snapshot_splits_pairs(
     meta_store: &SqlMetaStore,
 ) -> MetaResult<CdcTableSnapshotSplitAssignment> {
     let mut assignments = HashMap::default();
-    for (table_id, actor_ids) in table_id_actor_ids.into_iter() {
+    for (table_id, actor_ids) in table_id_actor_ids {
         assignments
             .extend(assign_cdc_table_snapshot_splits_impl(table_id, actor_ids, meta_store).await?);
     }
