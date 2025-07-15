@@ -22,7 +22,7 @@ use risingwave_common::row::RowDeserializer;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{OrderType, cmp_datum};
 use risingwave_connector::source::cdc::CdcScanOptions;
-use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReaderImpl};
+use risingwave_connector::source::cdc::external::ExternalTableReaderImpl;
 use risingwave_connector::source::{CdcTableSnapshotSplit, CdcTableSnapshotSplitRaw};
 use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
@@ -37,7 +37,7 @@ use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTab
 use crate::executor::backfill::cdc::upstream_table::snapshot::{
     SplitSnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
 };
-use crate::executor::backfill::utils::{get_cdc_chunk_last_offset, mapping_chunk, mapping_message};
+use crate::executor::backfill::utils::{mapping_chunk, mapping_message};
 use crate::executor::prelude::*;
 use crate::executor::source::get_infinite_backoff_strategy;
 
@@ -252,8 +252,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                 self.external_table.clone(),
                 table_reader.expect("table reader must created"),
             );
-            let offset_parse_func = upstream_table_reader.reader.get_cdc_offset_parser();
-
             'split_backfill: for split in actor_snapshot_splits.iter().skip(next_split_idx) {
                 // let state = state_impl.restore_state(split.split_id).await?;
                 // Keep track of rows from the snapshot.
@@ -276,8 +274,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                     schema_table_name.clone(),
                     external_database_name.clone(),
                 );
-                let split_low_log_offset: Option<CdcOffset> =
-                    upstream_table_reader.current_cdc_offset().await?;
                 let right_snapshot = pin!(
                     upstream_table_reader
                         .snapshot_read_table_split(read_args)
@@ -359,29 +355,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                     if chunk.cardinality() == 0 {
                                         continue;
                                     }
-                                    let chunk_binlog_offset =
-                                        get_cdc_chunk_last_offset(&offset_parse_func, &chunk)?;
-                                    tracing::trace!(
-                                        "recv changelog chunk: chunk_offset {:?}, capactiy {}",
-                                        chunk_binlog_offset,
-                                        chunk.capacity()
-                                    );
-                                    // Since we don't need changelog before the
-                                    // `split_low_log_offset`, skip the chunk that *only* contains
-                                    // events before `split_low_log_offset`.
-                                    if let Some(split_low_log_offset) =
-                                        split_low_log_offset.as_ref()
-                                        && let Some(chunk_offset) = chunk_binlog_offset
-                                        && chunk_offset < *split_low_log_offset
-                                    {
-                                        tracing::trace!(
-                                            "skip changelog chunk: chunk_offset {:?}, capacity {}",
-                                            chunk_offset,
-                                            chunk.capacity()
-                                        );
-                                        continue;
-                                    }
-
                                     if let Some(filtered_chunk) = filter_stream_chunk(
                                         chunk,
                                         &current_actor_bounds,
@@ -492,8 +465,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             // as backfill is finished.
             #[for_await]
             for msg in &mut upstream {
-                // upstream offsets will be removed from the message before forwarding to
-                // downstream
                 let Some(msg) = mapping_message(msg?, &self.output_indices) else {
                     continue;
                 };
