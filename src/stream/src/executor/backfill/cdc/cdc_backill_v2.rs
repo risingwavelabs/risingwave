@@ -345,6 +345,12 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
 
                                     if is_reset_barrier(&barrier, self.actor_ctx.id) {
                                         next_reset_barrier = Some(barrier);
+                                        for chunk in upstream_chunk_buffer.drain(..) {
+                                            yield Message::Chunk(mapping_chunk(
+                                                chunk,
+                                                &self.output_indices,
+                                            ));
+                                        }
                                         continue 'with_cdc_table_snapshot_splits;
                                     }
                                     // emit barrier and continue to consume the backfill stream
@@ -379,10 +385,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                         split_id = split.split_id,
                                         "snapshot read stream ends"
                                     );
-                                    // If the snapshot read stream ends, it means all historical
-                                    // data has been loaded.
-                                    // We should not mark the chunk anymore,
-                                    // otherwise, we will ignore some rows in the buffer.
                                     for chunk in upstream_chunk_buffer.drain(..) {
                                         yield Message::Chunk(mapping_chunk(
                                             chunk,
