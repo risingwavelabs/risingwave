@@ -30,6 +30,7 @@ use risingwave_common::catalog::{ColumnId, DatabaseId, Field, Schema, TableId};
 use risingwave_common::config::MetricLevel;
 use risingwave_common::must_match;
 use risingwave_common::operator::{unique_executor_id, unique_operator_id};
+use risingwave_expr::expr::build_non_strict_from_prost;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -54,7 +55,8 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
     Actor, ActorContext, ActorContextRef, DispatchExecutor, Execute, Executor, ExecutorInfo,
-    MergeExecutorInput, SnapshotBackfillExecutor, TroublemakerExecutor, WrapperExecutor,
+    MergeExecutorInput, SnapshotBackfillExecutor, TroublemakerExecutor, UpstreamSinkUnionExecutor,
+    WrapperExecutor,
 };
 use crate::from_proto::{MergeExecutorBuilder, create_executor};
 use crate::task::barrier_manager::{
@@ -467,21 +469,46 @@ impl StreamActorManager {
 
         // Create the input executor before creating itself
         let mut input = Vec::with_capacity(node.input.iter().len());
+
+        let mut sink_into_streams = Vec::new();
         for input_stream_node in &node.input {
-            input.push(
-                self.create_nodes_inner(
-                    fragment_id,
-                    input_stream_node,
-                    env.clone(),
-                    store.clone(),
-                    actor_context,
-                    vnode_bitmap.clone(),
-                    has_stateful || is_stateful,
-                    subtasks,
-                    local_barrier_manager,
-                )
-                .await?,
-            );
+            let mut is_sink_into = false;
+            if let NodeBody::Project(project) = input_stream_node.get_node_body().unwrap() {
+                let project_input = input_stream_node.get_input();
+                assert!(project_input.len() == 1);
+                let project_input = project_input.first().unwrap();
+                if let NodeBody::Merge(merge) = project_input.get_node_body().unwrap() {
+                    tracing::debug!(
+                        "sink into table: fragment_id: {}, upstream_fragment_id: {}, project: {:?}",
+                        fragment_id,
+                        merge.upstream_fragment_id,
+                        project.get_select_list()
+                    );
+                    assert!(project.get_nondecreasing_exprs().is_empty());
+                    sink_into_streams.push((
+                        merge.upstream_fragment_id,
+                        project_input.get_fields().clone(),
+                        project.get_select_list().clone(),
+                    ));
+                    is_sink_into = true;
+                }
+            }
+            if !is_sink_into {
+                input.push(
+                    self.create_nodes_inner(
+                        fragment_id,
+                        input_stream_node,
+                        env.clone(),
+                        store.clone(),
+                        actor_context,
+                        vnode_bitmap.clone(),
+                        has_stateful || is_stateful,
+                        subtasks,
+                        local_barrier_manager,
+                    )
+                    .await?,
+                );
+            }
         }
 
         let op_info = node.get_identity().clone();
@@ -497,6 +524,33 @@ impl StreamActorManager {
             actor_context: actor_context.clone(),
             identity: info.identity.clone().into(),
         };
+
+        if !sink_into_streams.is_empty() {
+            let upstream_infos = sink_into_streams
+                .into_iter()
+                .map(|(upstream_fragment_id, fields, select_list)| {
+                    let merge_schema: Schema = fields.iter().map(Field::from).collect();
+                    let project_exprs = select_list
+                        .iter()
+                        .map(|e| build_non_strict_from_prost(e, eval_error_report.clone()))
+                        .try_collect()
+                        .unwrap();
+                    (upstream_fragment_id, merge_schema, project_exprs)
+                })
+                .collect();
+            let upstream_sink_union_executor = UpstreamSinkUnionExecutor::new(
+                actor_context.clone(),
+                local_barrier_manager.clone(),
+                self.streaming_metrics.clone(),
+                env.config().developer.chunk_size,
+                upstream_infos,
+            );
+            let mut info = info.clone();
+            info.id += 1 << 20; // Ensure the id is unique.
+            info.identity = format!("UnionUpstreamSink {:X}", executor_id);
+            let executor = (info, upstream_sink_union_executor).into();
+            input.push(executor);
+        }
 
         // Build the executor with params.
         let executor_params = ExecutorParams {

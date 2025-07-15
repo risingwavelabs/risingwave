@@ -41,7 +41,7 @@ pub(crate) enum MergeExecutorUpstream {
 pub(crate) struct MergeExecutorInput {
     upstream: MergeExecutorUpstream,
     actor_context: ActorContextRef,
-    upstream_fragment_id: UpstreamFragmentId,
+    pub(crate) upstream_fragment_id: UpstreamFragmentId,
     local_barrier_manager: LocalBarrierManager,
     executor_stats: Arc<StreamingMetrics>,
     pub(crate) info: ExecutorInfo,

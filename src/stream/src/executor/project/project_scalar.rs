@@ -19,6 +19,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::NonStrictExpression;
 
 use crate::executor::prelude::*;
+use crate::executor::project::apply_project_exprs;
 
 /// `ProjectExecutor` project data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete
@@ -92,16 +93,7 @@ impl Inner {
         &self,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        let (data_chunk, ops) = chunk.into_parts();
-        let mut projected_columns = Vec::new();
-
-        for expr in &self.exprs {
-            let evaluated_expr = expr.eval_infallible(&data_chunk).await;
-            projected_columns.push(evaluated_expr);
-        }
-        let (_, vis) = data_chunk.into_parts();
-
-        let mut new_chunk = StreamChunk::with_visibility(ops, projected_columns, vis);
+        let mut new_chunk = apply_project_exprs(&self.exprs, chunk).await?;
         if self.noop_update_hint {
             new_chunk = new_chunk.eliminate_adjacent_noop_update();
         }

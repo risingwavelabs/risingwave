@@ -101,6 +101,7 @@ mod temporal_join;
 mod top_n;
 mod troublemaker;
 mod union;
+mod upstream_sink_union;
 mod values;
 mod watermark;
 mod watermark_filter;
@@ -160,6 +161,7 @@ pub use top_n::{
 };
 pub use troublemaker::TroublemakerExecutor;
 pub use union::UnionExecutor;
+pub use upstream_sink_union::UpstreamSinkUnionExecutor;
 pub use utils::DummyExecutor;
 pub use values::ValuesExecutor;
 pub use watermark_filter::WatermarkFilterExecutor;
