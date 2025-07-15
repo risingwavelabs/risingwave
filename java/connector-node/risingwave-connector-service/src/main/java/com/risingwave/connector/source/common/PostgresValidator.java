@@ -662,7 +662,8 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         }
     }
 
-    private boolean isDataTypeCompatible(String pgDataType, Data.DataType.TypeName typeName, Long charMaxLength) {
+    private boolean isDataTypeCompatible(
+            String pgDataType, Data.DataType.TypeName typeName, Long charMaxLength) {
         System.out.println(
                 "PostgresValidator: pgDataType = "
                         + pgDataType
