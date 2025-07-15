@@ -639,6 +639,11 @@ impl PostgresExternalTableReader {
         let mut left = None;
         let mut right = Some(min_value.saturating_add(saturated_split_max_size));
         loop {
+            let mut is_completed = false;
+            if right.as_ref().map(|r| *r >= max_value).unwrap_or(true) {
+                right = None;
+                is_completed = true;
+            }
             let split = CdcTableSnapshotSplit {
                 split_id,
                 left_bound_inclusive: OwnedRow::new(vec![
@@ -650,7 +655,7 @@ impl PostgresExternalTableReader {
             };
             try_increase_split_id(&mut split_id)?;
             yield split;
-            if right.as_ref().map(|r| *r >= max_value).unwrap_or(true) {
+            if is_completed {
                 break;
             }
             left = right;
