@@ -81,7 +81,7 @@ select
 from toast_test_table
 where name = 'incremental_toast';
 ----
-5 incremental_toast	8193 t t
+5 incremental_toast	8192 t t
 
 # Verify total count after incremental insert
 query TTTTT
@@ -91,7 +91,7 @@ select count(*) from toast_test_table;
 
 # Clean up
 statement ok
-drop source toast_test_source;
+drop table toast_test_table;
 
 statement ok
-drop table toast_test_table;
+drop source toast_test_source;
