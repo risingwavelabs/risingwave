@@ -375,106 +375,6 @@ pub struct DynamicReceivers<InputId, M> {
     merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram>>,
 }
 
-impl<InputId: Clone + Ord + Hash + std::fmt::Debug, M> DynamicReceivers<InputId, M> {
-    pub fn new(
-        upstreams: Vec<BoxedMessageInput<InputId, M>>,
-        barrier_align_duration: Option<LabelGuardedMetric<GenericCounter<AtomicU64>>>,
-        merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram>>,
-    ) -> Self {
-        assert!(!upstreams.is_empty());
-        let upstream_input_ids = upstreams.iter().map(|input| input.id()).collect();
-        let mut this = Self {
-            barrier: None,
-            blocked: Vec::with_capacity(upstreams.len()),
-            active: Default::default(),
-            buffered_watermarks: Default::default(),
-            upstream_input_ids,
-            merge_barrier_align_duration,
-            barrier_align_duration,
-        };
-        this.extend_active(upstreams);
-        this
-    }
-
-    /// Extend the active upstreams with the given upstreams. The current stream must be at the
-    /// clean state right after a barrier.
-    pub fn extend_active(
-        &mut self,
-        upstreams: impl IntoIterator<Item = BoxedMessageInput<InputId, M>>,
-    ) {
-        assert!(self.blocked.is_empty() && self.barrier.is_none());
-
-        self.active
-            .extend(upstreams.into_iter().map(|s| s.into_future()));
-    }
-
-    /// Handle a new watermark message. Optionally returns the watermark message to emit.
-    pub fn handle_watermark(
-        &mut self,
-        input_id: InputId,
-        watermark: Watermark,
-    ) -> Option<Watermark> {
-        let col_idx = watermark.col_idx;
-        // Insert a buffer watermarks when first received from a column.
-        let watermarks = self
-            .buffered_watermarks
-            .entry(col_idx)
-            .or_insert_with(|| BufferedWatermarks::with_ids(self.upstream_input_ids.clone()));
-        watermarks.handle_watermark(input_id, watermark)
-    }
-
-    /// Consume `other` and add its upstreams to `self`. The two streams must be at the clean state
-    /// right after a barrier.
-    pub fn add_upstreams_from(&mut self, other: Self) {
-        assert!(self.blocked.is_empty() && self.barrier.is_none());
-        assert!(other.blocked.is_empty() && other.barrier.is_none());
-
-        self.active.extend(other.active);
-        let add_upstream_input_ids = other.upstream_input_ids;
-        self.upstream_input_ids
-            .extend(add_upstream_input_ids.iter().cloned());
-
-        // Add buffers to the buffered watermarks for all cols
-        self.buffered_watermarks.values_mut().for_each(|buffers| {
-            buffers.add_buffers(add_upstream_input_ids.iter().cloned());
-        });
-    }
-
-    /// Remove upstreams from `self` in `upstream_input_ids`. The current stream must be at the
-    /// clean state right after a barrier.
-    pub fn remove_upstreams(&mut self, upstream_input_ids: &HashSet<InputId>) {
-        assert!(self.blocked.is_empty() && self.barrier.is_none());
-
-        let new_upstreams = std::mem::take(&mut self.active)
-            .into_iter()
-            .map(|s| s.into_inner().unwrap())
-            .filter(|u| !upstream_input_ids.contains(&u.id()));
-        self.extend_active(new_upstreams);
-
-        self.upstream_input_ids
-            .retain(|id| !upstream_input_ids.contains(id));
-        self.buffered_watermarks.values_mut().for_each(|buffers| {
-            // Call `check_heap` in case the only upstream(s) that does not have
-            // watermark in heap is removed
-            buffers.remove_buffer(upstream_input_ids.clone());
-        });
-    }
-
-    pub fn merge_barrier_align_duration(&self) -> Option<LabelGuardedMetric<Histogram>> {
-        self.merge_barrier_align_duration.clone()
-    }
-
-    pub fn flush_buffered_watermarks(&mut self) {
-        self.buffered_watermarks
-            .values_mut()
-            .for_each(|buffers| buffers.clear());
-    }
-
-    pub fn upstream_ids(&self) -> &[InputId] {
-        &self.upstream_input_ids
-    }
-}
-
 impl<InputId: Clone + Ord + Hash + std::fmt::Debug + Unpin, M: Clone + Unpin> Stream
     for DynamicReceivers<InputId, M>
 {
@@ -574,6 +474,106 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug + Unpin, M: Clone + Unpin> St
         assert!(!self.active.is_terminated());
 
         Poll::Ready(Some(Ok(MessageInner::Barrier(barrier))))
+    }
+}
+
+impl<InputId: Clone + Ord + Hash + std::fmt::Debug, M> DynamicReceivers<InputId, M> {
+    pub fn new(
+        upstreams: Vec<BoxedMessageInput<InputId, M>>,
+        barrier_align_duration: Option<LabelGuardedMetric<GenericCounter<AtomicU64>>>,
+        merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram>>,
+    ) -> Self {
+        assert!(!upstreams.is_empty());
+        let upstream_input_ids = upstreams.iter().map(|input| input.id()).collect();
+        let mut this = Self {
+            barrier: None,
+            blocked: Vec::with_capacity(upstreams.len()),
+            active: Default::default(),
+            buffered_watermarks: Default::default(),
+            upstream_input_ids,
+            merge_barrier_align_duration,
+            barrier_align_duration,
+        };
+        this.extend_active(upstreams);
+        this
+    }
+
+    /// Extend the active upstreams with the given upstreams. The current stream must be at the
+    /// clean state right after a barrier.
+    pub fn extend_active(
+        &mut self,
+        upstreams: impl IntoIterator<Item = BoxedMessageInput<InputId, M>>,
+    ) {
+        assert!(self.blocked.is_empty() && self.barrier.is_none());
+
+        self.active
+            .extend(upstreams.into_iter().map(|s| s.into_future()));
+    }
+
+    /// Handle a new watermark message. Optionally returns the watermark message to emit.
+    pub fn handle_watermark(
+        &mut self,
+        input_id: InputId,
+        watermark: Watermark,
+    ) -> Option<Watermark> {
+        let col_idx = watermark.col_idx;
+        // Insert a buffer watermarks when first received from a column.
+        let watermarks = self
+            .buffered_watermarks
+            .entry(col_idx)
+            .or_insert_with(|| BufferedWatermarks::with_ids(self.upstream_input_ids.clone()));
+        watermarks.handle_watermark(input_id, watermark)
+    }
+
+    /// Consume `other` and add its upstreams to `self`. The two streams must be at the clean state
+    /// right after a barrier.
+    pub fn add_upstreams_from(&mut self, other: Self) {
+        assert!(self.blocked.is_empty() && self.barrier.is_none());
+        assert!(other.blocked.is_empty() && other.barrier.is_none());
+
+        self.active.extend(other.active);
+        let add_upstream_input_ids = other.upstream_input_ids;
+        self.upstream_input_ids
+            .extend(add_upstream_input_ids.iter().cloned());
+
+        // Add buffers to the buffered watermarks for all cols
+        self.buffered_watermarks.values_mut().for_each(|buffers| {
+            buffers.add_buffers(add_upstream_input_ids.iter().cloned());
+        });
+    }
+
+    /// Remove upstreams from `self` in `upstream_input_ids`. The current stream must be at the
+    /// clean state right after a barrier.
+    pub fn remove_upstreams(&mut self, upstream_input_ids: &HashSet<InputId>) {
+        assert!(self.blocked.is_empty() && self.barrier.is_none());
+
+        let new_upstreams = std::mem::take(&mut self.active)
+            .into_iter()
+            .map(|s| s.into_inner().unwrap())
+            .filter(|u| !upstream_input_ids.contains(&u.id()));
+        self.extend_active(new_upstreams);
+
+        self.upstream_input_ids
+            .retain(|id| !upstream_input_ids.contains(id));
+        self.buffered_watermarks.values_mut().for_each(|buffers| {
+            // Call `check_heap` in case the only upstream(s) that does not have
+            // watermark in heap is removed
+            buffers.remove_buffer(upstream_input_ids.clone());
+        });
+    }
+
+    pub fn merge_barrier_align_duration(&self) -> Option<LabelGuardedMetric<Histogram>> {
+        self.merge_barrier_align_duration.clone()
+    }
+
+    pub fn flush_buffered_watermarks(&mut self) {
+        self.buffered_watermarks
+            .values_mut()
+            .for_each(|buffers| buffers.clear());
+    }
+
+    pub fn upstream_ids(&self) -> &[InputId] {
+        &self.upstream_input_ids
     }
 }
 
