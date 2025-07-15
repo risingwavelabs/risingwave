@@ -56,7 +56,7 @@ order by id;
 4 toast_record_4 17261 t t
 
 # Test 2: Insert incremental data with TOAST in PostgreSQL
-statement ok
+system ok
 psql -c "insert into toast_test_table (name, large_jsonb, large_text)
 values (
     'incremental_toast',
