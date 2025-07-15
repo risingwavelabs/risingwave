@@ -58,7 +58,7 @@ use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
-use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup};
+use risingwave_pb::meta::{PbObject, PbObjectGroup};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::telemetry::PbTelemetryEventStage;
 use risingwave_pb::user::PbUserInfo;
