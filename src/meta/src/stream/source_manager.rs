@@ -45,8 +45,9 @@ use worker::{ConnectorSourceWorkerHandle, create_source_worker_async};
 
 use crate::MetaResult;
 use crate::barrier::{BarrierScheduler, Command, ReplaceStreamJobPlan};
+use crate::controller::catalog::SourceFragmentDiff;
 use crate::manager::MetadataManager;
-use crate::model::{ActorId, FragmentId, StreamJobFragments};
+use crate::model::{ActorId, FragmentId};
 use crate::rpc::metrics::MetaMetrics;
 
 pub type SourceManagerRef = Arc<SourceManager>;
@@ -68,16 +69,14 @@ pub struct SourceManager {
 pub struct SourceManagerCore {
     metadata_manager: MetadataManager,
 
+    cached_fragment_ids: HashSet<i32>,
+
     /// Managed source loops
     managed_sources: HashMap<SourceId, ConnectorSourceWorkerHandle>,
     /// Fragments associated with each source
     source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
     /// `source_id` -> `(fragment_id, upstream_fragment_id)`
     backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
-
-    /// Splits assigned per actor,
-    /// incl. both `Source` and `SourceBackfill`.
-    actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
 
 pub struct SourceManagerRunningInfo {
@@ -92,79 +91,92 @@ impl SourceManagerCore {
         managed_sources: HashMap<SourceId, ConnectorSourceWorkerHandle>,
         source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
         backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
-        actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
     ) -> Self {
         Self {
             metadata_manager,
+            cached_fragment_ids: Default::default(),
             managed_sources,
             source_fragments,
             backfill_fragments,
-            actor_splits,
         }
+    }
+
+    pub async fn sync_fragments(&mut self) -> MetaResult<()> {
+        let SourceFragmentDiff {
+            dropped_fragments,
+            created_source_fragments,
+            created_source_backfill_fragments,
+            created_ids,
+        } = self
+            .metadata_manager
+            .catalog_controller
+            .diff_source_fragments(&self.cached_fragment_ids)
+            .await?;
+
+        self.drop_source_fragments(
+            None,
+            BTreeSet::from_iter(dropped_fragments.iter().cloned().map(|f| f as _)),
+        );
+
+        for fragment_id in dropped_fragments {
+            if !self.cached_fragment_ids.remove(&fragment_id) {
+                tracing::warn!("fragment {} is not in the cached fragment ids", fragment_id);
+            }
+        }
+
+        for fragment_id in created_ids {
+            if !self.cached_fragment_ids.insert(fragment_id) {
+                tracing::warn!(
+                    "fragment {} is already in the cached fragment ids",
+                    fragment_id
+                );
+            }
+        }
+
+        for (fragment_id, source_id) in created_source_fragments {
+            self.source_fragments
+                .entry(source_id)
+                .or_default()
+                .insert(fragment_id as FragmentId);
+        }
+
+        for ((fragment_id, upstream_fragment_id), source_id) in created_source_backfill_fragments {
+            self.backfill_fragments
+                .entry(source_id)
+                .or_default()
+                .insert((
+                    fragment_id as FragmentId,
+                    upstream_fragment_id as FragmentId,
+                ));
+        }
+
+        Ok(())
     }
 
     /// Updates states after all kinds of source change.
     pub fn apply_source_change(&mut self, source_change: SourceChange) {
-        let mut added_source_fragments = Default::default();
-        let mut added_backfill_fragments = Default::default();
         let mut finished_backfill_fragments = Default::default();
-        let mut split_assignment = Default::default();
-        let mut dropped_actors = Default::default();
         let mut fragment_replacements = Default::default();
-        let mut dropped_source_fragments = Default::default();
         let mut dropped_source_ids = Default::default();
         let mut recreate_source_id_map_new_props: Vec<(u32, HashMap<String, String>)> =
             Default::default();
 
         match source_change {
-            SourceChange::CreateJob {
-                added_source_fragments: added_source_fragments_,
-                added_backfill_fragments: added_backfill_fragments_,
-                split_assignment: split_assignment_,
-            } => {
-                added_source_fragments = added_source_fragments_;
-                added_backfill_fragments = added_backfill_fragments_;
-                split_assignment = split_assignment_;
-            }
             SourceChange::CreateJobFinished {
                 finished_backfill_fragments: finished_backfill_fragments_,
             } => {
                 finished_backfill_fragments = finished_backfill_fragments_;
             }
-            SourceChange::SplitChange(split_assignment_) => {
-                split_assignment = split_assignment_;
-            }
-            SourceChange::DropMv {
-                dropped_source_fragments: dropped_source_fragments_,
-                dropped_actors: dropped_actors_,
-            } => {
-                dropped_source_fragments = dropped_source_fragments_;
-                dropped_actors = dropped_actors_;
-            }
+
             SourceChange::ReplaceJob {
-                dropped_source_fragments: dropped_source_fragments_,
-                dropped_actors: dropped_actors_,
-                added_source_fragments: added_source_fragments_,
-                split_assignment: split_assignment_,
                 fragment_replacements: fragment_replacements_,
             } => {
-                dropped_source_fragments = dropped_source_fragments_;
-                dropped_actors = dropped_actors_;
-                added_source_fragments = added_source_fragments_;
-                split_assignment = split_assignment_;
                 fragment_replacements = fragment_replacements_;
             }
             SourceChange::DropSource {
                 dropped_source_ids: dropped_source_ids_,
             } => {
                 dropped_source_ids = dropped_source_ids_;
-            }
-            SourceChange::Reschedule {
-                split_assignment: split_assignment_,
-                dropped_actors: dropped_actors_,
-            } => {
-                split_assignment = split_assignment_;
-                dropped_actors = dropped_actors_;
             }
             SourceChange::UpdateSourceProps {
                 source_id_map_new_props,
@@ -191,19 +203,19 @@ impl SourceManagerCore {
             }
         }
 
-        for (source_id, fragments) in added_source_fragments {
-            self.source_fragments
-                .entry(source_id)
-                .or_default()
-                .extend(fragments);
-        }
-
-        for (source_id, fragments) in added_backfill_fragments {
-            self.backfill_fragments
-                .entry(source_id)
-                .or_default()
-                .extend(fragments);
-        }
+        // for (source_id, fragments) in added_source_fragments {
+        //     self.source_fragments
+        //         .entry(source_id)
+        //         .or_default()
+        //         .extend(fragments);
+        // }
+        //
+        // for (source_id, fragments) in added_backfill_fragments {
+        //     self.backfill_fragments
+        //         .entry(source_id)
+        //         .or_default()
+        //         .extend(fragments);
+        // }
 
         for (source_id, fragments) in finished_backfill_fragments {
             let handle = self.managed_sources.get(&source_id).unwrap_or_else(|| {
@@ -215,20 +227,20 @@ impl SourceManagerCore {
             handle.finish_backfill(fragments.iter().map(|(id, _up_id)| *id).collect());
         }
 
-        for (_, actor_splits) in split_assignment {
-            for (actor_id, splits) in actor_splits {
-                // override previous splits info
-                self.actor_splits.insert(actor_id, splits);
-            }
-        }
+        // for (_, actor_splits) in split_assignment {
+        //     for (actor_id, splits) in actor_splits {
+        //         // override previous splits info
+        //         // self.actor_splits.insert(actor_id, splits);
+        //     }
+        // }
 
-        for actor_id in dropped_actors {
-            self.actor_splits.remove(&actor_id);
-        }
+        // for actor_id in dropped_actors {
+        //     self.actor_splits.remove(&actor_id);
+        // }
 
-        for (source_id, fragment_ids) in dropped_source_fragments {
-            self.drop_source_fragments(Some(source_id), fragment_ids);
-        }
+        // for (source_id, fragment_ids) in dropped_source_fragments {
+        //     self.drop_source_fragments(Some(source_id), fragment_ids);
+        // }
 
         for (old_fragment_id, new_fragment_id) in fragment_replacements {
             // TODO: add source_id to the fragment_replacements to avoid iterating all sources
@@ -304,6 +316,8 @@ impl SourceManagerCore {
                         );
                     }
                 }
+
+                // XXX: handle empty source?
             }
         }
     }
@@ -352,30 +366,12 @@ impl SourceManager {
                 )
             })
             .collect();
-        let actor_splits = metadata_manager
-            .catalog_controller
-            .load_actor_splits()
-            .await?
-            .into_iter()
-            .map(|(actor_id, splits)| {
-                (
-                    actor_id as ActorId,
-                    splits
-                        .to_protobuf()
-                        .splits
-                        .iter()
-                        .map(|split| SplitImpl::try_from(split).unwrap())
-                        .collect(),
-                )
-            })
-            .collect();
 
         let core = Mutex::new(SourceManagerCore::new(
             metadata_manager,
             managed_sources,
             source_fragments,
             backfill_fragments,
-            actor_splits,
         ));
 
         Ok(Self {
@@ -411,30 +407,8 @@ impl SourceManager {
 
     /// For replacing job (alter table/source, create sink into table).
     #[await_tree::instrument]
-    pub async fn handle_replace_job(
-        &self,
-        dropped_job_fragments: &StreamJobFragments,
-        added_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
-        split_assignment: SplitAssignment,
-        replace_plan: &ReplaceStreamJobPlan,
-    ) {
-        // Extract the fragments that include source operators.
-        let dropped_source_fragments = dropped_job_fragments.stream_source_fragments().clone();
-
-        let fragments = &dropped_job_fragments.fragments;
-
-        let dropped_actors = dropped_source_fragments
-            .values()
-            .flatten()
-            .flat_map(|fragment_id| fragments.get(fragment_id).unwrap().actors.iter())
-            .map(|actor| actor.actor_id)
-            .collect::<HashSet<_>>();
-
+    pub async fn handle_replace_job(&self, replace_plan: &ReplaceStreamJobPlan) {
         self.apply_source_change(SourceChange::ReplaceJob {
-            dropped_source_fragments,
-            dropped_actors,
-            added_source_fragments,
-            split_assignment,
             fragment_replacements: replace_plan.fragment_replacements(),
         })
         .await;
@@ -478,18 +452,29 @@ impl SourceManager {
         }
     }
 
-    pub async fn list_assignments(&self) -> HashMap<ActorId, Vec<SplitImpl>> {
+    pub async fn list_assignments_from_db(&self) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
         let core = self.core.lock().await;
-        core.actor_splits.clone()
+        let splits = core
+            .metadata_manager
+            .catalog_controller
+            .list_all_actor_splits()
+            .await?;
+
+        let splits = splits
+            .into_iter()
+            .map(|(actor_id, splits)| (actor_id as _, splits))
+            .collect();
+
+        Ok(splits)
     }
 
-    pub async fn get_running_info(&self) -> SourceManagerRunningInfo {
+    pub async fn get_running_info_from_db(&self) -> MetaResult<SourceManagerRunningInfo> {
         let core = self.core.lock().await;
-        SourceManagerRunningInfo {
+        Ok(SourceManagerRunningInfo {
             source_fragments: core.source_fragments.clone(),
             backfill_fragments: core.backfill_fragments.clone(),
-            actor_splits: core.actor_splits.clone(),
-        }
+            actor_splits: self.list_assignments_from_db().await?,
+        })
     }
 
     /// Checks whether the external source metadata has changed, and sends a split assignment command
@@ -502,7 +487,8 @@ impl SourceManager {
     /// to update states in `SourceManager`.
     async fn tick(&self) -> MetaResult<()> {
         let split_assignment = {
-            let core_guard = self.core.lock().await;
+            let mut core_guard = self.core.lock().await;
+            core_guard.sync_fragments().await?;
             core_guard.reassign_splits().await?
         };
 
@@ -543,14 +529,6 @@ impl SourceManager {
 
 #[derive(strum::Display)]
 pub enum SourceChange {
-    /// `CREATE SOURCE` (shared), or `CREATE MV`.
-    /// This is applied after the job is successfully created (`post_collect` barrier).
-    CreateJob {
-        added_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
-        /// (`source_id`, -> (`source_backfill_fragment_id`, `upstream_source_fragment_id`))
-        added_backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
-        split_assignment: SplitAssignment,
-    },
     UpdateSourceProps {
         // the new properties to be set for each source_id
         // and the props should not affect split assignment and fragments
@@ -563,27 +541,11 @@ pub enum SourceChange {
         /// (`source_id`, -> (`source_backfill_fragment_id`, `upstream_source_fragment_id`))
         finished_backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
     },
-    SplitChange(SplitAssignment),
     /// `DROP SOURCE` or `DROP MV`
-    DropSource {
-        dropped_source_ids: Vec<SourceId>,
-    },
-    DropMv {
-        // FIXME: we should consider source backfill fragments here for MV on shared source.
-        dropped_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
-        dropped_actors: HashSet<ActorId>,
-    },
-    ReplaceJob {
-        dropped_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
-        dropped_actors: HashSet<ActorId>,
+    DropSource { dropped_source_ids: Vec<SourceId> },
 
-        added_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
-        split_assignment: SplitAssignment,
+    ReplaceJob {
         fragment_replacements: HashMap<FragmentId, FragmentId>,
-    },
-    Reschedule {
-        split_assignment: SplitAssignment,
-        dropped_actors: HashSet<ActorId>,
     },
 }
 

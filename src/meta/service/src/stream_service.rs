@@ -425,7 +425,11 @@ impl StreamManagerService for StreamServiceImpl {
             source_fragments,
             backfill_fragments,
             mut actor_splits,
-        } = self.stream_manager.source_manager.get_running_info().await;
+        } = self
+            .stream_manager
+            .source_manager
+            .get_running_info_from_db()
+            .await?;
 
         let source_actors = self
             .metadata_manager

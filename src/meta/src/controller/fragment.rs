@@ -1717,6 +1717,63 @@ impl CatalogController {
         Ok(source_fragment_ids)
     }
 
+    // todo, refactor
+    async fn query_actor_splits_from_db(
+        &self,
+        actor_ids: Option<&[model::ActorId]>,
+    ) -> MetaResult<Vec<(model::ActorId, ConnectorSplits)>> {
+        let inner = self.inner.read().await;
+
+        let mut query = Actor::find()
+            .select_only()
+            .columns([actor::Column::ActorId, actor::Column::Splits])
+            .filter(actor::Column::Splits.is_not_null());
+
+        if let Some(actor_ids) = actor_ids {
+            query = query.filter(actor::Column::ActorId.is_in(actor_ids.to_vec()));
+        }
+
+        let res: Vec<(_, ConnectorSplits)> = query.into_tuple().all(&inner.db).await?;
+        Ok(res)
+    }
+
+    fn process_actor_splits_result(
+        &self,
+        res: Vec<(model::ActorId, ConnectorSplits)>,
+    ) -> MetaResult<HashMap<model::ActorId, Vec<SplitImpl>>> {
+        res.into_iter()
+            .map(|(actor_id, splits)| {
+                let splits: Result<Vec<_>, _> = splits
+                    .to_protobuf()
+                    .splits
+                    .into_iter()
+                    .map(|split| {
+                        SplitImpl::try_from(&split)
+                            .map_err(|e| anyhow::anyhow!("Failed to convert split: {}", e))
+                    })
+                    .collect();
+
+                splits.map(|s| (actor_id, s))
+            })
+            .collect::<Result<HashMap<_, _>, _>>()
+            .map_err(crate::MetaError::from)
+    }
+
+    pub async fn list_all_actor_splits(
+        &self,
+    ) -> MetaResult<HashMap<model::ActorId, Vec<SplitImpl>>> {
+        let res = self.query_actor_splits_from_db(None).await?;
+        self.process_actor_splits_result(res)
+    }
+
+    pub async fn list_actor_splits(
+        &self,
+        actor_ids: &[model::ActorId],
+    ) -> MetaResult<HashMap<model::ActorId, Vec<SplitImpl>>> {
+        let res = self.query_actor_splits_from_db(Some(actor_ids)).await?;
+        self.process_actor_splits_result(res)
+    }
+
     pub async fn load_actor_splits(&self) -> MetaResult<HashMap<ActorId, ConnectorSplits>> {
         let inner = self.inner.read().await;
         let splits: Vec<(ActorId, ConnectorSplits)> = Actor::find()

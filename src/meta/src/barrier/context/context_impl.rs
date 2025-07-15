@@ -134,10 +134,6 @@ impl CommandContext {
                     .metadata_manager
                     .update_actor_splits_by_split_assignment(split_assignment)
                     .await?;
-                barrier_manager_context
-                    .source_manager
-                    .apply_source_change(SourceChange::SplitChange(split_assignment.clone()))
-                    .await;
             }
 
             Command::DropStreamingJobs {
@@ -166,7 +162,7 @@ impl CommandContext {
                 match job_type {
                     CreateStreamingJobType::SinkIntoTable(
                         replace_plan @ ReplaceStreamJobPlan {
-                            old_fragments,
+                            old_fragments: _,
                             new_fragments,
                             upstream_fragment_downstreams,
                             init_split_assignment,
@@ -185,12 +181,7 @@ impl CommandContext {
                             .await?;
                         barrier_manager_context
                             .source_manager
-                            .handle_replace_job(
-                                old_fragments,
-                                new_fragments.stream_source_fragments(),
-                                init_split_assignment.clone(),
-                                replace_plan,
-                            )
+                            .handle_replace_job(replace_plan)
                             .await;
                     }
                     CreateStreamingJobType::Normal => {
@@ -258,17 +249,6 @@ impl CommandContext {
                         streaming_job.should_notify_creating(),
                     )
                     .await?;
-
-                let source_change = SourceChange::CreateJob {
-                    added_source_fragments: stream_job_fragments.stream_source_fragments(),
-                    added_backfill_fragments: stream_job_fragments.source_backfill_fragments(),
-                    split_assignment: init_split_assignment.clone(),
-                };
-
-                barrier_manager_context
-                    .source_manager
-                    .apply_source_change(source_change)
-                    .await;
             }
             Command::RescheduleFragment {
                 reschedules,
@@ -283,7 +263,7 @@ impl CommandContext {
 
             Command::ReplaceStreamJob(
                 replace_plan @ ReplaceStreamJobPlan {
-                    old_fragments,
+                    old_fragments: _,
                     new_fragments,
                     upstream_fragment_downstreams,
                     init_split_assignment,
@@ -306,12 +286,7 @@ impl CommandContext {
                 // Apply the split changes in source manager.
                 barrier_manager_context
                     .source_manager
-                    .handle_replace_job(
-                        old_fragments,
-                        new_fragments.stream_source_fragments(),
-                        init_split_assignment.clone(),
-                        replace_plan,
-                    )
+                    .handle_replace_job(replace_plan)
                     .await;
                 barrier_manager_context
                     .hummock_manager

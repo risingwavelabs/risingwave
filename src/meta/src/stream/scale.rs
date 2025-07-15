@@ -87,7 +87,6 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_meta_model::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
-use super::SourceChange;
 use crate::controller::id::IdCategory;
 use crate::controller::utils::filter_workers_by_resource_group;
 
@@ -1639,12 +1638,7 @@ impl ScaleController {
         }
 
         if !stream_source_actor_splits.is_empty() {
-            self.source_manager
-                .apply_source_change(SourceChange::Reschedule {
-                    split_assignment: stream_source_actor_splits,
-                    dropped_actors: stream_source_dropped_actors,
-                })
-                .await;
+            // todo, placeholder
         }
 
         Ok(())

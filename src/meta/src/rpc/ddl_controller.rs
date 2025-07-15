@@ -1468,7 +1468,7 @@ impl DdlController {
             removed_state_table_ids,
             removed_source_ids,
             removed_secret_ids: secret_ids,
-            removed_source_fragments,
+            // removed_source_fragments: _,
             removed_actors,
             removed_fragments,
         } = release_ctx;
@@ -1489,25 +1489,6 @@ impl DdlController {
         self.source_manager
             .apply_source_change(SourceChange::DropSource {
                 dropped_source_ids: removed_source_ids.into_iter().map(|id| id as _).collect(),
-            })
-            .await;
-
-        // unregister fragments and actors from source manager.
-        // FIXME: need also unregister source backfill fragments.
-        let dropped_source_fragments = removed_source_fragments
-            .into_iter()
-            .map(|(source_id, fragments)| {
-                (
-                    source_id,
-                    fragments.into_iter().map(|id| id as u32).collect(),
-                )
-            })
-            .collect();
-        let dropped_actors = removed_actors.iter().map(|id| *id as _).collect();
-        self.source_manager
-            .apply_source_change(SourceChange::DropMv {
-                dropped_source_fragments,
-                dropped_actors,
             })
             .await;
 

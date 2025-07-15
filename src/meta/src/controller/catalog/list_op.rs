@@ -17,6 +17,67 @@ use sea_orm::prelude::DateTime;
 use super::*;
 
 impl CatalogController {
+    pub async fn diff_source_fragments(
+        &self,
+        prev_fragment_ids: &HashSet<FragmentId>,
+    ) -> MetaResult<SourceFragmentDiff> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let fragment_ids: Vec<FragmentId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        let fragment_ids_set: HashSet<FragmentId> = fragment_ids.iter().cloned().collect();
+
+        let created_ids: Vec<FragmentId> = fragment_ids_set
+            .difference(prev_fragment_ids)
+            .cloned()
+            .collect();
+
+        let deleted_ids: HashSet<FragmentId> = prev_fragment_ids
+            .difference(&fragment_ids_set)
+            .cloned()
+            .collect();
+
+        let created_fragments = Fragment::find()
+            .filter(fragment::Column::FragmentId.is_in(created_ids.clone()))
+            .all(&txn)
+            .await?;
+
+        let mut new_source_fragments = HashMap::new();
+
+        let mut new_source_backfill_fragments = HashMap::new();
+
+        for fragment in created_fragments {
+            {
+                // todo, toooooo heavy
+                let node = fragment.stream_node.to_protobuf();
+                if let Some(source_id) = node.find_stream_source() {
+                    new_source_fragments.insert(fragment.fragment_id, source_id as SourceId);
+                }
+
+                if let Some((source_id, upstream_source_fragment_id)) = node.find_source_backfill()
+                {
+                    new_source_backfill_fragments.insert(
+                        (fragment.fragment_id, upstream_source_fragment_id as _),
+                        source_id as SourceId,
+                    );
+                }
+            }
+        }
+
+        Ok(SourceFragmentDiff {
+            dropped_fragments: deleted_ids,
+            created_source_fragments: new_source_fragments,
+            created_source_backfill_fragments: new_source_backfill_fragments,
+            created_ids,
+        })
+    }
+
     pub async fn list_time_travel_table_ids(&self) -> MetaResult<Vec<TableId>> {
         self.inner.read().await.list_time_travel_table_ids().await
     }

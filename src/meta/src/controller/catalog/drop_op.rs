@@ -269,7 +269,7 @@ impl CatalogController {
             }
         }
 
-        let (removed_source_fragments, removed_actors, removed_fragments) =
+        let (_, removed_actors, removed_fragments) =
             get_fragments_for_jobs(&txn, removed_streaming_job_ids.clone()).await?;
 
         // Find affect users with privileges on all this objects.
@@ -369,7 +369,7 @@ impl CatalogController {
                 removed_state_table_ids: removed_state_table_ids.into_iter().collect(),
                 removed_source_ids,
                 removed_secret_ids,
-                removed_source_fragments,
+                //                removed_source_fragments,
                 removed_actors,
                 removed_fragments,
             },

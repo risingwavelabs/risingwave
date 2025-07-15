@@ -20,7 +20,7 @@ mod list_op;
 mod test;
 mod util;
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::mem::take;
 use std::sync::Arc;
@@ -104,6 +104,13 @@ pub type Catalog = (
 
 pub type CatalogControllerRef = Arc<CatalogController>;
 
+pub struct SourceFragmentDiff {
+    pub dropped_fragments: HashSet<FragmentId>,
+    pub created_source_fragments: HashMap<FragmentId, SourceId>,
+    pub created_source_backfill_fragments: HashMap<(FragmentId, FragmentId), SourceId>,
+    pub created_ids: Vec<FragmentId>,
+}
+
 /// `CatalogController` is the controller for catalog related operations, including database, schema, table, view, etc.
 pub struct CatalogController {
     pub(crate) env: MetaSrvEnv,
@@ -131,8 +138,7 @@ pub struct ReleaseContext {
     pub(crate) removed_source_ids: Vec<SourceId>,
     /// Dropped Source fragments (when `DROP MATERIALIZED VIEW` referencing sources),
     /// need to unregister from source manager.
-    pub(crate) removed_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
-
+    // pub(crate) removed_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
     pub(crate) removed_actors: HashSet<ActorId>,
     pub(crate) removed_fragments: HashSet<FragmentId>,
 }
