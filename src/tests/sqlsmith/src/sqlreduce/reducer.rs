@@ -88,7 +88,7 @@ impl<'a> Reducer<'a> {
             .split_last()
             .ok_or_else(|| anyhow!("No SQL statements found"))?;
 
-        for s in proceeding_stmts.iter() {
+        for s in proceeding_stmts {
             debug!("Executing preceding statement: {}", s);
             self.checker.client.simple_query(&s.to_string()).await?;
         }

@@ -152,32 +152,28 @@ impl Transform for RowPullup {
 
     fn get_reduction_points(&self, ast: AST) -> Vec<usize> {
         let mut reduction_points = Vec::new();
-        if let Statement::Query(query) = &ast {
-            if let SetExpr::Select(select) = &query.body {
+        if let Statement::Query(query) = &ast
+            && let SetExpr::Select(select) = &query.body {
                 for (i, item) in select.projection.iter().enumerate() {
-                    if let SelectItem::UnnamedExpr(expr) = item {
-                        if let Expr::Row { .. } = expr {
+                    if let SelectItem::UnnamedExpr(expr) = item
+                        && let Expr::Row { .. } = expr {
                             reduction_points.push(i);
                         }
-                    }
                 }
             }
-        }
         reduction_points
     }
 
     fn apply_on(&self, ast: &mut AST, reduction_points: Vec<usize>) -> AST {
-        if let Statement::Query(query) = ast {
-            if let SetExpr::Select(select) = &mut query.body {
+        if let Statement::Query(query) = ast
+            && let SetExpr::Select(select) = &mut query.body {
                 for i in reduction_points {
-                    if let SelectItem::UnnamedExpr(ref mut expr) = select.projection[i] {
-                        if let Expr::Row(elements) = expr {
+                    if let SelectItem::UnnamedExpr(ref mut expr) = select.projection[i]
+                        && let Expr::Row(elements) = expr {
                             *expr = elements[0].clone();
                         }
-                    }
                 }
             }
-        }
         ast.clone()
     }
 }
@@ -204,32 +200,28 @@ impl Transform for ArrayPullup {
 
     fn get_reduction_points(&self, ast: AST) -> Vec<usize> {
         let mut reduction_points = Vec::new();
-        if let Statement::Query(query) = &ast {
-            if let SetExpr::Select(select) = &query.body {
+        if let Statement::Query(query) = &ast
+            && let SetExpr::Select(select) = &query.body {
                 for (i, item) in select.projection.iter().enumerate() {
-                    if let SelectItem::UnnamedExpr(expr) = item {
-                        if let Expr::Array { .. } = expr {
+                    if let SelectItem::UnnamedExpr(expr) = item
+                        && let Expr::Array { .. } = expr {
                             reduction_points.push(i);
                         }
-                    }
                 }
             }
-        }
         reduction_points
     }
 
     fn apply_on(&self, ast: &mut AST, reduction_points: Vec<usize>) -> AST {
-        if let Statement::Query(query) = ast {
-            if let SetExpr::Select(select) = &mut query.body {
+        if let Statement::Query(query) = ast
+            && let SetExpr::Select(select) = &mut query.body {
                 for i in reduction_points {
-                    if let SelectItem::UnnamedExpr(ref mut expr) = select.projection[i] {
-                        if let Expr::Array(array) = expr {
+                    if let SelectItem::UnnamedExpr(ref mut expr) = select.projection[i]
+                        && let Expr::Array(array) = expr {
                             *expr = array.elem[0].clone();
                         }
-                    }
                 }
             }
-        }
         ast.clone()
     }
 }
@@ -260,19 +252,18 @@ impl Transform for SetOperationPullup {
 
     fn get_reduction_points(&self, ast: AST) -> Vec<usize> {
         let mut reduction_points = Vec::new();
-        if let Statement::Query(query) = &ast {
-            if let SetExpr::SetOperation { .. } = &query.body {
+        if let Statement::Query(query) = &ast
+            && let SetExpr::SetOperation { .. } = &query.body {
                 reduction_points.push(0); // left
                 reduction_points.push(1); // right
             }
-        }
         reduction_points
     }
 
     fn apply_on(&self, ast: &mut AST, reduction_points: Vec<usize>) -> AST {
         let mut new_ast = ast.clone();
-        if let Statement::Query(query) = ast {
-            if let SetExpr::SetOperation { left, right, .. } = &mut query.body {
+        if let Statement::Query(query) = ast
+            && let SetExpr::SetOperation { left, right, .. } = &mut query.body {
                 if reduction_points.contains(&0) {
                     // left
                     new_ast = Statement::Query(Box::new(Query {
@@ -287,7 +278,6 @@ impl Transform for SetOperationPullup {
                     }));
                 }
             }
-        }
         new_ast
     }
 }

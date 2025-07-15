@@ -30,9 +30,9 @@ impl<'a> Checker<'a> {
 pub async fn run_query(client: &Client, query: &str) -> (bool, String) {
     let query_task = client.simple_query(query);
     match query_task.await {
-        Ok(_) => return (true, String::new()),
+        Ok(_) => (true, String::new()),
         Err(e) => {
-            return (false, e.to_string());
+            (false, e.to_string())
         }
     }
 }

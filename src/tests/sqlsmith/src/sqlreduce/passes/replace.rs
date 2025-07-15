@@ -42,9 +42,9 @@ pub struct ScalarReplace;
 impl ScalarReplace {
     fn replacement_for_value(v: &Value) -> Value {
         match v {
-            Value::Number(_) => Value::Number("1".to_string()),
+            Value::Number(_) => Value::Number("1".to_owned()),
             Value::Boolean(_) => Value::Boolean(true),
-            Value::SingleQuotedString(_) => Value::SingleQuotedString("a".to_string()),
+            Value::SingleQuotedString(_) => Value::SingleQuotedString("a".to_owned()),
             Value::Null => Value::Null,
             _ => Value::Null,
         }
@@ -58,21 +58,20 @@ impl Transform for ScalarReplace {
 
     fn get_reduction_points(&self, ast: AST) -> Vec<usize> {
         let mut reduction_points = Vec::new();
-        if let Statement::Query(query) = &ast {
-            if let SetExpr::Select(select) = &query.body {
+        if let Statement::Query(query) = &ast
+            && let SetExpr::Select(select) = &query.body {
                 for (i, item) in select.projection.iter().enumerate() {
                     if let SelectItem::UnnamedExpr(Expr::Value(_)) = item {
                         reduction_points.push(i);
                     }
                 }
             }
-        }
         reduction_points
     }
 
     fn apply_on(&self, ast: &mut AST, reduction_points: Vec<usize>) -> AST {
-        if let Statement::Query(query) = ast {
-            if let SetExpr::Select(select) = &mut query.body {
+        if let Statement::Query(query) = ast
+            && let SetExpr::Select(select) = &mut query.body {
                 for i in reduction_points {
                     if let SelectItem::UnnamedExpr(Expr::Value(ref mut v)) = select.projection[i] {
                         let new_v = Self::replacement_for_value(v);
@@ -80,7 +79,6 @@ impl Transform for ScalarReplace {
                     }
                 }
             }
-        }
         ast.clone()
     }
 }
@@ -111,28 +109,26 @@ impl Transform for NullReplace {
 
     fn get_reduction_points(&self, ast: AST) -> Vec<usize> {
         let mut reduction_points = Vec::new();
-        if let Statement::Query(query) = &ast {
-            if let SetExpr::Select(select) = &query.body {
+        if let Statement::Query(query) = &ast
+            && let SetExpr::Select(select) = &query.body {
                 for (i, item) in select.projection.iter().enumerate() {
                     if let SelectItem::UnnamedExpr(_) = item {
                         reduction_points.push(i);
                     }
                 }
             }
-        }
         reduction_points
     }
 
     fn apply_on(&self, ast: &mut AST, reduction_points: Vec<usize>) -> AST {
-        if let Statement::Query(query) = ast {
-            if let SetExpr::Select(select) = &mut query.body {
+        if let Statement::Query(query) = ast
+            && let SetExpr::Select(select) = &mut query.body {
                 for i in reduction_points {
                     if let SelectItem::UnnamedExpr(ref mut v) = select.projection[i] {
                         *v = Expr::Value(Value::Null);
                     }
                 }
             }
-        }
         ast.clone()
     }
 }
