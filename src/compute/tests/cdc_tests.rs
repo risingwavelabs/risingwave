@@ -46,9 +46,9 @@ use risingwave_stream::error::StreamResult;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::test_utils::MockSource;
 use risingwave_stream::executor::{
-    ActorContext, AddMutation, Barrier, BoxedMessageStream, CdcBackfillExecutor, CdcScanOptions,
-    Execute, Executor as StreamExecutor, ExecutorInfo, ExternalStorageTable, MaterializeExecutor,
-    Message, Mutation, StreamExecutorError, expect_first_barrier,
+    ActorContext, AddMutation, Barrier, BoxedMessageStream, CdcBackfillExecutor, Execute,
+    Executor as StreamExecutor, ExecutorInfo, ExternalStorageTable, MaterializeExecutor, Message,
+    Mutation, StreamExecutorError, expect_first_barrier,
 };
 
 // mock upstream binlog offset starting from "1.binlog, pos=0"
@@ -310,6 +310,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
             pause: false,
             subscriptions_to_add: vec![],
             backfill_nodes_to_pause: Default::default(),
+            actor_cdc_table_snapshot_splits: Default::default(),
         }));
 
     tx.send_barrier(init_barrier);

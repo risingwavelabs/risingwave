@@ -908,7 +908,7 @@ mod tests {
     use crate::executor::source::default_source_internal_table;
     use crate::executor::test_utils::MockSource;
     use crate::executor::{
-        ActorContext, Barrier, CdcBackfillExecutor, CdcScanOptions, ExternalStorageTable, Message,
+        ActorContext, Barrier, CdcBackfillExecutor, ExternalStorageTable, Message,
     };
 
     #[tokio::test]
