@@ -569,16 +569,6 @@ message AlterDatabaseParamResponse {
   WaitVersion version = 2;
 }
 
-message CompactTableRequest {
-  uint32 table_id = 1;
-}
-
-message CompactTableResponse {
-  common.Status status = 1;
-  // The compaction task ID that was triggered
-  uint64 task_id = 2;
-}
-
 message CompactIcebergTableRequest {
   uint32 sink_id = 1;
 }
