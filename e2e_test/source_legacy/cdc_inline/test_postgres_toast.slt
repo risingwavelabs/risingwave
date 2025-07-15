@@ -5,31 +5,7 @@ control substitution on
 
 # Step 1: Create table and insert initial data in PostgreSQL
 system ok
-psql -c "
-    DROP TABLE IF EXISTS toast_test_table;
-    CREATE TABLE toast_test_table (
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(100),
-        large_jsonb JSONB,
-        large_text TEXT,
-        created_at TIMESTAMP DEFAULT NOW()
-    );
-
-    INSERT INTO toast_test_table (name, large_jsonb, large_text)
-    SELECT
-        'toast_record_' || s,
-        jsonb_build_object(
-            'id', s,
-            'large_string', repeat('This is a very long string that will definitely trigger TOAST mechanism when combined with other data. ', 80),
-            'nested_object', jsonb_build_object(
-                'deep_content', repeat('Deep nested content that adds to the size. ', 40)
-            ),
-            'metadata', jsonb_build_object(
-                'description', repeat('Additional metadata content to ensure TOAST is triggered. ', 30)
-            )
-        ),
-        repeat('Large text field content that should also trigger TOAST when combined with the large JSON. ', 60)
-    FROM generate_series(1, 4) s;"
+psql -c "DROP TABLE IF EXISTS toast_test_table; CREATE TABLE toast_test_table (id SERIAL PRIMARY KEY, name VARCHAR(100), large_jsonb JSONB, large_text TEXT, created_at TIMESTAMP DEFAULT NOW()); INSERT INTO toast_test_table (name, large_jsonb, large_text) SELECT 'toast_record_' || s, jsonb_build_object('id', s, 'large_string', repeat('This is a very long string that will definitely trigger TOAST mechanism when combined with other data. ', 80), 'nested_object', jsonb_build_object('deep_content', repeat('Deep nested content that adds to the size. ', 40)), 'metadata', jsonb_build_object('description', repeat('Additional metadata content to ensure TOAST is triggered. ', 30))), repeat('Large text field content that should also trigger TOAST when combined with the large JSON. ', 60) FROM generate_series(1, 4) s;"
 
 # Step 2: Create RisingWave source from PostgreSQL CDC
 statement ok
