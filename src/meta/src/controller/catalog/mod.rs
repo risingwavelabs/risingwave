@@ -830,18 +830,25 @@ impl CatalogControllerInner {
             .all(&self.db)
             .await?;
 
-        let created_streaming_job_ids: Vec<ObjectId> = StreamingJob::find()
+        let job_statuses: HashMap<ObjectId, JobStatus> = StreamingJob::find()
             .select_only()
             .column(streaming_job::Column::JobId)
-            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
-            .into_tuple()
+            .column(streaming_job::Column::JobStatus)
+            .filter(
+                streaming_job::Column::JobStatus
+                    .eq(JobStatus::Created)
+                    .or(streaming_job::Column::CreateType.eq(CreateType::Background)),
+            )
+            .into_tuple::<(ObjectId, JobStatus)>()
             .all(&self.db)
-            .await?;
+            .await?
+            .into_iter()
+            .collect();
 
         let job_ids: HashSet<ObjectId> = table_objs
             .iter()
             .map(|(t, _)| t.table_id)
-            .chain(created_streaming_job_ids.iter().cloned())
+            .chain(job_statuses.keys().cloned())
             .collect();
 
         let internal_table_objs = Table::find()
@@ -859,15 +866,13 @@ impl CatalogControllerInner {
             .chain(internal_table_objs.into_iter())
             .map(|(table, obj)| {
                 // Correctly set the stream job status for creating materialized views and internal tables.
-                let is_created = created_streaming_job_ids.contains(&table.table_id)
-                    || (table.table_type == TableType::Internal
-                        && created_streaming_job_ids.contains(&table.belongs_to_job_id.unwrap()));
+                let mut status: PbStreamJobStatus =
+                    (*job_statuses.get(&table.table_id).unwrap()).into();
+                if table.table_type == TableType::Internal {
+                    status = (*job_statuses.get(&table.belongs_to_job_id.unwrap()).unwrap()).into();
+                }
                 let mut pb_table: PbTable = ObjectModel(table, obj.unwrap()).into();
-                pb_table.stream_job_status = if is_created {
-                    PbStreamJobStatus::Created.into()
-                } else {
-                    PbStreamJobStatus::Creating.into()
-                };
+                pb_table.stream_job_status = status.into();
                 pb_table
             })
             .collect())
