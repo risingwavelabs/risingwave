@@ -55,7 +55,33 @@ impl SnowflakeJniClient {
         })
     }
 
-    pub fn execute_create_merge_into_task_sql(&self) -> Result<()> {
+    pub fn execute_alter_add_columns(&mut self, columns: &Vec<(String, String)>) -> Result<()> {
+        self.execute_drop_task()?;
+        self.snowflake_task_context
+            .all_column_names
+            .extend(columns.iter().map(|(name, _typ)| name.to_string()));
+        let alter_add_column_cdc_table_sql = build_alter_add_column_sql(
+            &self.snowflake_task_context.cdc_table_name,
+            &self.snowflake_task_context.database,
+            &self.snowflake_task_context.schema,
+            &columns,
+        );
+
+        let alter_add_column_target_table_sql = build_alter_add_column_sql(
+            &self.snowflake_task_context.target_table_name,
+            &self.snowflake_task_context.database,
+            &self.snowflake_task_context.schema,
+            &columns,
+        );
+
+        self.execute_sql_sync(&alter_add_column_cdc_table_sql)?;
+        self.execute_sql_sync(&alter_add_column_target_table_sql)?;
+
+        self.execute_create_merge_into_task()?;
+        Ok(())
+    }
+
+    pub fn execute_create_merge_into_task(&self) -> Result<()> {
         let create_task_sql = build_create_merge_into_task_sql(&self.snowflake_task_context);
         let start_task_sql = build_start_task_sql(&self.snowflake_task_context);
         self.execute_sql_sync(&create_task_sql)?;
@@ -63,7 +89,7 @@ impl SnowflakeJniClient {
         Ok(())
     }
 
-    pub fn execute_drop_task_sql(&self) -> Result<()> {
+    pub fn execute_drop_task(&self) -> Result<()> {
         let sql = build_drop_task_sql(&self.snowflake_task_context);
         if let Err(e) = self.execute_sql_sync(&sql) {
             tracing::error!(
@@ -103,6 +129,24 @@ impl SnowflakeJniClient {
         })?;
         Ok(())
     }
+}
+
+fn build_alter_add_column_sql(
+    table_name: &str,
+    database: &str,
+    schema: &str,
+    columns: &Vec<(String, String)>,
+) -> String {
+    let full_task_name = format!("{}.{}.{}", database, schema, table_name);
+    let column_definitions: Vec<String> = columns
+        .iter()
+        .map(|(name, typ)| format!("{} {}", name, typ))
+        .collect();
+    let column_definitions_str = column_definitions.join(", ");
+    format!(
+        "ALTER TABLE {} ADD COLUMN {} ",
+        full_task_name, column_definitions_str
+    )
 }
 
 fn build_start_task_sql(snowflake_task_context: &SnowflakeTaskContext) -> String {

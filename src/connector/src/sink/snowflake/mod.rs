@@ -17,17 +17,19 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use bytes::BytesMut;
 use opendal::Operator;
 use phf::{Set, phf_set};
 use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_pb::connector_service::SinkMetadata;
+use risingwave_pb::connector_service::sink_metadata::{self, SerializedMetadata};
 use sea_orm::DatabaseConnection;
-use serde::Deserialize;
-use serde_json::{Map, Value};
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value, json};
 use serde_with::{DisplayFromStr, serde_as};
 use tokio::sync::mpsc::UnboundedSender;
 use tonic::async_trait;
@@ -363,6 +365,76 @@ impl SnowflakeSinkWriter {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+enum SchemaChange {
+    AddColumn(Vec<(String, String)>),
+}
+
+impl<'a> TryFrom<&'a SchemaChange> for SinkMetadata {
+    type Error = SinkError;
+
+    fn try_from(value: &'a SchemaChange) -> std::result::Result<Self, Self::Error> {
+        let metadata = match value {
+            SchemaChange::AddColumn(columns) => {
+                json!({
+                    "type_name": "add_column",
+                    "add_columns": columns.iter().map(|(name, data_type)| {
+                        json!({
+                            "name": name,
+                            "data_type": data_type,
+                        })
+                    }).collect::<Vec<_>>(),
+                })
+            }
+        };
+        let metadata =
+            serde_json::to_vec(&metadata).context("cannot serialize schema change metadata")?;
+        Ok(SinkMetadata {
+            metadata: Some(sink_metadata::Metadata::Serialized(SerializedMetadata {
+                metadata,
+            })),
+        })
+    }
+}
+
+impl SchemaChange {
+    fn try_from(value: &SinkMetadata) -> Result<Self> {
+        if let Some(sink_metadata::Metadata::Serialized(v)) = &value.metadata {
+            let meta = serde_json::from_slice::<Value>(&v.metadata)
+                .context("cannot deserialize schema change")?;
+            let type_name = meta
+                .get("type_name")
+                .ok_or_else(|| anyhow!("schema change metadata should have a type field"))?;
+            if type_name == "add_column" {
+                let columns = meta
+                    .get("add_columns")
+                    .ok_or_else(|| anyhow!("schema change metadata should have a columns field"))?;
+                let columns = columns
+                    .as_array()
+                    .ok_or_else(|| anyhow!("columns should be an array"))?
+                    .iter()
+                    .map(|c| {
+                        let name = c
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .ok_or_else(|| anyhow!("each column should have a name field"))?;
+                        let data_type = c
+                            .get("data_type")
+                            .and_then(Value::as_str)
+                            .ok_or_else(|| anyhow!("each column should have a data_type field"))?;
+                        Ok((name.to_owned(), data_type.to_owned()))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(SchemaChange::AddColumn(columns))
+            } else {
+                bail!("unsupported schema change type: {}", type_name);
+            }
+        } else {
+            bail!("unsupported schema change metadata format");
+        }
+    }
+}
+
 #[async_trait]
 impl SinkWriter for SnowflakeSinkWriter {
     type CommitMetadata = Option<SinkMetadata>;
@@ -503,13 +575,30 @@ impl SinkCommitCoordinator for SnowflakeSinkCommitter {
         match &self.snowflake_sink_committer_enum {
             SnowflakeSinkCommitterEnum::AppendOnly => {}
             SnowflakeSinkCommitterEnum::Upsert(client) => {
-                client.execute_create_merge_into_task_sql()?;
+                client.execute_create_merge_into_task()?;
             }
         }
         Ok(None)
     }
 
-    async fn commit(&mut self, _epoch: u64, _metadata: Vec<SinkMetadata>) -> Result<()> {
+    async fn commit(&mut self, _epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
+        if metadata.is_empty() {
+            return Ok(());
+        }
+        let metadata = metadata.first().ok_or_else(|| {
+            SinkError::Config(anyhow!("metadata should not be empty when committing"))
+        })?;
+        let metadata = SchemaChange::try_from(metadata).map_err(|e| {
+            SinkError::Config(anyhow!("cannot parse schema change metadata: {}", e))
+        })?;
+        let SchemaChange::AddColumn(add_columns) = metadata;
+        match &mut self.snowflake_sink_committer_enum {
+            SnowflakeSinkCommitterEnum::AppendOnly => {}
+            SnowflakeSinkCommitterEnum::Upsert(client) => {
+                client.execute_alter_add_columns(&add_columns)?;
+            }
+        }
+
         Ok(())
     }
 }
@@ -519,7 +608,7 @@ impl Drop for SnowflakeSinkCommitter {
         match &self.snowflake_sink_committer_enum {
             SnowflakeSinkCommitterEnum::AppendOnly => {}
             SnowflakeSinkCommitterEnum::Upsert(client) => {
-                client.execute_drop_task_sql().ok();
+                client.execute_drop_task().ok();
             }
         }
     }
