@@ -104,5 +104,5 @@ pub async fn handle_vacuum(
         .meta_client()
         .compact_iceberg_table(sink_id)
         .await?;
-    return Ok(PgResponse::builder(StatementType::VACUUM).into());
+    Ok(PgResponse::builder(StatementType::VACUUM).into())
 }
