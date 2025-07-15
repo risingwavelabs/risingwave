@@ -866,6 +866,7 @@ impl CatalogControllerInner {
             .chain(internal_table_objs.into_iter())
             .map(|(table, obj)| {
                 // Correctly set the stream job status for creating materialized views and internal tables.
+                // If the table is not contained in `job_statuses`, it means the job is a creating mv.
                 let status: PbStreamJobStatus = if table.table_type == TableType::Internal {
                     (*job_statuses
                         .get(&table.belongs_to_job_id.unwrap())
