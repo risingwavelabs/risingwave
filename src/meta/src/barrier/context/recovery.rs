@@ -440,11 +440,12 @@ impl GlobalBarrierWorkerContextImpl {
                         .catalog_controller
                         .cdc_table_backfill_actor_ids()
                         .await?;
-                    let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits_pairs(
-                        cdc_table_backfill_actors,
-                        self.env.meta_store_ref(),
-                    )
-                    .await?;
+                    let cdc_table_snapshot_split_assignment =
+                        assign_cdc_table_snapshot_splits_pairs(
+                            cdc_table_backfill_actors,
+                            self.env.meta_store_ref(),
+                        )
+                        .await?;
                     Ok(BarrierWorkerRuntimeInfoSnapshot {
                         active_streaming_nodes,
                         database_job_infos: info,
