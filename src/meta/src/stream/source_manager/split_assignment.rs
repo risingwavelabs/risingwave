@@ -247,7 +247,7 @@ impl SourceManager {
     ) -> MetaResult<SplitAssignment> {
         let core = self.core.lock().await;
 
-        let source_backfill_fragments = table_fragments.source_backfill_fragments()?;
+        let source_backfill_fragments = table_fragments.source_backfill_fragments();
 
         let mut assigned = HashMap::new();
 

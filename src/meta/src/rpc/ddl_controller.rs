@@ -86,7 +86,7 @@ use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
     CreateStreamingJobContext, CreateStreamingJobOption, GlobalStreamManagerRef,
     JobRescheduleTarget, ReplaceStreamJobContext, SourceChange, SourceManagerRef,
-    StreamFragmentGraph, create_source_worker, validate_sink,
+    StreamFragmentGraph, create_source_worker, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
@@ -151,12 +151,11 @@ pub enum DdlCommand {
     DropSource(SourceId, DropMode),
     CreateFunction(Function),
     DropFunction(FunctionId),
-    CreateView(View),
+    CreateView(View, HashSet<ObjectId>),
     DropView(ViewId, DropMode),
     CreateStreamingJob {
         stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
-        create_type: CreateType,
         affected_table_replace_info: Option<ReplaceStreamJobInfo>,
         dependencies: HashSet<ObjectId>,
         specific_resource_group: Option<String>, // specific resource group
@@ -197,7 +196,7 @@ impl DdlCommand {
             DdlCommand::DropSource(id, _) => Right(*id),
             DdlCommand::CreateFunction(function) => Left(function.name.clone()),
             DdlCommand::DropFunction(id) => Right(*id),
-            DdlCommand::CreateView(view) => Left(view.name.clone()),
+            DdlCommand::CreateView(view, _) => Left(view.name.clone()),
             DdlCommand::DropView(id, _) => Right(*id),
             DdlCommand::CreateStreamingJob { stream_job, .. } => Left(stream_job.name()),
             DdlCommand::DropStreamingJob { job_id, .. } => Right(job_id.id()),
@@ -236,7 +235,7 @@ impl DdlCommand {
             | DdlCommand::CreateDatabase(_)
             | DdlCommand::CreateSchema(_)
             | DdlCommand::CreateFunction(_)
-            | DdlCommand::CreateView(_)
+            | DdlCommand::CreateView(_, _)
             | DdlCommand::CreateConnection(_)
             | DdlCommand::CommentOn(_)
             | DdlCommand::CreateSecret(_)
@@ -383,14 +382,15 @@ impl DdlController {
                 }
                 DdlCommand::CreateFunction(function) => ctrl.create_function(function).await,
                 DdlCommand::DropFunction(function_id) => ctrl.drop_function(function_id).await,
-                DdlCommand::CreateView(view) => ctrl.create_view(view).await,
+                DdlCommand::CreateView(view, dependencies) => {
+                    ctrl.create_view(view, dependencies).await
+                }
                 DdlCommand::DropView(view_id, drop_mode) => {
                     ctrl.drop_view(view_id, drop_mode).await
                 }
                 DdlCommand::CreateStreamingJob {
                     stream_job,
                     fragment_graph,
-                    create_type: _,
                     affected_table_replace_info,
                     dependencies,
                     specific_resource_group,
@@ -594,10 +594,14 @@ impl DdlController {
         .await
     }
 
-    async fn create_view(&self, view: View) -> MetaResult<NotificationVersion> {
+    async fn create_view(
+        &self,
+        view: View,
+        dependencies: HashSet<ObjectId>,
+    ) -> MetaResult<NotificationVersion> {
         self.metadata_manager
             .catalog_controller
-            .create_view(view)
+            .create_view(view, dependencies)
             .await
     }
 
@@ -716,12 +720,21 @@ impl DdlController {
             .catalog_controller
             .create_subscription_catalog(&mut subscription)
             .await?;
-        self.stream_manager
-            .create_subscription(&subscription)
-            .await
-            .inspect_err(|e| {
-                tracing::debug!(error = %e.as_report(), "cancel create subscription");
-            })?;
+        if let Err(err) = self.stream_manager.create_subscription(&subscription).await {
+            tracing::debug!(error = %err.as_report(), "failed to create subscription");
+            let _ = self
+                .metadata_manager
+                .catalog_controller
+                .try_abort_creating_subscription(subscription.id as _)
+                .await
+                .inspect_err(|e| {
+                    tracing::error!(
+                        error = %e.as_report(),
+                        "failed to abort create subscription after failure"
+                    );
+                });
+            return Err(err);
+        }
 
         let version = self
             .metadata_manager
@@ -1109,19 +1122,18 @@ impl DdlController {
             if !if_not_exists {
                 return Err(meta_err);
             }
-            if let MetaErrorInner::Duplicated(_, _, Some(job_id)) = meta_err.inner() {
+            return if let MetaErrorInner::Duplicated(_, _, Some(job_id)) = meta_err.inner() {
                 if streaming_job.create_type() == CreateType::Foreground {
                     let database_id = streaming_job.database_id();
-                    return self
-                        .metadata_manager
+                    self.metadata_manager
                         .wait_streaming_job_finished(database_id.into(), *job_id)
-                        .await;
+                        .await
                 } else {
-                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                    Ok(IGNORED_NOTIFICATION_VERSION)
                 }
             } else {
-                return Err(meta_err);
-            }
+                Err(meta_err)
+            };
         }
         let job_id = streaming_job.id();
         tracing::debug!(
@@ -1339,10 +1351,10 @@ impl DdlController {
         // create streaming jobs.
         let stream_job_id = streaming_job.id();
         match (streaming_job.create_type(), &streaming_job) {
-            // FIXME(kwannoel): Unify background stream's creation path with MV below.
+            // TODO(August): Unify background sink into table's creation path with MV below.
             (CreateType::Unspecified, _)
             | (CreateType::Foreground, _)
-            | (CreateType::Background, StreamingJob::Sink(_, _)) => {
+            | (CreateType::Background, StreamingJob::Sink(_, Some(_))) => {
                 let version = self
                     .stream_manager
                     .create_streaming_job(stream_job_fragments, ctx, None)
@@ -2091,13 +2103,31 @@ impl DdlController {
                 to_remove_state_table_id: old_internal_table_ids[0] as i32, // asserted before
                 to_remove_source_id,
             });
+        } else if stream_job.is_materialized_view() {
+            // If it's ALTER MV, use `state::match` to match the internal tables, which is more complicated
+            // but more robust.
+            let old_fragments_upstreams = self
+                .metadata_manager
+                .catalog_controller
+                .upstream_fragments(old_fragments.fragment_ids())
+                .await?;
+
+            let old_state_graph =
+                state_match::Graph::from_existing(&old_fragments, &old_fragments_upstreams);
+            let new_state_graph = state_match::Graph::from_building(&fragment_graph);
+            let mapping =
+                state_match::match_graph_internal_tables(&new_state_graph, &old_state_graph)
+                    .context("incompatible altering on the streaming job states")?;
+
+            fragment_graph.fit_internal_table_ids_with_mapping(mapping);
         } else {
+            // If it's ALTER TABLE or SOURCE, use a trivial table id matching algorithm to keep the original behavior.
+            // TODO(alter-mv): this is actually a special case of ALTER MV, can we merge the two branches?
             let old_internal_tables = self
                 .metadata_manager
                 .get_table_catalog_by_ids(old_internal_table_ids)
                 .await?;
-            // TODO(alter-mv): the current impl is very fragile for alter MV, be more strict here!
-            fragment_graph.fit_internal_table_ids(old_internal_tables)?;
+            fragment_graph.fit_internal_tables_trivial(old_internal_tables)?;
         }
 
         // 1. Resolve the edges to the downstream fragments, extend the fragment graph to a complete
@@ -2345,7 +2375,7 @@ impl DdlController {
             if self
                 .metadata_manager
                 .catalog_controller
-                .list_background_creating_mviews(true)
+                .list_background_creating_jobs(true)
                 .await?
                 .is_empty()
             {

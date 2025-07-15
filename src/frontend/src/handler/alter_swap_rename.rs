@@ -133,9 +133,12 @@ pub async fn handle_swap_rename(
         StatementType::ALTER_SINK => {
             let catalog_reader = session.env().catalog_reader().read_guard();
             let (src_sink, _) =
-                catalog_reader.get_sink_by_name(db_name, src_schema_path, &src_obj_name)?;
-            let (target_sink, _) =
-                catalog_reader.get_sink_by_name(db_name, target_schema_path, &target_obj_name)?;
+                catalog_reader.get_created_sink_by_name(db_name, src_schema_path, &src_obj_name)?;
+            let (target_sink, _) = catalog_reader.get_created_sink_by_name(
+                db_name,
+                target_schema_path,
+                &target_obj_name,
+            )?;
             check_swap_rename_privilege(
                 &session,
                 src_sink.owner.user_id,

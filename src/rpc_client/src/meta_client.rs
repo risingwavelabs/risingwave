@@ -512,6 +512,7 @@ impl MetaClient {
         graph: StreamFragmentGraph,
         job_type: PbTableJobType,
         if_not_exists: bool,
+        dependencies: HashSet<ObjectId>,
     ) -> Result<WaitVersion> {
         let request = CreateTableRequest {
             materialized_view: Some(table),
@@ -519,6 +520,7 @@ impl MetaClient {
             source,
             job_type: job_type as _,
             if_not_exists,
+            dependencies: dependencies.into_iter().collect(),
         };
         let resp = self.inner.create_table(request).await?;
         // TODO: handle error in `resp.status` here
@@ -732,8 +734,15 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn create_view(&self, view: PbView) -> Result<WaitVersion> {
-        let request = CreateViewRequest { view: Some(view) };
+    pub async fn create_view(
+        &self,
+        view: PbView,
+        dependencies: HashSet<ObjectId>,
+    ) -> Result<WaitVersion> {
+        let request = CreateViewRequest {
+            view: Some(view),
+            dependencies: dependencies.into_iter().collect(),
+        };
         let resp = self.inner.create_view(request).await?;
         // TODO: handle error in `resp.status` here
         Ok(resp

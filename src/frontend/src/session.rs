@@ -1504,15 +1504,15 @@ impl SessionManagerImpl {
     ) -> std::result::Result<Arc<SessionImpl>, BoxedError> {
         let catalog_reader = self.env.catalog_reader();
         let reader = catalog_reader.read_guard();
-        let database_name = reader
-            .get_database_by_id(&database_id)
-            .map_err(|_| {
+        let (database_name, database_owner) = {
+            let db = reader.get_database_by_id(&database_id).map_err(|_| {
                 Box::new(Error::new(
                     ErrorKind::InvalidInput,
                     format!("database \"{}\" does not exist", database_id),
                 ))
-            })?
-            .name();
+            })?;
+            (db.name(), db.owner())
+        };
 
         let user_reader = self.env.user_info_reader();
         let reader = user_reader.read_guard();
@@ -1525,7 +1525,7 @@ impl SessionManagerImpl {
             }
             let has_privilege =
                 user.has_privilege(&Object::DatabaseId(database_id), AclMode::Connect);
-            if !user.is_super && !has_privilege {
+            if !user.is_super && database_owner != user.id && !has_privilege {
                 return Err(Box::new(Error::new(
                     ErrorKind::PermissionDenied,
                     "User does not have CONNECT privilege.",
@@ -1685,6 +1685,10 @@ impl Session for SessionImpl {
             }
             Portal::PureStatement(statement) => Ok(infer(None, statement)?),
         }
+    }
+
+    fn get_config(&self, key: &str) -> std::result::Result<String, BoxedError> {
+        self.config().get(key).map_err(Into::into)
     }
 
     fn set_config(&self, key: &str, value: String) -> std::result::Result<String, BoxedError> {

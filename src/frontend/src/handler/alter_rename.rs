@@ -154,7 +154,8 @@ pub async fn handle_rename_sink(
 
     let sink_id = {
         let reader = session.env().catalog_reader().read_guard();
-        let (sink, schema_name) = reader.get_sink_by_name(db_name, schema_path, &real_sink_name)?;
+        let (sink, schema_name) =
+            reader.get_created_sink_by_name(db_name, schema_path, &real_sink_name)?;
         session.check_privilege_for_drop_alter(schema_name, &**sink)?;
         sink.id
     };

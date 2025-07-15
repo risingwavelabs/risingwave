@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Debug;
+
 use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
@@ -22,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::ConnectorResult;
 use crate::source::pulsar::PulsarProperties;
 use crate::source::pulsar::split::PulsarSplit;
-use crate::source::pulsar::topic::{Topic, parse_topic};
+use crate::source::pulsar::topic::{PERSISTENT_DOMAIN, Topic, check_topic_exists, parse_topic};
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 pub struct PulsarSplitEnumerator {
@@ -95,6 +97,7 @@ impl SplitEnumerator for PulsarSplitEnumerator {
 
         let splits = if topic_partitions > 0 {
             // partitioned topic
+            // if we can know the number of partitions, the topic must exist
             (0..topic_partitions as i32)
                 .map(|p| PulsarSplit {
                     topic: self.topic.sub_topic(p).unwrap(),
@@ -102,6 +105,14 @@ impl SplitEnumerator for PulsarSplitEnumerator {
                 })
                 .collect_vec()
         } else {
+            // only do existence check for persistent non-partitioned topic
+            //
+            // for non-persistent topic, all metadata is in broker memory
+            // unless there's a live producer/consumer, the broker may not be aware of the non-persistent topic.
+            if self.topic.domain == PERSISTENT_DOMAIN {
+                // if the topic is non-partitioned, we need to check if the topic exists on the broker
+                check_topic_exists(&self.client, &self.topic).await?;
+            }
             // non partitioned topic
             vec![PulsarSplit {
                 topic: self.topic.clone(),
