@@ -1,0 +1,64 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t(v1 int);
+
+statement ok
+insert into t select * from generate_series(1, 10000);
+
+statement ok
+set backfill_rate_limit=1;
+
+statement ok
+set background_ddl=true;
+
+statement ok
+CREATE SINK sink1 AS select * from t WITH (
+    connector = 'blackhole'
+);
+
+statement count 1
+show jobs;
+
+onlyif can-use-recover
+statement ok
+recover;
+
+onlyif can-use-recover
+sleep 5s
+
+onlyif can-use-recover
+statement count 1
+show jobs;
+
+statement ok
+alter sink sink1 set SINK_RATE_LIMIT to 10000;
+
+statement count 0 retry 3 backoff 2s
+show jobs;
+
+statement ok
+CREATE SINK sink2 AS select * from t WITH (
+    connector = 'blackhole'
+);
+
+statement count 1
+show jobs;
+
+statement ok
+drop sink sink2;
+
+statement count 0
+show jobs;
+
+# TODO: support backfill progress for background sink into table
+
+statement ok
+drop table t cascade;
+
+statement ok
+set background_ddl=false;
+
+statement ok
+set backfill_rate_limit=default;

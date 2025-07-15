@@ -147,12 +147,11 @@ pub enum DdlCommand {
     DropSource(SourceId, DropMode),
     CreateFunction(Function),
     DropFunction(FunctionId),
-    CreateView(View),
+    CreateView(View, HashSet<ObjectId>),
     DropView(ViewId, DropMode),
     CreateStreamingJob {
         stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
-        create_type: CreateType,
         affected_table_replace_info: Option<ReplaceStreamJobInfo>,
         dependencies: HashSet<ObjectId>,
         specific_resource_group: Option<String>, // specific resource group
@@ -193,7 +192,7 @@ impl DdlCommand {
             DdlCommand::DropSource(id, _) => Right(*id),
             DdlCommand::CreateFunction(function) => Left(function.name.clone()),
             DdlCommand::DropFunction(id) => Right(*id),
-            DdlCommand::CreateView(view) => Left(view.name.clone()),
+            DdlCommand::CreateView(view, _) => Left(view.name.clone()),
             DdlCommand::DropView(id, _) => Right(*id),
             DdlCommand::CreateStreamingJob { stream_job, .. } => Left(stream_job.name()),
             DdlCommand::DropStreamingJob { job_id, .. } => Right(job_id.id()),
@@ -232,7 +231,7 @@ impl DdlCommand {
             | DdlCommand::CreateDatabase(_)
             | DdlCommand::CreateSchema(_)
             | DdlCommand::CreateFunction(_)
-            | DdlCommand::CreateView(_)
+            | DdlCommand::CreateView(_, _)
             | DdlCommand::CreateConnection(_)
             | DdlCommand::CommentOn(_)
             | DdlCommand::CreateSecret(_)
@@ -379,14 +378,15 @@ impl DdlController {
                 }
                 DdlCommand::CreateFunction(function) => ctrl.create_function(function).await,
                 DdlCommand::DropFunction(function_id) => ctrl.drop_function(function_id).await,
-                DdlCommand::CreateView(view) => ctrl.create_view(view).await,
+                DdlCommand::CreateView(view, dependencies) => {
+                    ctrl.create_view(view, dependencies).await
+                }
                 DdlCommand::DropView(view_id, drop_mode) => {
                     ctrl.drop_view(view_id, drop_mode).await
                 }
                 DdlCommand::CreateStreamingJob {
                     stream_job,
                     fragment_graph,
-                    create_type: _,
                     affected_table_replace_info,
                     dependencies,
                     specific_resource_group,
@@ -576,10 +576,14 @@ impl DdlController {
         .await
     }
 
-    async fn create_view(&self, view: View) -> MetaResult<NotificationVersion> {
+    async fn create_view(
+        &self,
+        view: View,
+        dependencies: HashSet<ObjectId>,
+    ) -> MetaResult<NotificationVersion> {
         self.metadata_manager
             .catalog_controller
-            .create_view(view)
+            .create_view(view, dependencies)
             .await
     }
 
@@ -698,12 +702,21 @@ impl DdlController {
             .catalog_controller
             .create_subscription_catalog(&mut subscription)
             .await?;
-        self.stream_manager
-            .create_subscription(&subscription)
-            .await
-            .inspect_err(|e| {
-                tracing::debug!(error = %e.as_report(), "cancel create subscription");
-            })?;
+        if let Err(err) = self.stream_manager.create_subscription(&subscription).await {
+            tracing::debug!(error = %err.as_report(), "failed to create subscription");
+            let _ = self
+                .metadata_manager
+                .catalog_controller
+                .try_abort_creating_subscription(subscription.id as _)
+                .await
+                .inspect_err(|e| {
+                    tracing::error!(
+                        error = %e.as_report(),
+                        "failed to abort create subscription after failure"
+                    );
+                });
+            return Err(err);
+        }
 
         let version = self
             .metadata_manager
@@ -1055,19 +1068,18 @@ impl DdlController {
             if !if_not_exists {
                 return Err(meta_err);
             }
-            if let MetaErrorInner::Duplicated(_, _, Some(job_id)) = meta_err.inner() {
+            return if let MetaErrorInner::Duplicated(_, _, Some(job_id)) = meta_err.inner() {
                 if streaming_job.create_type() == CreateType::Foreground {
                     let database_id = streaming_job.database_id();
-                    return self
-                        .metadata_manager
+                    self.metadata_manager
                         .wait_streaming_job_finished(database_id.into(), *job_id)
-                        .await;
+                        .await
                 } else {
-                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                    Ok(IGNORED_NOTIFICATION_VERSION)
                 }
             } else {
-                return Err(meta_err);
-            }
+                Err(meta_err)
+            };
         }
         let job_id = streaming_job.id();
 
@@ -1285,10 +1297,10 @@ impl DdlController {
         // create streaming jobs.
         let stream_job_id = streaming_job.id();
         match (streaming_job.create_type(), &streaming_job) {
-            // FIXME(kwannoel): Unify background stream's creation path with MV below.
+            // TODO(August): Unify background sink into table's creation path with MV below.
             (CreateType::Unspecified, _)
             | (CreateType::Foreground, _)
-            | (CreateType::Background, StreamingJob::Sink(_, _)) => {
+            | (CreateType::Background, StreamingJob::Sink(_, Some(_))) => {
                 let version = self
                     .stream_manager
                     .create_streaming_job(stream_job_fragments, ctx, None)
@@ -2309,7 +2321,7 @@ impl DdlController {
             if self
                 .metadata_manager
                 .catalog_controller
-                .list_background_creating_mviews(true)
+                .list_background_creating_jobs(true)
                 .await?
                 .is_empty()
             {

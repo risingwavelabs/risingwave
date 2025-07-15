@@ -112,6 +112,7 @@ pub mod show;
 mod transaction;
 mod use_db;
 pub mod util;
+pub mod vacuum;
 pub mod variable;
 mod wait;
 
@@ -1281,6 +1282,7 @@ pub async fn handle(
         Statement::Deallocate { name, prepare } => {
             prepared_statement::handle_deallocate(name, prepare).await
         }
+        Statement::Vacuum { table_name } => vacuum::handle_vacuum(handler_args, table_name).await,
         _ => bail_not_implemented!("Unhandled statement: {}", stmt),
     }
 }

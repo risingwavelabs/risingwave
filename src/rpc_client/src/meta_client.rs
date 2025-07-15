@@ -512,6 +512,7 @@ impl MetaClient {
         graph: StreamFragmentGraph,
         job_type: PbTableJobType,
         if_not_exists: bool,
+        dependencies: HashSet<ObjectId>,
     ) -> Result<WaitVersion> {
         let request = CreateTableRequest {
             materialized_view: Some(table),
@@ -519,6 +520,7 @@ impl MetaClient {
             source,
             job_type: job_type as _,
             if_not_exists,
+            dependencies: dependencies.into_iter().collect(),
         };
         let resp = self.inner.create_table(request).await?;
         // TODO: handle error in `resp.status` here
@@ -717,8 +719,15 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn create_view(&self, view: PbView) -> Result<WaitVersion> {
-        let request = CreateViewRequest { view: Some(view) };
+    pub async fn create_view(
+        &self,
+        view: PbView,
+        dependencies: HashSet<ObjectId>,
+    ) -> Result<WaitVersion> {
+        let request = CreateViewRequest {
+            view: Some(view),
+            dependencies: dependencies.into_iter().collect(),
+        };
         let resp = self.inner.create_view(request).await?;
         // TODO: handle error in `resp.status` here
         Ok(resp
@@ -762,6 +771,14 @@ impl MetaClient {
         Ok(resp
             .version
             .ok_or_else(|| anyhow!("wait version not set"))?)
+    }
+
+    pub async fn compact_table(&self, table_id: TableId) -> Result<u64> {
+        let request = CompactTableRequest {
+            table_id: table_id.table_id(),
+        };
+        let resp = self.inner.compact_table(request).await?;
+        Ok(resp.task_id)
     }
 
     pub async fn drop_view(&self, view_id: u32, cascade: bool) -> Result<WaitVersion> {
@@ -2342,6 +2359,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, auto_schema_change, AutoSchemaChangeRequest, AutoSchemaChangeResponse }
             ,{ ddl_client, alter_swap_rename, AlterSwapRenameRequest, AlterSwapRenameResponse }
             ,{ ddl_client, alter_secret, AlterSecretRequest, AlterSecretResponse }
+            ,{ ddl_client, compact_table, CompactTableRequest, CompactTableResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }

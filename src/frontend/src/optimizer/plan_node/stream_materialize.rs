@@ -278,7 +278,6 @@ impl StreamMaterialize {
             database_id,
             associated_source_id: None,
             name,
-            dependent_relations: vec![],
             columns,
             pk: table_pk,
             stream_key,
