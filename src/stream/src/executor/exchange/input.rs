@@ -26,28 +26,18 @@ use super::permit::Receiver;
 use crate::executor::prelude::*;
 use crate::executor::{
     BarrierInner, DispatcherBarrier, DispatcherMessage, DispatcherMessageBatch,
-    DispatcherMessageStreamItem, MessageStreamItemInner,
+    DispatcherMessageStreamItem,
 };
-use crate::task::{FragmentId, InputId, LocalBarrierManager, UpDownActorIds, UpDownFragmentIds};
+use crate::task::{FragmentId, LocalBarrierManager, UpDownActorIds, UpDownFragmentIds};
 
 /// `Input` is a more abstract upstream input type, used for `DynamicReceivers` type
 /// handling of multiple upstream inputs
 pub trait Input: Stream + Send {
+    type InputId;
     /// The upstream input id.
-    fn id(&self) -> InputId;
-}
+    fn id(&self) -> Self::InputId;
 
-pub type BoxedInput<Message> = Pin<Box<dyn Input<Item = Message>>>;
-pub type BoxedMessageInput<M> = BoxedInput<MessageStreamItemInner<M>>;
-
-/// `ActorInput` provides an interface for [`MergeExecutor`](crate::executor::MergeExecutor) and
-/// [`ReceiverExecutor`](crate::executor::ReceiverExecutor) to receive data from upstream actors.
-/// Only used for actor inputs.
-pub trait ActorInput: Input<Item = DispatcherMessageStreamItem> {
-    /// The upstream actor id.
-    fn actor_id(&self) -> ActorId;
-
-    fn boxed_input(self) -> BoxedActorInput
+    fn boxed_input(self) -> BoxedInput<Self::InputId, Self::Item>
     where
         Self: Sized + 'static,
     {
@@ -55,19 +45,20 @@ pub trait ActorInput: Input<Item = DispatcherMessageStreamItem> {
     }
 }
 
+pub type BoxedInput<InputId, Item> = Pin<Box<dyn Input<InputId = InputId, Item = Item>>>;
+
+/// `ActorInput` provides an interface for [`MergeExecutor`](crate::executor::MergeExecutor) and
+/// [`ReceiverExecutor`](crate::executor::ReceiverExecutor) to receive data from upstream actors.
+/// Only used for actor inputs.
+pub trait ActorInput = Input<Item = DispatcherMessageStreamItem, InputId = ActorId>;
+
 pub type BoxedActorInput = Pin<Box<dyn ActorInput>>;
 
 impl std::fmt::Debug for dyn ActorInput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Input")
-            .field("actor_id", &self.actor_id())
+            .field("actor_id", &self.id())
             .finish_non_exhaustive()
-    }
-}
-
-impl<T: ActorInput> Input for T {
-    fn id(&self) -> InputId {
-        self.actor_id() as InputId
     }
 }
 
@@ -173,8 +164,10 @@ impl Stream for LocalInput {
     }
 }
 
-impl ActorInput for LocalInput {
-    fn actor_id(&self) -> ActorId {
+impl Input for LocalInput {
+    type InputId = ActorId;
+
+    fn id(&self) -> Self::InputId {
         self.actor_id
     }
 }
@@ -357,8 +350,10 @@ impl Stream for RemoteInput {
     }
 }
 
-impl ActorInput for RemoteInput {
-    fn actor_id(&self) -> ActorId {
+impl Input for RemoteInput {
+    type InputId = ActorId;
+
+    fn id(&self) -> Self::InputId {
         self.actor_id
     }
 }

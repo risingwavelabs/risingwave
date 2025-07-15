@@ -17,10 +17,9 @@ use std::task::{Context, Poll};
 
 use pin_project::pin_project;
 
-use crate::executor::DynamicReceivers;
-use crate::executor::exchange::input::Input;
+use crate::executor::exchange::input::{BoxedInput, Input};
+use crate::executor::merge::DynamicReceivers;
 use crate::executor::prelude::*;
-use crate::task::InputId;
 
 /// `UnionExecutor` merges data from multiple inputs.
 pub struct UnionExecutor {
@@ -57,7 +56,8 @@ impl Execute for UnionExecutor {
             .map(|e| e.execute())
             .enumerate()
             .map(|(id, input)| {
-                Box::pin(UnionExecutorInput { id, inner: input }) as Pin<Box<dyn Input<Item = _>>>
+                Box::pin(UnionExecutorInput { id, inner: input })
+                    as BoxedInput<usize, MessageStreamItem>
             })
             .collect();
 
@@ -85,8 +85,10 @@ struct UnionExecutorInput {
 }
 
 impl Input for UnionExecutorInput {
-    fn id(&self) -> InputId {
-        self.id as InputId
+    type InputId = usize;
+
+    fn id(&self) -> Self::InputId {
+        self.id
     }
 }
 
@@ -134,7 +136,8 @@ mod tests {
             .into_iter()
             .enumerate()
             .map(|(id, input)| {
-                Box::pin(UnionExecutorInput { id, inner: input }) as Pin<Box<dyn Input<Item = _>>>
+                Box::pin(UnionExecutorInput { id, inner: input })
+                    as BoxedInput<usize, MessageStreamItem>
             })
             .collect();
         let mut output = vec![];
