@@ -464,7 +464,7 @@ async fn test_background_sink_create() -> Result<()> {
     });
 
     // Wait for job to start
-    sleep(Duration::from_secs(4)).await;
+    sleep(Duration::from_secs(2)).await;
 
     kill_cn_and_meta_and_wait_recover(&cluster).await;
 
