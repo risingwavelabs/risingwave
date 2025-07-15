@@ -108,7 +108,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             .cloned()
             .collect_vec();
         // Currently we hard code the split column to be the first column of primary keys.
-        // TODO(zw): configurable split columns
+        // TODO(zw): feat: configurable split columns
         let snapshot_split_column_index = pk_indices[0];
         let cdc_table_snapshot_split_column =
             vec![self.external_table.schema().fields[snapshot_split_column_index].clone()];
@@ -310,7 +310,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                                 snapshot_valve.resume();
                                             }
                                             Mutation::Throttle(some) => {
-                                                // TODO(zw): improve throttle.
+                                                // TODO(zw): optimization: improve throttle.
                                                 // 1. Handle rate limit 0. Currently, to resume the process, the actor must be rebuilt.
                                                 // 2. Apply new rate limit immediately.
                                                 if let Some(new_rate_limit) =

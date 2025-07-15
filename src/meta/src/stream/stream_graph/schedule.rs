@@ -254,7 +254,6 @@ impl Scheduler {
             single_assignment.keys().exactly_one().cloned().unwrap() as _;
 
         let dynamic_mapping_fn = Box::new(move |limited_count: usize, force_parallelism: bool| {
-            // TODO(zw): review this change.
             let (parallelism, vnode_count) = if force_parallelism {
                 (limited_count, limited_count)
             } else {

@@ -21,6 +21,7 @@ use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{CdcTableDesc, ColumnDesc, Field, Schema};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_connector::source::cdc::external::CdcTableType;
 use risingwave_connector::source::cdc::{
     CDC_BACKFILL_ENABLE_KEY, CDC_BACKFILL_NUM_ROWS_PER_SPLIT, CDC_BACKFILL_PARALLELISM,
     CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY, CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY, CdcScanOptions,
@@ -50,7 +51,13 @@ pub struct CdcScan {
     pub options: CdcScanOptions,
 }
 
-pub fn build_cdc_scan_options_with_options(with_options: &WithOptions) -> Result<CdcScanOptions> {
+pub fn build_cdc_scan_options_with_options(
+    with_options: &WithOptions,
+    cdc_table_type: CdcTableType,
+) -> Result<CdcScanOptions> {
+    // Update this after more CDC table type is supported for backfill v2.
+    let support_backfill_v2 = matches!(cdc_table_type, CdcTableType::Postgres);
+
     // unspecified option will use default values
     let mut scan_options = CdcScanOptions::default();
 
@@ -70,14 +77,19 @@ pub fn build_cdc_scan_options_with_options(with_options: &WithOptions) -> Result
             .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY))?;
     };
 
-    if let Some(backfill_parallelism) = with_options.get(CDC_BACKFILL_PARALLELISM) {
-        scan_options.backfill_parallelism = u32::from_str(backfill_parallelism)
-            .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_PARALLELISM))?;
-    }
+    if support_backfill_v2 {
+        if let Some(backfill_parallelism) = with_options.get(CDC_BACKFILL_PARALLELISM) {
+            scan_options.backfill_parallelism = u32::from_str(backfill_parallelism)
+                .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_PARALLELISM))?;
+        }
 
-    if let Some(backfill_num_rows_per_split) = with_options.get(CDC_BACKFILL_NUM_ROWS_PER_SPLIT) {
-        scan_options.backfill_num_rows_per_split = u64::from_str(backfill_num_rows_per_split)
-            .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_NUM_ROWS_PER_SPLIT))?;
+        if let Some(backfill_num_rows_per_split) = with_options.get(CDC_BACKFILL_NUM_ROWS_PER_SPLIT)
+        {
+            scan_options.backfill_num_rows_per_split = u64::from_str(backfill_num_rows_per_split)
+                .map_err(|_| {
+                anyhow!("Invalid value for {}", CDC_BACKFILL_NUM_ROWS_PER_SPLIT)
+            })?;
+        }
     }
 
     Ok(scan_options)

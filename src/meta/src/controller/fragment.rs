@@ -851,6 +851,11 @@ impl CatalogController {
         Ok(table_fragments)
     }
 
+    /// Returns pairs of (job id, actor ids), where actors belong to CDC table backfill fragment of the job.
+    pub async fn cdc_table_backfill_actor_ids(&self) -> MetaResult<HashMap<u32, HashSet<u32>>> {
+        todo!("");
+    }
+
     pub async fn upstream_fragments(
         &self,
         fragment_ids: impl Iterator<Item = crate::model::FragmentId>,

@@ -384,7 +384,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
         &self,
         _options: CdcTableSnapshotSplitOption,
     ) -> BoxStream<'_, ConnectorResult<CdcTableSnapshotSplit>> {
-        // TODO(zw): impl
+        // TODO(zw): feat: impl
         stream::empty::<ConnectorResult<CdcTableSnapshotSplit>>().boxed()
     }
 

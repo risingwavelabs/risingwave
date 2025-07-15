@@ -74,9 +74,6 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
                 ..Default::default()
             });
         let table_type = CdcTableType::from_properties(&properties);
-        let is_parallelized_cdc_backfill_supported =
-            is_parallelized_cdc_backfill_supported(&table_type);
-
         // Filter out additional columns to construct the external table schema
         let table_schema: Schema = table_desc
             .columns
@@ -110,7 +107,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
         );
 
         let output_columns = table_desc.columns.iter().map(Into::into).collect_vec();
-        if is_parallelized_cdc_backfill_supported && scan_options.is_parallelized_backfill() {
+        if scan_options.is_parallelized_backfill() {
             // Set state table's vnodes to None to allow splits to be assigned to any actors, without following vnode constraints.
             let vnodes = None;
             let state_table =
@@ -148,8 +145,4 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             Ok((params.info, exec).into())
         }
     }
-}
-
-fn is_parallelized_cdc_backfill_supported(cdc_table_type: &CdcTableType) -> bool {
-    matches!(cdc_table_type, CdcTableType::Postgres)
 }

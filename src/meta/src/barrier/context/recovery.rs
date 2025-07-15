@@ -35,7 +35,7 @@ use crate::barrier::info::InflightStreamingJobInfo;
 use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor, StreamJobFragments, TableParallelism};
-use crate::stream::cdc::assign_cdc_table_snapshot_splits;
+use crate::stream::cdc::assign_cdc_table_snapshot_splits_pairs;
 use crate::stream::{
     JobParallelismTarget, JobReschedulePolicy, JobRescheduleTarget, JobResourceGroupTarget,
     RescheduleOptions, SourceChange, StreamFragmentGraph,
@@ -435,14 +435,13 @@ impl GlobalBarrierWorkerContextImpl {
 
                     // get split assignments for all actors
                     let source_splits = self.source_manager.list_assignments().await;
-                    // TODO(zw): optimize this heavy method
-                    let all_table_fragments = self
+                    let cdc_table_backfill_actors = self
                         .metadata_manager
                         .catalog_controller
-                        .table_fragments()
+                        .cdc_table_backfill_actor_ids()
                         .await?;
-                    let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits(
-                        all_table_fragments.values(),
+                    let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits_pairs(
+                        cdc_table_backfill_actors,
                         self.env.meta_store_ref(),
                     )
                     .await?;
@@ -574,14 +573,13 @@ impl GlobalBarrierWorkerContextImpl {
         // get split assignments for all actors
         let source_splits = self.source_manager.list_assignments().await;
 
-        // TODO(zw): optimize this heavy method
-        let all_table_fragments = self
+        let cdc_table_backfill_actors = self
             .metadata_manager
             .catalog_controller
-            .table_fragments()
+            .cdc_table_backfill_actor_ids()
             .await?;
-        let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits(
-            all_table_fragments.values(),
+        let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits_pairs(
+            cdc_table_backfill_actors,
             self.env.meta_store_ref(),
         )
         .await?;
