@@ -47,6 +47,7 @@ pub const CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY: &str = "snapshot.interval";
 pub const CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY: &str = "snapshot.batch_size";
 pub const CDC_BACKFILL_PARALLELISM: &str = "backfill.parallelism";
 pub const CDC_BACKFILL_NUM_ROWS_PER_SPLIT: &str = "backfill.num_rows_per_split";
+pub const CDC_BACKFILL_AS_EVEN_SPLITS: &str = "backfill.as_even_splits";
 // We enable transaction for shared cdc source by default
 pub const CDC_TRANSACTIONAL_KEY: &str = "transactional";
 pub const CDC_WAIT_FOR_STREAMING_START_TIMEOUT: &str = "cdc.source.wait.streaming.start.timeout";
@@ -283,6 +284,7 @@ pub struct CdcScanOptions {
     pub snapshot_batch_size: u32,
     pub backfill_parallelism: u32,
     pub backfill_num_rows_per_split: u64,
+    pub backfill_as_even_splits: bool,
 }
 
 impl Default for CdcScanOptions {
@@ -294,6 +296,7 @@ impl Default for CdcScanOptions {
             backfill_parallelism: 1,
             // 0 means disable backfill v2.
             backfill_num_rows_per_split: 0,
+            backfill_as_even_splits: true,
         }
     }
 }
@@ -306,6 +309,7 @@ impl CdcScanOptions {
             snapshot_batch_size: self.snapshot_batch_size,
             backfill_parallelism: self.backfill_parallelism,
             backfill_num_rows_per_split: self.backfill_num_rows_per_split,
+            backfill_as_even_splits: self.backfill_as_even_splits,
         }
     }
 
@@ -316,6 +320,7 @@ impl CdcScanOptions {
             snapshot_batch_size: proto.snapshot_batch_size,
             backfill_parallelism: proto.backfill_parallelism,
             backfill_num_rows_per_split: proto.backfill_num_rows_per_split,
+            backfill_as_even_splits: proto.backfill_as_even_splits,
         }
     }
 

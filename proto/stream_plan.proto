@@ -692,6 +692,8 @@ message StreamCdcScanOptions {
   uint32 backfill_parallelism = 4;
 
   uint64 backfill_num_rows_per_split = 5;
+
+  bool backfill_as_even_splits = 6;
 }
 
 message StreamCdcScanNode {

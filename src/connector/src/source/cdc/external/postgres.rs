@@ -21,7 +21,7 @@ use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{Datum, ScalarImpl, ToOwnedDatum};
+use risingwave_common::types::{DataType, Datum, ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
 use serde_derive::{Deserialize, Serialize};
 use tokio_postgres::types::PgLsn;
@@ -111,94 +111,27 @@ impl ExternalTableReader for PostgresExternalTableReader {
 
     #[try_stream(boxed, ok = CdcTableSnapshotSplit, error = ConnectorError)]
     async fn get_parallel_cdc_splits(&self, options: CdcTableSnapshotSplitOption) {
-        let mut split_id = 1;
-        let Some(backfill_num_rows_per_split) = options.backfill_num_rows_per_split else {
-            // No parallel cdc splits.
-            return Ok(());
-        };
+        let backfill_num_rows_per_split = options.backfill_num_rows_per_split;
         if backfill_num_rows_per_split == 0 {
             // No parallel cdc splits.
+            tracing::warn!(backfill_num_rows_per_split, "Cannot get CDC splits.");
             return Ok(());
         }
-        // TODO(zw): for numeric types, use evenly-sized partition to optimize performance.
-
-        let Some((min_value, max_value)) = self.min_and_max().await? else {
-            let left_bound_row = OwnedRow::new(vec![None]);
-            let right_bound_row = OwnedRow::new(vec![None]);
-            let split = CdcTableSnapshotSplit {
-                split_id,
-                left_bound_inclusive: left_bound_row,
-                right_bound_exclusive: right_bound_row,
-            };
-            yield split;
-            return Ok(());
+        let row_stream = if options.backfill_as_even_splits
+            && is_supported_even_split_data_type(&self.split_column.data_type)
+        {
+            // For certain types, use evenly-sized partition to optimize performance.
+            tracing::info!(?self.schema_table_name, ?self.rw_schema, ?self.pk_indices, ?self.split_column, "Get parallel cdc table snapshot even splits.");
+            self.as_even_splits(options)
+        } else {
+            tracing::info!(?self.schema_table_name, ?self.rw_schema, ?self.pk_indices, ?self.split_column, "Get parallel cdc table snapshot uneven splits.");
+            self.as_uneven_splits(options)
         };
-        tracing::info!(?self.schema_table_name, ?self.rw_schema, ?self.pk_indices, ?self.split_column, "get parallel cdc table snapshot splits");
-        // left bound will never be NULL value.
-        let mut next_left_bound_inclusive = min_value.clone();
-        loop {
-            let left_bound_inclusive: Datum = if next_left_bound_inclusive == min_value {
-                None
-            } else {
-                Some(next_left_bound_inclusive.clone())
-            };
-            let right_bound_exclusive;
-            let mut next_right = self
-                .next_split_right_bound_exclusive(
-                    &next_left_bound_inclusive,
-                    &max_value,
-                    backfill_num_rows_per_split,
-                )
-                .await?;
-            if let Some(Some(ref inner)) = next_right
-                && *inner == next_left_bound_inclusive
-            {
-                next_right = self
-                    .next_greater_bound(&next_left_bound_inclusive, &max_value)
-                    .await?;
-            }
-            if let Some(next_right) = next_right {
-                match next_right {
-                    None => {
-                        // NULL found.
-                        right_bound_exclusive = None;
-                    }
-                    Some(next_right) => {
-                        next_left_bound_inclusive = next_right.to_owned();
-                        right_bound_exclusive = Some(next_right);
-                    }
-                }
-            } else {
-                // Not found.
-                right_bound_exclusive = None;
-            };
-            let is_completed = right_bound_exclusive.is_none();
-            if is_completed && left_bound_inclusive.is_none() {
-                assert_eq!(split_id, 1);
-            }
-            tracing::info!(
-                split_id,
-                ?left_bound_inclusive,
-                ?right_bound_exclusive,
-                "New CDC table snapshot split."
-            );
-            let left_bound_row = OwnedRow::new(vec![left_bound_inclusive]);
-            let right_bound_row = OwnedRow::new(vec![right_bound_exclusive]);
-            let split = CdcTableSnapshotSplit {
-                split_id,
-                left_bound_inclusive: left_bound_row,
-                right_bound_exclusive: right_bound_row,
-            };
-            match split_id.checked_add(1) {
-                Some(s) => {
-                    split_id = s;
-                }
-                None => return Err(anyhow::anyhow!("too many CDC snapshot splits").into()),
-            }
-            yield split;
-            if is_completed {
-                break;
-            }
+        pin_mut!(row_stream);
+        #[for_await]
+        for row in row_stream {
+            let row = row?;
+            yield row;
         }
     }
 
@@ -605,11 +538,158 @@ impl PostgresExternalTableReader {
             yield row;
         }
     }
+
+    #[try_stream(boxed, ok = CdcTableSnapshotSplit, error = ConnectorError)]
+    async fn as_uneven_splits(&self, options: CdcTableSnapshotSplitOption) {
+        let mut split_id = 1;
+        let Some((min_value, max_value)) = self.min_and_max().await? else {
+            let left_bound_row = OwnedRow::new(vec![None]);
+            let right_bound_row = OwnedRow::new(vec![None]);
+            let split = CdcTableSnapshotSplit {
+                split_id,
+                left_bound_inclusive: left_bound_row,
+                right_bound_exclusive: right_bound_row,
+            };
+            yield split;
+            return Ok(());
+        };
+        // left bound will never be NULL value.
+        let mut next_left_bound_inclusive = min_value.clone();
+        loop {
+            let left_bound_inclusive: Datum = if next_left_bound_inclusive == min_value {
+                None
+            } else {
+                Some(next_left_bound_inclusive.clone())
+            };
+            let right_bound_exclusive;
+            let mut next_right = self
+                .next_split_right_bound_exclusive(
+                    &next_left_bound_inclusive,
+                    &max_value,
+                    options.backfill_num_rows_per_split,
+                )
+                .await?;
+            if let Some(Some(ref inner)) = next_right
+                && *inner == next_left_bound_inclusive
+            {
+                next_right = self
+                    .next_greater_bound(&next_left_bound_inclusive, &max_value)
+                    .await?;
+            }
+            if let Some(next_right) = next_right {
+                match next_right {
+                    None => {
+                        // NULL found.
+                        right_bound_exclusive = None;
+                    }
+                    Some(next_right) => {
+                        next_left_bound_inclusive = next_right.to_owned();
+                        right_bound_exclusive = Some(next_right);
+                    }
+                }
+            } else {
+                // Not found.
+                right_bound_exclusive = None;
+            };
+            let is_completed = right_bound_exclusive.is_none();
+            if is_completed && left_bound_inclusive.is_none() {
+                assert_eq!(split_id, 1);
+            }
+            tracing::info!(
+                split_id,
+                ?left_bound_inclusive,
+                ?right_bound_exclusive,
+                "New CDC table snapshot split."
+            );
+            let left_bound_row = OwnedRow::new(vec![left_bound_inclusive]);
+            let right_bound_row = OwnedRow::new(vec![right_bound_exclusive]);
+            let split = CdcTableSnapshotSplit {
+                split_id,
+                left_bound_inclusive: left_bound_row,
+                right_bound_exclusive: right_bound_row,
+            };
+            try_increase_split_id(&mut split_id)?;
+            yield split;
+            if is_completed {
+                break;
+            }
+        }
+    }
+
+    #[try_stream(boxed, ok = CdcTableSnapshotSplit, error = ConnectorError)]
+    async fn as_even_splits(&self, options: CdcTableSnapshotSplitOption) {
+        let mut split_id = 1;
+        let Some((min_value, max_value)) = self.min_and_max().await? else {
+            let left_bound_row = OwnedRow::new(vec![None]);
+            let right_bound_row = OwnedRow::new(vec![None]);
+            let split = CdcTableSnapshotSplit {
+                split_id,
+                left_bound_inclusive: left_bound_row,
+                right_bound_exclusive: right_bound_row,
+            };
+            yield split;
+            return Ok(());
+        };
+        let min_value = min_value.as_integral();
+        let max_value = max_value.as_integral();
+        let saturated_split_max_size = options
+            .backfill_num_rows_per_split
+            .try_into()
+            .unwrap_or(i64::MAX);
+        let mut left = None;
+        let mut right = Some(min_value.saturating_add(saturated_split_max_size));
+        loop {
+            let split = CdcTableSnapshotSplit {
+                split_id,
+                left_bound_inclusive: OwnedRow::new(vec![
+                    left.map(|l| to_int_scalar(l, &self.split_column.data_type)),
+                ]),
+                right_bound_exclusive: OwnedRow::new(vec![
+                    right.map(|r| to_int_scalar(r, &self.split_column.data_type)),
+                ]),
+            };
+            try_increase_split_id(&mut split_id)?;
+            yield split;
+            if right.as_ref().map(|r| *r >= max_value).unwrap_or(true) {
+                break;
+            }
+            left = right;
+            right = left.map(|l| l.saturating_add(saturated_split_max_size));
+        }
+    }
+}
+
+fn to_int_scalar(i: i64, data_type: &DataType) -> ScalarImpl {
+    match data_type {
+        DataType::Int16 => ScalarImpl::Int16(i.try_into().unwrap()),
+        DataType::Int32 => ScalarImpl::Int32(i.try_into().unwrap()),
+        DataType::Int64 => ScalarImpl::Int64(i),
+        _ => {
+            panic!("Can't convert int {} to ScalarImpl::{}", i, data_type)
+        }
+    }
+}
+
+fn try_increase_split_id(split_id: &mut i64) -> ConnectorResult<()> {
+    match split_id.checked_add(1) {
+        Some(s) => {
+            *split_id = s;
+            Ok(())
+        }
+        None => Err(anyhow::anyhow!("too many CDC snapshot splits").into()),
+    }
 }
 
 /// Use the first column of primary keys to split table.
 fn split_column(rw_schema: &Schema, pk_indices: &[usize]) -> Field {
     rw_schema.fields[pk_indices[0]].clone()
+}
+
+fn is_supported_even_split_data_type(data_type: &DataType) -> bool {
+    matches!(
+        data_type,
+        DataType::Int16 | DataType::Int32 | DataType::Int64
+    )
 }
 
 #[cfg(test)]
