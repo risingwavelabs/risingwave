@@ -12,8 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use clap::Parser;
+use std::time::Duration;
+
+use clap::{Parser, ValueEnum};
 use risingwave_sqlsmith::reducer::shrink_file;
+use risingwave_sqlsmith::sqlreduce::Strategy;
+use tokio_postgres::NoTls;
+
+#[derive(Debug, Clone, ValueEnum)]
+enum ReductionStrategy {
+    Single,
+    Aggressive,
+    Consecutive,
+}
 
 /// Reduce an sql query
 #[derive(Parser, Debug)]
@@ -26,9 +37,44 @@ struct Args {
     /// Output file
     #[arg(short, long)]
     output_file: String,
+
+    /// Reducer strategy
+    #[arg(short, long, default_value = "single")]
+    strategy: ReductionStrategy,
+
+    /// For consecutive strategy, number of elements to reduce at once (used only when strategy = consecutive)
+    #[arg(short, long, default_value_t = 2)]
+    consecutive_k: usize,
 }
 
-fn main() {
+#[tokio::main(flavor = "multi_thread", worker_threads = 5)]
+async fn main() {
     let args = Args::parse();
-    shrink_file(&args.input_file, &args.output_file).unwrap();
+
+    let (client, connection) = tokio_postgres::Config::new()
+        .host("localhost")
+        .port(4566)
+        .dbname("dev")
+        .user("root")
+        .password("")
+        .connect_timeout(Duration::from_secs(5))
+        .connect(NoTls)
+        .await
+        .unwrap_or_else(|e| panic!("Failed to connect to database: {}", e));
+
+    tokio::spawn(async move {
+        if let Err(e) = connection.await {
+            tracing::error!("Postgres connection error: {:?}", e);
+        }
+    });
+
+    let strategy = match args.strategy {
+        ReductionStrategy::Single => Strategy::Single,
+        ReductionStrategy::Aggressive => Strategy::Aggressive,
+        ReductionStrategy::Consecutive => Strategy::Consecutive(args.consecutive_k),
+    };
+
+    shrink_file(&args.input_file, &args.output_file, strategy, &client)
+        .await
+        .unwrap();
 }

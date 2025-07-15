@@ -23,26 +23,38 @@ use risingwave_sqlparser::ast::{
     Cte, CteInner, Expr, FunctionArgExpr, Join, Query, Select, SetExpr, Statement, TableFactor,
     TableWithJoins, With,
 };
+use tokio_postgres::Client;
 
 use crate::parse_sql;
+use crate::sqlreduce::Strategy;
+use crate::sqlreduce::checker::Checker;
+use crate::sqlreduce::reducer::Reducer;
 use crate::utils::{create_file, read_file_contents, write_to_file};
 
 type Result<A> = anyhow::Result<A>;
 
 /// Shrinks a given failing query file.
-pub fn shrink_file(input_file_path: &str, output_file_path: &str) -> Result<()> {
+pub async fn shrink_file(
+    input_file_path: &str,
+    output_file_path: &str,
+    strategy: Strategy,
+    client: &Client,
+) -> Result<()> {
     // read failed sql
     let file_contents = read_file_contents(input_file_path)?;
 
     // reduce failed sql
-    let reduced_sql = shrink(&file_contents)?;
+    let reduced_sql = shrink_statements(&file_contents)?;
+
+    // shrink the reduced sql
+    let reduced_sql = shrink(&reduced_sql, strategy, client).await?;
 
     // write reduced sql
     let mut file = create_file(output_file_path).unwrap();
     write_to_file(&mut file, reduced_sql)
 }
 
-fn shrink(sql: &str) -> Result<String> {
+fn shrink_statements(sql: &str) -> Result<String> {
     let sql_statements = parse_sql(sql);
 
     // Session variable before the failing query.
@@ -92,6 +104,15 @@ fn shrink(sql: &str) -> Result<String> {
         });
 
     Ok(sql)
+}
+
+async fn shrink(sql: &str, strategy: Strategy, client: &Client) -> Result<String> {
+    let checker = Checker::new(client);
+    let mut reducer = Reducer::new(checker, strategy);
+
+    let reduced_sql = reducer.reduce(&sql).await?;
+
+    Ok(reduced_sql)
 }
 
 pub(crate) fn find_ddl_references(sql_statements: &[Statement]) -> HashSet<String> {
@@ -296,7 +317,7 @@ SET RW_TWO_PHASE_AGG = true;
 {query}
 "
         );
-        assert_eq!(expected, shrink(&sql).unwrap());
+        assert_eq!(expected, shrink_statements(&sql).unwrap());
     }
 
     #[test]
@@ -312,7 +333,7 @@ SET RW_TWO_PHASE_AGG = true;
 {query}
 "
         );
-        assert_eq!(expected, shrink(&sql).unwrap());
+        assert_eq!(expected, shrink_statements(&sql).unwrap());
     }
 
     #[test]
@@ -328,7 +349,7 @@ SET RW_TWO_PHASE_AGG = true;
 {query}
 "
         );
-        assert_eq!(expected, shrink(&sql).unwrap());
+        assert_eq!(expected, shrink_statements(&sql).unwrap());
     }
 
     #[test]
@@ -350,7 +371,7 @@ SET RW_TWO_PHASE_AGG = true;
 {query}
 "
         );
-        assert_eq!(expected, shrink(&sql).unwrap());
+        assert_eq!(expected, shrink_statements(&sql).unwrap());
     }
 
     #[test]
@@ -366,7 +387,7 @@ SET RW_TWO_PHASE_AGG = true;
 {query}
 "
         );
-        assert_eq!(expected, shrink(&sql).unwrap());
+        assert_eq!(expected, shrink_statements(&sql).unwrap());
     }
 
     #[test]
@@ -382,7 +403,7 @@ SET RW_TWO_PHASE_AGG = true;
 {query}
 "
         );
-        assert_eq!(expected, shrink(&sql).unwrap());
+        assert_eq!(expected, shrink_statements(&sql).unwrap());
     }
 
     #[test]
@@ -398,6 +419,6 @@ SET RW_TWO_PHASE_AGG = true;
 {query}
 "
         );
-        assert_eq!(expected, shrink(&sql).unwrap());
+        assert_eq!(expected, shrink_statements(&sql).unwrap());
     }
 }

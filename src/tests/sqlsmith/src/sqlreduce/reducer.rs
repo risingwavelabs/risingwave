@@ -29,7 +29,9 @@ use crate::sqlreduce::checker::Checker;
 use crate::sqlreduce::passes::pullup::{
     ArrayPullup, BinaryOperatorPullup, CasePullup, RowPullup, SetOperationPullup,
 };
-use crate::sqlreduce::passes::remove::{FromRemove, GroupByRemove, OrderByRemove, WhereRemove};
+use crate::sqlreduce::passes::remove::{
+    FromRemove, GroupByRemove, OrderByRemove, SelectItemRemove, WhereRemove,
+};
 use crate::sqlreduce::passes::replace::{NullReplace, ScalarReplace};
 use crate::sqlreduce::passes::{Strategy, Transform};
 
@@ -48,6 +50,7 @@ impl<'a> Reducer<'a> {
             Box::new(OrderByRemove),
             Box::new(WhereRemove),
             Box::new(FromRemove),
+            Box::new(SelectItemRemove),
             Box::new(BinaryOperatorPullup),
             Box::new(CasePullup),
             Box::new(RowPullup),
@@ -76,6 +79,7 @@ impl<'a> Reducer<'a> {
     ///
     /// # Returns
     /// - A simplified version of the last statement that still fails in the same way.
+    /// - The preceding statements are also returned as a string.
     ///
     /// # Errors
     /// - Returns an error if SQL parsing fails or if no statements are found.
@@ -108,6 +112,13 @@ impl<'a> Reducer<'a> {
             .await;
 
         info!("Reduction complete.");
+
+        let mut reduced_sqls = String::new();
+        for s in proceeding_stmts {
+            reduced_sqls.push_str(&s.to_string());
+            reduced_sqls.push_str(";\n");
+        }
+        reduced_sqls.push_str(&reduced_sql);
         Ok(reduced_sql)
     }
 

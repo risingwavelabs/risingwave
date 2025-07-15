@@ -36,21 +36,23 @@ impl Transform for GroupByRemove {
     fn get_reduction_points(&self, ast: AST) -> Vec<usize> {
         let mut reduction_points = Vec::new();
         if let Statement::Query(query) = &ast
-            && let SetExpr::Select(select) = &query.body {
-                for i in 0..select.group_by.len() {
-                    reduction_points.push(i);
-                }
+            && let SetExpr::Select(select) = &query.body
+        {
+            for i in 0..select.group_by.len() {
+                reduction_points.push(i);
             }
+        }
         reduction_points
     }
 
     fn apply_on(&self, ast: &mut AST, reduction_points: Vec<usize>) -> AST {
         if let Statement::Query(query) = ast
-            && let SetExpr::Select(select) = &mut query.body {
-                for i in reduction_points {
-                    select.group_by.remove(i);
-                }
+            && let SetExpr::Select(select) = &mut query.body
+        {
+            for i in reduction_points {
+                select.group_by.remove(i);
             }
+        }
         ast.clone()
     }
 }
@@ -113,19 +115,21 @@ impl Transform for WhereRemove {
         let mut reduction_points = Vec::new();
         if let Statement::Query(query) = &ast
             && let SetExpr::Select(select) = &query.body
-                && select.selection.is_some() {
-                    reduction_points.push(0);
-                }
+            && select.selection.is_some()
+        {
+            reduction_points.push(0);
+        }
         reduction_points
     }
 
     fn apply_on(&self, ast: &mut AST, reduction_points: Vec<usize>) -> AST {
         if let Statement::Query(query) = ast
-            && let SetExpr::Select(select) = &mut query.body {
-                for _ in reduction_points {
-                    select.selection = None;
-                }
+            && let SetExpr::Select(select) = &mut query.body
+        {
+            for _ in reduction_points {
+                select.selection = None;
             }
+        }
         ast.clone()
     }
 }
@@ -150,21 +154,64 @@ impl Transform for FromRemove {
     fn get_reduction_points(&self, ast: AST) -> Vec<usize> {
         let mut reduction_points = Vec::new();
         if let Statement::Query(query) = &ast
-            && let SetExpr::Select(select) = &query.body {
-                for i in 0..select.from.len() {
-                    reduction_points.push(i);
-                }
+            && let SetExpr::Select(select) = &query.body
+        {
+            for i in 0..select.from.len() {
+                reduction_points.push(i);
             }
+        }
         reduction_points
     }
 
     fn apply_on(&self, ast: &mut AST, reduction_points: Vec<usize>) -> AST {
         if let Statement::Query(query) = ast
-            && let SetExpr::Select(select) = &mut query.body {
-                for i in reduction_points {
-                    select.from.remove(i);
-                }
+            && let SetExpr::Select(select) = &mut query.body
+        {
+            for i in reduction_points {
+                select.from.remove(i);
             }
+        }
+        ast.clone()
+    }
+}
+
+/// Remove individual items from the SELECT list.
+///
+/// Example:
+/// ```sql
+/// SELECT a, b, c FROM t;
+/// ```
+/// May be reduced to:
+/// ```sql
+/// SELECT a, c FROM t;
+/// ```
+pub struct SelectItemRemove;
+
+impl Transform for SelectItemRemove {
+    fn name(&self) -> String {
+        "select_item_remove".to_owned()
+    }
+
+    fn get_reduction_points(&self, ast: AST) -> Vec<usize> {
+        let mut reduction_points = Vec::new();
+        if let Statement::Query(query) = &ast
+            && let SetExpr::Select(select) = &query.body
+        {
+            for i in 0..select.projection.len() {
+                reduction_points.push(i);
+            }
+        }
+        reduction_points
+    }
+
+    fn apply_on(&self, ast: &mut AST, reduction_points: Vec<usize>) -> AST {
+        if let Statement::Query(query) = ast
+            && let SetExpr::Select(select) = &mut query.body
+        {
+            for i in reduction_points {
+                select.projection.remove(i);
+            }
+        }
         ast.clone()
     }
 }

@@ -19,6 +19,10 @@ pub struct Checker<'a> {
 }
 
 impl<'a> Checker<'a> {
+    pub fn new(client: &'a Client) -> Self {
+        Self { client }
+    }
+
     pub async fn is_failure_preserved(&self, old: &str, new: &str) -> bool {
         let old_result = run_query(self.client, old).await;
         let new_result = run_query(self.client, new).await;
@@ -31,8 +35,6 @@ pub async fn run_query(client: &Client, query: &str) -> (bool, String) {
     let query_task = client.simple_query(query);
     match query_task.await {
         Ok(_) => (true, String::new()),
-        Err(e) => {
-            (false, e.to_string())
-        }
+        Err(e) => (false, e.to_string()),
     }
 }
