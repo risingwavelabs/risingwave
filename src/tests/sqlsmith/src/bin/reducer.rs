@@ -19,6 +19,7 @@ use risingwave_sqlsmith::reducer::shrink_file;
 use risingwave_sqlsmith::sqlreduce::Strategy;
 use thiserror_ext::AsReport;
 use tokio_postgres::NoTls;
+use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Clone, ValueEnum)]
 enum ReductionStrategy {
@@ -50,6 +51,12 @@ struct Args {
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 5)]
 async fn main() {
+    _ = tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .with_ansi(console::colors_enabled_stderr() && console::colors_enabled())
+        .with_writer(std::io::stderr)
+        .try_init();
+
     let args = Args::parse();
 
     let (client, connection) = tokio_postgres::Config::new()

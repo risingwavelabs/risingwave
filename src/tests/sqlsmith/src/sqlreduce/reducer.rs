@@ -119,7 +119,7 @@ impl<'a> Reducer<'a> {
             reduced_sqls.push_str(";\n");
         }
         reduced_sqls.push_str(&reduced_sql);
-        Ok(reduced_sql)
+        Ok(reduced_sqls)
     }
 
     /// Apply all transformations in a fixed-point loop until no further reduction is possible.
