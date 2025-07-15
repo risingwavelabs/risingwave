@@ -203,20 +203,6 @@ impl SourceManagerCore {
             }
         }
 
-        // for (source_id, fragments) in added_source_fragments {
-        //     self.source_fragments
-        //         .entry(source_id)
-        //         .or_default()
-        //         .extend(fragments);
-        // }
-        //
-        // for (source_id, fragments) in added_backfill_fragments {
-        //     self.backfill_fragments
-        //         .entry(source_id)
-        //         .or_default()
-        //         .extend(fragments);
-        // }
-
         for (source_id, fragments) in finished_backfill_fragments {
             let handle = self.managed_sources.get(&source_id).unwrap_or_else(|| {
                 panic!(
@@ -226,21 +212,6 @@ impl SourceManagerCore {
             });
             handle.finish_backfill(fragments.iter().map(|(id, _up_id)| *id).collect());
         }
-
-        // for (_, actor_splits) in split_assignment {
-        //     for (actor_id, splits) in actor_splits {
-        //         // override previous splits info
-        //         // self.actor_splits.insert(actor_id, splits);
-        //     }
-        // }
-
-        // for actor_id in dropped_actors {
-        //     self.actor_splits.remove(&actor_id);
-        // }
-
-        // for (source_id, fragment_ids) in dropped_source_fragments {
-        //     self.drop_source_fragments(Some(source_id), fragment_ids);
-        // }
 
         for (old_fragment_id, new_fragment_id) in fragment_replacements {
             // TODO: add source_id to the fragment_replacements to avoid iterating all sources
@@ -300,25 +271,36 @@ impl SourceManagerCore {
                 }
             }
         } else {
-            for (source_id, fragment_ids) in &mut self.source_fragments {
-                let mut dropped_ids = vec![];
-                for fragment_id in &dropped_fragment_ids {
-                    if fragment_ids.remove(fragment_id) {
-                        dropped_ids.push(*fragment_id);
-                    }
-                }
-                if !dropped_ids.is_empty() {
-                    if let Some(handle) = self.managed_sources.get(source_id) {
-                        handle.drop_fragments(dropped_ids);
-                    } else {
-                        panic_if_debug!(
-                            "source {source_id} not found when dropping fragment {dropped_ids:?}",
-                        );
-                    }
-                }
+            self.source_fragments
+                .retain(|source_id, fragment_ids| {
+                    let mut dropped_ids_for_this_source = vec![];
 
-                // XXX: handle empty source?
-            }
+                    fragment_ids.retain(|fragment_id| {
+                        if dropped_fragment_ids.contains(fragment_id) {
+                            dropped_ids_for_this_source.push(*fragment_id);
+                            false
+                        } else {
+                            true
+                        }
+                    });
+
+                    // If we dropped any fragments for this source, notify the managed source.
+                    if !dropped_ids_for_this_source.is_empty() {
+                        if let Some(handle) = self.managed_sources.get(source_id) {
+                            handle.drop_fragments(dropped_ids_for_this_source);
+                        } else {
+                            panic_if_debug!(
+                                "source {source_id} not found when dropping fragment {dropped_ids_for_this_source:?}",
+                            );
+                        }
+                    }
+
+                    // The key logic for the outer `retain`:
+                    // If the `fragment_ids` vector is now empty, this closure returns `false`,
+                    // which tells `self.source_fragments.retain` to REMOVE this source_id.
+                    // Otherwise, it returns `true`, and the source_id is KEPT.
+                    !fragment_ids.is_empty()
+                });
         }
     }
 }

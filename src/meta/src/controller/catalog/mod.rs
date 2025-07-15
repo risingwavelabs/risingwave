@@ -136,9 +136,7 @@ pub struct ReleaseContext {
     pub(crate) removed_secret_ids: Vec<SecretId>,
     /// Dropped sources (when `DROP SOURCE`), need to unregister from source manager.
     pub(crate) removed_source_ids: Vec<SourceId>,
-    /// Dropped Source fragments (when `DROP MATERIALIZED VIEW` referencing sources),
-    /// need to unregister from source manager.
-    // pub(crate) removed_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+
     pub(crate) removed_actors: HashSet<ActorId>,
     pub(crate) removed_fragments: HashSet<FragmentId>,
 }

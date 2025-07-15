@@ -1468,7 +1468,6 @@ impl DdlController {
             removed_state_table_ids,
             removed_source_ids,
             removed_secret_ids: secret_ids,
-            // removed_source_fragments: _,
             removed_actors,
             removed_fragments,
         } = release_ctx;

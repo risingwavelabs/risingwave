@@ -1717,7 +1717,6 @@ impl CatalogController {
         Ok(source_fragment_ids)
     }
 
-    // todo, refactor
     async fn query_actor_splits_from_db(
         &self,
         actor_ids: Option<&[model::ActorId]>,
@@ -1772,18 +1771,6 @@ impl CatalogController {
     ) -> MetaResult<HashMap<model::ActorId, Vec<SplitImpl>>> {
         let res = self.query_actor_splits_from_db(Some(actor_ids)).await?;
         self.process_actor_splits_result(res)
-    }
-
-    pub async fn load_actor_splits(&self) -> MetaResult<HashMap<ActorId, ConnectorSplits>> {
-        let inner = self.inner.read().await;
-        let splits: Vec<(ActorId, ConnectorSplits)> = Actor::find()
-            .select_only()
-            .columns([actor::Column::ActorId, actor::Column::Splits])
-            .filter(actor::Column::Splits.is_not_null())
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-        Ok(splits.into_iter().collect())
     }
 
     /// Get the actor count of `Materialize` or `Sink` fragment of the specified table.

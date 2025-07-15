@@ -1625,22 +1625,6 @@ impl ScaleController {
             }
         }
 
-        let mut stream_source_actor_splits = HashMap::new();
-        let mut stream_source_dropped_actors = HashSet::new();
-
-        // todo: handle adaptive splits
-        for (fragment_id, reschedule) in reschedules {
-            if !reschedule.actor_splits.is_empty() {
-                stream_source_actor_splits
-                    .insert(*fragment_id as FragmentId, reschedule.actor_splits.clone());
-                stream_source_dropped_actors.extend(reschedule.removed_actors.clone());
-            }
-        }
-
-        if !stream_source_actor_splits.is_empty() {
-            // todo, placeholder
-        }
-
         Ok(())
     }
 

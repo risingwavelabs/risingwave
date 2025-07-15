@@ -54,7 +54,6 @@ impl CatalogController {
 
         for fragment in created_fragments {
             {
-                // todo, toooooo heavy
                 let node = fragment.stream_node.to_protobuf();
                 if let Some(source_id) = node.find_stream_source() {
                     new_source_fragments.insert(fragment.fragment_id, source_id as SourceId);
