@@ -259,19 +259,23 @@ impl PostgresExternalTableReader {
 
 pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
     match ty_name.to_lowercase().as_str() {
-        "smallint" | "int2" => Some(PgType::INT2),
-        "integer" | "int" | "int4" => Some(PgType::INT4),
-        "bigint" | "int8" => Some(PgType::INT8),
+        "int2" => Some(PgType::INT2),
+        "int" | "int4" => Some(PgType::INT4),
+        "int8" => Some(PgType::INT8),
         "real" | "float4" => Some(PgType::FLOAT4),
         "double precision" | "float8" => Some(PgType::FLOAT8),
         "numeric" | "decimal" => Some(PgType::NUMERIC),
+        "money" => Some(PgType::MONEY),
         "boolean" | "bool" => Some(PgType::BOOL),
-        "varchar" | "character varying" => Some(PgType::VARCHAR),
+        "inet" | "xml" | "varchar" | "character varying" | "int4range" | "int8range"
+        | "numrange" | "tsrange" | "tstzrange" | "daterange" | "macaddr" | "macaddr8" | "cidr" => {
+            Some(PgType::VARCHAR)
+        }
         "char" | "character" | "bpchar" => Some(PgType::BPCHAR),
-        "text" => Some(PgType::TEXT),
+        "citext" | "text" => Some(PgType::TEXT),
         "bytea" => Some(PgType::BYTEA),
         "date" => Some(PgType::DATE),
-        "time" | "time without time zone" => Some(PgType::TIME),
+        "time" | "timetz" => Some(PgType::TIME),
         "timestamp" | "timestamp without time zone" => Some(PgType::TIMESTAMP),
         "timestamptz" | "timestamp with time zone" => Some(PgType::TIMESTAMPTZ),
         "interval" => Some(PgType::INTERVAL),
@@ -291,17 +295,22 @@ pub fn pg_type_to_rw_type(pg_type: &PgType) -> ConnectorResult<DataType> {
         PgType::INT8 => DataType::Int64,
         PgType::FLOAT4 => DataType::Float32,
         PgType::FLOAT8 => DataType::Float64,
-        PgType::NUMERIC => DataType::Decimal,
+        PgType::NUMERIC | PgType::MONEY => DataType::Decimal,
         PgType::DATE => DataType::Date,
         PgType::TIME => DataType::Time,
+        PgType::TIMETZ => DataType::Time,
+        PgType::POINT => DataType::Struct(risingwave_common::types::StructType::new(vec![
+            ("x", DataType::Float32),
+            ("y", DataType::Float32),
+        ])),
         PgType::TIMESTAMP => DataType::Timestamp,
         PgType::TIMESTAMPTZ => DataType::Timestamptz,
         PgType::INTERVAL => DataType::Interval,
-        PgType::VARCHAR | PgType::TEXT | PgType::BPCHAR => DataType::Varchar,
+        PgType::VARCHAR | PgType::TEXT | PgType::BPCHAR | PgType::UUID => DataType::Varchar,
         PgType::BYTEA => DataType::Bytea,
         PgType::JSON | PgType::JSONB => DataType::Jsonb,
         _ => {
-            return Err(anyhow::anyhow!("unsupported postgres type: {}", pg_type).into());
+            return Err(anyhow::anyhow!("111unsupported postgres type: {}", pg_type).into());
         }
     };
     Ok(data_type)

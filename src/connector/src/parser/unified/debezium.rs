@@ -202,7 +202,6 @@ pub fn parse_schema_change(
                 for col in columns.array_elements().unwrap() {
                     let name = jsonb_access_field!(col, "name", string);
                     let type_name = jsonb_access_field!(col, "typeName", string);
-
                     let data_type = match *connector_props {
                         ConnectorProperties::PostgresCdc(_) => {
                             let ty = type_name_to_pg_type(type_name.as_str());
