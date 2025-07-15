@@ -17,6 +17,7 @@ use std::time::Duration;
 use clap::{Parser, ValueEnum};
 use risingwave_sqlsmith::reducer::shrink_file;
 use risingwave_sqlsmith::sqlreduce::Strategy;
+use thiserror_ext::AsReport;
 use tokio_postgres::NoTls;
 
 #[derive(Debug, Clone, ValueEnum)]
@@ -60,11 +61,11 @@ async fn main() {
         .connect_timeout(Duration::from_secs(5))
         .connect(NoTls)
         .await
-        .unwrap_or_else(|e| panic!("Failed to connect to database: {}", e));
+        .unwrap_or_else(|e| panic!("Failed to connect to database: {}", e.as_report()));
 
     tokio::spawn(async move {
         if let Err(e) = connection.await {
-            tracing::error!("Postgres connection error: {:?}", e);
+            tracing::error!(error = %e.as_report(), "Postgres connection error");
         }
     });
 

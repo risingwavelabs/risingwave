@@ -14,7 +14,7 @@
 
 use risingwave_sqlparser::ast::{Expr, SelectItem, SetExpr, Statement, Value};
 
-use crate::sqlreduce::passes::{AST, Transform};
+use crate::sqlreduce::passes::{Ast, Transform};
 
 /// Replace scalar constants in SELECT projections with canonical placeholders.
 ///
@@ -56,7 +56,7 @@ impl Transform for ScalarReplace {
         "scalar_replace".to_owned()
     }
 
-    fn get_reduction_points(&self, ast: AST) -> Vec<usize> {
+    fn get_reduction_points(&self, ast: Ast) -> Vec<usize> {
         let mut reduction_points = Vec::new();
         if let Statement::Query(query) = &ast
             && let SetExpr::Select(select) = &query.body
@@ -70,7 +70,7 @@ impl Transform for ScalarReplace {
         reduction_points
     }
 
-    fn apply_on(&self, ast: &mut AST, reduction_points: Vec<usize>) -> AST {
+    fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
         if let Statement::Query(query) = ast
             && let SetExpr::Select(select) = &mut query.body
         {
@@ -109,7 +109,7 @@ impl Transform for NullReplace {
         "null_replace".to_owned()
     }
 
-    fn get_reduction_points(&self, ast: AST) -> Vec<usize> {
+    fn get_reduction_points(&self, ast: Ast) -> Vec<usize> {
         let mut reduction_points = Vec::new();
         if let Statement::Query(query) = &ast
             && let SetExpr::Select(select) = &query.body
@@ -123,7 +123,7 @@ impl Transform for NullReplace {
         reduction_points
     }
 
-    fn apply_on(&self, ast: &mut AST, reduction_points: Vec<usize>) -> AST {
+    fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
         if let Statement::Query(query) = ast
             && let SetExpr::Select(select) = &mut query.body
         {

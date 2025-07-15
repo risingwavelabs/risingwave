@@ -130,7 +130,7 @@ impl<'a> Reducer<'a> {
     ///   accept it and continue from that point.
     ///
     /// The process continues until a global fixed point is reached (i.e., no transformation
-    /// makes progress on any part of the AST).
+    /// makes progress on any part of the SQL).
     ///
     /// # Arguments
     /// - `sql`: The SQL string (usually the failing query) to reduce.

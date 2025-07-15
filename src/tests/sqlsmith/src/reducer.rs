@@ -110,7 +110,7 @@ async fn shrink(sql: &str, strategy: Strategy, client: &Client) -> Result<String
     let checker = Checker::new(client);
     let mut reducer = Reducer::new(checker, strategy);
 
-    let reduced_sql = reducer.reduce(&sql).await?;
+    let reduced_sql = reducer.reduce(sql).await?;
 
     Ok(reduced_sql)
 }

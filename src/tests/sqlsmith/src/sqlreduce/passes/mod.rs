@@ -20,7 +20,7 @@ pub mod pullup;
 pub mod remove;
 pub mod replace;
 
-pub type AST = Statement;
+pub type Ast = Statement;
 
 #[derive(Debug, Clone)]
 pub enum Strategy {
@@ -32,11 +32,11 @@ pub enum Strategy {
 pub trait Transform: Send + Sync {
     fn name(&self) -> String;
 
-    fn get_reduction_points(&self, ast: AST) -> Vec<usize>;
+    fn get_reduction_points(&self, ast: Ast) -> Vec<usize>;
 
-    fn apply_on(&self, ast: &mut AST, reduction_points: Vec<usize>) -> AST;
+    fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast;
 
-    fn transform(&self, ast: AST, idx: usize, strategy: Strategy) -> Vec<(AST, usize)> {
+    fn transform(&self, ast: Ast, idx: usize, strategy: Strategy) -> Vec<(Ast, usize)> {
         let reduction_points = self.get_reduction_points(ast.clone());
 
         match strategy {

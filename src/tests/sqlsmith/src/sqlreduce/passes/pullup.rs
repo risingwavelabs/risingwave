@@ -14,7 +14,7 @@
 
 use risingwave_sqlparser::ast::{Expr, Query, SelectItem, SetExpr, Statement};
 
-use crate::sqlreduce::passes::{AST, Transform};
+use crate::sqlreduce::passes::{Ast, Transform};
 
 /// Replace binary expressions in SELECT projections with their right-hand operand.
 ///
@@ -37,7 +37,7 @@ impl Transform for BinaryOperatorPullup {
         "binary_operator_pullup".to_owned()
     }
 
-    fn get_reduction_points(&self, ast: AST) -> Vec<usize> {
+    fn get_reduction_points(&self, ast: Ast) -> Vec<usize> {
         let mut reduction_points = Vec::new();
         if let Statement::Query(query) = &ast
             && let SetExpr::Select(select) = &query.body
@@ -54,7 +54,7 @@ impl Transform for BinaryOperatorPullup {
         reduction_points
     }
 
-    fn apply_on(&self, ast: &mut AST, reduction_points: Vec<usize>) -> AST {
+    fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
         if let Statement::Query(query) = ast
             && let SetExpr::Select(select) = &mut query.body
         {
@@ -96,7 +96,7 @@ impl Transform for CasePullup {
         "case_pullup".to_owned()
     }
 
-    fn get_reduction_points(&self, ast: AST) -> Vec<usize> {
+    fn get_reduction_points(&self, ast: Ast) -> Vec<usize> {
         let mut reduction_points = Vec::new();
         if let Statement::Query(query) = &ast
             && let SetExpr::Select(select) = &query.body
@@ -112,7 +112,7 @@ impl Transform for CasePullup {
         reduction_points
     }
 
-    fn apply_on(&self, ast: &mut AST, reduction_points: Vec<usize>) -> AST {
+    fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
         if let Statement::Query(query) = ast
             && let SetExpr::Select(select) = &mut query.body
         {
@@ -150,7 +150,7 @@ impl Transform for RowPullup {
         "row_pullup".to_owned()
     }
 
-    fn get_reduction_points(&self, ast: AST) -> Vec<usize> {
+    fn get_reduction_points(&self, ast: Ast) -> Vec<usize> {
         let mut reduction_points = Vec::new();
         if let Statement::Query(query) = &ast
             && let SetExpr::Select(select) = &query.body
@@ -166,7 +166,7 @@ impl Transform for RowPullup {
         reduction_points
     }
 
-    fn apply_on(&self, ast: &mut AST, reduction_points: Vec<usize>) -> AST {
+    fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
         if let Statement::Query(query) = ast
             && let SetExpr::Select(select) = &mut query.body
         {
@@ -202,7 +202,7 @@ impl Transform for ArrayPullup {
         "array_pullup".to_owned()
     }
 
-    fn get_reduction_points(&self, ast: AST) -> Vec<usize> {
+    fn get_reduction_points(&self, ast: Ast) -> Vec<usize> {
         let mut reduction_points = Vec::new();
         if let Statement::Query(query) = &ast
             && let SetExpr::Select(select) = &query.body
@@ -218,7 +218,7 @@ impl Transform for ArrayPullup {
         reduction_points
     }
 
-    fn apply_on(&self, ast: &mut AST, reduction_points: Vec<usize>) -> AST {
+    fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
         if let Statement::Query(query) = ast
             && let SetExpr::Select(select) = &mut query.body
         {
@@ -258,7 +258,7 @@ impl Transform for SetOperationPullup {
         "set_operation_pullup".to_owned()
     }
 
-    fn get_reduction_points(&self, ast: AST) -> Vec<usize> {
+    fn get_reduction_points(&self, ast: Ast) -> Vec<usize> {
         let mut reduction_points = Vec::new();
         if let Statement::Query(query) = &ast
             && let SetExpr::SetOperation { .. } = &query.body
@@ -269,7 +269,7 @@ impl Transform for SetOperationPullup {
         reduction_points
     }
 
-    fn apply_on(&self, ast: &mut AST, reduction_points: Vec<usize>) -> AST {
+    fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
         let mut new_ast = ast.clone();
         if let Statement::Query(query) = ast
             && let SetExpr::SetOperation { left, right, .. } = &mut query.body
