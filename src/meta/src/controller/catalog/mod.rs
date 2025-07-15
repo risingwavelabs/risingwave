@@ -434,6 +434,9 @@ impl CatalogController {
             filter_condition
         };
 
+        // Find `Creating` background streaming job of sink into table, they need to be cleaned up.
+        // TODO(August): remove it when background sink into table is unified.
+
         let dirty_job_objs: Vec<PartialObject> = streaming_job::Entity::find()
             .select_only()
             .column(streaming_job::Column::JobId)
@@ -507,14 +510,28 @@ impl CatalogController {
             .into_iter()
             .collect();
 
-        // Only notify delete for failed materialized views.
-        let dirty_mview_objs = dirty_job_objs
+        let dirty_background_jobs: HashSet<ObjectId> = streaming_job::Entity::find()
+            .select_only()
+            .column(streaming_job::Column::JobId)
+            .filter(
+                streaming_job::Column::JobId
+                    .is_in(dirty_job_ids.clone())
+                    .and(streaming_job::Column::CreateType.eq(CreateType::Background)),
+            )
+            .into_tuple()
+            .all(&txn)
+            .await?
+            .into_iter()
+            .collect();
+
+        // notify delete for failed materialized views and background jobs.
+        let to_notify_objs = dirty_job_objs
             .into_iter()
             .filter(|obj| {
                 matches!(
                     dirty_table_type_map.get(&obj.oid),
                     Some(TableType::MaterializedView)
-                )
+                ) || dirty_background_jobs.contains(&obj.oid)
             })
             .collect_vec();
 
@@ -540,7 +557,7 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        let dirty_mview_internal_table_objs = Object::find()
+        let dirty_internal_table_objs = Object::find()
             .select_only()
             .columns([
                 object::Column::Oid,
@@ -549,7 +566,7 @@ impl CatalogController {
                 object::Column::DatabaseId,
             ])
             .join(JoinType::InnerJoin, object::Relation::Table.def())
-            .filter(table::Column::BelongsToJobId.is_in(dirty_mview_objs.iter().map(|obj| obj.oid)))
+            .filter(table::Column::BelongsToJobId.is_in(to_notify_objs.iter().map(|obj| obj.oid)))
             .into_partial_model()
             .all(&txn)
             .await?;
@@ -570,9 +587,9 @@ impl CatalogController {
         txn.commit().await?;
 
         let object_group = build_object_group_for_delete(
-            dirty_mview_objs
+            to_notify_objs
                 .into_iter()
-                .chain(dirty_mview_internal_table_objs.into_iter())
+                .chain(dirty_internal_table_objs.into_iter())
                 .collect_vec(),
         );
 
@@ -798,15 +815,17 @@ impl CatalogControllerInner {
             .collect())
     }
 
-    /// `list_tables` return all `CREATED` tables, `CREATING` materialized views and internal tables that belong to them.
+    /// `list_tables` return all `CREATED` tables, `CREATING` materialized views/ `BACKGROUND` jobs and internal tables that belong to them.
     async fn list_tables(&self) -> MetaResult<Vec<PbTable>> {
         let table_objs = Table::find()
             .find_also_related(Object)
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
             .filter(
-                streaming_job::Column::JobStatus
-                    .eq(JobStatus::Created)
-                    .or(table::Column::TableType.eq(TableType::MaterializedView)),
+                streaming_job::Column::JobStatus.eq(JobStatus::Created).or(
+                    table::Column::TableType
+                        .eq(TableType::MaterializedView)
+                        .or(streaming_job::Column::CreateType.eq(CreateType::Background)),
+                ),
             )
             .all(&self.db)
             .await?;
@@ -894,18 +913,48 @@ impl CatalogControllerInner {
             .collect())
     }
 
-    /// `list_sinks` return all `CREATED` sinks.
+    /// `list_sinks` return all `CREATED` and `BACKGROUND` sinks.
     async fn list_sinks(&self) -> MetaResult<Vec<PbSink>> {
         let sink_objs = Sink::find()
             .find_also_related(Object)
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
-            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
+            .filter(
+                streaming_job::Column::JobStatus
+                    .eq(JobStatus::Created)
+                    .or(streaming_job::Column::CreateType.eq(CreateType::Background)),
+            )
             .all(&self.db)
             .await?;
 
+        let creating_sinks: HashSet<_> = StreamingJob::find()
+            .select_only()
+            .column(streaming_job::Column::JobId)
+            .filter(
+                streaming_job::Column::JobStatus
+                    .eq(JobStatus::Creating)
+                    .and(
+                        streaming_job::Column::JobId
+                            .is_in(sink_objs.iter().map(|(sink, _)| sink.sink_id)),
+                    ),
+            )
+            .into_tuple::<SinkId>()
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .collect();
+
         Ok(sink_objs
             .into_iter()
-            .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
+            .map(|(sink, obj)| {
+                let is_creating = creating_sinks.contains(&sink.sink_id);
+                let mut pb_sink: PbSink = ObjectModel(sink, obj.unwrap()).into();
+                pb_sink.stream_job_status = if is_creating {
+                    PbStreamJobStatus::Creating.into()
+                } else {
+                    PbStreamJobStatus::Created.into()
+                };
+                pb_sink
+            })
             .collect())
     }
 

@@ -340,6 +340,7 @@ struct ShowClusterRow {
 struct ShowJobRow {
     id: i64,
     statement: String,
+    create_type: String,
     progress: String,
 }
 
@@ -649,6 +650,7 @@ pub async fn handle_show_object(
             let rows = resp.into_iter().map(|job| ShowJobRow {
                 id: job.id as i64,
                 statement: job.statement,
+                create_type: job.create_type,
                 progress: job.progress,
             });
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
@@ -828,7 +830,7 @@ pub fn handle_show_create_object(
         }
         ShowCreateType::Sink => {
             let (sink, schema) =
-                catalog_reader.get_sink_by_name(&database, schema_path, &object_name)?;
+                catalog_reader.get_any_sink_by_name(&database, schema_path, &object_name)?;
             if !has_access_to_object(current_user, schema, sink.id.sink_id, sink.owner.user_id) {
                 return Err(CatalogError::NotFound("sink", name.to_string()).into());
             }

@@ -307,7 +307,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::RwRecoveryStatus
             | Type::PgTableIsVisible
             | Type::HasFunctionPrivilege
-            | Type::OpenaiEmbedding => self.impure = true,
+            | Type::OpenaiEmbedding
+            | Type::HasDatabasePrivilege => self.impure = true,
         }
     }
 }
