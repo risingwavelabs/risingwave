@@ -129,7 +129,7 @@ create database test with resource_group = 'test';
 db error: ERROR: Failed to run the query
 
 Caused by:
-  feature ResourceGroup is only available for tier Paid and above, while the current tier is Free
+  feature ResourceGroup is not available based on your license
 
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
 

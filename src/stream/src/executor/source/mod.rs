@@ -36,6 +36,8 @@ mod reader_stream;
 
 mod source_executor;
 pub use source_executor::*;
+mod dummy_source_executor;
+pub use dummy_source_executor::*;
 mod source_backfill_executor;
 pub use source_backfill_executor::*;
 mod fs_list_executor;

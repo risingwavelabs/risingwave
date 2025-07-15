@@ -160,7 +160,8 @@ fn make_prost_privilege(
                     Binder::resolve_schema_qualified_name(db_name, name)?;
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-                let (sink, _) = reader.get_sink_by_name(db_name, schema_path, &sink_name)?;
+                let (sink, _) =
+                    reader.get_created_sink_by_name(db_name, schema_path, &sink_name)?;
                 grant_objs.push(PbObject::SinkId(sink.id.sink_id));
             }
         }

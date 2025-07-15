@@ -70,8 +70,8 @@
         <jackson.version>2.19.1</jackson.version>
         <hadoop.version>3.4.1</hadoop.version>
         <testcontainers.version>1.21.3</testcontainers.version>
-        <aws.version>2.31.73</aws.version>
-        <jetty.version>12.0.22</jetty.version>
+        <aws.version>2.31.77</aws.version>
+        <jetty.version>12.0.23</jetty.version>
         <parquet.version>1.15.1</parquet.version>
     </properties>
 
@@ -115,7 +115,7 @@
             <dependency>
                 <groupId>org.apache.commons</groupId>
                 <artifactId>commons-lang3</artifactId>
-                <version>3.17.0</version>
+                <version>3.18.0</version>
             </dependency>
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>

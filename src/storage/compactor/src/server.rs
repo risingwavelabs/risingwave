@@ -282,6 +282,8 @@ pub async fn compactor_serve(
             ),
             CompactorMode::Shared => unreachable!(),
             CompactorMode::DedicatedIceberg => {
+                register_jvm_builder();
+
                 risingwave_storage::hummock::compactor::start_iceberg_compactor(
                     compactor_context.clone(),
                     hummock_meta_client.clone(),

@@ -170,6 +170,9 @@ message DropMaterializedViewResponse {
 
 message CreateViewRequest {
   catalog.View view = 1;
+
+  // The list of object IDs that this view depends on.
+  repeated uint32 dependencies = 2;
 }
 
 message CreateViewResponse {
@@ -214,6 +217,8 @@ message CreateTableRequest {
   stream_plan.StreamFragmentGraph fragment_graph = 3;
   TableJobType job_type = 4;
   bool if_not_exists = 5;
+  // The list of object IDs that this table depends on, currently only used for `SHARED_CDC_SOURCE`.
+  repeated uint32 dependencies = 6;
 }
 
 message CreateTableResponse {
@@ -429,6 +434,7 @@ message DdlProgress {
   uint64 id = 1;
   string statement = 2;
   string progress = 3;
+  string create_type = 4;
 }
 
 message GetDdlProgressResponse {

@@ -5,6 +5,9 @@ statement ok
 CREATE SCHEMA test_schema;
 
 statement ok
+CREATE DATABASE test_db;
+
+statement ok
 CREATE TABLE foo (id INT, name VARCHAR);
 
 statement ok
@@ -25,6 +28,9 @@ CREATE SOURCE foo_source (a int, b int) with (
 
 statement ok
 CREATE TABLE bar (id INT);
+
+statement ok
+GRANT ALL PRIVILEGES ON DATABASE test_db TO test_user;
 
 statement ok
 GRANT ALL PRIVILEGES ON foo TO test_user GRANTED BY root;
@@ -49,6 +55,9 @@ GRANT CREATE ON SCHEMA test_schema TO test_user;
 
 query error table not found: bar_err
 GRANT INSERT ON bar_err TO test_user WITH GRANT OPTION GRANTED BY root;
+
+query error database not found: test_db_err
+SELECT has_database_privilege('test_user', 'test_db_err', 'CONNECT');
 
 query error Invalid parameter user: User test_user_err not found
 SELECT has_table_privilege('test_user_err', 'foo', 'SELECT');
@@ -76,6 +85,11 @@ SELECT has_schema_privilege('test_user', 'test_schema', 'INSERT');
 
 query error Invalid parameter privilege: unrecognized privilege type: "DELETE"
 SELECT has_any_column_privilege('test_user', 'foo_mv'::regclass, 'DELETE');
+
+query I
+SELECT has_database_privilege('test_user', 'test_db', 'CONNECT');
+----
+t
 
 query I
 SELECT has_table_privilege('test_user', 'foo', 'SELECT');
@@ -214,6 +228,14 @@ SELECT has_schema_privilege('test_user', 'test_schema', 'CREATE');
 t
 
 statement ok
+REVOKE ALL PRIVILEGES ON DATABASE test_db FROM test_user;
+
+query I
+SELECT has_database_privilege('test_user', 'test_db', 'CONNECT');
+----
+f
+
+statement ok
 REVOKE SELECT ON ALL TABLES IN SCHEMA public FROM test_user GRANTED BY root;
 
 query I
@@ -260,6 +282,9 @@ t
 
 statement ok
 REVOKE EXECUTE ON FUNCTION foo_func(int) FROM test_user;
+
+statement ok
+DROP DATABASE test_db;
 
 statement ok
 DROP FUNCTION foo_func(int);

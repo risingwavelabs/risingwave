@@ -45,7 +45,6 @@ use super::monitor::SourceMetrics;
 use super::nats::source::NatsMeta;
 use super::nexmark::source::message::NexmarkMeta;
 use super::pulsar::source::PulsarMeta;
-use super::{AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
@@ -526,20 +525,6 @@ for_all_sources!(impl_connector_properties);
 impl Default for ConnectorProperties {
     fn default() -> Self {
         ConnectorProperties::Test(Box::default())
-    }
-}
-
-impl ConnectorProperties {
-    pub fn is_new_fs_connector_hash_map(with_properties: &HashMap<String, String>) -> bool {
-        with_properties
-            .get(UPSTREAM_SOURCE_KEY)
-            .map(|s| {
-                s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR)
-                    || s.eq_ignore_ascii_case(POSIX_FS_CONNECTOR)
-                    || s.eq_ignore_ascii_case(GCS_CONNECTOR)
-                    || s.eq_ignore_ascii_case(AZBLOB_CONNECTOR)
-            })
-            .unwrap_or(false)
     }
 }
 
