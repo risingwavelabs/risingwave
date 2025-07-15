@@ -141,8 +141,14 @@ impl ExternalTableReader for MockExternalTableReader {
         &self,
         _options: CdcTableSnapshotSplitOption,
     ) -> BoxStream<'_, ConnectorResult<CdcTableSnapshotSplit>> {
-        // Mock doesn't support parallelized backfill.
-        stream::empty::<ConnectorResult<CdcTableSnapshotSplit>>().boxed()
+        stream::once(async {
+            Ok(CdcTableSnapshotSplit {
+                split_id: 1,
+                left_bound_inclusive: OwnedRow::new(vec![None]),
+                right_bound_exclusive: OwnedRow::new(vec![None]),
+            })
+        })
+        .boxed()
     }
 
     fn split_snapshot_read(
@@ -152,6 +158,6 @@ impl ExternalTableReader for MockExternalTableReader {
         _right: OwnedRow,
         _split_columns: Vec<Field>,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
-        unimplemented!()
+        self.snapshot_read_inner()
     }
 }
