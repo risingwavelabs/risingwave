@@ -1282,7 +1282,7 @@ pub async fn handle(
         Statement::Deallocate { name, prepare } => {
             prepared_statement::handle_deallocate(name, prepare).await
         }
-        Statement::Vacuum { table_name } => vacuum::handle_vacuum(handler_args, table_name).await,
+        Statement::Vacuum { object_name } => vacuum::handle_vacuum(handler_args, object_name).await,
         _ => bail_not_implemented!("Unhandled statement: {}", stmt),
     }
 }
