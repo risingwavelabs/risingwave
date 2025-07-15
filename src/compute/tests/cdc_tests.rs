@@ -33,10 +33,10 @@ use risingwave_common::types::{Datum, JsonbVal};
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::SplitImpl;
-use risingwave_connector::source::cdc::DebeziumCdcSplit;
 use risingwave_connector::source::cdc::external::{
     CdcTableType, DebeziumOffset, DebeziumSourceOffset, ExternalTableConfig, SchemaTableName,
 };
+use risingwave_connector::source::cdc::{CdcScanOptions, DebeziumCdcSplit};
 use risingwave_hummock_sdk::test_batch_query_epoch;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::BatchTable;
@@ -238,8 +238,9 @@ async fn test_cdc_backfill() -> StreamResult<()> {
             Some(4), // limit a snapshot chunk to have <= 4 rows by rate limit
             CdcScanOptions {
                 disable_backfill: false,
-                snapshot_interval: 1,
+                snapshot_barrier_interval: 1,
                 snapshot_batch_size: 4,
+                ..Default::default()
             },
         )
         .boxed(),

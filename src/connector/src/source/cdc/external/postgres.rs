@@ -120,7 +120,7 @@ impl ExternalTableReader for PostgresExternalTableReader {
             // No parallel cdc splits.
             return Ok(());
         }
-        // TODO: for numeric types, use evenly-sized partition to optimize performance.
+        // TODO(zw): for numeric types, use evenly-sized partition to optimize performance.
 
         let Some((min_value, max_value)) = self.min_and_max().await? else {
             let left_bound_row = OwnedRow::new(vec![None]);
