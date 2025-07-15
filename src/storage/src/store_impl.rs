@@ -19,7 +19,8 @@ use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
 use foyer::{
-    CacheBuilder, DirectFsDeviceOptions, Engine, FifoPicker, HybridCacheBuilder, LargeEngineOptions,
+    CacheBuilder, FifoPicker, FsDeviceBuilder, HybridCacheBuilder, LargeObjectEngineBuilder,
+    PsyncIoEngineBuilder,
 };
 use futures::FutureExt;
 use futures::future::BoxFuture;
@@ -701,32 +702,38 @@ impl StateStoreImpl {
                 .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
                     u64::BITS as usize / 8 + value.estimate_size()
                 })
-                .storage(Engine::Large(
-                    LargeEngineOptions::new()
-                        .with_indexer_shards(opts.meta_file_cache_indexer_shards)
-                        .with_flushers(opts.meta_file_cache_flushers)
-                        .with_reclaimers(opts.meta_file_cache_reclaimers)
-                        .with_buffer_pool_size(opts.meta_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
-                        .with_clean_region_threshold(
-                            opts.meta_file_cache_reclaimers + opts.meta_file_cache_reclaimers / 2,
-                        )
-                        .with_recover_concurrency(opts.meta_file_cache_recover_concurrency)
-                        .with_blob_index_size(16 * KB)
-                        .with_eviction_pickers(vec![Box::new(FifoPicker::new(
-                            opts.meta_file_cache_fifo_probation_ratio,
-                        ))]),
-                ));
+                .storage();
 
             if !opts.meta_file_cache_dir.is_empty() {
                 if let Err(e) = Feature::ElasticDiskCache.check_available() {
                     tracing::warn!(error = %e.as_report(), "ElasticDiskCache is not available.");
                 } else {
                     builder = builder
-                        .with_device_options(
-                            DirectFsDeviceOptions::new(&opts.meta_file_cache_dir)
+                        .with_device_builder(
+                            FsDeviceBuilder::new(&opts.meta_file_cache_dir)
                                 .with_capacity(opts.meta_file_cache_capacity_mb * MB)
-                                .with_file_size(opts.meta_file_cache_file_capacity_mb * MB)
-                                .with_throttle(opts.meta_file_cache_throttle.clone()),
+                                .with_throttle(opts.meta_file_cache_throttle.clone())
+                                .with_direct(true),
+                        )
+                        .with_io_engine_builder(PsyncIoEngineBuilder::new())
+                        .with_engine_builder(
+                            LargeObjectEngineBuilder::new()
+                                .with_region_size(opts.meta_file_cache_file_capacity_mb * MB)
+                                .with_indexer_shards(opts.meta_file_cache_indexer_shards)
+                                .with_flushers(opts.meta_file_cache_flushers)
+                                .with_reclaimers(opts.meta_file_cache_reclaimers)
+                                .with_buffer_pool_size(
+                                    opts.meta_file_cache_flush_buffer_threshold_mb * MB,
+                                ) // 128 MiB
+                                .with_clean_region_threshold(
+                                    opts.meta_file_cache_reclaimers
+                                        + opts.meta_file_cache_reclaimers / 2,
+                                )
+                                .with_recover_concurrency(opts.meta_file_cache_recover_concurrency)
+                                .with_blob_index_size(16 * KB)
+                                .with_eviction_pickers(vec![Box::new(FifoPicker::new(
+                                    opts.meta_file_cache_fifo_probation_ratio,
+                                ))]),
                         )
                         .with_recover_mode(opts.meta_file_cache_recover_mode)
                         .with_compression(opts.meta_file_cache_compression)
@@ -751,32 +758,38 @@ impl StateStoreImpl {
                     // FIXME(MrCroxx): Calculate block weight more accurately.
                     u64::BITS as usize * 2 / 8 + value.raw().len()
                 })
-                .storage(Engine::Large(
-                    LargeEngineOptions::new()
-                        .with_indexer_shards(opts.data_file_cache_indexer_shards)
-                        .with_flushers(opts.data_file_cache_flushers)
-                        .with_reclaimers(opts.data_file_cache_reclaimers)
-                        .with_buffer_pool_size(opts.data_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
-                        .with_clean_region_threshold(
-                            opts.data_file_cache_reclaimers + opts.data_file_cache_reclaimers / 2,
-                        )
-                        .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
-                        .with_blob_index_size(16 * KB)
-                        .with_eviction_pickers(vec![Box::new(FifoPicker::new(
-                            opts.data_file_cache_fifo_probation_ratio,
-                        ))]),
-                ));
+                .storage();
 
             if !opts.data_file_cache_dir.is_empty() {
                 if let Err(e) = Feature::ElasticDiskCache.check_available() {
                     tracing::warn!(error = %e.as_report(), "ElasticDiskCache is not available.");
                 } else {
                     builder = builder
-                        .with_device_options(
-                            DirectFsDeviceOptions::new(&opts.data_file_cache_dir)
+                        .with_device_builder(
+                            FsDeviceBuilder::new(&opts.data_file_cache_dir)
                                 .with_capacity(opts.data_file_cache_capacity_mb * MB)
-                                .with_file_size(opts.data_file_cache_file_capacity_mb * MB)
-                                .with_throttle(opts.data_file_cache_throttle.clone()),
+                                .with_throttle(opts.data_file_cache_throttle.clone())
+                                .with_direct(true),
+                        )
+                        .with_io_engine_builder(PsyncIoEngineBuilder::new())
+                        .with_engine_builder(
+                            LargeObjectEngineBuilder::new()
+                                .with_region_size(opts.data_file_cache_file_capacity_mb * MB)
+                                .with_indexer_shards(opts.data_file_cache_indexer_shards)
+                                .with_flushers(opts.data_file_cache_flushers)
+                                .with_reclaimers(opts.data_file_cache_reclaimers)
+                                .with_buffer_pool_size(
+                                    opts.data_file_cache_flush_buffer_threshold_mb * MB,
+                                ) // 128 MiB
+                                .with_clean_region_threshold(
+                                    opts.data_file_cache_reclaimers
+                                        + opts.data_file_cache_reclaimers / 2,
+                                )
+                                .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
+                                .with_blob_index_size(16 * KB)
+                                .with_eviction_pickers(vec![Box::new(FifoPicker::new(
+                                    opts.data_file_cache_fifo_probation_ratio,
+                                ))]),
                         )
                         .with_recover_mode(opts.data_file_cache_recover_mode)
                         .with_compression(opts.data_file_cache_compression)
