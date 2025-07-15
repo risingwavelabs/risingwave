@@ -54,7 +54,7 @@ pub async fn handle_vacuum(
 
                 // Find the iceberg sink
                 let (sink, _) = catalog_reader
-                    .get_sink_by_name(db_name, schema_path, &sink_name)
+                    .get_created_sink_by_name(db_name, schema_path, &sink_name)
                     .map_err(|_| {
                         RwError::from(ErrorCode::CatalogError(
                             format!(
@@ -75,7 +75,7 @@ pub async fn handle_vacuum(
                     .into());
             }
         } else if let Ok((sink, _)) =
-            catalog_reader.get_sink_by_name(db_name, schema_path, &real_object_name)
+            catalog_reader.get_created_sink_by_name(db_name, schema_path, &real_object_name)
         {
             if let Some(connector_type) = sink.properties.get(CONNECTOR_TYPE_KEY) {
                 if connector_type == "iceberg" {
