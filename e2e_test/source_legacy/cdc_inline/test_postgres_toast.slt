@@ -50,10 +50,10 @@ select
 from toast_test_table
 order by id;
 ----
-1	toast_record_1	[0-9]+	true	true
-2	toast_record_2	[0-9]+	true	true
-3	toast_record_3	[0-9]+	true	true
-4	toast_record_4	[0-9]+	true	true
+1 toast_record_1 17261 t t
+2 toast_record_2 17261 t t
+3 toast_record_3 17261 t t
+4 toast_record_4 17261 t t
 
 # Test 2: Insert incremental data with TOAST in PostgreSQL
 statement ok
@@ -81,7 +81,7 @@ select
 from toast_test_table
 where name = 'incremental_toast';
 ----
-5	incremental_toast	[0-9]+	true	true
+5 incremental_toast	8193 t t
 
 # Verify total count after incremental insert
 query TTTTT
