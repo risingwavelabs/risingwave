@@ -28,6 +28,7 @@ use thiserror_ext::AsReport;
 
 use super::SecretId;
 use super::error::{SecretError, SecretResult};
+use super::vault_client::{VaultAuth, VaultClient, VaultConfig};
 
 static INSTANCE: std::sync::OnceLock<LocalSecretManager> = std::sync::OnceLock::new();
 
@@ -141,10 +142,48 @@ impl LocalSecretManager {
         Ok(options)
     }
 
+    pub async fn fill_secrets_async(
+        &self,
+        mut options: BTreeMap<String, String>,
+        secret_refs: BTreeMap<String, PbSecretRef>,
+    ) -> SecretResult<BTreeMap<String, String>> {
+        for (option_key, secret_ref) in secret_refs {
+            let path_str = self.fill_secret_async(secret_ref).await?;
+            options.insert(option_key, path_str);
+        }
+        Ok(options)
+    }
+
     pub fn fill_secret(&self, secret_ref: PbSecretRef) -> SecretResult<String> {
         let secret_guard: RwLockReadGuard<'_, parking_lot::RawRwLock, HashMap<u32, Vec<u8>>> =
             self.secrets.read();
         self.fill_secret_inner(secret_ref, &secret_guard)
+    }
+
+    pub async fn fill_secret_async(&self, secret_ref: PbSecretRef) -> SecretResult<String> {
+        let secret_id = secret_ref.secret_id;
+        let pb_secret_bytes = {
+            let secret_guard = self.secrets.read();
+            secret_guard
+                .get(&secret_id)
+                .ok_or(SecretError::ItemNotFound(secret_id))?
+                .clone()
+        };
+
+        let secret_value_bytes = Self::get_secret_value_async(&pb_secret_bytes).await?;
+        match secret_ref.ref_as() {
+            RefAsType::Text => {
+                // We converted the secret string from sql to bytes using `as_bytes` in frontend.
+                // So use `from_utf8` here to convert it back to string.
+                Ok(String::from_utf8(secret_value_bytes.clone())?)
+            }
+            RefAsType::File => {
+                let path_str =
+                    self.get_or_init_secret_file(secret_id, secret_value_bytes.clone())?;
+                Ok(path_str)
+            }
+            RefAsType::Unspecified => Err(SecretError::UnspecifiedRefType(secret_id)),
+        }
     }
 
     fn fill_secret_inner(
@@ -207,7 +246,56 @@ impl LocalSecretManager {
         let secret_value = match Self::get_pb_secret_backend(pb_secret_bytes)? {
             risingwave_pb::secret::secret::SecretBackend::Meta(backend) => backend.value.clone(),
             risingwave_pb::secret::secret::SecretBackend::HashicorpVault(_) => {
-                return Err(anyhow!("hashicorp_vault backend is not implemented yet").into());
+                return Err(anyhow!(
+                    "hashicorp_vault backend requires async resolution, use get_secret_value_async"
+                )
+                .into());
+            }
+        };
+        Ok(secret_value)
+    }
+
+    async fn get_secret_value_async(pb_secret_bytes: &[u8]) -> SecretResult<Vec<u8>> {
+        let secret_value = match Self::get_pb_secret_backend(pb_secret_bytes)? {
+            risingwave_pb::secret::secret::SecretBackend::Meta(backend) => backend.value.clone(),
+            risingwave_pb::secret::secret::SecretBackend::HashicorpVault(vault_backend) => {
+                // Convert the protobuf backend to VaultConfig
+                let auth = match vault_backend.auth {
+                    Some(
+                        risingwave_pb::secret::secret_hashicorp_vault_backend::Auth::TokenAuth(
+                            token_auth,
+                        ),
+                    ) => VaultAuth::Token {
+                        token: token_auth.token,
+                    },
+                    Some(
+                        risingwave_pb::secret::secret_hashicorp_vault_backend::Auth::ApproleAuth(
+                            approle_auth,
+                        ),
+                    ) => VaultAuth::AppRole {
+                        role_id: approle_auth.role_id,
+                        secret_id: approle_auth.secret_id,
+                    },
+                    None => {
+                        return Err(anyhow!("No auth method specified for Vault backend").into());
+                    }
+                };
+
+                let config = VaultConfig {
+                    addr: vault_backend.addr,
+                    path: vault_backend.path,
+                    field: vault_backend.field,
+                    auth,
+                    tls_skip_verify: vault_backend.tls_skip_verify,
+                    cache_ttl_secs: if vault_backend.cache_ttl_secs > 0 {
+                        Some(vault_backend.cache_ttl_secs)
+                    } else {
+                        None
+                    },
+                };
+
+                let client = VaultClient::new(config)?;
+                client.get_secret().await?
             }
         };
         Ok(secret_value)

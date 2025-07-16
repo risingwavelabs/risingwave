@@ -15,7 +15,6 @@
 use anyhow::anyhow;
 use pgwire::pg_response::StatementType;
 use prost::Message;
-use risingwave_common::bail_not_implemented;
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_pb::secret::secret;
@@ -67,8 +66,27 @@ pub async fn handle_alter_secret(
                     };
                     secret_payload.encode_to_vec()
                 }
-                secret::SecretBackend::HashicorpVault(_) => {
-                    bail_not_implemented!("hashicorp_vault backend is not implemented yet")
+                secret::SecretBackend::HashicorpVault(vault_backend) => {
+                    // For Vault backend, we need to preserve the original configuration
+                    // and only allow changing specific parameters if provided
+                    if new_credential != risingwave_sqlparser::ast::Value::Null {
+                        return Err(crate::error::ErrorCode::InvalidParameterValue(
+                            "credential must be null when altering hashicorp_vault backend"
+                                .to_owned(),
+                        )
+                        .into());
+                    }
+
+                    // Return the original vault backend configuration for now
+                    // In the future, we could allow updating specific vault parameters
+                    let secret_payload = risingwave_pb::secret::Secret {
+                        secret_backend: Some(
+                            risingwave_pb::secret::secret::SecretBackend::HashicorpVault(
+                                vault_backend.clone(),
+                            ),
+                        ),
+                    };
+                    secret_payload.encode_to_vec()
                 }
             }
         } else {

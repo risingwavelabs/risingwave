@@ -14,7 +14,6 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use prost::Message;
-use risingwave_common::bail_not_implemented;
 use risingwave_common::license::Feature;
 use risingwave_sqlparser::ast::{CreateSecretStatement, SqlOption, Value};
 
@@ -99,7 +98,123 @@ pub(crate) fn get_secret_payload(credential: Value, with_options: WithOptions) -
                     )
                     .into());
                 }
-                bail_not_implemented!("hashicorp_vault backend is not implemented yet")
+
+                // Parse required parameters
+                let addr = with_options
+                    .get("addr")
+                    .ok_or_else(|| {
+                        ErrorCode::InvalidParameterValue(
+                            "'addr' is required for hashicorp_vault backend".to_owned(),
+                        )
+                    })?
+                    .clone();
+
+                let path = with_options
+                    .get("path")
+                    .ok_or_else(|| {
+                        ErrorCode::InvalidParameterValue(
+                            "'path' is required for hashicorp_vault backend".to_owned(),
+                        )
+                    })?
+                    .clone();
+
+                let field = with_options
+                    .get("field")
+                    .cloned()
+                    .unwrap_or_else(|| "value".to_owned());
+
+                // Parse auth method
+                let auth_method = with_options
+                    .get("auth_method")
+                    .ok_or_else(|| {
+                        ErrorCode::InvalidParameterValue(
+                            "'auth_method' is required for hashicorp_vault backend".to_owned(),
+                        )
+                    })?
+                    .to_lowercase();
+
+                // Parse optional parameters
+                let tls_skip_verify = with_options
+                    .get("tls_skip_verify")
+                    .map(|v| v.to_lowercase() == "true")
+                    .unwrap_or(false);
+
+                let cache_ttl_secs = with_options
+                    .get("cache_ttl_secs")
+                    .map(|v| v.parse::<u32>())
+                    .transpose()
+                    .map_err(|_| {
+                        ErrorCode::InvalidParameterValue(
+                            "'cache_ttl_secs' must be a valid integer".to_owned(),
+                        )
+                    })?
+                    .unwrap_or(0);
+
+                // Create the auth oneof
+                let auth_oneof = match auth_method.as_str() {
+                    "token" => {
+                        let token = with_options
+                            .get("auth_token")
+                            .ok_or_else(|| {
+                                ErrorCode::InvalidParameterValue(
+                                    "'auth_token' is required for token auth method".to_owned(),
+                                )
+                            })?
+                            .clone();
+                        Some(
+                            risingwave_pb::secret::secret_hashicorp_vault_backend::Auth::TokenAuth(
+                                risingwave_pb::secret::VaultTokenAuth { token },
+                            ),
+                        )
+                    }
+                    "approle" => {
+                        let role_id = with_options
+                            .get("auth_role_id")
+                            .ok_or_else(|| {
+                                ErrorCode::InvalidParameterValue(
+                                    "'auth_role_id' is required for approle auth method".to_owned(),
+                                )
+                            })?
+                            .clone();
+                        let secret_id = with_options
+                            .get("auth_secret_id")
+                            .ok_or_else(|| {
+                                ErrorCode::InvalidParameterValue(
+                                    "'auth_secret_id' is required for approle auth method"
+                                        .to_owned(),
+                                )
+                            })?
+                            .clone();
+                        Some(
+                            risingwave_pb::secret::secret_hashicorp_vault_backend::Auth::ApproleAuth(
+                                risingwave_pb::secret::VaultAppRoleAuth { role_id, secret_id },
+                            ),
+                        )
+                    }
+                    _ => {
+                        return Err(ErrorCode::InvalidParameterValue(format!(
+                            "Unsupported auth method: {}. Supported methods are: token, approle",
+                            auth_method
+                        ))
+                        .into());
+                    }
+                };
+
+                let backend = risingwave_pb::secret::Secret {
+                    secret_backend: Some(
+                        risingwave_pb::secret::secret::SecretBackend::HashicorpVault(
+                            risingwave_pb::secret::SecretHashicorpVaultBackend {
+                                addr,
+                                path,
+                                field,
+                                auth: auth_oneof,
+                                tls_skip_verify,
+                                cache_ttl_secs,
+                            },
+                        ),
+                    ),
+                };
+                Ok(backend.encode_to_vec())
             }
             _ => Err(ErrorCode::InvalidParameterValue(format!(
                 "secret backend \"{}\" is not supported. Supported backends are: {}",
