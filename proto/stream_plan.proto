@@ -128,6 +128,11 @@ message RefreshStartMutation {
   uint32 table_id = 1;
 }
 
+message LoadFinishMutation {
+  // Table ID to finish loading operation.
+  uint32 table_id = 1;
+}
+
 message BarrierMutation {
   oneof mutation {
     // Add new dispatchers to some actors, used for creating materialized views.
@@ -157,6 +162,8 @@ message BarrierMutation {
     StartFragmentBackfillMutation start_fragment_backfill = 14;
     // Start refresh signal for refreshing tables
     RefreshStartMutation refresh_start = 15;
+    // Load finish signal for refreshing tables
+    LoadFinishMutation load_finish = 16;
     // Combined mutation.
     // Currently, it can only be Add & Update, which is for sink into table.
     CombinedMutation combined = 100;
@@ -364,6 +371,9 @@ message MaterializeNode {
   repeated common.ColumnOrder column_orders = 2;
   // Used for internal table states.
   catalog.Table table = 3;
+  // For refreshable tables, staging table for collecting new data during refresh.
+  // This table has the same schema as the main table but with a different table_id.
+  optional catalog.Table staging_table = 5;
 }
 
 message AggCallState {

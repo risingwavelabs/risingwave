@@ -15,8 +15,9 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
-use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
+use risingwave_connector::source::{BatchSourceSplitImpl, SplitId, SplitImpl, SplitMetaData};
 use risingwave_storage::StateStore;
 
 use super::SourceStateTableHandler;
@@ -46,6 +47,9 @@ pub struct StreamSourceCore<S: StateStore> {
     /// Source messages will only write the cache.
     /// It is read on split change and rebuild stream reader on error.
     pub(crate) updated_splits_in_epoch: HashMap<SplitId, SplitImpl>,
+
+    /// Is refreshable batch source
+    pub(crate) is_batch_source: bool,
 }
 
 impl<S> StreamSourceCore<S>
@@ -59,6 +63,9 @@ where
         source_desc_builder: SourceDescBuilder,
         split_state_store: SourceStateTableHandler<S>,
     ) -> Self {
+        let is_batch_source = source_desc_builder
+            .with_properties()
+            .is_refreshable_connector();
         Self {
             source_id,
             source_name,
@@ -67,6 +74,7 @@ where
             latest_split_info: HashMap::new(),
             split_state_store,
             updated_splits_in_epoch: HashMap::new(),
+            is_batch_source,
         }
     }
 
@@ -75,5 +83,22 @@ where
             .into_iter()
             .map(|split| (split.id(), split))
             .collect();
+    }
+
+    /// # Panics
+    /// If the source is not a batch source.
+    pub fn get_batch_split(&self) -> BatchSourceSplitImpl {
+        debug_assert_eq!(
+            self.latest_split_info.len(),
+            1,
+            "batch source should have only one split"
+        );
+        self.latest_split_info
+            .values()
+            .next()
+            .unwrap()
+            .clone()
+            .as_batch_split()
+            .unwrap()
     }
 }

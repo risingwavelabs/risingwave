@@ -193,6 +193,7 @@ impl StreamReaderBuilder {
 
             let (stream, _) = build_stream_result.unwrap();
             let stream = apply_rate_limit(stream, self.rate_limit).boxed();
+            let mut is_error = false;
             #[for_await]
             'consume: for msg in stream {
                 match msg {
@@ -214,9 +215,21 @@ impl StreamReaderBuilder {
                             actor_id = self.actor_ctx.id,
                             "stream source reader error"
                         );
+                        is_error = true;
                         break 'consume;
                     }
                 }
+            }
+            if !is_error {
+                tracing::info!("stream source reader consume finished");
+                latest_splits_info.values_mut().for_each(|split_impl| {
+                    if let Some(mut batch_split) = split_impl.clone().as_batch_split() {
+                        batch_split.finish();
+                        *split_impl = batch_split.into();
+                    }
+                });
+                yield (StreamChunk::default(), latest_splits_info.clone());
+                break 'build_consume_loop;
             }
             tracing::info!("stream source reader error, retry in 1s");
             tokio::time::sleep(Duration::from_secs(1)).await;
