@@ -474,15 +474,14 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         } else {
             let storage = &this.storages;
             let agg_funcs = &this.agg_funcs;
-            let futs =
-                vars.dirty_groups
-                    .drain()
-                    .into_iter()
-                    .map(|(key, mut agg_group)| async move {
-                        let (change, stats) =
-                            agg_group.build_outputs_change(storage, agg_funcs).await?;
-                        Ok::<_, StreamExecutorError>((change, stats, key, agg_group))
-                    });
+            let futs = vars
+                .dirty_groups
+                .drain()
+                .map(|(key, mut agg_group)| async move {
+                    let (change, stats) =
+                        agg_group.build_outputs_change(storage, agg_funcs).await?;
+                    Ok::<_, StreamExecutorError>((change, stats, key, agg_group))
+                });
             let mut buffered = stream::iter(futs).buffer_unordered(10).fuse();
             while let Some(result) = buffered.next().await {
                 let (change, stats, key, agg_group) = result?;
