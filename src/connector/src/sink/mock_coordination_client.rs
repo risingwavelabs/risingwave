@@ -160,7 +160,11 @@ impl MockSinkCoordinationRpcClient {
                                 metadata,
                             })),
                     }) => {
-                        mock_coordinator_committer.clone().lock().await.commit(epoch, vec![metadata.unwrap()]).await.map_err(|e| Status::from_error(Box::new(e)))?;
+                        let metadata = match metadata {
+                            Some(metadata) => vec![metadata],
+                            None => vec![]
+                        };
+                        mock_coordinator_committer.clone().lock().await.commit(epoch, metadata).await.map_err(|e| Status::from_error(Box::new(e)))?;
                         response_tx_clone.clone().send(Ok(CoordinateResponse {
                             msg: Some(coordinate_response::Msg::CommitResponse(CommitResponse{epoch})),
                         })).await.map_err(|e| Status::from_error(Box::new(e)))?;

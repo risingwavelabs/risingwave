@@ -114,7 +114,6 @@ pub enum EngineType {
     Fs,
     Azblob,
     Webhdfs,
-    Snowflake,
 }
 
 impl<S: OpendalSinkBackend> Sink for FileSink<S> {
@@ -124,11 +123,6 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
     const SINK_NAME: &'static str = S::SINK_NAME;
 
     async fn validate(&self) -> Result<()> {
-        if matches!(self.engine_type, EngineType::Snowflake) {
-            risingwave_common::license::Feature::SnowflakeSink
-                .check_available()
-                .map_err(|e| anyhow::anyhow!(e))?;
-        }
         if !self.is_append_only {
             return Err(SinkError::Config(anyhow!(
                 "File sink only supports append-only mode at present. \
@@ -179,16 +173,9 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
         let op = S::new_operator(config.clone())?;
         let batching_strategy = S::get_batching_strategy(config.clone());
         let engine_type = S::get_engine_type();
-        let format_desc = match param.format_desc {
-            Some(desc) => desc,
-            None => {
-                if let EngineType::Snowflake = engine_type {
-                    SinkFormatDesc::plain_json_for_snowflake_only()
-                } else {
-                    return Err(SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")));
-                }
-            }
-        };
+        let format_desc = param
+            .format_desc
+            .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?;
         Ok(Self {
             op,
             path,
@@ -412,7 +399,6 @@ impl OpenDalSinkWriter {
         let object_name = {
             let base_path = match self.engine_type {
                 EngineType::Fs => "".to_owned(),
-                EngineType::Snowflake if self.write_path.is_empty() => "".to_owned(),
                 _ => format!("{}/", self.write_path),
             };
 
