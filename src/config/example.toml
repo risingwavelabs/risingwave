@@ -238,6 +238,8 @@ iceberg_compaction_max_record_batch_rows = 1024
 iceberg_compaction_min_size_per_partition_mb = 1024
 iceberg_compaction_max_file_count_per_partition = 32
 iceberg_compaction_write_parquet_max_row_group_rows = 102400
+iceberg_compaction_small_file_threshold_mb = 32
+iceberg_compaction_max_task_total_size_mb = 51200
 
 [storage.cache]
 vector_block_cache_capacity_mb = 16
