@@ -147,6 +147,27 @@ impl BuildingFragment {
                     table.definition = job.name();
                 }
 
+                tracing::info!(
+                    table_id = %table.id,
+                    refreshable = %table.refreshable,
+                    staging_table_exists = %materialize_node.staging_table.is_some(),
+                    "Processing MaterializeNode in fill_job"
+                );
+
+                // // If the table is refreshable and staging_table is available, fill it too
+                // if table.refreshable && materialize_node.staging_table.is_some() {
+                //     if let Some(staging_table_ref) = materialize_node.staging_table.as_mut() {
+                //         staging_table_ref.fragment_id = fragment_id;
+                //         staging_table_ref.definition = format!("{}_staging", job.name());
+
+                //         tracing::info!(
+                //             table_id = %table.id,
+                //             staging_table_id = %staging_table_ref.id,
+                //             "Successfully filled staging table in MaterializeNode"
+                //         );
+                //     }
+                // }
+
                 has_job = true;
             }
             NodeBody::Sink(sink_node) => {

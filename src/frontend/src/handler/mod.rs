@@ -1285,6 +1285,9 @@ pub async fn handle(
         Statement::Refresh { table_name } => {
             refresh::handle_refresh(handler_args, table_name).await
         }
+        Statement::LoadFinish { table_name } => {
+            refresh::handle_load_finish(handler_args, table_name).await
+        }
         _ => bail_not_implemented!("Unhandled statement: {}", stmt),
     }
 }

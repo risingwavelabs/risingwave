@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::bail;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
+use risingwave_common::row::RowExt;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common_rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter};
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
@@ -774,12 +775,13 @@ where
                 "iter_with_vnode_and_output_indices"
             );
             let vnode_row_iter = upstream_table
-                .iter_with_vnode_and_output_indices(
+                .iter_with_vnode(
                     vnode,
                     &range_bounds,
                     PrefetchOptions::prefetch_for_small_range_scan(),
                 )
-                .await?;
+                .await?
+                .map_ok(|row| row.project(&upstream_table.output_indices).into_owned_row());
 
             let vnode_row_iter = vnode_row_iter.map_ok(move |row| (vnode, row));
 

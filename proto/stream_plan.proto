@@ -126,11 +126,13 @@ message StartFragmentBackfillMutation {
 message RefreshStartMutation {
   // Table ID to start refresh operation.
   uint32 table_id = 1;
+  // Associated source ID for this refresh operation.
+  uint32 associated_source_id = 2;
 }
 
 message LoadFinishMutation {
-  // Table ID to finish loading operation.
-  uint32 table_id = 1;
+  // Associated source ID for this load operation.
+  uint32 associated_source_id = 1;
 }
 
 message BarrierMutation {

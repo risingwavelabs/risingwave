@@ -603,9 +603,11 @@ impl<S: StateStore> SourceExecutor<S> {
                         if batch_split.finished() {
                             tracing::info!("data stream finished");
                             if barrier.mutation.is_none() {
-                                tracing::info!("emitting load finish");
+                                // FIXME: this doesn't work, because barrier is not sent across actor.
+                                // mutations are subscribed from local barrier sender https://github.com/risingwavelabs/risingwave/pull/18255
+                                tracing::info!(?epoch, "emitting load finish");
                                 barrier.mutation = Some(Arc::new(Mutation::LoadFinish {
-                                    table_id: source_id,
+                                    associated_source_id: source_id,
                                 }));
                                 load_finish_sent = true;
                             }
@@ -693,8 +695,12 @@ impl<S: StateStore> SourceExecutor<S> {
                                     self.rebuild_stream_reader(&source_desc, &mut stream)?;
                                 }
                             }
-                            Mutation::RefreshStart { table_id } if table_id == &source_id => {
+                            Mutation::RefreshStart {
+                                table_id: _,
+                                associated_source_id,
+                            } if *associated_source_id == source_id => {
                                 debug_assert!(self.is_batch_source());
+                                load_finish_sent = false;
 
                                 // Similar to split_change, we need to update the split info, and rebuild source reader.
 
@@ -702,7 +708,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                 if let Ok(new_splits) = self.refresh_batch_splits() {
                                     tracing::info!(
                                         actor_id = self.actor_ctx.id,
-                                        table_id = %table_id,
+                                         %associated_source_id,
                                         new_splits_count = new_splits.len(),
                                         "RefreshStart triggered split re-enumeration"
                                     );
@@ -714,7 +720,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                 } else {
                                     tracing::warn!(
                                         actor_id = self.actor_ctx.id,
-                                        table_id = %table_id,
+                                        %associated_source_id,
                                         "Failed to refresh splits during RefreshStart"
                                     );
                                 }
@@ -736,6 +742,7 @@ impl<S: StateStore> SourceExecutor<S> {
                     }
 
                     let barrier_epoch = barrier.epoch;
+                    tracing::info!(?barrier, "source executor yield barrier");
                     yield Message::Barrier(barrier);
 
                     if let Some((source_desc, stream, to_apply_mutation)) = split_change {

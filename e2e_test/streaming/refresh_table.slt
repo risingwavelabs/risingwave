@@ -1,0 +1,235 @@
+# Test cases for refreshable table functionality using batch_posix_fs connector
+# This test validates the REFRESH TABLE command and covers insert, update, delete scenarios
+
+control substitution on
+
+# Setup test directory and initial test files
+system ok
+rm -rf /tmp/rw_refresh_test && mkdir -p /tmp/rw_refresh_test
+
+system ok
+echo "1,alice" > /tmp/rw_refresh_test/file1.csv
+
+system ok
+echo "2,bob" > /tmp/rw_refresh_test/file2.csv
+
+# ----
+# Test 1: Create refreshable table and initial load (must have PRIMARY KEY)
+statement ok
+CREATE TABLE refresh_fs_t (id int PRIMARY KEY, name varchar) WITH (
+    connector = 'batch_posix_fs',
+    batch_posix_fs.root = '/tmp/rw_refresh_test',
+    match_pattern = '*.csv'
+) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
+
+sleep 2s
+
+# Initial load should read existing files
+query II rowsort retry 3 backoff 5s
+SELECT * FROM refresh_fs_t;
+----
+1 alice
+2 bob
+
+# ----
+# Test 2: Add new files and refresh (INSERT scenario)
+system ok
+echo "3,charlie" > /tmp/rw_refresh_test/file3.csv
+
+system ok
+echo "4,david" > /tmp/rw_refresh_test/new_file.csv
+
+sleep 2s
+
+# won't see new data after load finish, before next refresh
+query II rowsort
+SELECT * FROM refresh_fs_t;
+----
+1 alice
+2 bob
+
+statement ok
+REFRESH TABLE refresh_fs_t;
+
+sleep 2s
+
+
+query II rowsort retry 3 backoff 5s
+SELECT * FROM refresh_fs_t;
+----
+1 alice
+2 bob
+3 charlie
+4 david
+
+# ----
+# Test 3: Modify existing file content (UPDATE scenario)
+system ok
+echo "1,alice_updated" > /tmp/rw_refresh_test/file1.csv
+
+system ok
+echo "2,bob_updated" > /tmp/rw_refresh_test/file2.csv
+
+statement ok
+REFRESH TABLE refresh_fs_t;
+
+sleep 2s
+
+query II rowsort retry 3 backoff 5s
+SELECT * FROM refresh_fs_t;
+----
+1 alice_updated
+2 bob_updated
+3 charlie
+4 david
+
+# ----
+# Test 4: Remove files (DELETE scenario)
+system ok
+rm /tmp/rw_refresh_test/file3.csv
+
+system ok
+rm /tmp/rw_refresh_test/new_file.csv
+
+statement ok
+REFRESH TABLE refresh_fs_t;
+
+sleep 2s
+
+query II rowsort retry 3 backoff 5s
+SELECT * FROM refresh_fs_t;
+----
+1 alice_updated
+2 bob_updated
+
+# ----
+# Test 5: Mixed operations - add, update, delete simultaneously
+system ok
+echo "1,alice_final" > /tmp/rw_refresh_test/file1.csv
+
+system ok
+rm /tmp/rw_refresh_test/file2.csv
+
+system ok
+echo "5,eve" > /tmp/rw_refresh_test/file5.csv
+
+system ok
+echo "6,frank" > /tmp/rw_refresh_test/file6.csv
+
+statement ok
+REFRESH TABLE refresh_fs_t;
+
+query II rowsort retry 3 backoff 5s
+SELECT * FROM refresh_fs_t;
+----
+1 alice_final
+5 eve
+6 frank
+
+# ----
+# Test 6: Empty directory (all files deleted)
+system ok
+rm /tmp/rw_refresh_test/*.csv
+
+statement ok
+REFRESH TABLE refresh_fs_t;
+
+query II rowsort retry 3 backoff 5s
+SELECT * FROM refresh_fs_t;
+----
+
+# ----
+# Test 7: Re-populate after empty
+system ok
+echo "7,grace" > /tmp/rw_refresh_test/new1.csv
+
+system ok
+echo "8,henry" > /tmp/rw_refresh_test/new2.csv
+
+statement ok
+REFRESH TABLE refresh_fs_t;
+
+query II rowsort retry 3 backoff 5s
+SELECT * FROM refresh_fs_t;
+----
+7 grace
+8 henry
+
+# ----
+# Test 8: Test duplicate primary key handling during refresh
+# Test duplicate primary key handling during refresh
+system ok
+echo "7,grace_duplicate" >> /tmp/rw_refresh_test/new1.csv
+
+statement ok
+REFRESH TABLE refresh_fs_t;
+
+# Should use last occurrence or handle conflict appropriately
+query II rowsort retry 3 backoff 5s
+SELECT * FROM refresh_fs_t WHERE id = 7;
+----
+7 grace_duplicate
+
+# ----
+# Test 9: Error cases
+
+# Test refreshing non-existent table
+statement error
+REFRESH TABLE non_existent_table;
+
+# Test refreshing a non-refreshable table
+statement ok
+CREATE TABLE non_refreshable_t (v1 int) WITH (
+    connector = 'datagen',
+    fields.v1.kind = 'sequence',
+    fields.v1.start = '1',
+    fields.v1.end = '10'
+) FORMAT NATIVE ENCODE NATIVE;
+
+statement error Table 'public.non_refreshable_t' is not refreshable
+REFRESH TABLE non_refreshable_t;
+
+# ----
+# Test 10: Pattern matching behavior
+system ok
+mkdir -p /tmp/rw_refresh_test/subdir
+
+system ok
+echo "9,ivan" > /tmp/rw_refresh_test/should_match.csv
+
+system ok
+echo "10,julia" > /tmp/rw_refresh_test/should_not_match.txt
+
+system ok
+echo "11,kevin" > /tmp/rw_refresh_test/subdir/nested.csv
+
+statement ok
+REFRESH TABLE refresh_fs_t;
+
+# Should only include .csv files in root directory based on pattern
+query II rowsort retry 3 backoff 5s
+SELECT * FROM refresh_fs_t;
+----
+7 grace_duplicate
+8 henry
+9 ivan
+
+# ----
+# Test 11: Error case - create refreshable table without PRIMARY KEY
+statement error
+CREATE TABLE no_pk_refresh_t (id int, name varchar) WITH (
+    connector = 'batch_posix_fs',
+    batch_posix_fs.root = '/tmp/rw_refresh_test',
+    match_pattern = '*.csv'
+) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
+
+# ----
+# Cleanup
+statement ok
+DROP TABLE refresh_fs_t;
+
+statement ok
+DROP TABLE non_refreshable_t;
+
+system ok
+rm -rf /tmp/rw_refresh_test

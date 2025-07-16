@@ -37,8 +37,8 @@ use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
-    EventLog, FragmentDistribution, PbThrottleTarget, RecoveryStatus, RefreshRequest,
-    RefreshResponse,
+    EventLog, FragmentDistribution, LoadFinishRequest, LoadFinishResponse, PbThrottleTarget,
+    RecoveryStatus, RefreshRequest, RefreshResponse,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_rpc_client::error::Result;
@@ -164,6 +164,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn set_sync_log_store_aligned(&self, job_id: u32, aligned: bool) -> Result<()>;
 
     async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse>;
+
+    async fn load_finish(&self, request: LoadFinishRequest) -> Result<LoadFinishResponse>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -404,5 +406,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse> {
         self.0.refresh(request).await
+    }
+
+    async fn load_finish(&self, request: LoadFinishRequest) -> Result<LoadFinishResponse> {
+        self.0.load_finish(request).await
     }
 }

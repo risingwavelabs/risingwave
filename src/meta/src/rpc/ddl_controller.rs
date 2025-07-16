@@ -1168,6 +1168,10 @@ impl DdlController {
             .incomplete_internal_tables()
             .into_values()
             .collect_vec();
+        tracing::debug!(
+            ?incomplete_internal_tables,
+            "creating internal table catalogs"
+        );
         let table_id_map = self
             .metadata_manager
             .catalog_controller

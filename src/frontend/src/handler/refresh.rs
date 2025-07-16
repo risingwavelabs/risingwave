@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_pb::meta::RefreshRequest;
+use risingwave_pb::meta::{LoadFinishRequest, RefreshRequest};
 use risingwave_sqlparser::ast::ObjectName;
 
 use crate::catalog::table_catalog::TableType;
@@ -64,6 +64,7 @@ pub async fn handle_refresh(
     // Create refresh request
     let refresh_request = RefreshRequest {
         table_id: table_id.table_id(),
+        associated_source_id: table_catalog.associated_source_id().unwrap().table_id(),
     };
 
     // Send refresh command to meta service via stream manager
@@ -95,6 +96,88 @@ pub async fn handle_refresh(
 
             Err(ErrorCode::InternalError(format!(
                 "Failed to refresh table '{}.{}': {}",
+                schema_name, table_name, e
+            ))
+            .into())
+        }
+    }
+}
+
+/// Handle LOAD FINISH statement
+///
+/// This function processes the LOAD FINISH statement by:
+/// 1. Validating the table exists and is refreshable
+/// 2. Sending a load finish command to the meta service
+/// 3. Returning appropriate response to the client
+pub async fn handle_load_finish(
+    handler_args: HandlerArgs,
+    table_name: ObjectName,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session;
+
+    // Get table catalog to validate table exists
+    let (table_catalog, schema_name) =
+        get_table_catalog_by_table_name(session.as_ref(), &table_name)?;
+
+    // Check if table supports refresh operations
+    if !table_catalog.refreshable {
+        return Err(ErrorCode::InvalidInputSyntax(format!(
+            "Table '{}.{}' is not refreshable. Only tables created with REFRESHABLE flag support load finish.",
+            schema_name, table_name
+        )).into());
+    }
+
+    // Only allow load finish on tables, not views or materialized views
+    match table_catalog.table_type() {
+        TableType::Table => {
+            // This is valid
+        }
+        t @ (TableType::MaterializedView | TableType::Index | TableType::Internal) => {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "LOAD FINISH is only supported for tables, got {:?}.",
+                t
+            ))
+            .into());
+        }
+    }
+
+    let table_id = table_catalog.id();
+
+    // Create load finish request
+    let load_finish_request = LoadFinishRequest {
+        table_id: table_id.table_id(),
+        associated_source_id: table_catalog.associated_source_id().unwrap().table_id(),
+    };
+
+    // Send load finish command to meta service via stream manager
+    let meta_client = session.env().meta_client();
+    match meta_client.load_finish(load_finish_request).await {
+        Ok(_) => {
+            // Load finish command sent successfully
+            tracing::info!(
+                table_id = %table_id,
+                table_name = %table_name,
+                "Load finish initiated"
+            );
+
+            // Return success response
+            Ok(PgResponse::builder(StatementType::OTHER)
+                .notice(format!(
+                    "LOAD FINISH initiated for table '{}.{}'",
+                    schema_name, table_name
+                ))
+                .into())
+        }
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                table_id = %table_id,
+                table_name = %table_name,
+                "Failed to initiate load finish"
+            );
+
+            Err(ErrorCode::InternalError(format!(
+                "Failed to load finish table '{}.{}': {}",
                 schema_name, table_name, e
             ))
             .into())

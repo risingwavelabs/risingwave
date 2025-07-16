@@ -147,6 +147,11 @@ async fn merge(
                                     barrier,
                                 ));
                             }
+                            // Hack for LoadFinish
+                            if barrier.mutation.is_some() {
+                                tracing::info!("Union: hack for LoadFinish");
+                                current_barrier = Some(barrier);
+                            }
                         } else {
                             current_barrier = Some(barrier);
                         }

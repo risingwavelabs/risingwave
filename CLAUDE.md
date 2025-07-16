@@ -16,3 +16,9 @@ RisingWave is a Postgres-compatible streaming database.
 
 ### Develop Connectors
 @docs/dev/src/connector/intro.md
+
+## WIP
+
+Currently, I'm working on refreshable batch source.
+- @.cursor/rules/batch_source.mdc
+- @refreshable_batch_source_status.md
