@@ -216,6 +216,7 @@ impl IcebergConfig {
                     && k != &"catalog.uri"
                     && k != &"catalog.type"
                     && k != &"catalog.name"
+                    && k != &"catalog.header"
             })
             .map(|(k, v)| (k[8..].to_string(), v.clone()))
             .collect();
