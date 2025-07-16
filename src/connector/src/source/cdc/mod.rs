@@ -53,6 +53,7 @@ pub const CDC_BACKFILL_SPLIT_PK_COLUMN_INDEX: &str = "backfill.split_pk_column_i
 pub const CDC_TRANSACTIONAL_KEY: &str = "transactional";
 pub const CDC_WAIT_FOR_STREAMING_START_TIMEOUT: &str = "cdc.source.wait.streaming.start.timeout";
 pub const CDC_AUTO_SCHEMA_CHANGE_KEY: &str = "auto.schema.change";
+pub const CDC_BACKFILL_MAX_PARALLELISM: u32 = 256;
 
 // User can set strong-schema='true' to enable strong schema for mongo cdc source
 pub const CDC_MONGODB_STRONG_SCHEMA_KEY: &str = "strong_schema";
@@ -286,7 +287,7 @@ pub struct CdcScanOptions {
     pub snapshot_barrier_interval: u32,
     /// Used by non-parallelized backfill. The number of rows to fetch in a single batch when reading from an external table.
     pub snapshot_batch_size: u32,
-    /// Used by parallelized backfill, i.e. backfill V2. The initial parallelism of parallel backfill. This also caps the maximum parallelism for subsequent modifications.
+    /// Used by parallelized backfill, i.e. backfill V2. The initial parallelism of parallel backfill.
     pub backfill_parallelism: u32,
     /// Used by parallelized backfill. The estimated number of rows per split used in splits generation.
     pub backfill_num_rows_per_split: u64,

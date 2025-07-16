@@ -23,9 +23,10 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_connector::source::cdc::external::CdcTableType;
 use risingwave_connector::source::cdc::{
-    CDC_BACKFILL_AS_EVEN_SPLITS, CDC_BACKFILL_ENABLE_KEY, CDC_BACKFILL_NUM_ROWS_PER_SPLIT,
-    CDC_BACKFILL_PARALLELISM, CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY,
-    CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY, CDC_BACKFILL_SPLIT_PK_COLUMN_INDEX, CdcScanOptions,
+    CDC_BACKFILL_AS_EVEN_SPLITS, CDC_BACKFILL_ENABLE_KEY, CDC_BACKFILL_MAX_PARALLELISM,
+    CDC_BACKFILL_NUM_ROWS_PER_SPLIT, CDC_BACKFILL_PARALLELISM,
+    CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY, CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY,
+    CDC_BACKFILL_SPLIT_PK_COLUMN_INDEX, CdcScanOptions,
 };
 
 use super::GenericPlanNode;
@@ -82,6 +83,14 @@ pub fn build_cdc_scan_options_with_options(
         if let Some(backfill_parallelism) = with_options.get(CDC_BACKFILL_PARALLELISM) {
             scan_options.backfill_parallelism = u32::from_str(backfill_parallelism)
                 .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_PARALLELISM))?;
+            if scan_options.backfill_parallelism > CDC_BACKFILL_MAX_PARALLELISM {
+                return Err(anyhow!(
+                    "Invalid value for {}, should be in range [0,{}] ",
+                    CDC_BACKFILL_PARALLELISM,
+                    CDC_BACKFILL_MAX_PARALLELISM
+                )
+                .into());
+            }
         }
 
         if let Some(backfill_num_rows_per_split) = with_options.get(CDC_BACKFILL_NUM_ROWS_PER_SPLIT)
