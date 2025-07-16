@@ -87,4 +87,4 @@ echo "Test AppRole - Secret ID: $SECRET_ID"
 export VAULT_TEST_ROLE_ID="$ROLE_ID"
 export VAULT_TEST_SECRET_ID="$SECRET_ID"
 
-echo "Vault setup completed successfully" 
+echo "Vault setup completed successfully"
