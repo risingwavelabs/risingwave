@@ -255,13 +255,13 @@ impl CommandContext {
                         stream_job_fragments.actor_ids(),
                         upstream_fragment_downstreams,
                         init_split_assignment,
-                        streaming_job.is_materialized_view(),
+                        streaming_job.should_notify_creating(),
                     )
                     .await?;
 
                 let source_change = SourceChange::CreateJob {
                     added_source_fragments: stream_job_fragments.stream_source_fragments(),
-                    added_backfill_fragments: stream_job_fragments.source_backfill_fragments()?,
+                    added_backfill_fragments: stream_job_fragments.source_backfill_fragments(),
                     split_assignment: init_split_assignment.clone(),
                 };
 

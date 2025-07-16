@@ -773,6 +773,14 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
+    pub async fn compact_table(&self, table_id: TableId) -> Result<u64> {
+        let request = CompactTableRequest {
+            table_id: table_id.table_id(),
+        };
+        let resp = self.inner.compact_table(request).await?;
+        Ok(resp.task_id)
+    }
+
     pub async fn drop_view(&self, view_id: u32, cascade: bool) -> Result<WaitVersion> {
         let request = DropViewRequest { view_id, cascade };
         let resp = self.inner.drop_view(request).await?;
@@ -2351,6 +2359,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, auto_schema_change, AutoSchemaChangeRequest, AutoSchemaChangeResponse }
             ,{ ddl_client, alter_swap_rename, AlterSwapRenameRequest, AlterSwapRenameResponse }
             ,{ ddl_client, alter_secret, AlterSecretRequest, AlterSecretResponse }
+            ,{ ddl_client, compact_table, CompactTableRequest, CompactTableResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }

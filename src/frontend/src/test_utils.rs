@@ -869,6 +869,7 @@ impl MockCatalogWriter {
 
     fn create_sink_inner(&self, mut sink: PbSink, _graph: StreamFragmentGraph) -> Result<()> {
         sink.id = self.gen_id();
+        sink.stream_job_status = PbStreamJobStatus::Created as _;
         self.catalog.write().create_sink(&sink);
         self.add_table_or_sink_id(sink.id, sink.schema_id, sink.database_id);
         Ok(())
@@ -1211,6 +1212,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn set_sync_log_store_aligned(&self, _job_id: u32, _aligned: bool) -> RpcResult<()> {
         Ok(())
+    }
+
+    async fn compact_table(&self, _table_id: TableId) -> RpcResult<u64> {
+        Ok(1)
     }
 }
 
