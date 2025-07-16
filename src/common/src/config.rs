@@ -1096,6 +1096,12 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::fifo_probation_ratio")]
     pub fifo_probation_ratio: f64,
 
+    #[serde(default = "default::file_cache::io_engine")]
+    pub io_engine: FoyerIoEngine,
+
+    #[serde(default = "default::file_cache::direct_io")]
+    pub direct_io: bool,
+
     /// Recover mode.
     ///
     /// Options:
@@ -1114,6 +1120,17 @@ pub struct FileCacheConfig {
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum FoyerIoEngine {
+    Psync,
+    IoUring {
+        threads: usize,
+        iodepth: usize,
+        iopoll: bool,
+        weight: f64,
+    },
 }
 
 #[derive(Debug, Default, Clone, Copy, ValueEnum, Serialize, Deserialize)]
@@ -2095,6 +2112,8 @@ pub mod default {
 
         use foyer::{Compression, RecoverMode, RuntimeOptions, Throttle, TokioRuntimeOptions};
 
+        use crate::config::FoyerIoEngine;
+
         pub fn dir() -> String {
             "".to_owned()
         }
@@ -2137,6 +2156,14 @@ pub mod default {
 
         pub fn fifo_probation_ratio() -> f64 {
             0.1
+        }
+
+        pub fn io_engine() -> FoyerIoEngine {
+            FoyerIoEngine::Psync
+        }
+
+        pub fn direct_io() -> bool {
+            false
         }
 
         pub fn recover_mode() -> RecoverMode {

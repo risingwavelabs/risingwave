@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use risingwave_common::config::{
-    EvictionConfig, ObjectStoreConfig, RwConfig, StorageMemoryConfig, extract_storage_memory_config,
+    EvictionConfig, FoyerIoEngine, ObjectStoreConfig, RwConfig, StorageMemoryConfig,
+    extract_storage_memory_config,
 };
 use risingwave_common::system_param::reader::{SystemParamsRead, SystemParamsReader};
 use risingwave_common::system_param::system_params_for_test;
@@ -96,6 +97,8 @@ pub struct StorageOpts {
     pub data_file_cache_fifo_probation_ratio: f64,
     pub data_file_cache_runtime_config: foyer::RuntimeOptions,
     pub data_file_cache_throttle: foyer::Throttle,
+    pub data_file_cache_direct_io: bool,
+    pub data_file_cache_io_engine: FoyerIoEngine,
 
     pub cache_refill_data_refill_levels: Vec<u32>,
     pub cache_refill_timeout_ms: u64,
@@ -118,6 +121,8 @@ pub struct StorageOpts {
     pub meta_file_cache_fifo_probation_ratio: f64,
     pub meta_file_cache_runtime_config: foyer::RuntimeOptions,
     pub meta_file_cache_throttle: foyer::Throttle,
+    pub meta_file_cache_direct_io: bool,
+    pub meta_file_cache_io_engine: FoyerIoEngine,
 
     pub vector_file_block_size_kb: usize,
     pub vector_block_cache_capacity_mb: usize,
@@ -232,6 +237,8 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             data_file_cache_fifo_probation_ratio: c.storage.data_file_cache.fifo_probation_ratio,
             data_file_cache_runtime_config: c.storage.data_file_cache.runtime_config.clone(),
             data_file_cache_throttle,
+            data_file_cache_direct_io: c.storage.data_file_cache.direct_io,
+            data_file_cache_io_engine: c.storage.data_file_cache.io_engine,
             meta_file_cache_dir: c.storage.meta_file_cache.dir.clone(),
             meta_file_cache_capacity_mb: c.storage.meta_file_cache.capacity_mb,
             meta_file_cache_file_capacity_mb: c.storage.meta_file_cache.file_capacity_mb,
@@ -245,6 +252,8 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             meta_file_cache_fifo_probation_ratio: c.storage.meta_file_cache.fifo_probation_ratio,
             meta_file_cache_runtime_config: c.storage.meta_file_cache.runtime_config.clone(),
             meta_file_cache_throttle,
+            meta_file_cache_direct_io: c.storage.meta_file_cache.direct_io,
+            meta_file_cache_io_engine: c.storage.meta_file_cache.io_engine,
             cache_refill_data_refill_levels: c.storage.cache_refill.data_refill_levels.clone(),
             cache_refill_timeout_ms: c.storage.cache_refill.timeout_ms,
             cache_refill_concurrency: c.storage.cache_refill.concurrency,

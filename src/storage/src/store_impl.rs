@@ -18,14 +18,17 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
+#[cfg(target_os = "linux")]
+use foyer::UringIoEngineBuilder;
 use foyer::{
-    CacheBuilder, FifoPicker, FsDeviceBuilder, HybridCacheBuilder, LargeObjectEngineBuilder,
-    PsyncIoEngineBuilder,
+    CacheBuilder, FifoPicker, FsDeviceBuilder, HybridCacheBuilder, IoEngineBuilder,
+    LargeObjectEngineBuilder, PsyncIoEngineBuilder,
 };
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::FoyerIoEngine;
 use risingwave_common::license::Feature;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;
@@ -692,6 +695,24 @@ impl StateStoreImpl {
         const KB: usize = 1 << 10;
         const MB: usize = 1 << 20;
 
+        let io_engine = |config: FoyerIoEngine| match config {
+            FoyerIoEngine::Psync => PsyncIoEngineBuilder::new().boxed() as Box<dyn IoEngineBuilder>,
+            #[cfg(target_os = "linux")]
+            FoyerIoEngine::IoUring {
+                threads,
+                iodepth,
+                iopoll,
+                weight,
+            } => UringIoEngineBuilder::new()
+                .with_threads(threads)
+                .with_io_depth(iodepth)
+                .with_weight(weight)
+                .with_iopoll(iopoll)
+                .boxed() as Box<dyn IoEngineBuilder>,
+            #[cfg(not(target_os = "linux"))]
+            FoyerIoEngine::IoUring { .. } => unsupported!("io_uring is only supported on Linux"),
+        };
+
         let meta_cache = {
             let mut builder = HybridCacheBuilder::new()
                 .with_name("foyer.meta")
@@ -713,9 +734,9 @@ impl StateStoreImpl {
                             FsDeviceBuilder::new(&opts.meta_file_cache_dir)
                                 .with_capacity(opts.meta_file_cache_capacity_mb * MB)
                                 .with_throttle(opts.meta_file_cache_throttle.clone())
-                                .with_direct(true),
+                                .with_direct(opts.meta_file_cache_direct_io),
                         )
-                        .with_io_engine_builder(PsyncIoEngineBuilder::new())
+                        .with_io_engine_builder(io_engine(opts.meta_file_cache_io_engine))
                         .with_engine_builder(
                             LargeObjectEngineBuilder::new()
                                 .with_region_size(opts.meta_file_cache_file_capacity_mb * MB)
@@ -769,9 +790,9 @@ impl StateStoreImpl {
                             FsDeviceBuilder::new(&opts.data_file_cache_dir)
                                 .with_capacity(opts.data_file_cache_capacity_mb * MB)
                                 .with_throttle(opts.data_file_cache_throttle.clone())
-                                .with_direct(true),
+                                .with_direct(opts.data_file_cache_direct_io),
                         )
-                        .with_io_engine_builder(PsyncIoEngineBuilder::new())
+                        .with_io_engine_builder(io_engine(opts.data_file_cache_io_engine))
                         .with_engine_builder(
                             LargeObjectEngineBuilder::new()
                                 .with_region_size(opts.data_file_cache_file_capacity_mb * MB)
