@@ -141,8 +141,12 @@ impl MockExternalTableReader {
             ]),
         ];
         for row in snapshot {
-            if cmp_datum(&row[0], &left[0], OrderType::ascending_nulls_first()).is_ge()
-                && cmp_datum(&row[0], &right[0], OrderType::ascending_nulls_last()).is_lt()
+            if left[0].is_none() && right[0].is_none() {
+                yield row;
+            } else if (left[0].is_none()
+                || cmp_datum(&row[0], &left[0], OrderType::ascending_nulls_first()).is_ge())
+                && (right[0].is_none()
+                    || cmp_datum(&row[0], &right[0], OrderType::ascending_nulls_first()).is_lt())
             {
                 yield row;
             }

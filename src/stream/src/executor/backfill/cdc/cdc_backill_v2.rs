@@ -515,7 +515,7 @@ fn filter_stream_chunk(
             is_in_range = cmp_datum(
                 row_split_key,
                 right_split_key,
-                OrderType::ascending_nulls_last(),
+                OrderType::ascending_nulls_first(),
             )
             .is_lt();
         }
