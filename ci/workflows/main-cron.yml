@@ -939,7 +939,7 @@ steps:
           - GITHUB_TOKEN
           - BUILDKITE_TAG
           - BUILDKITE_SOURCE
-    timeout_in_minutes: 60
+    timeout_in_minutes: 90
     retry: *auto-retry
 
   - label: "release aarch64 (dry-run)"
