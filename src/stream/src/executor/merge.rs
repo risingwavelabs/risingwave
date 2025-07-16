@@ -262,13 +262,11 @@ impl MergeExecutor {
                     );
                     barrier.passed_actors.push(actor_id);
 
-                    let upstream_actor_ids: Vec<_> = select_all.upstream_input_ids().collect();
-
                     if let Some(Mutation::Update(UpdateMutation { dispatchers, .. })) =
                         barrier.mutation.as_deref()
-                        && upstream_actor_ids
-                            .iter()
-                            .any(|actor_id| dispatchers.contains_key(actor_id))
+                        && select_all
+                            .upstream_input_ids()
+                            .any(|actor_id| dispatchers.contains_key(&actor_id))
                     {
                         // `Watermark` of upstream may become stale after downstream scaling.
                         select_all.flush_buffered_watermarks();
@@ -282,7 +280,7 @@ impl MergeExecutor {
                             .unwrap_or(self.upstream_fragment_id);
                         let removed_upstream_actor_id: HashSet<_> =
                             if update.new_upstream_fragment_id.is_some() {
-                                upstream_actor_ids.iter().copied().collect()
+                                select_all.upstream_input_ids().collect()
                             } else {
                                 update.removed_upstream_actor_id.iter().copied().collect()
                             };

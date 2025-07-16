@@ -1488,10 +1488,9 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug, M> DynamicReceivers<InputId,
         assert!(self.blocked.is_empty() && self.barrier.is_none());
         assert!(other.blocked.is_empty() && other.barrier.is_none());
 
-        let add_upstream_input_ids: Vec<_> = other.upstream_input_ids().collect();
         // Add buffers to the buffered watermarks for all cols
         self.buffered_watermarks.values_mut().for_each(|buffers| {
-            buffers.add_buffers(add_upstream_input_ids.iter().cloned());
+            buffers.add_buffers(other.upstream_input_ids());
         });
 
         self.active.extend(other.active);
