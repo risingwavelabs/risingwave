@@ -701,13 +701,13 @@ impl StateStoreImpl {
             FoyerIoEngine::IoUring {
                 threads,
                 iodepth,
-                iopoll,
+                sqpoll,
                 weight,
             } => UringIoEngineBuilder::new()
                 .with_threads(threads)
                 .with_io_depth(iodepth)
                 .with_weight(weight)
-                .with_iopoll(iopoll)
+                .with_sqpoll(sqpoll)
                 .boxed() as Box<dyn IoEngineBuilder>,
             #[cfg(not(target_os = "linux"))]
             FoyerIoEngine::IoUring { .. } => unsupported!("io_uring is only supported on Linux"),

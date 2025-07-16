@@ -1128,7 +1128,7 @@ pub enum FoyerIoEngine {
     IoUring {
         threads: usize,
         iodepth: usize,
-        iopoll: bool,
+        sqpoll: bool,
         weight: f64,
     },
 }
