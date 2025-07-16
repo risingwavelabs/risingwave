@@ -42,6 +42,9 @@ ACCEPT_EULA=Y DEBIAN_FRONTEND=noninteractive apt-get install -y mssql-tools unix
 export PATH="/opt/mssql-tools/bin/:$PATH"
 export SQLCMDSERVER=sqlserver-server SQLCMDUSER=SA SQLCMDPASSWORD="SomeTestOnly@SA" SQLCMDDBNAME=mydb SQLCMDPORT=1433
 
+echo "--- Setup HashiCorp Vault for testing"
+./ci/scripts/setup-vault.sh
+
 echo "--- e2e, inline test"
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_meta=info" \
 risedev ci-start ci-inline-source-test
@@ -53,6 +56,9 @@ if [ "$profile" == "ci-dev" ]; then
 fi
 risedev slt './e2e_test/source_inline/**/*.slt' -j4
 risedev slt './e2e_test/source_inline/**/*.slt.serial'
+
+echo "--- Run Vault secret tests"
+risedev slt './e2e_test/ddl/vault_secret.slt'
 
 if [ "$profile" == "ci-release" ]; then
     # NOTE(kwannoel): This test has an execution time in main-cron of about ~1 minute.
