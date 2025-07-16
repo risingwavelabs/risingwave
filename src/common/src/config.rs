@@ -3064,6 +3064,10 @@ pub struct MetaStoreConfig {
     /// Acquire timeout in seconds for a meta store connection.
     #[serde(default = "default::meta_store_config::acquire_timeout_sec")]
     pub acquire_timeout_sec: u64,
+    /// Options for the URL connection, such as `sslmode=disable`.
+    /// Example: `param1=value1&param2=value2`
+    #[serde(default)]
+    pub url_connection_options: Option<String>,
 }
 
 #[cfg(test)]
