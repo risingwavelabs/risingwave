@@ -256,6 +256,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                 self.external_table.clone(),
                 table_reader.expect("table reader must created"),
             );
+            // Backfill snapshot splits sequentially.
             'split_backfill: for split in actor_snapshot_splits.iter().skip(next_split_idx) {
                 // let state = state_impl.restore_state(split.split_id).await?;
                 // Keep track of rows from the snapshot.
@@ -375,8 +376,8 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                         upstream_chunk_buffer.push(filtered_chunk.compact());
                                     }
                                 }
-                                Message::Watermark(_) => {
-                                    // Ignore watermark during backfill.
+                                msg @ Message::Watermark(_) => {
+                                    yield msg;
                                 }
                             }
                         }
@@ -411,52 +412,16 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                     }
                 }
 
+                // Mark current split backfill as finished. The state will be persisted by next barrier.
+                state_impl
+                    .mutate_state(split.split_id, true, row_count)
+                    .await?;
+
                 // TODO(zw): review: do we still need this workaround?
                 // // Here we have to ensure the snapshot stream is consumed at least once,
                 // // since the barrier event can kick in anytime.
                 // // Otherwise, the result set of the new snapshot stream may become empty.
                 // // It maybe a cancellation bug of the mysql driver.
-
-                // update and persist current backfill progress
-                // Wait for first barrier to come after backfill is finished.
-                // So we can update our progress + persist the status.
-                while let Some(Ok(msg)) = upstream.next().await {
-                    let Some(msg) = mapping_message(msg, &self.output_indices) else {
-                        continue;
-                    };
-                    match msg {
-                        Message::Barrier(barrier) => {
-                            // finalized the backfill state
-                            state_impl
-                                .mutate_state(split.split_id, true, row_count)
-                                .await?;
-                            state_impl.commit_state(barrier.epoch).await?;
-                            if is_reset_barrier(&barrier, self.actor_ctx.id) {
-                                next_reset_barrier = Some(barrier);
-                                continue 'with_cdc_table_snapshot_splits;
-                            }
-                            yield Message::Barrier(barrier);
-                            // break after the state have been saved
-                            break;
-                        }
-                        Message::Chunk(chunk) => {
-                            if chunk.cardinality() == 0 {
-                                continue;
-                            }
-                            if let Some(filtered_chunk) = filter_stream_chunk(
-                                chunk,
-                                &current_actor_bounds,
-                                snapshot_split_column_index,
-                            ) && filtered_chunk.cardinality() > 0
-                            {
-                                yield Message::Chunk(filtered_chunk);
-                            }
-                        }
-                        msg @ Message::Watermark(_) => {
-                            yield msg;
-                        }
-                    }
-                }
             }
 
             upstream_table_reader.disconnect().await?;

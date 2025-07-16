@@ -58,7 +58,7 @@ pub fn build_cdc_scan_options_with_options(
     cdc_table_type: CdcTableType,
 ) -> Result<CdcScanOptions> {
     // Update this after more CDC table type is supported for backfill v2.
-    let support_backfill_v2 = matches!(cdc_table_type, CdcTableType::Postgres);
+    let support_backfill_v2 = matches!(cdc_table_type, CdcTableType::Postgres | CdcTableType::Mock);
 
     // unspecified option will use default values
     let mut scan_options = CdcScanOptions::default();

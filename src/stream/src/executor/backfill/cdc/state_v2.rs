@@ -82,7 +82,7 @@ impl<S: StateStore> ParallelizedCdcBackfillState<S> {
         is_finished: bool,
         row_count: u64,
     ) -> StreamExecutorResult<()> {
-        // schema: | `split_id` | `backfill_finished` |
+        // schema: | `split_id` | `backfill_finished` | `row_count` |
         let mut state = vec![None; self.state_len];
         let split_id = Some(ScalarImpl::from(split_id));
         state[0].clone_from(&split_id);

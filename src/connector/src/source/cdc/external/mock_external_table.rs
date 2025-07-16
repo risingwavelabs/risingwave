@@ -19,7 +19,8 @@ use futures::{StreamExt, stream};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Field;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::util::sort_util::{OrderType, cmp_datum};
 
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::CdcTableSnapshotSplit;
@@ -110,6 +111,43 @@ impl MockExternalTableReader {
             yield row.clone();
         }
     }
+
+    #[try_stream(boxed, ok = OwnedRow, error = ConnectorError)]
+    async fn split_snapshot_read_inner(&self, left: OwnedRow, right: OwnedRow) {
+        let snapshot = vec![
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(1)),
+                Some(ScalarImpl::Float64(1.0001.into())),
+            ]),
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(1)),
+                Some(ScalarImpl::Float64(11.00.into())),
+            ]),
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(2)),
+                Some(ScalarImpl::Float64(22.00.into())),
+            ]),
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(5)),
+                Some(ScalarImpl::Float64(1.0005.into())),
+            ]),
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(6)),
+                Some(ScalarImpl::Float64(1.0006.into())),
+            ]),
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(8)),
+                Some(ScalarImpl::Float64(1.0008.into())),
+            ]),
+        ];
+        for row in snapshot {
+            if cmp_datum(&row[0], &left[0], OrderType::ascending_nulls_first()).is_ge()
+                && cmp_datum(&row[0], &right[0], OrderType::ascending_nulls_last()).is_lt()
+            {
+                yield row;
+            }
+        }
+    }
 }
 
 impl ExternalTableReader for MockExternalTableReader {
@@ -144,8 +182,8 @@ impl ExternalTableReader for MockExternalTableReader {
         stream::once(async {
             Ok(CdcTableSnapshotSplit {
                 split_id: 1,
-                left_bound_inclusive: OwnedRow::new(vec![None]),
-                right_bound_exclusive: OwnedRow::new(vec![None]),
+                left_bound_inclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(1))]),
+                right_bound_exclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(10))]),
             })
         })
         .boxed()
@@ -154,10 +192,12 @@ impl ExternalTableReader for MockExternalTableReader {
     fn split_snapshot_read(
         &self,
         _table_name: SchemaTableName,
-        _left: OwnedRow,
-        _right: OwnedRow,
-        _split_columns: Vec<Field>,
+        left: OwnedRow,
+        right: OwnedRow,
+        split_columns: Vec<Field>,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
-        self.snapshot_read_inner()
+        assert_eq!(split_columns.len(), 1);
+        assert_eq!(split_columns[0].data_type, DataType::Int64);
+        self.split_snapshot_read_inner(left, right)
     }
 }
