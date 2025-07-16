@@ -191,8 +191,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
 
             // After init the state table and forward the initial barrier to downstream,
             // we now try to create the table reader with retry.
-            // If backfill hasn't finished, we can ignore upstream cdc events before we create the table reader;
-            // If backfill is finished, we should forward the upstream cdc events to downstream.
             let mut table_reader: Option<ExternalTableReaderImpl> = None;
             let external_table = self.external_table.clone();
             let mut future = Box::pin(async move {
@@ -218,7 +216,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                     if let Some(msg) = mapping_message(msg, &self.output_indices) {
                         match msg {
                             Message::Barrier(barrier) => {
-                                // commit state to bump the epoch of state table
                                 state_impl.commit_state(barrier.epoch).await?;
                                 if is_reset_barrier(&barrier, self.actor_ctx.id) {
                                     next_reset_barrier = Some(barrier);
@@ -258,8 +255,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             );
             // Backfill snapshot splits sequentially.
             'split_backfill: for split in actor_snapshot_splits.iter().skip(next_split_idx) {
-                // let state = state_impl.restore_state(split.split_id).await?;
-                // Keep track of rows from the snapshot.
                 tracing::info!(
                     table_id,
                     upstream_table_name,
@@ -292,7 +287,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                     select_with_strategy(left_upstream, right_snapshot, |_: &mut ()| {
                         stream::PollNext::Left
                     });
-                let mut row_count = 0;
+                let mut row_count: u64 = 0;
                 #[for_await]
                 for either in &mut backfill_stream {
                     match either {
@@ -340,14 +335,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                             _ => (),
                                         }
                                     }
-
-                                    // update and persist current backfill progress
-                                    state_impl
-                                        .mutate_state(split.split_id, false, row_count)
-                                        .await?;
-
                                     state_impl.commit_state(barrier.epoch).await?;
-
                                     if is_reset_barrier(&barrier, self.actor_ctx.id) {
                                         next_reset_barrier = Some(barrier);
                                         for chunk in upstream_chunk_buffer.drain(..) {
@@ -411,17 +399,10 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                         }
                     }
                 }
-
                 // Mark current split backfill as finished. The state will be persisted by next barrier.
                 state_impl
                     .mutate_state(split.split_id, true, row_count)
                     .await?;
-
-                // TODO(zw): review: do we still need this workaround?
-                // // Here we have to ensure the snapshot stream is consumed at least once,
-                // // since the barrier event can kick in anytime.
-                // // Otherwise, the result set of the new snapshot stream may become empty.
-                // // It maybe a cancellation bug of the mysql driver.
             }
 
             upstream_table_reader.disconnect().await?;
@@ -441,7 +422,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                 };
                 match msg {
                     Message::Barrier(barrier) => {
-                        // commit state just to bump the epoch of state table
                         state_impl.commit_state(barrier.epoch).await?;
                         if is_reset_barrier(&barrier, self.actor_ctx.id) {
                             next_reset_barrier = Some(barrier);

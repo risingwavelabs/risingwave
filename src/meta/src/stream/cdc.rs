@@ -21,7 +21,7 @@ use futures::pin_mut;
 use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::row::Row;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::source::cdc::external::{
     CdcTableSnapshotSplitOption, CdcTableType, ExternalTableConfig, ExternalTableReader,
@@ -166,6 +166,7 @@ pub(crate) async fn assign_cdc_table_snapshot_splits(
         if stream_scan_fragments.is_empty() {
             continue;
         }
+        assert_eq!(stream_scan_fragments.len(), 1);
         let stream_scan_fragment = stream_scan_fragments.swap_remove(0);
         let assignment = assign_cdc_table_snapshot_splits_impl(
             job.stream_job_id.table_id,
@@ -200,25 +201,15 @@ pub(crate) async fn assign_cdc_table_snapshot_splits_impl(
     meta_store: &SqlMetaStore,
 ) -> MetaResult<CdcTableSnapshotSplitAssignment> {
     if actor_ids.is_empty() {
-        return Err(anyhow::anyhow!(
-            "A stream scan fragment should have at least 1 actor".to_owned()
-        )
-        .into());
+        return Err(anyhow::anyhow!("Expect at least 1 actor, 0 was found.").into());
     }
     let mut assignments = HashMap::default();
-    let mut splits = try_get_cdc_table_snapshot_splits(table_id, meta_store).await?;
+    let splits = try_get_cdc_table_snapshot_splits(table_id, meta_store).await?;
     if splits.is_empty() {
-        tracing::error!(
-            "Expect at least one CDC table snapshot splits, 0 was found. Fall back to one (null, null) split."
+        return Err(
+            anyhow::anyhow!("Expect at least 1 CDC table snapshot splits, 0 was found.").into(),
         );
-        // Fall back to one (null, null) split to avoid missing read.
-        let null = OwnedRow::new(vec![None]).value_serialize();
-        splits = vec![CdcTableSnapshotSplitRaw {
-            split_id: i64::MAX,
-            left_bound_inclusive: null.clone(),
-            right_bound_exclusive: null,
-        }];
-    };
+    }
     let splits_per_actor = splits.len().div_ceil(actor_ids.len());
     for (actor_id, splits) in actor_ids.iter().copied().zip_eq_debug(
         splits
