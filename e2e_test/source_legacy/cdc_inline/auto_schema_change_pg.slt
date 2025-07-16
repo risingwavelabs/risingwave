@@ -223,3 +223,275 @@ SELECT id, name, description, new_col from rw_test_include_ts order by id;
 
 statement ok
 drop source pg_source_ts cascade;
+
+# Test comprehensive PostgreSQL data types with auto schema change
+system ok
+psql -c "
+    DROP TABLE IF EXISTS test_comprehensive_types;
+
+    -- Create extensions for special data types
+    CREATE EXTENSION IF NOT EXISTS citext;
+
+    CREATE TABLE test_comprehensive_types (
+        v1 uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+        v2 jsonb NOT NULL,
+        v3 character varying NOT NULL,
+        v4 integer,
+        v5 timestamp(6) without time zone NOT NULL,
+        v6 boolean,
+        v7 smallint,
+        v8 bigint,
+        v9 real,
+        v10 double precision,
+        v11 char(10),
+        v12 varchar(50),
+        v13 character(20),
+        v14 character varying(100),
+        v15 timestamptz,
+        v16 timetz,
+        v17 interval,
+        v18 bytea,
+        v19 json,
+        v20 xml,
+        v21 point,
+        v22 citext,
+        v23 inet,
+        v24 int4range,
+        v25 int8range,
+        v26 numrange,
+        v27 tsrange,
+        v28 tstzrange,
+        v29 daterange,
+        v31 date,
+        v32 time(3),
+        v33 timestamp(3),
+        v34 numeric(10,2),
+        v35 decimal(8,4),
+        v36 money,
+        v37 cidr,
+        v38 macaddr,
+        v39 macaddr8,
+        v40 int[]
+    );
+"
+
+statement ok
+create source pg_comprehensive_source with (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ slot.name = 'pg_comprehensive_slot',
+ auto.schema.change = 'true'
+);
+
+statement ok
+create table rw_test_comprehensive_types (
+  v1 character varying primary key,
+  v2 jsonb,
+  v3 character varying,
+  v4 int,
+  v5 timestamp,
+  v6 boolean,
+  v7 smallint,
+  v8 bigint,
+  v9 real,
+  v10 double precision,
+  v11 character varying,
+  v12 character varying,
+  v13 character varying,
+  v14 character varying,
+  v15 timestamp with time zone,
+  v16 time without time zone,
+  v17 interval,
+  v18 bytea,
+  v19 jsonb,
+  v20 character varying,
+  v21 struct<x REAL, y REAL>,
+  v22 character varying,
+  v23 character varying,
+  v24 character varying,
+  v25 character varying,
+  v26 character varying,
+  v27 character varying,
+  v28 character varying,
+  v29 character varying,
+  v31 date,
+  v32 time without time zone,
+  v33 timestamp without time zone,
+  v34 numeric,
+  v35 numeric,
+  v36 numeric,
+  v37 character varying,
+  v38 character varying,
+  v39 character varying,
+  v40 integer[]
+) from pg_comprehensive_source table 'public.test_comprehensive_types';
+
+system ok
+psql -c "
+    INSERT INTO test_comprehensive_types (v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40) VALUES (
+        '{\"test\": \"abc\"}',
+        'source1',
+        42,
+        NOW(),
+        true,
+        123,
+        1234567890123456789,
+        3.14,
+        2.718281828459045,
+        'char10',
+        'varchar50',
+        'char20',
+        'varchar100',
+        NOW() AT TIME ZONE 'UTC',
+        '12:34:56.789'::time,
+        '1 day 2 hours 3 minutes',
+        E'\\x48656c6c6f',
+        '{\"json\": \"test\"}',
+        '<xml>test</xml>',
+        point(1.0, 2.0),
+        'citext_test',
+        '192.168.1.1',
+        '[1,10)',
+        '[100,200)',
+        '[1.5,2.5)',
+        '[2023-01-01,2023-12-31)',
+        '[2023-01-01 00:00:00+00,2023-12-31 23:59:59+00)',
+        '[2023-01-01,2023-12-31)',
+        '2023-12-25',
+        '12:34:56.789',
+        '2023-12-25 12:34:56.789',
+        123.45,
+        123.4567,
+        123.45,
+        '192.168.1.0/24',
+        '08:00:2b:01:02:03',
+        '08:00:2b:01:02:03:04:05',
+        '{1, 2, 3, 4, 5}'
+    );
+"
+
+sleep 3s
+
+# Verify initial data
+query I
+SELECT count(*) from rw_test_comprehensive_types;
+----
+1
+
+# Test schema change by adding a new column
+system ok
+psql -c "
+    ALTER TABLE test_comprehensive_types ADD COLUMN foo JSONB;
+    INSERT INTO test_comprehensive_types (v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, foo) VALUES (
+        '{\"test\": \"def\"}',
+        'source2',
+        43,
+        NOW(),
+        false,
+        456,
+        987654321098765432,
+        2.71,
+        3.141592653589793,
+        'char10_2',
+        'varchar50_2',
+        'char20_2',
+        'varchar100_2',
+        NOW() AT TIME ZONE 'UTC',
+        '23:45:12.123'::time,
+        '2 days 3 hours 4 minutes',
+        E'\\x576f726c64',
+        '{\"json2\": \"test2\"}',
+        '<xml2>test2</xml2>',
+        point(3.0, 4.0),
+        'citext_test2',
+        '10.0.0.1',
+        '[5,15)',
+        '[200,300)',
+        '[2.5,3.5)',
+        '[2024-01-01,2024-12-31)',
+        '[2024-01-01 00:00:00+00,2024-12-31 23:59:59+00)',
+        '[2024-01-01,2024-12-31)',
+        '2024-12-25',
+        '23:45:12.123',
+        '2024-12-25 23:45:12.123',
+        456.78,
+        456.7890,
+        456.78,
+        '10.0.0.0/24',
+        '08:00:2b:04:05:06',
+        '08:00:2b:04:05:06:07:08',
+        '{10, 20, 30, 40, 50}',
+        '{\"new\": \"column\"}'
+    );
+"
+
+sleep 5s
+
+# Verify schema change worked and new column exists
+query TTTT
+describe rw_test_comprehensive_types;
+----
+v1 character varying false NULL
+v2 jsonb false NULL
+v3 character varying false NULL
+v4 integer false NULL
+v5 timestamp without time zone false NULL
+v6 boolean false NULL
+v7 smallint false NULL
+v8 bigint false NULL
+v9 real false NULL
+v10 double precision false NULL
+v11 character varying false NULL
+v12 character varying false NULL
+v13 character varying false NULL
+v14 character varying false NULL
+v15 timestamp with time zone false NULL
+v16 time without time zone false NULL
+v17 interval false NULL
+v18 bytea false NULL
+v19 jsonb false NULL
+v20 character varying false NULL
+v21 struct<x REAL, y REAL> false NULL
+v22 character varying false NULL
+v23 character varying false NULL
+v24 character varying false NULL
+v25 character varying false NULL
+v26 character varying false NULL
+v27 character varying false NULL
+v28 character varying false NULL
+v29 character varying false NULL
+v31 date false NULL
+v32 time without time zone false NULL
+v33 timestamp without time zone false NULL
+v34 numeric false NULL
+v35 numeric false NULL
+v36 numeric false NULL
+v37 character varying false NULL
+v38 character varying false NULL
+v39 character varying false NULL
+v40 integer[] false NULL
+foo jsonb false NULL
+_rw_timestamp timestamp with time zone true NULL
+primary key v1 NULL NULL
+distribution key v1 NULL NULL
+table description rw_test_comprehensive_types NULL NULL
+
+# Verify both rows exist with the new column
+query I
+SELECT count(*) from rw_test_comprehensive_types;
+----
+2
+
+# Test specific column data from both rows
+query TTT
+SELECT v3, v4, foo from rw_test_comprehensive_types order by v3;
+----
+source1 42 NULL
+source2 43 {"new": "column"}
+
+statement ok
+drop source pg_comprehensive_source cascade;

@@ -259,7 +259,7 @@ impl PostgresExternalTableReader {
 
 pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
     let ty_name_lower = ty_name.to_lowercase();
-    
+
     // Handle array types (prefixed with _)
     if ty_name_lower.starts_with('_') {
         let base_type = &ty_name_lower[1..]; // Remove the _ prefix
@@ -297,9 +297,8 @@ pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
             "money" => Some(PgType::MONEY),
             "boolean" | "bool" => Some(PgType::BOOL),
             "inet" | "xml" | "varchar" | "character varying" | "int4range" | "int8range"
-            | "numrange" | "tsrange" | "tstzrange" | "daterange" | "macaddr" | "macaddr8" | "cidr" => {
-                Some(PgType::VARCHAR)
-            }
+            | "numrange" | "tsrange" | "tstzrange" | "daterange" | "macaddr" | "macaddr8"
+            | "cidr" => Some(PgType::VARCHAR),
             "char" | "character" | "bpchar" => Some(PgType::BPCHAR),
             "citext" | "text" => Some(PgType::TEXT),
             "bytea" => Some(PgType::BYTEA),
@@ -358,10 +357,12 @@ pub fn pg_type_to_rw_type(pg_type: &PgType) -> ConnectorResult<DataType> {
         PgType::JSON_ARRAY => DataType::List(Box::new(DataType::Jsonb)),
         PgType::JSONB_ARRAY => DataType::List(Box::new(DataType::Jsonb)),
         PgType::UUID_ARRAY => DataType::List(Box::new(DataType::Varchar)),
-        PgType::POINT_ARRAY => DataType::List(Box::new(DataType::Struct(risingwave_common::types::StructType::new(vec![
-            ("x", DataType::Float32),
-            ("y", DataType::Float32),
-        ])))),
+        PgType::POINT_ARRAY => DataType::List(Box::new(DataType::Struct(
+            risingwave_common::types::StructType::new(vec![
+                ("x", DataType::Float32),
+                ("y", DataType::Float32),
+            ]),
+        ))),
         _ => {
             return Err(anyhow::anyhow!("unsupported postgres type: {}", pg_type).into());
         }
