@@ -74,7 +74,6 @@ pub struct PostgresExternalTableReader {
     field_names: String,
     pk_indices: Vec<usize>,
     client: tokio::sync::Mutex<tokio_postgres::Client>,
-    split_column: Field,
     schema_table_name: SchemaTableName,
 }
 
@@ -113,18 +112,27 @@ impl ExternalTableReader for PostgresExternalTableReader {
     async fn get_parallel_cdc_splits(&self, options: CdcTableSnapshotSplitOption) {
         let backfill_num_rows_per_split = options.backfill_num_rows_per_split;
         if backfill_num_rows_per_split == 0 {
-            // No parallel cdc splits.
-            tracing::warn!(backfill_num_rows_per_split, "Cannot get CDC splits.");
-            return Ok(());
+            return Err(anyhow::anyhow!(
+                "invalid backfill_num_rows_per_split, must be greater than 0"
+            )
+            .into());
         }
+        if options.backfill_split_pk_column_index as usize >= self.pk_indices.len() {
+            return Err(anyhow::anyhow!(format!(
+                "invalid backfill_split_pk_column_index {}, out of bound",
+                options.backfill_split_pk_column_index
+            ))
+            .into());
+        }
+        let split_column = self.split_column(&options);
         let row_stream = if options.backfill_as_even_splits
-            && is_supported_even_split_data_type(&self.split_column.data_type)
+            && is_supported_even_split_data_type(&split_column.data_type)
         {
             // For certain types, use evenly-sized partition to optimize performance.
-            tracing::info!(?self.schema_table_name, ?self.rw_schema, ?self.pk_indices, ?self.split_column, "Get parallel cdc table snapshot even splits.");
+            tracing::info!(?self.schema_table_name, ?self.rw_schema, ?self.pk_indices, ?split_column, "Get parallel cdc table snapshot even splits.");
             self.as_even_splits(options)
         } else {
-            tracing::info!(?self.schema_table_name, ?self.rw_schema, ?self.pk_indices, ?self.split_column, "Get parallel cdc table snapshot uneven splits.");
+            tracing::info!(?self.schema_table_name, ?self.rw_schema, ?self.pk_indices, ?split_column, "Get parallel cdc table snapshot uneven splits.");
             self.as_uneven_splits(options)
         };
         pin_mut!(row_stream);
@@ -176,13 +184,11 @@ impl PostgresExternalTableReader {
             .map(|f| Self::quote_column(&f.name))
             .join(",");
 
-        let split_column = split_column(&rw_schema, &pk_indices);
         Ok(Self {
             rw_schema,
             field_names,
             pk_indices,
             client: tokio::sync::Mutex::new(client),
-            split_column,
             schema_table_name,
         })
     }
@@ -346,11 +352,14 @@ impl PostgresExternalTableReader {
         format!("\"{}\"", column)
     }
 
-    async fn min_and_max(&self) -> ConnectorResult<Option<(ScalarImpl, ScalarImpl)>> {
+    async fn min_and_max(
+        &self,
+        split_column: &Field,
+    ) -> ConnectorResult<Option<(ScalarImpl, ScalarImpl)>> {
         let sql = format!(
             "SELECT MIN({}), MAX({}) FROM {}",
-            self.split_column.name,
-            self.split_column.name,
+            split_column.name,
+            split_column.name,
             Self::get_normalized_table_name(&self.schema_table_name),
         );
         let client = self.client.lock().await;
@@ -359,18 +368,10 @@ impl PostgresExternalTableReader {
             Ok(None)
         } else {
             let row = &rows[0];
-            let min = postgres_cell_to_scalar_impl(
-                row,
-                &self.split_column.data_type,
-                0,
-                &self.split_column.name,
-            );
-            let max = postgres_cell_to_scalar_impl(
-                row,
-                &self.split_column.data_type,
-                1,
-                &self.split_column.name,
-            );
+            let min =
+                postgres_cell_to_scalar_impl(row, &split_column.data_type, 0, &split_column.name);
+            let max =
+                postgres_cell_to_scalar_impl(row, &split_column.data_type, 1, &split_column.name);
             match (min, max) {
                 (Some(min), Some(max)) => Ok(Some((min, max))),
                 _ => Ok(None),
@@ -383,16 +384,17 @@ impl PostgresExternalTableReader {
         left_value: &ScalarImpl,
         max_value: &ScalarImpl,
         max_split_size: u64,
+        split_column: &Field,
     ) -> ConnectorResult<Option<Datum>> {
         let sql = format!(
             "WITH t as (SELECT {} FROM {} WHERE {} >= $1 ORDER BY {} ASC LIMIT {}) SELECT CASE WHEN MAX({}) < $2 THEN MAX({}) ELSE NULL END FROM t",
-            Self::quote_column(&self.split_column.name),
+            Self::quote_column(&split_column.name),
             Self::get_normalized_table_name(&self.schema_table_name),
-            Self::quote_column(&self.split_column.name),
-            Self::quote_column(&self.split_column.name),
+            Self::quote_column(&split_column.name),
+            Self::quote_column(&split_column.name),
             max_split_size,
-            Self::quote_column(&self.split_column.name),
-            Self::quote_column(&self.split_column.name),
+            Self::quote_column(&split_column.name),
+            Self::quote_column(&split_column.name),
         );
         let client = self.client.lock().await;
         let prepared_stmt = client.prepare(&sql).await?;
@@ -411,9 +413,9 @@ impl PostgresExternalTableReader {
             let row = row?;
             Ok::<_, ConnectorError>(postgres_cell_to_scalar_impl(
                 &row,
-                &self.split_column.data_type,
+                &split_column.data_type,
                 0,
-                &self.split_column.name,
+                &split_column.name,
             ))
         });
         pin_mut!(datum_stream);
@@ -429,13 +431,14 @@ impl PostgresExternalTableReader {
         &self,
         start_offset: &ScalarImpl,
         max_value: &ScalarImpl,
+        split_column: &Field,
     ) -> ConnectorResult<Option<Datum>> {
         let sql = format!(
             "SELECT MIN({}) FROM {} WHERE {} > $1 AND {} <$2",
-            Self::quote_column(&self.split_column.name),
+            Self::quote_column(&split_column.name),
             Self::get_normalized_table_name(&self.schema_table_name),
-            Self::quote_column(&self.split_column.name),
-            Self::quote_column(&self.split_column.name),
+            Self::quote_column(&split_column.name),
+            Self::quote_column(&split_column.name),
         );
         let client = self.client.lock().await;
         let prepared_stmt = client.prepare(&sql).await?;
@@ -454,9 +457,9 @@ impl PostgresExternalTableReader {
             let row = row?;
             Ok::<_, ConnectorError>(postgres_cell_to_scalar_impl(
                 &row,
-                &self.split_column.data_type,
+                &split_column.data_type,
                 0,
-                &self.split_column.name,
+                &split_column.name,
             ))
         });
         pin_mut!(datum_stream);
@@ -541,8 +544,9 @@ impl PostgresExternalTableReader {
 
     #[try_stream(boxed, ok = CdcTableSnapshotSplit, error = ConnectorError)]
     async fn as_uneven_splits(&self, options: CdcTableSnapshotSplitOption) {
+        let split_column = self.split_column(&options);
         let mut split_id = 1;
-        let Some((min_value, max_value)) = self.min_and_max().await? else {
+        let Some((min_value, max_value)) = self.min_and_max(&split_column).await? else {
             let left_bound_row = OwnedRow::new(vec![None]);
             let right_bound_row = OwnedRow::new(vec![None]);
             let split = CdcTableSnapshotSplit {
@@ -567,13 +571,14 @@ impl PostgresExternalTableReader {
                     &next_left_bound_inclusive,
                     &max_value,
                     options.backfill_num_rows_per_split,
+                    &split_column,
                 )
                 .await?;
             if let Some(Some(ref inner)) = next_right
                 && *inner == next_left_bound_inclusive
             {
                 next_right = self
-                    .next_greater_bound(&next_left_bound_inclusive, &max_value)
+                    .next_greater_bound(&next_left_bound_inclusive, &max_value, &split_column)
                     .await?;
             }
             if let Some(next_right) = next_right {
@@ -618,8 +623,9 @@ impl PostgresExternalTableReader {
 
     #[try_stream(boxed, ok = CdcTableSnapshotSplit, error = ConnectorError)]
     async fn as_even_splits(&self, options: CdcTableSnapshotSplitOption) {
+        let split_column = self.split_column(&options);
         let mut split_id = 1;
-        let Some((min_value, max_value)) = self.min_and_max().await? else {
+        let Some((min_value, max_value)) = self.min_and_max(&split_column).await? else {
             let left_bound_row = OwnedRow::new(vec![None]);
             let right_bound_row = OwnedRow::new(vec![None]);
             let split = CdcTableSnapshotSplit {
@@ -647,10 +653,10 @@ impl PostgresExternalTableReader {
             let split = CdcTableSnapshotSplit {
                 split_id,
                 left_bound_inclusive: OwnedRow::new(vec![
-                    left.map(|l| to_int_scalar(l, &self.split_column.data_type)),
+                    left.map(|l| to_int_scalar(l, &split_column.data_type)),
                 ]),
                 right_bound_exclusive: OwnedRow::new(vec![
-                    right.map(|r| to_int_scalar(r, &self.split_column.data_type)),
+                    right.map(|r| to_int_scalar(r, &split_column.data_type)),
                 ]),
             };
             try_increase_split_id(&mut split_id)?;
@@ -661,6 +667,11 @@ impl PostgresExternalTableReader {
             left = right;
             right = left.map(|l| l.saturating_add(saturated_split_max_size));
         }
+    }
+
+    fn split_column(&self, options: &CdcTableSnapshotSplitOption) -> Field {
+        self.rw_schema.fields[self.pk_indices[options.backfill_split_pk_column_index as usize]]
+            .clone()
     }
 }
 
@@ -686,10 +697,6 @@ fn try_increase_split_id(split_id: &mut i64) -> ConnectorResult<()> {
 }
 
 /// Use the first column of primary keys to split table.
-fn split_column(rw_schema: &Schema, pk_indices: &[usize]) -> Field {
-    rw_schema.fields[pk_indices[0]].clone()
-}
-
 fn is_supported_even_split_data_type(data_type: &DataType) -> bool {
     matches!(
         data_type,

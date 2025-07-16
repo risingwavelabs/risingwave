@@ -48,6 +48,7 @@ pub const CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY: &str = "snapshot.batch_size";
 pub const CDC_BACKFILL_PARALLELISM: &str = "backfill.parallelism";
 pub const CDC_BACKFILL_NUM_ROWS_PER_SPLIT: &str = "backfill.num_rows_per_split";
 pub const CDC_BACKFILL_AS_EVEN_SPLITS: &str = "backfill.as_even_splits";
+pub const CDC_BACKFILL_SPLIT_PK_COLUMN_INDEX: &str = "backfill.split_pk_column_index";
 // We enable transaction for shared cdc source by default
 pub const CDC_TRANSACTIONAL_KEY: &str = "transactional";
 pub const CDC_WAIT_FOR_STREAMING_START_TIMEOUT: &str = "cdc.source.wait.streaming.start.timeout";
@@ -279,12 +280,20 @@ pub fn build_actor_cdc_table_snapshot_splits(
 
 #[derive(Debug, Clone, Hash, PartialEq)]
 pub struct CdcScanOptions {
+    /// Used by Used in non-parallel backfill, i.e. backfill V1.
     pub disable_backfill: bool,
+    /// Used by non-parallelized backfill. The frequency of snapshot read resets for consuming the WAL backlog.
     pub snapshot_barrier_interval: u32,
+    /// Used by non-parallelized backfill. The number of rows to fetch in a single batch when reading from an external table.
     pub snapshot_batch_size: u32,
+    /// Used by parallelized backfill, i.e. backfill V2. The initial parallelism of parallel backfill. This also caps the maximum parallelism for subsequent modifications.
     pub backfill_parallelism: u32,
+    /// Used by parallelized backfill. The estimated number of rows per split used in splits generation.
     pub backfill_num_rows_per_split: u64,
+    /// Used by parallelized backfill. For supported split column data type, assume an uniform distribution and adopt a much faster splits generation method.
     pub backfill_as_even_splits: bool,
+    /// Used by parallelized backfill. Specify the index of primary key column to use as split column.
+    pub backfill_split_pk_column_index: u32,
 }
 
 impl Default for CdcScanOptions {
@@ -297,6 +306,7 @@ impl Default for CdcScanOptions {
             // 0 means disable backfill v2.
             backfill_num_rows_per_split: 0,
             backfill_as_even_splits: true,
+            backfill_split_pk_column_index: 0,
         }
     }
 }
@@ -310,6 +320,7 @@ impl CdcScanOptions {
             backfill_parallelism: self.backfill_parallelism,
             backfill_num_rows_per_split: self.backfill_num_rows_per_split,
             backfill_as_even_splits: self.backfill_as_even_splits,
+            backfill_split_pk_column_index: self.backfill_split_pk_column_index,
         }
     }
 
@@ -321,6 +332,7 @@ impl CdcScanOptions {
             backfill_parallelism: proto.backfill_parallelism,
             backfill_num_rows_per_split: proto.backfill_num_rows_per_split,
             backfill_as_even_splits: proto.backfill_as_even_splits,
+            backfill_split_pk_column_index: proto.backfill_split_pk_column_index,
         }
     }
 

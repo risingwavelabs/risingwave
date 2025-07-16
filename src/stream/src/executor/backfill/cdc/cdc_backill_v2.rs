@@ -107,9 +107,13 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             .filter(|col| col.additional_column.column_type.is_some())
             .cloned()
             .collect_vec();
-        // Currently we hard code the split column to be the first column of primary keys.
-        // TODO(zw): feat: configurable split columns
-        let snapshot_split_column_index = pk_indices[0];
+        assert!(
+            (self.options.backfill_split_pk_column_index as usize) < pk_indices.len(),
+            "split pk column index {} out of bound",
+            self.options.backfill_split_pk_column_index
+        );
+        let snapshot_split_column_index =
+            pk_indices[self.options.backfill_split_pk_column_index as usize];
         let cdc_table_snapshot_split_column =
             vec![self.external_table.schema().fields[snapshot_split_column_index].clone()];
 

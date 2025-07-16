@@ -235,6 +235,7 @@ pub trait ExternalTableReader: Sized {
 pub struct CdcTableSnapshotSplitOption {
     pub backfill_num_rows_per_split: u64,
     pub backfill_as_even_splits: bool,
+    pub backfill_split_pk_column_index: u32,
 }
 
 pub enum ExternalTableReaderImpl {

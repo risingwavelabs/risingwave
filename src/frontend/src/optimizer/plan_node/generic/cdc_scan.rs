@@ -25,7 +25,7 @@ use risingwave_connector::source::cdc::external::CdcTableType;
 use risingwave_connector::source::cdc::{
     CDC_BACKFILL_AS_EVEN_SPLITS, CDC_BACKFILL_ENABLE_KEY, CDC_BACKFILL_NUM_ROWS_PER_SPLIT,
     CDC_BACKFILL_PARALLELISM, CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY,
-    CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY, CdcScanOptions,
+    CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY, CDC_BACKFILL_SPLIT_PK_COLUMN_INDEX, CdcScanOptions,
 };
 
 use super::GenericPlanNode;
@@ -95,6 +95,15 @@ pub fn build_cdc_scan_options_with_options(
         if let Some(backfill_as_even_splits) = with_options.get(CDC_BACKFILL_AS_EVEN_SPLITS) {
             scan_options.backfill_as_even_splits = bool::from_str(backfill_as_even_splits)
                 .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_AS_EVEN_SPLITS))?;
+        }
+
+        if let Some(backfill_split_pk_column_index) =
+            with_options.get(CDC_BACKFILL_SPLIT_PK_COLUMN_INDEX)
+        {
+            scan_options.backfill_split_pk_column_index =
+                u32::from_str(backfill_split_pk_column_index).map_err(|_| {
+                    anyhow!("Invalid value for {}", CDC_BACKFILL_SPLIT_PK_COLUMN_INDEX)
+                })?;
         }
     }
 

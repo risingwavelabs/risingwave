@@ -57,6 +57,7 @@ pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
         CdcTableSnapshotSplitOption {
             backfill_num_rows_per_split: per_table_options.backfill_num_rows_per_split,
             backfill_as_even_splits: per_table_options.backfill_as_even_splits,
+            backfill_split_pk_column_index: per_table_options.backfill_split_pk_column_index,
         }
     } else {
         return Ok(());
