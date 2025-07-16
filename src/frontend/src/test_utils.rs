@@ -61,8 +61,8 @@ use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
-    EventLog, FragmentDistribution, PbTableParallelism, PbThrottleTarget, RecoveryStatus,
-    RefreshRequest, RefreshResponse, SystemParams,
+    EventLog, FragmentDistribution, LoadFinishRequest, LoadFinishResponse, PbTableParallelism,
+    PbThrottleTarget, RecoveryStatus, RefreshRequest, RefreshResponse, SystemParams,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -1216,6 +1216,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn refresh(&self, _request: RefreshRequest) -> RpcResult<RefreshResponse> {
         Ok(RefreshResponse { status: None })
+    }
+
+    async fn load_finish(&self, _request: LoadFinishRequest) -> RpcResult<LoadFinishResponse> {
+        Ok(LoadFinishResponse { status: None })
     }
 }
 

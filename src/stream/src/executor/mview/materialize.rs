@@ -73,7 +73,7 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     is_dummy_table: bool,
 }
 
-fn get_op_consistency_level(
+pub fn get_op_consistency_level(
     conflict_behavior: ConflictBehavior,
     may_have_downstream: bool,
     depended_subscriptions: &HashSet<u32>,
@@ -107,6 +107,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         version_column_index: Option<u32>,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
+        tracing::info!(?table_catalog, "MaterializeExecutor::new");
+
         let table_columns: Vec<ColumnDesc> = table_catalog
             .columns
             .iter()
@@ -327,7 +329,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
     }
 
     /// return true when changed
-    fn may_update_depended_subscriptions(
+    pub fn may_update_depended_subscriptions(
         depended_subscriptions: &mut HashSet<u32>,
         barrier: &Barrier,
         mv_table_id: TableId,
@@ -426,7 +428,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
 }
 
 /// Construct output `StreamChunk` from given buffer.
-fn generate_output(
+pub fn generate_output(
     change_buffer: ChangeBuffer,
     data_types: Vec<DataType>,
 ) -> StreamExecutorResult<Option<StreamChunk>> {
@@ -474,7 +476,7 @@ fn generate_output(
 
 /// `ChangeBuffer` is a buffer to handle chunk into `KeyOp`.
 /// TODO(rc): merge with `TopNStaging`.
-struct ChangeBuffer {
+pub struct ChangeBuffer {
     buffer: HashMap<Vec<u8>, KeyOp>,
 }
 
@@ -562,8 +564,8 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S
 }
 
 /// A cache for materialize executors.
-struct MaterializeCache<SD> {
-    lru_cache: ManagedLruCache<Vec<u8>, CacheValue>,
+pub struct MaterializeCache<SD> {
+    pub lru_cache: ManagedLruCache<Vec<u8>, CacheValue>,
     row_serde: BasicSerde,
     version_column_index: Option<u32>,
     _serde: PhantomData<SD>,
@@ -572,7 +574,7 @@ struct MaterializeCache<SD> {
 type CacheValue = Option<CompactedRow>;
 
 impl<SD: ValueRowSerde> MaterializeCache<SD> {
-    fn new(
+    pub fn new(
         watermark_sequence: AtomicU64Ref,
         metrics_info: MetricsInfo,
         row_serde: BasicSerde,
@@ -588,7 +590,9 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         }
     }
 
-    async fn handle<S: StateStore>(
+    /// First populate the cache from `table`, and then calculate a [`ChangeBuffer`].
+    /// `table` will not be written in this method.
+    pub async fn handle<S: StateStore>(
         &mut self,
         row_ops: Vec<(Op, Vec<u8>, Bytes)>,
         table: &StateTableInner<S, SD>,
@@ -759,7 +763,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         })
     }
 
-    fn evict(&mut self) {
+    pub fn evict(&mut self) {
         self.lru_cache.evict()
     }
 }

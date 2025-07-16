@@ -1273,6 +1273,10 @@ pub enum Statement {
     Refresh {
         table_name: ObjectName,
     },
+    /// Load finish table
+    LoadFinish {
+        table_name: ObjectName,
+    },
     /// SELECT
     Query(Box<Query>),
     /// INSERT
@@ -1800,6 +1804,10 @@ impl Statement {
             }
             Statement::Refresh { table_name } => {
                 write!(f, "REFRESH {}", table_name)?;
+                Ok(())
+            }
+            Statement::LoadFinish { table_name } => {
+                write!(f, "LOAD FINISH {}", table_name)?;
                 Ok(())
             }
             Statement::Analyze { table_name } => {

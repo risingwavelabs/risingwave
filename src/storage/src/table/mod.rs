@@ -119,10 +119,6 @@ impl<T: AsRef<[u8]>, R> KeyedRow<T, R> {
         self.row
     }
 
-    pub fn into_owned_row_key(self) -> (TableKey<T>, R) {
-        (self.vnode_prefixed_key, self.row)
-    }
-
     pub fn vnode(&self) -> VirtualNode {
         self.vnode_prefixed_key.vnode_part()
     }

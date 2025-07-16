@@ -318,6 +318,7 @@ impl Parser<'_> {
                 Keyword::CLOSE => Ok(self.parse_close_cursor()?),
                 Keyword::TRUNCATE => Ok(self.parse_truncate()?),
                 Keyword::REFRESH => Ok(self.parse_refresh()?),
+                Keyword::LOAD => Ok(self.parse_load_finish()?),
                 Keyword::CREATE => Ok(self.parse_create()?),
                 Keyword::DISCARD => Ok(self.parse_discard()?),
                 Keyword::DROP => Ok(self.parse_drop()?),
@@ -377,6 +378,12 @@ impl Parser<'_> {
         self.expect_keyword(Keyword::TABLE)?;
         let table_name = self.parse_object_name()?;
         Ok(Statement::Refresh { table_name })
+    }
+
+    pub fn parse_load_finish(&mut self) -> ModalResult<Statement> {
+        self.expect_keyword(Keyword::FINISH)?;
+        let table_name = self.parse_object_name()?;
+        Ok(Statement::LoadFinish { table_name })
     }
 
     pub fn parse_analyze(&mut self) -> ModalResult<Statement> {

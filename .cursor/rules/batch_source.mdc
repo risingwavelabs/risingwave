@@ -1,0 +1,101 @@
+---
+alwaysApply: true
+---
+我现在正在实现 refreshable batch source 这个功能，
+designed to ingest data source without CDC.
+
+
+## User interface
+
+User just create a normal table with connector.
+If the connector is a special "batch" connector, the table can be refreshed.
+The table MUST have a primary key.
+
+e.g., (We will implement batch_posix_fs connector as a MVP)
+
+```
+create table t (v1 int primary key, v2 int) with (
+    connector = 'batch_posix_fs',
+    batch_posix_fs.root = '/tmp/rw_refresh_test',
+    match_pattern = '*.csv'
+) format plain encode csv
+```
+
+When data is changed, (including delete) user can use `REFRESH t` to reload the table.
+
+
+Later, we will support more batch connectors, e.g., snowflake, bigquery, etc.
+And we will support scheduled refresh.
+
+```
+CREATE TABLE t WITH (connector = 'snowflake', refresh_interval = '1h');
+```
+
+## Implementation
+
+The idea is "Staging Table for Diff Calculation"
+
+1. **Load & Insert**: As data is read from the source, it is simultaneously:
+    - Inserted into the main table using an `on conflict overwrite` clause (no need version col).
+    - The PKs are inserted into a separate, PK-only staging table.
+2. **Calculate Deletes**: The core of this step is a `LEFT ANTI JOIN` to find rows in the main table that are no longer present in the source (`DELETE FROM main_table WHERE pk NOT IN (SELECT pk FROM staging_table)`).
+
+**Implementation Options for the `ANTI JOIN`**:
+
+- **Hash Join**: Not ideal. Since both tables can be large, building a hash table on the staging table (the right side) risks significant memory pressure and potential spills to disk/object store.
+- **Lookup Join**: Also potentially inefficient. This would require a full scan of the main table while performing a point-lookup for each row (bloom filter doesn’t help), leading to poor performance.
+- **Sort-Merge Join**: **The most promising approach.** Since both the main table and the staging table are already sorted by PK, the join can be executed as a highly efficient, parallelizable merge iteration.
+
+
+```mermaid
+graph LR
+    Source["Source (singleton)"] --> Hash("hash(pk)") --> Materialize["Materialize"]
+```
+
+```
+// Source 节点的逻辑
+
+// 当接收到 Refresh (刷新) Barrier (屏障) 时触发
+PROCEDURE on_barrier_refresh:
+    // 1. 将 Refresh Barrier 向下游传递，通知下游节点刷新开始
+    YIELD Barrier::Refresh
+
+    // 2. 执行从外部源加载数据的操作
+    //    这通常是一个迭代过程，会产生多批数据
+    YIELD load_from_source()
+
+    // 3. 数据加载完成后，发出一个 LoadFinish (加载完成) 信号
+    //    通知下游节点数据已全部加载到中间状态
+    YIELD Signal::LoadFinish
+
+    // (原始图中的注释：这是一个 Barrier，还是需要一个新的信号机制？)
+    // 开发者注：需要确认 LoadFinish 是作为 Barrier 还是普通 Signal 更合适，
+    // 这取决于是否需要所有并行任务都完成后再进行下一步。
+
+
+// Materialize 节点的逻辑
+
+// 当接收到 Refresh (刷新) Barrier 时触发
+PROCEDURE on_barrier_refresh:
+    // 切换写入目标，后续接收到的数据将写入 t_staging (临时表)
+    SET write_target = t_staging
+
+// 当接收到 LoadFinish (加载完成) 信号时触发
+PROCEDURE on_signal_load_finish:
+    // 此时，所有新数据已写入 t_staging 表
+
+    // 1. 迭代比较 t_staging (新数据) 和 t_main (主表/旧数据) 以计算差异
+    FOR each diff IN merge_and_compare(t_staging, t_main):
+        // a. 在批处理合并过程中，需要维护偏移量或游标状态
+        MAINTAIN merge_offset_state
+
+        // b. 将计算出的差异 (diff) 应用到主表 t_main
+        UPDATE t_main WITH diff
+
+        // c. 将差异 (diff) 向下游传递 (如果还有后续节点)
+        YIELD diff
+    ENDFOR
+
+    // 2. 清空临时表，为下一次刷新做准备
+    TRUNCATE t_staging
+```

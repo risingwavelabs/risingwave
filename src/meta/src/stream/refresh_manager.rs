@@ -14,6 +14,7 @@
 
 use anyhow::anyhow;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::meta::{RefreshRequest, RefreshResponse};
 
 use crate::barrier::{BarrierScheduler, Command};
@@ -43,8 +44,9 @@ impl RefreshManager {
     /// 3. Returns the result of the refresh operation
     pub async fn refresh_table(&self, request: RefreshRequest) -> MetaResult<RefreshResponse> {
         let table_id = TableId::new(request.table_id);
+        let associated_source_id = TableId::new(request.associated_source_id);
 
-        tracing::info!("Starting refresh operation for table {}", table_id);
+        tracing::info!(%table_id, %associated_source_id, "Starting refresh operation");
 
         // Validate that the table exists and is refreshable
         self.validate_refreshable_table(table_id).await?;
@@ -58,7 +60,10 @@ impl RefreshManager {
         );
 
         // Create refresh command
-        let refresh_command = Command::Refresh { table_id };
+        let refresh_command = Command::Refresh {
+            table_id,
+            associated_source_id,
+        };
 
         // Send refresh command through barrier system
         match self

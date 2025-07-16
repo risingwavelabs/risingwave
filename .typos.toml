@@ -45,6 +45,8 @@ extend-exclude = [
     # Ideally, we should just ignore that line: https://github.com/crate-ci/typos/issues/316
     "src/common/src/cast/mod.rs",
     "src/tests/simulation/tests/integration_tests/scale/shared_source.rs",
+    # code copied from other projects
+    "src/utils/futures_util/src/select_with_strategy.rs",
     # We don't want to fix "Divy" here, but may want in other places.
     "integration_tests/deltalake-sink/spark-script/run-sql-file.sh",
     # These files are copied from debezium connector, we don't want to fix their typos

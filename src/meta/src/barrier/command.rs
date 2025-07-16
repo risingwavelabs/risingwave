@@ -347,6 +347,7 @@ pub enum Command {
     /// and reloading data from source.
     Refresh {
         table_id: TableId,
+        associated_source_id: TableId,
     },
 }
 
@@ -387,7 +388,14 @@ impl std::fmt::Display for Command {
             } => write!(f, "DropSubscription: {subscription_id}"),
             Command::ConnectorPropsChange(_) => write!(f, "ConnectorPropsChange"),
             Command::StartFragmentBackfill { .. } => write!(f, "StartFragmentBackfill"),
-            Command::Refresh { table_id } => write!(f, "Refresh: {}", table_id),
+            Command::Refresh {
+                table_id,
+                associated_source_id,
+            } => write!(
+                f,
+                "Refresh: {} (source: {})",
+                table_id, associated_source_id
+            ),
         }
     }
 }
@@ -1106,9 +1114,13 @@ impl Command {
                     fragment_ids: fragment_ids.clone(),
                 }),
             ),
-            Command::Refresh { table_id } => Some(Mutation::RefreshStart(
+            Command::Refresh {
+                table_id,
+                associated_source_id,
+            } => Some(Mutation::RefreshStart(
                 risingwave_pb::stream_plan::RefreshStartMutation {
                     table_id: table_id.table_id,
+                    associated_source_id: associated_source_id.table_id,
                 },
             )),
         }

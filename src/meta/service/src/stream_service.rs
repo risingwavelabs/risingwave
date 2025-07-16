@@ -532,6 +532,16 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(response))
     }
 
+    async fn load_finish(
+        &self,
+        request: Request<LoadFinishRequest>,
+    ) -> Result<Response<LoadFinishResponse>, Status> {
+        let req = request.into_inner();
+        tracing::info!("Load finish for table with id: {}", req.table_id);
+        // TODO: Implement load finish logic
+        Ok(Response::new(LoadFinishResponse { status: None }))
+    }
+
     async fn alter_connector_props(
         &self,
         request: Request<AlterConnectorPropsRequest>,

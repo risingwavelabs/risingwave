@@ -49,11 +49,22 @@ pub struct StreamMaterialize {
     /// Child of Materialize plan
     input: PlanRef,
     table: TableCatalog,
+    /// For refreshable tables, staging table for collecting new data during refresh
+    staging_table: Option<TableCatalog>,
 }
 
 impl StreamMaterialize {
     #[must_use]
     pub fn new(input: PlanRef, table: TableCatalog) -> Self {
+        Self::new_with_staging(input, table, None)
+    }
+
+    #[must_use]
+    pub fn new_with_staging(
+        input: PlanRef,
+        table: TableCatalog,
+        staging_table: Option<TableCatalog>,
+    ) -> Self {
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
@@ -65,7 +76,12 @@ impl StreamMaterialize {
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),
         );
-        Self { base, input, table }
+        Self {
+            base,
+            input,
+            table,
+            staging_table,
+        }
     }
 
     /// Create a materialize node, for `MATERIALIZED VIEW` and `INDEX`.
@@ -158,27 +174,84 @@ impl StreamMaterialize {
 
         let table = Self::derive_table_catalog(
             input.clone(),
-            name,
+            name.clone(),
             database_id,
             schema_id,
-            user_order_by,
-            columns,
-            definition,
+            user_order_by.clone(),
+            columns.clone(),
+            definition.clone(),
             conflict_behavior,
             version_column_index,
-            Some(pk_column_indices),
+            Some(pk_column_indices.clone()),
             row_id_index,
             TableType::Table,
-            Some(version),
+            Some(version.clone()),
             Cardinality::unknown(), // unknown cardinality for tables
             retention_seconds,
             CreateType::Foreground,
-            webhook_info,
+            webhook_info.clone(),
             engine,
             refreshable,
         )?;
 
-        Ok(Self::new(input, table))
+        // For refreshable tables, create a staging table with the same schema but different table_id
+        let staging_table = if refreshable {
+            tracing::info!(
+                table_name = %name,
+                refreshable = %refreshable,
+                "Creating staging table for refreshable table"
+            );
+
+            assert!(row_id_index.is_none());
+            assert!(retention_seconds.is_none());
+
+            let pk_columns: Vec<_> = pk_column_indices
+                .iter()
+                .map(|idx| columns[*idx].clone())
+                .collect();
+            let pk_indices = (0..pk_columns.len()).collect();
+
+            let staging_table = Self::derive_table_catalog(
+                input.clone(),
+                format!("{}_staging", name), // Add staging suffix to name
+                database_id,
+                schema_id,
+                user_order_by,
+                pk_columns,
+                format!("-- Staging table for refreshable table: {}", definition),
+                conflict_behavior,
+                version_column_index,
+                Some(pk_indices),
+                None,
+                TableType::Table,
+                Some(version),
+                Cardinality::unknown(),
+                None,
+                CreateType::Foreground,
+                webhook_info,
+                engine,
+                false, // Staging table itself is not refreshable
+            )?;
+
+            tracing::info!(
+                table_name = %name,
+                staging_table_name = %staging_table.name,
+                "Successfully created staging table"
+            );
+
+            Some(staging_table)
+        } else {
+            None
+        };
+
+        tracing::info!(
+            table_name = %name,
+            refreshable = %refreshable,
+            has_staging_table = %staging_table.is_some(),
+            "Creating StreamMaterialize with staging table info"
+        );
+
+        Ok(Self::new_with_staging(input, table, staging_table))
     }
 
     /// Rewrite the input to satisfy the required distribution if necessary, according to the type.
@@ -334,6 +407,12 @@ impl StreamMaterialize {
         &self.table
     }
 
+    /// Get a reference to the stream materialize's staging table.
+    #[must_use]
+    pub fn staging_table(&self) -> Option<&TableCatalog> {
+        self.staging_table.as_ref()
+    }
+
     pub fn name(&self) -> &str {
         self.table.name()
     }
@@ -385,7 +464,7 @@ impl PlanTreeNodeUnary for StreamMaterialize {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let new = Self::new(input, self.table().clone());
+        let new = Self::new_with_staging(input, self.table().clone(), self.staging_table.clone());
         new.base
             .schema()
             .fields
@@ -402,14 +481,34 @@ impl PlanTreeNodeUnary for StreamMaterialize {
 impl_plan_tree_node_for_unary! { StreamMaterialize }
 
 impl StreamNode for StreamMaterialize {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
+
+        tracing::info!(
+            table_name = %self.table().name(),
+            refreshable = %self.table().refreshable,
+            has_staging_table = %self.staging_table.is_some(),
+            staging_table_name = ?self.staging_table.as_ref().map(|t| &t.name),
+            "Converting StreamMaterialize to protobuf"
+        );
+
+        let staging_table_prost = self.staging_table.clone().map(|t| {
+            let prost = t.with_id(state.gen_table_id_wrapped()).to_prost();
+            tracing::info!(
+                staging_table_id = %prost.id,
+                staging_table_name = %prost.name,
+                "Staging table converted to protobuf"
+            );
+            prost
+        });
 
         PbNodeBody::Materialize(Box::new(MaterializeNode {
             // Do not fill `table` and `table_id` here to avoid duplication. It will be filled by
             // meta service after global information is generated.
             table_id: 0,
             table: None,
+            // Pass staging table catalog if available for refreshable tables
+            staging_table: staging_table_prost,
 
             column_orders: self
                 .table()

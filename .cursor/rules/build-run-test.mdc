@@ -9,7 +9,8 @@ You may need to learn how to build and test RisingWave when implementing feature
 
 - Use `./risedev b` to build the project.
 - Use `./risedev c` to check if the code follow rust-clippy rules, coding styles, etc.
-- Use `./risedev d` to run a RisingWave instance. If the project is not built, this will build the project before running. The instance will run in background, so you don't need to start a new terminal to run this command. You can connect to the instance right after this command is finished.
+- Use `./risedev d` to run a RisingWave instance. If the project is not built, this will build the project before running. The instance will run in background, so you don't need to start a new terminal to run this command. You can connect to the instance right after this command is finished. When you see errors like
+  `psql: error: connection to server at "127.0.0.1", port 4566 failed: Connection refused`, just rerun `./risedev d` to start the instance.
 - Use `./risedev k` to stop a RisingWave instance started by `./risedev d`.
 - The log files of a running RisingWave are located in `.risingwave/log` folder in the workspace. You can check them (`tail` is suggested because they can be quite long) if things go wrong.
 - When a RisingWave instance is running, you can use `./risedev psql -c "<your query>"` to run SQL queries in RW.
