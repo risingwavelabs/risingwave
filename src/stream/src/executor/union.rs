@@ -15,10 +15,8 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use pin_project::pin_project;
-
+use crate::executor::DynamicReceivers;
 use crate::executor::exchange::input::{BoxedInput, Input};
-use crate::executor::merge::DynamicReceivers;
 use crate::executor::prelude::*;
 
 /// `UnionExecutor` merges data from multiple inputs.
@@ -77,10 +75,8 @@ impl Execute for UnionExecutor {
     }
 }
 
-#[pin_project]
 struct UnionExecutorInput {
     id: usize,
-    #[pin]
     inner: BoxedMessageStream,
 }
 
@@ -95,8 +91,8 @@ impl Input for UnionExecutorInput {
 impl Stream for UnionExecutorInput {
     type Item = MessageStreamItem;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.project().inner.poll_next(cx)
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.inner.as_mut().poll_next(cx)
     }
 }
 
