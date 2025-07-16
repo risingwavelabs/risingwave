@@ -695,7 +695,7 @@ message StreamCdcScanOptions {
 
   bool backfill_as_even_splits = 6;
 
-  uint32  backfill_split_pk_column_index = 7;
+  uint32 backfill_split_pk_column_index = 7;
 }
 
 message StreamCdcScanNode {
