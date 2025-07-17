@@ -256,7 +256,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                 table_reader.expect("table reader must created"),
             );
             // Backfill snapshot splits sequentially.
-            'split_backfill: for split in actor_snapshot_splits.iter().skip(next_split_idx) {
+            for split in actor_snapshot_splits.iter().skip(next_split_idx) {
                 tracing::info!(
                     table_id,
                     upstream_table_name,
@@ -296,6 +296,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                         Either::Left(msg) => {
                             match msg? {
                                 Message::Barrier(barrier) => {
+                                    state_impl.commit_state(barrier.epoch).await?;
                                     if let Some(mutation) = barrier.mutation.as_deref() {
                                         use crate::executor::Mutation;
                                         match mutation {
@@ -329,14 +330,20 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                                         upstream_table_name,
                                                         "CdcBackfill has been dropped due to config change"
                                                     );
+                                                    for chunk in upstream_chunk_buffer.drain(..) {
+                                                        yield Message::Chunk(mapping_chunk(
+                                                            chunk,
+                                                            &self.output_indices,
+                                                        ));
+                                                    }
                                                     yield Message::Barrier(barrier);
-                                                    break 'split_backfill;
+                                                    let () = futures::future::pending().await;
+                                                    unreachable!();
                                                 }
                                             }
                                             _ => (),
                                         }
                                     }
-                                    state_impl.commit_state(barrier.epoch).await?;
                                     if is_reset_barrier(&barrier, self.actor_ctx.id) {
                                         next_reset_barrier = Some(barrier);
                                         for chunk in upstream_chunk_buffer.drain(..) {
