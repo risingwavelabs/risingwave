@@ -547,3 +547,110 @@ fn is_reset_barrier(barrier: &Barrier, actor_id: ActorId) -> bool {
         _ => false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::StreamChunk;
+    use risingwave_common::row::OwnedRow;
+    use risingwave_common::types::ScalarImpl;
+
+    use crate::executor::backfill::cdc::cdc_backill_v2::filter_stream_chunk;
+
+    #[test]
+    fn test_filter_stream_chunk() {
+        use risingwave_common::array::StreamChunkTestExt;
+        let chunk = StreamChunk::from_pretty(
+            "  I I
+             + 1 6
+             - 2 .
+            U- 3 7
+            U+ 4 .",
+        );
+        let bound = None;
+        let c = filter_stream_chunk(chunk.clone(), &bound, 0);
+        assert!(c.is_none());
+
+        let bound = Some((OwnedRow::new(vec![None]), OwnedRow::new(vec![None])));
+        let c = filter_stream_chunk(chunk.clone(), &bound, 0);
+        assert_eq!(c.unwrap().compact(), chunk);
+
+        let bound = Some((
+            OwnedRow::new(vec![None]),
+            OwnedRow::new(vec![Some(ScalarImpl::Int64(3))]),
+        ));
+        let c = filter_stream_chunk(chunk.clone(), &bound, 0);
+        assert_eq!(
+            c.unwrap().compact(),
+            StreamChunk::from_pretty(
+                "  I I
+             + 1 6
+             - 2 .",
+            )
+        );
+
+        let bound = Some((
+            OwnedRow::new(vec![Some(ScalarImpl::Int64(3))]),
+            OwnedRow::new(vec![None]),
+        ));
+        let c = filter_stream_chunk(chunk.clone(), &bound, 0);
+        assert_eq!(
+            c.unwrap().compact(),
+            StreamChunk::from_pretty(
+                "  I I
+            U- 3 7
+            U+ 4 .",
+            )
+        );
+
+        let bound = Some((
+            OwnedRow::new(vec![Some(ScalarImpl::Int64(2))]),
+            OwnedRow::new(vec![Some(ScalarImpl::Int64(4))]),
+        ));
+        let c = filter_stream_chunk(chunk.clone(), &bound, 0);
+        assert_eq!(
+            c.unwrap().compact(),
+            StreamChunk::from_pretty(
+                "  I I
+             - 2 .
+            U- 3 7",
+            )
+        );
+
+        // Test NULL value.
+        let bound = None;
+        let c = filter_stream_chunk(chunk.clone(), &bound, 1);
+        assert!(c.is_none());
+
+        let bound = Some((OwnedRow::new(vec![None]), OwnedRow::new(vec![None])));
+        let c = filter_stream_chunk(chunk.clone(), &bound, 1);
+        assert_eq!(c.unwrap().compact(), chunk);
+
+        let bound = Some((
+            OwnedRow::new(vec![None]),
+            OwnedRow::new(vec![Some(ScalarImpl::Int64(7))]),
+        ));
+        let c = filter_stream_chunk(chunk.clone(), &bound, 1);
+        assert_eq!(
+            c.unwrap().compact(),
+            StreamChunk::from_pretty(
+                "  I I
+             + 1 6
+             - 2 .
+            U+ 4 .",
+            )
+        );
+
+        let bound = Some((
+            OwnedRow::new(vec![Some(ScalarImpl::Int64(7))]),
+            OwnedRow::new(vec![None]),
+        ));
+        let c = filter_stream_chunk(chunk.clone(), &bound, 1);
+        assert_eq!(
+            c.unwrap().compact(),
+            StreamChunk::from_pretty(
+                "  I I
+            U- 3 7",
+            )
+        );
+    }
+}

@@ -15,7 +15,6 @@
 use std::sync::atomic::AtomicUsize;
 
 use futures::stream::BoxStream;
-use futures::{StreamExt, stream};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Field;
 use risingwave_common::row::OwnedRow;
@@ -32,6 +31,7 @@ use crate::source::cdc::external::{
 pub struct MockExternalTableReader {
     binlog_watermarks: Vec<MySqlOffset>,
     snapshot_cnt: AtomicUsize,
+    parallel_backfill_snapshots: Vec<OwnedRow>,
 }
 
 impl MockExternalTableReader {
@@ -48,9 +48,44 @@ impl MockExternalTableReader {
             MySqlOffset::new(binlog_file.clone(), 8),
             MySqlOffset::new(binlog_file.clone(), 10),
         ];
+        let parallel_backfill_snapshots = vec![
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(1)),
+                Some(ScalarImpl::Float64(1.0001.into())),
+            ]),
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(1)),
+                Some(ScalarImpl::Float64(11.00.into())),
+            ]),
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(2)),
+                Some(ScalarImpl::Float64(22.00.into())),
+            ]),
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(5)),
+                Some(ScalarImpl::Float64(1.0005.into())),
+            ]),
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(6)),
+                Some(ScalarImpl::Float64(1.0006.into())),
+            ]),
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(900)),
+                Some(ScalarImpl::Float64(900.1.into())),
+            ]),
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(8)),
+                Some(ScalarImpl::Float64(1.0008.into())),
+            ]),
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(400)),
+                Some(ScalarImpl::Float64(400.1.into())),
+            ]),
+        ];
         Self {
             binlog_watermarks,
             snapshot_cnt: AtomicUsize::new(0),
+            parallel_backfill_snapshots,
         }
     }
 
@@ -114,39 +149,13 @@ impl MockExternalTableReader {
 
     #[try_stream(boxed, ok = OwnedRow, error = ConnectorError)]
     async fn split_snapshot_read_inner(&self, left: OwnedRow, right: OwnedRow) {
-        let snapshot = vec![
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Int64(1)),
-                Some(ScalarImpl::Float64(1.0001.into())),
-            ]),
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Int64(1)),
-                Some(ScalarImpl::Float64(11.00.into())),
-            ]),
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Int64(2)),
-                Some(ScalarImpl::Float64(22.00.into())),
-            ]),
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Int64(5)),
-                Some(ScalarImpl::Float64(1.0005.into())),
-            ]),
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Int64(6)),
-                Some(ScalarImpl::Float64(1.0006.into())),
-            ]),
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Int64(8)),
-                Some(ScalarImpl::Float64(1.0008.into())),
-            ]),
-        ];
-        for row in snapshot {
+        for row in &self.parallel_backfill_snapshots {
             if (left[0].is_none()
                 || cmp_datum(&row[0], &left[0], OrderType::ascending_nulls_first()).is_ge())
                 && (right[0].is_none()
                     || cmp_datum(&row[0], &right[0], OrderType::ascending_nulls_first()).is_lt())
             {
-                yield row;
+                yield row.clone();
             }
         }
     }
@@ -181,14 +190,7 @@ impl ExternalTableReader for MockExternalTableReader {
         &self,
         _options: CdcTableSnapshotSplitOption,
     ) -> BoxStream<'_, ConnectorResult<CdcTableSnapshotSplit>> {
-        stream::once(async {
-            Ok(CdcTableSnapshotSplit {
-                split_id: 1,
-                left_bound_inclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(1))]),
-                right_bound_exclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(10))]),
-            })
-        })
-        .boxed()
+        unreachable!()
     }
 
     fn split_snapshot_read(

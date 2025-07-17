@@ -30,7 +30,7 @@ use risingwave_common::array::{
 };
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId};
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{Datum, JsonbVal, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, JsonbVal, ScalarImpl};
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::cdc::external::{
@@ -45,12 +45,14 @@ use risingwave_stream::common::table::state_table::StateTable;
 use risingwave_stream::common::table::test_utils::gen_pbtable;
 use risingwave_stream::error::StreamResult;
 use risingwave_stream::executor::monitor::StreamingMetrics;
-use risingwave_stream::executor::test_utils::MockSource;
+use risingwave_stream::executor::test_utils::{MessageSender, MockSource};
 use risingwave_stream::executor::{
     ActorContext, AddMutation, Barrier, BoxedMessageStream, CdcBackfillExecutor, Execute,
     Executor as StreamExecutor, ExecutorInfo, ExternalStorageTable, MaterializeExecutor, Message,
-    Mutation, ParallelizedCdcBackfillExecutor, StreamExecutorError, expect_first_barrier,
+    Mutation, ParallelizedCdcBackfillExecutor, StreamExecutorError, UpdateMutation,
+    expect_first_barrier,
 };
+use risingwave_stream::task::ActorId;
 
 // mock upstream binlog offset starting from "1.binlog, pos=0"
 pub struct MockOffsetGenExecutor {
@@ -135,7 +137,6 @@ impl Execute for MockOffsetGenExecutor {
 
 #[tokio::test]
 async fn test_cdc_backfill() -> StreamResult<()> {
-    use risingwave_common::types::DataType;
     let memory_state_store = MemoryStateStore::new();
 
     let (mut tx, source) = MockSource::channel();
@@ -448,12 +449,19 @@ async fn consume_message_stream(mut stream: BoxedMessageStream) -> StreamResult<
     Ok(())
 }
 
-#[tokio::test]
-async fn test_parallelized_cdc_backfill() -> StreamResult<()> {
-    use risingwave_common::types::DataType;
+struct ParallelizedCdcBackfillTestContext {
+    memory_state_store: MemoryStateStore,
+    actor_id: ActorId,
+    tx: MessageSender,
+    materialize: BoxedMessageStream,
+    materialize_table_id: TableId,
+    table_schema: Schema,
+}
+
+async fn setup_parallelized_cdc_backfill_test_context() -> ParallelizedCdcBackfillTestContext {
     let memory_state_store = MemoryStateStore::new();
 
-    let (mut tx, source) = MockSource::channel();
+    let (tx, source) = MockSource::channel();
     let source = source.into_executor(Schema::new(vec![]), vec![]);
     let cdc_source = StreamExecutor::new(
         ExecutorInfo::new(
@@ -545,7 +553,7 @@ async fn test_parallelized_cdc_backfill() -> StreamResult<()> {
 
     // Create a `MaterializeExecutor` to write the changes to storage.
     let materialize_table_id = TableId::new(5678);
-    let mut materialize = MaterializeExecutor::for_test(
+    let materialize = MaterializeExecutor::for_test(
         cdc_backfill,
         memory_state_store.clone(),
         materialize_table_id,
@@ -557,7 +565,17 @@ async fn test_parallelized_cdc_backfill() -> StreamResult<()> {
     .await
     .boxed()
     .execute();
+    ParallelizedCdcBackfillTestContext {
+        memory_state_store,
+        actor_id,
+        tx,
+        materialize,
+        materialize_table_id,
+        table_schema,
+    }
+}
 
+fn parallelized_cdc_backfill_upstream_data() -> Vec<StreamChunk> {
     // construct upstream chunks
     let chunk1_payload = vec![
         r#"{ "payload": { "before": null, "after": { "id": 1, "price": 10.01}, "source": { "version": "1.9.7.Final", "connector": "postgres", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
@@ -568,7 +586,10 @@ async fn test_parallelized_cdc_backfill() -> StreamResult<()> {
         r#"{ "payload": { "before": null, "after": { "id": 5, "price": 5.05}, "source": { "version": "1.9.7.Final", "connector": "postgres", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
         r#"{ "payload": { "before": null, "after": { "id": 6, "price": 6.06}, "source": { "version": "1.9.7.Final", "connector": "postgres", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
     ];
-
+    let chunk1_datums: Vec<Datum> = chunk1_payload
+        .into_iter()
+        .map(|s| Some(JsonbVal::from_str(s).unwrap().into()))
+        .collect_vec();
     let chunk2_payload = vec![
         r#"{ "payload": { "before": null, "after": { "id": 1, "price": 11.11}, "source": { "version": "1.9.7.Final", "connector": "postgres", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
         r#"{ "payload": { "before": null, "after": { "id": 6, "price": 10.08}, "source": { "version": "1.9.7.Final", "connector": "postgres", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
@@ -576,25 +597,33 @@ async fn test_parallelized_cdc_backfill() -> StreamResult<()> {
         r#"{ "payload": { "before": null, "after": { "id": 978, "price": 72.6}, "source": { "version": "1.9.7.Final", "connector": "postgres", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
         r#"{ "payload": { "before": null, "after": { "id": 134, "price": 41.7}, "source": { "version": "1.9.7.Final", "connector": "postgres", "name": "RW_CDC_1002"}, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
     ];
-
-    let chunk1_datums: Vec<Datum> = chunk1_payload
-        .into_iter()
-        .map(|s| Some(JsonbVal::from_str(s).unwrap().into()))
-        .collect_vec();
-
     let chunk2_datums: Vec<Datum> = chunk2_payload
         .into_iter()
         .map(|s| Some(JsonbVal::from_str(s).unwrap().into()))
         .collect_vec();
-
     let chunk_schema = Schema::new(vec![
         Field::unnamed(DataType::Jsonb), // payload
     ]);
-
     let stream_chunk1 = create_stream_chunk(chunk1_datums, &chunk_schema);
     let stream_chunk2 = create_stream_chunk(chunk2_datums, &chunk_schema);
+    vec![stream_chunk1, stream_chunk2]
+}
 
-    // The first barrier
+#[tokio::test]
+async fn test_parallelized_cdc_backfill() {
+    let ParallelizedCdcBackfillTestContext {
+        memory_state_store,
+        actor_id,
+        mut tx,
+        mut materialize,
+        materialize_table_id,
+        table_schema,
+    } = setup_parallelized_cdc_backfill_test_context().await;
+    let mut upstream_data = parallelized_cdc_backfill_upstream_data();
+    let stream_chunk1 = upstream_data.swap_remove(0);
+    let stream_chunk2 = upstream_data.swap_remove(0);
+
+    // The first barrier to initialized CDC table snapshot splits.
     let mut curr_epoch = test_epoch(11);
     let mut source_splits = HashMap::new();
     source_splits.insert(
@@ -622,10 +651,9 @@ async fn test_parallelized_cdc_backfill() -> StreamResult<()> {
             backfill_nodes_to_pause: Default::default(),
             actor_cdc_table_snapshot_splits,
         }));
-
     tx.send_barrier(init_barrier);
     assert!(matches!(
-        materialize.next().await.unwrap()?,
+        materialize.next().await.unwrap().unwrap(),
         Message::Barrier(Barrier {
             epoch,
             mutation: Some(_),
@@ -639,10 +667,12 @@ async fn test_parallelized_cdc_backfill() -> StreamResult<()> {
         materialize_table_id,
     )
     .await;
-    // The backfill executor processed 4 rows from snapshot stream.
-    let Message::Chunk(_) = materialize.next().await.unwrap()? else {
-        panic!("expect chunk");
-    };
+
+    // The backfill executor should process 4 rows (limited by chunk size) from snapshot stream.
+    assert!(matches!(
+        materialize.next().await.unwrap().unwrap(),
+        Message::Chunk(_)
+    ));
     assert_mv(
         None,
         &table_schema,
@@ -650,15 +680,7 @@ async fn test_parallelized_cdc_backfill() -> StreamResult<()> {
         materialize_table_id,
     )
     .await;
-    curr_epoch.inc_epoch();
-    tx.push_barrier(curr_epoch, false);
-    assert!(matches!(
-        materialize.next().await.unwrap()?,
-        Message::Barrier(Barrier {
-            epoch,
-            ..
-        }) if epoch.curr == curr_epoch
-    ));
+    send_and_poll_barrier(&mut curr_epoch, &mut tx, &mut materialize).await;
     assert_mv(
         DataChunk::from_pretty(
             "I F
@@ -675,20 +697,26 @@ async fn test_parallelized_cdc_backfill() -> StreamResult<()> {
 
     // Push first WAL chunk. It should be buffered until split backfill is completed.
     tx.push_chunk(stream_chunk1);
+    assert_mv(
+        DataChunk::from_pretty(
+            "I F
+            1 11.00
+            2 22.00
+            5 1.0005",
+        )
+        .into(),
+        &table_schema,
+        memory_state_store.clone(),
+        materialize_table_id,
+    )
+    .await;
 
     // The backfill executor should process remaining 2 rows from snapshot stream.
-    let Message::Chunk(_) = materialize.next().await.unwrap()? else {
-        panic!("expect chunk");
-    };
-    curr_epoch.inc_epoch();
-    tx.push_barrier(curr_epoch, false);
     assert!(matches!(
-        materialize.next().await.unwrap()?,
-        Message::Barrier(Barrier {
-            epoch,
-            ..
-        }) if epoch.curr == curr_epoch
+        materialize.next().await.unwrap().unwrap(),
+        Message::Chunk(_)
     ));
+    send_and_poll_barrier(&mut curr_epoch, &mut tx, &mut materialize).await;
     assert_mv(
         DataChunk::from_pretty(
             "I F
@@ -706,18 +734,11 @@ async fn test_parallelized_cdc_backfill() -> StreamResult<()> {
     .await;
 
     // The backfill executor should process first WAL buffered previously.
-    let Message::Chunk(_) = materialize.next().await.unwrap()? else {
-        panic!("expect chunk");
-    };
-    curr_epoch.inc_epoch();
-    tx.push_barrier(curr_epoch, false);
     assert!(matches!(
-        materialize.next().await.unwrap()?,
-        Message::Barrier(Barrier {
-            epoch,
-            ..
-        }) if epoch.curr == curr_epoch
+        materialize.next().await.unwrap().unwrap(),
+        Message::Chunk(_)
     ));
+    send_and_poll_barrier(&mut curr_epoch, &mut tx, &mut materialize).await;
     assert_mv(
         DataChunk::from_pretty(
             "I F
@@ -740,18 +761,11 @@ async fn test_parallelized_cdc_backfill() -> StreamResult<()> {
     tx.push_chunk(stream_chunk2);
 
     // The backfill executor should process second WAL chunk.
-    let Message::Chunk(_) = materialize.next().await.unwrap()? else {
-        panic!("expect chunk");
-    };
-    curr_epoch.inc_epoch();
-    tx.push_barrier(curr_epoch, false);
     assert!(matches!(
-        materialize.next().await.unwrap()?,
-        Message::Barrier(Barrier {
-            epoch,
-            ..
-        }) if epoch.curr == curr_epoch
+        materialize.next().await.unwrap().unwrap(),
+        Message::Chunk(_)
     ));
+    send_and_poll_barrier(&mut curr_epoch, &mut tx, &mut materialize).await;
     assert_mv(
         DataChunk::from_pretty(
             "I F
@@ -769,8 +783,254 @@ async fn test_parallelized_cdc_backfill() -> StreamResult<()> {
         materialize_table_id,
     )
     .await;
+}
 
-    Ok(())
+#[tokio::test]
+async fn test_parallelized_cdc_backfill_reschedule() {
+    let ParallelizedCdcBackfillTestContext {
+        memory_state_store,
+        actor_id,
+        mut tx,
+        mut materialize,
+        materialize_table_id,
+        table_schema,
+    } = setup_parallelized_cdc_backfill_test_context().await;
+    let mut upstream_data = parallelized_cdc_backfill_upstream_data();
+    let stream_chunk1 = upstream_data.swap_remove(0);
+    let stream_chunk2 = upstream_data.swap_remove(0);
+
+    // The first barrier to initialized CDC table snapshot splits.
+    let mut curr_epoch = test_epoch(11);
+    let mut source_splits = HashMap::new();
+    source_splits.insert(
+        actor_id,
+        vec![SplitImpl::PostgresCdc(DebeziumCdcSplit::new(0, None, None))],
+    );
+    let actor_cdc_table_snapshot_splits = [(
+        actor_id,
+        vec![CdcTableSnapshotSplitRaw {
+            split_id: 2,
+            left_bound_inclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(1))]).value_serialize(),
+            right_bound_exclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(6))])
+                .value_serialize(),
+        }],
+    )]
+    .into_iter()
+    .collect();
+    let init_barrier =
+        Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Add(AddMutation {
+            adds: HashMap::new(),
+            added_actors: HashSet::new(),
+            splits: source_splits.clone(),
+            pause: false,
+            subscriptions_to_add: vec![],
+            backfill_nodes_to_pause: Default::default(),
+            actor_cdc_table_snapshot_splits,
+        }));
+    tx.send_barrier(init_barrier);
+    assert!(matches!(
+        materialize.next().await.unwrap().unwrap(),
+        Message::Barrier(Barrier {
+            epoch,
+            mutation: Some(_),
+            ..
+        }) if epoch.curr == curr_epoch
+    ));
+    assert_mv(
+        None,
+        &table_schema,
+        memory_state_store.clone(),
+        materialize_table_id,
+    )
+    .await;
+
+    // The backfill executor should process 4 rows (limited by chunk size) from snapshot stream.
+    assert!(matches!(
+        materialize.next().await.unwrap().unwrap(),
+        Message::Chunk(_)
+    ));
+    curr_epoch.inc_epoch();
+    tx.push_barrier(curr_epoch, false);
+    assert!(matches!(
+        materialize.next().await.unwrap().unwrap(),
+        Message::Barrier(Barrier {
+            epoch,
+            ..
+        }) if epoch.curr == curr_epoch
+    ));
+    assert_mv(
+        DataChunk::from_pretty(
+            "I F
+            1 11.00
+            2 22.00
+            5 1.0005",
+        )
+        .into(),
+        &table_schema,
+        memory_state_store.clone(),
+        materialize_table_id,
+    )
+    .await;
+
+    // Push first WAL chunk. It should be buffered until split backfill is completed.
+    tx.push_chunk(stream_chunk1);
+
+    // Send reschedule barrier.
+    let actor_cdc_table_snapshot_splits = [(
+        actor_id,
+        vec![
+            CdcTableSnapshotSplitRaw {
+                split_id: 3,
+                left_bound_inclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(6))])
+                    .value_serialize(),
+                right_bound_exclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(100))])
+                    .value_serialize(),
+            },
+            CdcTableSnapshotSplitRaw {
+                split_id: 4,
+                left_bound_inclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(100))])
+                    .value_serialize(),
+                right_bound_exclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(500))])
+                    .value_serialize(),
+            },
+        ],
+    )]
+    .into_iter()
+    .collect();
+    curr_epoch.inc_epoch();
+    let reschedule_barrier =
+        Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Update(UpdateMutation {
+            dispatchers: Default::default(),
+            merges: Default::default(),
+            vnode_bitmaps: Default::default(),
+            dropped_actors: Default::default(),
+            actor_splits: Default::default(),
+            actor_new_dispatchers: Default::default(),
+            actor_cdc_table_snapshot_splits,
+        }));
+    tx.send_barrier(reschedule_barrier);
+
+    // Buffered WAL should have been flushed.
+    assert!(matches!(
+        materialize.next().await.unwrap().unwrap(),
+        Message::Chunk(_)
+    ));
+    assert!(matches!(
+        materialize.next().await.unwrap().unwrap(),
+        Message::Barrier(Barrier {
+            epoch,
+            mutation: Some(_),
+            ..
+        }) if epoch.curr == curr_epoch
+    ));
+    assert_mv(
+        DataChunk::from_pretty(
+            "I F
+            1 10.01
+            2 22.22
+            3 3.03
+            4 4.04
+            5 5.05",
+        )
+        .into(),
+        &table_schema,
+        memory_state_store.clone(),
+        materialize_table_id,
+    )
+    .await;
+
+    // The backfill executor should process all rows of first split from snapshot stream.
+    assert!(matches!(
+        materialize.next().await.unwrap().unwrap(),
+        Message::Chunk(_)
+    ));
+    send_and_poll_barrier(&mut curr_epoch, &mut tx, &mut materialize).await;
+    assert_mv(
+        DataChunk::from_pretty(
+            "I F
+            1 10.01
+            2 22.22
+            3 3.03
+            4 4.04
+            5 5.05
+            6 1.0006
+            8 1.0008",
+        )
+        .into(),
+        &table_schema,
+        memory_state_store.clone(),
+        materialize_table_id,
+    )
+    .await;
+
+    // The backfill executor should process all rows of second split from snapshot stream.
+    assert!(matches!(
+        materialize.next().await.unwrap().unwrap(),
+        Message::Chunk(_)
+    ));
+    send_and_poll_barrier(&mut curr_epoch, &mut tx, &mut materialize).await;
+    assert_mv(
+        DataChunk::from_pretty(
+            "I F
+            1 10.01
+            2 22.22
+            3 3.03
+            4 4.04
+            5 5.05
+            6 1.0006
+            8 1.0008
+            400 400.1",
+        )
+        .into(),
+        &table_schema,
+        memory_state_store.clone(),
+        materialize_table_id,
+    )
+    .await;
+
+    // Push second WAL chunk. It should be processed immediately.
+    tx.push_chunk(stream_chunk2);
+    assert!(matches!(
+        materialize.next().await.unwrap().unwrap(),
+        Message::Chunk(_)
+    ));
+    send_and_poll_barrier(&mut curr_epoch, &mut tx, &mut materialize).await;
+    assert_mv(
+        DataChunk::from_pretty(
+            "I F
+            1 10.01
+            2 22.22
+            3 3.03
+            4 4.04
+            5 5.05
+            6 10.08
+            8 1.0008
+            134 41.7
+            199 40.5
+            400 400.1",
+        )
+        .into(),
+        &table_schema,
+        memory_state_store.clone(),
+        materialize_table_id,
+    )
+    .await;
+}
+
+async fn send_and_poll_barrier(
+    curr_epoch: &mut u64,
+    tx: &mut MessageSender,
+    materialize: &mut BoxedMessageStream,
+) {
+    curr_epoch.inc_epoch();
+    tx.push_barrier(*curr_epoch, false);
+    assert!(matches!(
+        materialize.next().await.unwrap().unwrap(),
+        Message::Barrier(Barrier {
+            epoch,
+            ..
+        }) if epoch.curr == *curr_epoch
+    ));
 }
 
 async fn assert_mv(
