@@ -36,7 +36,7 @@ use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation, Dispatcher,
-    Dispatchers, DropSubscriptionsMutation, PauseMutation, ResumeMutation,
+    Dispatchers, DropSubscriptionsMutation, PauseMutation, PbSinkAddColumns, ResumeMutation,
     SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
     SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
@@ -856,6 +856,7 @@ impl Command {
                         merge_updates,
                         dispatchers,
                         init_split_assignment,
+                        None,
                     );
 
                     Some(Mutation::Combined(CombinedMutation {
@@ -920,6 +921,7 @@ impl Command {
                     merge_updates,
                     dispatchers,
                     init_split_assignment,
+                    auto_refresh_schema_sinks.as_ref(),
                 )
             }
 
@@ -1078,6 +1080,7 @@ impl Command {
                     dropped_actors,
                     actor_splits,
                     actor_new_dispatchers,
+                    sink_add_columns: Default::default(),
                 });
                 tracing::debug!("update mutation: {mutation:?}");
                 Some(mutation)
@@ -1235,6 +1238,7 @@ impl Command {
         merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
         dispatchers: FragmentActorDispatchers,
         init_split_assignment: &SplitAssignment,
+        auto_refresh_schema_sinks: Option<&Vec<AutoRefreshSchemaSinkContext>>,
     ) -> Option<Mutation> {
         let dropped_actors = dropped_actors.into_iter().collect();
 
@@ -1254,6 +1258,24 @@ impl Command {
             merge_update: merge_updates.into_values().flatten().collect(),
             dropped_actors,
             actor_splits,
+            sink_add_columns: auto_refresh_schema_sinks
+                .as_ref()
+                .into_iter()
+                .flat_map(|sinks| {
+                    sinks.iter().map(|sink| {
+                        (
+                            sink.original_sink.id,
+                            PbSinkAddColumns {
+                                fields: sink
+                                    .newly_add_fields
+                                    .iter()
+                                    .map(|field| field.to_prost())
+                                    .collect(),
+                            },
+                        )
+                    })
+                })
+                .collect(),
             ..Default::default()
         }))
     }
