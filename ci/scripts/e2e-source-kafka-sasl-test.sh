@@ -34,14 +34,6 @@ tar xf ./risingwave-connector.tar.gz -C ./connector-node
 echo "--- Install dependencies"
 python3 -m pip install --break-system-packages -r ./e2e_test/requirements.txt
 
-echo "--- Setup Kafka Admin ---"
-# two containers: message_queue_sasl_1:9092 and message_queue_sasl_2:9093, set with the same user and admin
-
-echo "--- Setup Kafka 1(message_queue_sasl_1:9092) ---"
-RPK_BROKERS="message_queue_sasl_1:9092" ./ci/scripts/rpk-sasl-setup-auth.sh
-echo "--- Setup Kafka 2(message_queue_sasl_2:9093) ---"
-RPK_BROKERS="message_queue_sasl_2:9093" ./ci/scripts/rpk-sasl-setup-auth.sh
-
 echo "--- test begins ---"
 
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_meta=info" \

@@ -1,16 +1,13 @@
 control substitution on
 
-# in the test file, you MUST interact with rpk with RPK_BROKERS to specify which kafka to interact
-# Options: message_queue_sasl_1:9092 and message_queue_sasl_2:9093
+# called from `ci/scripts/e2e-source-kafka-sasl-test.sh`
+# rpk cannot connect to cluster with sasl_plaintext + plain (it requires scram)
 
 system ok
-RPK_BROKERS="message_queue_sasl_1:9092" rpk -X sasl.mechanism=SCRAM-SHA-256 -X user=admin -X pass=admin123 topic create test_kafka_sasl_basic -p 3
-
-system ok
-cat <<EOF | RPK_BROKERS="message_queue_sasl_1:9092" rpk -X sasl.mechanism=SCRAM-SHA-256 -X user=admin -X pass=admin123 topic produce test_kafka_sasl_basic -f "%p %v\\n" -p 0
-0 {"x":"a"}
-1 {"x":"b"}
-2 {"x":"c"}
+cat << EOF | kcat -b message_queue_sasl_1:9092 -X security.protocol=SASL_PLAINTEXT -X sasl.mechanism=PLAIN -X sasl.username=dev -X sasl.password=rw -L
+{"x": "a"}
+{"x": "b"}
+{"x": "c"}
 EOF
 
 statement ok
@@ -21,14 +18,14 @@ WITH(
     topic = 'test_kafka_sasl_basic',
     scan.startup.mode = 'earliest',
     properties.security.protocol = 'sasl_plaintext',
-    properties.sasl.mechanism = 'SCRAM-SHA-256',
+    properties.sasl.mechanism = 'PLAIN',
     properties.sasl.username = 'user1',
     properties.sasl.password = 'password123',
 ) FORMAT PLAIN ENCODE JSON;
 
-sleep 15s
+sleep 1s
 
-query I
+query I retry 5 backoff 1s
 select count(*) from table_sasl;
 ----
 3
@@ -38,6 +35,3 @@ select count(*) from table_sasl;
 
 statement ok
 drop table table_sasl;
-
-system ok
-RPK_BROKERS="message_queue_sasl_1:9092" rpk -X sasl.mechanism=SCRAM-SHA-256 -X user=admin -X pass=admin123 topic delete 'test_kafka_sasl_basic'
