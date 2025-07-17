@@ -23,7 +23,7 @@ use risingwave_common::types::Timestamptz;
 use risingwave_common::util::StackTraceResponseExt;
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_hummock_sdk::level::Level;
-use risingwave_meta_model::table::TableType;
+use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::EventLog;
 use risingwave_pb::meta::event_log::Event;
@@ -631,38 +631,33 @@ impl DiagnoseCommand {
             .into_iter()
             .map(|s| (s.id, (s.name, s.schema_id, s.definition)))
             .collect::<BTreeMap<_, _>>();
-        let tables = self
-            .metadata_manager
-            .catalog_controller
-            .list_tables_by_type(TableType::Table)
-            .await?
-            .into_iter()
-            .map(|t| (t.id, (t.name, t.schema_id, t.definition)))
-            .collect::<BTreeMap<_, _>>();
-        let mvs = self
-            .metadata_manager
-            .catalog_controller
-            .list_tables_by_type(TableType::MaterializedView)
-            .await?
-            .into_iter()
-            .map(|t| (t.id, (t.name, t.schema_id, t.definition)))
-            .collect::<BTreeMap<_, _>>();
-        let indexes = self
-            .metadata_manager
-            .catalog_controller
-            .list_tables_by_type(TableType::Index)
-            .await?
-            .into_iter()
-            .map(|t| (t.id, (t.name, t.schema_id, t.definition)))
-            .collect::<BTreeMap<_, _>>();
-        let internal_tables = self
-            .metadata_manager
-            .catalog_controller
-            .list_tables_by_type(TableType::Internal)
-            .await?
-            .into_iter()
-            .map(|t| (t.id, (t.name, t.schema_id, t.definition)))
-            .collect::<BTreeMap<_, _>>();
+        let mut user_tables = BTreeMap::new();
+        let mut mvs = BTreeMap::new();
+        let mut indexes = BTreeMap::new();
+        let mut internal_tables = BTreeMap::new();
+        {
+            let grouped = self
+                .metadata_manager
+                .catalog_controller
+                .list_all_state_tables()
+                .await?
+                .into_iter()
+                .chunk_by(|t| t.table_type());
+            for (table_type, tables) in &grouped {
+                let tables = tables
+                    .into_iter()
+                    .map(|t| (t.id, (t.name, t.schema_id, t.definition)));
+                match table_type {
+                    PbTableType::Table => user_tables.extend(tables),
+                    PbTableType::MaterializedView => mvs.extend(tables),
+                    PbTableType::Index => indexes.extend(tables),
+                    PbTableType::Internal => internal_tables.extend(tables),
+                    PbTableType::Unspecified => {
+                        tracing::error!("unspecified table type: {:?}", tables.collect_vec());
+                    }
+                }
+            }
+        }
         let sinks = self
             .metadata_manager
             .catalog_controller
@@ -673,11 +668,11 @@ impl DiagnoseCommand {
             .collect::<BTreeMap<_, _>>();
         let catalogs = [
             ("SOURCE", sources),
-            ("TABLE", tables),
+            ("TABLE", user_tables),
             ("MATERIALIZED VIEW", mvs),
             ("INDEX", indexes),
-            ("INTERNAL TABLE", internal_tables),
             ("SINK", sinks),
+            ("INTERNAL TABLE", internal_tables),
         ];
         let mut obj_id_to_name = HashMap::new();
         for (title, items) in catalogs {
