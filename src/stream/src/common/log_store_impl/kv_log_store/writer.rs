@@ -135,6 +135,12 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         next_epoch: u64,
         options: FlushCurrentEpochOptions,
     ) -> LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>> {
+        if let Some(add_columns) = options.add_columns {
+            return Err(anyhow!(
+                "alter column not supported for kv log store: {:?}",
+                add_columns
+            ));
+        }
         let epoch = self.state.epoch().curr;
         let mut writer = self.state.start_writer(false);
 

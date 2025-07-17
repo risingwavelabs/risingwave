@@ -50,6 +50,13 @@ impl Field {
             name: self.name.clone(),
         }
     }
+
+    pub fn from_prost(pb: &PbField) -> Self {
+        Field {
+            data_type: DataType::from(pb.data_type.as_ref().unwrap()),
+            name: pb.name.clone(),
+        }
+    }
 }
 
 impl From<&ColumnDesc> for Field {
