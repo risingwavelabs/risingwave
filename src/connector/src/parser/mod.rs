@@ -51,6 +51,7 @@ use crate::source::{
     BoxSourceMessageStream, SourceChunkStream, SourceColumnDesc, SourceColumnType, SourceContext,
     SourceContextRef, SourceCtrlOpts, SourceMeta,
 };
+use crate::source::cdc::CdcMessageType;
 
 mod access_builder;
 pub mod additional_columns;
@@ -323,8 +324,20 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                 // We still have to maintain the row number in this case.
                 res @ (Ok(ParseResult::Rows) | Err(_)) => {
                     if let Err(error) = res {
-                        // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
-                        //       see #13105
+                        if let SourceMeta::DebeziumCdc(cdc_meta) = &msg.meta {
+                            if matches!(cdc_meta.msg_type, CdcMessageType::SchemaChange) {
+                                tracing::error!(
+                                    error = %error.as_report(),
+                                    split_id = &*msg.split_id,
+                                    offset = msg.offset,
+                                    "Schema change message parsing failed, blocking source."
+                                );
+                                
+                               
+                                return Err(error.into());
+                            }
+                        }
+                        // 对于普通数据消息，保持原有的跳过逻辑
                         static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
                             LazyLock::new(LogSuppresser::default);
                         if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
@@ -374,6 +387,7 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                 },
 
                 Ok(ParseResult::SchemaChange(schema_change)) => {
+                    println!("走到这里了");
                     if schema_change.is_empty() {
                         continue;
                     }
@@ -389,7 +403,8 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                         match oneshot_rx.await {
                             Ok(()) => {}
                             Err(e) => {
-                                tracing::error!(error = %e.as_report(), "failed to wait for schema change");
+                                tracing::error!(error = %e.as_report(), "faile111d to wait for schema change");
+                                return Err(anyhow::Error::from(e).into());
                             }
                         }
                     }
