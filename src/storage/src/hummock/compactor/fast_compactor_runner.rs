@@ -34,8 +34,8 @@ use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::block_stream::BlockDataStream;
 use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::compactor::{
-    CompactionFilter, CompactionStatistics, Compactor, CompactorContext, RemoteBuilderFactory,
-    TaskConfig,
+    CompactionFilter, CompactionStatistics, Compactor, CompactorContext, MultiCompactionFilter,
+    RemoteBuilderFactory, TaskConfig,
 };
 use crate::hummock::iterator::{
     NonPkPrefixSkipWatermarkState, PkPrefixSkipWatermarkState, SkipWatermarkState,
@@ -347,24 +347,26 @@ impl ConcatSstableIterator {
     }
 }
 
-pub struct CompactorRunner {
+pub struct CompactorRunner<C: CompactionFilter = MultiCompactionFilter> {
     left: Box<ConcatSstableIterator>,
     right: Box<ConcatSstableIterator>,
     task_id: u64,
     executor: CompactTaskExecutor<
         RemoteBuilderFactory<UnifiedSstableWriterFactory, BlockedXor16FilterBuilder>,
+        C,
     >,
     compression_algorithm: CompressionAlgorithm,
     metrics: Arc<CompactorMetrics>,
 }
 
-impl CompactorRunner {
+impl<C: CompactionFilter> CompactorRunner<C> {
     pub fn new(
         context: CompactorContext,
         task: CompactTask,
         compaction_catalog_agent_ref: CompactionCatalogAgentRef,
         object_id_getter: Arc<dyn GetObjectId>,
         task_progress: Arc<TaskProgress>,
+        compaction_filter: C,
     ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         let compression_algorithm: CompressionAlgorithm = task.compression_algorithm.into();
@@ -445,6 +447,7 @@ impl CompactorRunner {
                 task_progress,
                 state,
                 non_pk_prefix_state,
+                compaction_filter,
             ),
             left,
             right,
@@ -454,10 +457,7 @@ impl CompactorRunner {
         }
     }
 
-    pub async fn run(
-        mut self,
-        compaction_filter: impl CompactionFilter + Clone,
-    ) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
+    pub async fn run(mut self) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
         self.left.rewind().await?;
         self.right.rewind().await?;
         let mut skip_raw_block_count = 0;
@@ -532,9 +532,7 @@ impl CompactorRunner {
 
             let target_key = second.current_sstable().key();
             let iter = first.sstable_iter.as_mut().unwrap().iter.as_mut().unwrap();
-            self.executor
-                .run(iter, target_key, compaction_filter.clone())
-                .await?;
+            self.executor.run(iter, target_key).await?;
             if !iter.is_valid() {
                 first.sstable_iter.as_mut().unwrap().iter.take();
                 if !first.current_sstable().is_valid() {
@@ -552,9 +550,7 @@ impl CompactorRunner {
             let sstable_iter = rest_data.sstable_iter.as_mut().unwrap();
             let target_key = FullKey::decode(&sstable_iter.sstable.meta.largest_key);
             if let Some(iter) = sstable_iter.iter.as_mut() {
-                self.executor
-                    .run(iter, target_key, compaction_filter.clone())
-                    .await?;
+                self.executor.run(iter, target_key).await?;
                 assert!(
                     !iter.is_valid(),
                     "iter should not be valid key {:?}",
@@ -581,9 +577,7 @@ impl CompactorRunner {
                     let target_key = FullKey::decode(&largest_key);
                     sstable_iter.init_block_iter(block, block_meta.uncompressed_size as usize)?;
                     let mut iter = sstable_iter.iter.take().unwrap();
-                    self.executor
-                        .run(&mut iter, target_key, compaction_filter.clone())
-                        .await?;
+                    self.executor.run(&mut iter, target_key).await?;
                 } else {
                     let largest_key = sstable_iter.current_block_largest();
                     let block_len = block.len() as u64;
@@ -637,7 +631,7 @@ impl CompactorRunner {
     }
 }
 
-pub struct CompactTaskExecutor<F: TableBuilderFactory> {
+pub struct CompactTaskExecutor<F: TableBuilderFactory, C: CompactionFilter> {
     last_key: FullKey<Vec<u8>>,
     compaction_statistics: CompactionStatistics,
     last_table_id: Option<u32>,
@@ -649,15 +643,17 @@ pub struct CompactTaskExecutor<F: TableBuilderFactory> {
     last_key_is_delete: bool,
     progress_key_num: u32,
     non_pk_prefix_skip_watermark_state: NonPkPrefixSkipWatermarkState,
+    compaction_filter: C,
 }
 
-impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
+impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
     pub fn new(
         builder: CapacitySplitTableBuilder<F>,
         task_config: TaskConfig,
         task_progress: Arc<TaskProgress>,
         skip_watermark_state: PkPrefixSkipWatermarkState,
         non_pk_prefix_skip_watermark_state: NonPkPrefixSkipWatermarkState,
+        compaction_filter: C,
     ) -> Self {
         Self {
             builder,
@@ -671,6 +667,7 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
             skip_watermark_state,
             progress_key_num: 0,
             non_pk_prefix_skip_watermark_state,
+            compaction_filter,
         }
     }
 
@@ -705,7 +702,6 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
         &mut self,
         iter: &mut BlockIterator,
         target_key: FullKey<&[u8]>,
-        mut compaction_filter: impl CompactionFilter,
     ) -> HummockResult<()> {
         self.skip_watermark_state.reset_watermark();
         self.non_pk_prefix_skip_watermark_state.reset_watermark();
@@ -735,7 +731,7 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
                 drop = true;
             }
 
-            if !drop && compaction_filter.should_delete(iter.key()) {
+            if !drop && self.compaction_filter.should_delete(iter.key()) {
                 drop = true;
             }
 
@@ -786,6 +782,11 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
         }
 
         if self.watermark_should_delete(smallest_key) {
+            return false;
+        }
+
+        // Check compaction filter
+        if self.compaction_filter.should_delete(*smallest_key) {
             return false;
         }
 

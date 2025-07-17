@@ -439,6 +439,7 @@ pub async fn compact_with_agent(
             compaction_catalog_agent_ref.clone(),
             object_id_getter.clone(),
             task_progress_guard.progress.clone(),
+            multi_filter,
         );
 
         tokio::select! {
@@ -447,7 +448,7 @@ pub async fn compact_with_agent(
                 task_status = TaskStatus::ManualCanceled;
             },
 
-            ret = runner.run(multi_filter) => {
+            ret = runner.run() => {
                 match ret {
                     Ok((ssts, statistics)) => {
                         output_ssts.push((0, ssts, statistics));

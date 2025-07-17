@@ -1310,6 +1310,7 @@ pub(crate) mod tests {
                 22, 23, 24, 25, 26, 27, 28, 29,
             ])),
             Arc::new(TaskProgress::default()),
+            compaction_filter.clone(),
         );
         let (_, ret1, _) = slow_compact_runner
             .run(
@@ -1320,7 +1321,7 @@ pub(crate) mod tests {
             .await
             .unwrap();
         let ret = ret1.into_iter().map(|sst| sst.sst_info).collect_vec();
-        let (ssts, _) = fast_compact_runner.run(compaction_filter).await.unwrap();
+        let (ssts, _) = fast_compact_runner.run().await.unwrap();
         let fast_ret = ssts.into_iter().map(|sst| sst.sst_info).collect_vec();
         (ret, fast_ret)
     }
@@ -2470,8 +2471,9 @@ pub(crate) mod tests {
             compaction_catalog_agent_ref.clone(),
             object_id_manager.clone() as Arc<dyn GetObjectId>,
             Arc::new(TaskProgress::default()),
+            state_cleanup_filter,
         );
-        let (ssts_with_filter, _) = fast_compact_runner.run(state_cleanup_filter).await.unwrap();
+        let (ssts_with_filter, _) = fast_compact_runner.run().await.unwrap();
 
         // Verify filtered result: only keys from existing_table_id should be kept
         let mut filtered_key_count = 0;
