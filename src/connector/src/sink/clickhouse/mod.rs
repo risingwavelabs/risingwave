@@ -12,19 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub const ICEBERG_SINK: &str = "iceberg";
+pub const CLICKHOUSE_SINK: &str = "clickhouse";
 
 cfg_if::cfg_if! {
-    if #[cfg(feature = "sink-iceberg")] {
+    if #[cfg(feature = "sink-clickhouse")] {
         mod imp;
-        pub use imp::{IcebergSink, IcebergConfig};
+        pub use imp::{ClickHouseSink, ClickHouseConfig};
     } else {
         use crate::sink::utils::dummy::{FeatureNotEnabledSinkMarker, FeatureNotEnabledSink};
-        pub struct IcebergNotEnabled;
-        impl FeatureNotEnabledSinkMarker for IcebergNotEnabled {
-            const SINK_NAME: &'static str = ICEBERG_SINK;
+        pub struct ClickHouseNotEnabled;
+        impl FeatureNotEnabledSinkMarker for ClickHouseNotEnabled {
+            const SINK_NAME: &'static str = CLICKHOUSE_SINK;
         }
-        pub type IcebergSink = FeatureNotEnabledSink<IcebergNotEnabled>;
-        pub struct IcebergConfig;
+        pub type ClickHouseSink = FeatureNotEnabledSink<ClickHouseNotEnabled>;
+        pub struct ClickHouseConfig;
     }
 }

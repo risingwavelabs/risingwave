@@ -12,19 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub const ICEBERG_SINK: &str = "iceberg";
+pub const BIGQUERY_SINK: &str = "bigquery";
 
 cfg_if::cfg_if! {
-    if #[cfg(feature = "sink-iceberg")] {
+    if #[cfg(feature = "sink-bigquery")] {
         mod imp;
-        pub use imp::{IcebergSink, IcebergConfig};
+        pub use imp::{BigQuerySink, BigQueryConfig};
     } else {
         use crate::sink::utils::dummy::{FeatureNotEnabledSinkMarker, FeatureNotEnabledSink};
-        pub struct IcebergNotEnabled;
-        impl FeatureNotEnabledSinkMarker for IcebergNotEnabled {
-            const SINK_NAME: &'static str = ICEBERG_SINK;
+        pub struct BigQueryNotEnabled;
+        impl FeatureNotEnabledSinkMarker for BigQueryNotEnabled {
+            const SINK_NAME: &'static str = BIGQUERY_SINK;
         }
-        pub type IcebergSink = FeatureNotEnabledSink<IcebergNotEnabled>;
-        pub struct IcebergConfig;
+        pub type BigQuerySink = FeatureNotEnabledSink<BigQueryNotEnabled>;
+        pub struct BigQueryConfig;
     }
 }

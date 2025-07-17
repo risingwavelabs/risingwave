@@ -65,9 +65,12 @@ use decouple_checkpoint_log_sink::{
     COMMIT_CHECKPOINT_INTERVAL, DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
     DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE,
 };
+use big_query::BIGQUERY_SINK;
+use clickhouse::CLICKHOUSE_SINK;
 use deltalake::DELTALAKE_SINK;
 use futures::future::BoxFuture;
 use iceberg::ICEBERG_SINK;
+use mongodb::MONGODB_SINK;
 use opendal::Error as OpendalError;
 use prometheus::Registry;
 use risingwave_common::array::ArrayError;
@@ -1031,6 +1034,7 @@ impl From<RpcError> for SinkError {
     }
 }
 
+#[cfg(feature = "sink-clickhouse")]
 impl From<ClickHouseError> for SinkError {
     fn from(value: ClickHouseError) -> Self {
         SinkError::ClickHouse(value.to_report_string())
