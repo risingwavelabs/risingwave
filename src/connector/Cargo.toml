@@ -9,13 +9,16 @@ repository = { workspace = true }
 
 [features]
 default = []
-all-sinks = ["sink-deltalake", "sink-iceberg", "sink-clickhouse", "sink-mongodb", "sink-bigquery"]
+all-sinks = ["sink-deltalake", "sink-iceberg", "sink-clickhouse", "sink-mongodb", "sink-bigquery", "sink-elasticsearch", "sink-opensearch", "sink-dynamodb"]
 all-sources = []
 sink-deltalake = ["dep:deltalake"]
 sink-iceberg = ["dep:iceberg", "dep:iceberg-catalog-glue", "dep:iceberg-catalog-rest"]
 sink-clickhouse = ["dep:clickhouse"]
 sink-mongodb = ["dep:mongodb"]
 sink-bigquery = ["dep:gcp-bigquery-client", "dep:google-cloud-bigquery", "dep:google-cloud-gax", "dep:google-cloud-googleapis"]
+sink-elasticsearch = ["dep:elasticsearch"]
+sink-opensearch = ["dep:opensearch"]
+sink-dynamodb = ["dep:aws-sdk-dynamodb"]
 
 [dependencies]
 anyhow = "1"
@@ -30,7 +33,7 @@ await-tree = { workspace = true }
 aws-config = { workspace = true }
 aws-credential-types = { workspace = true }
 aws-msk-iam-sasl-signer = "1.0.0"
-aws-sdk-dynamodb = "1"
+aws-sdk-dynamodb = { version = "1", optional = true }
 aws-sdk-glue = { workspace = true }
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
@@ -55,7 +58,7 @@ deltalake = { workspace = true, optional = true }
 duration-str = "0.17.0"
 easy-ext = "1"
 either = "1"
-elasticsearch = { version = "8.17.0-alpha.1", features = ["rustls-tls"] }
+elasticsearch = { version = "8.17.0-alpha.1", features = ["rustls-tls"], optional = true }
 enum-as-inner = "0.6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
@@ -94,7 +97,7 @@ opendal = { workspace = true, features = [
     "services-s3",
     "services-webhdfs",
 ] }
-opensearch = { version = "2.3.0", features = ["rustls-tls"] }
+opensearch = { version = "2.3.0", features = ["rustls-tls"], optional = true }
 openssl = "0.10.72"
 parking_lot = { workspace = true }
 parquet = { workspace = true }

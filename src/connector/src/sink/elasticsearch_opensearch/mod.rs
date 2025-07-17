@@ -12,9 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod elasticsearch;
 pub mod elasticsearch_converter;
 pub mod elasticsearch_opensearch_client;
 pub mod elasticsearch_opensearch_config;
 pub mod elasticsearch_opensearch_formatter;
-pub mod opensearch;
+
+pub const ES_SINK: &str = "elasticsearch";
+pub const OPENSEARCH_SINK: &str = "opensearch";
+
+cfg_if::cfg_if! {
+    if #[cfg(feature = "sink-elasticsearch")] {
+        pub mod elasticsearch;
+        pub use elasticsearch::ElasticSearchSink;
+    } else {
+        use crate::sink::utils::dummy::{FeatureNotEnabledSinkMarker, FeatureNotEnabledSink};
+        pub struct ElasticSearchNotEnabled;
+        impl FeatureNotEnabledSinkMarker for ElasticSearchNotEnabled {
+            const SINK_NAME: &'static str = ES_SINK;
+        }
+        pub type ElasticSearchSink = FeatureNotEnabledSink<ElasticSearchNotEnabled>;
+    }
+}
+
+cfg_if::cfg_if! {
+    if #[cfg(feature = "sink-opensearch")] {
+        pub mod opensearch;
+        pub use opensearch::OpenSearchSink;
+    } else {
+        use crate::sink::utils::dummy::{FeatureNotEnabledSinkMarker, FeatureNotEnabledSink};
+        pub struct OpenSearchNotEnabled;
+        impl FeatureNotEnabledSinkMarker for OpenSearchNotEnabled {
+            const SINK_NAME: &'static str = OPENSEARCH_SINK;
+        }
+        pub type OpenSearchSink = FeatureNotEnabledSink<OpenSearchNotEnabled>;
+    }
+}
