@@ -4,7 +4,7 @@ control substitution on
 # rpk cannot connect to cluster with sasl_plaintext + plain (it requires scram)
 
 system ok
-cat << EOF | kcat -b message_queue_sasl_1:19092 -X security.protocol=SASL_PLAINTEXT -X sasl.mechanism=PLAIN -X sasl.username=dev -X sasl.password=rw -P
+cat << EOF | kcat -b message_queue_sasl_1:19092 -X security.protocol=SASL_PLAINTEXT -X sasl.mechanism=PLAIN -X sasl.username=dev -X sasl.password=rw -P -t test_kafka_sasl_basic
 {"x": "a"}
 {"x": "b"}
 {"x": "c"}
