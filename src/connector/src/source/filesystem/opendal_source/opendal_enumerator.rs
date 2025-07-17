@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::stream::{self, BoxStream};
 use futures::{StreamExt, TryStreamExt};
-use opendal::{Metakey, Operator};
+use opendal::Operator;
 use risingwave_common::types::Timestamptz;
 
 use super::OpendalSource;
@@ -74,12 +74,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
             true => prefix,
             false => "/",
         };
-        let object_lister = self
-            .op
-            .lister_with(list_prefix)
-            .recursive(true)
-            .metakey(Metakey::ContentLength | Metakey::LastModified)
-            .await?;
+        let object_lister = self.op.lister_with(list_prefix).recursive(true).await?;
         let stream = stream::unfold(object_lister, |mut object_lister| async move {
             match object_lister.next().await {
                 Some(Ok(object)) => {
