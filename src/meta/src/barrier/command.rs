@@ -26,7 +26,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_meta_model::WorkerId;
-use risingwave_pb::catalog::{CreateType, Table};
+use risingwave_pb::catalog::CreateType;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
@@ -59,8 +59,8 @@ use crate::model::{
     StreamJobFragments, StreamJobFragmentsToCreate,
 };
 use crate::stream::{
-    ConnectorPropsChange, FragmentBackfillOrder, JobReschedulePostUpdates, SplitAssignment,
-    ThrottleConfig, build_actor_connector_splits,
+    AutoRefreshSchemaSinkContext, ConnectorPropsChange, FragmentBackfillOrder,
+    JobReschedulePostUpdates, SplitAssignment, ThrottleConfig, build_actor_connector_splits,
 };
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -121,6 +121,7 @@ pub struct ReplaceStreamJobPlan {
     pub tmp_id: u32,
     /// The state table ids to be dropped.
     pub to_drop_state_table_ids: Vec<TableId>,
+    pub auto_refresh_schema_sinks: Option<Vec<AutoRefreshSchemaSinkContext>>,
 }
 
 impl ReplaceStreamJobPlan {
@@ -145,6 +146,23 @@ impl ReplaceStreamJobPlan {
                     CommandFragmentChanges::ReplaceNodeUpstream(replace_map.clone()),
                 )
                 .expect("non-duplicate");
+        }
+        if let Some(sinks) = &self.auto_refresh_schema_sinks {
+            for sink in sinks {
+                let fragment_change = CommandFragmentChanges::NewFragment(
+                    TableId::new(sink.original_sink.id as _),
+                    sink.new_fragment_info(),
+                );
+                fragment_changes
+                    .try_insert(sink.new_fragment.fragment_id, fragment_change)
+                    .expect("non-duplicate");
+                fragment_changes
+                    .try_insert(
+                        sink.original_fragment.fragment_id,
+                        CommandFragmentChanges::RemoveFragment,
+                    )
+                    .expect("non-duplicate");
+            }
         }
         fragment_changes
     }
@@ -181,7 +199,6 @@ pub struct CreateStreamingJobCommandInfo {
     pub job_type: StreamingJobType,
     pub create_type: CreateType,
     pub streaming_job: StreamingJob,
-    pub internal_tables: Vec<Table>,
     pub fragment_backfill_ordering: FragmentBackfillOrder,
 }
 
@@ -835,7 +852,7 @@ impl Command {
                         })
                         .collect();
                     let update = Self::generate_update_mutation_for_replace_table(
-                        old_fragments,
+                        old_fragments.actor_ids(),
                         merge_updates,
                         dispatchers,
                         init_split_assignment,
@@ -872,6 +889,7 @@ impl Command {
                 replace_upstream,
                 upstream_fragment_downstreams,
                 init_split_assignment,
+                auto_refresh_schema_sinks,
                 ..
             }) => {
                 let edges = edges.as_mut().expect("should exist");
@@ -886,7 +904,19 @@ impl Command {
                     })
                     .collect();
                 Self::generate_update_mutation_for_replace_table(
-                    old_fragments,
+                    old_fragments.actor_ids().into_iter().chain(
+                        auto_refresh_schema_sinks
+                            .as_ref()
+                            .into_iter()
+                            .flat_map(|sinks| {
+                                sinks.iter().flat_map(|sink| {
+                                    sink.original_fragment
+                                        .actors
+                                        .iter()
+                                        .map(|actor| actor.actor_id)
+                                })
+                            }),
+                    ),
                     merge_updates,
                     dispatchers,
                     init_split_assignment,
@@ -1171,19 +1201,42 @@ impl Command {
             }
             Command::ReplaceStreamJob(replace_table) => {
                 let edges = edges.as_mut().expect("should exist");
-                Some(edges.collect_actors_to_create(replace_table.new_fragments.actors_to_create()))
+                let mut actors =
+                    edges.collect_actors_to_create(replace_table.new_fragments.actors_to_create());
+                if let Some(sinks) = &replace_table.auto_refresh_schema_sinks {
+                    let sink_actors = edges.collect_actors_to_create(sinks.iter().map(|sink| {
+                        (
+                            sink.new_fragment.fragment_id,
+                            &sink.new_fragment.nodes,
+                            sink.new_fragment.actors.iter().map(|actor| {
+                                (
+                                    actor,
+                                    sink.actor_status[&actor.actor_id]
+                                        .location
+                                        .as_ref()
+                                        .unwrap()
+                                        .worker_node_id as _,
+                                )
+                            }),
+                        )
+                    }));
+                    for (worker_id, fragment_actors) in sink_actors {
+                        actors.entry(worker_id).or_default().extend(fragment_actors);
+                    }
+                }
+                Some(actors)
             }
             _ => None,
         }
     }
 
     fn generate_update_mutation_for_replace_table(
-        old_fragments: &StreamJobFragments,
+        dropped_actors: impl IntoIterator<Item = ActorId>,
         merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
         dispatchers: FragmentActorDispatchers,
         init_split_assignment: &SplitAssignment,
     ) -> Option<Mutation> {
-        let dropped_actors = old_fragments.actor_ids();
+        let dropped_actors = dropped_actors.into_iter().collect();
 
         let actor_new_dispatchers = dispatchers
             .into_values()

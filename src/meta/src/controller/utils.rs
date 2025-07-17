@@ -30,11 +30,11 @@ use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::{
-    ActorId, DataTypeArray, DatabaseId, DispatcherType, FragmentId, I32Array, JobStatus, ObjectId,
-    PrivilegeId, SchemaId, SourceId, StreamNode, StreamSourceInfo, TableId, UserId, VnodeBitmap,
-    WorkerId, actor, connection, database, fragment, fragment_relation, function, index, object,
-    object_dependency, schema, secret, sink, source, streaming_job, subscription, table, user,
-    user_default_privilege, user_privilege, view,
+    ActorId, ColumnCatalogArray, DataTypeArray, DatabaseId, DispatcherType, FragmentId, I32Array,
+    JobStatus, ObjectId, PrivilegeId, SchemaId, SourceId, StreamNode, StreamSourceInfo, TableId,
+    UserId, VnodeBitmap, WorkerId, actor, connection, database, fragment, fragment_relation,
+    function, index, object, object_dependency, schema, secret, sink, source, streaming_job,
+    subscription, table, user, user_default_privilege, user_privilege, view,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
@@ -1055,6 +1055,20 @@ where
             }
         })
         .collect())
+}
+
+pub async fn get_table_columns(
+    txn: &impl ConnectionTrait,
+    id: TableId,
+) -> MetaResult<ColumnCatalogArray> {
+    let columns = Table::find_by_id(id)
+        .select_only()
+        .columns([table::Column::Columns])
+        .into_tuple::<ColumnCatalogArray>()
+        .one(txn)
+        .await?
+        .ok_or_else(|| MetaError::catalog_id_not_found("table", id))?;
+    Ok(columns)
 }
 
 /// `grant_default_privileges_automatically` grants default privileges automatically
