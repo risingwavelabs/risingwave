@@ -29,14 +29,23 @@ pub use connection::{
     ConfluentSchemaRegistryConnection, Connection, ElasticsearchConnection, IcebergConnection,
     KafkaConnection, SCHEMA_REGISTRY_CONNECTION_TYPE, read_kafka_log_level, validate_connection,
 };
-pub use iceberg::compaction::IcebergSinkCompactionUpdate;
+cfg_if::cfg_if! {
+    if #[cfg(feature = "sink-iceberg")] {
+        mod iceberg;
+        pub use iceberg::compaction::IcebergSinkCompactionUpdate;
+        pub use iceberg::IcebergCommon;
+    } else {
+        // Dummy implementations when iceberg feature is disabled
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        pub struct IcebergCommon;
+        #[derive(Debug, Clone)]
+        pub struct IcebergSinkCompactionUpdate;
+    }
+}
 
-mod iceberg;
 #[cfg(not(madsim))]
 mod maybe_tls_connector;
 pub mod postgres;
-
-pub use iceberg::IcebergCommon;
 pub use postgres::{PostgresExternalTable, SslMode, create_pg_client};
 
 #[cfg(test)]

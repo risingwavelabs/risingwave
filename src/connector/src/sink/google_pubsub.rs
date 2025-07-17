@@ -12,22 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+pub const PUBSUB_SINK: &str = "google_pubsub";
 
-use anyhow::anyhow;
-use google_cloud_gax::conn::Environment;
-use google_cloud_googleapis::pubsub::v1::PubsubMessage;
-use google_cloud_pubsub::apiv1;
-use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
-use google_cloud_pubsub::client::google_cloud_auth::project;
-use google_cloud_pubsub::client::google_cloud_auth::token::DefaultTokenSourceProvider;
-use google_cloud_pubsub::client::{Client, ClientConfig};
-use google_cloud_pubsub::publisher::Publisher;
-use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::Schema;
-use serde_derive::Deserialize;
-use serde_with::serde_as;
-use tonic::Status;
+#[cfg(feature = "sink-bigquery")]
+mod imp {
+    use std::collections::BTreeMap;
+
+    use anyhow::anyhow;
+    use google_cloud_gax::conn::Environment;
+    use google_cloud_googleapis::pubsub::v1::PubsubMessage;
+    use google_cloud_pubsub::apiv1;
+    use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
+    use google_cloud_pubsub::client::google_cloud_auth::project;
+    use google_cloud_pubsub::client::google_cloud_auth::token::DefaultTokenSourceProvider;
+    use google_cloud_pubsub::client::{Client, ClientConfig};
+    use google_cloud_pubsub::publisher::Publisher;
+    use risingwave_common::array::StreamChunk;
+    use risingwave_common::catalog::Schema;
+    use serde_derive::Deserialize;
+    use serde_with::serde_as;
+    use tonic::Status;
 use with_options::WithOptions;
 
 use super::catalog::SinkFormatDesc;
@@ -36,12 +40,11 @@ use super::log_store::DeliveryFutureManagerAddFuture;
 use super::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt, FormattedSink,
 };
-use super::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SinkWriterParam};
-use crate::dispatch_sink_formatter_str_key_impl;
-use crate::enforce_secret::EnforceSecret;
+    use super::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SinkWriterParam};
+    use crate::dispatch_sink_formatter_str_key_impl;
+    use crate::enforce_secret::EnforceSecret;
 
-pub const PUBSUB_SINK: &str = "google_pubsub";
-const PUBSUB_SEND_FUTURE_BUFFER_MAX_SIZE: usize = 65536;
+    const PUBSUB_SEND_FUTURE_BUFFER_MAX_SIZE: usize = 65536;
 
 mod delivery_future {
     use anyhow::Context;
@@ -334,3 +337,14 @@ impl FormattedSink for GooglePubSubPayloadWriter<'_> {
         }
     }
 }
+} // Close the imp module
+
+#[cfg(feature = "sink-bigquery")]
+pub use imp::{GooglePubSubSink, GooglePubSubConfig, GooglePubSubSinkWriter};
+
+#[cfg(not(feature = "sink-bigquery"))]
+pub struct GooglePubSubSink;
+#[cfg(not(feature = "sink-bigquery"))]
+pub struct GooglePubSubConfig;
+#[cfg(not(feature = "sink-bigquery"))]
+pub struct GooglePubSubSinkWriter;

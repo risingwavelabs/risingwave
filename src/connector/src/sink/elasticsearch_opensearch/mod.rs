@@ -20,12 +20,13 @@ pub mod elasticsearch_opensearch_formatter;
 pub const ES_SINK: &str = "elasticsearch";
 pub const OPENSEARCH_SINK: &str = "opensearch";
 
+use crate::sink::utils::dummy::{FeatureNotEnabledSinkMarker, FeatureNotEnabledSink};
+
 cfg_if::cfg_if! {
     if #[cfg(feature = "sink-elasticsearch")] {
         pub mod elasticsearch;
         pub use elasticsearch::ElasticSearchSink;
     } else {
-        use crate::sink::utils::dummy::{FeatureNotEnabledSinkMarker, FeatureNotEnabledSink};
         pub struct ElasticSearchNotEnabled;
         impl FeatureNotEnabledSinkMarker for ElasticSearchNotEnabled {
             const SINK_NAME: &'static str = ES_SINK;
@@ -39,7 +40,6 @@ cfg_if::cfg_if! {
         pub mod opensearch;
         pub use opensearch::OpenSearchSink;
     } else {
-        use crate::sink::utils::dummy::{FeatureNotEnabledSinkMarker, FeatureNotEnabledSink};
         pub struct OpenSearchNotEnabled;
         impl FeatureNotEnabledSinkMarker for OpenSearchNotEnabled {
             const SINK_NAME: &'static str = OPENSEARCH_SINK;

@@ -95,6 +95,7 @@ impl From<ConnectorError> for RpcError {
 }
 
 #[expect(clippy::disallowed_types)]
+#[cfg(feature = "sink-iceberg")]
 impl From<iceberg::Error> for ConnectorError {
     fn from(value: iceberg::Error) -> Self {
         risingwave_common::error::IcebergError::from(value).into()

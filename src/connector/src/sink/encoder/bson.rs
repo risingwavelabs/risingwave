@@ -12,21 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
+#[cfg(feature = "sink-mongodb")]
+mod imp {
+    use std::sync::LazyLock;
 
-use anyhow::anyhow;
-use mongodb::bson::spec::BinarySubtype;
-use mongodb::bson::{Binary, Bson, DateTime, Document};
-use risingwave_common::array::RowRef;
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::log::LogSuppresser;
-use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, DatumRef, JsonbVal, ScalarRefImpl};
-use risingwave_common::util::iter_util::ZipEqDebug;
-use thiserror_ext::AsReport;
+    use anyhow::anyhow;
+    use mongodb::bson::spec::BinarySubtype;
+    use mongodb::bson::{Binary, Bson, DateTime, Document};
+    use risingwave_common::array::RowRef;
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::log::LogSuppresser;
+    use risingwave_common::row::Row;
+    use risingwave_common::types::{DataType, DatumRef, JsonbVal, ScalarRefImpl};
+    use risingwave_common::util::iter_util::ZipEqDebug;
+    use thiserror_ext::AsReport;
 
-use super::{Result as SinkResult, RowEncoder, SerTo};
-use crate::sink::SinkError;
+    use super::{Result as SinkResult, RowEncoder, SerTo};
+    use crate::sink::SinkError;
 
 static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
 
@@ -202,3 +204,10 @@ fn datum_to_bson(field: &Field, datum: DatumRef<'_>) -> Bson {
         }
     }
 }
+} // Close the imp module
+
+#[cfg(feature = "sink-mongodb")]
+pub use imp::BsonEncoder;
+
+#[cfg(not(feature = "sink-mongodb"))]
+pub struct BsonEncoder;

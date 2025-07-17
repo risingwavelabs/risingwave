@@ -18,6 +18,7 @@ pub mod prelude {
     pub use crate::source::filesystem::LegacyS3SplitEnumerator;
     pub use crate::source::filesystem::opendal_source::OpendalEnumerator;
     pub use crate::source::google_pubsub::PubsubSplitEnumerator as GooglePubsubSplitEnumerator;
+    #[cfg(feature = "sink-iceberg")]
     pub use crate::source::iceberg::IcebergSplitEnumerator;
     pub use crate::source::kafka::KafkaSplitEnumerator;
     pub use crate::source::kinesis::KinesisSplitEnumerator;
@@ -68,6 +69,7 @@ pub use kinesis::KINESIS_CONNECTOR;
 pub use mqtt::MQTT_CONNECTOR;
 pub use nats::NATS_CONNECTOR;
 mod common;
+#[cfg(feature = "sink-iceberg")]
 pub mod iceberg;
 mod manager;
 pub mod reader;
