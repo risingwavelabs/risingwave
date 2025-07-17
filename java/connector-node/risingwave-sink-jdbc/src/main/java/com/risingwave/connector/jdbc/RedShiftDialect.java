@@ -19,9 +19,13 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 public class RedShiftDialect extends PostgresDialect {
+    private final List<Integer> columnSqlTypes;
+    private final List<Integer> pkIndices;
 
     public RedShiftDialect(List<Integer> columnSqlTypes, List<Integer> pkIndices) {
         super(columnSqlTypes, pkIndices);
+        this.columnSqlTypes = columnSqlTypes;
+        this.pkIndices = pkIndices;
     }
 
     @Override
@@ -33,9 +37,20 @@ public class RedShiftDialect extends PostgresDialect {
         // Build the VALUES placeholders for the source data
         String valuesPlaceholders =
                 fieldNames.stream()
-                        .map(f -> "? AS " + quoteIdentifier(f))
+                        .map(
+                                f -> {
+                                    int index = fieldNames.indexOf(f);
+                                    int sqlType = columnSqlTypes.get(index);
+                                    if (sqlType == java.sql.Types.VARCHAR
+                                            || sqlType == java.sql.Types.CHAR
+                                            || sqlType == java.sql.Types.LONGVARCHAR
+                                            || sqlType == java.sql.Types.NVARCHAR) {
+                                        return "CAST(? AS VARCHAR) AS " + quoteIdentifier(f);
+                                    } else {
+                                        return "? AS " + quoteIdentifier(f);
+                                    }
+                                })
                         .collect(Collectors.joining(", "));
-
         // Build the ON condition for primary key matching
         String onCondition =
                 primaryKeyFields.stream()

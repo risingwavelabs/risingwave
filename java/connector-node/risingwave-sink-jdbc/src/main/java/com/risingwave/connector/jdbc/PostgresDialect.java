@@ -37,7 +37,7 @@ public class PostgresDialect implements JdbcDialect {
         this.pkIndices = pkIndices.stream().mapToInt(i -> i).toArray();
     }
 
-    private static final HashMap<TypeName, String> RW_TYPE_TO_JDBC_TYPE_NAME;
+    static final HashMap<TypeName, String> RW_TYPE_TO_JDBC_TYPE_NAME;
 
     static {
         RW_TYPE_TO_JDBC_TYPE_NAME = new HashMap<TypeName, String>();
