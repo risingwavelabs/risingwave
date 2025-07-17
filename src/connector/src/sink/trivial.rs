@@ -15,8 +15,10 @@
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
+use itertools::Itertools;
 use phf::{Set, phf_set};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
+use tracing::debug;
 
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
@@ -94,11 +96,13 @@ impl<T: TrivialSinkName> Sink for TrivialSink<T> {
 #[async_trait]
 impl<T: TrivialSinkName> LogSinker for TrivialSink<T> {
     async fn consume_log_and_sink(self, mut log_reader: impl SinkLogReader) -> Result<!> {
+        debug!("blackhole sink start");
         log_reader.start_from(None).await?;
         loop {
             let (epoch, item) = log_reader.next_item().await?;
             match item {
-                LogStoreReadItem::StreamChunk { chunk_id, .. } => {
+                LogStoreReadItem::StreamChunk { chunk_id, chunk } => {
+                    debug!("receive chunk: {:?}", chunk.rows().collect_vec());
                     log_reader.truncate(TruncateOffset::Chunk { epoch, chunk_id })?;
                 }
                 LogStoreReadItem::Barrier { .. } => {

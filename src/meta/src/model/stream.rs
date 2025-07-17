@@ -742,25 +742,12 @@ impl StreamJobFragments {
         }
     }
 
-    /// Retrieve the **complete** internal tables map of the whole graph.
-    ///
-    /// Compared to [`crate::stream::StreamFragmentGraph::incomplete_internal_tables`],
-    /// the table catalogs returned here are complete, with all fields filled.
-    pub fn internal_tables(&self) -> BTreeMap<u32, Table> {
-        self.collect_tables_inner(true)
-    }
-
-    /// `internal_tables()` with additional table in `Materialize` node.
-    pub fn all_tables(&self) -> BTreeMap<u32, Table> {
-        self.collect_tables_inner(false)
-    }
-
-    fn collect_tables_inner(&self, internal_tables_only: bool) -> BTreeMap<u32, Table> {
+    pub fn collect_tables(fragments: impl Iterator<Item = &Fragment>) -> BTreeMap<u32, Table> {
         let mut tables = BTreeMap::new();
-        for fragment in self.fragments.values() {
+        for fragment in fragments {
             stream_graph_visitor::visit_stream_node_tables_inner(
                 &mut fragment.nodes.clone(),
-                internal_tables_only,
+                false,
                 true,
                 |table, _| {
                     let table_id = table.id;

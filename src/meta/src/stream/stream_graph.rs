@@ -22,7 +22,7 @@ pub mod state_match;
 pub use actor::{ActorGraphBuildResult, ActorGraphBuilder};
 pub use assignment::*;
 pub use fragment::{
-    CompleteStreamFragmentGraph, FragmentBackfillOrder, StreamFragmentGraph,
+    CompleteStreamFragmentGraph, FragmentBackfillOrder, StreamFragmentGraph, clone_fragment,
     fill_snapshot_backfill_epoch,
 };
 pub use schedule::Locations;

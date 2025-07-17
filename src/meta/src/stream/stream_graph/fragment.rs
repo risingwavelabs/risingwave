@@ -45,9 +45,12 @@ use risingwave_pb::stream_plan::{
 };
 
 use crate::barrier::SnapshotBackfillInfo;
+use crate::controller::id::IdGeneratorManager;
 use crate::manager::{MetaSrvEnv, StreamingJob, StreamingJobType};
 use crate::model::{ActorId, Fragment, FragmentId, StreamActor};
-use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
+use crate::stream::stream_graph::id::{
+    GlobalActorIdGen, GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen,
+};
 use crate::stream::stream_graph::schedule::Distribution;
 use crate::{MetaError, MetaResult};
 
@@ -331,6 +334,33 @@ impl StreamFragmentEdge {
     }
 }
 
+pub fn clone_fragment(fragment: &Fragment, id_generator_manager: &IdGeneratorManager) -> Fragment {
+    let fragment_id = GlobalFragmentIdGen::new(id_generator_manager, 1)
+        .to_global_id(0)
+        .as_global_id();
+    let actor_id_gen = GlobalActorIdGen::new(id_generator_manager, fragment.actors.len() as _);
+    Fragment {
+        fragment_id,
+        fragment_type_mask: fragment.fragment_type_mask,
+        distribution_type: fragment.distribution_type,
+        actors: fragment
+            .actors
+            .iter()
+            .enumerate()
+            .map(|(i, actor)| StreamActor {
+                actor_id: actor_id_gen.to_global_id(i as _).as_global_id() as _,
+                fragment_id,
+                vnode_bitmap: actor.vnode_bitmap.clone(),
+                mview_definition: actor.mview_definition.clone(),
+                expr_context: actor.expr_context.clone(),
+            })
+            .collect(),
+        state_table_ids: fragment.state_table_ids.clone(),
+        maybe_vnode_count: fragment.maybe_vnode_count,
+        nodes: fragment.nodes.clone(),
+    }
+}
+
 /// Adjacency list (G) of backfill orders.
 /// `G[10] -> [1, 2, 11]`
 /// means for the backfill node in `fragment 10`
@@ -467,8 +497,6 @@ impl StreamFragmentGraph {
     /// Note that some fields in the table catalogs are not filled during the current phase, e.g.,
     /// `fragment_id`, `vnode_count`. They will be all filled after a `TableFragments` is built.
     /// Be careful when using the returned values.
-    ///
-    /// See also [`crate::model::StreamJobFragments::internal_tables`].
     pub fn incomplete_internal_tables(&self) -> BTreeMap<u32, Table> {
         let mut tables = BTreeMap::new();
         for fragment in self.fragments.values() {
