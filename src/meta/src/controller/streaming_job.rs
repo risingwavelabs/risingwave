@@ -873,9 +873,6 @@ impl CatalogController {
             .map(|ctx| ctx.timezone.clone())
             .unwrap_or(original_timezone);
 
-        let todo = 0;
-        // TODO: set create type
-
         // 4. create streaming object for new replace table.
         let new_obj_id = Self::create_streaming_job_obj(
             &txn,
@@ -1179,7 +1176,7 @@ impl CatalogController {
         replace_upstream: FragmentReplaceUpstream,
         sink_into_table_context: SinkIntoTableContext,
         drop_table_connector_ctx: Option<&DropTableConnectorContext>,
-        auto_refresh_schema_sinks: Option<Vec<(ObjectId, ObjectId, Vec<PbColumnCatalog>)>>,
+        auto_refresh_schema_sinks: Option<Vec<FinishAutoRefreshSchemaSinkContext>>,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -1236,7 +1233,7 @@ impl CatalogController {
         txn: &DatabaseTransaction,
         streaming_job: StreamingJob,
         drop_table_connector_ctx: Option<&DropTableConnectorContext>,
-        auto_refresh_schema_sinks: Option<Vec<(ObjectId, ObjectId, Vec<PbColumnCatalog>)>>,
+        auto_refresh_schema_sinks: Option<Vec<FinishAutoRefreshSchemaSinkContext>>,
     ) -> MetaResult<(
         Vec<PbObject>,
         Vec<PbFragmentWorkerSlotMapping>,
@@ -1465,16 +1462,22 @@ impl CatalogController {
         }
 
         if let Some(sinks) = auto_refresh_schema_sinks {
-            for (tmp_sink_id, original_sink_id, columns) in sinks {
-                finish_fragments(txn, tmp_sink_id, original_sink_id, Default::default()).await?;
-                let (mut sink, sink_obj) = Sink::find_by_id(original_sink_id)
+            for finish_sink_context in sinks {
+                finish_fragments(
+                    txn,
+                    finish_sink_context.tmp_sink_id,
+                    finish_sink_context.original_sink_id,
+                    Default::default(),
+                )
+                .await?;
+                let (mut sink, sink_obj) = Sink::find_by_id(finish_sink_context.original_sink_id)
                     .find_also_related(Object)
                     .one(txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("sink", original_job_id))?;
-                let columns = ColumnCatalogArray::from(columns);
+                let columns = ColumnCatalogArray::from(finish_sink_context.columns);
                 Sink::update(sink::ActiveModel {
-                    sink_id: Set(original_sink_id),
+                    sink_id: Set(finish_sink_context.original_sink_id),
                     columns: Set(columns.clone()),
                     ..Default::default()
                 })
@@ -1486,6 +1489,30 @@ impl CatalogController {
                         ObjectModel(sink, sink_obj.unwrap()).into(),
                     )),
                 });
+                if let Some((log_store_table_id, new_log_store_table_columns)) =
+                    finish_sink_context.new_log_store_table
+                {
+                    let new_log_store_table_columns: ColumnCatalogArray =
+                        new_log_store_table_columns.into();
+                    let (mut table, table_obj) = Table::find_by_id(log_store_table_id)
+                        .find_also_related(Object)
+                        .one(txn)
+                        .await?
+                        .ok_or_else(|| MetaError::catalog_id_not_found("table", original_job_id))?;
+                    Table::update(table::ActiveModel {
+                        table_id: Set(log_store_table_id),
+                        columns: Set(new_log_store_table_columns.clone()),
+                        ..Default::default()
+                    })
+                    .exec(txn)
+                    .await?;
+                    table.columns = new_log_store_table_columns;
+                    objects.push(PbObject {
+                        object_info: Some(PbObjectInfo::Table(
+                            ObjectModel(table, table_obj.unwrap()).into(),
+                        )),
+                    });
+                }
             }
         }
 
@@ -2529,6 +2556,13 @@ pub struct SinkIntoTableContext {
     /// For alter table (e.g., add column), this is the list of existing sink ids
     /// otherwise empty.
     pub updated_sink_catalogs: Vec<SinkId>,
+}
+
+pub struct FinishAutoRefreshSchemaSinkContext {
+    pub tmp_sink_id: ObjectId,
+    pub original_sink_id: ObjectId,
+    pub columns: Vec<PbColumnCatalog>,
+    pub new_log_store_table: Option<(ObjectId, Vec<PbColumnCatalog>)>,
 }
 
 async fn update_connector_props_fragments<F>(

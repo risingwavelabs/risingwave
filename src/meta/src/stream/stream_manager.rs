@@ -22,7 +22,7 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_meta_model::ObjectId;
-use risingwave_pb::catalog::{CreateType, PbSink, Subscription};
+use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{Operation, PbInfo};
 use risingwave_pb::meta::table_fragments::ActorStatus;
@@ -178,6 +178,7 @@ pub struct AutoRefreshSchemaSinkContext {
     pub original_fragment: Fragment,
     pub new_columns: Vec<PbColumnCatalog>,
     pub new_fragment: Fragment,
+    pub new_log_store_table: Option<PbTable>,
     pub actor_status: BTreeMap<ActorId, ActorStatus>,
 }
 
