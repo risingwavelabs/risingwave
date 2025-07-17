@@ -53,13 +53,7 @@ impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
     async fn list_splits(&mut self) -> ConnectorResult<Vec<OpendalFsSplit<Src>>> {
         let empty_split: OpendalFsSplit<Src> = OpendalFsSplit::empty_split();
         let prefix = self.prefix.as_deref().unwrap_or("/");
-        let list_prefix = if prefix.ends_with("/") {
-            prefix.to_owned()
-        } else if let Some(parent_pos) = prefix.rfind('/') {
-            prefix[..=parent_pos].to_owned()
-        } else {
-            "/".to_owned()
-        };
+        let list_prefix = Self::extract_list_prefix(prefix);
 
         let mut lister = self.op.lister(&list_prefix).await?;
         // fetch one item as validation, no need to get all
@@ -75,15 +69,22 @@ impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
 }
 
 impl<Src: OpendalSource> OpendalEnumerator<Src> {
-    pub async fn list(&self) -> ConnectorResult<ObjectMetadataIter> {
-        let prefix = self.prefix.as_deref().unwrap_or("/");
-        let list_prefix = if prefix.ends_with("/") {
+    /// Extract the directory to list from a prefix.
+    /// If prefix ends with "/", use it as-is (directory).
+    /// Otherwise, extract parent directory.
+    fn extract_list_prefix(prefix: &str) -> String {
+        if prefix.ends_with("/") {
             prefix.to_owned()
         } else if let Some(parent_pos) = prefix.rfind('/') {
             prefix[..=parent_pos].to_owned()
         } else {
             "/".to_owned()
-        };
+        }
+    }
+
+    pub async fn list(&self) -> ConnectorResult<ObjectMetadataIter> {
+        let prefix = self.prefix.as_deref().unwrap_or("/");
+        let list_prefix = Self::extract_list_prefix(prefix);
         let object_lister = self
             .op
             .lister_with(&list_prefix)
@@ -133,16 +134,12 @@ pub type ObjectMetadataIter = BoxStream<'static, ConnectorResult<FsPageItem>>;
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::source::filesystem::opendal_source::OpendalS3;
     use crate::source::filesystem::s3::enumerator::get_prefix;
 
     fn calculate_list_prefix(prefix: &str) -> String {
-        if prefix.ends_with("/") {
-            prefix.to_owned()
-        } else if let Some(parent_pos) = prefix.rfind('/') {
-            prefix[..=parent_pos].to_owned()
-        } else {
-            "/".to_owned()
-        }
+        OpendalEnumerator::<OpendalS3>::extract_list_prefix(prefix)
     }
 
     #[test]
