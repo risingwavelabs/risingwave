@@ -28,7 +28,6 @@ use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
 use tracing::Instrument;
 
-use crate::executor::UpdateMutation;
 use crate::executor::backfill::cdc::cdc_backfill::{
     build_reader_and_poll_upstream, transform_upstream,
 };
@@ -254,7 +253,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                 table_reader.expect("table reader must created"),
             );
             // Backfill snapshot splits sequentially.
-            'split_backfill: for split in actor_snapshot_splits.iter().skip(next_split_idx) {
+            for split in actor_snapshot_splits.iter().skip(next_split_idx) {
                 tracing::info!(
                     table_id,
                     upstream_table_name,
@@ -316,20 +315,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                                 {
                                                     // The new rate limit will take effect since next split.
                                                     self.rate_limit_rps = *new_rate_limit;
-                                                }
-                                            }
-                                            Mutation::Update(UpdateMutation {
-                                                dropped_actors,
-                                                ..
-                                            }) => {
-                                                if dropped_actors.contains(&self.actor_ctx.id) {
-                                                    tracing::info!(
-                                                        table_id,
-                                                        upstream_table_name,
-                                                        "CdcBackfill has been dropped due to config change"
-                                                    );
-                                                    yield Message::Barrier(barrier);
-                                                    break 'split_backfill;
                                                 }
                                             }
                                             _ => (),
