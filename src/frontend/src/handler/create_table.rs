@@ -928,15 +928,10 @@ fn derive_with_options_for_cdc_table(
 ) -> Result<WithOptionsSecResolved> {
     use source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR};
     // we should remove the prefix from `full_table_name`
-    // Check if 'database.name' exists either as a regular property or as a secret reference
-    let source_database_name: Option<&str> = source_with_properties
+    let source_database_name: &str = source_with_properties
         .get("database.name")
-        .map(|s| s.as_str());
-    
-    // If database.name is neither in regular properties nor in secrets, return error
-    if source_database_name.is_none() && !source_with_properties.as_secret().contains_key("database.name") {
-        return Err(anyhow!("The source with properties does not contain 'database.name'").into());
-    }
+        .ok_or_else(|| anyhow!("The source with properties does not contain 'database.name'"))?
+        .as_str();
     let mut with_options = source_with_properties.clone();
     if let Some(connector) = source_with_properties.get(UPSTREAM_SOURCE_KEY) {
         match connector.as_str() {
@@ -946,23 +941,18 @@ fn derive_with_options_for_cdc_table(
                 let (db_name, table_name) = external_table_name.split_once('.').ok_or_else(|| {
                     anyhow!("The upstream table name must contain database name prefix, e.g. 'database.table'")
                 })?;
-                
-                // Only validate database name if it's not a secret
-                if let Some(source_db_name) = source_database_name {
-                    // We allow multiple database names in the source definition
-                    if !source_db_name
-                        .split(',')
-                        .map(|s| s.trim())
-                        .any(|name| name == db_name)
-                    {
-                        return Err(anyhow!(
-                            "The database name `{}` in the FROM clause is not included in the database name `{}` in source definition",
-                            db_name,
-                            source_db_name
-                        ).into());
-                    }
+                // We allow multiple database names in the source definition
+                if !source_database_name
+                    .split(',')
+                    .map(|s| s.trim())
+                    .any(|name| name == db_name)
+                {
+                    return Err(anyhow!(
+                        "The database name `{}` in the FROM clause is not included in the database name `{}` in source definition",
+                        db_name,
+                        source_database_name
+                    ).into());
                 }
-                // If database.name is a secret, we skip validation but still set the table-specific properties
                 with_options.insert(DATABASE_NAME_KEY.into(), db_name.into());
                 with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
             }
@@ -989,15 +979,13 @@ fn derive_with_options_for_cdc_table(
                         let schema_name = parts[1];
                         let table_name = parts[2];
 
-                        // Only verify database name if it's not a secret
-                        if let Some(source_db_name) = source_database_name {
-                            if db_name != source_db_name {
-                                return Err(anyhow!(
-                                    "The database name `{}` in the FROM clause is not the same as the database name `{}` in source definition",
-                                    db_name,
-                                    source_db_name
-                                ).into());
-                            }
+                        // Verify database name matches source configuration
+                        if db_name != source_database_name {
+                            return Err(anyhow!(
+                                "The database name `{}` in the FROM clause is not the same as the database name `{}` in source definition",
+                                db_name,
+                                source_database_name
+                            ).into());
                         }
                         (db_name, schema_name, table_name)
                     }
@@ -1005,16 +993,12 @@ fn derive_with_options_for_cdc_table(
                         // Schema and table only: schema.table
                         let schema_name = parts[0];
                         let table_name = parts[1];
-                        // Use placeholder for database name when it's a secret
-                        let db_name = source_database_name.unwrap_or("<secret>");
-                        (db_name, schema_name, table_name)
+                        (source_database_name, schema_name, table_name)
                     }
                     1 => {
                         // Table only: table (use default schema 'dbo')
                         let table_name = parts[0];
-                        // Use placeholder for database name when it's a secret
-                        let db_name = source_database_name.unwrap_or("<secret>");
-                        (db_name, "dbo", table_name)
+                        (source_database_name, "dbo", table_name)
                     }
                     _ => {
                         return Err(anyhow!(
@@ -2472,63 +2456,5 @@ mod tests {
 
         // Options are not merged into props.
         assert!(!source.with_properties.contains_key("schema.location"));
-    }
-
-    #[test]
-    fn test_derive_with_options_for_cdc_table_with_secret() {
-        use std::collections::BTreeMap;
-        use risingwave_pb::secret::PbSecretRef;
-        use risingwave_connector::WithOptionsSecResolved;
-
-        // Test case 1: database.name as regular property (should work)
-        let mut props = BTreeMap::new();
-        props.insert("connector".to_string(), "postgres-cdc".to_string());
-        props.insert("database.name".to_string(), "mydb".to_string());
-        
-        let with_options = WithOptionsSecResolved::new(props, BTreeMap::new());
-        let result = derive_with_options_for_cdc_table(&with_options, "public.users".to_string());
-        assert!(result.is_ok());
-
-        // Test case 2: database.name as secret reference (should work with our fix)
-        let mut props = BTreeMap::new();
-        props.insert("connector".to_string(), "postgres-cdc".to_string());
-        
-        let mut secrets = BTreeMap::new();
-        secrets.insert("database.name".to_string(), PbSecretRef {
-            secret_id: 1,
-            ref_as: risingwave_pb::secret::secret_ref::RefAsType::Text.into(),
-        });
-        
-        let with_options = WithOptionsSecResolved::new(props, secrets);
-        let result = derive_with_options_for_cdc_table(&with_options, "public.users".to_string());
-        assert!(result.is_ok());
-
-        // Test case 3: database.name missing entirely (should fail)
-        let mut props = BTreeMap::new();
-        props.insert("connector".to_string(), "postgres-cdc".to_string());
-        
-        let with_options = WithOptionsSecResolved::new(props, BTreeMap::new());
-        let result = derive_with_options_for_cdc_table(&with_options, "public.users".to_string());
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("does not contain 'database.name'"));
-
-        // Test case 4: MySQL CDC with database.name as secret (should work)
-        let mut props = BTreeMap::new();
-        props.insert("connector".to_string(), "mysql-cdc".to_string());
-        
-        let mut secrets = BTreeMap::new();
-        secrets.insert("database.name".to_string(), PbSecretRef {
-            secret_id: 1,
-            ref_as: risingwave_pb::secret::secret_ref::RefAsType::Text.into(),
-        });
-        
-        let with_options = WithOptionsSecResolved::new(props, secrets);
-        let result = derive_with_options_for_cdc_table(&with_options, "mydb.users".to_string());
-        assert!(result.is_ok());
-        
-        // Verify that table-specific properties are set correctly
-        let resolved = result.unwrap();
-        assert_eq!(resolved.get("database.name"), Some(&"mydb".to_string()));
-        assert_eq!(resolved.get("table.name"), Some(&"users".to_string()));
     }
 }
