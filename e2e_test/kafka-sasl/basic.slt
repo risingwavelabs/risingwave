@@ -14,7 +14,7 @@ statement ok
 CREATE TABLE table_sasl(x varchar)
 WITH(
     connector = 'kafka',
-    properties.bootstrap.server = 'message_queue_sasl_1:19092'
+    properties.bootstrap.server = 'message_queue_sasl_1:19092',
     topic = 'test_kafka_sasl_basic',
     scan.startup.mode = 'earliest',
     properties.security.protocol = 'sasl_plaintext',
