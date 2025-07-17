@@ -34,7 +34,8 @@ use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::block_stream::BlockDataStream;
 use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::compactor::{
-    CompactionStatistics, Compactor, CompactorContext, RemoteBuilderFactory, TaskConfig,
+    CompactionFilter, CompactionStatistics, Compactor, CompactorContext, RemoteBuilderFactory,
+    TaskConfig,
 };
 use crate::hummock::iterator::{
     NonPkPrefixSkipWatermarkState, PkPrefixSkipWatermarkState, SkipWatermarkState,
@@ -453,7 +454,10 @@ impl CompactorRunner {
         }
     }
 
-    pub async fn run(mut self) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
+    pub async fn run(
+        mut self,
+        compaction_filter: impl CompactionFilter + Clone,
+    ) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
         self.left.rewind().await?;
         self.right.rewind().await?;
         let mut skip_raw_block_count = 0;
@@ -528,7 +532,9 @@ impl CompactorRunner {
 
             let target_key = second.current_sstable().key();
             let iter = first.sstable_iter.as_mut().unwrap().iter.as_mut().unwrap();
-            self.executor.run(iter, target_key).await?;
+            self.executor
+                .run(iter, target_key, compaction_filter.clone())
+                .await?;
             if !iter.is_valid() {
                 first.sstable_iter.as_mut().unwrap().iter.take();
                 if !first.current_sstable().is_valid() {
@@ -546,7 +552,9 @@ impl CompactorRunner {
             let sstable_iter = rest_data.sstable_iter.as_mut().unwrap();
             let target_key = FullKey::decode(&sstable_iter.sstable.meta.largest_key);
             if let Some(iter) = sstable_iter.iter.as_mut() {
-                self.executor.run(iter, target_key).await?;
+                self.executor
+                    .run(iter, target_key, compaction_filter.clone())
+                    .await?;
                 assert!(
                     !iter.is_valid(),
                     "iter should not be valid key {:?}",
@@ -573,7 +581,9 @@ impl CompactorRunner {
                     let target_key = FullKey::decode(&largest_key);
                     sstable_iter.init_block_iter(block, block_meta.uncompressed_size as usize)?;
                     let mut iter = sstable_iter.iter.take().unwrap();
-                    self.executor.run(&mut iter, target_key).await?;
+                    self.executor
+                        .run(&mut iter, target_key, compaction_filter.clone())
+                        .await?;
                 } else {
                     let largest_key = sstable_iter.current_block_largest();
                     let block_len = block.len() as u64;
@@ -695,6 +705,7 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
         &mut self,
         iter: &mut BlockIterator,
         target_key: FullKey<&[u8]>,
+        mut compaction_filter: impl CompactionFilter,
     ) -> HummockResult<()> {
         self.skip_watermark_state.reset_watermark();
         self.non_pk_prefix_skip_watermark_state.reset_watermark();
@@ -724,7 +735,11 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
                 drop = true;
             }
 
-            if self.watermark_should_delete(&iter.key()) {
+            if !drop && compaction_filter.should_delete(iter.key()) {
+                drop = true;
+            }
+
+            if !drop && self.watermark_should_delete(&iter.key()) {
                 drop = true;
                 self.last_key_is_delete = true;
             }

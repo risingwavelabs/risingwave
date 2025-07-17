@@ -447,7 +447,7 @@ pub async fn compact_with_agent(
                 task_status = TaskStatus::ManualCanceled;
             },
 
-            ret = runner.run() => {
+            ret = runner.run(multi_filter) => {
                 match ret {
                     Ok((ssts, statistics)) => {
                         output_ssts.push((0, ssts, statistics));
