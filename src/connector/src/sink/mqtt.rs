@@ -28,13 +28,13 @@ use serde_with::serde_as;
 use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
+use super::SinkWriterParam;
 use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
 use super::encoder::{
     DateHandlingMode, JsonEncoder, JsonbHandlingMode, ProtoEncoder, ProtoHeader, RowEncoder, SerTo,
     TimeHandlingMode, TimestampHandlingMode, TimestamptzHandlingMode,
 };
 use super::writer::AsyncTruncateSinkWriterExt;
-use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::connector_common::MqttCommon;
 use crate::deserialize_bool_from_string;
 use crate::enforce_secret::EnforceSecret;
@@ -176,7 +176,6 @@ impl TryFrom<SinkParam> for MqttSink {
 }
 
 impl Sink for MqttSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = AsyncTruncateLogSinkerOf<MqttSinkWriter>;
 
     const SINK_NAME: &'static str = MQTT_SINK;
