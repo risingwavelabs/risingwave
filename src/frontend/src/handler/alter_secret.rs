@@ -66,32 +66,16 @@ pub async fn handle_alter_secret(
                     };
                     secret_payload.encode_to_vec()
                 }
-                secret::SecretBackend::HashicorpVault(vault_backend) => {
-                    // For Vault backend, we need to preserve the original configuration
-                    // and only allow changing specific parameters if provided
-                    if new_credential != risingwave_sqlparser::ast::Value::Null {
-                        return Err(crate::error::ErrorCode::InvalidParameterValue(
-                            "credential must be null when altering hashicorp_vault backend"
-                                .to_owned(),
-                        )
-                        .into());
-                    }
-
-                    // Return the original vault backend configuration for now
-                    // In the future, we could allow updating specific vault parameters
-                    let secret_payload = risingwave_pb::secret::Secret {
-                        secret_backend: Some(
-                            risingwave_pb::secret::secret::SecretBackend::HashicorpVault(
-                                vault_backend.clone(),
-                            ),
-                        ),
-                    };
-                    secret_payload.encode_to_vec()
+                secret::SecretBackend::HashicorpVault(_vault_backend) => {
+                    return Err(crate::error::ErrorCode::InvalidParameterValue(
+                        "credential must be null when altering hashicorp_vault backend".to_owned(),
+                    )
+                    .into());
                 }
             }
         } else {
             let with_options = WithOptions::try_from(sql_options.as_ref() as &[SqlOption])?;
-            get_secret_payload(new_credential, with_options)?
+            get_secret_payload(new_credential, with_options).await?
         };
 
         let catalog_writer = session.catalog_writer()?;

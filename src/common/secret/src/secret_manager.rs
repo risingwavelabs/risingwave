@@ -28,7 +28,7 @@ use thiserror_ext::AsReport;
 
 use super::SecretId;
 use super::error::{SecretError, SecretResult};
-use super::vault_client::{VaultAuth, VaultClient, VaultConfig};
+use super::vault_client::{HashiCorpVaultClient, HashiCorpVaultConfig};
 
 static INSTANCE: std::sync::OnceLock<LocalSecretManager> = std::sync::OnceLock::new();
 
@@ -259,42 +259,8 @@ impl LocalSecretManager {
         let secret_value = match Self::get_pb_secret_backend(pb_secret_bytes)? {
             risingwave_pb::secret::secret::SecretBackend::Meta(backend) => backend.value.clone(),
             risingwave_pb::secret::secret::SecretBackend::HashicorpVault(vault_backend) => {
-                // Convert the protobuf backend to VaultConfig
-                let auth = match vault_backend.auth {
-                    Some(
-                        risingwave_pb::secret::secret_hashicorp_vault_backend::Auth::TokenAuth(
-                            token_auth,
-                        ),
-                    ) => VaultAuth::Token {
-                        token: token_auth.token,
-                    },
-                    Some(
-                        risingwave_pb::secret::secret_hashicorp_vault_backend::Auth::ApproleAuth(
-                            approle_auth,
-                        ),
-                    ) => VaultAuth::AppRole {
-                        role_id: approle_auth.role_id,
-                        secret_id: approle_auth.secret_id,
-                    },
-                    None => {
-                        return Err(anyhow!("No auth method specified for Vault backend").into());
-                    }
-                };
-
-                let config = VaultConfig {
-                    addr: vault_backend.addr,
-                    path: vault_backend.path,
-                    field: vault_backend.field,
-                    auth,
-                    tls_skip_verify: vault_backend.tls_skip_verify,
-                    cache_ttl_secs: if vault_backend.cache_ttl_secs > 0 {
-                        Some(vault_backend.cache_ttl_secs)
-                    } else {
-                        None
-                    },
-                };
-
-                let client = VaultClient::new(config)?;
+                let config = HashiCorpVaultConfig::from_protobuf(&vault_backend)?;
+                let client = HashiCorpVaultClient::new(config)?;
                 client.get_secret().await?
             }
         };

@@ -15,6 +15,7 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use prost::Message;
 use risingwave_common::license::Feature;
+use risingwave_common::secret::vault_client::{HashiCorpVaultClient, HashiCorpVaultConfig};
 use risingwave_sqlparser::ast::{CreateSecretStatement, SqlOption, Value};
 
 use crate::error::{ErrorCode, Result};
@@ -50,7 +51,15 @@ pub async fn handle_create_secret(
     }
     let with_options = WithOptions::try_from(stmt.with_properties.0.as_ref() as &[SqlOption])?;
 
-    let secret_payload = get_secret_payload(stmt.credential, with_options)?;
+    // Check for secret references in WITH options (forbid them during secret creation)
+    if !with_options.secret_ref().is_empty() {
+        return Err(ErrorCode::InvalidParameterValue(
+            "Secret references are not allowed when creating a secret".to_owned(),
+        )
+        .into());
+    }
+
+    let secret_payload = get_secret_payload(stmt.credential, with_options).await?;
 
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
@@ -78,12 +87,14 @@ pub fn secret_to_str(value: &Value) -> Result<String> {
     }
 }
 
-pub(crate) fn get_secret_payload(credential: Value, with_options: WithOptions) -> Result<Vec<u8>> {
-    let secret = secret_to_str(&credential)?.as_bytes().to_vec();
-
+pub(crate) async fn get_secret_payload(
+    credential: Value,
+    with_options: WithOptions,
+) -> Result<Vec<u8>> {
     if let Some(backend) = with_options.get(SECRET_BACKEND_KEY) {
         match backend.to_lowercase().as_ref() {
             SECRET_BACKEND_META => {
+                let secret = secret_to_str(&credential)?.as_bytes().to_vec();
                 let backend = risingwave_pb::secret::Secret {
                     secret_backend: Some(risingwave_pb::secret::secret::SecretBackend::Meta(
                         risingwave_pb::secret::SecretMetaBackend { value: secret },
@@ -99,118 +110,37 @@ pub(crate) fn get_secret_payload(credential: Value, with_options: WithOptions) -
                     .into());
                 }
 
-                // Parse required parameters
-                let addr = with_options
-                    .get("addr")
-                    .ok_or_else(|| {
-                        ErrorCode::InvalidParameterValue(
-                            "'addr' is required for hashicorp_vault backend".to_owned(),
-                        )
-                    })?
-                    .clone();
+                // Convert WithOptions to a map for serde deserialization
+                let mut config_map = std::collections::HashMap::new();
+                for (key, value) in with_options.iter() {
+                    config_map.insert(key.clone(), value.clone());
+                }
 
-                let path = with_options
-                    .get("path")
-                    .ok_or_else(|| {
-                        ErrorCode::InvalidParameterValue(
-                            "'path' is required for hashicorp_vault backend".to_owned(),
-                        )
-                    })?
-                    .clone();
-
-                let field = with_options
-                    .get("field")
-                    .cloned()
-                    .unwrap_or_else(|| "value".to_owned());
-
-                // Parse auth method
-                let auth_method = with_options
-                    .get("auth_method")
-                    .ok_or_else(|| {
-                        ErrorCode::InvalidParameterValue(
-                            "'auth_method' is required for hashicorp_vault backend".to_owned(),
-                        )
-                    })?
-                    .to_lowercase();
-
-                // Parse optional parameters
-                let tls_skip_verify = with_options
-                    .get("tls_skip_verify")
-                    .map(|v| v.to_lowercase() == "true")
-                    .unwrap_or(false);
-
-                let cache_ttl_secs = with_options
-                    .get("cache_ttl_secs")
-                    .map(|v| v.parse::<u32>())
-                    .transpose()
-                    .map_err(|_| {
-                        ErrorCode::InvalidParameterValue(
-                            "'cache_ttl_secs' must be a valid integer".to_owned(),
-                        )
-                    })?
-                    .unwrap_or(0);
-
-                // Create the auth oneof
-                let auth_oneof = match auth_method.as_str() {
-                    "token" => {
-                        let token = with_options
-                            .get("auth_token")
-                            .ok_or_else(|| {
-                                ErrorCode::InvalidParameterValue(
-                                    "'auth_token' is required for token auth method".to_owned(),
-                                )
-                            })?
-                            .clone();
-                        Some(
-                            risingwave_pb::secret::secret_hashicorp_vault_backend::Auth::TokenAuth(
-                                risingwave_pb::secret::VaultTokenAuth { token },
-                            ),
-                        )
-                    }
-                    "approle" => {
-                        let role_id = with_options
-                            .get("auth_role_id")
-                            .ok_or_else(|| {
-                                ErrorCode::InvalidParameterValue(
-                                    "'auth_role_id' is required for approle auth method".to_owned(),
-                                )
-                            })?
-                            .clone();
-                        let secret_id = with_options
-                            .get("auth_secret_id")
-                            .ok_or_else(|| {
-                                ErrorCode::InvalidParameterValue(
-                                    "'auth_secret_id' is required for approle auth method"
-                                        .to_owned(),
-                                )
-                            })?
-                            .clone();
-                        Some(
-                            risingwave_pb::secret::secret_hashicorp_vault_backend::Auth::ApproleAuth(
-                                risingwave_pb::secret::VaultAppRoleAuth { role_id, secret_id },
-                            ),
-                        )
-                    }
-                    _ => {
-                        return Err(ErrorCode::InvalidParameterValue(format!(
-                            "Unsupported auth method: {}. Supported methods are: token, approle",
-                            auth_method
+                // Deserialize using serde with validation
+                let config: HashiCorpVaultConfig =
+                    serde_json::from_value(serde_json::Value::Object(
+                        config_map
+                            .into_iter()
+                            .map(|(k, v)| (k, serde_json::Value::String(v)))
+                            .collect(),
+                    ))
+                    .map_err(|e| {
+                        ErrorCode::InvalidParameterValue(format!(
+                            "Invalid HashiCorp Vault configuration: {}",
+                            e
                         ))
-                        .into());
-                    }
-                };
+                    })?;
+
+                {
+                    // validate
+                    let client = HashiCorpVaultClient::new(config.clone())?;
+                    client.get_secret().await?;
+                }
 
                 let backend = risingwave_pb::secret::Secret {
                     secret_backend: Some(
                         risingwave_pb::secret::secret::SecretBackend::HashicorpVault(
-                            risingwave_pb::secret::SecretHashicorpVaultBackend {
-                                addr,
-                                path,
-                                field,
-                                auth: auth_oneof,
-                                tls_skip_verify,
-                                cache_ttl_secs,
-                            },
+                            config.to_protobuf(),
                         ),
                     ),
                 };

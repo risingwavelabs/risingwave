@@ -20,6 +20,7 @@ use anyhow::{Context, Result};
 use moka::future::Cache as MokaCache;
 use parking_lot::Mutex;
 use reqwest::Client;
+use risingwave_pb::secret;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -44,20 +45,35 @@ static GLOBAL_VAULT_TOKEN_CACHE: LazyLock<MokaCache<TokenCacheKey, CachedToken>>
             .build()
     });
 
-#[derive(Debug, Clone)]
-pub struct VaultConfig {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HashiCorpVaultConfig {
     pub addr: String,
     pub path: String,
+    #[serde(default = "default_field")]
     pub field: String,
-    pub auth: VaultAuth,
+    #[serde(flatten)]
+    pub auth: HashiCorpVaultAuth,
+    #[serde(default)]
     pub tls_skip_verify: bool,
-    pub cache_ttl_secs: Option<u32>,
+    #[serde(default)]
+    pub cache_ttl_secs: u32,
 }
 
-#[derive(Debug, Clone)]
-pub enum VaultAuth {
-    Token { token: String },
-    AppRole { role_id: String, secret_id: String },
+fn default_field() -> String {
+    "value".to_owned()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "auth_method", rename_all = "lowercase")]
+pub enum HashiCorpVaultAuth {
+    Token {
+        auth_token: String,
+    },
+    #[serde(rename = "approle")]
+    AppRole {
+        auth_role_id: String,
+        auth_secret_id: String,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -94,14 +110,76 @@ struct CachedSecret {
 }
 
 #[derive(Debug)]
-pub struct VaultClient {
+pub struct HashiCorpVaultClient {
     client: Client,
-    config: VaultConfig,
+    config: HashiCorpVaultConfig,
     secret_cache: Mutex<HashMap<String, CachedSecret>>,
 }
 
-impl VaultClient {
-    pub fn new(config: VaultConfig) -> Result<Self> {
+impl HashiCorpVaultConfig {
+    /// Convert from protobuf `SecretHashicorpVaultBackend` to `HashiCorpVaultConfig`
+    pub fn from_protobuf(vault_backend: &secret::SecretHashicorpVaultBackend) -> Result<Self> {
+        let auth = match vault_backend.auth.as_ref() {
+            Some(secret::secret_hashicorp_vault_backend::Auth::TokenAuth(token_auth)) => {
+                HashiCorpVaultAuth::Token {
+                    auth_token: token_auth.token.clone(),
+                }
+            }
+            Some(secret::secret_hashicorp_vault_backend::Auth::ApproleAuth(approle_auth)) => {
+                HashiCorpVaultAuth::AppRole {
+                    auth_role_id: approle_auth.role_id.clone(),
+                    auth_secret_id: approle_auth.secret_id.clone(),
+                }
+            }
+            None => {
+                return Err(anyhow::anyhow!(
+                    "No auth method specified for Vault backend"
+                ));
+            }
+        };
+
+        Ok(HashiCorpVaultConfig {
+            addr: vault_backend.addr.clone(),
+            path: vault_backend.path.clone(),
+            field: vault_backend.field.clone(),
+            auth,
+            tls_skip_verify: vault_backend.tls_skip_verify,
+            cache_ttl_secs: vault_backend.cache_ttl_secs,
+        })
+    }
+
+    /// Convert `HashiCorpVaultConfig` to protobuf `SecretHashicorpVaultBackend`
+    pub fn to_protobuf(&self) -> secret::SecretHashicorpVaultBackend {
+        let auth = match &self.auth {
+            HashiCorpVaultAuth::Token { auth_token } => Some(
+                secret::secret_hashicorp_vault_backend::Auth::TokenAuth(secret::VaultTokenAuth {
+                    token: auth_token.clone(),
+                }),
+            ),
+            HashiCorpVaultAuth::AppRole {
+                auth_role_id,
+                auth_secret_id,
+            } => Some(secret::secret_hashicorp_vault_backend::Auth::ApproleAuth(
+                secret::VaultAppRoleAuth {
+                    role_id: auth_role_id.clone(),
+                    secret_id: auth_secret_id.clone(),
+                },
+            )),
+        };
+
+        secret::SecretHashicorpVaultBackend {
+            addr: self.addr.clone(),
+            path: self.path.clone(),
+            field: self.field.clone(),
+            auth,
+            tls_skip_verify: self.tls_skip_verify,
+            cache_ttl_secs: self.cache_ttl_secs,
+        }
+    }
+}
+
+impl HashiCorpVaultClient {
+    pub fn new(config: HashiCorpVaultConfig) -> Result<Self> {
         let mut client_builder = Client::builder();
 
         if config.tls_skip_verify {
@@ -121,7 +199,7 @@ impl VaultClient {
 
     pub async fn get_secret(&self) -> Result<Vec<u8>> {
         // Check cache first if TTL is configured
-        if let Some(_ttl_secs) = self.config.cache_ttl_secs {
+        if self.config.cache_ttl_secs > 0 {
             let cache_key = format!("{}#{}", self.config.path, self.config.field);
             let mut cache = self.secret_cache.lock();
 
@@ -159,7 +237,7 @@ impl VaultClient {
             // Handle authentication failures - token may have been rotated/revoked
             if (response.status() == 401 || response.status() == 403)
                 && retry_count == 0
-                && matches!(self.config.auth, VaultAuth::AppRole { .. })
+                && matches!(self.config.auth, HashiCorpVaultAuth::AppRole { .. })
             {
                 // this case means the token changed during cache, need to trigger a refresh
                 force_refresh_token = true;
@@ -226,7 +304,8 @@ impl VaultClient {
         };
 
         // Cache the result if TTL is configured
-        if let Some(ttl_secs) = self.config.cache_ttl_secs {
+        if self.config.cache_ttl_secs > 0 {
+            let ttl_secs = self.config.cache_ttl_secs;
             let cache_key = format!("{}#{}", self.config.path, self.config.field);
             let expires_at = Instant::now() + Duration::from_secs(ttl_secs as u64);
             let cached = CachedSecret {
@@ -243,12 +322,15 @@ impl VaultClient {
 
     async fn get_token_internal(&self, force_refresh: bool) -> Result<String> {
         match &self.config.auth {
-            VaultAuth::Token { token } => Ok(token.clone()),
-            VaultAuth::AppRole { role_id, secret_id } => {
+            HashiCorpVaultAuth::Token { auth_token } => Ok(auth_token.clone()),
+            HashiCorpVaultAuth::AppRole {
+                auth_role_id,
+                auth_secret_id,
+            } => {
                 // Create cache key with vault base URL and role_id
                 let cache_key = TokenCacheKey {
                     vault_base_url: self.config.addr.trim_end_matches('/').to_owned(),
-                    role_id: role_id.clone(),
+                    role_id: auth_role_id.clone(),
                 };
 
                 // Check global token cache first (unless forced refresh)
@@ -269,8 +351,8 @@ impl VaultClient {
                     self.config.addr.trim_end_matches('/')
                 );
                 let login_request = VaultAppRoleLoginRequest {
-                    role_id: role_id.clone(),
-                    secret_id: secret_id.clone(),
+                    role_id: auth_role_id.clone(),
+                    secret_id: auth_secret_id.clone(),
                 };
 
                 let response = self
