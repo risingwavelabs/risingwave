@@ -62,7 +62,8 @@ pub(crate) mod tests {
     };
     use risingwave_storage::hummock::compactor::fast_compactor_runner::CompactorRunner as FastCompactorRunner;
     use risingwave_storage::hummock::compactor::{
-        CompactionExecutor, CompactorContext, DummyCompactionFilter, TaskProgress,
+        CompactionExecutor, CompactorContext, DummyCompactionFilter, StateCleanUpCompactionFilter,
+        TaskProgress,
     };
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::iterator::{
@@ -73,7 +74,7 @@ pub(crate) mod tests {
     use risingwave_storage::hummock::test_utils::{ReadOptions, *};
     use risingwave_storage::hummock::value::HummockValue;
     use risingwave_storage::hummock::{
-        BlockedXor16FilterBuilder, CachePolicy, CompressionAlgorithm, FilterBuilder,
+        BlockedXor16FilterBuilder, CachePolicy, CompressionAlgorithm, FilterBuilder, GetObjectId,
         HummockStorage as GlobalHummockStorage, HummockStorage, LocalHummockStorage, MemoryLimiter,
         SharedComapctorObjectIdManager, Sstable, SstableBuilder, SstableBuilderOptions,
         SstableIteratorReadOptions, SstableObjectIdManager, SstableWriterOptions,
@@ -1309,10 +1310,11 @@ pub(crate) mod tests {
                 VecDeque::from_iter([22, 23, 24, 25, 26, 27, 28, 29]),
             )),
             Arc::new(TaskProgress::default()),
+            compaction_filter.clone(),
         );
         let (_, ret1, _) = slow_compact_runner
             .run(
-                compaction_filter,
+                compaction_filter.clone(),
                 compaction_catalog_agent_ref,
                 Arc::new(TaskProgress::default()),
             )
@@ -2352,5 +2354,174 @@ pub(crate) mod tests {
             .merge_compaction_group_for_test(parent_group_id, new_cg_id, created_tables.clone())
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_fast_compactor_existing_table_ids_filter() {
+        let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
+        let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+            hummock_manager_ref.clone(),
+            worker_id as u32,
+        ));
+
+        // Set up two table IDs, but only one will be in existing_table_ids
+        let existing_table_id: u32 = 1;
+        let filtered_table_id: u32 = 2;
+
+        let storage = get_hummock_storage(
+            hummock_meta_client.clone(),
+            get_notification_client_for_test(
+                env,
+                hummock_manager_ref.clone(),
+                cluster_ctl_ref,
+                worker_id,
+            )
+            .await,
+            &hummock_manager_ref,
+            &[existing_table_id, filtered_table_id],
+        )
+        .await;
+
+        hummock_manager_ref.get_new_object_ids(10).await.unwrap();
+        let compact_ctx = get_compactor_context(&storage);
+        let compaction_catalog_agent_ref =
+            CompactionCatalogAgent::for_test(vec![existing_table_id, filtered_table_id]);
+
+        let sstable_store = compact_ctx.sstable_store.clone();
+        let capacity = 256 * 1024;
+        let options = SstableBuilderOptions {
+            capacity,
+            block_capacity: 2048,
+            restart_interval: 16,
+            bloom_false_positive: 0.1,
+            compression_algorithm: CompressionAlgorithm::Lz4,
+            ..Default::default()
+        };
+
+        // Create test data: mix keys from both tables
+        let mut sst_input = vec![];
+        let epoch = test_epoch(100);
+
+        // Add keys for existing_table_id (should be kept)
+        for i in 0..50 {
+            let key = FullKey::new(
+                TableId::new(existing_table_id),
+                TableKey(format!("existing_key_{:03}", i).into_bytes()),
+                epoch,
+            );
+            let value = HummockValue::put(format!("value_{}", i).into_bytes());
+            sst_input.push((key, value));
+        }
+
+        // Add keys for filtered_table_id (should be filtered out)
+        for i in 0..50 {
+            let key = FullKey::new(
+                TableId::new(filtered_table_id),
+                TableKey(format!("filtered_key_{:03}", i).into_bytes()),
+                epoch,
+            );
+            let value = HummockValue::put(format!("value_{}", i).into_bytes());
+            sst_input.push((key, value));
+        }
+
+        // Sort by key to simulate real SST ordering
+        sst_input.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let sst = gen_test_sstable_info(options.clone(), 1, sst_input, sstable_store.clone()).await;
+
+        // Create compaction task with only existing_table_id in existing_table_ids
+        let task = CompactTask {
+            input_ssts: vec![
+                InputLevel {
+                    level_idx: 0,
+                    level_type: risingwave_pb::hummock::LevelType::Nonoverlapping,
+                    table_infos: vec![sst.clone()],
+                },
+                InputLevel {
+                    level_idx: 1,
+                    level_type: risingwave_pb::hummock::LevelType::Nonoverlapping,
+                    table_infos: vec![],
+                },
+            ],
+            existing_table_ids: vec![existing_table_id], // Only include existing_table_id
+            task_id: 1,
+            splits: vec![KeyRange::inf()],
+            target_level: 6,
+            base_level: 4,
+            target_file_size: capacity as u64,
+            compression_algorithm: 1,
+            gc_delete_keys: true,
+            ..Default::default()
+        };
+
+        let object_id_manager = Arc::new(ObjectIdManager::new(
+            hummock_meta_client.clone(),
+            storage
+                .storage_opts()
+                .clone()
+                .sstable_id_remote_fetch_number,
+        ));
+
+        // Run with StateCleanUpCompactionFilter (should filter out filtered_table_id)
+        let state_cleanup_filter =
+            StateCleanUpCompactionFilter::new(HashSet::from_iter([existing_table_id]));
+        let fast_compact_runner = FastCompactorRunner::new(
+            compact_ctx.clone(),
+            task.clone(),
+            compaction_catalog_agent_ref.clone(),
+            object_id_manager.clone() as Arc<dyn GetObjectId>,
+            Arc::new(TaskProgress::default()),
+            state_cleanup_filter,
+        );
+        let (ssts_with_filter, _) = fast_compact_runner.run().await.unwrap();
+
+        // Verify filtered result: only keys from existing_table_id should be kept
+        let mut filtered_key_count = 0;
+        for sst_info in &ssts_with_filter {
+            filtered_key_count += sst_info.sst_info.total_key_count;
+        }
+
+        // Verify that filtering worked correctly - only existing_table_id keys should remain
+        assert_eq!(
+            filtered_key_count, 50,
+            "Expected 50 keys from existing_table_id, got {}",
+            filtered_key_count
+        );
+
+        // Additional verification: iterate through the filtered output to double-check
+        let read_options = Arc::new(SstableIteratorReadOptions::default());
+        let sst_infos: Vec<SstableInfo> = ssts_with_filter
+            .iter()
+            .map(|s| s.sst_info.clone())
+            .collect();
+
+        let mut iter = UserIterator::for_test(
+            ConcatIterator::new(sst_infos, sstable_store.clone(), read_options),
+            (Bound::Unbounded, Bound::Unbounded),
+        );
+
+        iter.rewind().await.unwrap();
+        let mut verified_keys = 0;
+
+        while iter.is_valid() {
+            let key = iter.key();
+            let table_id = key.user_key.table_id.table_id();
+
+            // Verify that only existing_table_id keys are present
+            assert_eq!(
+                table_id, existing_table_id,
+                "Found unexpected table_id {} in output, expected only {}",
+                table_id, existing_table_id
+            );
+
+            verified_keys += 1;
+            iter.next().await.unwrap();
+        }
+
+        assert_eq!(
+            verified_keys, 50,
+            "Expected to verify 50 keys by iteration, got {}",
+            verified_keys
+        );
     }
 }
