@@ -27,7 +27,7 @@ mod imp {
     use risingwave_common::util::iter_util::ZipEqDebug;
     use thiserror_ext::AsReport;
 
-    use super::{Result as SinkResult, RowEncoder, SerTo};
+    use super::super::{Result as SinkResult, RowEncoder, SerTo};
     use crate::sink::SinkError;
 
 static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);

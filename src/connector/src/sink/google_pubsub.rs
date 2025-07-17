@@ -34,13 +34,13 @@ mod imp {
     use tonic::Status;
 use with_options::WithOptions;
 
-use super::catalog::SinkFormatDesc;
-use super::formatter::SinkFormatterImpl;
-use super::log_store::DeliveryFutureManagerAddFuture;
-use super::writer::{
-    AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt, FormattedSink,
-};
-    use super::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SinkWriterParam};
+    use super::super::catalog::SinkFormatDesc;
+    use super::super::formatter::SinkFormatterImpl;
+    use super::super::log_store::DeliveryFutureManagerAddFuture;
+    use super::super::writer::{
+        AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt, FormattedSink,
+    };
+    use super::super::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SinkWriterParam};
     use crate::dispatch_sink_formatter_str_key_impl;
     use crate::enforce_secret::EnforceSecret;
 

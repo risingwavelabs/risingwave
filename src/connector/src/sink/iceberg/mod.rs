@@ -16,6 +16,8 @@ pub const ICEBERG_SINK: &str = "iceberg";
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "sink-iceberg")] {
+        pub mod exactly_once_util;
+        mod prometheus;
         mod imp;
         pub use imp::{IcebergSink, IcebergConfig};
     } else {

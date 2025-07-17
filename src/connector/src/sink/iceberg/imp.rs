@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod exactly_once_util;
-mod prometheus;
+pub use super::exactly_once_util;
+use super::prometheus;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::num::NonZeroU64;
