@@ -900,13 +900,8 @@ async fn test_parallelized_cdc_backfill_reschedule() {
     curr_epoch.inc_epoch();
     let reschedule_barrier =
         Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Update(UpdateMutation {
-            dispatchers: Default::default(),
-            merges: Default::default(),
-            vnode_bitmaps: Default::default(),
-            dropped_actors: Default::default(),
-            actor_splits: Default::default(),
-            actor_new_dispatchers: Default::default(),
             actor_cdc_table_snapshot_splits,
+            ..Default::default()
         }));
     tx.send_barrier(reschedule_barrier);
 
