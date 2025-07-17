@@ -28,6 +28,7 @@ use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::common::ActorInfo;
+use risingwave_pb::plan_common::PbField;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
@@ -36,7 +37,7 @@ use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation, Dispatcher,
-    Dispatchers, DropSubscriptionsMutation, PauseMutation, ResumeMutation,
+    Dispatchers, DropSubscriptionsMutation, PauseMutation, PbSinkAddColumns, ResumeMutation,
     SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
     SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
@@ -856,6 +857,7 @@ impl Command {
                         merge_updates,
                         dispatchers,
                         init_split_assignment,
+                        None,
                     );
 
                     Some(Mutation::Combined(CombinedMutation {
@@ -920,6 +922,7 @@ impl Command {
                     merge_updates,
                     dispatchers,
                     init_split_assignment,
+                    auto_refresh_schema_sinks.as_ref(),
                 )
             }
 
@@ -1078,6 +1081,7 @@ impl Command {
                     dropped_actors,
                     actor_splits,
                     actor_new_dispatchers,
+                    sink_add_columns: Default::default(),
                 });
                 tracing::debug!("update mutation: {mutation:?}");
                 Some(mutation)
@@ -1235,6 +1239,7 @@ impl Command {
         merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
         dispatchers: FragmentActorDispatchers,
         init_split_assignment: &SplitAssignment,
+        auto_refresh_schema_sinks: Option<&Vec<AutoRefreshSchemaSinkContext>>,
     ) -> Option<Mutation> {
         let dropped_actors = dropped_actors.into_iter().collect();
 
@@ -1254,6 +1259,30 @@ impl Command {
             merge_update: merge_updates.into_values().flatten().collect(),
             dropped_actors,
             actor_splits,
+            sink_add_columns: auto_refresh_schema_sinks
+                .as_ref()
+                .into_iter()
+                .flat_map(|sinks| {
+                    sinks.iter().map(|sink| {
+                        (
+                            sink.original_sink.id,
+                            PbSinkAddColumns {
+                                fields: sink
+                                    .new_columns
+                                    .iter()
+                                    .map(|col| {
+                                        let desc = col.column_desc.as_ref().unwrap();
+                                        PbField {
+                                            data_type: Some(desc.column_type.clone().unwrap()),
+                                            name: desc.name.clone(),
+                                        }
+                                    })
+                                    .collect(),
+                            },
+                        )
+                    })
+                })
+                .collect(),
             ..Default::default()
         }))
     }

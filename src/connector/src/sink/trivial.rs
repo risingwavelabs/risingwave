@@ -17,6 +17,7 @@ use std::marker::PhantomData;
 use async_trait::async_trait;
 use phf::{Set, phf_set};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
+use tracing::info;
 
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
@@ -101,7 +102,10 @@ impl<T: TrivialSinkName> LogSinker for TrivialSink<T> {
                 LogStoreReadItem::StreamChunk { chunk_id, .. } => {
                     log_reader.truncate(TruncateOffset::Chunk { epoch, chunk_id })?;
                 }
-                LogStoreReadItem::Barrier { .. } => {
+                LogStoreReadItem::Barrier { add_columns, .. } => {
+                    if let Some(add_columns) = add_columns {
+                        info!("trivial sink receive add columns {:?}", add_columns);
+                    }
                     log_reader.truncate(TruncateOffset::Barrier { epoch })?;
                 }
             }

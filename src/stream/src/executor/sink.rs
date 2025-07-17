@@ -332,6 +332,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 }
                 Message::Barrier(barrier) => {
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
+                    let add_columns = barrier.as_sink_add_columns(sink_id);
+                    if let Some(add_columns) = &add_columns {
+                        info!("trivial sink receive add columns {:?}", add_columns);
+                    }
                     let post_flush = log_writer
                         .flush_current_epoch(
                             barrier.epoch.curr,
@@ -339,6 +343,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 is_checkpoint: barrier.kind.is_checkpoint(),
                                 new_vnode_bitmap: update_vnode_bitmap.clone(),
                                 is_stop: barrier.is_stop(actor_id),
+                                add_columns,
                             },
                         )
                         .await?;
