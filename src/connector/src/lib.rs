@@ -193,6 +193,19 @@ mod tests {
             .assert_eq(&generate_allow_alter_on_fly_fields_combined());
     }
 
+    #[test]
+    fn test_feature_flag_constants() {
+        // Test that sink name constants are correctly defined
+        assert_eq!(crate::sink::deltalake::DELTALAKE_SINK, "deltalake");
+        assert_eq!(crate::sink::iceberg::ICEBERG_SINK, "iceberg");
+        assert_eq!(crate::sink::clickhouse::CLICKHOUSE_SINK, "clickhouse");
+        assert_eq!(crate::sink::mongodb::MONGODB_SINK, "mongodb");
+        assert_eq!(crate::sink::big_query::BIGQUERY_SINK, "bigquery");
+        assert_eq!(crate::sink::dynamodb::DYNAMO_DB_SINK, "dynamodb");
+        assert_eq!(crate::sink::elasticsearch_opensearch::ES_SINK, "elasticsearch");
+        assert_eq!(crate::sink::elasticsearch_opensearch::OPENSEARCH_SINK, "opensearch");
+    }
+
     /// Test some serde behavior we rely on.
     mod serde {
         #![expect(dead_code)]
