@@ -394,32 +394,6 @@ impl CatalogController {
         Ok(table_id_map)
     }
 
-    pub async fn insert_refresh_sink_fragment(
-        &self,
-        sink_id: SinkId,
-        fragment: &crate::model::Fragment,
-        actor_status: &BTreeMap<
-            crate::model::ActorId,
-            risingwave_pb::meta::table_fragments::ActorStatus,
-        >,
-    ) -> MetaResult<()> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
-        let (fragment, actors) = Self::extract_fragment_and_actors_for_new_job(
-            sink_id,
-            fragment,
-            actor_status,
-            &HashMap::new(),
-        )?;
-        Fragment::insert(fragment.into_active_model())
-            .exec(&txn)
-            .await?;
-        for actor in actors {
-            Actor::insert(actor.into_active_model()).exec(&txn).await?;
-        }
-        txn.commit().await?;
-        Ok(())
-    }
 
     pub async fn prepare_stream_job_fragments(
         &self,
