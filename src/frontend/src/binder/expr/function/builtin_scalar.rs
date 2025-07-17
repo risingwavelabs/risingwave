@@ -436,6 +436,8 @@ impl Binder {
                 ("map_length", raw_call(ExprType::MapLength)),
                 // vector
                 ("l2_distance", raw_call(ExprType::L2Distance)),
+                ("cosine_distance", raw_call(ExprType::CosineDistance)),
+                ("l1_distance", raw_call(ExprType::L1Distance)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least

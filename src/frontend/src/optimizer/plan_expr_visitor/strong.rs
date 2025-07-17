@@ -109,6 +109,8 @@ impl Strong {
             | ExprType::Floor
             | ExprType::Extract
             | ExprType::L2Distance
+            | ExprType::CosineDistance
+            | ExprType::L1Distance
             | ExprType::Greatest
             | ExprType::Least => self.any_null(func_call),
             // ALL: This kind of expression is null if and only if all of its arguments are null.
