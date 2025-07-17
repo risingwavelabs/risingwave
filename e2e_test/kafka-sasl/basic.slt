@@ -19,8 +19,8 @@ WITH(
     scan.startup.mode = 'earliest',
     properties.security.protocol = 'sasl_plaintext',
     properties.sasl.mechanism = 'PLAIN',
-    properties.sasl.username = 'user1',
-    properties.sasl.password = 'password123',
+    properties.sasl.username = 'dev',
+    properties.sasl.password = 'rw',
 ) FORMAT PLAIN ENCODE JSON;
 
 sleep 1s
