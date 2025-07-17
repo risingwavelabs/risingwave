@@ -679,7 +679,7 @@ where
         tracing::trace!("cancel query in session: {:?}", session_id);
         self.session_mgr.cancel_queries_in_session(session_id);
         self.session_mgr.cancel_creating_jobs_in_session(session_id);
-        self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
+        self.is_terminate = true;
         Ok(())
     }
 
