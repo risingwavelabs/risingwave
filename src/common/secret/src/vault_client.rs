@@ -13,13 +13,36 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
+use moka::future::Cache as MokaCache;
 use parking_lot::Mutex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct TokenCacheKey {
+    vault_base_url: String,
+    role_id: String,
+}
+
+#[derive(Debug, Clone)]
+struct CachedToken {
+    token: String,
+    expires_at: Instant,
+}
+
+/// Global cache for Vault tokens to reduce authentication requests
+/// Cache key contains (vault service base url, `role_id`) as requested
+static GLOBAL_VAULT_TOKEN_CACHE: LazyLock<MokaCache<TokenCacheKey, CachedToken>> =
+    LazyLock::new(|| {
+        MokaCache::builder()
+            .max_capacity(1000) // Limit cache size
+            .build()
+    });
 
 #[derive(Debug, Clone)]
 pub struct VaultConfig {
@@ -74,7 +97,6 @@ struct CachedSecret {
 pub struct VaultClient {
     client: Client,
     config: VaultConfig,
-    token_cache: Mutex<Option<(String, Instant)>>,
     secret_cache: Mutex<HashMap<String, CachedSecret>>,
 }
 
@@ -93,7 +115,6 @@ impl VaultClient {
         Ok(Self {
             client,
             config,
-            token_cache: Mutex::new(None),
             secret_cache: Mutex::new(HashMap::new()),
         })
     }
@@ -113,30 +134,79 @@ impl VaultClient {
             }
         }
 
-        // Get token (either directly or via app role)
-        let token = self.get_token().await?;
+        // Try to get secret, with retry logic for token invalidation
+        let mut force_refresh_token = false;
 
-        // Fetch secret from Vault
-        let url = format!(
-            "{}/v1/{}",
-            self.config.addr.trim_end_matches('/'),
-            self.config.path
-        );
-        let response = self
-            .client
-            .get(&url)
-            .header("X-Vault-Token", &token)
-            .send()
-            .await
-            .context("Failed to send request to Vault")?;
+        // Retry loop for handling token invalidation
+        for retry_count in 0..1 {
+            // Get token (either directly or via app role)
+            let token = self.get_token_internal(force_refresh_token).await?;
 
-        if !response.status().is_success() {
-            return Err(anyhow::anyhow!(
-                "Vault API returned error status: {} - {}",
-                response.status(),
-                response.text().await.unwrap_or_default()
-            ));
+            // Fetch secret from Vault
+            let url = format!(
+                "{}/v1/{}",
+                self.config.addr.trim_end_matches('/'),
+                self.config.path
+            );
+            let response = self
+                .client
+                .get(&url)
+                .header("X-Vault-Token", &token)
+                .send()
+                .await
+                .context("Failed to send request to Vault")?;
+
+            // Handle authentication failures - token may have been rotated/revoked
+            if (response.status() == 401 || response.status() == 403)
+                && retry_count == 0
+                && matches!(self.config.auth, VaultAuth::AppRole { .. })
+            {
+                // this case means the token changed during cache, need to trigger a refresh
+                force_refresh_token = true;
+                continue;
+            }
+
+            if !response.status().is_success() {
+                return Err(anyhow::anyhow!(
+                    "Vault API returned error status: {} - {}",
+                    response.status(),
+                    response.text().await.unwrap_or_default()
+                ));
+            }
+
+            // Success case - process the response and break out of retry loop
+            return self.process_secret_response(response).await;
         }
+
+        // Should never reach here due to early returns, but adding unreachable for safety
+        unreachable!("")
+    }
+
+    async fn process_secret_response(&self, response: reqwest::Response) -> Result<Vec<u8>> {
+        // a demo response:
+        //   {
+        //     "request_id": "e345b77b-8b5a-552b-eb2c-7d80a627c9ad",
+        //     "lease_id": "",
+        //     "renewable": false,
+        //     "lease_duration": 0,
+        //     "data": {
+        //       "data": {
+        //         "key": "test-api-key-12345",
+        //         "secret": "test-api-secret-67890"
+        //       },
+        //       "metadata": {
+        //         "created_time": "2025-07-17T08:07:24.177261949Z",
+        //         "custom_metadata": null,
+        //         "deletion_time": "",
+        //         "destroyed": false,
+        //         "version": 1
+        //       }
+        //     },
+        //     "wrap_info": null,
+        //     "warnings": null,
+        //     "auth": null,
+        //     "mount_type": "kv"
+        //   }
 
         let secret_response: VaultSecretResponse = response
             .json()
@@ -171,17 +241,25 @@ impl VaultClient {
         Ok(secret_bytes)
     }
 
-    async fn get_token(&self) -> Result<String> {
+    async fn get_token_internal(&self, force_refresh: bool) -> Result<String> {
         match &self.config.auth {
             VaultAuth::Token { token } => Ok(token.clone()),
             VaultAuth::AppRole { role_id, secret_id } => {
-                // Check token cache first
+                // Create cache key with vault base URL and role_id
+                let cache_key = TokenCacheKey {
+                    vault_base_url: self.config.addr.trim_end_matches('/').to_owned(),
+                    role_id: role_id.clone(),
+                };
+
+                // Check global token cache first (unless forced refresh)
+                if !force_refresh
+                    && let Some(cached_token) = GLOBAL_VAULT_TOKEN_CACHE.get(&cache_key).await
                 {
-                    let cache = self.token_cache.lock();
-                    if let Some((token, expires_at)) = &*cache
-                        && *expires_at > Instant::now()
-                    {
-                        return Ok(token.clone());
+                    if cached_token.expires_at > Instant::now() {
+                        return Ok(cached_token.token);
+                    } else {
+                        // Token expired, remove it from cache
+                        GLOBAL_VAULT_TOKEN_CACHE.invalidate(&cache_key).await;
                     }
                 }
 
@@ -204,6 +282,10 @@ impl VaultClient {
                     .context("Failed to send app role login request")?;
 
                 if !response.status().is_success() {
+                    // If authentication fails and we have a cached token, invalidate it
+                    if !force_refresh {
+                        GLOBAL_VAULT_TOKEN_CACHE.invalidate(&cache_key).await;
+                    }
                     return Err(anyhow::anyhow!(
                         "Vault app role login failed: {} - {}",
                         response.status(),
@@ -219,12 +301,15 @@ impl VaultClient {
                 let token = auth_response.auth.client_token;
                 let lease_duration = auth_response.auth.lease_duration;
 
-                // Cache the token with some buffer time (90% of lease duration)
+                // Cache the token with per-entry expiration based on lease duration (90% of lease duration)
                 let expires_at = Instant::now() + Duration::from_secs((lease_duration * 9) / 10);
-                {
-                    let mut cache = self.token_cache.lock();
-                    *cache = Some((token.clone(), expires_at));
-                }
+                let cached_token = CachedToken {
+                    token: token.clone(),
+                    expires_at,
+                };
+                GLOBAL_VAULT_TOKEN_CACHE
+                    .insert(cache_key, cached_token)
+                    .await;
 
                 Ok(token)
             }

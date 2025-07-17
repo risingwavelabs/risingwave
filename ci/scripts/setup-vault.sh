@@ -12,7 +12,7 @@ export VAULT_TOKEN="root-token"
 echo "Waiting for Vault to be ready..."
 timeout=60
 while [ $timeout -gt 0 ]; do
-    if vault status > /dev/null 2>&1; then
+    if curl -s -f "$VAULT_ADDR/v1/sys/health" > /dev/null 2>&1; then
         echo "Vault is ready!"
         break
     fi
@@ -27,9 +27,13 @@ if [ $timeout -le 0 ]; then
 fi
 
 # Check if kv-v2 secrets engine is already enabled
-if ! vault secrets list -format=json | jq -e '.["secret/"]' > /dev/null 2>&1; then
+if ! curl -s -H "X-Vault-Token: $VAULT_TOKEN" "$VAULT_ADDR/v1/sys/mounts" | grep -q '"secret/"'; then
     echo "Enabling KV v2 secrets engine..."
-    vault secrets enable -version=2 -path=secret kv
+    curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
+         -H "Content-Type: application/json" \
+         -X POST \
+         -d '{"type": "kv", "options": {"version": "2"}}' \
+         "$VAULT_ADDR/v1/sys/mounts/secret"
 else
     echo "KV v2 secrets engine already enabled"
 fi
@@ -38,45 +42,83 @@ fi
 echo "Creating test secrets..."
 
 # Secret for database credentials
-vault kv put secret/myapp/db \
-  username="testuser" \
-  password="testpass123" \
-  host="localhost" \
-  port="5432"
+curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
+     -H "Content-Type: application/json" \
+     -X POST \
+     -d '{
+       "data": {
+         "username": "testuser",
+         "password": "testpass123",
+         "host": "localhost",
+         "port": "5432"
+       }
+     }' \
+     "$VAULT_ADDR/v1/secret/data/myapp/db"
 
 # Secret for API keys
-vault kv put secret/myapp/api_key \
-  key="test-api-key-12345" \
-  secret="test-api-secret-67890"
+curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
+     -H "Content-Type: application/json" \
+     -X POST \
+     -d '{
+       "data": {
+         "key": "test-api-key-12345",
+         "secret": "test-api-secret-67890"
+       }
+     }' \
+     "$VAULT_ADDR/v1/secret/data/myapp/api_key"
 
 # Secret for webhook
-vault kv put secret/myapp/webhook \
-  signing_key="webhook-secret-key"
+curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
+     -H "Content-Type: application/json" \
+     -X POST \
+     -d '{
+       "data": {
+         "signing_key": "webhook-secret-key"
+       }
+     }' \
+     "$VAULT_ADDR/v1/secret/data/myapp/webhook"
 
 # Enable approle auth method if not already enabled
-if ! vault auth list -format=json | jq -e '.["approle/"]' > /dev/null 2>&1; then
+if ! curl -s -H "X-Vault-Token: $VAULT_TOKEN" "$VAULT_ADDR/v1/sys/auth" | grep -q '"approle/"'; then
     echo "Enabling AppRole authentication..."
-    vault auth enable approle
+    curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
+         -H "Content-Type: application/json" \
+         -X POST \
+         -d '{"type": "approle"}' \
+         "$VAULT_ADDR/v1/sys/auth/approle"
 else
     echo "AppRole authentication already enabled"
 fi
 
 # Create a policy for test access
-vault policy write test-policy - <<EOF
-path "secret/data/*" {
-  capabilities = ["read"]
-}
-EOF
+curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
+     -H "Content-Type: application/json" \
+     -X PUT \
+     -d '{
+       "policy": "path \"secret/data/*\" {\n  capabilities = [\"read\"]\n}"
+     }' \
+     "$VAULT_ADDR/v1/sys/policies/acl/test-policy"
 
 # Create an approle
-vault write auth/approle/role/test-role \
-  token_policies="test-policy" \
-  token_ttl=1h \
-  token_max_ttl=4h
+curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
+     -H "Content-Type: application/json" \
+     -X POST \
+     -d '{
+       "token_policies": ["test-policy"],
+       "token_ttl": "1h",
+       "token_max_ttl": "4h"
+     }' \
+     "$VAULT_ADDR/v1/auth/approle/role/test-role"
 
 # Get role ID and secret ID for testing
-ROLE_ID=$(vault read -field=role_id auth/approle/role/test-role/role-id)
-SECRET_ID=$(vault write -field=secret_id -f auth/approle/role/test-role/secret-id)
+ROLE_ID=$(curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
+               "$VAULT_ADDR/v1/auth/approle/role/test-role/role-id" | \
+               grep -o '"role_id":"[^"]*"' | cut -d'"' -f4)
+
+SECRET_ID=$(curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
+                 -X POST \
+                 "$VAULT_ADDR/v1/auth/approle/role/test-role/secret-id" | \
+                 grep -o '"secret_id":"[^"]*"' | cut -d'"' -f4)
 
 echo "Setup complete!"
 echo "Root token: root-token"
