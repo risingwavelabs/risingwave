@@ -655,6 +655,14 @@ impl DiagnoseCommand {
             .into_iter()
             .map(|t| (t.id, (t.name, t.schema_id, t.definition)))
             .collect::<BTreeMap<_, _>>();
+        let internal_tables = self
+            .metadata_manager
+            .catalog_controller
+            .list_tables_by_type(TableType::Internal)
+            .await?
+            .into_iter()
+            .map(|t| (t.id, (t.name, t.schema_id, t.definition)))
+            .collect::<BTreeMap<_, _>>();
         let sinks = self
             .metadata_manager
             .catalog_controller
@@ -668,6 +676,7 @@ impl DiagnoseCommand {
             ("TABLE", tables),
             ("MATERIALIZED VIEW", mvs),
             ("INDEX", indexes),
+            ("INTERNAL TABLE", internal_tables),
             ("SINK", sinks),
         ];
         let mut obj_id_to_name = HashMap::new();
