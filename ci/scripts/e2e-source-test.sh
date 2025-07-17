@@ -51,6 +51,7 @@ if [ "$profile" == "ci-dev" ]; then
     echo "--- Run debug mode only tests"
     risedev slt './e2e_test/debug_mode_only/debug_splits.slt'
 fi
+risedev slt './e2e_test/kafka-sasl/**/*.slt' -j4
 risedev slt './e2e_test/source_inline/**/*.slt' -j4
 risedev slt './e2e_test/source_inline/**/*.slt.serial'
 

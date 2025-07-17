@@ -109,14 +109,6 @@ services:
       - KAFKA_CFG_LISTENER_NAME_BROKER_PLAIN_SASL_JAAS_CONFIG=org.apache.kafka.common.security.plain.PlainLoginModule required username="dev" password="rw," user_dev="rw";
       - KAFKA_CFG_LISTENER_NAME_CONTROLLER_PLAIN_SASL_JAAS_CONFIG=org.apache.kafka.common.security.plain.PlainLoginModule required username="dev" password="rw" user_dev="rw";
 
-  source-kafka-sasl-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
-    depends_on:
-      - message_queue_sasl_1
-    volumes:
-      - ..:/risingwave
-    stop_grace_period: 30s
-
   source-test-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
@@ -131,6 +123,7 @@ services:
       - mongodb-setup
       - mongo_data_generator
       - nats-server
+      - message_queue_sasl_1
     volumes:
       - ..:/risingwave
     stop_grace_period: 30s
