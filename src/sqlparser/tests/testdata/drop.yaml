@@ -20,3 +20,11 @@
   formatted_sql: DROP SECRET secret
 - input: DROP SECRET IF EXISTS secret
   formatted_sql: DROP SECRET IF EXISTS secret
+- input: DROP CONNECTION conn
+  formatted_sql: DROP CONNECTION conn
+- input: DROP CONNECTION IF EXISTS conn
+  formatted_sql: DROP CONNECTION IF EXISTS conn
+- input: DROP CONNECTION conn CASCADE
+  formatted_sql: DROP CONNECTION conn CASCADE
+- input: DROP CONNECTION IF EXISTS conn CASCADE
+  formatted_sql: DROP CONNECTION IF EXISTS conn CASCADE
