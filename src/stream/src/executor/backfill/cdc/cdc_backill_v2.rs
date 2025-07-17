@@ -125,8 +125,10 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         let mut is_reset = false;
         let mut state_impl =
             ParallelizedCdcBackfillState::new(self.state_table, METADATA_STATE_LEN);
+        let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
         // Need reset on CDC table snapshot splits reschedule.
         'with_cdc_table_snapshot_splits: loop {
+            assert!(upstream_chunk_buffer.is_empty());
             let reset_barrier = next_reset_barrier.take().unwrap();
             let all_snapshot_splits = match reset_barrier.mutation.as_deref() {
                 Some(Mutation::Add(add)) => &add.actor_cdc_table_snapshot_splits,
@@ -262,7 +264,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                     "start cdc backfill split"
                 );
                 extends_current_actor_bound(&mut current_actor_bounds, split);
-                let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
                 let left_upstream = upstream.by_ref().map(Either::Left);
                 let read_args = SplitSnapshotReadArgs::new(
                     split.left_bound_inclusive.clone(),
