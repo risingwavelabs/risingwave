@@ -9,6 +9,7 @@ repository = { workspace = true }
 
 [features]
 default = []
+all-connectors = ["all-sinks", "all-sources"]
 all-sinks = ["sink-deltalake", "sink-iceberg", "sink-clickhouse", "sink-mongodb", "sink-bigquery", "sink-elasticsearch", "sink-opensearch", "sink-dynamodb"]
 all-sources = []
 sink-deltalake = ["dep:deltalake"]
