@@ -929,13 +929,12 @@ fn derive_with_options_for_cdc_table(
     use source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR};
     // we should remove the prefix from `full_table_name`
     // Check if 'database.name' exists either as a regular property or as a secret reference
-    let database_name_is_secret = source_with_properties.as_secret().contains_key("database.name");
     let source_database_name: Option<&str> = source_with_properties
         .get("database.name")
         .map(|s| s.as_str());
     
     // If database.name is neither in regular properties nor in secrets, return error
-    if source_database_name.is_none() && !database_name_is_secret {
+    if source_database_name.is_none() && !source_with_properties.as_secret().contains_key("database.name") {
         return Err(anyhow!("The source with properties does not contain 'database.name'").into());
     }
     let mut with_options = source_with_properties.clone();
