@@ -61,7 +61,7 @@ use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage}
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use strum::Display;
 use thiserror_ext::AsReport;
-use tokio::sync::{Semaphore, oneshot};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot};
 use tokio::time::sleep;
 use tracing::Instrument;
 
@@ -301,11 +301,16 @@ impl CreatingStreamingJobPermit {
                     }
                     Ordering::Equal => continue,
                     Ordering::Greater => {
-                        semaphore_clone
-                            .acquire_many((permits - new_permits) as u32)
-                            .await
-                            .unwrap()
-                            .forget();
+                        let to_release = permits - new_permits;
+                        let reduced = semaphore_clone.forget_permits(to_release);
+                        // TODO: implement dynamic semaphore with limits by ourself.
+                        if reduced != to_release {
+                            tracing::warn!(
+                                "no enough permits to release, expected {}, but reduced {}",
+                                to_release,
+                                reduced
+                            );
+                        }
                     }
                 }
                 tracing::info!(
@@ -1090,10 +1095,12 @@ impl DdlController {
             job_type = ?streaming_job.job_type(),
             "starting streaming job",
         );
-        let _permit = self
+        // TODO: acquire permits for recovered background DDLs.
+        let permit = self
             .creating_streaming_job_permits
             .semaphore
-            .acquire()
+            .clone()
+            .acquire_owned()
             .instrument_await("acquire_creating_streaming_job_permit")
             .await
             .unwrap();
@@ -1114,6 +1121,7 @@ impl DdlController {
                 fragment_graph,
                 affected_table_replace_info,
                 specific_resource_group,
+                permit,
             )
             .await
         {
@@ -1158,6 +1166,7 @@ impl DdlController {
         fragment_graph: StreamFragmentGraphProto,
         affected_table_replace_info: Option<ReplaceStreamJobInfo>,
         specific_resource_group: Option<String>,
+        permit: OwnedSemaphorePermit,
     ) -> MetaResult<NotificationVersion> {
         let mut fragment_graph =
             StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
@@ -1322,6 +1331,8 @@ impl DdlController {
                         .inspect_err(|err| {
                             tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to create background streaming job");
                         });
+                    // drop the permit to release the semaphore
+                    drop(permit);
                 };
 
                 let fut = (self.env.await_tree_reg())
