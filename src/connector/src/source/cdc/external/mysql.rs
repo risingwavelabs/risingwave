@@ -17,14 +17,14 @@ use std::collections::HashMap;
 use anyhow::{Context, anyhow};
 use chrono::{DateTime, NaiveDateTime};
 use futures::stream::BoxStream;
-use futures::{StreamExt, pin_mut};
+use futures::{StreamExt, pin_mut, stream};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use mysql_async::prelude::*;
 use mysql_common::params::Params;
 use mysql_common::value::Value;
 use risingwave_common::bail;
-use risingwave_common::catalog::{CDC_OFFSET_COLUMN_NAME, ColumnDesc, ColumnId, Schema};
+use risingwave_common::catalog::{CDC_OFFSET_COLUMN_NAME, ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Decimal, F32, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -38,9 +38,10 @@ use sqlx::mysql::MySqlConnectOptions;
 use thiserror_ext::AsReport;
 
 use crate::error::{ConnectorError, ConnectorResult};
+use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
-    CdcOffset, CdcOffsetParseFunc, DebeziumOffset, ExternalTableConfig, ExternalTableReader,
-    SchemaTableName, SslMode, mysql_row_to_owned_row,
+    CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, DebeziumOffset,
+    ExternalTableConfig, ExternalTableReader, SchemaTableName, SslMode, mysql_row_to_owned_row,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -377,6 +378,24 @@ impl ExternalTableReader for MySqlExternalTableReader {
 
     async fn disconnect(self) -> ConnectorResult<()> {
         self.pool.disconnect().await.map_err(|e| e.into())
+    }
+
+    fn get_parallel_cdc_splits(
+        &self,
+        _options: CdcTableSnapshotSplitOption,
+    ) -> BoxStream<'_, ConnectorResult<CdcTableSnapshotSplit>> {
+        // TODO(zw): feat: impl
+        stream::empty::<ConnectorResult<CdcTableSnapshotSplit>>().boxed()
+    }
+
+    fn split_snapshot_read(
+        &self,
+        _table_name: SchemaTableName,
+        _left: OwnedRow,
+        _right: OwnedRow,
+        _split_columns: Vec<Field>,
+    ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
+        todo!("implement MySQL CDC parallelized backfill")
     }
 }
 

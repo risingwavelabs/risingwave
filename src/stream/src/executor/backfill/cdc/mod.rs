@@ -12,40 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod cdc_backfill;
-mod state;
-mod upstream_table;
-
 pub use cdc_backfill::CdcBackfillExecutor;
-use risingwave_pb::stream_plan::StreamCdcScanOptions;
+pub use cdc_backill_v2::ParallelizedCdcBackfillExecutor;
 pub use upstream_table::external::ExternalStorageTable;
 
-#[derive(Debug, Clone)]
-pub struct CdcScanOptions {
-    /// Whether to disable backfill
-    pub disable_backfill: bool,
-    /// Barrier interval to start a new snapshot read
-    pub snapshot_interval: u32,
-    /// Batch size for a snapshot read query
-    pub snapshot_batch_size: u32,
-}
-
-impl Default for CdcScanOptions {
-    fn default() -> Self {
-        Self {
-            disable_backfill: false,
-            snapshot_interval: 1,
-            snapshot_batch_size: 1000,
-        }
-    }
-}
-
-impl CdcScanOptions {
-    pub fn from_proto(proto: &StreamCdcScanOptions) -> Self {
-        Self {
-            disable_backfill: proto.disable_backfill,
-            snapshot_interval: proto.snapshot_barrier_interval,
-            snapshot_batch_size: proto.snapshot_batch_size,
-        }
-    }
-}
+mod cdc_backfill;
+mod cdc_backill_v2;
+mod state;
+mod state_v2;
+mod upstream_table;
