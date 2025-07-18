@@ -754,7 +754,9 @@ impl FromStr for Decimal {
             "nan" => Ok(Decimal::NaN),
             "inf" | "+inf" | "infinity" | "+infinity" => Ok(Decimal::PositiveInf),
             "-inf" | "-infinity" => Ok(Decimal::NegativeInf),
-            s => RustDecimal::from_str(s).map(Decimal::Normalized),
+            s => RustDecimal::from_str(s)
+                .or_else(|_| RustDecimal::from_scientific(s))
+                .map(Decimal::Normalized),
         }
     }
 }
