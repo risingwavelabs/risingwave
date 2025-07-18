@@ -41,7 +41,7 @@ pub(crate) enum MergeExecutorUpstream {
 pub(crate) struct MergeExecutorInput {
     upstream: MergeExecutorUpstream,
     actor_context: ActorContextRef,
-    upstream_fragment_id: UpstreamFragmentId,
+    pub(crate) upstream_fragment_id: UpstreamFragmentId,
     local_barrier_manager: LocalBarrierManager,
     executor_stats: Arc<StreamingMetrics>,
     pub(crate) info: ExecutorInfo,
@@ -171,6 +171,7 @@ impl MergeExecutor {
         inputs: Vec<super::exchange::permit::Receiver>,
         local_barrier_manager: crate::task::LocalBarrierManager,
         schema: Schema,
+        chunk_size: usize,
     ) -> Self {
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::ActorInput;
@@ -197,7 +198,7 @@ impl MergeExecutor {
             local_barrier_manager,
             metrics.into(),
             barrier_rx,
-            100,
+            chunk_size,
             schema,
         )
     }
@@ -638,6 +639,7 @@ mod tests {
             rxs,
             barrier_test_env.local_barrier_manager.clone(),
             Schema::new(vec![]),
+            100,
         );
         let mut merger = merger.boxed().execute();
         for (idx, epoch) in epochs {
