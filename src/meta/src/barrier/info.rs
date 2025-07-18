@@ -303,11 +303,19 @@ impl InflightDatabaseInfo {
         let new_fragment_infos = info
             .into_iter()
             .flat_map(|info| info.stream_job_fragments.new_fragment_info())
-            .chain(
-                replace_job
-                    .into_iter()
-                    .flat_map(|replace_job| replace_job.new_fragments.new_fragment_info()),
-            )
+            .chain(replace_job.into_iter().flat_map(|replace_job| {
+                replace_job.new_fragments.new_fragment_info().chain(
+                    replace_job
+                        .auto_refresh_schema_sinks
+                        .as_ref()
+                        .into_iter()
+                        .flat_map(|sinks| {
+                            sinks.iter().map(|sink| {
+                                (sink.new_fragment.fragment_id, sink.new_fragment_info())
+                            })
+                        }),
+                )
+            }))
             .collect_vec();
         let mut builder = FragmentEdgeBuilder::new(
             existing_fragment_ids

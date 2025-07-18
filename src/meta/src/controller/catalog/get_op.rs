@@ -12,8 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::ColumnCatalog;
+
 use super::*;
-use crate::controller::utils::{get_database_resource_group, get_existing_job_resource_group};
+use crate::controller::utils::{
+    get_database_resource_group, get_existing_job_resource_group, get_table_columns,
+};
 
 impl CatalogController {
     pub async fn get_secret_by_id(&self, secret_id: SecretId) -> MetaResult<PbSecret> {
@@ -115,11 +119,37 @@ impl CatalogController {
         Ok(tables)
     }
 
+    pub async fn get_table_columns(&self, id: TableId) -> MetaResult<Vec<ColumnCatalog>> {
+        let inner = self.inner.read().await;
+        Ok(get_table_columns(&inner.db, id)
+            .await?
+            .to_protobuf()
+            .into_iter()
+            .map(|col| col.into())
+            .collect())
+    }
+
     pub async fn get_sink_by_ids(&self, sink_ids: Vec<SinkId>) -> MetaResult<Vec<PbSink>> {
         let inner = self.inner.read().await;
         let sink_objs = Sink::find()
             .find_also_related(Object)
             .filter(sink::Column::SinkId.is_in(sink_ids))
+            .all(&inner.db)
+            .await?;
+        Ok(sink_objs
+            .into_iter()
+            .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
+            .collect())
+    }
+
+    pub async fn get_sink_auto_refresh_schema_from(
+        &self,
+        table_id: TableId,
+    ) -> MetaResult<Vec<PbSink>> {
+        let inner = self.inner.read().await;
+        let sink_objs = Sink::find()
+            .find_also_related(Object)
+            .filter(sink::Column::AutoRefreshSchemaFromTable.eq(table_id))
             .all(&inner.db)
             .await?;
         Ok(sink_objs

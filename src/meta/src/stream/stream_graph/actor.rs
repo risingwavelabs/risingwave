@@ -593,13 +593,11 @@ pub struct ActorGraphBuildResult {
     /// The graph of sealed fragments, including all actors.
     pub graph: BTreeMap<FragmentId, Fragment>,
     /// The downstream fragments of the fragments from the new graph to be created.
+    /// Including the fragment relation to external downstream fragment.
     pub downstream_fragment_relations: FragmentDownstreamRelation,
 
     /// The scheduled locations of the actors to be built.
     pub building_locations: Locations,
-
-    /// The actual locations of the external actors.
-    pub existing_locations: Locations,
 
     /// The new dispatchers to be added to the upstream mview actors. Used for MV on MV.
     pub upstream_fragment_downstreams: FragmentDownstreamRelation,
@@ -827,7 +825,6 @@ impl ActorGraphBuilder {
 
         // Convert the actor location map to the `Locations` struct.
         let building_locations = self.build_locations(building_locations);
-        let existing_locations = self.build_locations(external_locations);
 
         // Extract the new fragment relation from the external changes.
         let upstream_fragment_downstreams = upstream_fragment_changes
@@ -899,7 +896,6 @@ impl ActorGraphBuilder {
             graph,
             downstream_fragment_relations,
             building_locations,
-            existing_locations,
             upstream_fragment_downstreams,
             replace_upstream,
             new_no_shuffle,
