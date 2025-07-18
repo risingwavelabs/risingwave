@@ -724,9 +724,14 @@ impl IcebergSinkWriter {
         // To avoid duplicate file name, each time the sink created will generate a unique uuid as file name suffix.
         let unique_uuid_suffix = Uuid::now_v7();
 
-        let parquet_writer_properties = WriterProperties::builder().set_max_row_group_size(
-            writer_param.streaming_config.developer.iceberg_sink_write_parquet_max_row_group_rows
-        ).build();
+        let parquet_writer_properties = WriterProperties::builder()
+            .set_max_row_group_size(
+                writer_param
+                    .streaming_config
+                    .developer
+                    .iceberg_sink_write_parquet_max_row_group_rows,
+            )
+            .build();
 
         let parquet_writer_builder = ParquetWriterBuilder::new(
             parquet_writer_properties,
@@ -867,9 +872,14 @@ impl IcebergSinkWriter {
         // To avoid duplicate file name, each time the sink created will generate a unique uuid as file name suffix.
         let unique_uuid_suffix = Uuid::now_v7();
 
-        let parquet_writer_properties = WriterProperties::builder().set_max_row_group_size(
-            writer_param.streaming_config.developer.iceberg_sink_write_parquet_max_row_group_rows
-        ).build();
+        let parquet_writer_properties = WriterProperties::builder()
+            .set_max_row_group_size(
+                writer_param
+                    .streaming_config
+                    .developer
+                    .iceberg_sink_write_parquet_max_row_group_rows,
+            )
+            .build();
 
         let data_file_builder = {
             let parquet_writer_builder = ParquetWriterBuilder::new(
