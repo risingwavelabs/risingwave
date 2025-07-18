@@ -28,6 +28,7 @@ use rdkafka::{ClientConfig, Offset, TopicPartitionList};
 use risingwave_common::bail;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 
+use crate::connector_common::read_kafka_log_level;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::SourceEnumeratorContextRef;
 use crate::source::base::SplitEnumerator;
@@ -120,6 +121,9 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         let topic = common_props.topic.clone();
         config.set("bootstrap.servers", &broker_address);
         config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
+        if let Some(log_level) = read_kafka_log_level() {
+            config.set_log_level(log_level);
+        }
         properties.connection.set_security_properties(&mut config);
         properties.set_client(&mut config);
         let mut scan_start_offset = match properties
@@ -502,11 +506,12 @@ impl KafkaSplitEnumerator {
         high_watermark_metrics.set(offset);
     }
 
-    pub async fn check_reachability(&self) -> bool {
-        self.client
+    pub async fn check_reachability(&self) -> ConnectorResult<()> {
+        let _ = self
+            .client
             .fetch_metadata(Some(self.topic.as_str()), self.sync_call_timeout)
-            .await
-            .is_ok()
+            .await?;
+        Ok(())
     }
 
     async fn fetch_topic_partition(&self) -> ConnectorResult<Vec<i32>> {
