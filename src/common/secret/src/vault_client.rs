@@ -18,7 +18,6 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use moka::future::Cache as MokaCache;
-use parking_lot::Mutex;
 use reqwest::Client;
 use risingwave_pb::secret;
 use serde::{Deserialize, Serialize};
@@ -55,8 +54,6 @@ pub struct HashiCorpVaultConfig {
     pub auth: HashiCorpVaultAuth,
     #[serde(default)]
     pub tls_skip_verify: bool,
-    #[serde(default)]
-    pub cache_ttl_secs: u32,
 }
 
 fn default_field() -> String {
@@ -104,16 +101,9 @@ struct VaultSecretData {
 }
 
 #[derive(Debug)]
-struct CachedSecret {
-    value: Vec<u8>,
-    expires_at: Instant,
-}
-
-#[derive(Debug)]
 pub struct HashiCorpVaultClient {
     client: Client,
     config: HashiCorpVaultConfig,
-    secret_cache: Mutex<HashMap<String, CachedSecret>>,
 }
 
 impl HashiCorpVaultConfig {
@@ -144,7 +134,6 @@ impl HashiCorpVaultConfig {
             field: vault_backend.field.clone(),
             auth,
             tls_skip_verify: vault_backend.tls_skip_verify,
-            cache_ttl_secs: vault_backend.cache_ttl_secs,
         })
     }
 
@@ -173,7 +162,6 @@ impl HashiCorpVaultConfig {
             field: self.field.clone(),
             auth,
             tls_skip_verify: self.tls_skip_verify,
-            cache_ttl_secs: self.cache_ttl_secs,
         }
     }
 }
@@ -190,28 +178,10 @@ impl HashiCorpVaultClient {
             .build()
             .context("Failed to create HTTP client")?;
 
-        Ok(Self {
-            client,
-            config,
-            secret_cache: Mutex::new(HashMap::new()),
-        })
+        Ok(Self { client, config })
     }
 
     pub async fn get_secret(&self) -> Result<Vec<u8>> {
-        // Check cache first if TTL is configured
-        if self.config.cache_ttl_secs > 0 {
-            let cache_key = format!("{}#{}", self.config.path, self.config.field);
-            let mut cache = self.secret_cache.lock();
-
-            if let Some(cached) = cache.get(&cache_key) {
-                if cached.expires_at > Instant::now() {
-                    return Ok(cached.value.clone());
-                } else {
-                    cache.remove(&cache_key);
-                }
-            }
-        }
-
         // Try to get secret, with retry logic for token invalidation
         let mut force_refresh_token = false;
 
@@ -302,20 +272,6 @@ impl HashiCorpVaultClient {
             _ => serde_json::to_vec(field_value)
                 .context("Failed to serialize field value to bytes")?,
         };
-
-        // Cache the result if TTL is configured
-        if self.config.cache_ttl_secs > 0 {
-            let ttl_secs = self.config.cache_ttl_secs;
-            let cache_key = format!("{}#{}", self.config.path, self.config.field);
-            let expires_at = Instant::now() + Duration::from_secs(ttl_secs as u64);
-            let cached = CachedSecret {
-                value: secret_bytes.clone(),
-                expires_at,
-            };
-
-            let mut cache = self.secret_cache.lock();
-            cache.insert(cache_key, cached);
-        }
 
         Ok(secret_bytes)
     }
