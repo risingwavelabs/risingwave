@@ -163,6 +163,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                     .collect();
             }
             tracing::debug!(?actor_snapshot_splits, "actor splits");
+            assert_consecutive_splits(&actor_snapshot_splits);
 
             let mut is_snapshot_paused = reset_barrier.is_pause_on_startup();
             let barrier_epoch = reset_barrier.epoch;
@@ -170,9 +171,9 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             if !is_reset {
                 state_impl.init_epoch(barrier_epoch).await?;
                 is_reset = true;
-                tracing::info!("Initialize executor.");
+                tracing::info!(table_id, "Initialize executor.");
             } else {
-                tracing::info!("Reset executor.");
+                tracing::info!(table_id, "Reset executor.");
             }
 
             let mut current_actor_bounds = None;
@@ -553,6 +554,27 @@ fn is_reset_barrier(barrier: &Barrier, actor_id: ActorId) -> bool {
             .actor_cdc_table_snapshot_splits
             .contains_key(&actor_id),
         _ => false,
+    }
+}
+
+fn assert_consecutive_splits(actor_snapshot_splits: &[CdcTableSnapshotSplit]) {
+    for i in 1..actor_snapshot_splits.len() {
+        assert_eq!(
+            actor_snapshot_splits[i].split_id,
+            actor_snapshot_splits[i - 1].split_id + 1,
+            "{:?}",
+            actor_snapshot_splits
+        );
+        assert!(
+            cmp_datum(
+                actor_snapshot_splits[i - 1]
+                    .right_bound_exclusive
+                    .datum_at(0),
+                actor_snapshot_splits[i].right_bound_exclusive.datum_at(0),
+                OrderType::ascending_nulls_last(),
+            )
+            .is_lt()
+        );
     }
 }
 

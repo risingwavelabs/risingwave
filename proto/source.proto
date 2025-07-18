@@ -25,6 +25,6 @@ message CdcTableSnapshotSplits {
 
 message CdcTableSnapshotSplit {
   int64 split_id = 1;
-  bytes left = 2;
-  bytes right = 3;
+  bytes left_bound_inclusive = 2;
+  bytes right_bound_exclusive = 3;
 }

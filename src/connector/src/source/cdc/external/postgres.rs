@@ -105,6 +105,7 @@ impl ExternalTableReader for PostgresExternalTableReader {
         primary_keys: Vec<String>,
         limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
+        assert_eq!(table_name, self.schema_table_name);
         self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
     }
 
@@ -150,6 +151,7 @@ impl ExternalTableReader for PostgresExternalTableReader {
         right: OwnedRow,
         split_columns: Vec<Field>,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
+        assert_eq!(table_name, self.schema_table_name);
         self.split_snapshot_read_inner(table_name, left, right, split_columns)
     }
 }
@@ -479,6 +481,11 @@ impl PostgresExternalTableReader {
         right: OwnedRow,
         split_columns: Vec<Field>,
     ) {
+        assert_eq!(
+            split_columns.len(),
+            1,
+            "multiple split columns is not supported yet"
+        );
         assert_eq!(left.len(), 1, "multiple split columns is not supported yet");
         assert_eq!(
             right.len(),

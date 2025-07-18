@@ -249,8 +249,8 @@ pub fn build_pb_actor_cdc_table_snapshot_splits(
                     .into_iter()
                     .map(|s| PbCdcTableSnapshotSplit {
                         split_id: s.split_id,
-                        left: s.left_bound_inclusive,
-                        right: s.right_bound_exclusive,
+                        left_bound_inclusive: s.left_bound_inclusive,
+                        right_bound_exclusive: s.right_bound_exclusive,
                     })
                     .collect(),
             };
@@ -270,8 +270,8 @@ pub fn build_actor_cdc_table_snapshot_splits(
                 .into_iter()
                 .map(|s| CdcTableSnapshotSplitRaw {
                     split_id: s.split_id,
-                    left_bound_inclusive: s.left,
-                    right_bound_exclusive: s.right,
+                    left_bound_inclusive: s.left_bound_inclusive,
+                    right_bound_exclusive: s.right_bound_exclusive,
                 })
                 .collect();
             (actor_id, splits)
