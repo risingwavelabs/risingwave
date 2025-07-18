@@ -343,10 +343,9 @@ impl IcebergCommon {
                 );
             }
 
-            if let Some(headers) = self.headers().ok() {
-                for (header_name, header_value) in headers {
-                    java_catalog_configs.insert(format!("header.{}", header_name), header_value);
-                }
+            let headers = self.headers()?;
+            for (header_name, header_value) in headers {
+                java_catalog_configs.insert(format!("header.{}", header_name), header_value);
             }
 
             match self.catalog_type.as_deref() {
