@@ -404,7 +404,7 @@ impl Sink for KafkaSink {
         .await?;
         if let Err(e) = check.check_reachability().await {
             return Err(SinkError::Config(anyhow!(
-                "cannot connect to kafka broker ({}) with error: {:?}",
+                "cannot connect to kafka broker ({}) with error: {}",
                 self.config.connection.brokers,
                 e.as_report()
             )));
