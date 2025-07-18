@@ -130,14 +130,8 @@ impl PlainParser {
                         self.source_ctx.source_id.into(),
                         &self.source_ctx.connector_props,
                     ) {
-                        Ok(schema_change) => {
-                       
-                            Ok(ParseResult::SchemaChange(schema_change))
-                        },
-                        Err(err) => {
-                          
-                            Err(err)?
-                        },
+                        Ok(schema_change) => Ok(ParseResult::SchemaChange(schema_change)),
+                        Err(err) => Err(err)?,
                     };
                 }
                 CdcMessageType::Unspecified => {

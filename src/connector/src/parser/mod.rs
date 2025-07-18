@@ -46,12 +46,12 @@ use self::upsert_parser::UpsertParser;
 use crate::error::ConnectorResult;
 use crate::parser::maxwell::MaxwellParser;
 use crate::schema::schema_registry::SchemaRegistryConfig;
+use crate::source::cdc::CdcMessageType;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
     BoxSourceMessageStream, SourceChunkStream, SourceColumnDesc, SourceColumnType, SourceContext,
     SourceContextRef, SourceCtrlOpts, SourceMeta,
 };
-use crate::source::cdc::CdcMessageType;
 
 mod access_builder;
 pub mod additional_columns;
@@ -332,8 +332,7 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                                     offset = msg.offset,
                                     "Schema change message parsing failed, blocking source."
                                 );
-                                
-                               
+
                                 return Err(error.into());
                             }
                         }
