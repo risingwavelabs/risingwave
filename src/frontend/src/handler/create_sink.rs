@@ -31,7 +31,6 @@ use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
-use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
 use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
 use risingwave_connector::sink::kafka::KAFKA_SINK;
@@ -39,6 +38,7 @@ use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_SNAPSHOT_OPTION, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
     enforce_secret_sink,
 };
+use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithPropertiesExt};
 use risingwave_pb::catalog::PbSink;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::ddl_service::{ReplaceJobPlan, TableJobType, replace_job_plan};
@@ -157,26 +157,41 @@ pub async fn gen_sink_plan(
         OptimizerContext::from_handler_args(handler_args.clone())
     };
 
+    let is_auto_schema_change = resolved_with_options
+        .remove(AUTO_SCHEMA_CHANGE_KEY)
+        .map(|value| {
+            value.parse::<bool>().map_err(|_| {
+                ErrorCode::InvalidInputSyntax(format!(
+                    "invalid value {} of '{}' option, expect",
+                    value, AUTO_SCHEMA_CHANGE_KEY
+                ))
+            })
+        })
+        .transpose()?
+        .unwrap_or(false);
+
     // Used for debezium's table name
     let sink_from_table_name;
     // `true` means that sink statement has the form: `CREATE SINK s1 FROM ...`
     // `false` means that sink statement has the form: `CREATE SINK s1 AS <query>`
     let direct_sink_from_name: Option<(ObjectName, bool)>;
     let query = match stmt.sink_from {
-        CreateSink::From {
-            from_name,
-            auto_refresh_schema,
-        } => {
+        CreateSink::From(from_name) => {
             sink_from_table_name = from_name.0.last().unwrap().real_value();
-            direct_sink_from_name = Some((from_name.clone(), auto_refresh_schema));
-            if auto_refresh_schema && stmt.into_table_name.is_some() {
+            direct_sink_from_name = Some((from_name.clone(), is_auto_schema_change));
+            if is_auto_schema_change && stmt.into_table_name.is_some() {
                 return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                    "AUTO REFRESH SCHEMA not supported for sink-into-table".to_owned(),
+                    "auto schema change not supported for sink-into-table".to_owned(),
                 )));
             }
             Box::new(gen_query_from_table_name(from_name))
         }
         CreateSink::AsQuery(query) => {
+            if is_auto_schema_change {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "auto schema change not supported for CREATE SINK AS QUERY".to_owned(),
+                )));
+            }
             sink_from_table_name = sink_table_name.clone();
             direct_sink_from_name = None;
             query
@@ -193,24 +208,30 @@ pub async fn gen_sink_plan(
         let auto_refresh_schema_from_table = if let Some((from_name, true)) = &direct_sink_from_name
         {
             let from_relation =
-                binder.bind_relation_by_name(from_name.clone(), None, None, false)?;
+                binder.bind_relation_by_name(from_name.clone(), None, None, true)?;
             if let Relation::BaseTable(table) = from_relation {
                 if table.table_catalog.table_type != TableType::Table {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "AUTO REFRESH SCHEMA only support on TABLE, but got {:?}",
+                        "auto schema change only support on TABLE, but got {:?}",
                         table.table_catalog.table_type
                     ))
                     .into());
                 }
+                if table.table_catalog.database_id != sink_database_id {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "auto schema change sink does not support created from cross database table".to_owned()
+                    )
+                        .into());
+                }
                 for col in &table.table_catalog.columns {
                     if !col.is_hidden() && (col.is_generated() || col.is_rw_sys_column()) {
-                        return Err(ErrorCode::InvalidInputSyntax(format!("AUTO REFRESH SCHEMA not supported for table with non-hidden generated column or sys column, but got {}", col.name())).into());
+                        return Err(ErrorCode::InvalidInputSyntax(format!("auto schema change not supported for table with non-hidden generated column or sys column, but got {}", col.name())).into());
                     }
                 }
                 Some(table.table_catalog)
             } else {
                 return Err(RwError::from(ErrorCode::NotSupported(
-                    "AUTO REFRESH SCHEMA only supported for TABLE".to_owned(),
+                    "auto schema change only supported for TABLE".to_owned(),
                     "try recreating the sink from table".to_owned(),
                 )));
             }
