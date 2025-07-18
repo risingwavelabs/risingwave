@@ -334,7 +334,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
                     let add_columns = barrier.as_sink_add_columns(sink_id);
                     if let Some(add_columns) = &add_columns {
-                        info!("trivial sink receive add columns {:?}", add_columns);
+                        info!(?add_columns, %sink_id, "sink receive add columns");
                     }
                     let post_flush = log_writer
                         .flush_current_epoch(

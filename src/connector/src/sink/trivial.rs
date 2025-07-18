@@ -104,7 +104,7 @@ impl<T: TrivialSinkName> LogSinker for TrivialSink<T> {
                 }
                 LogStoreReadItem::Barrier { add_columns, .. } => {
                     if let Some(add_columns) = add_columns {
-                        info!("trivial sink receive add columns {:?}", add_columns);
+                        info!(?add_columns, "trivial sink receive add columns");
                     }
                     log_reader.truncate(TruncateOffset::Barrier { epoch })?;
                 }

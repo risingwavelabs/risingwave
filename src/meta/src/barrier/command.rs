@@ -28,7 +28,6 @@ use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::common::ActorInfo;
-use risingwave_pb::plan_common::PbField;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
@@ -1268,15 +1267,9 @@ impl Command {
                             sink.original_sink.id,
                             PbSinkAddColumns {
                                 fields: sink
-                                    .new_columns
+                                    .newly_add_fields
                                     .iter()
-                                    .map(|col| {
-                                        let desc = col.column_desc.as_ref().unwrap();
-                                        PbField {
-                                            data_type: Some(desc.column_type.clone().unwrap()),
-                                            name: desc.name.clone(),
-                                        }
-                                    })
+                                    .map(|field| field.to_prost())
                                     .collect(),
                             },
                         )
