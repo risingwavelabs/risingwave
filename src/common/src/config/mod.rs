@@ -371,6 +371,10 @@ pub mod default {
         pub fn iceberg_sink_positional_delete_cache_size() -> usize {
             1024
         }
+
+        pub fn iceberg_sink_write_parquet_max_row_group_rows() -> usize {
+            100_000
+        }
     }
 }
 

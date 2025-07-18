@@ -217,6 +217,10 @@ pub struct StreamingDeveloperConfig {
     /// `IcebergSink`: The size of the cache for positional delete in the sink.
     #[serde(default = "default::developer::iceberg_sink_positional_delete_cache_size")]
     pub iceberg_sink_positional_delete_cache_size: usize,
+
+    /// `IcebergSink`: The maximum number of rows in a row group when writing Parquet files.
+    #[serde(default = "default::developer::iceberg_sink_write_parquet_max_row_group_rows")]
+    pub iceberg_sink_write_parquet_max_row_group_rows: usize,
 }
 
 pub mod default {
