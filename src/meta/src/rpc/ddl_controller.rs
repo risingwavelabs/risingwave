@@ -85,8 +85,8 @@ use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
     GlobalStreamManagerRef, JobRescheduleTarget, ReplaceStreamJobContext, SourceChange,
-    SourceManagerRef, StreamFragmentGraph, create_source_worker,
-    rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
+    SourceManagerRef, StreamFragmentGraph, check_sink_fragments_support_refresh_schema,
+    create_source_worker, rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
@@ -1252,6 +1252,9 @@ impl DdlController {
                 );
             }
             StreamingJob::Sink(sink, _) => {
+                if sink.auto_refresh_schema_from_table.is_some() {
+                    check_sink_fragments_support_refresh_schema(&stream_job_fragments.fragments)?
+                }
                 // Validate the sink on the connector node.
                 validate_sink(sink).await?;
                 let connector_name = sink.get_properties().get(UPSTREAM_SOURCE_KEY).cloned();

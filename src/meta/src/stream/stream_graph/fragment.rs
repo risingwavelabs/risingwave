@@ -363,6 +363,55 @@ fn clone_fragment(fragment: &Fragment, id_generator_manager: &IdGeneratorManager
     }
 }
 
+pub fn check_sink_fragments_support_refresh_schema(
+    fragments: &BTreeMap<FragmentId, Fragment>,
+) -> MetaResult<()> {
+    if fragments.len() != 1 {
+        return Err(anyhow!(
+            "sink with auto schema change should have only 1 fragment, but got {:?}",
+            fragments.len()
+        )
+        .into());
+    }
+    let (_, fragment) = fragments.first_key_value().expect("non-empty");
+    let sink_node = &fragment.nodes;
+    let PbNodeBody::Sink(_) = sink_node.node_body.as_ref().unwrap() else {
+        return Err(anyhow!("expect PbNodeBody::Sink but got: {:?}", sink_node.node_body).into());
+    };
+    let [stream_scan_node] = sink_node.input.as_slice() else {
+        panic!("Sink has more than 1 input: {:?}", sink_node.input);
+    };
+    let PbNodeBody::StreamScan(scan) = stream_scan_node.node_body.as_ref().unwrap() else {
+        return Err(anyhow!(
+            "expect PbNodeBody::StreamScan but got: {:?}",
+            stream_scan_node.node_body
+        )
+        .into());
+    };
+    let stream_scan_type = PbStreamScanType::try_from(scan.stream_scan_type).unwrap();
+    if stream_scan_type != PbStreamScanType::ArrangementBackfill {
+        return Err(anyhow!(
+            "unsupported stream_scan_type for auto refresh schema: {:?}",
+            stream_scan_type
+        )
+        .into());
+    }
+    let [merge_node, _batch_plan_node] = stream_scan_node.input.as_slice() else {
+        panic!(
+            "the number of StreamScan inputs is not 2: {:?}",
+            stream_scan_node.input
+        );
+    };
+    let NodeBody::Merge(_) = merge_node.node_body.as_ref().unwrap() else {
+        return Err(anyhow!(
+            "expect PbNodeBody::Merge but got: {:?}",
+            merge_node.node_body
+        )
+        .into());
+    };
+    Ok(())
+}
+
 pub fn rewrite_refresh_schema_sink_fragment(
     original_sink_fragment: &Fragment,
     sink: &PbSink,
@@ -414,6 +463,13 @@ pub fn rewrite_refresh_schema_sink_fragment(
             "the number of StreamScan inputs is not 2: {:?}",
             stream_scan_node.input
         );
+    };
+    let NodeBody::Merge(merge) = merge_node.node_body.as_mut().unwrap() else {
+        return Err(anyhow!(
+            "expect PbNodeBody::Merge but got: {:?}",
+            merge_node.node_body
+        )
+        .into());
     };
     // update sink_node
     sink_node.identity = {
@@ -527,13 +583,6 @@ pub fn rewrite_refresh_schema_sink_fragment(
             .to_prost()
         })
         .collect();
-    let NodeBody::Merge(merge) = merge_node.node_body.as_mut().unwrap() else {
-        return Err(anyhow!(
-            "expect PbNodeBody::Merge but got: {:?}",
-            merge_node.node_body
-        )
-        .into());
-    };
     merge.upstream_fragment_id = upstream_table_fragment_id;
     merge.fields.extend(
         newly_added_columns.iter().map(|col| {
