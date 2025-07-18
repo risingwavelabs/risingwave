@@ -54,7 +54,7 @@ pub use self::command::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
     ReplaceStreamJobPlan, Reschedule, SnapshotBackfillInfo,
 };
-pub use self::info::InflightSubscriptionInfo;
+pub(crate) use self::info::{InflightSubscriptionInfo, SharedActorInfos};
 pub use self::manager::{BarrierManagerRef, GlobalBarrierManager};
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;

@@ -2629,8 +2629,7 @@ impl GlobalStreamManager {
 
         self.env
             .notification_manager()
-            .insert_local_sender(local_notification_tx)
-            .await;
+            .insert_local_sender(local_notification_tx);
 
         let worker_nodes = self
             .metadata_manager

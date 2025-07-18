@@ -1702,11 +1702,11 @@ pub enum Statement {
     Use {
         db_name: ObjectName,
     },
-    /// `VACUUM [database_name][schema_name][table_name]`
+    /// `VACUUM [database_name][schema_name][object_name]`
     ///
-    /// Note: this is a RisingWave specific statement for iceberg table compaction.
+    /// Note: this is a RisingWave specific statement for iceberg table/sink compaction.
     Vacuum {
-        table_name: ObjectName,
+        object_name: ObjectName,
     },
 }
 
@@ -2446,8 +2446,8 @@ impl Statement {
                 write!(f, "USE {}", db_name)?;
                 Ok(())
             }
-            Statement::Vacuum { table_name } => {
-                write!(f, "VACUUM {}", table_name)?;
+            Statement::Vacuum { object_name } => {
+                write!(f, "VACUUM {}", object_name)?;
                 Ok(())
             }
             Statement::AlterFragment {

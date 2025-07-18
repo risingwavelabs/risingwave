@@ -188,6 +188,24 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
     map
 });
 
+/// Map of connection names to their `allow_alter_on_fly` field names
+pub static CONNECTION_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {
+    use crate::connector_common::*;
+    let mut map = HashMap::new();
+    // KafkaConnection
+    map.try_insert(
+        std::any::type_name::<KafkaConnection>().to_owned(),
+        [
+            "properties.security.protocol".to_owned(),
+            "properties.ssl.endpoint.identification.algorithm".to_owned(),
+            "properties.sasl.mechanism".to_owned(),
+            "properties.sasl.username".to_owned(),
+            "properties.sasl.password".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
+    map
+});
+
 /// Get all source connector names that have `allow_alter_on_fly` fields
 pub fn get_source_connectors_with_allow_alter_on_fly_fields() -> Vec<&'static str> {
     SOURCE_ALLOW_ALTER_ON_FLY_FIELDS.keys().map(|s| s.as_str()).collect()
@@ -196,6 +214,11 @@ pub fn get_source_connectors_with_allow_alter_on_fly_fields() -> Vec<&'static st
 /// Get all sink connector names that have `allow_alter_on_fly` fields
 pub fn get_sink_connectors_with_allow_alter_on_fly_fields() -> Vec<&'static str> {
     SINK_ALLOW_ALTER_ON_FLY_FIELDS.keys().map(|s| s.as_str()).collect()
+}
+
+/// Get all connection names that have `allow_alter_on_fly` fields
+pub fn get_connection_names_with_allow_alter_on_fly_fields() -> Vec<&'static str> {
+    CONNECTION_ALLOW_ALTER_ON_FLY_FIELDS.keys().map(|s| s.as_str()).collect()
 }
 
 /// Checks if all given fields are allowed to be altered on the fly for the specified source connector.
@@ -219,6 +242,33 @@ pub fn check_source_allow_alter_on_fly_fields(
         if !allowed_fields.contains(field) {
             return Err(ConnectorError::from(anyhow::anyhow!(
                 "Field '{field}' is not allowed to be altered on the fly for connector: {connector_name}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+pub fn check_connection_allow_alter_on_fly_fields(
+    connection_name: &str,
+    fields: &[String],
+) -> crate::error::ConnectorResult<()> {
+    use crate::source::connection_name_to_prop_type_name;
+
+    // Convert connection name to the type name key
+    let Some(type_name) = connection_name_to_prop_type_name(connection_name) else {
+        return Err(ConnectorError::from(anyhow::anyhow!(
+            "Unknown connection: {connection_name}"
+        )));
+    };
+    let Some(allowed_fields) = CONNECTION_ALLOW_ALTER_ON_FLY_FIELDS.get(type_name) else {
+        return Err(ConnectorError::from(anyhow::anyhow!(
+            "No allow_alter_on_fly fields registered for connection: {connection_name}"
+        )));
+    };
+    for field in fields {
+        if !allowed_fields.contains(field) {
+            return Err(ConnectorError::from(anyhow::anyhow!(
+                "Field '{field}' is not allowed to be altered on the fly for connection: {connection_name}"
             )));
         }
     }

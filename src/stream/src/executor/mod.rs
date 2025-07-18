@@ -14,18 +14,25 @@
 
 mod prelude;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Debug;
+use std::hash::Hash;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::Poll;
+use std::vec;
 
 use await_tree::InstrumentAwait;
 use enum_as_inner::EnumAsInner;
-use futures::stream::BoxStream;
+use futures::stream::{BoxStream, FusedStream, FuturesUnordered, StreamFuture};
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
+use prometheus::Histogram;
+use prometheus::core::{AtomicU64, GenericCounter};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::metrics::LabelGuardedMetric;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
@@ -47,8 +54,11 @@ use risingwave_pb::stream_plan::{
     SubscriptionUpstreamInfo, ThrottleMutation,
 };
 use smallvec::SmallVec;
+use tokio::time::Instant;
 
 use crate::error::StreamResult;
+use crate::executor::exchange::input::BoxedInput;
+use crate::executor::watermark::BufferedWatermarks;
 use crate::task::{ActorId, FragmentId};
 
 mod actor;
@@ -1323,4 +1333,222 @@ pub trait StreamConsumer: Send + 'static {
     type BarrierStream: Stream<Item = StreamResult<Barrier>> + Send;
 
     fn execute(self: Box<Self>) -> Self::BarrierStream;
+}
+
+type BoxedMessageInput<InputId, M> = BoxedInput<InputId, MessageStreamItemInner<M>>;
+
+/// A stream for merging messages from multiple upstreams.
+/// Can dynamically add and delete upstream streams.
+/// For the meaning of the generic parameter `M` used, refer to `BarrierInner<M>`.
+pub struct DynamicReceivers<InputId, M> {
+    /// The barrier we're aligning to. If this is `None`, then `blocked_upstreams` is empty.
+    barrier: Option<BarrierInner<M>>,
+    /// The upstreams that're blocked by the `barrier`.
+    blocked: Vec<BoxedMessageInput<InputId, M>>,
+    /// The upstreams that're not blocked and can be polled.
+    active: FuturesUnordered<StreamFuture<BoxedMessageInput<InputId, M>>>,
+    /// watermark column index -> `BufferedWatermarks`
+    buffered_watermarks: BTreeMap<usize, BufferedWatermarks<InputId>>,
+    /// Currently only used for union.
+    barrier_align_duration: Option<LabelGuardedMetric<GenericCounter<AtomicU64>>>,
+    /// Only for merge. If None, then we don't take `Instant::now()` and `observe` during `poll_next`
+    merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram>>,
+}
+
+impl<InputId: Clone + Ord + Hash + std::fmt::Debug + Unpin, M: Clone + Unpin> Stream
+    for DynamicReceivers<InputId, M>
+{
+    type Item = MessageStreamItemInner<M>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        if self.active.is_terminated() {
+            // This only happens if we've been asked to stop.
+            assert!(self.blocked.is_empty());
+            return Poll::Ready(None);
+        }
+
+        let mut start = None;
+        loop {
+            match futures::ready!(self.active.poll_next_unpin(cx)) {
+                // Directly forward the error.
+                Some((Some(Err(e)), _)) => {
+                    return Poll::Ready(Some(Err(e)));
+                }
+                // Handle the message from some upstream.
+                Some((Some(Ok(message)), remaining)) => {
+                    let input_id = remaining.id();
+                    match message {
+                        MessageInner::Chunk(chunk) => {
+                            // Continue polling this upstream by pushing it back to `active`.
+                            self.active.push(remaining.into_future());
+                            return Poll::Ready(Some(Ok(MessageInner::Chunk(chunk))));
+                        }
+                        MessageInner::Watermark(watermark) => {
+                            // Continue polling this upstream by pushing it back to `active`.
+                            self.active.push(remaining.into_future());
+                            if let Some(watermark) = self.handle_watermark(input_id, watermark) {
+                                return Poll::Ready(Some(Ok(MessageInner::Watermark(watermark))));
+                            }
+                        }
+                        MessageInner::Barrier(barrier) => {
+                            // Block this upstream by pushing it to `blocked`.
+                            if self.blocked.is_empty() {
+                                start = Some(Instant::now());
+                            }
+                            self.blocked.push(remaining);
+                            if let Some(current_barrier) = self.barrier.as_ref() {
+                                if current_barrier.epoch != barrier.epoch {
+                                    return Poll::Ready(Some(Err(
+                                        StreamExecutorError::align_barrier(
+                                            current_barrier.clone().map_mutation(|_| None),
+                                            barrier.map_mutation(|_| None),
+                                        ),
+                                    )));
+                                }
+                            } else {
+                                self.barrier = Some(barrier);
+                            }
+                        }
+                    }
+                }
+                // We use barrier as the control message of the stream. That is, we always stop the
+                // actors actively when we receive a `Stop` mutation, instead of relying on the stream
+                // termination.
+                //
+                // Besides, in abnormal cases when the other side of the `Input` closes unexpectedly,
+                // we also yield an `Err(ExchangeChannelClosed)`, which will hit the `Err` arm above.
+                // So this branch will never be reached in all cases.
+                Some((None, remaining)) => {
+                    return Poll::Ready(Some(Err(StreamExecutorError::channel_closed(format!(
+                        "upstream input {:?} unexpectedly closed",
+                        remaining.id()
+                    )))));
+                }
+                // There's no active upstreams. Process the barrier and resume the blocked ones.
+                None => {
+                    if let Some(start) = start {
+                        if let Some(barrier_align_duration) = &self.barrier_align_duration {
+                            barrier_align_duration.inc_by(start.elapsed().as_nanos() as u64);
+                        }
+                        if let Some(merge_barrier_align_duration) =
+                            &self.merge_barrier_align_duration
+                        {
+                            // Observe did a few atomic operation inside, we want to avoid the overhead.
+                            merge_barrier_align_duration.observe(start.elapsed().as_secs_f64())
+                        }
+                    }
+
+                    break;
+                }
+            }
+        }
+
+        assert!(self.active.is_terminated());
+        let barrier = self.barrier.take().unwrap();
+
+        let upstreams = std::mem::take(&mut self.blocked);
+        self.extend_active(upstreams);
+        assert!(!self.active.is_terminated());
+
+        Poll::Ready(Some(Ok(MessageInner::Barrier(barrier))))
+    }
+}
+
+impl<InputId: Clone + Ord + Hash + std::fmt::Debug, M> DynamicReceivers<InputId, M> {
+    pub fn new(
+        upstreams: Vec<BoxedMessageInput<InputId, M>>,
+        barrier_align_duration: Option<LabelGuardedMetric<GenericCounter<AtomicU64>>>,
+        merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram>>,
+    ) -> Self {
+        assert!(!upstreams.is_empty());
+        let mut this = Self {
+            barrier: None,
+            blocked: Vec::with_capacity(upstreams.len()),
+            active: Default::default(),
+            buffered_watermarks: Default::default(),
+            merge_barrier_align_duration,
+            barrier_align_duration,
+        };
+        this.extend_active(upstreams);
+        this
+    }
+
+    /// Extend the active upstreams with the given upstreams. The current stream must be at the
+    /// clean state right after a barrier.
+    pub fn extend_active(
+        &mut self,
+        upstreams: impl IntoIterator<Item = BoxedMessageInput<InputId, M>>,
+    ) {
+        assert!(self.blocked.is_empty() && self.barrier.is_none());
+
+        self.active
+            .extend(upstreams.into_iter().map(|s| s.into_future()));
+    }
+
+    /// Handle a new watermark message. Optionally returns the watermark message to emit.
+    pub fn handle_watermark(
+        &mut self,
+        input_id: InputId,
+        watermark: Watermark,
+    ) -> Option<Watermark> {
+        let col_idx = watermark.col_idx;
+        // Insert a buffer watermarks when first received from a column.
+        let upstream_ids: Vec<_> = self.upstream_input_ids().collect();
+        let watermarks = self
+            .buffered_watermarks
+            .entry(col_idx)
+            .or_insert_with(|| BufferedWatermarks::with_ids(upstream_ids));
+        watermarks.handle_watermark(input_id, watermark)
+    }
+
+    /// Consume `other` and add its upstreams to `self`. The two streams must be at the clean state
+    /// right after a barrier.
+    pub fn add_upstreams_from(&mut self, other: Self) {
+        assert!(self.blocked.is_empty() && self.barrier.is_none());
+        assert!(other.blocked.is_empty() && other.barrier.is_none());
+
+        // Add buffers to the buffered watermarks for all cols
+        self.buffered_watermarks.values_mut().for_each(|buffers| {
+            buffers.add_buffers(other.upstream_input_ids());
+        });
+
+        self.active.extend(other.active);
+    }
+
+    /// Remove upstreams from `self` in `upstream_input_ids`. The current stream must be at the
+    /// clean state right after a barrier.
+    pub fn remove_upstreams(&mut self, upstream_input_ids: &HashSet<InputId>) {
+        assert!(self.blocked.is_empty() && self.barrier.is_none());
+
+        let new_upstreams = std::mem::take(&mut self.active)
+            .into_iter()
+            .map(|s| s.into_inner().unwrap())
+            .filter(|u| !upstream_input_ids.contains(&u.id()));
+        self.extend_active(new_upstreams);
+        self.buffered_watermarks.values_mut().for_each(|buffers| {
+            // Call `check_heap` in case the only upstream(s) that does not have
+            // watermark in heap is removed
+            buffers.remove_buffer(upstream_input_ids.clone());
+        });
+    }
+
+    pub fn merge_barrier_align_duration(&self) -> Option<LabelGuardedMetric<Histogram>> {
+        self.merge_barrier_align_duration.clone()
+    }
+
+    pub fn flush_buffered_watermarks(&mut self) {
+        self.buffered_watermarks
+            .values_mut()
+            .for_each(|buffers| buffers.clear());
+    }
+
+    pub fn upstream_input_ids(&self) -> impl Iterator<Item = InputId> + '_ {
+        self.blocked
+            .iter()
+            .map(|s| s.id())
+            .chain(self.active.iter().map(|s| s.get_ref().unwrap().id()))
+    }
 }

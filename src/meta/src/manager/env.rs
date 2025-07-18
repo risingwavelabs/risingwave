@@ -32,6 +32,7 @@ use risingwave_sqlparser::ast::RedactSqlOptionKeywordsRef;
 use sea_orm::EntityTrait;
 
 use crate::MetaResult;
+use crate::barrier::SharedActorInfos;
 use crate::controller::SqlMetaStore;
 use crate::controller::id::{
     IdGeneratorManager as SqlIdGeneratorManager, IdGeneratorManagerRef as SqlIdGeneratorManagerRef,
@@ -61,6 +62,8 @@ pub struct MetaSrvEnv {
 
     /// notification manager.
     notification_manager: NotificationManagerRef,
+
+    shared_actor_info: SharedActorInfos,
 
     /// stream client pool memorization.
     stream_client_pool: StreamClientPoolRef,
@@ -448,6 +451,7 @@ impl MetaSrvEnv {
             system_param_manager_impl: system_param_controller,
             session_param_manager_impl: session_param_controller,
             meta_store_impl: meta_store_impl.clone(),
+            shared_actor_info: SharedActorInfos::new(notification_manager.clone()),
             notification_manager,
             stream_client_pool,
             frontend_client_pool,
@@ -523,6 +527,10 @@ impl MetaSrvEnv {
 
     pub fn await_tree_reg(&self) -> &await_tree::Registry {
         &self.await_tree_reg
+    }
+
+    pub(crate) fn shared_actor_infos(&self) -> &SharedActorInfos {
+        &self.shared_actor_info
     }
 }
 

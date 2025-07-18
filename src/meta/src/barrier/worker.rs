@@ -266,8 +266,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             tokio::sync::mpsc::unbounded_channel();
         self.env
             .notification_manager()
-            .insert_local_sender(local_notification_tx)
-            .await;
+            .insert_local_sender(local_notification_tx);
 
         // Start the event loop.
         loop {
@@ -850,7 +849,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     let resp = match result {
                         Err(e) => {
                             warn!(worker_id, err = %e.as_report(), "worker node failure during recovery");
-                            for (failed_database_id,_ ) in collecting_databases.extract_if(|_, node_to_collect| {
+                            for (failed_database_id, _) in collecting_databases.extract_if(|_, node_to_collect| {
                                 !node_to_collect.is_valid_after_worker_err(worker_id)
                             }) {
                                 warn!(%failed_database_id, worker_id, "database failed to recovery in global recovery due to worker node err");
@@ -876,7 +875,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     }
                                     continue;
                                 }
-                                other @ (Response::Init(_) | Response::Shutdown(_) | Response::ResetDatabase(_))=> {
+                                other @ (Response::Init(_) | Response::Shutdown(_) | Response::ResetDatabase(_)) => {
                                     return Err(anyhow!("get unexpected resp {:?}", other).into());
                                 }
                             }

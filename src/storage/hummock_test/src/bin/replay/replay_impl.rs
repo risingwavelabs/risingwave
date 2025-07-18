@@ -320,9 +320,11 @@ impl NotificationClient for ReplayNotificationClient {
     ) -> std::result::Result<Self::Channel, ObserverError> {
         let (tx, rx) = unbounded_channel();
 
-        self.notification_manager
-            .insert_sender(subscribe_type, WorkerKey(self.addr.to_protobuf()), tx)
-            .await;
+        self.notification_manager.insert_sender(
+            subscribe_type,
+            WorkerKey(self.addr.to_protobuf()),
+            tx,
+        );
 
         // send the first snapshot message
         let op = self.first_resp.0.operation();

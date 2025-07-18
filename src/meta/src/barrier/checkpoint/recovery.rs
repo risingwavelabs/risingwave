@@ -489,6 +489,10 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             .databases
             .remove(&self.database_id)
             .expect("should exist");
+        self.control
+            .env
+            .shared_actor_infos()
+            .remove_database(self.database_id);
     }
 }
 

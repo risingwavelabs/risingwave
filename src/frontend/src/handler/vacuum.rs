@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::bail;
 use risingwave_common::catalog::Engine;
+use risingwave_connector::sink::CONNECTOR_TYPE_KEY;
 use risingwave_sqlparser::ast::ObjectName;
 
 use crate::binder::Binder;
@@ -22,13 +24,14 @@ use crate::handler::{HandlerArgs, RwPgResponse};
 
 pub async fn handle_vacuum(
     handler_args: HandlerArgs,
-    table_name: ObjectName,
+    object_name: ObjectName,
 ) -> Result<RwPgResponse> {
     let session = &handler_args.session;
     let db_name = &session.database();
 
-    let table_id = {
-        let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
+    let sink_id = {
+        let (schema_name, real_object_name) =
+            Binder::resolve_schema_qualified_name(db_name, object_name)?;
         let catalog_reader = session.env().catalog_reader().read_guard();
         let search_path = session.config().search_path();
         let user_name = session.user_name();
@@ -38,27 +41,68 @@ pub async fn handle_vacuum(
             &user_name,
         );
 
-        let (table, _) = catalog_reader
-            .get_created_table_by_name(db_name, schema_path, &table_name)
-            .map_err(|_| {
-                RwError::from(ErrorCode::CatalogError(
-                    format!("table {} not found", table_name).into(),
+        if let Ok((table, _)) =
+            catalog_reader.get_created_table_by_name(db_name, schema_path, &real_object_name)
+        {
+            if table.engine() == Engine::Iceberg {
+                // For iceberg engine table, get the associated iceberg sink name
+                let sink_name = table.iceberg_sink_name().ok_or_else(|| {
+                    RwError::from(ErrorCode::CatalogError(
+                        format!("No iceberg sink name found for table {}", real_object_name).into(),
+                    ))
+                })?;
+
+                // Find the iceberg sink
+                let (sink, _) = catalog_reader
+                    .get_created_sink_by_name(db_name, schema_path, &sink_name)
+                    .map_err(|_| {
+                        RwError::from(ErrorCode::CatalogError(
+                            format!(
+                                "Iceberg sink {} not found for table {}",
+                                sink_name, real_object_name
+                            )
+                            .into(),
+                        ))
+                    })?;
+
+                sink.id.sink_id()
+            } else {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "VACUUM can only be used on Iceberg engine tables or Iceberg sinks, but table '{}' uses {:?} engine",
+                    real_object_name,
+                    table.engine()
                 ))
-            })?;
-
-        if table.engine() != Engine::Iceberg {
-            return Err(ErrorCode::InvalidInputSyntax(format!(
-                "VACUUM can only be used on Iceberg engine tables, but table '{}' uses {:?} engine",
-                table_name,
-                table.engine()
-            ))
-            .into());
+                    .into());
+            }
+        } else if let Ok((sink, _)) =
+            catalog_reader.get_created_sink_by_name(db_name, schema_path, &real_object_name)
+        {
+            if let Some(connector_type) = sink.properties.get(CONNECTOR_TYPE_KEY) {
+                if connector_type == "iceberg" {
+                    sink.id.sink_id()
+                } else {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "VACUUM can only be used on Iceberg sinks, but sink '{}' is of type '{}'",
+                        real_object_name, connector_type
+                    ))
+                    .into());
+                }
+            } else {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "VACUUM can only be used on Iceberg sinks, but sink '{}' has no connector type specified",
+                    real_object_name
+                ))
+                    .into());
+            }
+        } else {
+            bail!("object {} not found", real_object_name);
         }
-
-        table.id()
     };
 
-    session.env().meta_client().compact_table(table_id).await?;
-
+    session
+        .env()
+        .meta_client()
+        .compact_iceberg_table(sink_id)
+        .await?;
     Ok(PgResponse::builder(StatementType::VACUUM).into())
 }
