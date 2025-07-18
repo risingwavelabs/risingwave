@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{F64, VectorRef};
+use risingwave_common::types::{F64, VectorRef, VectorVal};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::{ExprError, Result, function};
 
@@ -234,4 +234,18 @@ fn inner_product(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
         sum += l * r;
     }
     Ok((sum as f64).into())
+}
+
+#[function("add(vector, vector) -> vector", type_infer = "unreachable")]
+fn vector_add(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
+    let lhs = lhs.into_slice();
+    let rhs = rhs.into_slice();
+    check_dims("vector_add", lhs, rhs)?;
+
+    let result = lhs
+        .iter()
+        .zip_eq_fast(rhs.iter())
+        .map(|(l, r)| l + r)
+        .collect();
+    Ok(result)
 }
