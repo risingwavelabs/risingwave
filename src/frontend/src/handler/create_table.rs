@@ -1670,10 +1670,7 @@ pub async fn create_iceberg_engine_table(
         };
         CreateSink::AsQuery(query.clone())
     } else {
-        CreateSink::From {
-            from_name: table_name.clone(),
-            auto_refresh_schema: false,
-        }
+        CreateSink::From(table_name.clone())
     };
 
     let mut sink_name = table_name.clone();
