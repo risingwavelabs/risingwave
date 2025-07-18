@@ -899,7 +899,7 @@ impl IcebergSinkWriter {
         };
         let position_delete_builder = {
             let parquet_writer_builder = ParquetWriterBuilder::new(
-                parquet_writer_properties,
+                parquet_writer_properties.clone(),
                 POSITION_DELETE_SCHEMA.clone(),
                 table.file_io().clone(),
                 DefaultLocationGenerator::new(table.metadata().clone())
