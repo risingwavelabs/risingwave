@@ -659,7 +659,10 @@ fn infer_type_for_special(
                 .into()),
             }
         }
-        ExprType::L2Distance | ExprType::CosineDistance | ExprType::L1Distance => {
+        ExprType::L2Distance
+        | ExprType::CosineDistance
+        | ExprType::L1Distance
+        | ExprType::InnerProduct => {
             ensure_arity!("l2_distance", | inputs | == 2);
             let (known_idx, unknown_idx) = match (inputs[0].is_untyped(), inputs[1].is_untyped()) {
                 (true, true) => return Err(ErrorCode::BindError(

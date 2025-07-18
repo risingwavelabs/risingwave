@@ -76,3 +76,16 @@ fn l1_distance(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
     }
     Ok((sum as f64).into())
 }
+
+#[function("inner_product(vector, vector) -> float8")]
+fn inner_product(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
+    let lhs = lhs.into_slice();
+    let rhs = rhs.into_slice();
+    check_dims("inner_product", lhs, rhs)?;
+
+    let mut sum = 0.0f32;
+    for (l, r) in lhs.iter().zip_eq_fast(rhs.iter()) {
+        sum += l * r;
+    }
+    Ok((sum as f64).into())
+}

@@ -311,6 +311,7 @@ message ExprNode {
     L2_DISTANCE = 750;
     COSINE_DISTANCE = 751;
     L1_DISTANCE = 752;
+    INNER_PRODUCT = 753;
 
     // Internal function for schema change
     COMPOSITE_CAST = 800;
