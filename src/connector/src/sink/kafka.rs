@@ -406,10 +406,11 @@ impl Sink for KafkaSink {
             Arc::new(SourceEnumeratorContext::dummy()),
         )
         .await?;
-        if !check.check_reachability().await {
+        if let Err(e) = check.check_reachability().await {
             return Err(SinkError::Config(anyhow!(
-                "cannot connect to kafka broker ({})",
-                self.config.connection.brokers
+                "cannot connect to kafka broker ({}) with error: {:?}",
+                self.config.connection.brokers,
+                e.as_report()
             )));
         }
         Ok(())
