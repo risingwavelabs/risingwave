@@ -23,6 +23,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_connector::source::cdc::external::{
     CdcTableSnapshotSplitOption, CdcTableType, ExternalTableConfig, ExternalTableReader,
     SchemaTableName,
@@ -129,18 +130,16 @@ pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
 
 /// Returns true if the fragment is CDC scan and has parallelized backfill enabled.
 fn is_parallelized_backfill_enabled_cdc_scan_fragment(fragment: &Fragment) -> bool {
-    match &fragment.nodes.node_body {
-        Some(NodeBody::StreamCdcScan(node)) => is_parallelized_backfill_enabled(node),
-        Some(NodeBody::Project(_)) => {
-            for input in &fragment.nodes.input {
-                if let Some(NodeBody::StreamCdcScan(node)) = &input.node_body {
-                    return is_parallelized_backfill_enabled(node);
-                }
-            }
+    let mut b = false;
+    visit_stream_node_cont(&fragment.nodes, |node| {
+        if let Some(NodeBody::StreamCdcScan(node)) = &node.node_body {
+            b = is_parallelized_backfill_enabled(node);
             false
+        } else {
+            true
         }
-        _ => false,
-    }
+    });
+    b
 }
 
 pub fn is_parallelized_backfill_enabled(node: &StreamCdcScanNode) -> bool {
