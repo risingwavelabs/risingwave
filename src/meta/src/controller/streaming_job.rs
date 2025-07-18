@@ -45,7 +45,7 @@ use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
-use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup};
+use risingwave_pb::meta::{PbObject, PbObjectGroup};
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::PbStreamNode;
@@ -70,8 +70,8 @@ use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
 use crate::controller::utils::{
     PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
     check_sink_into_table_cycle, ensure_object_id, ensure_user_id, get_fragment_actor_ids,
-    get_fragment_mappings, get_internal_tables_by_id, grant_default_privileges_automatically,
-    insert_fragment_relations, list_user_info_by_ids, rebuild_fragment_mapping_from_actors,
+    get_internal_tables_by_id, grant_default_privileges_automatically, insert_fragment_relations,
+    list_user_info_by_ids,
 };
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
@@ -395,7 +395,8 @@ impl CatalogController {
     // Given that we've ensured the tables inside `TableFragments` are complete, shall we consider
     // making them the source of truth and performing a full replacement for those in the meta store?
     /// Insert fragments and actors to meta store. Used both for creating new jobs and replacing jobs.
-    #[await_tree::instrument("prepare_streaming_job_for_{}", if for_replace { "replace" } else { "create" })]
+    #[await_tree::instrument("prepare_streaming_job_for_{}", if for_replace { "replace" } else { "create" }
+    )]
     pub async fn prepare_streaming_job(
         &self,
         stream_job_fragments: &StreamJobFragmentsToCreate,
@@ -675,7 +676,6 @@ impl CatalogController {
             actor_ids,
             upstream_fragment_new_downstreams,
             split_assignment,
-            false,
         )
         .await
     }
@@ -686,7 +686,6 @@ impl CatalogController {
         actor_ids: Vec<crate::model::ActorId>,
         upstream_fragment_new_downstreams: &FragmentDownstreamRelation,
         split_assignment: &SplitAssignment,
-        notify_for_creating: bool,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -728,15 +727,7 @@ impl CatalogController {
         .update(&txn)
         .await?;
 
-        let fragment_mapping = if notify_for_creating {
-            get_fragment_mappings(&txn, job_id as _).await?
-        } else {
-            vec![]
-        };
-
         txn.commit().await?;
-        self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
-            .await;
 
         Ok(())
     }
@@ -1022,8 +1013,6 @@ impl CatalogController {
             _ => unreachable!("invalid job type: {:?}", job_type),
         }
 
-        let fragment_mapping = get_fragment_mappings(&txn, job_id).await?;
-
         let replace_table_mapping_update = match replace_stream_job_info {
             Some(ReplaceStreamJobPlan {
                 streaming_job,
@@ -1033,7 +1022,7 @@ impl CatalogController {
             }) => {
                 let incoming_sink_id = job_id;
 
-                let (relations, fragment_mapping, _) = Self::finish_replace_streaming_job_inner(
+                let (relations, _) = Self::finish_replace_streaming_job_inner(
                     tmp_id as ObjectId,
                     replace_upstream,
                     SinkIntoTableContext {
@@ -1047,7 +1036,7 @@ impl CatalogController {
                 )
                 .await?;
 
-                Some((relations, fragment_mapping))
+                Some(relations)
             }
             None => None,
         };
@@ -1056,9 +1045,6 @@ impl CatalogController {
             updated_user_info = grant_default_privileges_automatically(&txn, job_id).await?;
         }
         txn.commit().await?;
-
-        self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
-            .await;
 
         let mut version = self
             .notify_frontend(
@@ -1072,9 +1058,7 @@ impl CatalogController {
             version = self.notify_users_update(updated_user_info).await;
         }
 
-        if let Some((objects, fragment_mapping)) = replace_table_mapping_update {
-            self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
-                .await;
+        if let Some(objects) = replace_table_mapping_update {
             version = self
                 .notify_frontend(
                     NotificationOperation::Update,
@@ -1107,26 +1091,18 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let (objects, fragment_mapping, delete_notification_objs) =
-            Self::finish_replace_streaming_job_inner(
-                tmp_id,
-                replace_upstream,
-                sink_into_table_context,
-                &txn,
-                streaming_job,
-                drop_table_connector_ctx,
-            )
-            .await?;
+        let (objects, delete_notification_objs) = Self::finish_replace_streaming_job_inner(
+            tmp_id,
+            replace_upstream,
+            sink_into_table_context,
+            &txn,
+            streaming_job,
+            drop_table_connector_ctx,
+        )
+        .await?;
 
         txn.commit().await?;
 
-        // FIXME: Do not notify frontend currently, because frontend nodes might refer to old table
-        // catalog and need to access the old fragment. Let frontend nodes delete the old fragment
-        // when they receive table catalog change.
-        // self.notify_fragment_mapping(NotificationOperation::Delete, old_fragment_mappings)
-        //     .await;
-        self.notify_fragment_mapping(NotificationOperation::Add, fragment_mapping)
-            .await;
         let mut version = self
             .notify_frontend(
                 NotificationOperation::Update,
@@ -1158,11 +1134,7 @@ impl CatalogController {
         txn: &DatabaseTransaction,
         streaming_job: StreamingJob,
         drop_table_connector_ctx: Option<&DropTableConnectorContext>,
-    ) -> MetaResult<(
-        Vec<PbObject>,
-        Vec<PbFragmentWorkerSlotMapping>,
-        Option<(Vec<PbUserInfo>, Vec<PartialObject>)>,
-    )> {
+    ) -> MetaResult<(Vec<PbObject>, Option<(Vec<PbUserInfo>, Vec<PartialObject>)>)> {
         let original_job_id = streaming_job.id() as ObjectId;
         let job_type = streaming_job.job_type();
 
@@ -1378,15 +1350,13 @@ impl CatalogController {
             }
         }
 
-        let fragment_mapping: Vec<_> = get_fragment_mappings(txn, original_job_id as _).await?;
-
         let mut notification_objs: Option<(Vec<PbUserInfo>, Vec<PartialObject>)> = None;
         if let Some(drop_table_connector_ctx) = drop_table_connector_ctx {
             notification_objs =
                 Some(Self::drop_table_associated_source(txn, drop_table_connector_ctx).await?);
         }
 
-        Ok((objects, fragment_mapping, notification_objs))
+        Ok((objects, notification_objs))
     }
 
     /// Abort the replacing streaming job by deleting the temporary job object.
@@ -2164,18 +2134,13 @@ impl CatalogController {
 
         let txn = inner.db.begin().await?;
 
-        let mut fragment_mapping_to_notify = vec![];
-
-        for (
-            fragment_id,
-            Reschedule {
-                removed_actors,
-                vnode_bitmap_updates,
-                actor_splits,
-                newly_created_actors,
-                ..
-            },
-        ) in reschedules
+        for Reschedule {
+            removed_actors,
+            vnode_bitmap_updates,
+            actor_splits,
+            newly_created_actors,
+            ..
+        } in reschedules.into_values()
         {
             // drop removed actors
             Actor::delete_many()
@@ -2249,31 +2214,6 @@ impl CatalogController {
                 actor.splits = Set(Some((&PbConnectorSplits { splits }).into()));
                 actor.update(&txn).await?;
             }
-
-            // fragment update
-            let fragment = Fragment::find_by_id(fragment_id)
-                .one(&txn)
-                .await?
-                .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
-
-            let job_actors = fragment
-                .find_related(Actor)
-                .all(&txn)
-                .await?
-                .into_iter()
-                .map(|actor| {
-                    (
-                        fragment_id,
-                        fragment.distribution_type,
-                        actor.actor_id,
-                        actor.vnode_bitmap,
-                        actor.worker_id,
-                        actor.status,
-                    )
-                })
-                .collect_vec();
-
-            fragment_mapping_to_notify.extend(rebuild_fragment_mapping_from_actors(job_actors));
         }
 
         let JobReschedulePostUpdates {
@@ -2304,8 +2244,6 @@ impl CatalogController {
         }
 
         txn.commit().await?;
-        self.notify_fragment_mapping(Operation::Update, fragment_mapping_to_notify)
-            .await;
 
         Ok(())
     }

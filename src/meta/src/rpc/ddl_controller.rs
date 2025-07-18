@@ -283,8 +283,7 @@ impl CreatingStreamingJobPermit {
         let (local_notification_tx, mut local_notification_rx) =
             tokio::sync::mpsc::unbounded_channel();
         env.notification_manager()
-            .insert_local_sender(local_notification_tx)
-            .await;
+            .insert_local_sender(local_notification_tx);
         let semaphore_clone = semaphore.clone();
         tokio::spawn(async move {
             while let Some(notification) = local_notification_rx.recv().await {
