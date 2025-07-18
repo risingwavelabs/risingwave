@@ -17,5 +17,5 @@ mod project_scalar;
 mod project_set;
 
 pub use materialized_exprs::{MaterializedExprsArgs, MaterializedExprsExecutor};
-pub use project_scalar::ProjectExecutor;
+pub use project_scalar::{ProjectExecutor, apply_project_exprs};
 pub use project_set::{ProjectSetExecutor, ProjectSetSelectItem};
