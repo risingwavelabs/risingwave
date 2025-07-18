@@ -48,7 +48,7 @@ use iceberg::writer::function_writer::fanout_partition_writer::FanoutPartitionWr
 use iceberg::writer::{IcebergWriter, IcebergWriterBuilder};
 use iceberg::{Catalog, NamespaceIdent, TableCreation, TableIdent};
 use itertools::Itertools;
-use parquet::basic::Compression;
+use parquet::file::properties::WriterProperties;
 use prometheus::monitored_general_writer::MonitoredGeneralWriterBuilder;
 use prometheus::monitored_position_delete_writer::MonitoredPositionDeleteWriterBuilder;
 use regex::Regex;
