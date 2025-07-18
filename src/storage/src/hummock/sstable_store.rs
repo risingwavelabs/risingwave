@@ -21,10 +21,10 @@ use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
 use fail::fail_point;
 use foyer::{
-    Cache, CacheBuilder, CacheEntry, Engine, EventListener, FetchState, Hint, HybridCache,
-    HybridCacheBuilder, HybridCacheEntry, HybridCacheProperties, LargeEngineOptions,
+    Cache, CacheBuilder, CacheEntry, EventListener, FetchState, Hint, HybridCache,
+    HybridCacheBuilder, HybridCacheEntry, HybridCacheProperties,
 };
-use futures::{StreamExt, future};
+use futures::{StreamExt, TryFutureExt, future};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::vector_index::VectorFileInfo;
 use risingwave_hummock_sdk::{
@@ -203,7 +203,7 @@ impl SstableStore {
             .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
                 u64::BITS as usize / 8 + value.estimate_size()
             })
-            .storage(Engine::Large(LargeEngineOptions::new()))
+            .storage()
             .build()
             .await
             .map_err(HummockError::foyer_error)?;
@@ -215,7 +215,7 @@ impl SstableStore {
                 // FIXME(MrCroxx): Calculate block weight more accurately.
                 u64::BITS as usize * 2 / 8 + value.raw().len()
             })
-            .storage(Engine::Large(LargeEngineOptions::new()))
+            .storage()
             .build()
             .await
             .map_err(HummockError::foyer_error)?;
@@ -434,12 +434,12 @@ impl SstableStore {
                             object_id,
                             file_size
                         );
-                        return Err(anyhow::Error::from(HummockError::from(e)));
+                        return Err(foyer::Error::other(HummockError::from(e)));
                     }
                 };
                 let block = Box::new(
                     Block::decode(block_data, uncompressed_capacity)
-                        .map_err(anyhow::Error::from)?,
+                        .map_err(foyer::Error::other)?,
                 );
                 Ok(block)
             }
@@ -517,11 +517,16 @@ impl SstableStore {
                     self.get_object_data_path(HummockObjectId::VectorFile(vector_file.object_id));
                 let meta_offset = vector_file.meta_offset;
                 async move {
-                    let encoded_footer = store.read(&path, meta_offset..).await?;
-                    let meta = VectorFileMeta::decode_footer(&encoded_footer)?;
+                    let encoded_footer = store
+                        .read(&path, meta_offset..)
+                        .await
+                        .map_err(foyer::Error::other)?;
+                    let meta = VectorFileMeta::decode_footer(&encoded_footer)
+                        .map_err(foyer::Error::other)?;
                     Ok(Box::new(meta))
                 }
             })
+            .map_err(HummockError::foyer_error)
             .await
     }
 
@@ -539,11 +544,15 @@ impl SstableStore {
                 let start_offset = block_meta.offset;
                 let end_offset = start_offset + block_meta.block_size;
                 async move {
-                    let encoded_block = store.read(&path, start_offset..end_offset).await?;
-                    let block = VectorBlock::decode(&encoded_block)?;
+                    let encoded_block = store
+                        .read(&path, start_offset..end_offset)
+                        .await
+                        .map_err(foyer::Error::other)?;
+                    let block = VectorBlock::decode(&encoded_block).map_err(foyer::Error::other)?;
                     Ok(Box::new(block))
                 }
             })
+            .map_err(HummockError::foyer_error)
             .await
     }
 
@@ -621,8 +630,11 @@ impl SstableStore {
             let range = sstable_info_ref.meta_offset as usize..;
             async move {
                 let now = Instant::now();
-                let buf = store.read(&meta_path, range).await?;
-                let meta = SstableMeta::decode(&buf[..])?;
+                let buf = store
+                    .read(&meta_path, range)
+                    .await
+                    .map_err(foyer::Error::other)?;
+                let meta = SstableMeta::decode(&buf[..]).map_err(foyer::Error::other)?;
 
                 let sst = Sstable::new(object_id, meta);
                 let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();

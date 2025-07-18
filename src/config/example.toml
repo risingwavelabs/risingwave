@@ -268,6 +268,8 @@ insert_rate_limit_mb = 0
 indexer_shards = 64
 compression = "None"
 fifo_probation_ratio = 0.1
+io_engine = "Psync"
+direct_io = false
 recover_mode = "Quiet"
 
 [storage.data_file_cache.throttle]
@@ -294,6 +296,8 @@ insert_rate_limit_mb = 0
 indexer_shards = 64
 compression = "None"
 fifo_probation_ratio = 0.1
+io_engine = "Psync"
+direct_io = false
 recover_mode = "Quiet"
 
 [storage.meta_file_cache.throttle]
