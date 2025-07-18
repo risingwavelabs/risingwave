@@ -56,18 +56,27 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::{Arc, LazyLock};
 
-use ::clickhouse::error::Error as ClickHouseError;
 use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
-use clickhouse::CLICKHOUSE_SINK;
 use decouple_checkpoint_log_sink::{
     COMMIT_CHECKPOINT_INTERVAL, DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
     DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE,
 };
 use deltalake::DELTALAKE_SINK;
 use futures::future::BoxFuture;
+
+// Import sink constants (always available)
+use big_query::BIGQUERY_SINK;
+use clickhouse::CLICKHOUSE_SINK;
+use dynamodb::DYNAMO_DB_SINK;
+use elasticsearch_opensearch::{ES_SINK, OPENSEARCH_SINK};
 use iceberg::ICEBERG_SINK;
+use mongodb::MONGODB_SINK;
+
+// Conditional imports for error types that depend on optional dependencies
+#[cfg(feature = "sink-clickhouse")]
+use ::clickhouse::error::Error as ClickHouseError;
 use opendal::Error as OpendalError;
 use prometheus::Registry;
 use risingwave_common::array::ArrayError;
@@ -1031,6 +1040,7 @@ impl From<RpcError> for SinkError {
     }
 }
 
+#[cfg(feature = "sink-clickhouse")]
 impl From<ClickHouseError> for SinkError {
     fn from(value: ClickHouseError) -> Self {
         SinkError::ClickHouse(value.to_report_string())
@@ -1056,12 +1066,14 @@ impl From<tiberius::error::Error> for SinkError {
     }
 }
 
+#[cfg(feature = "sink-elasticsearch")]
 impl From<::elasticsearch::Error> for SinkError {
     fn from(err: ::elasticsearch::Error) -> Self {
         SinkError::ElasticSearchOpenSearch(anyhow!(err))
     }
 }
 
+#[cfg(feature = "sink-opensearch")]
 impl From<::opensearch::Error> for SinkError {
     fn from(err: ::opensearch::Error) -> Self {
         SinkError::ElasticSearchOpenSearch(anyhow!(err))

@@ -1080,9 +1080,15 @@ impl EnforceSecret for MongodbCommon {
 }
 
 impl MongodbCommon {
+    #[cfg(feature = "sink-mongodb")]
     pub(crate) async fn build_client(&self) -> ConnectorResult<mongodb::Client> {
         let client = mongodb::Client::with_uri_str(&self.connect_uri).await?;
 
         Ok(client)
+    }
+    
+    #[cfg(not(feature = "sink-mongodb"))]
+    pub(crate) async fn build_client(&self) -> ConnectorResult<()> {
+        Err(crate::error::ConnectorError::FeatureNotEnabled("mongodb sink"))
     }
 }
