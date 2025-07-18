@@ -48,7 +48,7 @@ use iceberg::writer::function_writer::fanout_partition_writer::FanoutPartitionWr
 use iceberg::writer::{IcebergWriter, IcebergWriterBuilder};
 use iceberg::{Catalog, NamespaceIdent, TableCreation, TableIdent};
 use itertools::Itertools;
-use parquet::file::properties::WriterProperties;
+use parquet::basic::Compression;
 use prometheus::monitored_general_writer::MonitoredGeneralWriterBuilder;
 use prometheus::monitored_position_delete_writer::MonitoredPositionDeleteWriterBuilder;
 use regex::Regex;
@@ -721,8 +721,12 @@ impl IcebergSinkWriter {
         // To avoid duplicate file name, each time the sink created will generate a unique uuid as file name suffix.
         let unique_uuid_suffix = Uuid::now_v7();
 
+        let parquet_writer_properties = WriterProperties::builder().set_max_row_group_size(
+            writer_param.streaming_config.developer.iceberg_sink_write_parquet_max_row_group_rows
+        ).build();
+
         let parquet_writer_builder = ParquetWriterBuilder::new(
-            WriterProperties::new(),
+            parquet_writer_properties,
             schema.clone(),
             table.file_io().clone(),
             DefaultLocationGenerator::new(table.metadata().clone())
@@ -860,9 +864,13 @@ impl IcebergSinkWriter {
         // To avoid duplicate file name, each time the sink created will generate a unique uuid as file name suffix.
         let unique_uuid_suffix = Uuid::now_v7();
 
+        let parquet_writer_properties = WriterProperties::builder().set_max_row_group_size(
+            writer_param.streaming_config.developer.iceberg_sink_write_parquet_max_row_group_rows
+        ).build();
+
         let data_file_builder = {
             let parquet_writer_builder = ParquetWriterBuilder::new(
-                WriterProperties::new(),
+                parquet_writer_properties.clone(),
                 schema.clone(),
                 table.file_io().clone(),
                 DefaultLocationGenerator::new(table.metadata().clone())
@@ -881,7 +889,7 @@ impl IcebergSinkWriter {
         };
         let position_delete_builder = {
             let parquet_writer_builder = ParquetWriterBuilder::new(
-                WriterProperties::new(),
+                parquet_writer_properties,
                 POSITION_DELETE_SCHEMA.clone(),
                 table.file_io().clone(),
                 DefaultLocationGenerator::new(table.metadata().clone())
@@ -914,7 +922,7 @@ impl IcebergSinkWriter {
             )
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
             let parquet_writer_builder = ParquetWriterBuilder::new(
-                WriterProperties::new(),
+                parquet_writer_properties.clone(),
                 Arc::new(
                     arrow_schema_to_schema(config.projected_arrow_schema_ref())
                         .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
