@@ -248,10 +248,10 @@ pub struct IcebergConnection {
 
     /// The http header to be used in the catalog requests.
     /// Example:
-    /// `catalog.header = "a=b;c=d"`
+    /// `catalog.header = "key1=value1;key2=value2;key3=value3"`
     /// explain the format of the header:
-    /// a is the header name, b is the header value, c is another header name, d is the header value.
-    /// ';' is used to separate different headers.
+    /// - Each header is a key-value pair, separated by an '='.
+    /// - Multiple headers can be specified, separated by a ';'.
     #[serde(rename = "catalog.header")]
     pub header: Option<String>,
 }
