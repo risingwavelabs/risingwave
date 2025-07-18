@@ -250,7 +250,7 @@ pub fn start(
             },
             MetaBackend::Sqlite => MetaStoreBackend::Sql {
                 endpoint: format!(
-                    "sqlite://{}?mode=rwc",
+                    "sqlite://{}",
                     opts.sql_endpoint
                         .expect("sql endpoint is required")
                         .expose_secret()
