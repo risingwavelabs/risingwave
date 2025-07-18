@@ -135,7 +135,7 @@ impl LocalBarrierManager {
 
 #[cfg(test)]
 impl LocalBarrierManager {
-    pub fn spawn_for_test()
+    pub(super) fn spawn_for_test()
     -> crate::task::barrier_worker::EventSender<crate::task::barrier_worker::LocalActorOperation>
     {
         use std::sync::Arc;
