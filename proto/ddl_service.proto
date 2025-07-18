@@ -629,7 +629,6 @@ service DdlService {
   rpc AutoSchemaChange(AutoSchemaChangeRequest) returns (AutoSchemaChangeResponse);
   rpc AlterSwapRename(AlterSwapRenameRequest) returns (AlterSwapRenameResponse);
   rpc AlterDatabaseParam(AlterDatabaseParamRequest) returns (AlterDatabaseParamResponse);
-  rpc CompactTable(CompactTableRequest) returns (CompactTableResponse);
   rpc CompactIcebergTable(CompactIcebergTableRequest) returns (CompactIcebergTableResponse);
   rpc AlterCdcTableBackfillParallelism(AlterCdcTableBackfillParallelismRequest) returns (AlterCdcTableBackfillParallelismResponse);
 }
