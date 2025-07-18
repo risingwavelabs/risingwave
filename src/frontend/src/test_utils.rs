@@ -75,7 +75,7 @@ use tempfile::{Builder, NamedTempFile};
 use crate::FrontendOpts;
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
-use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SecretId};
+use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SecretId, SinkId};
 use crate::error::{ErrorCode, Result};
 use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
@@ -1214,7 +1214,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(())
     }
 
-    async fn compact_table(&self, _table_id: TableId) -> RpcResult<u64> {
+    async fn compact_iceberg_table(&self, _sink_id: SinkId) -> RpcResult<u64> {
         Ok(1)
     }
 }
