@@ -336,7 +336,6 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                                 return Err(error.into());
                             }
                         }
-                        // 对于普通数据消息，保持原有的跳过逻辑
                         static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
                             LazyLock::new(LogSuppresser::default);
                         if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
@@ -386,7 +385,6 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                 },
 
                 Ok(ParseResult::SchemaChange(schema_change)) => {
-                    println!("走到这里了");
                     if schema_change.is_empty() {
                         continue;
                     }
