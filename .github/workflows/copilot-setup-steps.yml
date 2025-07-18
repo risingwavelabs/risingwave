@@ -50,8 +50,8 @@ jobs:
           test -f Cargo.toml
           test -f risedev.yml
           test -f .github/copilot-instructions.md
-          
+
           # Test basic risedev functionality
           ./risedev --help
-          
+
           echo "Setup validation completed successfully"
