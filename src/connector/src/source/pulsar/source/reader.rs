@@ -14,12 +14,13 @@
 
 use anyhow::Context;
 use async_trait::async_trait;
-use futures::StreamExt;
+use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pulsar::consumer::InitialPosition;
 use pulsar::message::proto::MessageIdData;
-use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
+use pulsar::reader::Reader;
+use pulsar::{ConsumerOptions, Pulsar, TokioExecutor};
 use risingwave_common::{bail, ensure};
 
 use crate::error::ConnectorResult;
@@ -31,7 +32,7 @@ use crate::source::{
     SplitReader, into_chunk_stream,
 };
 
-const PULSAR_DEFAULT_SUBSCRIPTION_PREFIX: &str = "rw-consumer";
+const PULSAR_DEFAULT_READER_PREFIX: &str = "rw-reader";
 
 pub enum PulsarSplitReader {
     Broker(PulsarBrokerReader),
@@ -93,7 +94,7 @@ pub struct PulsarFilterOffset {
 pub struct PulsarBrokerReader {
     #[expect(dead_code)]
     pulsar: Pulsar<TokioExecutor>,
-    consumer: Consumer<Vec<u8>, TokioExecutor>,
+    reader: Reader<Vec<u8>, TokioExecutor>,
     #[expect(dead_code)]
     split: PulsarSplit,
     #[expect(dead_code)]
@@ -159,17 +160,16 @@ impl SplitReader for PulsarBrokerReader {
             .await?;
         let topic = split.topic.to_string();
 
-        tracing::debug!("creating consumer for pulsar split topic {}", topic,);
+        tracing::debug!("creating reader for pulsar split topic {}", topic,);
 
-        let builder: ConsumerBuilder<TokioExecutor> = pulsar
-            .consumer()
+        let builder = pulsar
+            .reader()
             .with_topic(&topic)
-            .with_subscription_type(SubType::Exclusive)
-            .with_subscription(format!(
+            .with_consumer_name(format!(
                 "{}-{}-{}",
                 props
                     .subscription_name_prefix
-                    .unwrap_or(PULSAR_DEFAULT_SUBSCRIPTION_PREFIX.to_owned()),
+                    .unwrap_or(PULSAR_DEFAULT_READER_PREFIX.to_owned()),
                 source_ctx.fragment_id,
                 source_ctx.actor_id
             ));
@@ -187,16 +187,12 @@ impl SplitReader for PulsarBrokerReader {
                     )
                 } else {
                     builder.with_options(
-                        ConsumerOptions::default()
-                            .with_initial_position(InitialPosition::Earliest)
-                            .durable(false),
+                        ConsumerOptions::default().with_initial_position(InitialPosition::Earliest),
                     )
                 }
             }
             PulsarEnumeratorOffset::Latest => builder.with_options(
-                ConsumerOptions::default()
-                    .with_initial_position(InitialPosition::Latest)
-                    .durable(false),
+                ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
             ),
             PulsarEnumeratorOffset::MessageId(m) => {
                 if topic.starts_with("non-persistent://") {
@@ -213,7 +209,6 @@ impl SplitReader for PulsarBrokerReader {
                         batch_index: start_message_id.batch_index,
                     });
                     builder.with_options(pulsar::ConsumerOptions {
-                        durable: Some(false),
                         start_message_id: Some(start_message_id),
                         ..Default::default()
                     })
@@ -223,17 +218,15 @@ impl SplitReader for PulsarBrokerReader {
             PulsarEnumeratorOffset::Timestamp(_) => builder,
         };
 
-        let consumer: Consumer<Vec<u8>, _> = builder.build().await?;
-        if let PulsarEnumeratorOffset::Timestamp(_ts) = split.start_offset {
-            // FIXME: Here we need pulsar-rs to support the send + sync consumer
-            // consumer
-            //     .seek(None, None, Some(ts as u64), pulsar.clone())
-            //     .await?;
+        let mut reader: Reader<Vec<u8>, _> = builder.into_reader().await?;
+        if let PulsarEnumeratorOffset::Timestamp(ts) = split.start_offset {
+            // Use reader.seek() to seek to a specific timestamp
+            reader.seek(None, Some(ts as u64)).await?;
         }
 
         Ok(Self {
             pulsar,
-            consumer,
+            reader,
             split_id: split.id(),
             split,
             parser_config,
@@ -254,39 +247,63 @@ impl PulsarBrokerReader {
     async fn into_data_stream(self) {
         let max_chunk_size = self.source_ctx.source_ctrl_opts.chunk_size;
         let mut already_read_offset = self.already_read_offset;
-        #[for_await]
-        for msgs in self.consumer.ready_chunks(max_chunk_size) {
-            let mut res = Vec::with_capacity(msgs.len());
-            for msg in msgs {
-                let msg = msg?;
+        let mut res = Vec::with_capacity(max_chunk_size);
+        let mut reader = self.reader;
 
-                if let Some(PulsarFilterOffset {
-                    entry_id,
-                    batch_index,
-                }) = already_read_offset
-                {
-                    let message_id = msg.message_id();
+        loop {
+            // Read one message at a time from the reader
+            match reader.try_next().await {
+                Ok(Some(msg)) => {
+                    if let Some(PulsarFilterOffset {
+                        entry_id,
+                        batch_index,
+                    }) = already_read_offset
+                    {
+                        let message_id = msg.message_id();
 
-                    // for most case, we only compare `entry_id`
-                    // but for batch message, we need to compare `batch_index` if the `entry_id` is the same
-                    if message_id.entry_id <= entry_id && message_id.batch_index <= batch_index {
-                        tracing::info!(
-                            "skipping message with entry_id: {}, batch_index: {:?} as expected offset after entry_id {} batch_index {:?}",
-                            message_id.entry_id,
-                            message_id.batch_index,
-                            entry_id,
-                            batch_index
-                        );
-                        continue;
-                    } else {
-                        already_read_offset = None;
+                        // for most case, we only compare `entry_id`
+                        // but for batch message, we need to compare `batch_index` if the `entry_id` is the same
+                        if message_id.entry_id <= entry_id && message_id.batch_index <= batch_index
+                        {
+                            tracing::info!(
+                                "skipping message with entry_id: {}, batch_index: {:?} as expected offset after entry_id {} batch_index {:?}",
+                                message_id.entry_id,
+                                message_id.batch_index,
+                                entry_id,
+                                batch_index
+                            );
+                            continue;
+                        } else {
+                            already_read_offset = None;
+                        }
+                    }
+
+                    let msg = SourceMessage::from(msg);
+                    res.push(msg);
+
+                    // If we've collected enough messages, yield them
+                    if res.len() >= max_chunk_size {
+                        yield res;
+                        res = Vec::with_capacity(max_chunk_size);
                     }
                 }
-
-                let msg = SourceMessage::from(msg);
-                res.push(msg);
+                Ok(None) => {
+                    // No more messages available, yield any remaining messages
+                    if !res.is_empty() {
+                        yield res;
+                        res = Vec::with_capacity(max_chunk_size);
+                    }
+                    // Reader reached end of topic or no new messages
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                }
+                Err(e) => {
+                    // Handle error and yield any messages collected so far
+                    if !res.is_empty() {
+                        yield res;
+                    }
+                    return Err(e.into());
+                }
             }
-            yield res;
         }
     }
 }

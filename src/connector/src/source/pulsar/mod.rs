@@ -85,13 +85,13 @@ pub struct PulsarProperties {
     #[serde(rename = "iceberg.bucket", default)]
     pub iceberg_bucket: Option<String>,
 
-    /// Specify a custom consumer group id prefix for the source.
-    /// Defaults to `rw-consumer`.
+    /// Specify a custom reader name prefix for the source.
+    /// Defaults to `rw-reader`.
     ///
     /// Notes:
-    /// - Each job (materialized view) will have multiple subscriptions and
-    ///   contains a generated suffix in the subscription name.
-    ///   The subscription name will be `{subscription_name_prefix}-{fragment_id}-{actor_id}`.
+    /// - Each job (materialized view) will have multiple readers and
+    ///   contains a generated suffix in the reader name.
+    ///   The reader name will be `{subscription_name_prefix}-{fragment_id}-{actor_id}`.
     #[serde(rename = "subscription.name.prefix")]
     pub subscription_name_prefix: Option<String>,
 
