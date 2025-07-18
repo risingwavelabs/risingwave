@@ -321,6 +321,11 @@ mod tests {
 
         let actor_id = 2;
 
+        let b1 = Barrier::with_prev_epoch_for_test(2, 1);
+
+        test_env.inject_barrier(&b1, [actor_id]);
+        test_env.flush_all_events().await;
+
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int64),
