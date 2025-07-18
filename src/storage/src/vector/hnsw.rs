@@ -577,6 +577,7 @@ mod tests {
     const EF_SEARCH_LIST: &[usize] = &[16];
     // const EF_SEARCH_LIST: &'static [usize] = &[16, 30, 100];
 
+    #[cfg(not(madsim))]
     #[tokio::test]
     async fn test_hnsw_basic() {
         let input = (0..INPUT_COUNT)
