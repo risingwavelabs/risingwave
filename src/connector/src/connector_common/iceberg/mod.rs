@@ -140,10 +140,10 @@ pub struct IcebergCommon {
 
     /// The http header to be used in the catalog requests.
     /// Example:
-    /// `catalog.header = "a=b;c=d"`
+    /// `catalog.header = "key1=value1;key2=value2;key3=value3"`
     /// explain the format of the header:
-    /// a is the header name, b is the header value, c is another header name, d is the header value.
-    /// ';' is used to separate different headers.
+    /// - Each header is a key-value pair, separated by an '='.
+    /// - Multiple headers can be specified, separated by a ';'.
     #[serde(rename = "catalog.header")]
     pub header: Option<String>,
 }
@@ -343,6 +343,12 @@ impl IcebergCommon {
                 );
             }
 
+            if let Some(headers) = self.headers().ok() {
+                for (header_name, header_value) in headers {
+                    java_catalog_configs.insert(format!("header.{}", header_name), header_value);
+                }
+            }
+
             match self.catalog_type.as_deref() {
                 Some("rest") => {
                     if let Some(credential) = &self.credential {
@@ -521,7 +527,6 @@ impl IcebergCommon {
 
                 let headers = self.headers()?;
                 for (header_name, header_value) in headers {
-                    println!("Using header: {}={}", header_name, header_value);
                     iceberg_configs.insert(format!("header.{}", header_name), header_value);
                 }
 
