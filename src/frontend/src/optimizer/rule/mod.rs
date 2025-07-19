@@ -76,7 +76,7 @@ trait InfallibleRule<C: ConventionMarker>: Send + Sync + Description {
     ///
     /// - Returns `Some` if the apply is successful.
     /// - Returns `None` if it's not applicable. The optimizer may try other rules.
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef>;
+    fn apply(&self, plan: PlanRef<C>) -> Option<PlanRef<C>>;
 }
 
 use InfallibleRule as Rule;
@@ -92,14 +92,14 @@ pub trait FallibleRule<C: ConventionMarker>: Send + Sync + Description {
     /// - Returns `ApplyResult::NotApplicable` if it's not applicable. The optimizer may try other rules.
     /// - Returns `ApplyResult::Err` if an unrecoverable error occurred. The optimizer should stop applying
     ///   other rules and report the error to the user.
-    fn apply(&self, plan: PlanRef) -> ApplyResult<PlanRef>;
+    fn apply(&self, plan: PlanRef<C>) -> ApplyResult<PlanRef<C>>;
 }
 
 impl<C: ConventionMarker, R> FallibleRule<C> for R
 where
     R: InfallibleRule<C>,
 {
-    fn apply(&self, plan: PlanRef) -> ApplyResult<PlanRef> {
+    fn apply(&self, plan: PlanRef<C>) -> ApplyResult<PlanRef<C>> {
         match InfallibleRule::apply(self, plan) {
             Some(plan) => ApplyResult::Ok(plan),
             None => ApplyResult::NotApplicable,
@@ -374,7 +374,7 @@ macro_rules! impl_description {
 for_all_rules! {impl_description}
 
 mod prelude {
-    pub(super) use crate::optimizer::plan_node::{Logical, PlanRef};
+    pub(super) use crate::optimizer::plan_node::{Logical, LogicalPlanRef as PlanRef};
     pub(super) use crate::optimizer::rule::Rule;
 
     pub(super) type BoxedRule = crate::optimizer::rule::BoxedRule<Logical>;

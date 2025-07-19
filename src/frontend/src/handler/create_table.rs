@@ -76,9 +76,11 @@ use crate::handler::create_source::{
 };
 use crate::handler::util::SourceSchemaCompatExt;
 use crate::optimizer::plan_node::generic::{CdcScanOptions, SourceNodeKind};
-use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
+use crate::optimizer::plan_node::{
+    LogicalCdcScan, LogicalPlanRef, LogicalSource, StreamPlanRef as PlanRef,
+};
 use crate::optimizer::property::{Order, RequiredDist};
-use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRoot};
 use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
 use crate::stream_fragmenter::{GraphJobType, build_graph};
@@ -742,7 +744,7 @@ fn gen_table_plan_inner(
     let session = context.session_ctx().clone();
     let retention_seconds = context.with_options().retention_seconds();
 
-    let source_node: PlanRef = LogicalSource::new(
+    let source_node: LogicalPlanRef = LogicalSource::new(
         source_catalog.clone().map(Rc::new),
         columns.clone(),
         row_id_index,
@@ -885,7 +887,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         options,
     );
 
-    let scan_node: PlanRef = logical_scan.into();
+    let scan_node: LogicalPlanRef = logical_scan.into();
     let required_cols = FixedBitSet::with_capacity(non_generated_column_num);
     let plan_root = PlanRoot::new_with_logical_plan(
         scan_node,

@@ -36,9 +36,11 @@ use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_expr_rewriter::ConstEvalRewriter;
-use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMaterialize};
+use crate::optimizer::plan_node::{
+    Explain, LogicalProject, LogicalScan, StreamMaterialize, StreamPlanRef as PlanRef,
+};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
-use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRoot};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::{GraphJobType, build_graph};

@@ -16,7 +16,9 @@ use fixedbitset::FixedBitSet;
 
 use crate::binder::BoundInsert;
 use crate::error::Result;
-use crate::optimizer::plan_node::{LogicalInsert, LogicalProject, PlanRef, generic};
+use crate::optimizer::plan_node::{
+    LogicalInsert, LogicalPlanRef as PlanRef, LogicalProject, generic,
+};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{LogicalPlanRoot, PlanRoot};
 use crate::planner::Planner;
