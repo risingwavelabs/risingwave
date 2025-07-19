@@ -125,6 +125,7 @@ impl BuildingFragment {
             );
             table.fragment_id = fragment_id;
             table.owner = job.owner();
+            table.job_id = Some(job.id());
         });
     }
 

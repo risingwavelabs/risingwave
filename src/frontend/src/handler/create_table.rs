@@ -2117,7 +2117,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 col_id_gen,
                 on_conflict,
                 with_version_column.map(|x| x.real_value()),
-                IncludeOption::default(),
+                include_column_options,
                 table_name,
                 resolved_table_name,
                 database_id,

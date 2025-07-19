@@ -70,10 +70,9 @@ use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::scale::resolve_streaming_job_definition;
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, get_fragment_actor_dispatchers,
-    get_fragment_mappings, rebuild_fragment_mapping_from_actors,
-    resolve_no_shuffle_actor_dispatcher,
+    get_fragment_mappings, resolve_no_shuffle_actor_dispatcher,
 };
-use crate::manager::LocalNotification;
+use crate::manager::{LocalNotification, NotificationManager};
 use crate::model::{
     DownstreamFragmentRelation, Fragment, FragmentActorDispatchers, FragmentDownstreamRelation,
     StreamActor, StreamContext, StreamJobFragments, TableParallelism,
@@ -144,8 +143,8 @@ impl CatalogControllerInner {
     }
 }
 
-impl CatalogController {
-    pub(crate) async fn notify_fragment_mapping(
+impl NotificationManager {
+    pub(crate) fn notify_fragment_mapping(
         &self,
         operation: NotificationOperation,
         fragment_mappings: Vec<PbFragmentWorkerSlotMapping>,
@@ -154,41 +153,37 @@ impl CatalogController {
             .iter()
             .map(|mapping| mapping.fragment_id)
             .collect_vec();
+        if fragment_ids.is_empty() {
+            return;
+        }
         // notify all fragment mappings to frontend.
         for fragment_mapping in fragment_mappings {
-            self.env
-                .notification_manager()
-                .notify_frontend(
-                    operation,
-                    NotificationInfo::StreamingWorkerSlotMapping(fragment_mapping),
-                )
-                .await;
+            self.notify_frontend_without_version(
+                operation,
+                NotificationInfo::StreamingWorkerSlotMapping(fragment_mapping),
+            );
         }
 
         // update serving vnode mappings.
         match operation {
             NotificationOperation::Add | NotificationOperation::Update => {
-                self.env
-                    .notification_manager()
-                    .notify_local_subscribers(LocalNotification::FragmentMappingsUpsert(
-                        fragment_ids,
-                    ))
-                    .await;
+                self.notify_local_subscribers(LocalNotification::FragmentMappingsUpsert(
+                    fragment_ids,
+                ));
             }
             NotificationOperation::Delete => {
-                self.env
-                    .notification_manager()
-                    .notify_local_subscribers(LocalNotification::FragmentMappingsDelete(
-                        fragment_ids,
-                    ))
-                    .await;
+                self.notify_local_subscribers(LocalNotification::FragmentMappingsDelete(
+                    fragment_ids,
+                ));
             }
             op => {
                 tracing::warn!("unexpected fragment mapping op: {}", op.as_str_name());
             }
         }
     }
+}
 
+impl CatalogController {
     pub fn extract_fragment_and_actors_from_fragments(
         stream_job_fragments: &StreamJobFragments,
     ) -> MetaResult<Vec<(fragment::Model, Vec<actor::Model>)>> {
@@ -1239,12 +1234,6 @@ impl CatalogController {
         }
 
         txn.commit().await?;
-
-        self.notify_fragment_mapping(
-            NotificationOperation::Update,
-            rebuild_fragment_mapping_from_actors(actors),
-        )
-        .await;
 
         Ok(())
     }

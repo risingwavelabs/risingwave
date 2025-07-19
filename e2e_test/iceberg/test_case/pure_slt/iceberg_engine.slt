@@ -262,6 +262,7 @@ statement ok
 FLUSH;
 
 sleep 5s
+
 query ??
 select * from t_hosted_catalog;
 ----
@@ -276,6 +277,33 @@ query ?
 SELECT table_namespace FROM iceberg_tables WHERE catalog_name = 'dev' AND (table_namespace = 'public' OR table_namespace LIKE '*' ESCAPE '!') LIMIT 1;
 ----
 public
+
+statement ok
+insert into t_hosted_catalog values(2, 'yyy');
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ?? rowsort
+select * from t_hosted_catalog;
+----
+1 xxx
+2 yyy
+
+query ?
+select count(*) from rw_iceberg_files where  schema_name = 'public' and source_name = '__iceberg_source_t_hosted_catalog';
+----
+2
+
+statement ok
+VACUUM t_hosted_catalog;
+
+query ?
+select count(*) from rw_iceberg_files where  schema_name = 'public' and source_name = '__iceberg_source_t_hosted_catalog';
+----
+1
 
 statement ok
 DROP TABLE t_hosted_catalog;

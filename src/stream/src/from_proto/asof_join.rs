@@ -17,13 +17,15 @@ use std::sync::Arc;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::AsOfJoinType as JoinTypeProto;
-use risingwave_pb::stream_plan::AsOfJoinNode;
+use risingwave_pb::stream_plan::{AsOfJoinNode, JoinEncodingType as JoinEncodingTypeProto};
 
 use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::executor::asof_join::*;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{ActorContextRef, AsOfDesc, AsOfJoinType, JoinType};
+use crate::executor::{
+    ActorContextRef, AsOfDesc, AsOfJoinType, CpuEncoding, JoinType, MemoryEncoding,
+};
 use crate::task::AtomicU64Ref;
 
 pub struct AsOfJoinExecutorBuilder;
@@ -88,6 +90,9 @@ impl ExecutorBuilder for AsOfJoinExecutorBuilder {
         let join_type_proto = node.get_join_type()?;
         let as_of_desc_proto = node.get_asof_desc()?;
         let asof_desc = AsOfDesc::from_protobuf(as_of_desc_proto)?;
+        let join_encoding_type = node
+            .get_join_encoding_type()
+            .unwrap_or(JoinEncodingTypeProto::MemoryOptimized);
 
         let args = AsOfJoinExecutorDispatcherArgs {
             ctx: params.actor_context,
@@ -111,6 +116,7 @@ impl ExecutorBuilder for AsOfJoinExecutorBuilder {
                 .developer
                 .high_join_amplification_threshold,
             asof_desc,
+            join_encoding_type,
         };
 
         let exec = args.dispatch()?;
@@ -136,6 +142,7 @@ struct AsOfJoinExecutorDispatcherArgs<S: StateStore> {
     chunk_size: usize,
     high_join_amplification_threshold: usize,
     asof_desc: AsOfDesc,
+    join_encoding_type: JoinEncodingTypeProto,
 }
 
 impl<S: StateStore> HashKeyDispatcher for AsOfJoinExecutorDispatcherArgs<S> {
@@ -144,31 +151,45 @@ impl<S: StateStore> HashKeyDispatcher for AsOfJoinExecutorDispatcherArgs<S> {
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         /// This macro helps to fill the const generic type parameter.
         macro_rules! build {
-            ($join_type:ident) => {
-                Ok(AsOfJoinExecutor::<K, S, { AsOfJoinType::$join_type }>::new(
-                    self.ctx,
-                    self.info,
-                    self.source_l,
-                    self.source_r,
-                    self.params_l,
-                    self.params_r,
-                    self.null_safe,
-                    self.output_indices,
-                    self.state_table_l,
-                    self.state_table_r,
-                    self.lru_manager,
-                    self.metrics,
-                    self.chunk_size,
-                    self.high_join_amplification_threshold,
-                    self.asof_desc,
+            ($join_type:ident, $join_encoding:ident) => {
+                Ok(
+                    AsOfJoinExecutor::<K, S, { AsOfJoinType::$join_type }, $join_encoding>::new(
+                        self.ctx,
+                        self.info,
+                        self.source_l,
+                        self.source_r,
+                        self.params_l,
+                        self.params_r,
+                        self.null_safe,
+                        self.output_indices,
+                        self.state_table_l,
+                        self.state_table_r,
+                        self.lru_manager,
+                        self.metrics,
+                        self.chunk_size,
+                        self.high_join_amplification_threshold,
+                        self.asof_desc,
+                    )
+                    .boxed(),
                 )
-                .boxed())
             };
         }
-        match self.join_type_proto {
-            JoinTypeProto::Unspecified => unreachable!(),
-            JoinTypeProto::Inner => build!(Inner),
-            JoinTypeProto::LeftOuter => build!(LeftOuter),
+
+        macro_rules! build_match {
+            ($($join_type:ident),*) => {
+                match (self.join_type_proto, self.join_encoding_type) {
+                    (JoinTypeProto::Unspecified, _) | (_, JoinEncodingTypeProto::Unspecified) => unreachable!(),
+                    $(
+                        (JoinTypeProto::$join_type, JoinEncodingTypeProto::MemoryOptimized) => build!($join_type, MemoryEncoding),
+                        (JoinTypeProto::$join_type, JoinEncodingTypeProto::CpuOptimized) => build!($join_type, CpuEncoding),
+                    )*
+                }
+            };
+        }
+
+        build_match! {
+            Inner,
+            LeftOuter
         }
     }
 

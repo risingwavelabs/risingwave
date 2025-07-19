@@ -126,8 +126,7 @@ impl SessionParamsController {
         self.notify_workers(name.clone(), new_param.clone());
         if old_batch_parallelism != new_batch_parallelism {
             self.notification_manager
-                .notify_local_subscribers(LocalNotification::BatchParallelismChange)
-                .await;
+                .notify_local_subscribers(LocalNotification::BatchParallelismChange);
         }
 
         Ok(new_param)
