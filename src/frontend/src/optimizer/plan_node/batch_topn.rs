@@ -19,7 +19,8 @@ use super::batch::prelude::*;
 use super::generic::TopNLimit;
 use super::utils::impl_distill_by_unit;
 use super::{
-    ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, generic,
+    BatchPlanRef as PlanRef, ExprRewritable, PlanBase, PlanTreeNodeUnary, ToBatchPb,
+    ToDistributedBatch, generic,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -65,7 +66,7 @@ impl BatchTopN {
         };
 
         let ensure_single_dist =
-            RequiredDist::single().enforce_if_not_satisfies(partial_input, &Order::any())?;
+            RequiredDist::single().batch_enforce_if_not_satisfies(partial_input, &Order::any())?;
 
         let batch_global_topn = self.clone_with_input(ensure_single_dist);
         Ok(batch_global_topn.into())
@@ -85,7 +86,7 @@ impl BatchTopN {
 
 impl_distill_by_unit!(BatchTopN, core, "BatchTopN");
 
-impl PlanTreeNodeUnary for BatchTopN {
+impl PlanTreeNodeUnary<Batch> for BatchTopN {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -97,7 +98,7 @@ impl PlanTreeNodeUnary for BatchTopN {
     }
 }
 
-impl_plan_tree_node_for_unary! {BatchTopN}
+impl_plan_tree_node_for_unary! { Batch, BatchTopN}
 
 impl ToDistributedBatch for BatchTopN {
     fn to_distributed(&self) -> Result<PlanRef> {
@@ -135,6 +136,6 @@ impl ToLocalBatch for BatchTopN {
     }
 }
 
-impl ExprRewritable for BatchTopN {}
+impl ExprRewritable<Batch> for BatchTopN {}
 
 impl ExprVisitable for BatchTopN {}

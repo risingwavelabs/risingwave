@@ -16,7 +16,7 @@ use fixedbitset::FixedBitSet;
 
 use crate::binder::BoundInsert;
 use crate::error::Result;
-use crate::optimizer::plan_node::{LogicalInsert, LogicalProject, PlanRef, generic};
+use crate::optimizer::plan_node::{LogicalInsert, LogicalProject, generic};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{LogicalPlanRoot, PlanRoot};
 use crate::planner::Planner;
@@ -28,7 +28,7 @@ impl Planner {
             input = LogicalProject::create(input, insert.cast_exprs);
         }
         let returning = !insert.returning_list.is_empty();
-        let mut plan: PlanRef = LogicalInsert::new(generic::Insert::new(
+        let mut plan = LogicalInsert::new(generic::Insert::new(
             input,
             insert.table_name.clone(),
             insert.table_id,

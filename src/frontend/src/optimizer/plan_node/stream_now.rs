@@ -66,7 +66,7 @@ impl Distill for StreamNow {
     }
 }
 
-impl_plan_tree_node_for_leaf! { StreamNow }
+impl_plan_tree_node_for_leaf! { Stream, StreamNow }
 
 impl StreamNode for StreamNow {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
@@ -96,6 +96,6 @@ impl StreamNode for StreamNow {
     }
 }
 
-impl ExprRewritable for StreamNow {}
+impl ExprRewritable<Stream> for StreamNow {}
 
 impl ExprVisitable for StreamNow {}

@@ -45,11 +45,10 @@ pub struct InputRefValidator;
 
 impl InputRefValidator {
     #[track_caller]
-    pub fn validate<C: ConventionMarker>(mut self, plan: PlanRef)
+    pub fn validate<C: ConventionMarker>(mut self, plan: PlanRef<C>)
     where
         Self: PlanVisitor<C, Result = Option<String>>,
     {
-        plan.expect_convention::<C>();
         if let Some(err) = self.visit(plan.clone()) {
             panic!(
                 "Input references are inconsistent with the input schema: {}, plan:\n{}",

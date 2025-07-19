@@ -17,7 +17,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -67,7 +67,7 @@ impl Distill for StreamRowIdGen {
     }
 }
 
-impl PlanTreeNodeUnary for StreamRowIdGen {
+impl PlanTreeNodeUnary<Stream> for StreamRowIdGen {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -77,7 +77,7 @@ impl PlanTreeNodeUnary for StreamRowIdGen {
     }
 }
 
-impl_plan_tree_node_for_unary! {StreamRowIdGen}
+impl_plan_tree_node_for_unary! { Stream, StreamRowIdGen}
 
 impl StreamNode for StreamRowIdGen {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -89,6 +89,6 @@ impl StreamNode for StreamRowIdGen {
     }
 }
 
-impl ExprRewritable for StreamRowIdGen {}
+impl ExprRewritable<Stream> for StreamRowIdGen {}
 
 impl ExprVisitable for StreamRowIdGen {}

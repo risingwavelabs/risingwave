@@ -19,9 +19,10 @@ use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::Schema;
 
 use super::{GenericPlanNode, GenericPlanRef, impl_distill_unit_from_fields};
+use crate::OptimizerContextRef;
 use crate::binder::ShareId;
+use crate::optimizer::plan_node::LogicalPlanRef;
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::{OptimizerContextRef, optimizer};
 
 #[derive(Clone, Debug)]
 pub struct CteRef<PlanRef> {
@@ -50,7 +51,7 @@ impl<PlanRef> CteRef<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> CteRef<PlanRef> {
-    pub fn get_cte_ref(&self) -> Option<optimizer::plan_node::PlanRef> {
+    pub fn get_cte_ref(&self) -> Option<LogicalPlanRef> {
         self.ctx().get_rcte_cache_plan(&self.share_id)
     }
 }

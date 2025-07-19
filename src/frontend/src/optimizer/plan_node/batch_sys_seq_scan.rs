@@ -20,7 +20,9 @@ use risingwave_pb::plan_common::PbColumnDesc;
 
 use super::batch::prelude::*;
 use super::utils::{Distill, childless_record, scan_ranges_as_strs};
-use super::{ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, generic};
+use super::{
+    BatchPlanRef as PlanRef, ExprRewritable, PlanBase, ToBatchPb, ToDistributedBatch, generic,
+};
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::ToLocalBatch;
@@ -89,7 +91,7 @@ impl BatchSysSeqScan {
     }
 }
 
-impl_plan_tree_node_for_leaf! { BatchSysSeqScan }
+impl_plan_tree_node_for_leaf! { Batch, BatchSysSeqScan }
 
 impl Distill for BatchSysSeqScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -154,7 +156,7 @@ impl ToLocalBatch for BatchSysSeqScan {
     }
 }
 
-impl ExprRewritable for BatchSysSeqScan {
+impl ExprRewritable<Batch> for BatchSysSeqScan {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

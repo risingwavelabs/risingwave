@@ -17,7 +17,8 @@ use risingwave_common::catalog::Schema;
 
 use super::utils::impl_distill_by_unit;
 use super::{
-    ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream,
+    BatchPlanRef, ColPrunable, ExprRewritable, Logical, LogicalPlanRef, PlanBase,
+    PredicatePushdown, StreamPlanRef, ToBatch, ToStream,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -33,18 +34,18 @@ use crate::utils::{ColIndexMapping, Condition};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalExcept {
     pub base: PlanBase<Logical>,
-    core: generic::Except<PlanRef>,
+    core: generic::Except<LogicalPlanRef>,
 }
 
 impl LogicalExcept {
-    pub fn new(all: bool, inputs: Vec<PlanRef>) -> Self {
+    pub fn new(all: bool, inputs: Vec<LogicalPlanRef>) -> Self {
         assert!(Schema::all_type_eq(inputs.iter().map(|x| x.schema())));
         let core = generic::Except { all, inputs };
         let base = PlanBase::new_logical_with_core(&core);
         LogicalExcept { base, core }
     }
 
-    pub fn create(all: bool, inputs: Vec<PlanRef>) -> PlanRef {
+    pub fn create(all: bool, inputs: Vec<LogicalPlanRef>) -> LogicalPlanRef {
         LogicalExcept::new(all, inputs).into()
     }
 
@@ -53,12 +54,12 @@ impl LogicalExcept {
     }
 }
 
-impl PlanTreeNode for LogicalExcept {
-    fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
+impl PlanTreeNode<Logical> for LogicalExcept {
+    fn inputs(&self) -> smallvec::SmallVec<[LogicalPlanRef; 2]> {
         self.core.inputs.clone().into_iter().collect()
     }
 
-    fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> PlanRef {
+    fn clone_with_inputs(&self, inputs: &[LogicalPlanRef]) -> LogicalPlanRef {
         Self::new(self.all(), inputs.to_vec()).into()
     }
 }
@@ -66,7 +67,7 @@ impl PlanTreeNode for LogicalExcept {
 impl_distill_by_unit!(LogicalExcept, core, "LogicalExcept");
 
 impl ColPrunable for LogicalExcept {
-    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> LogicalPlanRef {
         let new_inputs = self
             .inputs()
             .iter()
@@ -76,7 +77,7 @@ impl ColPrunable for LogicalExcept {
     }
 }
 
-impl ExprRewritable for LogicalExcept {}
+impl ExprRewritable<Logical> for LogicalExcept {}
 
 impl ExprVisitable for LogicalExcept {}
 
@@ -85,7 +86,7 @@ impl PredicatePushdown for LogicalExcept {
         &self,
         predicate: Condition,
         ctx: &mut PredicatePushdownContext,
-    ) -> PlanRef {
+    ) -> LogicalPlanRef {
         let new_inputs = self
             .inputs()
             .iter()
@@ -96,20 +97,20 @@ impl PredicatePushdown for LogicalExcept {
 }
 
 impl ToBatch for LogicalExcept {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<BatchPlanRef> {
         unimplemented!()
     }
 }
 
 impl ToStream for LogicalExcept {
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
         unimplemented!()
     }
 
     fn logical_rewrite_for_stream(
         &self,
         _ctx: &mut RewriteStreamContext,
-    ) -> Result<(PlanRef, ColIndexMapping)> {
+    ) -> Result<(LogicalPlanRef, ColIndexMapping)> {
         unimplemented!()
     }
 }

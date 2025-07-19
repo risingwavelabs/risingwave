@@ -32,14 +32,14 @@ mod update;
 mod values;
 pub use query::LIMIT_ALL_COUNT;
 
-use crate::PlanRef;
+use crate::optimizer::plan_node::LogicalPlanRef;
 
 /// `Planner` converts a bound statement to a [`crate::optimizer::plan_node::PlanNode`] tree
 pub struct Planner {
     ctx: OptimizerContextRef,
     /// Mapping of `ShareId` to its share plan.
     /// The share plan can be a CTE, a source, a view and so on.
-    share_cache: HashMap<ShareId, PlanRef>,
+    share_cache: HashMap<ShareId, LogicalPlanRef>,
     /// Plan for stream or batch.
     plan_for: PlanFor,
 }

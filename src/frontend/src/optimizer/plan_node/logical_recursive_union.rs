@@ -26,9 +26,9 @@ use super::{
     PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, ToBatch, ToStream,
     ToStreamContext, generic,
 };
-use crate::PlanRef;
 use crate::binder::ShareId;
 use crate::error::Result;
+use crate::optimizer::LogicalPlanRef as PlanRef;
 use crate::utils::Condition;
 
 /// `LogicalRecursiveUnion` returns the union of the rows of its inputs.
@@ -59,7 +59,7 @@ impl LogicalRecursiveUnion {
     }
 }
 
-impl PlanTreeNode for LogicalRecursiveUnion {
+impl PlanTreeNode<Logical> for LogicalRecursiveUnion {
     fn inputs(&self) -> SmallVec<[PlanRef; 2]> {
         smallvec![self.core.base.clone(), self.core.recursive.clone()]
     }
@@ -90,7 +90,7 @@ impl ColPrunable for LogicalRecursiveUnion {
     }
 }
 
-impl ExprRewritable for LogicalRecursiveUnion {}
+impl ExprRewritable<Logical> for LogicalRecursiveUnion {}
 
 impl ExprVisitable for LogicalRecursiveUnion {}
 
@@ -113,7 +113,7 @@ impl PredicatePushdown for LogicalRecursiveUnion {
 }
 
 impl ToBatch for LogicalRecursiveUnion {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         bail_not_implemented!(
             issue = 15135,
             "recursive CTE not supported for to_batch of LogicalRecursiveUnion"
@@ -122,7 +122,10 @@ impl ToBatch for LogicalRecursiveUnion {
 }
 
 impl ToStream for LogicalRecursiveUnion {
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(
+        &self,
+        _ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         bail_not_implemented!(
             issue = 15135,
             "recursive CTE not supported for to_stream of LogicalRecursiveUnion"

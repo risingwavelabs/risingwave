@@ -38,9 +38,8 @@ use risingwave_pb::stream_plan::{
 use self::rewrite::build_delta_join_without_arrange;
 use crate::error::ErrorCode::NotSupported;
 use crate::error::{Result, RwError};
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::reorganize_elements_id;
+use crate::optimizer::plan_node::{StreamPlanRef, reorganize_elements_id};
 use crate::stream_fragmenter::parallelism::derive_parallelism;
 
 /// The mutable state when building fragment graph.
@@ -148,14 +147,14 @@ impl GraphJobType {
 }
 
 pub fn build_graph(
-    plan_node: PlanRef,
+    plan_node: StreamPlanRef,
     job_type: Option<GraphJobType>,
 ) -> Result<StreamFragmentGraphProto> {
     build_graph_with_strategy(plan_node, job_type, None)
 }
 
 pub fn build_graph_with_strategy(
-    plan_node: PlanRef,
+    plan_node: StreamPlanRef,
     job_type: Option<GraphJobType>,
     backfill_order: Option<BackfillOrder>,
 ) -> Result<StreamFragmentGraphProto> {

@@ -22,11 +22,10 @@ use std::sync::Arc;
 use risingwave_sqlparser::ast::{ExplainFormat, ExplainOptions, ExplainType};
 
 use super::property::WatermarkGroupId;
-use crate::PlanRef;
 use crate::binder::ShareId;
 use crate::expr::{CorrelatedId, SessionTimezone};
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::PlanNodeId;
+use crate::optimizer::plan_node::{LogicalPlanRef, PlanNodeId};
 use crate::session::SessionImpl;
 use crate::utils::{OverwriteOptions, WithOptions};
 
@@ -57,7 +56,7 @@ pub struct OptimizerContext {
     overwrite_options: OverwriteOptions,
     /// Store the mapping between `share_id` and the corresponding
     /// `PlanRef`, used by rcte's planning. (e.g., in `LogicalCteRef`)
-    rcte_cache: RefCell<HashMap<ShareId, PlanRef>>,
+    rcte_cache: RefCell<HashMap<ShareId, LogicalPlanRef>>,
 
     /// Last assigned plan node ID.
     last_plan_node_id: Cell<i32>,
@@ -277,11 +276,11 @@ impl OptimizerContext {
         self.session_timezone.borrow().timezone()
     }
 
-    pub fn get_rcte_cache_plan(&self, id: &ShareId) -> Option<PlanRef> {
+    pub fn get_rcte_cache_plan(&self, id: &ShareId) -> Option<LogicalPlanRef> {
         self.rcte_cache.borrow().get(id).cloned()
     }
 
-    pub fn insert_rcte_cache_plan(&self, id: ShareId, plan: PlanRef) {
+    pub fn insert_rcte_cache_plan(&self, id: ShareId, plan: LogicalPlanRef) {
         self.rcte_cache.borrow_mut().insert(id, plan);
     }
 }

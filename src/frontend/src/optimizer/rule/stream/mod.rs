@@ -12,10 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub(crate) mod bushy_tree_join_ordering_rule;
-pub(crate) mod filter_with_now_to_join_rule;
-pub(crate) mod generate_series_with_now_rule;
+use crate::optimizer::plan_node::{Stream, StreamPlanRef};
+
+pub(crate) mod index_delta_join_rule;
 pub(crate) mod separate_consecutive_join;
-pub(crate) mod split_now_and_rule;
-pub(crate) mod split_now_or_rule;
+
+pub(crate) mod add_logstore_rule;
 pub(crate) mod stream_project_merge_rule;
+
+use super::InfallibleRule as Rule;
+type Convention = Stream;
+type BoxedRule = super::BoxedRule<Stream>;
+type PlanRef = StreamPlanRef;

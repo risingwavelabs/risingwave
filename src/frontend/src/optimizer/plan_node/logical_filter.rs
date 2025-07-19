@@ -20,8 +20,8 @@ use risingwave_common::types::DataType;
 use super::generic::GenericPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{
-    ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, ToBatch, ToStream, generic,
+    ColPrunable, ExprRewritable, Logical, LogicalPlanRef, LogicalPlanRef as PlanRef,
+    LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream, generic,
 };
 use crate::error::Result;
 use crate::expr::{
@@ -41,11 +41,11 @@ use crate::utils::{ColIndexMapping, Condition};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalFilter {
     pub base: PlanBase<Logical>,
-    core: generic::Filter<PlanRef>,
+    core: generic::Filter<LogicalPlanRef>,
 }
 
 impl LogicalFilter {
-    pub fn new(input: PlanRef, predicate: Condition) -> Self {
+    pub fn new(input: LogicalPlanRef, predicate: Condition) -> Self {
         let _ctx = input.ctx();
         for cond in &predicate.conjunctions {
             assert_input_ref!(cond, input.schema().fields().len());
@@ -56,7 +56,7 @@ impl LogicalFilter {
     }
 
     /// Create a `LogicalFilter` unless the predicate is always true
-    pub fn create(input: PlanRef, predicate: Condition) -> PlanRef {
+    pub fn create(input: LogicalPlanRef, predicate: Condition) -> LogicalPlanRef {
         if predicate.always_true() {
             input
         } else {
@@ -65,7 +65,7 @@ impl LogicalFilter {
     }
 
     /// Create a `LogicalFilter` to filter out rows where all keys are null.
-    pub fn filter_out_all_null_keys(input: PlanRef, key: &[usize]) -> PlanRef {
+    pub fn filter_out_all_null_keys(input: LogicalPlanRef, key: &[usize]) -> LogicalPlanRef {
         let schema = input.schema();
         let cond = ExprImpl::or(key.iter().unique().map(|&i| {
             FunctionCall::new_unchecked(
@@ -78,7 +78,7 @@ impl LogicalFilter {
         LogicalFilter::create_with_expr(input, cond)
     }
 
-    pub fn create_with_expr(input: PlanRef, predicate: ExprImpl) -> PlanRef {
+    pub fn create_with_expr(input: LogicalPlanRef, predicate: ExprImpl) -> LogicalPlanRef {
         let predicate = Condition::with_expr(predicate);
         Self::new(input, predicate).into()
     }
@@ -89,18 +89,18 @@ impl LogicalFilter {
     }
 }
 
-impl PlanTreeNodeUnary for LogicalFilter {
-    fn input(&self) -> PlanRef {
+impl PlanTreeNodeUnary<Logical> for LogicalFilter {
+    fn input(&self) -> LogicalPlanRef {
         self.core.input.clone()
     }
 
-    fn clone_with_input(&self, input: PlanRef) -> Self {
+    fn clone_with_input(&self, input: LogicalPlanRef) -> Self {
         Self::new(input, self.predicate().clone())
     }
 
     fn rewrite_with_input(
         &self,
-        input: PlanRef,
+        input: LogicalPlanRef,
         mut input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
         let predicate = self.predicate().clone().rewrite_expr(&mut input_col_change);
@@ -108,11 +108,11 @@ impl PlanTreeNodeUnary for LogicalFilter {
     }
 }
 
-impl_plan_tree_node_for_unary! {LogicalFilter}
+impl_plan_tree_node_for_unary! { Logical, LogicalFilter}
 impl_distill_by_unit!(LogicalFilter, core, "LogicalFilter");
 
 impl ColPrunable for LogicalFilter {
-    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> LogicalPlanRef {
         let required_cols_bitset = FixedBitSet::from_iter(required_cols.iter().copied());
         let input_col_num = self.input().schema().len();
         let predicate_required_cols = self.predicate().collect_input_refs(input_col_num);
@@ -149,12 +149,12 @@ impl ColPrunable for LogicalFilter {
     }
 }
 
-impl ExprRewritable for LogicalFilter {
+impl ExprRewritable<Logical> for LogicalFilter {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
 
-    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> LogicalPlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
         Self {
@@ -183,16 +183,18 @@ impl PredicatePushdown for LogicalFilter {
 }
 
 impl ToBatch for LogicalFilter {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         let new_input = self.input().to_batch()?;
-        let mut new_logical = self.core.clone();
-        new_logical.input = new_input;
-        Ok(BatchFilter::new(new_logical).into())
+        let core = self.core.clone_with_input(new_input);
+        Ok(BatchFilter::new(core).into())
     }
 }
 
 impl ToStream for LogicalFilter {
-    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(
+        &self,
+        ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         let new_input = self.input().to_stream(ctx)?;
 
         let predicate = self.predicate();
@@ -203,9 +205,8 @@ impl ToStream for LogicalFilter {
                 no `now()`, and `now_expr` is a non-decreasing expression contains `now()`."
             );
         }
-        let mut new_logical = self.core.clone();
-        new_logical.input = new_input;
-        Ok(StreamFilter::new(new_logical).into())
+        let core = self.core.clone_with_input(new_input);
+        Ok(StreamFilter::new(core).into())
     }
 
     fn logical_rewrite_for_stream(

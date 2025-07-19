@@ -15,9 +15,12 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::catalog::SourceId;
-use crate::optimizer::plan_node::{Logical, LogicalShare, LogicalSource, PlanRef};
+use crate::optimizer::PlanVisitor;
+use crate::optimizer::plan_node::{
+    Logical, LogicalPlanRef as PlanRef, LogicalShare, LogicalSource,
+};
+use crate::optimizer::plan_rewriter::PlanRewriter;
 use crate::optimizer::plan_visitor::{DefaultBehavior, DefaultValue, LogicalPlanVisitor};
-use crate::optimizer::{PlanRewriter, PlanVisitor};
 
 #[derive(Debug, Clone, Default)]
 pub struct ShareSourceRewriter {
@@ -80,7 +83,7 @@ impl PlanRewriter<Logical> for ShareSourceRewriter {
         if let Some(source) = plan.as_logical_source() {
             self.rewrite_logical_source(source)
         } else {
-            plan.clone_root_with_inputs::<Logical>(&inputs)
+            plan.clone_root_with_inputs(&inputs)
         }
     }
 }

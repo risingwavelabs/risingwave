@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::Planner;
 use crate::binder::{BoundSetExpr, ShareId};
 use crate::error::Result;
-use crate::optimizer::plan_node::LogicalRecursiveUnion;
-use crate::{PlanRef, Planner};
+use crate::optimizer::plan_node::{LogicalPlanRef, LogicalRecursiveUnion};
 
 impl Planner {
     pub(super) fn plan_recursive_union(
@@ -23,7 +23,7 @@ impl Planner {
         base: BoundSetExpr,
         recursive: BoundSetExpr,
         id: ShareId,
-    ) -> Result<PlanRef> {
+    ) -> Result<LogicalPlanRef> {
         let base = self.plan_set_expr(base, vec![], &[])?;
         let recursive = self.plan_set_expr(recursive, vec![], &[])?;
         let plan = LogicalRecursiveUnion::create(base, recursive, id);

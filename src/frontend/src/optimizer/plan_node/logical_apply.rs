@@ -22,8 +22,8 @@ use super::generic::{
 };
 use super::utils::{Distill, childless_record};
 use super::{
-    ColPrunable, Logical, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
-    PredicatePushdown, ToBatch, ToStream,
+    BatchPlanRef, ColPrunable, Logical, LogicalJoin, LogicalPlanRef, LogicalProject, PlanBase,
+    PlanTreeNodeBinary, PredicatePushdown, StreamPlanRef, ToBatch, ToStream,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
@@ -40,8 +40,8 @@ use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalApply {
     pub base: PlanBase<Logical>,
-    left: PlanRef,
-    right: PlanRef,
+    left: LogicalPlanRef,
+    right: LogicalPlanRef,
     on: Condition,
     join_type: JoinType,
 
@@ -82,8 +82,8 @@ impl Distill for LogicalApply {
 
 impl LogicalApply {
     pub(crate) fn new(
-        left: PlanRef,
-        right: PlanRef,
+        left: LogicalPlanRef,
+        right: LogicalPlanRef,
         join_type: JoinType,
         on: Condition,
         correlated_id: CorrelatedId,
@@ -115,14 +115,14 @@ impl LogicalApply {
     }
 
     pub fn create(
-        left: PlanRef,
-        right: PlanRef,
+        left: LogicalPlanRef,
+        right: LogicalPlanRef,
         join_type: JoinType,
         on: Condition,
         correlated_id: CorrelatedId,
         correlated_indices: Vec<usize>,
         max_one_row: bool,
-    ) -> PlanRef {
+    ) -> LogicalPlanRef {
         Self::new(
             left,
             right,
@@ -144,8 +144,8 @@ impl LogicalApply {
     pub fn decompose(
         self,
     ) -> (
-        PlanRef,
-        PlanRef,
+        LogicalPlanRef,
+        LogicalPlanRef,
         Condition,
         JoinType,
         CorrelatedId,
@@ -200,7 +200,11 @@ impl LogicalApply {
     ///             /           \
     ///          Domain         RHS
     /// ```
-    pub fn translate_apply(self, domain: PlanRef, eq_predicates: Vec<ExprImpl>) -> PlanRef {
+    pub fn translate_apply(
+        self,
+        domain: LogicalPlanRef,
+        eq_predicates: Vec<ExprImpl>,
+    ) -> LogicalPlanRef {
         let (
             apply_left,
             apply_right,
@@ -280,16 +284,16 @@ impl LogicalApply {
     }
 }
 
-impl PlanTreeNodeBinary for LogicalApply {
-    fn left(&self) -> PlanRef {
+impl PlanTreeNodeBinary<Logical> for LogicalApply {
+    fn left(&self) -> LogicalPlanRef {
         self.left.clone()
     }
 
-    fn right(&self) -> PlanRef {
+    fn right(&self) -> LogicalPlanRef {
         self.right.clone()
     }
 
-    fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
+    fn clone_with_left_right(&self, left: LogicalPlanRef, right: LogicalPlanRef) -> Self {
         Self::new(
             left,
             right,
@@ -303,20 +307,24 @@ impl PlanTreeNodeBinary for LogicalApply {
     }
 }
 
-impl_plan_tree_node_for_binary! { LogicalApply }
+impl_plan_tree_node_for_binary! { Logical, LogicalApply }
 
 impl ColPrunable for LogicalApply {
-    fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
+    fn prune_col(
+        &self,
+        _required_cols: &[usize],
+        _ctx: &mut ColumnPruningContext,
+    ) -> LogicalPlanRef {
         panic!("LogicalApply should be unnested")
     }
 }
 
-impl ExprRewritable for LogicalApply {
+impl ExprRewritable<Logical> for LogicalApply {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
 
-    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> LogicalPlanRef {
         let mut new = self.clone();
         new.on = new.on.rewrite_expr(r);
         new.base = new.base.clone_with_new_plan_id();
@@ -335,7 +343,7 @@ impl PredicatePushdown for LogicalApply {
         &self,
         mut predicate: Condition,
         ctx: &mut PredicatePushdownContext,
-    ) -> PlanRef {
+    ) -> LogicalPlanRef {
         let left_col_num = self.left().schema().len();
         let right_col_num = self.right().schema().len();
         let join_type = self.join_type();
@@ -367,7 +375,7 @@ impl PredicatePushdown for LogicalApply {
 }
 
 impl ToBatch for LogicalApply {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<BatchPlanRef> {
         Err(RwError::from(ErrorCode::InternalError(
             "LogicalApply should be unnested".to_owned(),
         )))
@@ -375,7 +383,7 @@ impl ToBatch for LogicalApply {
 }
 
 impl ToStream for LogicalApply {
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
         Err(RwError::from(ErrorCode::InternalError(
             "LogicalApply should be unnested".to_owned(),
         )))
@@ -384,7 +392,7 @@ impl ToStream for LogicalApply {
     fn logical_rewrite_for_stream(
         &self,
         _ctx: &mut RewriteStreamContext,
-    ) -> Result<(PlanRef, ColIndexMapping)> {
+    ) -> Result<(LogicalPlanRef, ColIndexMapping)> {
         Err(RwError::from(ErrorCode::InternalError(
             "LogicalApply should be unnested".to_owned(),
         )))

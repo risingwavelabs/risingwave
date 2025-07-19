@@ -57,11 +57,10 @@ use super::SchedulerError;
 use crate::catalog::TableId;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::error::RwError;
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
 use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
 use crate::optimizer::plan_node::{
-    BatchIcebergScan, BatchKafkaScan, BatchSource, PlanNodeId, PlanNodeType,
+    BatchIcebergScan, BatchKafkaScan, BatchPlanRef, BatchSource, PlanNodeId, PlanNodeType,
 };
 use crate::optimizer::property::Distribution;
 use crate::scheduler::SchedulerResult;
@@ -117,10 +116,10 @@ impl Serialize for ExecutionPlanNode {
     }
 }
 
-impl TryFrom<PlanRef> for ExecutionPlanNode {
+impl TryFrom<BatchPlanRef> for ExecutionPlanNode {
     type Error = SchedulerError;
 
-    fn try_from(plan_node: PlanRef) -> Result<Self, Self::Error> {
+    fn try_from(plan_node: BatchPlanRef) -> Result<Self, Self::Error> {
         Ok(Self {
             plan_node_id: plan_node.plan_base().id(),
             plan_node_type: plan_node.node_type(),
@@ -166,7 +165,7 @@ impl BatchPlanFragmenter {
         catalog_reader: CatalogReader,
         batch_parallelism: Option<NonZeroU64>,
         timezone: String,
-        batch_node: PlanRef,
+        batch_node: BatchPlanRef,
     ) -> SchedulerResult<Self> {
         // if batch_parallelism is None, it means no limit, we will use the available nodes count as
         // parallelism.
@@ -198,7 +197,7 @@ impl BatchPlanFragmenter {
     }
 
     /// Split the plan node into each stages, based on exchange node.
-    fn split_into_stage(&mut self, batch_node: PlanRef) -> SchedulerResult<()> {
+    fn split_into_stage(&mut self, batch_node: BatchPlanRef) -> SchedulerResult<()> {
         let root_stage = self.new_stage(
             batch_node,
             Some(Distribution::Single.to_prost(
@@ -954,7 +953,7 @@ impl BatchPlanFragmenter {
 
     fn new_stage(
         &mut self,
-        root: PlanRef,
+        root: BatchPlanRef,
         exchange_info: Option<ExchangeInfo>,
     ) -> SchedulerResult<QueryStageRef> {
         let next_stage_id = self.next_stage_id;
@@ -1061,7 +1060,7 @@ impl BatchPlanFragmenter {
 
     fn visit_node(
         &mut self,
-        node: PlanRef,
+        node: BatchPlanRef,
         builder: &mut QueryStageBuilder,
         parent_exec_node: Option<&mut ExecutionPlanNode>,
     ) -> SchedulerResult<()> {
@@ -1088,7 +1087,7 @@ impl BatchPlanFragmenter {
 
     fn visit_exchange(
         &mut self,
-        node: PlanRef,
+        node: BatchPlanRef,
         builder: &mut QueryStageBuilder,
         parent_exec_node: Option<&mut ExecutionPlanNode>,
     ) -> SchedulerResult<()> {
@@ -1124,7 +1123,7 @@ impl BatchPlanFragmenter {
     /// If so, use  `SplitEnumeratorImpl` to get the split info from exteneral source.
     ///
     /// For current implementation, we can guarantee that each stage has only one source.
-    fn collect_stage_source(node: PlanRef) -> SchedulerResult<Option<SourceScanInfo>> {
+    fn collect_stage_source(node: BatchPlanRef) -> SchedulerResult<Option<SourceScanInfo>> {
         if node.node_type() == PlanNodeType::BatchExchange {
             // Do not visit next stage.
             return Ok(None);
@@ -1189,7 +1188,7 @@ impl BatchPlanFragmenter {
             .transpose()
     }
 
-    fn collect_stage_file_scan(node: PlanRef) -> SchedulerResult<Option<FileScanInfo>> {
+    fn collect_stage_file_scan(node: BatchPlanRef) -> SchedulerResult<Option<FileScanInfo>> {
         if node.node_type() == PlanNodeType::BatchExchange {
             // Do not visit next stage.
             return Ok(None);
@@ -1211,7 +1210,10 @@ impl BatchPlanFragmenter {
     ///
     /// If there are multiple scan nodes in this stage, they must have the same distribution, but
     /// maybe different vnodes partition. We just use the same partition for all the scan nodes.
-    fn collect_stage_table_scan(&self, node: PlanRef) -> SchedulerResult<Option<TableScanInfo>> {
+    fn collect_stage_table_scan(
+        &self,
+        node: BatchPlanRef,
+    ) -> SchedulerResult<Option<TableScanInfo>> {
         let build_table_scan_info = |name, table_desc: &TableDesc, scan_range| {
             let table_catalog = self
                 .catalog_reader
@@ -1254,7 +1256,7 @@ impl BatchPlanFragmenter {
     }
 
     /// Returns the dml table id if any.
-    fn collect_dml_table_id(node: &PlanRef) -> Option<TableId> {
+    fn collect_dml_table_id(node: &BatchPlanRef) -> Option<TableId> {
         if node.node_type() == PlanNodeType::BatchExchange {
             return None;
         }
@@ -1273,7 +1275,7 @@ impl BatchPlanFragmenter {
 
     fn collect_stage_lookup_join_parallelism(
         &self,
-        node: PlanRef,
+        node: BatchPlanRef,
     ) -> SchedulerResult<Option<usize>> {
         if node.node_type() == PlanNodeType::BatchExchange {
             // Do not visit next stage.

@@ -18,7 +18,10 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::batch::prelude::*;
 use super::utils::{Distill, childless_record};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchPb, ToDistributedBatch};
+use super::{
+    BatchPlanRef as PlanRef, ExprRewritable, PlanBase, PlanTreeNodeLeaf, ToBatchPb,
+    ToDistributedBatch,
+};
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::ToLocalBatch;
@@ -33,7 +36,7 @@ pub struct BatchTableFunction {
 }
 
 impl PlanTreeNodeLeaf for BatchTableFunction {}
-impl_plan_tree_node_for_leaf!(BatchTableFunction);
+impl_plan_tree_node_for_leaf! { Batch, BatchTableFunction }
 
 impl BatchTableFunction {
     pub fn new(logical: LogicalTableFunction) -> Self {
@@ -79,7 +82,7 @@ impl ToLocalBatch for BatchTableFunction {
     }
 }
 
-impl ExprRewritable for BatchTableFunction {
+impl ExprRewritable<Batch> for BatchTableFunction {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

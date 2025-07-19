@@ -33,8 +33,8 @@ use crate::expr::{
 pub use crate::optimizer::plan_node::LogicalFilter;
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef, Project, ProjectBuilder};
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalApply, LogicalDedup, LogicalJoin, LogicalOverWindow, LogicalProject,
-    LogicalProjectSet, LogicalTopN, LogicalValues, PlanAggCall, PlanRef,
+    LogicalAgg, LogicalApply, LogicalDedup, LogicalJoin, LogicalOverWindow, LogicalPlanRef,
+    LogicalProject, LogicalProjectSet, LogicalTopN, LogicalValues, PlanAggCall,
 };
 use crate::optimizer::property::Order;
 use crate::planner::Planner;
@@ -54,7 +54,7 @@ impl Planner {
         }: BoundSelect,
         extra_order_exprs: Vec<ExprImpl>,
         order: &[ColumnOrder],
-    ) -> Result<PlanRef> {
+    ) -> Result<LogicalPlanRef> {
         // Append expressions in ORDER BY.
         if distinct.is_distinct() && !extra_order_exprs.is_empty() {
             return Err(ErrorCode::InvalidInputSyntax(
@@ -200,13 +200,13 @@ impl Planner {
 
     /// Helper to create a dummy node as child of [`LogicalProject`].
     /// For example, `select 1+2, 3*4` will be `Project([1+2, 3+4]) - Values([[]])`.
-    fn create_dummy_values(&self) -> PlanRef {
+    fn create_dummy_values(&self) -> LogicalPlanRef {
         LogicalValues::create(vec![vec![]], Schema::default(), self.ctx.clone())
     }
 
     /// Helper to create an `EXISTS` boolean operator with the given `input`.
     /// It is represented by `Project([$0 >= 1]) -> Agg(count(*)) -> input`
-    fn create_exists(&self, input: PlanRef) -> Result<PlanRef> {
+    fn create_exists(&self, input: LogicalPlanRef) -> Result<LogicalPlanRef> {
         let count_star = Agg::new(vec![PlanAggCall::count_star()], IndexSet::empty(), input);
         let ge = FunctionCall::new(
             ExprType::GreaterThanOrEqual,
@@ -225,9 +225,9 @@ impl Planner {
     /// [`Self::substitute_subqueries_in_left_deep_tree_way`].
     pub(super) fn plan_where(
         &mut self,
-        mut input: PlanRef,
+        mut input: LogicalPlanRef,
         where_clause: ExprImpl,
-    ) -> Result<PlanRef> {
+    ) -> Result<LogicalPlanRef> {
         if !where_clause.has_subquery() {
             return Ok(LogicalFilter::create_with_expr(input, where_clause));
         }
@@ -281,7 +281,7 @@ impl Planner {
         &mut self,
         expr: ExprImpl,
         negated: bool,
-        input: &mut PlanRef,
+        input: &mut LogicalPlanRef,
     ) -> Result<()> {
         let join_type = if negated {
             JoinType::LeftAnti
@@ -345,9 +345,9 @@ impl Planner {
     /// But our dynamic filter sometimes generates subqueries in the same where clause multiple times (which couldn't work in the cross join way), so we need to support this case.
     pub(super) fn substitute_subqueries_in_left_deep_tree_way(
         &mut self,
-        mut root: PlanRef,
+        mut root: LogicalPlanRef,
         mut exprs: Vec<ExprImpl>,
-    ) -> Result<(PlanRef, Vec<ExprImpl>)> {
+    ) -> Result<(LogicalPlanRef, Vec<ExprImpl>)> {
         struct SubstituteSubQueries {
             input_col_num: usize,
             subqueries: Vec<Subquery>,
@@ -455,9 +455,9 @@ impl Planner {
     /// If we use the left-deep tree way, it will generate a lot of `Apply` nodes, which is not efficient.
     pub(super) fn substitute_subqueries_in_cross_join_way(
         &mut self,
-        mut root: PlanRef,
+        mut root: LogicalPlanRef,
         mut exprs: Vec<ExprImpl>,
-    ) -> Result<(PlanRef, Vec<ExprImpl>)> {
+    ) -> Result<(LogicalPlanRef, Vec<ExprImpl>)> {
         struct SubstituteSubQueries {
             input_col_num: usize,
             subqueries: Vec<Subquery>,
@@ -567,12 +567,12 @@ impl Planner {
     fn create_apply(
         correlated_id: CorrelatedId,
         correlated_indices: Vec<usize>,
-        left: PlanRef,
-        right: PlanRef,
+        left: LogicalPlanRef,
+        right: LogicalPlanRef,
         on: ExprImpl,
         join_type: JoinType,
         max_one_row: bool,
-    ) -> PlanRef {
+    ) -> LogicalPlanRef {
         LogicalApply::create(
             left,
             right,

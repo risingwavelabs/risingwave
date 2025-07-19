@@ -15,21 +15,21 @@
 use std::marker::PhantomData;
 
 use crate::PlanRef;
-use crate::optimizer::plan_node::ConventionMarker;
+use crate::optimizer::plan_node::{ConventionMarker, PlanTreeNode};
 use crate::optimizer::plan_rewriter::PlanRewriter;
 
 #[derive(Debug, Clone)]
 pub struct PlanCloner<C: ConventionMarker>(PhantomData<C>);
 
 impl<C: ConventionMarker> PlanCloner<C> {
-    pub fn clone_whole_plan(plan: PlanRef) -> PlanRef {
-        let mut plan_cloner = Self(PhantomData);
+    pub fn clone_whole_plan(plan: PlanRef<C>) -> PlanRef<C> {
+        let mut plan_cloner = PlanCloner(PhantomData);
         plan.rewrite_with(&mut plan_cloner)
     }
 }
 
 impl<C: ConventionMarker> PlanRewriter<C> for PlanCloner<C> {
-    fn rewrite_with_inputs(&mut self, plan: &PlanRef, inputs: Vec<PlanRef>) -> PlanRef {
-        plan.clone_root_with_inputs::<C>(&inputs)
+    fn rewrite_with_inputs(&mut self, plan: &PlanRef<C>, inputs: Vec<PlanRef<C>>) -> PlanRef<C> {
+        plan.clone_with_inputs(&inputs)
     }
 }

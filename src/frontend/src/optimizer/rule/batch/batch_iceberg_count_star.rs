@@ -19,13 +19,12 @@
 
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 
-use crate::PlanRef;
+use super::{BoxedRule, PlanRef, Rule};
 use crate::optimizer::plan_node::{BatchIcebergScan, PlanAggCall};
-use crate::optimizer::rule::{BoxedRule, Rule};
 
 pub struct BatchIcebergCountStar {}
 
-impl Rule for BatchIcebergCountStar {
+impl Rule<super::Convention> for BatchIcebergCountStar {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let agg = plan.as_batch_simple_agg()?;
         if agg.core.group_key.is_empty()

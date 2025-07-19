@@ -17,8 +17,9 @@ use itertools::Itertools;
 use super::generic::GenericPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{
-    BatchExpand, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, StreamExpand, ToBatch, ToStream, gen_filter_and_pushdown, generic,
+    BatchExpand, BatchPlanRef, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
+    PlanBase, PlanTreeNodeUnary, PredicatePushdown, StreamExpand, StreamPlanRef, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -70,7 +71,7 @@ impl LogicalExpand {
     }
 }
 
-impl PlanTreeNodeUnary for LogicalExpand {
+impl PlanTreeNodeUnary<Logical> for LogicalExpand {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -125,7 +126,7 @@ impl PlanTreeNodeUnary for LogicalExpand {
     }
 }
 
-impl_plan_tree_node_for_unary! {LogicalExpand}
+impl_plan_tree_node_for_unary! { Logical, LogicalExpand}
 impl_distill_by_unit!(LogicalExpand, core, "LogicalExpand");
 
 impl ColPrunable for LogicalExpand {
@@ -141,7 +142,7 @@ impl ColPrunable for LogicalExpand {
     }
 }
 
-impl ExprRewritable for LogicalExpand {}
+impl ExprRewritable<Logical> for LogicalExpand {}
 
 impl ExprVisitable for LogicalExpand {}
 
@@ -157,11 +158,10 @@ impl PredicatePushdown for LogicalExpand {
 }
 
 impl ToBatch for LogicalExpand {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<BatchPlanRef> {
         let new_input = self.input().to_batch()?;
-        let mut new_logical = self.core.clone();
-        new_logical.input = new_input;
-        Ok(BatchExpand::new(new_logical).into())
+        let expand = self.core.clone_with_input(new_input);
+        Ok(BatchExpand::new(expand).into())
     }
 }
 
@@ -175,11 +175,10 @@ impl ToStream for LogicalExpand {
         Ok((expand.into(), out_col_change))
     }
 
-    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
         let new_input = self.input().to_stream(ctx)?;
-        let mut new_logical = self.core.clone();
-        new_logical.input = new_input;
-        Ok(StreamExpand::new(new_logical).into())
+        let expand = self.core.clone_with_input(new_input);
+        Ok(StreamExpand::new(expand).into())
     }
 }
 

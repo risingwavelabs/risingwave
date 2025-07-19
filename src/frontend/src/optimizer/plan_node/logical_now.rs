@@ -19,9 +19,9 @@ use risingwave_common::catalog::Schema;
 use super::generic::{self, GenericPlanRef, Mode};
 use super::utils::{Distill, childless_record};
 use super::{
-    ColPrunable, ColumnPruningContext, ExprRewritable, Logical, LogicalFilter, LogicalValues,
-    PlanBase, PlanRef, PredicatePushdown, RewriteStreamContext, StreamNow, ToBatch, ToStream,
-    ToStreamContext,
+    ColPrunable, ColumnPruningContext, ExprRewritable, Logical, LogicalFilter,
+    LogicalPlanRef as PlanRef, LogicalValues, PlanBase, PredicatePushdown, RewriteStreamContext,
+    StreamNow, ToBatch, ToStream, ToStreamContext,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -60,9 +60,9 @@ impl Distill for LogicalNow {
     }
 }
 
-impl_plan_tree_node_for_leaf! { LogicalNow }
+impl_plan_tree_node_for_leaf! { Logical, LogicalNow }
 
-impl ExprRewritable for LogicalNow {}
+impl ExprRewritable<Logical> for LogicalNow {}
 
 impl ExprVisitable for LogicalNow {}
 
@@ -71,7 +71,7 @@ impl PredicatePushdown for LogicalNow {
         &self,
         predicate: crate::utils::Condition,
         _ctx: &mut super::PredicatePushdownContext,
-    ) -> crate::PlanRef {
+    ) -> PlanRef {
         LogicalFilter::create(self.clone().into(), predicate)
     }
 }
@@ -85,13 +85,16 @@ impl ToStream for LogicalNow {
     }
 
     /// `to_stream` is equivalent to `to_stream_with_dist_required(RequiredDist::Any)`
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(
+        &self,
+        _ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         Ok(StreamNow::new(self.core.clone()).into())
     }
 }
 
 impl ToBatch for LogicalNow {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         bail!("`LogicalNow` can only be converted to stream")
     }
 }

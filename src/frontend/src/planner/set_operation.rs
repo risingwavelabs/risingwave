@@ -14,10 +14,11 @@
 
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
-use crate::PlanRef;
 use crate::binder::{BoundSetExpr, BoundSetOperation};
 use crate::error::Result;
-use crate::optimizer::plan_node::{LogicalExcept, LogicalIntersect, LogicalProject, LogicalUnion};
+use crate::optimizer::plan_node::{
+    LogicalExcept, LogicalIntersect, LogicalPlanRef, LogicalProject, LogicalUnion,
+};
 use crate::planner::Planner;
 
 impl Planner {
@@ -28,7 +29,7 @@ impl Planner {
         corresponding_col_indices: Option<(ColIndexMapping, ColIndexMapping)>,
         left: BoundSetExpr,
         right: BoundSetExpr,
-    ) -> Result<PlanRef> {
+    ) -> Result<LogicalPlanRef> {
         let left = self.plan_set_expr(left, vec![], &[])?;
         let right = self.plan_set_expr(right, vec![], &[])?;
 

@@ -33,7 +33,7 @@ use crate::TableCatalog;
 use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprRewriter, ExprVisitor, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::plan_node::batch::BatchPlanRef;
+use crate::optimizer::plan_node::batch::BatchPlanExt;
 use crate::optimizer::property::{
     Distribution, FunctionalDependencySet, RequiredDist, WatermarkColumns,
 };
@@ -59,6 +59,16 @@ pub struct Agg<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
+    pub(crate) fn clone_with_input<OtherPlanRef>(&self, input: OtherPlanRef) -> Agg<OtherPlanRef> {
+        Agg {
+            agg_calls: self.agg_calls.clone(),
+            group_key: self.group_key.clone(),
+            grouping_sets: self.grouping_sets.clone(),
+            input,
+            enable_two_phase: self.enable_two_phase,
+        }
+    }
+
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.agg_calls.iter_mut().for_each(|call| {
             call.filter = call.filter.clone().rewrite_expr(r);
@@ -201,7 +211,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     }
 }
 
-impl<PlanRef: BatchPlanRef> Agg<PlanRef> {
+impl<PlanRef: BatchPlanExt> Agg<PlanRef> {
     // Check if the input is already sorted on group keys.
     pub(crate) fn input_provides_order_on_group_keys(&self) -> bool {
         let mut input_order_prefix = IndexSet::empty();
@@ -307,10 +317,10 @@ pub struct MaterializedInputState {
     pub order_columns: Vec<ColumnOrder>,
 }
 
-impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
+impl<PlanRef: stream::StreamPlanExt> Agg<PlanRef> {
     pub fn infer_tables(
         &self,
-        me: impl stream::StreamPlanRef,
+        me: impl stream::StreamPlanExt,
         vnode_col_idx: Option<usize>,
         window_col_idx: Option<usize>,
     ) -> (
@@ -382,7 +392,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     /// Infer `AggCallState`s for streaming agg.
     pub fn infer_stream_agg_state(
         &self,
-        me: impl stream::StreamPlanRef,
+        me: impl stream::StreamPlanExt,
         vnode_col_idx: Option<usize>,
         window_col_idx: Option<usize>,
     ) -> Vec<AggCallState> {
@@ -691,7 +701,9 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             })
             .collect()
     }
+}
 
+impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     pub fn decompose(self) -> (Vec<PlanAggCall>, IndexSet, Vec<IndexSet>, PlanRef, bool) {
         (
             self.agg_calls,
@@ -728,7 +740,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     }
 }
 
-impl_distill_unit_from_fields!(Agg, stream::StreamPlanRef);
+impl_distill_unit_from_fields!(Agg, GenericPlanRef);
 
 /// Rewritten version of [`crate::expr::AggCall`] which uses `InputRef` instead of `ExprImpl`.
 /// Refer to [`crate::optimizer::plan_node::logical_agg::LogicalAggBuilder::try_rewrite_agg_call`]

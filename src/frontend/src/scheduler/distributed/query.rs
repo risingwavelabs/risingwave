@@ -489,11 +489,12 @@ pub(crate) mod tests {
     use crate::catalog::root_catalog::Catalog;
     use crate::catalog::table_catalog::TableType;
     use crate::expr::InputRef;
+    use crate::optimizer::OptimizerContext;
     use crate::optimizer::plan_node::{
-        BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalScan, ToBatch, generic,
+        BatchExchange, BatchFilter, BatchHashJoin, BatchPlanRef, EqJoinPredicate, LogicalScan,
+        ToBatch, generic,
     };
     use crate::optimizer::property::{Cardinality, Distribution, Order};
-    use crate::optimizer::{OptimizerContext, PlanRef};
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
     use crate::scheduler::{
@@ -602,7 +603,7 @@ pub(crate) mod tests {
             engine: Engine::Hummock,
             clean_watermark_index_in_pk: None,
         };
-        let batch_plan_node: PlanRef = LogicalScan::create(
+        let batch_plan_node = LogicalScan::create(
             "".to_owned(),
             table_catalog.into(),
             vec![],
@@ -621,13 +622,13 @@ pub(crate) mod tests {
             batch_plan_node.clone(),
         ))
         .into();
-        let batch_exchange_node1: PlanRef = BatchExchange::new(
+        let batch_exchange_node1: BatchPlanRef = BatchExchange::new(
             batch_plan_node.clone(),
             Order::default(),
             Distribution::HashShard(vec![0, 1]),
         )
         .into();
-        let batch_exchange_node2: PlanRef = BatchExchange::new(
+        let batch_exchange_node2: BatchPlanRef = BatchExchange::new(
             batch_filter,
             Order::default(),
             Distribution::HashShard(vec![0, 1]),
@@ -663,9 +664,9 @@ pub(crate) mod tests {
         );
         let eq_join_predicate =
             EqJoinPredicate::new(Condition::true_cond(), vec![eq_key_1, eq_key_2], 2, 2);
-        let hash_join_node: PlanRef =
+        let hash_join_node: BatchPlanRef =
             BatchHashJoin::new(logical_join_node, eq_join_predicate, None).into();
-        let batch_exchange_node: PlanRef = BatchExchange::new(
+        let batch_exchange_node: BatchPlanRef = BatchExchange::new(
             hash_join_node.clone(),
             Order::default(),
             Distribution::Single,

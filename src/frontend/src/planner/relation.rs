@@ -33,8 +33,9 @@ use crate::error::{ErrorCode, Result};
 use crate::expr::{CastContext, Expr, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{
-    LogicalApply, LogicalCteRef, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan,
-    LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues, PlanRef,
+    LogicalApply, LogicalCteRef, LogicalHopWindow, LogicalJoin, LogicalPlanRef as PlanRef,
+    LogicalProject, LogicalScan, LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction,
+    LogicalValues,
 };
 use crate::optimizer::property::Cardinality;
 use crate::planner::{PlanFor, Planner};

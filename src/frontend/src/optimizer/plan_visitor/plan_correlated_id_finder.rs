@@ -15,10 +15,9 @@
 use std::collections::HashSet;
 
 use super::{DefaultBehavior, DefaultValue, LogicalPlanVisitor};
-use crate::PlanRef;
 use crate::expr::{CorrelatedId, CorrelatedInputRef, ExprVisitor};
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalFilter, LogicalJoin, LogicalProject, LogicalProjectSet,
+    LogicalAgg, LogicalFilter, LogicalJoin, LogicalPlanRef, LogicalProject, LogicalProjectSet,
     LogicalTableFunction, PlanTreeNode,
 };
 use crate::optimizer::plan_visitor::PlanVisitor;
@@ -33,7 +32,7 @@ impl PlanCorrelatedIdFinder {
         self.correlated_id_set.contains(correlated_id)
     }
 
-    pub fn find_correlated_id(plan: PlanRef, correlated_id: &CorrelatedId) -> bool {
+    pub fn find_correlated_id(plan: LogicalPlanRef, correlated_id: &CorrelatedId) -> bool {
         let mut plan_correlated_id_finder = Self::default();
         plan_correlated_id_finder.visit(plan);
         plan_correlated_id_finder.contains(correlated_id)

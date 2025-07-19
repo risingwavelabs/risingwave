@@ -19,7 +19,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use super::generic::{self, PlanAggCall};
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record, plan_node_name, watermark_pretty};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef};
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -157,7 +157,7 @@ impl Distill for StreamHashAgg {
     }
 }
 
-impl PlanTreeNodeUnary for StreamHashAgg {
+impl PlanTreeNodeUnary<Stream> for StreamHashAgg {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -175,7 +175,7 @@ impl PlanTreeNodeUnary for StreamHashAgg {
         )
     }
 }
-impl_plan_tree_node_for_unary! { StreamHashAgg }
+impl_plan_tree_node_for_unary! { Stream, StreamHashAgg }
 
 impl StreamNode for StreamHashAgg {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -221,7 +221,7 @@ impl StreamNode for StreamHashAgg {
     }
 }
 
-impl ExprRewritable for StreamHashAgg {
+impl ExprRewritable<Stream> for StreamHashAgg {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

@@ -19,7 +19,7 @@ use crate::binder::BoundDelete;
 use crate::error::Result;
 use crate::optimizer::plan_node::{LogicalDelete, LogicalProject, generic};
 use crate::optimizer::property::{Order, RequiredDist};
-use crate::optimizer::{LogicalPlanRoot, PlanRef, PlanRoot};
+use crate::optimizer::{LogicalPlanRoot, PlanRoot};
 
 impl Planner {
     pub(super) fn plan_delete(&mut self, delete: BoundDelete) -> Result<LogicalPlanRoot> {
@@ -47,7 +47,7 @@ impl Planner {
             input
         };
         let returning = !delete.returning_list.is_empty();
-        let mut plan: PlanRef = LogicalDelete::from(generic::Delete::new(
+        let mut plan = LogicalDelete::from(generic::Delete::new(
             input,
             delete.table_name.clone(),
             delete.table_id,
