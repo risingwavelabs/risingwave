@@ -33,7 +33,7 @@ export RW_BUILD_INSTRUMENT_COVERAGE=1
 echo "--- Build Rust components"
 
 if [[ "$profile" == "ci-dev" ]]; then
-    RISINGWAVE_FEATURE_FLAGS=(--features rw-dynamic-link --no-default-features)
+    RISINGWAVE_FEATURE_FLAGS=(--features rw-dynamic-link,all-connectors --no-default-features)
 else
     RISINGWAVE_FEATURE_FLAGS=(--features rw-static-link)
     configure_static_openssl
