@@ -210,6 +210,12 @@ impl Binder {
                 "?&" => ExprType::JsonbExistsAll,
                 // vector
                 "<->" => ExprType::L2Distance,
+                "<=>" => ExprType::CosineDistance,
+                "<+>" => ExprType::L1Distance,
+                "<#>" => {
+                    func_types.push(ExprType::Neg);
+                    ExprType::InnerProduct
+                }
                 _ => bail_not_implemented!(issue = 112, "binary op: {:?}", name),
             },
             BinaryOperator::Xor | BinaryOperator::PGQualified(_) => {
