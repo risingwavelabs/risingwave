@@ -9,14 +9,14 @@ SELECT setting FROM pg_settings WHERE name = 'license_key';
 <redacted>
 
 query error
-SELECT rw_test_paid_tier();
+SELECT rw_test_feature('TestDummy');
 ----
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: error while evaluating expression `test_paid_tier()`
-  3: feature TestPaid is not available based on your license
+  2: error while evaluating expression `test_feature('TestDummy')`
+  3: feature TestDummy is not available based on your license
 
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
 
@@ -26,17 +26,23 @@ statement ok
 ALTER SYSTEM SET license_key TO 'invalid';
 
 query error
-SELECT rw_test_paid_tier();
+SELECT rw_test_feature('TestDummy');
 ----
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: error while evaluating expression `test_paid_tier()`
-  3: feature TestPaid is not available due to license error
+  2: error while evaluating expression `test_feature('TestDummy')`
+  3: feature TestDummy is not available due to license error
   4: invalid license key
   5: InvalidToken
 
+
+# All features are not available.
+query I
+SELECT count(*) FROM rw_features WHERE available;
+----
+0
 
 # Set the license key to empty. This demonstrates the default behavior in production, i.e., free tier.
 statement ok
@@ -49,14 +55,14 @@ SELECT setting FROM pg_settings WHERE name = 'license_key';
 (empty)
 
 query error
-SELECT rw_test_paid_tier();
+SELECT rw_test_feature('TestDummy');
 ----
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: Expr error
-  2: error while evaluating expression `test_paid_tier()`
-  3: feature TestPaid is not available based on your license
+  2: error while evaluating expression `test_feature('TestDummy')`
+  3: feature TestDummy is not available based on your license
 
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
 
@@ -72,6 +78,18 @@ SELECT setting FROM pg_settings WHERE name = 'license_key';
 <default>
 
 query T
+SELECT rw_test_feature('TestDummy');
+----
+t
+
+# `rw_test_paid_tier` is deprecated but still works.
+query T
 SELECT rw_test_paid_tier();
 ----
 t
+
+# Test that all features are available.
+query I
+SELECT count(*) FROM rw_features WHERE NOT available;
+----
+0

@@ -114,7 +114,7 @@ pub struct License {
     /// Tier of the license.
     pub tier: Tier,
 
-    /// Maximum number of compute-node CPU cores allowed to use. Typically used for the paid tier.
+    /// Maximum number of compute-node CPU cores allowed to use.
     pub cpu_core_limit: Option<NonZeroUsize>,
 
     /// Expiration time in seconds since UNIX epoch.
@@ -145,7 +145,7 @@ pub enum LicenseError {
     InvalidKey(#[source] jsonwebtoken::errors::Error),
 
     #[error(
-        "the license key is currently not effective because the CPU core in the cluster \
+        "a valid license key is set, but it is currently not effective because the CPU core in the cluster \
         ({actual}) exceeds the maximum allowed by the license key ({limit}); \
         consider removing some nodes or acquiring a new license key with a higher limit"
     )]
