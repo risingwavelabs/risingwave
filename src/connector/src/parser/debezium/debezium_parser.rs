@@ -26,6 +26,7 @@ use crate::parser::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, ParseResult,
     ParserFormat, ProtocolProperties, SourceStreamChunkRowWriter, SpecificParserConfig,
 };
+use crate::source::cdc::SchemaChangeFailurePolicy;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
@@ -40,11 +41,23 @@ pub struct DebeziumParser {
 
 pub const DEBEZIUM_IGNORE_KEY: &str = "ignore_key";
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct DebeziumProps {
     // Ignore the key part of the message.
     // If enabled, we don't take the key part into message accessor.
     pub ignore_key: bool,
+
+    // Policy for handling schema change failures
+    pub schema_change_failure_policy: SchemaChangeFailurePolicy,
+}
+
+impl Default for DebeziumProps {
+    fn default() -> Self {
+        Self {
+            ignore_key: false,
+            schema_change_failure_policy: SchemaChangeFailurePolicy::default(),
+        }
+    }
 }
 
 impl DebeziumProps {
@@ -53,7 +66,17 @@ impl DebeziumProps {
             .get(DEBEZIUM_IGNORE_KEY)
             .map(|v| v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
-        Self { ignore_key }
+
+        // Parse schema change failure policy
+        let schema_change_failure_policy = props
+            .get(crate::source::cdc::CDC_SCHEMA_CHANGE_FAILURE_POLICY_KEY)
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_default();
+
+        Self {
+            ignore_key,
+            schema_change_failure_policy,
+        }
     }
 }
 
@@ -166,6 +189,10 @@ impl ByteStreamSourceParser for DebeziumParser {
 
     fn parser_format(&self) -> ParserFormat {
         ParserFormat::Debezium
+    }
+
+    fn get_schema_change_failure_policy(&self) -> crate::source::cdc::SchemaChangeFailurePolicy {
+        self.props.schema_change_failure_policy.clone()
     }
 
     #[allow(clippy::unused_async)] // false positive for `async_trait`

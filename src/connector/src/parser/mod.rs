@@ -173,6 +173,11 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     /// The format of the specific parser.
     fn parser_format(&self) -> ParserFormat;
 
+    /// Get the schema change failure policy for CDC sources
+    fn get_schema_change_failure_policy(&self) -> crate::source::cdc::SchemaChangeFailurePolicy {
+        crate::source::cdc::SchemaChangeFailurePolicy::default()
+    }
+
     /// Parse one record from the given `payload` and write rows to the `writer`.
     ///
     /// Returns error if **any** of the rows in the message failed to parse.
