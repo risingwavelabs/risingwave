@@ -78,6 +78,10 @@ impl<T: TrivialSinkName> Sink for TrivialSink<T> {
         Ok(T::SINK_NAME == TABLE_SINK && matches!(user_specified, SinkDecouple::Enable))
     }
 
+    fn support_schema_change() -> bool {
+        true
+    }
+
     async fn new_log_sinker(&self, _writer_env: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(Self(PhantomData))
     }

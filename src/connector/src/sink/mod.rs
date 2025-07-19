@@ -700,6 +700,10 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
         }
     }
 
+    fn support_schema_change() -> bool {
+        false
+    }
+
     fn validate_alter_config(_config: &BTreeMap<String, String>) -> Result<()> {
         Ok(())
     }

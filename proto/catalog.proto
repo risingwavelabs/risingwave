@@ -222,6 +222,8 @@ message Sink {
 
   // only for the sink whose target is a table. Columns of the target table when the sink is created. At this point all the default columns of the target table are all handled by the project operator in the sink plan.
   repeated plan_common.ColumnCatalog original_target_columns = 26;
+
+  optional uint32 auto_refresh_schema_from_table = 27;
 }
 
 message Subscription {

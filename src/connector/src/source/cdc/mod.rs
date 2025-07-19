@@ -46,7 +46,6 @@ pub const CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY: &str = "snapshot.batch_size";
 // We enable transaction for shared cdc source by default
 pub const CDC_TRANSACTIONAL_KEY: &str = "transactional";
 pub const CDC_WAIT_FOR_STREAMING_START_TIMEOUT: &str = "cdc.source.wait.streaming.start.timeout";
-pub const CDC_AUTO_SCHEMA_CHANGE_KEY: &str = "auto.schema.change";
 
 // User can set strong-schema='true' to enable strong schema for mongo cdc source
 pub const CDC_MONGODB_STRONG_SCHEMA_KEY: &str = "strong_schema";
