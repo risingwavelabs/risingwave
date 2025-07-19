@@ -17,7 +17,7 @@ use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
-use anyhow::{Context, anyhow};
+use anyhow::Context;
 use parking_lot::RwLock;
 use parking_lot::lock_api::RwLockReadGuard;
 use prost::Message;
@@ -213,10 +213,9 @@ impl LocalSecretManager {
                 let config = HashiCorpVaultConfig::from_protobuf(&vault_backend)?;
                 let client = HashiCorpVaultClient::new(config)?;
 
-                let secret_value = task::block_in_place(move || {
+                task::block_in_place(move || {
                     Handle::current().block_on(async move { client.get_secret().await })
-                })?;
-                secret_value
+                })?
             }
         };
         Ok(secret_value)
