@@ -18,10 +18,9 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::batch::prelude::*;
 use super::utils::impl_distill_by_unit;
-use super::{ExprRewritable, generic};
+use super::{BatchPlanRef as PlanRef, ExprRewritable, generic};
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     PlanBase, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, ToLocalBatch,
@@ -48,7 +47,7 @@ impl BatchProjectSet {
 
 impl_distill_by_unit!(BatchProjectSet, core, "BatchProjectSet");
 
-impl PlanTreeNodeUnary for BatchProjectSet {
+impl PlanTreeNodeUnary<Batch> for BatchProjectSet {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -60,7 +59,7 @@ impl PlanTreeNodeUnary for BatchProjectSet {
     }
 }
 
-impl_plan_tree_node_for_unary! { BatchProjectSet }
+impl_plan_tree_node_for_unary! { Batch, BatchProjectSet }
 
 impl ToDistributedBatch for BatchProjectSet {
     fn to_distributed(&self) -> Result<PlanRef> {
@@ -91,7 +90,7 @@ impl ToLocalBatch for BatchProjectSet {
     }
 }
 
-impl ExprRewritable for BatchProjectSet {
+impl ExprRewritable<Batch> for BatchProjectSet {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

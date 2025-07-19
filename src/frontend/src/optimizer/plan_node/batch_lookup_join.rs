@@ -21,15 +21,14 @@ use risingwave_sqlparser::ast::AsOf;
 
 use super::batch::prelude::*;
 use super::utils::{Distill, childless_record, to_pb_time_travel_as_of};
-use super::{ExprRewritable, generic};
+use super::{BatchPlanRef as PlanRef, ExprRewritable, LogicalScan, generic};
 use crate::error::Result;
 use crate::expr::{Expr, ExprRewriter, ExprVisitor};
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
-    EqJoinPredicate, EqJoinPredicateDisplay, LogicalScan, PlanBase, PlanTreeNodeUnary,
-    ToDistributedBatch, ToLocalBatch, TryToBatchPb,
+    EqJoinPredicate, EqJoinPredicateDisplay, PlanBase, PlanTreeNodeUnary, ToDistributedBatch,
+    ToLocalBatch, TryToBatchPb,
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::scheduler::SchedulerResult;
@@ -38,7 +37,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchLookupJoin {
     pub base: PlanBase<Batch>,
-    core: generic::Join<PlanRef>,
+    core: generic::Join<PlanRef, LogicalScan>,
 
     /// The join condition must be equivalent to `logical.on`, but separated into equal and
     /// non-equal parts to facilitate execution later
@@ -64,7 +63,7 @@ pub struct BatchLookupJoin {
 
 impl BatchLookupJoin {
     pub fn new(
-        core: generic::Join<PlanRef>,
+        core: generic::Join<PlanRef, LogicalScan>,
         eq_join_predicate: EqJoinPredicate,
         right_table_desc: TableDesc,
         right_output_column_ids: Vec<ColumnId>,
@@ -92,7 +91,10 @@ impl BatchLookupJoin {
         }
     }
 
-    fn derive_dist(left: &Distribution, core: &generic::Join<PlanRef>) -> Distribution {
+    fn derive_dist(
+        left: &Distribution,
+        core: &generic::Join<PlanRef, impl GenericPlanRef>,
+    ) -> Distribution {
         match left {
             Distribution::Single => Distribution::Single,
             Distribution::HashShard(_) | Distribution::UpstreamHashShard(_, _) => {
@@ -142,16 +144,16 @@ impl Distill for BatchLookupJoin {
             vec.push(("output", data));
         }
 
-        if let Some(scan) = self.core.right.as_logical_scan() {
-            let scan: &LogicalScan = scan;
-            vec.push(("lookup table", Pretty::display(&scan.table_name())));
-        }
+        vec.push((
+            "lookup table",
+            Pretty::display(&self.core.right.table_name()),
+        ));
 
         childless_record("BatchLookupJoin", vec)
     }
 }
 
-impl PlanTreeNodeUnary for BatchLookupJoin {
+impl PlanTreeNodeUnary<Batch> for BatchLookupJoin {
     fn input(&self) -> PlanRef {
         self.core.left.clone()
     }
@@ -173,7 +175,7 @@ impl PlanTreeNodeUnary for BatchLookupJoin {
     }
 }
 
-impl_plan_tree_node_for_unary! { BatchLookupJoin }
+impl_plan_tree_node_for_unary! { Batch, BatchLookupJoin }
 
 impl ToDistributedBatch for BatchLookupJoin {
     fn to_distributed(&self) -> Result<PlanRef> {
@@ -287,13 +289,13 @@ impl TryToBatchPb for BatchLookupJoin {
 impl ToLocalBatch for BatchLookupJoin {
     fn to_local(&self) -> Result<PlanRef> {
         let input = RequiredDist::single()
-            .enforce_if_not_satisfies(self.input().to_local()?, &Order::any())?;
+            .batch_enforce_if_not_satisfies(self.input().to_local()?, &Order::any())?;
 
         Ok(self.clone_with_distributed_lookup(input, false).into())
     }
 }
 
-impl ExprRewritable for BatchLookupJoin {
+impl ExprRewritable<Batch> for BatchLookupJoin {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

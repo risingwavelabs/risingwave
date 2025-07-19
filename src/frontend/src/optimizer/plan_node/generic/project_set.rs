@@ -19,7 +19,8 @@ use risingwave_common::types::DataType;
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
 use crate::expr::{Expr, ExprDisplay, ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::plan_node::batch::BatchPlanRef;
+use crate::optimizer::plan_node::BatchPlanRef;
+use crate::optimizer::plan_node::batch::BatchPlanNodeMetadata;
 use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
@@ -39,6 +40,16 @@ pub struct ProjectSet<PlanRef> {
 }
 
 impl<PlanRef> ProjectSet<PlanRef> {
+    pub(crate) fn clone_with_input<OtherPlanRef>(
+        &self,
+        input: OtherPlanRef,
+    ) -> ProjectSet<OtherPlanRef> {
+        ProjectSet {
+            select_list: self.select_list.clone(),
+            input,
+        }
+    }
+
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.select_list = self
             .select_list
@@ -132,7 +143,7 @@ impl<PlanRef: GenericPlanRef> ProjectSet<PlanRef> {
     }
 }
 
-impl<PlanRef: BatchPlanRef> ProjectSet<PlanRef> {
+impl ProjectSet<BatchPlanRef> {
     /// Map the order of the input to use the updated indices
     pub fn get_out_column_index_order(&self) -> Order {
         self.i2o_col_mapping()

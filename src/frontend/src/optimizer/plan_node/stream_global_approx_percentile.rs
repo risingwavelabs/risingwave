@@ -18,11 +18,11 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::GlobalApproxPercentileNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use crate::PlanRef;
+use super::StreamPlanRef as PlanRef;
 use crate::expr::{ExprRewriter, ExprVisitor, Literal};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::stream::StreamPlanRef;
+use crate::optimizer::plan_node::stream::StreamPlanNodeMetadata;
 use crate::optimizer::plan_node::utils::{Distill, TableCatalogBuilder, childless_record};
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanAggCall, PlanBase, PlanTreeNodeUnary, Stream, StreamNode,
@@ -78,7 +78,7 @@ impl Distill for StreamGlobalApproxPercentile {
     }
 }
 
-impl PlanTreeNodeUnary for StreamGlobalApproxPercentile {
+impl PlanTreeNodeUnary<Stream> for StreamGlobalApproxPercentile {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -93,7 +93,7 @@ impl PlanTreeNodeUnary for StreamGlobalApproxPercentile {
     }
 }
 
-impl_plan_tree_node_for_unary! {StreamGlobalApproxPercentile}
+impl_plan_tree_node_for_unary! { Stream, StreamGlobalApproxPercentile}
 
 impl StreamNode for StreamGlobalApproxPercentile {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -135,7 +135,7 @@ impl StreamNode for StreamGlobalApproxPercentile {
     }
 }
 
-impl ExprRewritable for StreamGlobalApproxPercentile {
+impl ExprRewritable<Stream> for StreamGlobalApproxPercentile {
     fn has_rewritable_expr(&self) -> bool {
         false
     }

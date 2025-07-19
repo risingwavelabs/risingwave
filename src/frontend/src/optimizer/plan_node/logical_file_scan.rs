@@ -19,8 +19,8 @@ use risingwave_common::catalog::Schema;
 use super::generic::GenericPlanRef;
 use super::utils::{Distill, childless_record};
 use super::{
-    BatchFileScan, ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef,
-    PredicatePushdown, ToBatch, ToStream, generic,
+    BatchFileScan, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, LogicalProject,
+    PlanBase, PredicatePushdown, ToBatch, ToStream, generic,
 };
 use crate::OptimizerContextRef;
 use crate::error::Result;
@@ -125,7 +125,7 @@ impl LogicalFileScan {
     }
 }
 
-impl_plan_tree_node_for_leaf! {LogicalFileScan}
+impl_plan_tree_node_for_leaf! { Logical, LogicalFileScan}
 impl Distill for LogicalFileScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let fields = vec![("columns", column_names_pretty(self.schema()))];
@@ -139,7 +139,7 @@ impl ColPrunable for LogicalFileScan {
     }
 }
 
-impl ExprRewritable for LogicalFileScan {}
+impl ExprRewritable<Logical> for LogicalFileScan {}
 
 impl ExprVisitable for LogicalFileScan {}
 
@@ -155,13 +155,16 @@ impl PredicatePushdown for LogicalFileScan {
 }
 
 impl ToBatch for LogicalFileScan {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         Ok(BatchFileScan::new(self.core.clone()).into())
     }
 }
 
 impl ToStream for LogicalFileScan {
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(
+        &self,
+        _ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         bail!("file_scan function is not supported in streaming mode")
     }
 

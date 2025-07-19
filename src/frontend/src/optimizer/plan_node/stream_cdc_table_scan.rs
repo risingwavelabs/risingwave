@@ -22,7 +22,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record};
-use super::{ExprRewritable, PlanBase, PlanRef, StreamNode, generic};
+use super::{ExprRewritable, PlanBase, StreamNode, StreamPlanRef as PlanRef, generic};
 use crate::catalog::ColumnId;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -112,7 +112,7 @@ impl StreamCdcTableScan {
     }
 }
 
-impl_plan_tree_node_for_leaf! { StreamCdcTableScan }
+impl_plan_tree_node_for_leaf! { Stream, StreamCdcTableScan }
 
 impl Distill for StreamCdcTableScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -301,7 +301,7 @@ impl StreamCdcTableScan {
     }
 }
 
-impl ExprRewritable for StreamCdcTableScan {
+impl ExprRewritable<Stream> for StreamCdcTableScan {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
