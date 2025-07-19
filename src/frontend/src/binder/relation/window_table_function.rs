@@ -70,11 +70,11 @@ const ERROR_2ND_ARG_TYPE: &str = "The 2st arg of window table function should be
 impl Binder {
     pub(super) fn bind_window_table_function(
         &mut self,
-        alias: Option<TableAlias>,
+        alias: Option<&TableAlias>,
         kind: WindowTableFunctionKind,
-        args: Vec<FunctionArg>,
+        args: &[FunctionArg],
     ) -> Result<BoundWindowTableFunction> {
-        let mut args = args.into_iter();
+        let mut args = args.iter();
 
         self.push_context();
 
@@ -110,7 +110,7 @@ impl Binder {
                 .into_iter(),
             ).collect::<Result<Vec<_>>>()?;
 
-        let (_, table_name) = Self::resolve_schema_qualified_name(&self.db_name, table_name)?;
+        let (_, table_name) = Self::resolve_schema_qualified_name(&self.db_name, &table_name)?;
         self.bind_table_to_context(columns, table_name, alias)?;
 
         // Other arguments are validated in `plan_window_table_function`

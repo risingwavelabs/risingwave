@@ -325,7 +325,7 @@ fn get_function_id_by_name(
     }
 
     let (schema, name) =
-        Binder::resolve_schema_qualified_name(db_name, desc.name).map_err(|e| {
+        Binder::resolve_schema_qualified_name(db_name, &desc.name).map_err(|e| {
             ExprError::InvalidParam {
                 name: "function",
                 reason: e.to_report_string().into(),

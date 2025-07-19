@@ -37,7 +37,7 @@ pub async fn handle_alter_source_column(
     let session = handler_args.session.clone();
     let db_name = &session.database();
     let (schema_name, real_source_name) =
-        Binder::resolve_schema_qualified_name(db_name, source_name.clone())?;
+        Binder::resolve_schema_qualified_name(db_name, &source_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
 

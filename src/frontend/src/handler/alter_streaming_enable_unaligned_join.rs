@@ -33,7 +33,7 @@ pub async fn handle_alter_streaming_enable_unaligned_join(
             Binder::validate_cross_db_reference(&session.database(), &name)?;
             let not_found_err = CatalogError::NotFound("stream job", name.to_string());
 
-            if let Ok(relation) = binder.bind_catalog_relation_by_object_name(name.clone(), true) {
+            if let Ok(relation) = binder.bind_catalog_relation_by_object_name(&name, true) {
                 match relation {
                     Relation::Source(s) => {
                         if s.is_shared() {

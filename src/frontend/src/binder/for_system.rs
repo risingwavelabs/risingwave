@@ -34,7 +34,7 @@ pub struct BoundView {
 impl Binder {
     pub fn bind_sink_by_name(&self, name: ObjectName) -> Result<BoundSink> {
         matches!(self.bind_for, BindFor::System);
-        let (schema_name, sink_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
+        let (schema_name, sink_name) = Self::resolve_schema_qualified_name(&self.db_name, &name)?;
 
         let search_path = SchemaPath::new(
             schema_name.as_deref(),
@@ -51,7 +51,7 @@ impl Binder {
 
     pub fn bind_view_by_name(&self, name: ObjectName) -> Result<BoundView> {
         matches!(self.bind_for, BindFor::System);
-        let (schema_name, view_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
+        let (schema_name, view_name) = Self::resolve_schema_qualified_name(&self.db_name, &name)?;
 
         let search_path = SchemaPath::new(
             schema_name.as_deref(),

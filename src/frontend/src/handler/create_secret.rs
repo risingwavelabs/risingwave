@@ -38,7 +38,7 @@ pub async fn handle_create_secret(
     let session = handler_args.session.clone();
     let db_name = &session.database();
     let (schema_name, secret_name) =
-        Binder::resolve_schema_qualified_name(db_name, stmt.secret_name.clone())?;
+        Binder::resolve_schema_qualified_name(db_name, &stmt.secret_name)?;
 
     if let Err(e) = session.check_secret_name_duplicated(stmt.secret_name.clone()) {
         return if stmt.if_not_exists {

@@ -95,11 +95,11 @@ impl Binder {
                     .into(),
             )),
 
-            Statement::Query(q) => Ok(BoundStatement::Query(self.bind_query(*q)?.into())),
+            Statement::Query(q) => Ok(BoundStatement::Query(self.bind_query(&q)?.into())),
 
             Statement::DeclareCursor { stmt } => match stmt.declare_cursor {
                 DeclareCursor::Query(body) => {
-                    let query = self.bind_query(*body)?;
+                    let query = self.bind_query(&body)?;
                     Ok(BoundStatement::DeclareCursor(
                         BoundDeclareCursor {
                             cursor_name: stmt.cursor_name,
@@ -131,7 +131,7 @@ impl Binder {
                 emit_mode,
                 with_options,
             } => {
-                let query = self.bind_query(*query)?;
+                let query = self.bind_query(&query)?;
                 let create_view = BoundCreateView::new(
                     or_replace,
                     materialized,

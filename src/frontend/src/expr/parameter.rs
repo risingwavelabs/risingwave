@@ -73,7 +73,7 @@ impl Parameter {
         self.param_types.has_infer(self.index)
     }
 
-    pub fn cast_infer_type(&mut self, data_type: DataType) {
+    pub fn cast_infer_type(&mut self, data_type: &DataType) {
         self.param_types.record_infer_type(self.index, data_type);
     }
 }

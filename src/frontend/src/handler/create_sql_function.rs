@@ -215,8 +215,7 @@ pub async fn handle_create_sql_function(
     // resolve database and schema id
     let session = &handler_args.session;
     let db_name = &session.database();
-    let (schema_name, function_name) =
-        Binder::resolve_schema_qualified_name(db_name, name.clone())?;
+    let (schema_name, function_name) = Binder::resolve_schema_qualified_name(db_name, &name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     // check if function exists
@@ -256,7 +255,7 @@ pub async fn handle_create_sql_function(
         binder.udf_context_mut().incr_global_count();
 
         if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
-            match binder.bind_expr(expr) {
+            match binder.bind_expr(&expr) {
                 Ok(expr) => {
                     // Check if the return type mismatches
                     if expr.return_type() != return_type {

@@ -322,7 +322,7 @@ mod common {
         session: &SessionImpl,
         name: ObjectName,
     ) -> Result<ObjectId> {
-        let (db_name, schema_name, rel_name) = Binder::resolve_db_schema_qualified_name(name)?;
+        let (db_name, schema_name, rel_name) = Binder::resolve_db_schema_qualified_name(&name)?;
         let db_name = db_name.unwrap_or(session.database());
 
         let reader = session.env().catalog_reader().read_guard();

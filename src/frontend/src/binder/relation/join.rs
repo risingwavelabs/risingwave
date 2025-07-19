@@ -42,9 +42,9 @@ impl RewriteExprsRecursive for BoundJoin {
 impl Binder {
     pub(crate) fn bind_vec_table_with_joins(
         &mut self,
-        from: Vec<TableWithJoins>,
+        from: &[TableWithJoins],
     ) -> Result<Option<Relation>> {
-        let mut from_iter = from.into_iter();
+        let mut from_iter = from.iter();
         let first = match from_iter.next() {
             Some(t) => t,
             None => return Ok(None),
@@ -54,7 +54,7 @@ impl Binder {
         self.pop_and_merge_lateral_context()?;
         for t in from_iter {
             self.push_lateral_context();
-            let right = self.bind_table_with_joins(t.clone())?;
+            let right = self.bind_table_with_joins(t)?;
             self.pop_and_merge_lateral_context()?;
 
             let is_lateral = match &right {
@@ -82,16 +82,16 @@ impl Binder {
         Ok(Some(root))
     }
 
-    pub(crate) fn bind_table_with_joins(&mut self, table: TableWithJoins) -> Result<Relation> {
-        let mut root = self.bind_table_factor(table.relation)?;
-        for join in table.joins {
-            let (constraint, join_type) = match join.join_operator {
+    pub(crate) fn bind_table_with_joins(&mut self, table: &TableWithJoins) -> Result<Relation> {
+        let mut root = self.bind_table_factor(&table.relation)?;
+        for join in &table.joins {
+            let (constraint, join_type) = match &join.join_operator {
                 JoinOperator::Inner(constraint) => (constraint, JoinType::Inner),
                 JoinOperator::LeftOuter(constraint) => (constraint, JoinType::LeftOuter),
                 JoinOperator::RightOuter(constraint) => (constraint, JoinType::RightOuter),
                 JoinOperator::FullOuter(constraint) => (constraint, JoinType::FullOuter),
                 // Cross join equals to inner join with with no constraint.
-                JoinOperator::CrossJoin => (JoinConstraint::None, JoinType::Inner),
+                JoinOperator::CrossJoin => (&JoinConstraint::None, JoinType::Inner),
                 JoinOperator::AsOfInner(constraint) => (constraint, JoinType::AsofInner),
                 JoinOperator::AsOfLeft(constraint) => (constraint, JoinType::AsofLeftOuter),
             };
@@ -103,10 +103,10 @@ impl Binder {
             ) {
                 let option_rel: Option<Relation>;
                 (cond, option_rel) =
-                    self.bind_join_constraint(constraint, Some(join.relation), join_type)?;
+                    self.bind_join_constraint(constraint, Some(&join.relation), join_type)?;
                 right = option_rel.unwrap();
             } else {
-                right = self.bind_table_factor(join.relation.clone())?;
+                right = self.bind_table_factor(&join.relation)?;
                 (cond, _) = self.bind_join_constraint(constraint, None, join_type)?;
             }
 
@@ -146,8 +146,8 @@ impl Binder {
 
     fn bind_join_constraint(
         &mut self,
-        constraint: JoinConstraint,
-        table_factor: Option<TableFactor>,
+        constraint: &JoinConstraint,
+        table_factor: Option<&TableFactor>,
         join_type: JoinType,
     ) -> Result<(ExprImpl, Option<Relation>)> {
         Ok(match constraint {
@@ -165,7 +165,7 @@ impl Binder {
                     JoinConstraint::Natural => None,
                     JoinConstraint::Using(cols) => {
                         // sanity check
-                        for col in &cols {
+                        for col in cols {
                             if !old_context.indices_of.contains_key(&col.real_value()) {
                                 return Err(ErrorCode::ItemNotFound(format!("column \"{}\" specified in USING clause does not exist in left table", col.real_value())).into());
                             }
@@ -236,7 +236,7 @@ impl Binder {
                 self.pop_and_merge_lateral_context()?;
                 // Bind the expression first, before allowing disambiguation of the columns involved
                 // in the join
-                let expr = self.bind_expr(binary_expr)?;
+                let expr = self.bind_expr(&binary_expr)?;
                 for (l, r) in col_indices {
                     let non_nullable = match join_type {
                         JoinType::LeftOuter | JoinType::Inner => Some(l),

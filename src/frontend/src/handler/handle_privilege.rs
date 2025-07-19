@@ -82,7 +82,7 @@ fn make_prost_privilege(
 
             for name in tables {
                 let (schema_name, table_name) =
-                    Binder::resolve_schema_qualified_name(db_name, name)?;
+                    Binder::resolve_schema_qualified_name(db_name, &name)?;
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
                 let (table, _) =
@@ -106,7 +106,7 @@ fn make_prost_privilege(
 
             for name in tables {
                 let (schema_name, table_name) =
-                    Binder::resolve_schema_qualified_name(db_name, name)?;
+                    Binder::resolve_schema_qualified_name(db_name, &name)?;
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
                 match reader.get_created_table_by_name(db_name, schema_path, &table_name) {
@@ -143,7 +143,7 @@ fn make_prost_privilege(
 
             for name in sources {
                 let (schema_name, source_name) =
-                    Binder::resolve_schema_qualified_name(db_name, name)?;
+                    Binder::resolve_schema_qualified_name(db_name, &name)?;
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
                 let (source, _) = reader.get_source_by_name(db_name, schema_path, &source_name)?;
@@ -157,7 +157,7 @@ fn make_prost_privilege(
 
             for name in sinks {
                 let (schema_name, sink_name) =
-                    Binder::resolve_schema_qualified_name(db_name, name)?;
+                    Binder::resolve_schema_qualified_name(db_name, &name)?;
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
                 let (sink, _) =
@@ -172,7 +172,7 @@ fn make_prost_privilege(
 
             for name in views {
                 let (schema_name, view_name) =
-                    Binder::resolve_schema_qualified_name(db_name, name)?;
+                    Binder::resolve_schema_qualified_name(db_name, &name)?;
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
                 let (view, _) = reader.get_view_by_name(db_name, schema_path, &view_name)?;
@@ -186,7 +186,7 @@ fn make_prost_privilege(
 
             for name in conns {
                 let (schema_name, conn_name) =
-                    Binder::resolve_schema_qualified_name(db_name, name)?;
+                    Binder::resolve_schema_qualified_name(db_name, &name)?;
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
                 let (conn, _) = reader.get_connection_by_name(db_name, schema_path, &conn_name)?;
@@ -199,7 +199,8 @@ fn make_prost_privilege(
             let user_name = &session.user_name();
 
             for name in subscriptions {
-                let (schema_name, sub_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+                let (schema_name, sub_name) =
+                    Binder::resolve_schema_qualified_name(db_name, &name)?;
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
                 let (sub, _) = reader.get_subscription_by_name(db_name, schema_path, &sub_name)?;
@@ -213,7 +214,7 @@ fn make_prost_privilege(
 
             for func_desc in func_descs {
                 let (schema_name, func_name) =
-                    Binder::resolve_schema_qualified_name(db_name, func_desc.name)?;
+                    Binder::resolve_schema_qualified_name(db_name, &func_desc.name)?;
                 let arg_types = match func_desc.args {
                     Some(args) => {
                         let mut arg_types = vec![];
@@ -257,7 +258,7 @@ fn make_prost_privilege(
 
             for name in secrets {
                 let (schema_name, secret_name) =
-                    Binder::resolve_schema_qualified_name(db_name, name)?;
+                    Binder::resolve_schema_qualified_name(db_name, &name)?;
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
                 let (secret, _) = reader.get_secret_by_name(db_name, schema_path, &secret_name)?;

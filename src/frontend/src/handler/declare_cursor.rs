@@ -62,7 +62,8 @@ pub async fn handle_declare_subscription_cursor(
     let session = handler_args.session.clone();
     let subscription = {
         let db_name = &session.database();
-        let (sub_schema_name, sub_name) = Binder::resolve_schema_qualified_name(db_name, sub_name)?;
+        let (sub_schema_name, sub_name) =
+            Binder::resolve_schema_qualified_name(db_name, &sub_name)?;
         session.get_subscription_by_name(sub_schema_name, &sub_name)?
     };
     // Start the first query of cursor, which includes querying the table and querying the subscription's logstore

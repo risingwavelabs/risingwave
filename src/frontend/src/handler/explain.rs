@@ -79,7 +79,7 @@ pub async fn do_handle_explain(
                     explain_options,
                     format_encode,
                     cdc_table_info,
-                    name.clone(),
+                    &name,
                     columns,
                     wildcard_idx,
                     constraints,

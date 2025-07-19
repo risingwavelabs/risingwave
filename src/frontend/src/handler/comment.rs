@@ -44,7 +44,7 @@ pub async fn handle_comment(
 
                 let (schema, table) = Binder::resolve_schema_qualified_name(
                     &session.database(),
-                    ObjectName(tab.to_vec()),
+                    &ObjectName(tab.to_vec()),
                 )?;
 
                 let (database_id, schema_id) =
@@ -71,7 +71,7 @@ pub async fn handle_comment(
             }
             CommentObject::Table => {
                 let (schema, table) =
-                    Binder::resolve_schema_qualified_name(&session.database(), object_name)?;
+                    Binder::resolve_schema_qualified_name(&session.database(), &object_name)?;
                 let (database_id, schema_id) =
                     session.get_database_and_schema_id_for_create(schema.clone())?;
                 let table = binder.bind_table(schema.as_deref(), &table)?;

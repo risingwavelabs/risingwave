@@ -621,7 +621,7 @@ impl LogicalAggBuilder {
                     agg_call.filter.clone(),
                     agg_call.direct_args.clone(),
                 )?)?)
-                .cast_explicit(agg_call.return_type())?;
+                .cast_explicit(&agg_call.return_type())?;
 
                 let count = ExprImpl::from(push_agg_call(AggCall::new(
                     PbAggKind::Count.into(),
@@ -662,7 +662,7 @@ impl LogicalAggBuilder {
                     agg_call.filter.clone(),
                     agg_call.direct_args.clone(),
                 )?)?)
-                .cast_explicit(agg_call.return_type())?;
+                .cast_explicit(&agg_call.return_type())?;
 
                 let sum = ExprImpl::from(push_agg_call(AggCall::new(
                     PbAggKind::Sum.into(),
@@ -672,7 +672,7 @@ impl LogicalAggBuilder {
                     agg_call.filter.clone(),
                     agg_call.direct_args.clone(),
                 )?)?)
-                .cast_explicit(agg_call.return_type())?;
+                .cast_explicit(&agg_call.return_type())?;
 
                 let count = ExprImpl::from(push_agg_call(AggCall::new(
                     PbAggKind::Count.into(),
@@ -706,7 +706,7 @@ impl LogicalAggBuilder {
                 let numerator_type = raw_numerator.return_type();
                 let numerator = ExprImpl::from(FunctionCall::new(
                     ExprType::Greatest,
-                    vec![raw_numerator, zero.clone().cast_explicit(numerator_type)?],
+                    vec![raw_numerator, zero.clone().cast_explicit(&numerator_type)?],
                 )?);
 
                 let denominator = match kind {

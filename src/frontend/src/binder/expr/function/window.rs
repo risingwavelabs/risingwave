@@ -60,14 +60,14 @@ impl Binder {
         kind: WindowFuncKind,
         args: Vec<ExprImpl>,
         ignore_nulls: bool,
-        filter: Option<Box<ast::Expr>>,
-        window: Window,
+        filter: Option<&ast::Expr>,
+        window: &Window,
     ) -> Result<ExprImpl> {
         self.ensure_window_function_allowed()?;
 
         // Resolve the window definition to a concrete window specification
         let window = match window {
-            Window::Spec(spec) => spec,
+            Window::Spec(spec) => spec.clone(),
             Window::Name(window_name) => {
                 // Look up the named window definition in the bind context
                 let window_name_str = window_name.real_value();
@@ -109,17 +109,17 @@ impl Binder {
 
         let partition_by = window
             .partition_by
-            .into_iter()
+            .iter()
             .map(|arg| self.bind_expr_inner(arg))
             .try_collect()?;
         let order_by = OrderBy::new(
             window
                 .order_by
-                .into_iter()
+                .iter()
                 .map(|order_by_expr| self.bind_order_by_expr(order_by_expr))
                 .collect::<Result<_>>()?,
         );
-        let frame = if let Some(frame) = window.window_frame {
+        let frame = if let Some(frame) = &window.window_frame {
             let exclusion = if let Some(exclusion) = frame.exclusion {
                 match exclusion {
                     WindowFrameExclusion::CurrentRow => FrameExclusion::CurrentRow,
@@ -135,10 +135,10 @@ impl Binder {
             } else {
                 FrameExclusion::NoOthers
             };
-            let bounds = match frame.units {
+            let bounds = match &frame.units {
                 WindowFrameUnits::Rows => {
-                    let (start, end) = must_match!(frame.bounds, WindowFrameBounds::Bounds { start, end } => (start, end));
-                    let (start, end) = self.bind_window_frame_usize_bounds(start, end)?;
+                    let (start, end) = must_match!(&frame.bounds, WindowFrameBounds::Bounds { start, end } => (start, end));
+                    let (start, end) = self.bind_window_frame_usize_bounds(start, end.as_ref())?;
                     FrameBounds::Rows(RowsFrameBounds { start, end })
                 }
                 unit @ (WindowFrameUnits::Range | WindowFrameUnits::Session) => {
@@ -184,11 +184,11 @@ impl Binder {
                         }
                     };
 
-                    if unit == WindowFrameUnits::Range {
-                        let (start, end) = must_match!(frame.bounds, WindowFrameBounds::Bounds { start, end } => (start, end));
+                    if unit == &WindowFrameUnits::Range {
+                        let (start, end) = must_match!(&frame.bounds, WindowFrameBounds::Bounds { start, end } => (start, end));
                         let (start, end) = self.bind_window_frame_scalar_impl_bounds(
                             start,
-                            end,
+                            end.as_ref(),
                             &offset_data_type,
                         )?;
                         FrameBounds::Range(RangeFrameBounds {
@@ -199,9 +199,9 @@ impl Binder {
                             end: end.map(RangeFrameOffset::new),
                         })
                     } else {
-                        let gap = must_match!(frame.bounds, WindowFrameBounds::Gap(gap) => gap);
+                        let gap = must_match!(&frame.bounds, WindowFrameBounds::Gap(gap) => gap);
                         let gap_value =
-                            self.bind_window_frame_bound_offset(*gap, offset_data_type.clone())?;
+                            self.bind_window_frame_bound_offset(gap, &offset_data_type)?;
                         FrameBounds::Session(SessionFrameBounds {
                             order_data_type,
                             order_type,
@@ -230,12 +230,12 @@ impl Binder {
 
     fn bind_window_frame_usize_bounds(
         &mut self,
-        start: WindowFrameBound,
-        end: Option<WindowFrameBound>,
+        start: &WindowFrameBound,
+        end: Option<&WindowFrameBound>,
     ) -> Result<(FrameBound<usize>, FrameBound<usize>)> {
-        let mut convert_offset = |offset: Box<ast::Expr>| -> Result<usize> {
+        let mut convert_offset = |offset: &ast::Expr| -> Result<usize> {
             let offset = self
-                .bind_window_frame_bound_offset(*offset, DataType::Int64)?
+                .bind_window_frame_bound_offset(offset, &DataType::Int64)?
                 .into_int64();
             if offset < 0 {
                 return Err(ErrorCode::InvalidInputSyntax(
@@ -245,12 +245,12 @@ impl Binder {
             }
             Ok(offset as usize)
         };
-        let mut convert_bound = |bound| -> Result<FrameBound<usize>> {
+        let mut convert_bound = |bound: &WindowFrameBound| -> Result<FrameBound<usize>> {
             Ok(match bound {
                 WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
                 WindowFrameBound::Preceding(None) => FrameBound::UnboundedPreceding,
                 WindowFrameBound::Preceding(Some(offset)) => {
-                    FrameBound::Preceding(convert_offset(offset)?)
+                    FrameBound::Preceding(convert_offset(offset.as_ref())?)
                 }
                 WindowFrameBound::Following(None) => FrameBound::UnboundedFollowing,
                 WindowFrameBound::Following(Some(offset)) => {
@@ -269,20 +269,20 @@ impl Binder {
 
     fn bind_window_frame_scalar_impl_bounds(
         &mut self,
-        start: WindowFrameBound,
-        end: Option<WindowFrameBound>,
+        start: &WindowFrameBound,
+        end: Option<&WindowFrameBound>,
         offset_data_type: &DataType,
     ) -> Result<(FrameBound<ScalarImpl>, FrameBound<ScalarImpl>)> {
-        let mut convert_bound = |bound| -> Result<FrameBound<_>> {
+        let mut convert_bound = |bound: &WindowFrameBound| -> Result<FrameBound<_>> {
             Ok(match bound {
                 WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
                 WindowFrameBound::Preceding(None) => FrameBound::UnboundedPreceding,
                 WindowFrameBound::Preceding(Some(offset)) => FrameBound::Preceding(
-                    self.bind_window_frame_bound_offset(*offset, offset_data_type.clone())?,
+                    self.bind_window_frame_bound_offset(offset, offset_data_type)?,
                 ),
                 WindowFrameBound::Following(None) => FrameBound::UnboundedFollowing,
                 WindowFrameBound::Following(Some(offset)) => FrameBound::Following(
-                    self.bind_window_frame_bound_offset(*offset, offset_data_type.clone())?,
+                    self.bind_window_frame_bound_offset(offset, offset_data_type)?,
                 ),
             })
         };
@@ -297,8 +297,8 @@ impl Binder {
 
     fn bind_window_frame_bound_offset(
         &mut self,
-        offset: ast::Expr,
-        cast_to: DataType,
+        offset: &ast::Expr,
+        cast_to: &DataType,
     ) -> Result<ScalarImpl> {
         let mut offset = self.bind_expr(offset)?;
         if !offset.is_const() {
@@ -307,7 +307,7 @@ impl Binder {
             )
             .into());
         }
-        if offset.cast_implicit_mut(cast_to.clone()).is_err() {
+        if offset.cast_implicit_mut(cast_to).is_err() {
             return Err(ErrorCode::InvalidInputSyntax(format!(
                 "offset/gap in window frame bounds must be castable to {}",
                 cast_to

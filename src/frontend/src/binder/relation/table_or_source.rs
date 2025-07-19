@@ -72,7 +72,7 @@ impl BoundSource {
 impl Binder {
     pub fn bind_catalog_relation_by_object_name(
         &mut self,
-        object_name: ObjectName,
+        object_name: &ObjectName,
         bind_creating_relations: bool,
     ) -> Result<Relation> {
         let (schema_name, table_name) =
@@ -93,8 +93,8 @@ impl Binder {
         db_name: Option<&str>,
         schema_name: Option<&str>,
         table_name: &str,
-        alias: Option<TableAlias>,
-        as_of: Option<AsOf>,
+        alias: Option<&TableAlias>,
+        as_of: Option<&AsOf>,
         bind_creating_relations: bool,
     ) -> Result<Relation> {
         // define some helper functions converting catalog to bound relation
@@ -304,7 +304,7 @@ impl Binder {
         &mut self,
         table_catalog: Arc<TableCatalog>,
         schema_name: &str,
-        as_of: Option<AsOf>,
+        as_of: Option<&AsOf>,
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
         let table_id = table_catalog.id();
         let columns = table_catalog
@@ -329,7 +329,7 @@ impl Binder {
             table_id,
             table_catalog,
             table_indexes,
-            as_of,
+            as_of: as_of.cloned(),
         };
 
         Ok::<_, RwError>((Relation::BaseTable(Box::new(table)), columns))
@@ -338,7 +338,7 @@ impl Binder {
     fn resolve_source_relation(
         &mut self,
         source_catalog: &SourceCatalog,
-        as_of: Option<AsOf>,
+        as_of: Option<&AsOf>,
         is_temporary: bool,
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
         debug_assert_column_ids_distinct(&source_catalog.columns);
@@ -357,7 +357,7 @@ impl Binder {
         Ok((
             Relation::Source(Box::new(BoundSource {
                 catalog: source_catalog.clone(),
-                as_of,
+                as_of: as_of.cloned(),
             })),
             source_catalog
                 .columns
@@ -392,7 +392,7 @@ impl Binder {
         else {
             unreachable!("a view should contain a query statement");
         };
-        let query = self.bind_query_for_view(*query).map_err(|e| {
+        let query = self.bind_query_for_view(&query).map_err(|e| {
             ErrorCode::BindError(format!(
                 "failed to bind view {}, sql: {}\nerror: {}",
                 view_catalog.name,

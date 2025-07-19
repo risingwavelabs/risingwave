@@ -191,7 +191,7 @@ impl Planner {
                                         );
                                         FunctionCall::cast_mut(
                                             &mut input_ref,
-                                            field.data_type().clone(),
+                                            &field.data_type(),
                                             CastContext::Explicit,
                                         )
                                         .unwrap();
