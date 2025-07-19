@@ -1,0 +1,255 @@
+control substitution on
+
+# Test for ALTER CONNECTION CONNECTOR WITH functionality
+
+system ok
+rpk topic create kafka_connection_alter_test -p 1
+
+system ok
+cat <<EOF | rpk topic produce 'kafka_connection_alter_test' -f "%k^%v\n"
+{"ID": 1}^{"ID": 1, "name": "Alice", "age": 25}
+{"ID": 2}^{"ID": 2, "name": "Bob", "age": 30}
+{"ID": 3}^{"ID": 3, "name": "Charlie", "age": 35}
+EOF
+
+# Create secrets for testing
+statement ok
+create secret secret1 with ( backend = 'meta' ) as 'initial_value';
+
+statement ok
+create secret secret2 with ( backend = 'meta' ) as 'updated_value';
+
+# Create connection with initial properties
+statement ok
+create connection kafka_conn with (
+    type = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.security.protocol = 'plaintext'
+);
+
+# Create a source that depends on the connection
+statement ok
+CREATE SOURCE src_using_conn (
+    "ID" INT,
+    "name" VARCHAR,
+    age INT
+)
+WITH (
+    connector = 'kafka',
+    connection = kafka_conn,
+    topic = 'kafka_connection_alter_test',
+    scan.startup.mode = 'earliest'
+)
+FORMAT PLAIN ENCODE JSON;
+
+# Create a sink that depends on the connection
+statement ok
+CREATE TABLE target_table (
+    "ID" INT,
+    "name" VARCHAR,
+    age INT
+);
+
+statement ok
+CREATE SINK sink_using_conn AS SELECT * FROM src_using_conn
+WITH (
+    connector = 'kafka',
+    connection = kafka_conn,
+    topic = 'kafka_connection_alter_test_output'
+) FORMAT PLAIN ENCODE JSON (
+    force_append_only = 'true'
+);
+
+# Wait for data to be consumed
+sleep 3s
+
+query I retry 3 backoff 5s
+SELECT count(*) FROM src_using_conn;
+----
+3
+
+# Test basic ALTER CONNECTION CONNECTOR WITH
+statement ok
+ALTER CONNECTION kafka_conn CONNECTOR WITH (
+    properties.sasl.username = 'test_user',
+    properties.sasl.mechanism = 'PLAIN'
+);
+
+# Verify the connection definition has been updated
+query I
+SELECT count(*) FROM rw_connections
+WHERE name = 'kafka_conn'
+  AND definition LIKE '%sasl.username = ''test_user''%'
+  AND definition LIKE '%sasl.mechanism = ''PLAIN''%';
+----
+1
+
+# Test altering with secrets
+statement ok
+ALTER CONNECTION kafka_conn CONNECTOR WITH (
+    properties.sasl.password = secret secret1
+);
+
+query I
+SELECT count(*) FROM rw_connections
+WHERE name = 'kafka_conn'
+  AND definition LIKE '%secret secret1%';
+----
+1
+
+# Test updating secret reference
+statement ok
+ALTER CONNECTION kafka_conn CONNECTOR WITH (
+    properties.sasl.password = secret secret2
+);
+
+query I
+SELECT count(*) FROM rw_connections
+WHERE name = 'kafka_conn'
+  AND definition LIKE '%secret secret2%'
+  AND definition NOT LIKE '%secret secret1%';
+----
+1
+
+# Verify that dependent sources and sinks still work after connection alteration
+sleep 2s
+
+query I retry 3 backoff 5s
+SELECT count(*) FROM src_using_conn;
+----
+3
+
+# Test error cases
+
+# Try to alter connection type (should fail)
+statement error Field 'type' is not allowed to be altered on the fly for connection: kafka
+ALTER CONNECTION kafka_conn CONNECTOR WITH ( type = 'pulsar' );
+
+# Try to alter bootstrap.server (should fail as it's typically not allowed)
+statement error Field 'properties.bootstrap.server' is not allowed to be altered on the fly for connection: kafka
+ALTER CONNECTION kafka_conn CONNECTOR WITH ( properties.bootstrap.server = 'invalid_server' );
+
+# Try to alter a property that's allowed for sinks but not connections
+statement error Field 'properties.batch.size' is not allowed to be altered on the fly for connection: kafka
+ALTER CONNECTION kafka_conn CONNECTOR WITH ( properties.batch.size = '1000' );
+
+# Try to alter non-existent connection
+statement error Connection "non_existent_conn" not found
+ALTER CONNECTION non_existent_conn CONNECTOR WITH ( properties.sasl.username = 'test' );
+
+# Test with multiple properties
+statement ok
+ALTER CONNECTION kafka_conn CONNECTOR WITH (
+    properties.sasl.username = 'admin',
+    properties.ssl.endpoint.identification.algorithm = 'none'
+);
+
+query I
+SELECT count(*) FROM rw_connections
+WHERE name = 'kafka_conn'
+  AND definition LIKE '%sasl.username = ''admin''%'
+  AND definition LIKE '%ssl.endpoint.identification.algorithm = ''none''%';
+----
+1
+
+# Test schema validation: create connection with different protocol
+statement ok
+create connection test_conn with (
+    type = 'kafka',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    properties.security.protocol = 'plaintext'
+);
+
+# Create source using test_conn
+statement ok
+CREATE SOURCE test_src (
+    "ID" INT,
+    "name" VARCHAR,
+    age INT
+)
+WITH (
+    connector = 'kafka',
+    connection = test_conn,
+    topic = 'kafka_connection_alter_test',
+    scan.startup.mode = 'earliest'
+)
+FORMAT PLAIN ENCODE JSON;
+
+# Alter the connection properties
+statement ok
+ALTER CONNECTION test_conn CONNECTOR WITH (
+    properties.sasl.mechanism = 'SCRAM-SHA-256'
+);
+
+# Verify source still works
+query I retry 3 backoff 5s
+SELECT count(*) FROM test_src;
+----
+3
+
+# Test multiple dependent objects
+statement ok
+CREATE SOURCE test_src2 (
+    "ID" INT,
+    "name" VARCHAR,
+    age INT
+)
+WITH (
+    connector = 'kafka',
+    connection = test_conn,
+    topic = 'kafka_connection_alter_test',
+    scan.startup.mode = 'earliest'
+)
+FORMAT PLAIN ENCODE JSON;
+
+# Alter connection again
+statement ok
+ALTER CONNECTION test_conn CONNECTOR WITH (
+    properties.sasl.username = 'kafka_user'
+);
+
+# Verify both sources work
+query I retry 3 backoff 5s
+SELECT count(*) FROM test_src;
+----
+3
+
+query I retry 3 backoff 5s
+SELECT count(*) FROM test_src2;
+----
+3
+
+# === Clean up ===
+
+statement ok
+DROP SINK sink_using_conn;
+
+statement ok
+DROP SOURCE src_using_conn;
+
+statement ok
+DROP SOURCE test_src;
+
+statement ok
+DROP SOURCE test_src2;
+
+statement ok
+DROP TABLE target_table;
+
+statement ok
+DROP CONNECTION kafka_conn;
+
+statement ok
+DROP CONNECTION test_conn;
+
+statement ok
+DROP SECRET secret1;
+
+statement ok
+DROP SECRET secret2;
+
+system ok
+rpk topic delete kafka_connection_alter_test
+
+system ok
+rpk topic delete kafka_connection_alter_test_output || true
