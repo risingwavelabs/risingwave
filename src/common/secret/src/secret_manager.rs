@@ -25,6 +25,8 @@ use risingwave_pb::catalog::PbSecret;
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::secret::secret_ref::RefAsType;
 use thiserror_ext::AsReport;
+use tokio::runtime::Handle;
+use tokio::task;
 
 use super::SecretId;
 use super::error::{SecretError, SecretResult};
@@ -142,48 +144,10 @@ impl LocalSecretManager {
         Ok(options)
     }
 
-    pub async fn fill_secrets_async(
-        &self,
-        mut options: BTreeMap<String, String>,
-        secret_refs: BTreeMap<String, PbSecretRef>,
-    ) -> SecretResult<BTreeMap<String, String>> {
-        for (option_key, secret_ref) in secret_refs {
-            let path_str = self.fill_secret_async(secret_ref).await?;
-            options.insert(option_key, path_str);
-        }
-        Ok(options)
-    }
-
     pub fn fill_secret(&self, secret_ref: PbSecretRef) -> SecretResult<String> {
         let secret_guard: RwLockReadGuard<'_, parking_lot::RawRwLock, HashMap<u32, Vec<u8>>> =
             self.secrets.read();
         self.fill_secret_inner(secret_ref, &secret_guard)
-    }
-
-    pub async fn fill_secret_async(&self, secret_ref: PbSecretRef) -> SecretResult<String> {
-        let secret_id = secret_ref.secret_id;
-        let pb_secret_bytes = {
-            let secret_guard = self.secrets.read();
-            secret_guard
-                .get(&secret_id)
-                .ok_or(SecretError::ItemNotFound(secret_id))?
-                .clone()
-        };
-
-        let secret_value_bytes = Self::get_secret_value_async(&pb_secret_bytes).await?;
-        match secret_ref.ref_as() {
-            RefAsType::Text => {
-                // We converted the secret string from sql to bytes using `as_bytes` in frontend.
-                // So use `from_utf8` here to convert it back to string.
-                Ok(String::from_utf8(secret_value_bytes.clone())?)
-            }
-            RefAsType::File => {
-                let path_str =
-                    self.get_or_init_secret_file(secret_id, secret_value_bytes.clone())?;
-                Ok(path_str)
-            }
-            RefAsType::Unspecified => Err(SecretError::UnspecifiedRefType(secret_id)),
-        }
     }
 
     fn fill_secret_inner(
@@ -245,23 +209,14 @@ impl LocalSecretManager {
     fn get_secret_value(pb_secret_bytes: &[u8]) -> SecretResult<Vec<u8>> {
         let secret_value = match Self::get_pb_secret_backend(pb_secret_bytes)? {
             risingwave_pb::secret::secret::SecretBackend::Meta(backend) => backend.value.clone(),
-            risingwave_pb::secret::secret::SecretBackend::HashicorpVault(_) => {
-                return Err(anyhow!(
-                    "hashicorp_vault backend requires async resolution, use get_secret_value_async"
-                )
-                .into());
-            }
-        };
-        Ok(secret_value)
-    }
-
-    async fn get_secret_value_async(pb_secret_bytes: &[u8]) -> SecretResult<Vec<u8>> {
-        let secret_value = match Self::get_pb_secret_backend(pb_secret_bytes)? {
-            risingwave_pb::secret::secret::SecretBackend::Meta(backend) => backend.value.clone(),
             risingwave_pb::secret::secret::SecretBackend::HashicorpVault(vault_backend) => {
                 let config = HashiCorpVaultConfig::from_protobuf(&vault_backend)?;
                 let client = HashiCorpVaultClient::new(config)?;
-                client.get_secret().await?
+
+                let secret_value = task::block_in_place(move || {
+                    Handle::current().block_on(async move { client.get_secret().await })
+                })?;
+                secret_value
             }
         };
         Ok(secret_value)
