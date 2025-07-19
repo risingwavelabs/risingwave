@@ -216,6 +216,7 @@ impl IcebergConfig {
                     && k != &"catalog.uri"
                     && k != &"catalog.type"
                     && k != &"catalog.name"
+                    && k != &"catalog.header"
             })
             .map(|(k, v)| (k[8..].to_string(), v.clone()))
             .collect();
@@ -2299,6 +2300,7 @@ mod test {
                 azblob_account_name: None,
                 azblob_account_key: None,
                 azblob_endpoint_url: None,
+                header: None,
             },
             r#type: "upsert".to_owned(),
             force_append_only: false,
