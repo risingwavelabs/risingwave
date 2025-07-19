@@ -31,7 +31,7 @@ VALUES
 
 CREATE TABLE single_type (
   id INT PRIMARY KEY,
-  c_time time,
+  c_time time
 );
 
 EXEC sys.sp_cdc_enable_table
@@ -39,7 +39,7 @@ EXEC sys.sp_cdc_enable_table
   @source_name = 'single_type',
   @role_name = NULL;
 
-INSERT INTO single_type VALUES (3, '23:59:59.999')
+INSERT INTO single_type VALUES (3, '23:59:59.999');
 
 
 CREATE TABLE sqlserver_all_data_types (
@@ -91,7 +91,7 @@ CREATE TABLE orders_without_cdc (
 
 CREATE TABLE test_pk_uuid (
   id UNIQUEIDENTIFIER PRIMARY KEY,
-  NAME NVARCHAR(50),
+  NAME NVARCHAR(50)
 );
 
 EXEC sys.sp_cdc_enable_table
@@ -99,12 +99,25 @@ EXEC sys.sp_cdc_enable_table
   @source_name = 'test_pk_uuid',
   @role_name = NULL;
 
-  DECLARE @i INT = 1;
+CREATE TABLE test_pk_binary (
+  id BINARY(50) PRIMARY KEY,
+  NAME NVARCHAR(50)
+);
+
+EXEC sys.sp_cdc_enable_table
+  @source_schema = 'dbo',
+  @source_name = 'test_pk_binary',
+  @role_name = NULL;
+
+DECLARE @i INT = 1;
 
 WHILE @i <= 2000
 BEGIN
     INSERT INTO test_pk_uuid (id, NAME)
     VALUES (NEWID(), CONCAT('TEST_NAME', @i));
+
+    INSERT INTO test_pk_binary (id, NAME)
+    VALUES (HASHBYTES('SHA2_256', CONCAT('TEST_NAME', @i)), CONCAT('TEST_NAME', @i));
 
     SET @i = @i + 1;
 END
