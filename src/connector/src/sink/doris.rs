@@ -39,7 +39,7 @@ use super::{
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::encoder::{JsonEncoder, RowEncoder};
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
-use crate::sink::{DummySinkCommitCoordinator, Sink, SinkParam, SinkWriter, SinkWriterParam};
+use crate::sink::{Sink, SinkParam, SinkWriter, SinkWriterParam};
 
 pub const DORIS_SINK: &str = "doris";
 
@@ -222,7 +222,6 @@ impl DorisSink {
 }
 
 impl Sink for DorisSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = LogSinkerOf<DorisSinkWriter>;
 
     const SINK_NAME: &'static str = DORIS_SINK;

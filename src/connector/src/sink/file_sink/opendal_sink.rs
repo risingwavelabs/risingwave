@@ -43,7 +43,7 @@ use crate::sink::encoder::{
     TimestamptzHandlingMode,
 };
 use crate::sink::file_sink::batching_log_sink::BatchingLogSinker;
-use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkFormatDesc, SinkParam};
+use crate::sink::{Result, Sink, SinkError, SinkFormatDesc, SinkParam};
 use crate::source::TryFromBTreeMap;
 use crate::with_options::WithOptions;
 
@@ -118,7 +118,6 @@ pub enum EngineType {
 }
 
 impl<S: OpendalSinkBackend> Sink for FileSink<S> {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = BatchingLogSinker;
 
     const SINK_NAME: &'static str = S::SINK_NAME;

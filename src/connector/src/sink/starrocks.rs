@@ -39,8 +39,8 @@ use super::doris_starrocks_connector::{
 };
 use super::encoder::{JsonEncoder, RowEncoder};
 use super::{
-    DummySinkCommitCoordinator, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
-    SinkError, SinkParam, SinkWriterMetrics,
+    SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkParam,
+    SinkWriterMetrics,
 };
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
@@ -285,7 +285,6 @@ impl StarrocksSink {
 }
 
 impl Sink for StarrocksSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = DecoupleCheckpointLogSinkerOf<StarrocksSinkWriter>;
 
     const SINK_NAME: &'static str = STARROCKS_SINK;

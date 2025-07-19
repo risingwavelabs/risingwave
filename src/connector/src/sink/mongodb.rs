@@ -43,8 +43,8 @@ use crate::deserialize_bool_from_string;
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::encoder::RowEncoder;
 use crate::sink::{
-    DummySinkCommitCoordinator, Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
-    Sink, SinkError, SinkParam, SinkWriterParam,
+    Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink, SinkError, SinkParam,
+    SinkWriterParam,
 };
 
 mod send_bulk_write_command_future {
@@ -257,7 +257,6 @@ impl TryFrom<SinkParam> for MongodbSink {
 }
 
 impl Sink for MongodbSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = AsyncTruncateLogSinkerOf<MongodbSinkWriter>;
 
     const SINK_NAME: &'static str = MONGODB_SINK;
