@@ -579,7 +579,7 @@ impl NonOverlapSubLevelPicker {
 pub mod tests {
     use std::collections::BTreeSet;
 
-    use risingwave_common::config::default::compaction_config;
+    use risingwave_common::config::meta::default::compaction_config;
 
     use super::*;
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
