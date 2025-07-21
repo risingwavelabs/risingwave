@@ -324,28 +324,28 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                 // We still have to maintain the row number in this case.
                 res @ (Ok(ParseResult::Rows) | Err(_)) => {
                     if let Err(error) = res {
-                        if let SourceMeta::DebeziumCdc(cdc_meta) = &msg.meta {
-                            if matches!(cdc_meta.msg_type, CdcMessageType::SchemaChange) {
-                                // Check the schema change failure policy
-                                match parser.source_ctx().schema_change_failure_policy {
-                                    crate::source::cdc::SchemaChangeFailurePolicy::Block => {
-                                        tracing::error!(
-                                            error = %error.as_report(),
-                                            split_id = &*msg.split_id,
-                                            offset = msg.offset,
-                                            "Schema change message parsing failed, blocking source."
-                                        );
-                                        return Err(error.into());
-                                    }
-                                    crate::source::cdc::SchemaChangeFailurePolicy::Skip => {
-                                        tracing::warn!(
-                                            error = %error.as_report(),
-                                            split_id = &*msg.split_id,
-                                            offset = msg.offset,
-                                            "Schema change message parsing failed, skipping due to policy."
-                                        );
-                                        // Continue processing, don't return error
-                                    }
+                        if let SourceMeta::DebeziumCdc(cdc_meta) = &msg.meta
+                            && matches!(cdc_meta.msg_type, CdcMessageType::SchemaChange)
+                        {
+                            // Check the schema change failure policy
+                            match parser.source_ctx().schema_change_failure_policy {
+                                crate::source::cdc::SchemaChangeFailurePolicy::Block => {
+                                    tracing::error!(
+                                        error = %error.as_report(),
+                                        split_id = &*msg.split_id,
+                                        offset = msg.offset,
+                                        "Schema change message parsing failed, blocking source."
+                                    );
+                                    return Err(error);
+                                }
+                                crate::source::cdc::SchemaChangeFailurePolicy::Skip => {
+                                    tracing::warn!(
+                                        error = %error.as_report(),
+                                        split_id = &*msg.split_id,
+                                        offset = msg.offset,
+                                        "Schema change message parsing failed, skipping due to policy."
+                                    );
+                                    // Continue processing, don't return error
                                 }
                             }
                         }
