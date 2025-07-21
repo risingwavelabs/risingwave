@@ -259,25 +259,29 @@ impl StreamActorManager {
 
         let mut sink_into_streams = Vec::new();
         for input_stream_node in &node.input {
+            // Check if the input stream node is for sink-into operation.
             let mut is_sink_into = false;
             if let NodeBody::Project(project) = input_stream_node.get_node_body().unwrap() {
                 let project_input = input_stream_node.get_input();
                 assert_eq!(project_input.len(), 1);
                 let project_input = project_input.first().unwrap();
-                if let NodeBody::Merge(merge) = project_input.get_node_body().unwrap() {
-                    tracing::debug!(
-                        "sink into table: fragment_id: {}, upstream_fragment_id: {}, project: {:?}",
-                        fragment_id,
-                        merge.upstream_fragment_id,
-                        project.get_select_list()
-                    );
-                    assert!(project.get_nondecreasing_exprs().is_empty());
-                    sink_into_streams.push((
-                        merge.upstream_fragment_id,
-                        project_input.get_fields().clone(),
-                        project.get_select_list().clone(),
-                    ));
-                    is_sink_into = true;
+                if project.get_select_list().iter().all(|e| {
+                    e.function_type() == risingwave_pb::expr::expr_node::PbType::Unspecified
+                }) {
+                    if let NodeBody::Merge(merge) = project_input.get_node_body().unwrap() {
+                        tracing::debug!(
+                            "sink into table: fragment_id: {}, upstream_fragment_id: {}, project: {:?}",
+                            fragment_id,
+                            merge.upstream_fragment_id,
+                            project.get_select_list()
+                        );
+                        sink_into_streams.push((
+                            merge.upstream_fragment_id,
+                            project_input.get_fields().clone(),
+                            project.get_select_list().clone(),
+                        ));
+                        is_sink_into = true;
+                    }
                 }
             }
             if !is_sink_into {
