@@ -64,6 +64,17 @@ pub(crate) struct SharedActorInfos {
 }
 
 impl SharedActorInfos {
+    pub fn read_guard(
+        &self,
+    ) -> parking_lot::RwLockReadGuard<
+        '_,
+        HashMap<DatabaseId, HashMap<FragmentId, InflightFragmentInfo>>,
+    > {
+        self.inner.read()
+    }
+}
+
+impl SharedActorInfos {
     pub(crate) fn new(notification_manager: NotificationManagerRef) -> Self {
         Self {
             inner: Arc::new(Default::default()),

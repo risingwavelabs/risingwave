@@ -47,6 +47,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use crate::barrier::SnapshotBackfillInfo;
+use crate::controller::fragment::InflightFragmentInfo;
 use crate::controller::id::IdGeneratorManager;
 use crate::manager::{MetaSrvEnv, StreamingJob, StreamingJobType};
 use crate::model::{ActorId, Fragment, FragmentId, StreamActor};
@@ -1095,7 +1096,7 @@ pub(super) enum EitherFragment {
     Building(BuildingFragment),
 
     /// An existing fragment that is external but connected to the fragments being built.
-    Existing(Fragment),
+    Existing(InflightFragmentInfo),
 }
 
 /// A wrapper of [`StreamFragmentGraph`] that contains the additional information of pre-existing
@@ -1112,7 +1113,7 @@ pub struct CompleteStreamFragmentGraph {
     building_graph: StreamFragmentGraph,
 
     /// The required information of existing fragments.
-    existing_fragments: HashMap<GlobalFragmentId, Fragment>,
+    existing_fragments: HashMap<GlobalFragmentId, InflightFragmentInfo>,
 
     /// The location of the actors in the existing fragments.
     existing_actor_location: HashMap<ActorId, WorkerId>,
@@ -1127,13 +1128,13 @@ pub struct CompleteStreamFragmentGraph {
 pub struct FragmentGraphUpstreamContext {
     /// Root fragment is the root of upstream stream graph, which can be a
     /// mview fragment or source fragment for cdc source job
-    upstream_root_fragments: HashMap<TableId, Fragment>,
+    upstream_root_fragments: HashMap<TableId, InflightFragmentInfo>,
     upstream_actor_location: HashMap<ActorId, WorkerId>,
 }
 
 pub struct FragmentGraphDownstreamContext {
     original_root_fragment_id: FragmentId,
-    downstream_fragments: Vec<(DispatcherType, Fragment)>,
+    downstream_fragments: Vec<(DispatcherType, InflightFragmentInfo)>,
     downstream_actor_location: HashMap<ActorId, WorkerId>,
 }
 
@@ -1156,7 +1157,7 @@ impl CompleteStreamFragmentGraph {
     /// `Materialize` or `Source` fragments.
     pub fn with_upstreams(
         graph: StreamFragmentGraph,
-        upstream_root_fragments: HashMap<TableId, Fragment>,
+        upstream_root_fragments: HashMap<TableId, InflightFragmentInfo>,
         existing_actor_location: HashMap<ActorId, WorkerId>,
         job_type: StreamingJobType,
     ) -> MetaResult<Self> {
@@ -1176,7 +1177,7 @@ impl CompleteStreamFragmentGraph {
     pub fn with_downstreams(
         graph: StreamFragmentGraph,
         original_root_fragment_id: FragmentId,
-        downstream_fragments: Vec<(DispatcherType, Fragment)>,
+        downstream_fragments: Vec<(DispatcherType, InflightFragmentInfo)>,
         existing_actor_location: HashMap<ActorId, WorkerId>,
         job_type: StreamingJobType,
     ) -> MetaResult<Self> {
@@ -1195,10 +1196,10 @@ impl CompleteStreamFragmentGraph {
     /// For replacing an existing table based on shared cdc source, which has both upstreams and downstreams.
     pub fn with_upstreams_and_downstreams(
         graph: StreamFragmentGraph,
-        upstream_root_fragments: HashMap<TableId, Fragment>,
+        upstream_root_fragments: HashMap<TableId, InflightFragmentInfo>,
         upstream_actor_location: HashMap<ActorId, WorkerId>,
         original_root_fragment_id: FragmentId,
-        downstream_fragments: Vec<(DispatcherType, Fragment)>,
+        downstream_fragments: Vec<(DispatcherType, InflightFragmentInfo)>,
         downstream_actor_location: HashMap<ActorId, WorkerId>,
         job_type: StreamingJobType,
     ) -> MetaResult<Self> {

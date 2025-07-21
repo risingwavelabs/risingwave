@@ -32,14 +32,14 @@ use risingwave_common::util::stream_graph_visitor::visit_fragment;
 use risingwave_common::{bail, hash};
 use risingwave_connector::source::cdc::{CDC_BACKFILL_MAX_PARALLELISM, CdcScanOptions};
 use risingwave_meta_model::WorkerId;
+use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
-use risingwave_pb::meta::table_fragments::fragment::{
-    FragmentDistributionType, PbFragmentDistributionType,
-};
+use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::stream_plan::DispatcherType::{self, *};
 
 use crate::MetaResult;
-use crate::model::{ActorId, Fragment};
+use crate::controller::fragment::InflightFragmentInfo;
+use crate::model::ActorId;
 use crate::stream::AssignerBuilder;
 use crate::stream::stream_graph::fragment::CompleteStreamFragmentGraph;
 use crate::stream::stream_graph::id::GlobalFragmentId as Id;
@@ -152,22 +152,24 @@ impl Distribution {
     }
 
     /// Create a distribution from a persisted protobuf `Fragment`.
-    pub fn from_fragment(fragment: &Fragment, actor_location: &HashMap<ActorId, WorkerId>) -> Self {
+    pub fn from_fragment(
+        fragment: &InflightFragmentInfo,
+        actor_location: &HashMap<ActorId, WorkerId>,
+    ) -> Self {
         match fragment.distribution_type {
-            FragmentDistributionType::Unspecified => unreachable!(),
-            FragmentDistributionType::Single => {
-                let actor_id = fragment.actors.iter().exactly_one().unwrap().actor_id;
-                let location = actor_location.get(&actor_id).unwrap();
+            DistributionType::Single => {
+                let (actor_id, _) = fragment.actors.iter().exactly_one().unwrap();
+                let location = actor_location.get(actor_id).unwrap();
                 Distribution::Singleton(*location)
             }
-            FragmentDistributionType::Hash => {
+            DistributionType::Hash => {
                 let actor_bitmaps: HashMap<_, _> = fragment
                     .actors
                     .iter()
-                    .map(|actor| {
+                    .map(|(actor_id, actor_info)| {
                         (
-                            actor.actor_id as hash::ActorId,
-                            actor.vnode_bitmap.clone().unwrap(),
+                            *actor_id as hash::ActorId,
+                            actor_info.vnode_bitmap.clone().unwrap(),
                         )
                     })
                     .collect();
