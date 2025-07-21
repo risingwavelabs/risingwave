@@ -26,9 +26,8 @@ pub struct JdbcJniClient {
 }
 
 impl JdbcJniClient {
-    pub fn new(jdbc_url: String, username: String, password: String) -> Result<Self> {
+    pub fn new(jdbc_url: String) -> Result<Self> {
         let jvm = JVM.get_or_init()?;
-        let jdbc_url = format!("{}?user={}&password={}", jdbc_url, username, password);
         Ok(Self { jvm, jdbc_url })
     }
 

@@ -166,7 +166,8 @@ impl SnowflakeConfig {
             .password
             .clone()
             .ok_or(SinkError::Config(anyhow!("snowflake.password is required")))?;
-        let client = JdbcJniClient::new(jdbc_url, username, password)?;
+        let jdbc_url = format!("{}?user={}&password={}", jdbc_url, username, password);
+        let client = JdbcJniClient::new(jdbc_url)?;
 
         if !is_append_only {
             snowflake_task_ctx.cdc_table_name = Some(self.snowflake_cdc_table_name.clone().ok_or(
@@ -538,7 +539,7 @@ impl SnowflakeJniClient {
                 cdc_table_name,
                 &self.snowflake_task_context.database,
                 &self.snowflake_task_context.schema,
-                &columns,
+                columns,
             );
             self.jdbc_client
                 .execute_sql_sync(&alter_add_column_cdc_table_sql)?;
@@ -548,7 +549,7 @@ impl SnowflakeJniClient {
             &self.snowflake_task_context.target_table_name,
             &self.snowflake_task_context.database,
             &self.snowflake_task_context.schema,
-            &columns,
+            columns,
         );
         self.jdbc_client
             .execute_sql_sync(&alter_add_column_target_table_sql)?;

@@ -39,6 +39,7 @@ pub mod nats;
 pub mod postgres;
 pub mod pulsar;
 pub mod redis;
+pub mod redshift;
 pub mod remote;
 pub mod snowflake;
 pub mod sqlserver;
