@@ -265,24 +265,32 @@ impl StreamActorManager {
                 let project_input = input_stream_node.get_input();
                 assert_eq!(project_input.len(), 1);
                 let project_input = project_input.first().unwrap();
-                let all_unspecified = project.get_select_list().iter().all(|e| {
-                    e.function_type() == risingwave_pb::expr::expr_node::PbType::Unspecified
-                });
-                if all_unspecified
+                let project_check = project.get_watermark_input_cols().is_empty()
+                    && project.get_watermark_output_cols().is_empty()
+                    && project.get_nondecreasing_exprs().is_empty()
+                    && !project.noop_update_hint;
+                if project_check
                     && let NodeBody::Merge(merge) = project_input.get_node_body().unwrap()
                 {
-                    tracing::debug!(
-                        "sink into table: fragment_id: {}, upstream_fragment_id: {}, project: {:?}",
-                        fragment_id,
-                        merge.upstream_fragment_id,
-                        project.get_select_list()
-                    );
-                    sink_into_streams.push((
-                        merge.upstream_fragment_id,
-                        project_input.get_fields().clone(),
-                        project.get_select_list().clone(),
-                    ));
-                    is_sink_into = true;
+                    #[allow(deprecated)]
+                    let merge_check = merge.get_upstream_actor_id().is_empty()
+                        && merge.upstream_dispatcher_type()
+                            == risingwave_pb::stream_plan::DispatcherType::Hash
+                        && merge.get_fields().is_empty();
+                    if merge_check {
+                        tracing::error!(
+                            "sink into table: fragment_id: {}, upstream_fragment_id: {}, project: {:?}",
+                            fragment_id,
+                            merge.upstream_fragment_id,
+                            project.get_select_list()
+                        );
+                        sink_into_streams.push((
+                            merge.upstream_fragment_id,
+                            project_input.get_fields().clone(),
+                            project.get_select_list().clone(),
+                        ));
+                        is_sink_into = true;
+                    }
                 }
             }
             if !is_sink_into {
