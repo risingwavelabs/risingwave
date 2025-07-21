@@ -23,11 +23,11 @@ use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use num_integer::Integer;
 use num_traits::abs;
-use risingwave_common::bail;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::hash::ActorMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::{bail, hash};
 use risingwave_meta_model::{ObjectId, WorkerId, actor, fragment, streaming_job};
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::FragmentWorkerSlotMappings;
@@ -86,9 +86,12 @@ use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_meta_model::DispatcherType;
+use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use sea_orm::TransactionTrait;
 
 use super::SourceChange;
+use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::id::IdCategory;
 use crate::controller::utils::filter_workers_by_resource_group;
 use crate::stream::cdc::assign_cdc_table_snapshot_splits_impl;
@@ -389,6 +392,101 @@ impl ScaleController {
             .catalog_controller
             .integrity_check()
             .await
+    }
+
+    pub async fn diff_fragment(
+        &self,
+        fragment_info: &InflightFragmentInfo,
+        curr_actors: &HashMap<crate::model::ActorId, InflightActorInfo>,
+        upstream_fragments: HashMap<FragmentId, DispatcherType>,
+        downstream_fragments: HashMap<FragmentId, DispatcherType>,
+    ) -> MetaResult<Reschedule> {
+        let prev_actors: HashMap<_, _> = fragment_info
+            .actors
+            .iter()
+            .map(|(actor_id, actor)| (*actor_id, actor))
+            .collect();
+
+        let prev_ids: HashSet<_> = prev_actors.keys().cloned().collect();
+        let curr_ids: HashSet<_> = curr_actors.keys().cloned().collect();
+
+        let removed_actors: HashSet<_> = &prev_ids - &curr_ids;
+        let added_actor_ids: HashSet<_> = &curr_ids - &prev_ids;
+        let kept_ids: HashSet<_> = prev_ids.intersection(&curr_ids).cloned().collect();
+
+        let mut added_actors = HashMap::new();
+        for &actor_id in &added_actor_ids {
+            let InflightActorInfo { worker_id, .. } = curr_actors
+                .get(&actor_id)
+                .ok_or_else(|| anyhow!("BUG: Worker not found for new actor {}", actor_id))?;
+
+            added_actors
+                .entry(*worker_id)
+                .or_insert_with(Vec::new)
+                .push(actor_id);
+        }
+
+        let mut vnode_bitmap_updates = HashMap::new();
+        for actor_id in kept_ids {
+            let prev_actor = prev_actors[&actor_id];
+            let curr_actor = &curr_actors[&actor_id];
+
+            // Check if the vnode distribution has changed.
+            if prev_actor.vnode_bitmap != curr_actor.vnode_bitmap
+                && let Some(bitmap) = curr_actor.vnode_bitmap.clone() {
+                    vnode_bitmap_updates.insert(actor_id, bitmap);
+                }
+        }
+
+        let actor_mapping = curr_actors
+            .iter()
+            .map(
+                |(
+                    actor_id,
+                    InflightActorInfo {
+                        worker_id,
+                        vnode_bitmap,
+                    },
+                )| (*actor_id as hash::ActorId, vnode_bitmap.clone().unwrap()),
+            )
+            .collect();
+
+        let upstream_dispatcher_mapping =
+            if let DistributionType::Hash = fragment_info.distribution_type {
+                Some(ActorMapping::from_bitmaps(&actor_mapping))
+            } else {
+                None
+            };
+
+        let upstream_fragment_dispatcher_ids = upstream_fragments
+            .iter()
+            .filter(|&(_, dispatcher_type)| *dispatcher_type != DispatcherType::NoShuffle)
+            .map(|(upstream_fragment, _)| {
+                (
+                    *upstream_fragment as FragmentId,
+                    fragment_info.fragment_id as DispatcherId,
+                )
+            })
+            .collect();
+
+        let downstream_fragment_ids = downstream_fragments
+            .iter()
+            .filter(|&(_, dispatcher_type)| *dispatcher_type != DispatcherType::NoShuffle)
+            .map(|(fragment_id, _)| *fragment_id)
+            .collect();
+
+        let reschedule = Reschedule {
+            added_actors,
+            removed_actors,
+            vnode_bitmap_updates,
+            upstream_fragment_dispatcher_ids,
+            upstream_dispatcher_mapping,
+            downstream_fragment_ids,
+            actor_splits: Default::default(),
+            newly_created_actors: Default::default(),
+        };
+
+        Ok(reschedule)
     }
 
     /// Build the context for rescheduling and do some validation for the request.
@@ -2393,6 +2491,21 @@ impl GlobalStreamManager {
     #[await_tree::instrument("acquire_reschedule_write_guard")]
     pub async fn reschedule_lock_write_guard(&self) -> RwLockWriteGuard<'_, ()> {
         self.scale_controller.reschedule_lock.write().await
+    }
+
+    pub async fn reschedule_(
+        &self,
+        // database_id: DatabaseId,
+        // plan: JobReschedulePlan,
+        // options: RescheduleOptions,
+    ) -> MetaResult<()> {
+        let inner = self.metadata_manager.catalog_controller.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        // let info = self.env.shared_actor_infos().read_guard();
+        //
+        // render_fragments(&txn)
+        todo!()
     }
 
     /// The entrypoint of rescheduling actors.
