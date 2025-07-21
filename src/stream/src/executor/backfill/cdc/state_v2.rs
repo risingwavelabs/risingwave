@@ -14,8 +14,9 @@
 
 use anyhow::anyhow;
 use risingwave_common::row;
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::types::{JsonbVal, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_connector::source::cdc::external::CdcOffset;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
@@ -26,6 +27,8 @@ pub struct CdcStateRecord {
     pub is_finished: bool,
     #[expect(dead_code)]
     pub row_count: i64,
+    pub cdc_offset_low: Option<CdcOffset>,
+    pub cdc_offset_high: Option<CdcOffset>,
 }
 
 /// state schema: | `split_id` | `backfill_finished` | `row_count` |
@@ -65,10 +68,24 @@ impl<S: StateStore> ParallelizedCdcBackfillState<S> {
                     Some(ScalarImpl::Int64(val)) => val,
                     _ => return Err(anyhow!("invalid backfill state: row_count").into()),
                 };
+                let cdc_offset_low = match state[3] {
+                    Some(ScalarImpl::Jsonb(ref jsonb)) => {
+                        serde_json::from_value(jsonb.clone().take()).unwrap()
+                    }
+                    _ => return Err(anyhow!("invalid backfill state: cdc_offset_low").into()),
+                };
+                let cdc_offset_high = match state[4] {
+                    Some(ScalarImpl::Jsonb(ref jsonb)) => {
+                        serde_json::from_value(jsonb.clone().take()).unwrap()
+                    }
+                    _ => return Err(anyhow!("invalid backfill state: cdc_offset_high").into()),
+                };
 
                 Ok(CdcStateRecord {
                     is_finished,
                     row_count,
+                    cdc_offset_low,
+                    cdc_offset_high,
                 })
             }
             None => Ok(CdcStateRecord::default()),
@@ -81,13 +98,23 @@ impl<S: StateStore> ParallelizedCdcBackfillState<S> {
         split_id: i64,
         is_finished: bool,
         row_count: u64,
+        cdc_offset_low: Option<CdcOffset>,
+        cdc_offset_high: Option<CdcOffset>,
     ) -> StreamExecutorResult<()> {
-        // schema: | `split_id` | `backfill_finished` | `row_count` |
+        // schema: | `split_id` | `backfill_finished` | `row_count` | `cdc_offset_low` | `cdc_offset_high` |
         let mut state = vec![None; self.state_len];
         let split_id = Some(ScalarImpl::from(split_id));
         state[0].clone_from(&split_id);
         state[1] = Some(is_finished.into());
         state[2] = Some((row_count as i64).into());
+        state[3] = cdc_offset_low.map(|cdc_offset| {
+            let json = serde_json::to_value(cdc_offset).unwrap();
+            ScalarImpl::Jsonb(JsonbVal::from(json))
+        });
+        state[4] = cdc_offset_high.map(|cdc_offset| {
+            let json = serde_json::to_value(cdc_offset).unwrap();
+            ScalarImpl::Jsonb(JsonbVal::from(json))
+        });
         match self.state_table.get_row(row::once(split_id)).await? {
             Some(prev_row) => {
                 self.state_table.update(prev_row, state.as_slice());

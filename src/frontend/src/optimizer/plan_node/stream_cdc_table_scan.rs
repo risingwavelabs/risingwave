@@ -78,6 +78,8 @@ impl StreamCdcTableScan {
             catalog_builder.add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
             // `row_count` column, the number of rows read from snapshot
             catalog_builder.add_column(&Field::with_name(DataType::Int64, "row_count"));
+            catalog_builder.add_column(&Field::with_name(DataType::Jsonb, "cdc_offset_low"));
+            catalog_builder.add_column(&Field::with_name(DataType::Jsonb, "cdc_offset_high"));
             catalog_builder
                 .build(vec![], 1)
                 .with_id(state.gen_table_id_wrapped())

@@ -1354,10 +1354,12 @@ impl ScaleController {
                 .cloned()
                 .unwrap_or_default();
 
+            let mut cdc_table_id = None;
             let cdc_table_snapshot_split_assignment = if fragment
                 .fragment_type_mask
                 .contains(FragmentTypeFlag::StreamCdcScan)
             {
+                cdc_table_id = Some(fragment.job_id);
                 assign_cdc_table_snapshot_splits_impl(
                     fragment.job_id,
                     fragment_actors_after_reschedule
@@ -1385,6 +1387,7 @@ impl ScaleController {
                     actor_splits,
                     newly_created_actors: Default::default(),
                     cdc_table_snapshot_split_assignment,
+                    cdc_table_id,
                 },
             );
         }

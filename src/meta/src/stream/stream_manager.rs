@@ -21,8 +21,10 @@ use await_tree::{InstrumentAwait, span};
 use futures::FutureExt;
 use futures::future::join_all;
 use itertools::Itertools;
+use num_traits::ToPrimitive;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
 use risingwave_pb::meta::object::PbObjectInfo;
@@ -55,6 +57,7 @@ use crate::model::{
 };
 use crate::stream::cdc::{
     assign_cdc_table_snapshot_splits, assign_cdc_table_snapshot_splits_for_replace_table,
+    is_parallelized_backfill_enabled_cdc_scan_fragment,
 };
 use crate::stream::{SourceChange, SourceManagerRef};
 use crate::{MetaError, MetaResult};
@@ -520,6 +523,34 @@ impl GlobalStreamManager {
             self.env.meta_store_ref(),
         )
         .await?;
+        if !cdc_table_snapshot_split_assignment.is_empty() {
+            self.env.cdc_table_backfill_tracker.add_split_count(
+                stream_job_fragments.stream_job_id.table_id,
+                cdc_table_snapshot_split_assignment
+                    .values()
+                    .map(|s| s.len().to_u64().unwrap())
+                    .sum(),
+            );
+            self.env
+                .cdc_table_backfill_tracker
+                .add_fragment_table_mapping(
+                    stream_job_fragments
+                        .fragments
+                        .values()
+                        .filter(|f| is_parallelized_backfill_enabled_cdc_scan_fragment(f))
+                        .map(|f| f.fragment_id),
+                    stream_job_fragments.stream_job_id.table_id,
+                );
+        }
+        let cdc_split_generation = self
+            .env
+            .cdc_table_backfill_tracker
+            .next_generation(iter::once(stream_job_fragments.stream_job_id.table_id));
+        let cdc_table_snapshot_split_assignment =
+            CdcTableSnapshotSplitAssignmentWithGeneration::new(
+                cdc_table_snapshot_split_assignment,
+                cdc_split_generation,
+            );
 
         let source_change = SourceChange::CreateJobFinished {
             finished_backfill_fragments: stream_job_fragments.source_backfill_fragments(),
