@@ -170,6 +170,12 @@ pub async fn gen_sink_plan(
         .transpose()?
         .unwrap_or(false);
 
+    if is_auto_schema_change {
+        Feature::SinkAutoSchemaChange
+            .check_available()
+            .map_err(|e| anyhow::anyhow!(e))?;
+    }
+
     // Used for debezium's table name
     let sink_from_table_name;
     // `true` means that sink statement has the form: `CREATE SINK s1 FROM ...`
