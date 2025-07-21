@@ -16,12 +16,14 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock, RwLockReadGuard};
 use std::time::Duration;
 
+use anyhow::anyhow;
 use rand::seq::IndexedRandom;
 use risingwave_common::bail;
 use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_pb::common::{WorkerNode, WorkerType};
+use thiserror_ext::AsReport;
 
 use crate::error::{BatchError, Result};
 
@@ -356,6 +358,14 @@ impl WorkerNodeSelector {
     }
 
     pub fn fragment_mapping(&self, fragment_id: FragmentId) -> Result<WorkerSlotMapping> {
+        Ok(self.fragment_mapping_inner(fragment_id).map_err(|e| {
+            let e = anyhow!(e);
+            error!("failed to get fragment mapping: {:?}", e.as_report());
+            e
+        })?)
+    }
+
+    fn fragment_mapping_inner(&self, fragment_id: FragmentId) -> Result<WorkerSlotMapping> {
         if self.enable_barrier_read {
             self.manager.get_streaming_fragment_mapping(&fragment_id)
         } else {
