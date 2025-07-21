@@ -922,6 +922,7 @@ impl GlobalBarrierWorkerContextImpl {
 
 
         info!("scaling actors succeed.");
+
         Ok(())
     }
 
