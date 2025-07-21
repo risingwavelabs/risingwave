@@ -442,7 +442,7 @@ impl StreamSink {
             let hint_string = || "Please run `set sink_decouple = true` first.".to_owned();
             if sink_desc.is_file_sink() {
                 return Err(ErrorCode::NotSupported(
-                    "File sink can only be created with sink_decouple enabled. ".to_owned(),
+                    "File sink can only be created with sink_decouple enabled.".to_owned(),
                     hint_string(),
                 )
                 .into());
