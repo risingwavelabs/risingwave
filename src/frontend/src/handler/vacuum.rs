@@ -31,7 +31,7 @@ pub async fn handle_vacuum(
 
     let sink_id = {
         let (schema_name, real_object_name) =
-            Binder::resolve_schema_qualified_name(db_name, object_name)?;
+            Binder::resolve_schema_qualified_name(db_name, &object_name)?;
         let catalog_reader = session.env().catalog_reader().read_guard();
         let search_path = session.config().search_path();
         let user_name = session.user_name();
