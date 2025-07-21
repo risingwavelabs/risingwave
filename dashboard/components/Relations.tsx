@@ -35,7 +35,6 @@ import Title from "../components/Title"
 import useFetch from "../lib/api/fetch"
 import {
   Relation,
-  StreamingRelation,
   getDatabases,
   getSchemas,
   getUsers,
@@ -73,7 +72,7 @@ export const dependentsColumn: Column<Relation> = {
   ),
 }
 
-export const fragmentsColumn: Column<StreamingRelation> = {
+export const fragmentsColumn: Column<Relation> = {
   name: "Fragments",
   width: 1,
   content: (r) => (

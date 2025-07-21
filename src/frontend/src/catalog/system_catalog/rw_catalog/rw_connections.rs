@@ -65,7 +65,11 @@ fn read_rw_connections(reader: &SysCatalogReaderImpl) -> Result<Vec<RwConnection
                         rw_connection.provider = conn.provider().into();
                     }
                     risingwave_pb::catalog::connection::Info::ConnectionParams(params) => {
-                        rw_connection.connection_params = print_connection_params(params, schema);
+                        rw_connection.connection_params = print_connection_params(
+                            &reader.auth_context.database,
+                            params,
+                            &catalog_reader,
+                        );
                     }
                 };
 

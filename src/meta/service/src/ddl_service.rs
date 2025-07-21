@@ -273,7 +273,7 @@ impl DdlService for DdlServiceImpl {
                         fragment_graph,
                         create_type: CreateType::Foreground,
                         affected_table_replace_info: None,
-                        dependencies: HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbSource`
+                        dependencies: HashSet::new(),
                         specific_resource_group: None,
                         if_not_exists: req.if_not_exists,
                     })
@@ -578,6 +578,11 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<CreateTableResponse>, Status> {
         let request = request.into_inner();
         let job_type = request.get_job_type().unwrap_or_default();
+        let dependencies = request
+            .get_dependencies()
+            .iter()
+            .map(|id| *id as ObjectId)
+            .collect();
         let source = request.source;
         let mview = request.materialized_view.unwrap();
         let fragment_graph = request.fragment_graph.unwrap();
@@ -590,7 +595,7 @@ impl DdlService for DdlServiceImpl {
                 fragment_graph,
                 create_type: CreateType::Foreground,
                 affected_table_replace_info: None,
-                dependencies: HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbTable`
+                dependencies,
                 specific_resource_group: None,
                 if_not_exists: request.if_not_exists,
             })
@@ -635,10 +640,15 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<CreateViewResponse>, Status> {
         let req = request.into_inner();
         let view = req.get_view()?.clone();
+        let dependencies = req
+            .get_dependencies()
+            .iter()
+            .map(|id| *id as ObjectId)
+            .collect::<HashSet<_>>();
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreateView(view))
+            .run_command(DdlCommand::CreateView(view, dependencies))
             .await?;
 
         Ok(Response::new(CreateViewResponse {
@@ -991,19 +1001,34 @@ impl DdlService for DdlServiceImpl {
                 let original_columns: HashSet<(String, DataType)> =
                     HashSet::from_iter(table.columns.iter().filter_map(|col| {
                         let col = ColumnCatalog::from(col.clone());
-                        let data_type = col.data_type().clone();
-                        if col.is_generated() {
+                        if col.is_generated() || col.is_hidden() {
                             None
                         } else {
-                            Some((col.column_desc.name, data_type))
+                            Some((col.column_desc.name.clone(), col.data_type().clone()))
                         }
                     }));
-                let new_columns: HashSet<(String, DataType)> =
-                    HashSet::from_iter(table_change.columns.iter().map(|col| {
+
+                let mut new_columns: HashSet<(String, DataType)> =
+                    HashSet::from_iter(table_change.columns.iter().filter_map(|col| {
                         let col = ColumnCatalog::from(col.clone());
-                        let data_type = col.data_type().clone();
-                        (col.column_desc.name, data_type)
+                        if col.is_generated() || col.is_hidden() {
+                            None
+                        } else {
+                            Some((col.column_desc.name.clone(), col.data_type().clone()))
+                        }
                     }));
+
+                // For subset/superset check, we need to add visible connector additional columns defined by INCLUDE in the original table to new_columns
+                // This includes both _rw columns and user-defined INCLUDE columns (e.g., INCLUDE TIMESTAMP AS xxx)
+                for col in &table.columns {
+                    let col = ColumnCatalog::from(col.clone());
+                    if col.is_connector_additional_column()
+                        && !col.is_hidden()
+                        && !col.is_generated()
+                    {
+                        new_columns.insert((col.column_desc.name.clone(), col.data_type().clone()));
+                    }
+                }
 
                 if !(original_columns.is_subset(&new_columns)
                     || original_columns.is_superset(&new_columns))
@@ -1014,9 +1039,9 @@ impl DdlService for DdlServiceImpl {
                                     upstraem_ddl = table_change.upstream_ddl,
                                     original_columns = ?original_columns,
                                     new_columns = ?new_columns,
-                                    "New columns should be a subset or superset of the original columns, since only `ADD COLUMN` and `DROP COLUMN` is supported");
+                                    "New columns should be a subset or superset of the original columns (including hidden columns), since only `ADD COLUMN` and `DROP COLUMN` is supported");
                     return Err(Status::invalid_argument(
-                        "New columns should be a subset or superset of the original columns",
+                        "New columns should be a subset or superset of the original columns (including hidden columns)",
                     ));
                 }
                 // skip the schema change if there is no change to original columns

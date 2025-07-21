@@ -223,7 +223,6 @@ pub(crate) fn gen_create_index_plan(
     }
 
     index_table.owner = table.owner;
-    index_table.dependent_relations = vec![table.id];
 
     let index_columns_len = index_columns_ordered_expr.len() as u32;
     let index_column_properties = index_columns_ordered_expr

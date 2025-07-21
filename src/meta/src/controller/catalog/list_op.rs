@@ -243,4 +243,9 @@ impl CatalogController {
         let inner = self.inner.read().await;
         inner.list_users().await
     }
+
+    pub async fn list_functions(&self) -> MetaResult<Vec<PbFunction>> {
+        let inner = self.inner.read().await;
+        inner.list_functions().await
+    }
 }

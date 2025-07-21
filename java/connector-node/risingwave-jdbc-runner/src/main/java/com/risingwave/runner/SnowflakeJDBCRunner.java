@@ -17,30 +17,31 @@
 package com.risingwave.runner;
 
 import java.sql.*;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class SnowflakeJDBCRunner {
-    private static final Logger logger = LogManager.getLogger(SnowflakeJDBCRunner.class);
+    private static final Logger LOG = LoggerFactory.getLogger(SnowflakeJDBCRunner.class);
 
-    public static void executeSql(String fullUrl, String sql) {
+    public static void executeSql(String fullUrl, String sql) throws Exception {
         Connection connection = null;
         try {
             Class.forName("net.snowflake.client.jdbc.SnowflakeDriver");
             connection = DriverManager.getConnection(fullUrl);
             Statement stmt = connection.createStatement();
             int result = stmt.executeUpdate(sql);
-            logger.info("[JDBCRunner] Executing SQL");
+            LOG.info("[JDBCRunner] Executing SQL");
             stmt.close();
         } catch (Exception e) {
-            logger.error("[JDBCRunner] SQLException: {}", e.getMessage(), e);
+            LOG.error("[JDBCRunner] SQLException: {}", e.getMessage(), e);
+            throw e;
         } finally {
             if (connection != null) {
                 try {
                     connection.close();
-                    logger.info("[JDBCRunner] Connection closed.");
+                    LOG.info("[JDBCRunner] Connection closed.");
                 } catch (SQLException e) {
-                    logger.error("[JDBCRunner] SQLException on close: {}", e.getMessage(), e);
+                    LOG.error("[JDBCRunner] SQLException on close: {}", e.getMessage(), e);
                 }
             }
         }

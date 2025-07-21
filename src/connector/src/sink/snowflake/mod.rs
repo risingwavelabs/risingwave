@@ -17,20 +17,19 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, anyhow};
+use anyhow::anyhow;
 use bytes::BytesMut;
 use opendal::Operator;
 use phf::{Set, phf_set};
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_pb::connector_service::SinkMetadata;
-use risingwave_pb::connector_service::sink_metadata::{self, SerializedMetadata};
 use sea_orm::DatabaseConnection;
-use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde::Deserialize;
+use serde_json::{Map, Value};
 use serde_with::{DisplayFromStr, serde_as};
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedSender;
 use tonic::async_trait;
 use with_options::WithOptions;
@@ -45,7 +44,7 @@ use crate::sink::encoder::{
 };
 use crate::sink::file_sink::opendal_sink::FileSink;
 use crate::sink::file_sink::s3::{S3Config, S3Sink};
-use crate::sink::snowflake::snowflake_jni_client::{SnowflakeJniClient, SnowflakeTaskContext};
+use crate::sink::snowflake::snowflake_jni_client::{JdbcJniClient, SnowflakeJniClient};
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
     Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink, SinkCommitCoordinator,
@@ -97,6 +96,13 @@ pub struct SnowflakeConfig {
     #[serde_as(as = "DisplayFromStr")]
     #[with_option(allow_alter_on_fly)]
     pub commit_checkpoint_interval: u64,
+
+    /// Enable auto schema change for upsert sink.
+    /// If enabled, the sink will automatically alter the target table to add new columns.
+    #[serde(default)]
+    #[serde(rename = "auto.schema.change")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub auto_schema_change: bool,
 }
 
 impl SnowflakeConfig {
@@ -115,6 +121,85 @@ impl SnowflakeConfig {
             )));
         }
         Ok(config)
+    }
+
+    pub fn build_snowflake_task_ctx_jdbc_client(
+        &self,
+        is_append_only: bool,
+        schema: &Schema,
+        pk_indices: &Vec<usize>,
+    ) -> Result<Option<(SnowflakeTaskContext, JdbcJniClient)>> {
+        if !self.auto_schema_change {
+            return Ok(None);
+        }
+        let target_table_name =
+            self.snowflake_target_table_name
+                .clone()
+                .ok_or(SinkError::Config(anyhow!(
+                    "snowflake.target_table_name is required"
+                )))?;
+        let database = self
+            .snowflake_database
+            .clone()
+            .ok_or(SinkError::Config(anyhow!("snowflake.database is required")))?
+            .to_owned();
+        let schema_name = self
+            .snowflake_schema
+            .clone()
+            .ok_or(SinkError::Config(anyhow!("snowflake.schema is required")))?
+            .to_owned();
+        let mut snowflake_task_ctx = SnowflakeTaskContext {
+            target_table_name,
+            database,
+            schema: schema_name,
+            ..Default::default()
+        };
+
+        let jdbc_url = self
+            .jdbc_url
+            .clone()
+            .ok_or(SinkError::Config(anyhow!("snowflake.jdbc.url is required")))?
+            .to_owned();
+        let username = self
+            .username
+            .clone()
+            .ok_or(SinkError::Config(anyhow!("snowflake.username is required")))?;
+        let password = self
+            .password
+            .clone()
+            .ok_or(SinkError::Config(anyhow!("snowflake.password is required")))?;
+        let client = JdbcJniClient::new(jdbc_url, username, password)?;
+
+        if !is_append_only {
+            snowflake_task_ctx.cdc_table_name = Some(self.snowflake_cdc_table_name.clone().ok_or(
+                SinkError::Config(anyhow!("snowflake.cdc_table_name is required")),
+            )?);
+            snowflake_task_ctx.schedule = Some(
+                self.snowflake_schedule
+                    .clone()
+                    .unwrap_or(DEFAULT_SCHEDULE.to_owned()),
+            );
+            snowflake_task_ctx.warehouse = Some(self.snowflake_warehouse.clone().ok_or(
+                SinkError::Config(anyhow!("snowflake.warehouse is required")),
+            )?);
+            snowflake_task_ctx.pk_column_names = Some(
+                schema
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| pk_indices.contains(index))
+                    .map(|(_, field)| field.name.clone())
+                    .collect(),
+            );
+            snowflake_task_ctx.all_column_names = Some(
+                schema
+                    .fields
+                    .iter()
+                    .map(|field| field.name.clone())
+                    .collect(),
+            );
+        }
+        Ok(Some((snowflake_task_ctx, client)))
     }
 }
 
@@ -174,47 +259,11 @@ impl Sink for SnowflakeSink {
         risingwave_common::license::Feature::SnowflakeSink
             .check_available()
             .map_err(|e| anyhow::anyhow!(e))?;
-        if !self.is_append_only {
-            self.config
-                .snowflake_cdc_table_name
-                .as_ref()
-                .ok_or_else(|| {
-                    SinkError::Config(anyhow!(
-                        "snowflake.cdc_table_name is required for upsert sink"
-                    ))
-                })?;
-            self.config
-                .snowflake_target_table_name
-                .as_ref()
-                .ok_or_else(|| {
-                    SinkError::Config(anyhow!(
-                        "snowflake.target_table_name is required for upsert sink"
-                    ))
-                })?;
-            self.config.snowflake_warehouse.as_ref().ok_or_else(|| {
-                SinkError::Config(anyhow!("snowflake.warehouse is required for upsert sink"))
-            })?;
-            self.config.username.as_ref().ok_or_else(|| {
-                SinkError::Config(anyhow!("snowflake.username is required for upsert sink"))
-            })?;
-            self.config.password.as_ref().ok_or_else(|| {
-                SinkError::Config(anyhow!("snowflake.password is required for upsert sink"))
-            })?;
-            self.config.jdbc_url.as_ref().ok_or_else(|| {
-                SinkError::Config(anyhow!("snowflake.jdbc.url is required for upsert sink"))
-            })?;
-            self.config.snowflake_database.as_ref().ok_or_else(|| {
-                SinkError::Config(anyhow!("snowflake.database is required for upsert sink"))
-            })?;
-            self.config.snowflake_schema.as_ref().ok_or_else(|| {
-                SinkError::Config(anyhow!("snowflake.schema is required for upsert sink"))
-            })?;
-            if self.pk_indices.is_empty() {
-                return Err(SinkError::Config(anyhow!(
-                    "snowflake.upsert requires primary key indices to be set"
-                )));
-            }
-        }
+        self.config.build_snowflake_task_ctx_jdbc_client(
+            self.is_append_only,
+            &self.schema,
+            &self.pk_indices,
+        )?;
         Ok(())
     }
 
@@ -365,76 +414,6 @@ impl SnowflakeSinkWriter {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-enum SchemaChange {
-    AddColumn(Vec<(String, String)>),
-}
-
-impl<'a> TryFrom<&'a SchemaChange> for SinkMetadata {
-    type Error = SinkError;
-
-    fn try_from(value: &'a SchemaChange) -> std::result::Result<Self, Self::Error> {
-        let metadata = match value {
-            SchemaChange::AddColumn(columns) => {
-                json!({
-                    "type_name": "add_column",
-                    "add_columns": columns.iter().map(|(name, data_type)| {
-                        json!({
-                            "name": name,
-                            "data_type": data_type,
-                        })
-                    }).collect::<Vec<_>>(),
-                })
-            }
-        };
-        let metadata =
-            serde_json::to_vec(&metadata).context("cannot serialize schema change metadata")?;
-        Ok(SinkMetadata {
-            metadata: Some(sink_metadata::Metadata::Serialized(SerializedMetadata {
-                metadata,
-            })),
-        })
-    }
-}
-
-impl SchemaChange {
-    fn try_from(value: &SinkMetadata) -> Result<Self> {
-        if let Some(sink_metadata::Metadata::Serialized(v)) = &value.metadata {
-            let meta = serde_json::from_slice::<Value>(&v.metadata)
-                .context("cannot deserialize schema change")?;
-            let type_name = meta
-                .get("type_name")
-                .ok_or_else(|| anyhow!("schema change metadata should have a type field"))?;
-            if type_name == "add_column" {
-                let columns = meta
-                    .get("add_columns")
-                    .ok_or_else(|| anyhow!("schema change metadata should have a columns field"))?;
-                let columns = columns
-                    .as_array()
-                    .ok_or_else(|| anyhow!("columns should be an array"))?
-                    .iter()
-                    .map(|c| {
-                        let name = c
-                            .get("name")
-                            .and_then(Value::as_str)
-                            .ok_or_else(|| anyhow!("each column should have a name field"))?;
-                        let data_type = c
-                            .get("data_type")
-                            .and_then(Value::as_str)
-                            .ok_or_else(|| anyhow!("each column should have a data_type field"))?;
-                        Ok((name.to_owned(), data_type.to_owned()))
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-                Ok(SchemaChange::AddColumn(columns))
-            } else {
-                bail!("unsupported schema change type: {}", type_name);
-            }
-        } else {
-            bail!("unsupported schema change metadata format");
-        }
-    }
-}
-
 #[async_trait]
 impl SinkWriter for SnowflakeSinkWriter {
     type CommitMetadata = Option<SinkMetadata>;
@@ -468,7 +447,7 @@ impl SinkWriter for SnowflakeSinkWriter {
             writer
                 .close()
                 .await
-                .map_err(|e| SinkError::File(e.to_string()))?;
+                .map_err(|e| SinkError::File(e.to_report_string()))?;
         }
         Ok(None)
     }
@@ -479,12 +458,23 @@ impl SinkWriter for SnowflakeSinkWriter {
     }
 }
 
-enum SnowflakeSinkCommitterEnum {
-    AppendOnly,
-    Upsert(SnowflakeJniClient),
+#[derive(Default)]
+pub struct SnowflakeTaskContext {
+    // required for task creation
+    pub target_table_name: String,
+    pub database: String,
+    pub schema: String,
+
+    // only upsert
+    pub task_name: Option<String>,
+    pub cdc_table_name: Option<String>,
+    pub schedule: Option<String>,
+    pub warehouse: Option<String>,
+    pub pk_column_names: Option<Vec<String>>,
+    pub all_column_names: Option<Vec<String>>,
 }
 pub struct SnowflakeSinkCommitter {
-    snowflake_sink_committer_enum: SnowflakeSinkCommitterEnum,
+    client: Option<SnowflakeJniClient>,
 }
 
 impl SnowflakeSinkCommitter {
@@ -494,122 +484,38 @@ impl SnowflakeSinkCommitter {
         pk_indices: &Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
-        if is_append_only {
-            Ok(Self {
-                snowflake_sink_committer_enum: SnowflakeSinkCommitterEnum::AppendOnly,
-            })
+        let client = if let Some((snowflake_task_ctx, client)) =
+            config.build_snowflake_task_ctx_jdbc_client(is_append_only, schema, pk_indices)?
+        {
+            Some(SnowflakeJniClient::new(client, snowflake_task_ctx))
         } else {
-            let cdc_table_name =
-                config
-                    .snowflake_cdc_table_name
-                    .ok_or(SinkError::Config(anyhow!(
-                        "snowflake.cdc_table_name is required"
-                    )))?;
-            let target_table_name =
-                config
-                    .snowflake_target_table_name
-                    .ok_or(SinkError::Config(anyhow!(
-                        "snowflake.target_table_name is required"
-                    )))?;
-            let schedule = config
-                .snowflake_schedule
-                .unwrap_or(DEFAULT_SCHEDULE.to_owned());
-            let warehouse = config.snowflake_warehouse.ok_or(SinkError::Config(anyhow!(
-                "snowflake.warehouse is required"
-            )))?;
-            let username = config
-                .username
-                .ok_or(SinkError::Config(anyhow!("snowflake.username is required")))?;
-            let password = config
-                .password
-                .ok_or(SinkError::Config(anyhow!("snowflake.password is required")))?;
-            let pk_column_names = schema
-                .fields
-                .iter()
-                .enumerate()
-                .filter(|(index, _)| pk_indices.contains(index))
-                .map(|(_, field)| field.name.clone())
-                .collect();
-            let all_column_names = schema
-                .fields
-                .iter()
-                .map(|field| field.name.clone())
-                .collect();
-            let jdbc_url = config
-                .jdbc_url
-                .ok_or(SinkError::Config(anyhow!("snowflake.jdbc.url is required")))?
-                .to_owned();
-            let database = config
-                .snowflake_database
-                .ok_or(SinkError::Config(anyhow!("snowflake.database is required")))?
-                .to_owned();
-            let schema_name = config
-                .snowflake_schema
-                .ok_or(SinkError::Config(anyhow!("snowflake.schema is required")))?
-                .to_owned();
-            let snowflake_task_ctx = SnowflakeTaskContext {
-                task_name: format!(
-                    "rw_snowflake_sink_from_{cdc_table_name}_to_{target_table_name}"
-                ),
-                cdc_table_name,
-                target_table_name,
-                schedule,
-                warehouse,
-                pk_column_names,
-                all_column_names,
-                database,
-                schema: schema_name,
-            };
-            let snowflake_client =
-                SnowflakeJniClient::new(snowflake_task_ctx, jdbc_url, username, password)?;
-            Ok(Self {
-                snowflake_sink_committer_enum: SnowflakeSinkCommitterEnum::Upsert(snowflake_client),
-            })
-        }
+            None
+        };
+        Ok(Self { client })
     }
 }
 
 #[async_trait]
 impl SinkCommitCoordinator for SnowflakeSinkCommitter {
     async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
-        match &self.snowflake_sink_committer_enum {
-            SnowflakeSinkCommitterEnum::AppendOnly => {}
-            SnowflakeSinkCommitterEnum::Upsert(client) => {
-                client.execute_create_merge_into_task()?;
-            }
+        if let Some(client) = &self.client {
+            client.execute_create_merge_into_task()?;
         }
         Ok(None)
     }
 
-    async fn commit(&mut self, _epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
-        if metadata.is_empty() {
-            return Ok(());
-        }
-        let metadata = metadata.first().ok_or_else(|| {
-            SinkError::Config(anyhow!("metadata should not be empty when committing"))
-        })?;
-        let metadata = SchemaChange::try_from(metadata).map_err(|e| {
-            SinkError::Config(anyhow!("cannot parse schema change metadata: {}", e))
-        })?;
-        let SchemaChange::AddColumn(add_columns) = metadata;
-        match &mut self.snowflake_sink_committer_enum {
-            SnowflakeSinkCommitterEnum::AppendOnly => {}
-            SnowflakeSinkCommitterEnum::Upsert(client) => {
-                client.execute_alter_add_columns(&add_columns)?;
-            }
-        }
-
+    async fn commit(&mut self, _epoch: u64, _metadata: Vec<SinkMetadata>) -> Result<()> {
+        // self.snowflake_task_context
+        //     .all_column_names
+        //     .extend(columns.iter().map(|(name, _typ)| name.to_string()));
         Ok(())
     }
 }
 
 impl Drop for SnowflakeSinkCommitter {
     fn drop(&mut self) {
-        match &self.snowflake_sink_committer_enum {
-            SnowflakeSinkCommitterEnum::AppendOnly => {}
-            SnowflakeSinkCommitterEnum::Upsert(client) => {
-                client.execute_drop_task().ok();
-            }
+        if let Some(client) = &self.client {
+            client.execute_drop_task().ok();
         }
     }
 }
