@@ -15,6 +15,7 @@
 mod compaction_executor;
 mod compaction_filter;
 pub mod compaction_utils;
+use iceberg::spec::MAIN_BRANCH;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ValidationTask};
@@ -441,6 +442,9 @@ pub fn start_iceberg_compactor(
                                         .set_compression(Compression::SNAPPY) // TODO: make it configurable
                                         .build();
 
+                                // TODO: get branch from iceberg_compaction_task
+                                let branch = MAIN_BRANCH.to_owned();
+
                                 let compactor_runner_config = match IcebergCompactorRunnerConfigBuilder::default()
                                     .max_parallelism(worker_num as u32)
                                     .min_size_per_partition(compactor_context.storage_opts.iceberg_compaction_min_size_per_partition_mb as u64 * 1024 * 1024)
@@ -449,6 +453,7 @@ pub fn start_iceberg_compactor(
                                     .enable_validate_compaction(compactor_context.storage_opts.iceberg_compaction_enable_validate)
                                     .max_record_batch_rows(compactor_context.storage_opts.iceberg_compaction_max_record_batch_rows)
                                     .write_parquet_properties(write_parquet_properties)
+                                    .to_branch(branch)
                                     .build() {
                                     Ok(config) => config,
                                     Err(e) => {

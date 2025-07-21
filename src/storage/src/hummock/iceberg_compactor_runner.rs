@@ -18,9 +18,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock};
 
 use derive_builder::Builder;
+use iceberg::spec::MAIN_BRANCH;
 use iceberg::{Catalog, TableIdent};
 use iceberg_compaction_core::compaction::{
-    Compaction, CompactionType, RewriteDataFilesCommitManagerRetryConfig,
+    CommitConsistencyParams, CommitManagerRetryConfig, Compaction, CompactionResult, CompactionType,
 };
 use iceberg_compaction_core::config::CompactionConfigBuilder;
 use iceberg_compaction_core::executor::RewriteFilesStat;
@@ -76,6 +77,9 @@ pub struct IcebergCompactorRunnerConfig {
     pub max_record_batch_rows: usize,
     #[builder(default = "default_writer_properties()")]
     pub write_parquet_properties: WriterProperties,
+
+    #[builder(default = "MAIN_BRANCH.to_owned()")]
+    pub to_branch: String,
 }
 
 #[derive(Debug, Clone)]
@@ -259,7 +263,7 @@ impl IcebergCompactorRunner {
         let now = std::time::Instant::now();
 
         let compact = async move {
-            let retry_config = RewriteDataFilesCommitManagerRetryConfig::default();
+            let retry_config = CommitManagerRetryConfig::default();
             let statistics = self
                 .analyze_task_statistics()
                 .await
@@ -322,6 +326,7 @@ impl IcebergCompactorRunner {
                 .with_executor_type(iceberg_compaction_core::executor::ExecutorType::DataFusion)
                 .with_registry(BERGLOOM_METRICS_REGISTRY.clone())
                 .with_retry_config(retry_config)
+                .with_to_branch(self.config.to_branch.clone())
                 .build()
                 .await
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
@@ -341,11 +346,87 @@ impl IcebergCompactorRunner {
                 },
             );
 
-            let stat = compaction
+            let CompactionResult {
+                data_files,
+                stats,
+                table,
+            } = compaction
                 .compact()
                 .await
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-            Ok::<RewriteFilesStat, HummockError>(stat)
+
+            let committed_table = table.unwrap();
+
+            if self.config.to_branch.as_str() != MAIN_BRANCH {
+                // Overwrite Main branch
+                let consistency_params = CommitConsistencyParams {
+                    starting_snapshot_id: committed_table
+                        .metadata()
+                        .snapshot_for_ref(self.config.to_branch.as_str())
+                        .ok_or(HummockError::compaction_executor(anyhow::anyhow!(
+                            "Don't find current_snapshot for branch {}",
+                            self.config.to_branch
+                        )))?
+                        .snapshot_id(),
+                    use_starting_sequence_number: true,
+                    basic_schema_id: committed_table.metadata().current_schema().schema_id(),
+                };
+
+                let commit_manager = compaction.build_commit_manager(consistency_params);
+
+                let input_files = {
+                    let mut input_files = vec![];
+                    if let Some(snapshot) = committed_table.metadata().snapshot_for_ref("main") {
+                        let manifest_list = snapshot
+                            .load_manifest_list(
+                                committed_table.file_io(),
+                                committed_table.metadata(),
+                            )
+                            .await
+                            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+
+                        for manifest_file in manifest_list
+                            .entries()
+                            .iter()
+                            .filter(|entry| entry.has_added_files() || entry.has_existing_files())
+                        {
+                            let manifest = manifest_file
+                                .load_manifest(committed_table.file_io())
+                                .await
+                                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+                            let (entry, _) = manifest.into_parts();
+                            for i in entry {
+                                match i.content_type() {
+                                    iceberg::spec::DataContentType::Data => {
+                                        input_files.push(i.data_file().clone());
+                                    }
+                                    iceberg::spec::DataContentType::EqualityDeletes => {
+                                        unreachable!(
+                                            "Equality deletes are not supported in main branch"
+                                        );
+                                    }
+                                    iceberg::spec::DataContentType::PositionDeletes => {
+                                        unreachable!(
+                                            "Position deletes are not supported in main branch"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+
+                        input_files
+                    } else {
+                        vec![]
+                    }
+                };
+
+                let _new_table = commit_manager
+                    .overwrite_files(data_files, input_files, MAIN_BRANCH)
+                    .await
+                    .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+            }
+
+            Ok::<RewriteFilesStat, HummockError>(stats)
         };
 
         tokio::select! {
@@ -383,9 +464,10 @@ impl IcebergCompactorRunner {
             .load_table(&self.table_ident)
             .await
             .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+
         let manifest_list = table
             .metadata()
-            .current_snapshot()
+            .snapshot_for_ref(&self.config.to_branch)
             .ok_or_else(|| HummockError::compaction_executor("Don't find current_snapshot"))?
             .load_manifest_list(table.file_io(), table.metadata())
             .await

@@ -245,6 +245,8 @@ pub struct IcebergConnection {
         deserialize_with = "deserialize_optional_bool_from_string"
     )]
     pub hosted_catalog: Option<bool>,
+
+    pub write_mode: String, // accept "COW" or "MORE"
 }
 
 impl EnforceSecret for IcebergConnection {
@@ -401,6 +403,7 @@ impl Connection for IcebergConnection {
             table_name: "test_table".to_owned(),
             enable_config_load: self.enable_config_load,
             hosted_catalog: self.hosted_catalog,
+            write_mode: self.write_mode.clone(),
         };
 
         let mut java_map = HashMap::new();

@@ -26,7 +26,8 @@ use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use iceberg::arrow::{arrow_schema_to_schema, schema_to_arrow_schema};
 use iceberg::spec::{
-    DataFile, SerializedDataFile, Transform, UnboundPartitionField, UnboundPartitionSpec,
+    DataFile, MAIN_BRANCH, SerializedDataFile, Transform, UnboundPartitionField,
+    UnboundPartitionSpec,
 };
 use iceberg::table::Table;
 use iceberg::transaction::Transaction;
@@ -95,6 +96,7 @@ use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
 
 pub const ICEBERG_SINK: &str = "iceberg";
+pub const ICEBERG_COW_BRANCH: &str = "cow_ingestion";
 
 fn default_commit_retry_num() -> u32 {
     8
@@ -1831,7 +1833,8 @@ impl IcebergSinkCommitter {
             let txn = Transaction::new(&table);
             let mut append_action = txn
                 .fast_append(Some(snapshot_id), None, vec![])
-                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?
+                .with_to_branch(self.get_branch());
             append_action
                 .add_data_files(data_files.clone())
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
@@ -1890,6 +1893,22 @@ impl IcebergSinkCommitter {
             Ok(true)
         } else {
             Ok(false)
+        }
+    }
+
+    fn get_branch(&self) -> String {
+        match self.config.r#type.as_str() {
+            SINK_TYPE_APPEND_ONLY => ICEBERG_COW_BRANCH.to_owned(),
+
+            SINK_TYPE_UPSERT => {
+                if self.config.common.write_mode == "COW" {
+                    ICEBERG_COW_BRANCH.to_owned()
+                } else {
+                    MAIN_BRANCH.to_owned()
+                }
+            }
+
+            _ => unreachable!("Unsupported iceberg sink type: {}", self.config.r#type),
         }
     }
 }
