@@ -569,11 +569,11 @@ message AlterDatabaseParamResponse {
   WaitVersion version = 2;
 }
 
-message CompactTableRequest {
-  uint32 table_id = 1;
+message CompactIcebergTableRequest {
+  uint32 sink_id = 1;
 }
 
-message CompactTableResponse {
+message CompactIcebergTableResponse {
   common.Status status = 1;
   // The compaction task ID that was triggered
   uint64 task_id = 2;
@@ -622,5 +622,5 @@ service DdlService {
   rpc AutoSchemaChange(AutoSchemaChangeRequest) returns (AutoSchemaChangeResponse);
   rpc AlterSwapRename(AlterSwapRenameRequest) returns (AlterSwapRenameResponse);
   rpc AlterDatabaseParam(AlterDatabaseParamRequest) returns (AlterDatabaseParamResponse);
-  rpc CompactTable(CompactTableRequest) returns (CompactTableResponse);
+  rpc CompactIcebergTable(CompactIcebergTableRequest) returns (CompactIcebergTableResponse);
 }

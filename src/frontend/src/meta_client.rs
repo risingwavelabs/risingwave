@@ -15,7 +15,6 @@
 use std::collections::{BTreeMap, HashMap};
 
 use anyhow::Context;
-use risingwave_common::catalog::TableId;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
@@ -42,7 +41,7 @@ use risingwave_pb::secret::PbSecretRef;
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
-use crate::catalog::DatabaseId;
+use crate::catalog::{DatabaseId, SinkId};
 
 /// A wrapper around the `MetaClient` that only provides a minor set of meta rpc.
 /// Most of the rpc to meta are delegated by other separate structs like `CatalogWriter`,
@@ -161,7 +160,7 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn set_sync_log_store_aligned(&self, job_id: u32, aligned: bool) -> Result<()>;
 
-    async fn compact_table(&self, table_id: TableId) -> Result<u64>;
+    async fn compact_iceberg_table(&self, sink_id: SinkId) -> Result<u64>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -400,7 +399,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.set_sync_log_store_aligned(job_id, aligned).await
     }
 
-    async fn compact_table(&self, table_id: TableId) -> Result<u64> {
-        self.0.compact_table(table_id).await
+    async fn compact_iceberg_table(&self, sink_id: SinkId) -> Result<u64> {
+        self.0.compact_iceberg_table(sink_id).await
     }
 }
