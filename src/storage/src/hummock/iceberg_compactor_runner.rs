@@ -354,8 +354,8 @@ impl IcebergCompactorRunner {
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
             let consistency_params = CommitConsistencyParams {
-                starting_snapshot_id: 0,
-                use_starting_sequence_number: false,
+                starting_snapshot_id: resp.snapshot_id,
+                use_starting_sequence_number: true,
                 basic_schema_id: table.metadata().current_schema().schema_id(),
             };
 
