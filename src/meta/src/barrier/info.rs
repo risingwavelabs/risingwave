@@ -90,6 +90,7 @@ pub struct SharedActorInfos {
 }
 
 impl SharedActorInfos {
+<<<<<<< HEAD
     pub fn read_guard(&self) -> RwLockReadGuard<'_, RawRwLock, SharedActorInfosInner> {
         self.inner.read()
     }

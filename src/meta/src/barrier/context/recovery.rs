@@ -1061,6 +1061,7 @@ impl GlobalBarrierWorkerContextImpl {
             info!(jobs=?reschedule_ids,"post applied reschedule for jobs in offline scaling");
         }
 
+
         info!("scaling actors succeed.");
         Ok(())
     }
