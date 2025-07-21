@@ -617,7 +617,19 @@ impl Binder {
                 ("pg_get_constraintdef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
                 ("pg_get_partkeydef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
                 ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),
-                ("has_database_privilege", raw_literal(ExprImpl::literal_bool(true))),
+                ("has_database_privilege", raw(|binder, mut inputs| {
+                    if inputs.len() == 2 {
+                        inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
+                    }
+                    if inputs.len() == 3 {
+                        Ok(FunctionCall::new(ExprType::HasDatabasePrivilege, inputs)?.into())
+                    } else {
+                        Err(ErrorCode::ExprError(
+                            "Too many/few arguments for pg_catalog.has_database_privilege()".into(),
+                        )
+                            .into())
+                    }
+                })),
                 ("has_table_privilege", raw(|binder, mut inputs| {
                     if inputs.len() == 2 {
                         inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));

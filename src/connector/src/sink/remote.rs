@@ -29,7 +29,7 @@ use phf::phf_set;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field};
 use risingwave_common::global_jvm::JVM;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::DataType;
@@ -662,6 +662,7 @@ impl SinkWriter for CoordinatedRemoteSinkWriter {
         if is_checkpoint {
             // TODO: add metrics to measure commit time
             let rsp = self.stream_handle.commit(epoch).await?;
+            println!("commit response: {:?}", rsp);
             rsp.metadata
                 .ok_or_else(|| {
                     SinkError::Remote(anyhow!(
@@ -698,7 +699,19 @@ impl SinkCommitCoordinator for RemoteCoordinator {
         Ok(None)
     }
 
-    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
+    async fn commit(
+        &mut self,
+        epoch: u64,
+        metadata: Vec<SinkMetadata>,
+        add_columns: Option<Vec<Field>>,
+    ) -> Result<()> {
+        if let Some(add_columns) = add_columns {
+            return Err(anyhow!(
+                "remote coordinator not support add columns, but got: {:?}",
+                add_columns
+            )
+            .into());
+        }
         Ok(self.stream_handle.commit(epoch, metadata).await?)
     }
 }

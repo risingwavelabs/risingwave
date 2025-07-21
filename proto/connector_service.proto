@@ -5,6 +5,7 @@ package connector_service;
 import "catalog.proto";
 import "common.proto";
 import "plan_common.proto";
+import "stream_plan.proto";
 
 option java_outer_classname = "ConnectorServiceProto";
 option java_package = "com.risingwave.proto";
@@ -227,6 +228,7 @@ message CoordinateRequest {
   message CommitRequest {
     uint64 epoch = 1;
     SinkMetadata metadata = 2;
+    stream_plan.SinkAddColumns add_columns = 3;
   }
 
   message UpdateVnodeBitmapRequest {

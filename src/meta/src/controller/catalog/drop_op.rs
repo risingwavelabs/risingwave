@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use risingwave_pb::catalog::PbTable;
+use risingwave_pb::catalog::subscription::PbSubscriptionState;
 use risingwave_pb::telemetry::PbTelemetryDatabaseObject;
-use sea_orm::{ColumnTrait, DatabaseTransaction, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, DatabaseTransaction, EntityTrait, ModelTrait, QueryFilter};
 
 use super::*;
 impl CatalogController {
@@ -374,6 +375,34 @@ impl CatalogController {
             },
             version,
         ))
+    }
+
+    pub async fn try_abort_creating_subscription(
+        &self,
+        subscription_id: SubscriptionId,
+    ) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let subscription = Subscription::find_by_id(subscription_id).one(&txn).await?;
+        let Some(subscription) = subscription else {
+            tracing::warn!(
+                subscription_id,
+                "subscription not found when aborting creation, might be cleaned by recovery"
+            );
+            return Ok(());
+        };
+
+        if subscription.subscription_state == PbSubscriptionState::Created as i32 {
+            tracing::warn!(
+                subscription_id,
+                "subscription is already created when aborting creation"
+            );
+            return Ok(());
+        }
+
+        subscription.delete(&txn).await?;
+        Ok(())
     }
 }
 

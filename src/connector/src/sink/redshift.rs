@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use anyhow::anyhow;
+use phf::{Set, phf_set};
+use risingwave_common::catalog::Field;
 use risingwave_pb::connector_service::SinkMetadata;
 use sea_orm::DatabaseConnection;
 use serde::Deserialize;
@@ -22,7 +24,8 @@ use tonic::async_trait;
 use with_options::WithOptions;
 
 use crate::connector_common::IcebergSinkCompactionUpdate;
-use crate::sink::jdbc_jni_client::JdbcJniClient;
+use crate::enforce_secret::EnforceSecret;
+use crate::sink::jdbc_jni_client::{JdbcJniClient, build_alter_add_column_sql};
 use crate::sink::remote::{Jdbc, RemoteLogSinker, RemoteSink};
 use crate::sink::{
     Result, Sink, SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkError, SinkParam,
@@ -46,9 +49,17 @@ pub struct RedShiftConfig {
     pub table: String,
 }
 
-struct RedshiftSink {
+#[derive(Debug)]
+pub struct RedshiftSink {
     remote_sink: RemoteSink<Jdbc>,
     config: RedShiftConfig,
+}
+impl EnforceSecret for RedshiftSink {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "user",
+        "password",
+        "jdbc.url"
+    };
 }
 
 impl TryFrom<SinkParam> for RedshiftSink {
@@ -77,6 +88,10 @@ impl Sink for RedshiftSink {
         self.remote_sink.validate().await
     }
 
+    fn support_schema_change() -> bool {
+        true
+    }
+
     async fn new_log_sinker(
         &self,
         writer_param: crate::sink::SinkWriterParam,
@@ -100,6 +115,7 @@ impl Sink for RedshiftSink {
 
 pub struct RedshiftSinkCommitter {
     client: JdbcJniClient,
+    table_name: String,
 }
 
 impl RedshiftSinkCommitter {
@@ -112,7 +128,10 @@ impl RedshiftSinkCommitter {
             jdbc_url = format!("{}&password={}", jdbc_url, password);
         }
         let client = JdbcJniClient::new(jdbc_url)?;
-        Ok(Self { client })
+        Ok(Self {
+            client,
+            table_name: config.table,
+        })
     }
 }
 #[async_trait]
@@ -121,9 +140,22 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
         Ok(None)
     }
 
-    async fn commit(&mut self, _epoch: u64, _metadata: Vec<SinkMetadata>) -> Result<()> {
-        // let sql = build_alter_add_column_sql(table, columns);
-        // self.client.execute_sql_sync(sql)
+    async fn commit(
+        &mut self,
+        _epoch: u64,
+        _metadata: Vec<SinkMetadata>,
+        add_columns: Option<Vec<Field>>,
+    ) -> Result<()> {
+        if let Some(add_columns) = add_columns {
+            let sql = build_alter_add_column_sql(
+                &self.table_name,
+                &add_columns
+                    .iter()
+                    .map(|f| (f.name.clone(), f.data_type.to_string()))
+                    .collect::<Vec<_>>(),
+            );
+            self.client.execute_sql_sync(&sql)?;
+        }
         Ok(())
     }
 }

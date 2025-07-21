@@ -90,6 +90,9 @@ impl ExecutorBuilder for AsOfJoinExecutorBuilder {
         let join_type_proto = node.get_join_type()?;
         let as_of_desc_proto = node.get_asof_desc()?;
         let asof_desc = AsOfDesc::from_protobuf(as_of_desc_proto)?;
+        let join_encoding_type = node
+            .get_join_encoding_type()
+            .unwrap_or(JoinEncodingTypeProto::MemoryOptimized);
 
         let args = AsOfJoinExecutorDispatcherArgs {
             ctx: params.actor_context,
@@ -113,7 +116,7 @@ impl ExecutorBuilder for AsOfJoinExecutorBuilder {
                 .developer
                 .high_join_amplification_threshold,
             asof_desc,
-            join_encoding_type: node.get_join_encoding_type()?,
+            join_encoding_type,
         };
 
         let exec = args.dispatch()?;

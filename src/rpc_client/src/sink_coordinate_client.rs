@@ -17,6 +17,7 @@ use std::future::Future;
 use anyhow::anyhow;
 use futures::{Stream, TryStreamExt};
 use risingwave_common::bitmap::Bitmap;
+use risingwave_common::catalog::Field;
 use risingwave_pb::connector_service::coordinate_request::{
     CommitRequest, StartCoordinationRequest, UpdateVnodeBitmapRequest,
 };
@@ -25,6 +26,7 @@ use risingwave_pb::connector_service::{
     CoordinateRequest, CoordinateResponse, PbSinkParam, SinkMetadata, coordinate_request,
     coordinate_response,
 };
+use risingwave_pb::stream_plan::PbSinkAddColumns;
 use tokio::sync::mpsc::Receiver;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Response, Status};
@@ -95,12 +97,16 @@ impl CoordinatorStreamHandle {
     pub async fn commit(
         &mut self,
         epoch: u64,
-        metadata: Option<SinkMetadata>,
+        metadata: SinkMetadata,
+        add_columns: Option<Vec<Field>>,
     ) -> anyhow::Result<()> {
         self.send_request(CoordinateRequest {
             msg: Some(coordinate_request::Msg::CommitRequest(CommitRequest {
                 epoch,
-                metadata,
+                metadata: Some(metadata),
+                add_columns: add_columns.map(|columns| PbSinkAddColumns {
+                    fields: columns.into_iter().map(|field| field.to_prost()).collect(),
+                }),
             })),
         })
         .await?;

@@ -20,6 +20,7 @@ use risingwave_jni_core::jvm_runtime::execute_with_jni_env;
 
 use crate::sink::Result;
 
+#[derive(Debug)]
 pub struct JdbcJniClient {
     jvm: &'static JavaVM,
     jdbc_url: String,

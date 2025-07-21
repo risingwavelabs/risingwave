@@ -22,9 +22,10 @@ use bytes::BytesMut;
 use opendal::Operator;
 use phf::{Set, phf_set};
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row;
-use risingwave_pb::connector_service::SinkMetadata;
+use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
+use risingwave_pb::connector_service::{sink_metadata, SinkMetadata};
 use sea_orm::DatabaseConnection;
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -127,7 +128,8 @@ impl SnowflakeConfig {
         schema: &Schema,
         pk_indices: &Vec<usize>,
     ) -> Result<Option<(SnowflakeTaskContext, JdbcJniClient)>> {
-        if !self.auto_schema_change {
+        if !self.auto_schema_change && is_append_only {
+            //append-only + no auto schema change is not need to create a client
             return Ok(None);
         }
         let target_table_name =
@@ -147,7 +149,7 @@ impl SnowflakeConfig {
             .ok_or(SinkError::Config(anyhow!("snowflake.schema is required")))?
             .to_owned();
         let mut snowflake_task_ctx = SnowflakeTaskContext {
-            target_table_name,
+            target_table_name: target_table_name.clone(),
             database,
             schema: schema_name,
             ..Default::default()
@@ -170,9 +172,10 @@ impl SnowflakeConfig {
         let client = JdbcJniClient::new(jdbc_url)?;
 
         if !is_append_only {
-            snowflake_task_ctx.cdc_table_name = Some(self.snowflake_cdc_table_name.clone().ok_or(
+            let cdc_table_name =self.snowflake_cdc_table_name.clone().ok_or(
                 SinkError::Config(anyhow!("snowflake.cdc_table_name is required")),
-            )?);
+            )?;
+            snowflake_task_ctx.cdc_table_name = Some(cdc_table_name.clone());
             snowflake_task_ctx.schedule = Some(
                 self.snowflake_schedule
                     .clone()
@@ -197,6 +200,9 @@ impl SnowflakeConfig {
                     .map(|field| field.name.clone())
                     .collect(),
             );
+            snowflake_task_ctx.task_name = Some(format!(
+                    "rw_snowflake_sink_from_{cdc_table_name}_to_{target_table_name}"
+            ));
         }
         Ok(Some((snowflake_task_ctx, client)))
     }
@@ -264,6 +270,10 @@ impl Sink for SnowflakeSink {
             &self.pk_indices,
         )?;
         Ok(())
+    }
+
+    fn support_schema_change() -> bool {
+        true
     }
 
     fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
@@ -448,7 +458,11 @@ impl SinkWriter for SnowflakeSinkWriter {
                 .await
                 .map_err(|e| SinkError::File(e.to_report_string()))?;
         }
-        Ok(None)
+        Ok(Some(SinkMetadata {
+            metadata: Some(sink_metadata::Metadata::Serialized(SerializedMetadata{
+                metadata: vec![],
+            }))
+        }))
     }
 
     async fn abort(&mut self) -> Result<()> {
@@ -503,10 +517,25 @@ impl SinkCommitCoordinator for SnowflakeSinkCommitter {
         Ok(None)
     }
 
-    async fn commit(&mut self, _epoch: u64, _metadata: Vec<SinkMetadata>) -> Result<()> {
-        // self.snowflake_task_context
-        //     .all_column_names
-        //     .extend(columns.iter().map(|(name, _typ)| name.to_string()));
+    async fn commit(
+        &mut self,
+        _epoch: u64,
+        _metadata: Vec<SinkMetadata>,
+        add_columns: Option<Vec<Field>>,
+    ) -> Result<()> {
+        if let Some(add_columns) = add_columns {
+            self.client
+                .as_mut()
+                .ok_or_else(|| {
+                    SinkError::Config(anyhow!("Snowflake sink committer is not initialized."))
+                })?
+                .execute_alter_add_columns(
+                    &add_columns
+                        .iter()
+                        .map(|f| (f.name.clone(), f.data_type.to_string()))
+                        .collect::<Vec<_>>(),
+                )?;
+        }
         Ok(())
     }
 }
@@ -534,6 +563,12 @@ impl SnowflakeJniClient {
 
     pub fn execute_alter_add_columns(&mut self, columns: &Vec<(String, String)>) -> Result<()> {
         self.execute_drop_task()?;
+        self.snowflake_task_context
+            .all_column_names
+            .as_mut()
+            .map(|names| {
+                names.extend(columns.iter().map(|(name, _)| name.clone()));
+            });
         if let Some(cdc_table_name) = &self.snowflake_task_context.cdc_table_name {
             let alter_add_column_cdc_table_sql = build_alter_add_column_sql(
                 cdc_table_name,

@@ -142,6 +142,7 @@ macro_rules! for_all_sinks {
 
                 { Fs, $crate::sink::file_sink::opendal_sink::FileSink<FsSink>, $crate::sink::file_sink::fs::FsConfig },
                 { Snowflake, $crate::sink::snowflake::SnowflakeSink, $crate::sink::snowflake::SnowflakeConfig },
+                { RedShift, $crate::sink::redshift::RedshiftSink, $crate::sink::redshift::RedShiftConfig },
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink, $crate::sink::deltalake::DeltaLakeConfig },
                 { BigQuery, $crate::sink::big_query::BigQuerySink, $crate::sink::big_query::BigQueryConfig },
                 { DynamoDb, $crate::sink::dynamodb::DynamoDbSink, $crate::sink::dynamodb::DynamoDbConfig },
@@ -704,6 +705,10 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
         }
     }
 
+    fn support_schema_change() -> bool {
+        false
+    }
+
     fn validate_alter_config(_config: &BTreeMap<String, String>) -> Result<()> {
         Ok(())
     }
@@ -780,19 +785,29 @@ pub trait SinkCommitCoordinator {
     /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
     /// to be passed between different gRPC node, so in this general trait, the metadata is
     /// serialized bytes.
-    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()>;
+    async fn commit(
+        &mut self,
+        epoch: u64,
+        metadata: Vec<SinkMetadata>,
+        add_columns: Option<Vec<Field>>,
+    ) -> Result<()>;
 }
 
-pub struct DummySinkCommitCoordinator;
+pub struct DummySinkCommitCoordinator(!);
 
 #[async_trait]
 impl SinkCommitCoordinator for DummySinkCommitCoordinator {
     async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
-        Ok(None)
+        unreachable!()
     }
 
-    async fn commit(&mut self, _epoch: u64, _metadata: Vec<SinkMetadata>) -> Result<()> {
-        Ok(())
+    async fn commit(
+        &mut self,
+        _epoch: u64,
+        _metadata: Vec<SinkMetadata>,
+        _add_columns: Option<Vec<Field>>,
+    ) -> Result<()> {
+        unreachable!()
     }
 }
 
