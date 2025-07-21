@@ -35,7 +35,9 @@ pub struct Model {
     pub vnode_count: i32,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize, Hash,
+)]
 #[sea_orm(rs_type = "String", db_type = "string(None)")]
 pub enum DistributionType {
     #[sea_orm(string_value = "SINGLE")]
