@@ -37,7 +37,7 @@ use sea_orm::{
     QueryFilter, QuerySelect, Statement, TransactionTrait,
 };
 
-use crate::controller::catalog::CatalogController;
+use crate::controller::catalog::{ActorInfo, CatalogController};
 use crate::controller::utils::{get_existing_job_resource_group, get_fragment_actor_dispatchers};
 use crate::model::ActorId;
 use crate::{MetaError, MetaResult};
@@ -277,7 +277,7 @@ impl CatalogController {
         fragment_ids: Vec<FragmentId>,
     ) -> MetaResult<RescheduleWorkingSet> {
         let inner = self.inner.read().await;
-        self.resolve_working_set_for_reschedule_helper(&inner.db, fragment_ids)
+        self.resolve_working_set_for_reschedule_helper(&inner.db, &inner.actors, fragment_ids)
             .await
     }
 
@@ -296,13 +296,14 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        self.resolve_working_set_for_reschedule_helper(&txn, fragment_ids)
+        self.resolve_working_set_for_reschedule_helper(&txn, &inner.actors, fragment_ids)
             .await
     }
 
     pub async fn resolve_working_set_for_reschedule_helper<C>(
         &self,
         txn: &C,
+        actor_cache: &ActorInfo,
         fragment_ids: Vec<FragmentId>,
     ) -> MetaResult<RescheduleWorkingSet>
     where
@@ -449,6 +450,7 @@ impl CatalogController {
 
         let fragment_actor_dispatchers = get_fragment_actor_dispatchers(
             txn,
+            actor_cache,
             fragments
                 .keys()
                 .map(|fragment_id| *fragment_id as _)
