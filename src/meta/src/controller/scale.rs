@@ -39,10 +39,8 @@ use sea_orm::{
     JoinType, QueryFilter, QuerySelect, RelationTrait, Statement, TransactionTrait,
 };
 
-
-use crate::controller::catalog::{ActorInfo, CatalogController};
 use crate::barrier::Reschedule;
-use crate::controller::catalog::CatalogController;
+use crate::controller::catalog::{ActorInfo, CatalogController};
 use crate::controller::utils::{get_existing_job_resource_group, get_fragment_actor_dispatchers};
 use crate::model::{ActorId, StreamActor};
 use crate::stream::AssignerBuilder;
@@ -791,7 +789,7 @@ pub struct ActorGraph<'a> {
     pub locations: &'a HashMap<ActorId, WorkerId>,
 }
 
-fn diff_graph(prev: &ActorGraph, curr: &ActorGraph) -> MetaResult<HashMap<FragmentId, Reschedule>> {
+fn diff_graph(prev: &ActorGraph<'_>, curr: &ActorGraph<'_>) -> MetaResult<HashMap<FragmentId, Reschedule>> {
     // Collect all unique fragment IDs from both previous and current graphs.
     let prev_fragment_ids: HashSet<_> = prev.fragments.keys().cloned().collect();
     let curr_fragment_ids: HashSet<_> = curr.fragments.keys().cloned().collect();
@@ -803,7 +801,14 @@ fn diff_graph(prev: &ActorGraph, curr: &ActorGraph) -> MetaResult<HashMap<Fragme
         let prev_state = prev.fragments.get(&fragment_id);
         let curr_state = curr.fragments.get(&fragment_id);
 
-        let prev
+        let prev_actors = match prev_state {
+            Some((_, actors)) => actors.as_slice(),
+            None => &[],
+        };
+        let curr_actors = match curr_state {
+            Some((_, actors)) => actors.as_slice(),
+            None => &[],
+        };
 
         let prev_actor_map: HashMap<_, _> = prev_actors.iter().map(|a| (a.actor_id, a)).collect();
         let curr_actor_map: HashMap<_, _> = curr_actors.iter().map(|a| (a.actor_id, a)).collect();
@@ -848,7 +853,7 @@ fn diff_graph(prev: &ActorGraph, curr: &ActorGraph) -> MetaResult<HashMap<Fragme
         // Only generate a reschedule plan if there are actual changes.
         //
         // 只有在确实发生变更时才生成 reschedule 计划。
-        if !added_actors_by_worker.is_empty()
+        let reschedule = if !added_actors_by_worker.is_empty()
             || !removed_actors.is_empty()
             || !vnode_bitmap_updates.is_empty()
         {
@@ -871,12 +876,12 @@ fn diff_graph(prev: &ActorGraph, curr: &ActorGraph) -> MetaResult<HashMap<Fragme
             })
         } else {
             None // No changes, no reschedule needed.
+        };
+        
+        if let Some(reschedule) = reschedule {
+            reschedules.insert(fragment_id, reschedule);
         }
     }
-    // if let Some(reschedule) = reschedule {
-    //     reschedules.insert(fragment_id, reschedule);
-    // }
-    // }
 
     Ok(reschedules)
 }
