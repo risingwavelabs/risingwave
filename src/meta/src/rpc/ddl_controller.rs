@@ -2061,7 +2061,7 @@ impl DdlController {
             .map(|fragment| {
                 (
                     fragment.fragment_id,
-                    fragment.actors.iter().map(|actor| actor.actor_id).collect(),
+                    fragment.actors.keys().copied().collect(),
                 )
             })
             .collect();

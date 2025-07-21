@@ -35,10 +35,10 @@ use crate::MetaResult;
 use crate::barrier::Reschedule;
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, WorkerExtraInfo};
-use crate::controller::fragment::FragmentParallelismInfo;
+use crate::controller::fragment::{FragmentParallelismInfo, InflightFragmentInfo};
 use crate::manager::{LocalNotification, NotificationVersion};
 use crate::model::{
-    ActorId, ClusterId, Fragment, FragmentId, StreamActor, StreamJobFragments, SubscriptionId,
+    ActorId, ClusterId, FragmentId, StreamActor, StreamJobFragments, SubscriptionId,
 };
 use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
 use crate::telemetry::MetaTelemetryJobDesc;
@@ -423,7 +423,10 @@ impl MetadataManager {
     pub async fn get_upstream_root_fragments(
         &self,
         upstream_table_ids: &HashSet<TableId>,
-    ) -> MetaResult<(HashMap<TableId, Fragment>, HashMap<ActorId, WorkerId>)> {
+    ) -> MetaResult<(
+        HashMap<TableId, InflightFragmentInfo>,
+        HashMap<ActorId, WorkerId>,
+    )> {
         let (upstream_root_fragments, actors) = self
             .catalog_controller
             .get_root_fragments(
@@ -519,7 +522,7 @@ impl MetadataManager {
         &self,
         job_id: u32,
     ) -> MetaResult<(
-        Vec<(PbDispatcherType, Fragment)>,
+        Vec<(PbDispatcherType, InflightFragmentInfo)>,
         HashMap<ActorId, WorkerId>,
     )> {
         let (fragments, actors) = self
@@ -527,32 +530,27 @@ impl MetadataManager {
             .get_downstream_fragments(job_id as _)
             .await?;
 
-        let actors = actors
-            .into_iter()
-            .map(|(actor, worker)| (actor as u32, worker))
-            .collect();
-
         Ok((fragments, actors))
     }
 
-    pub async fn get_worker_actor_ids(
-        &self,
-        job_ids: HashSet<TableId>,
-    ) -> MetaResult<BTreeMap<WorkerId, Vec<ActorId>>> {
-        let worker_actors = self
-            .catalog_controller
-            .get_worker_actor_ids(job_ids.into_iter().map(|id| id.table_id as _).collect())
-            .await?;
-        Ok(worker_actors
-            .into_iter()
-            .map(|(id, actors)| {
-                (
-                    id as WorkerId,
-                    actors.into_iter().map(|id| id as ActorId).collect(),
-                )
-            })
-            .collect())
-    }
+    // pub async fn get_worker_actor_ids(
+    //     &self,
+    //     job_ids: HashSet<TableId>,
+    // ) -> MetaResult<BTreeMap<WorkerId, Vec<ActorId>>> {
+    //     let worker_actors = self
+    //         .catalog_controller
+    //         .get_worker_actor_ids(job_ids.into_iter().map(|id| id.table_id as _).collect())
+    //         .await?;
+    //     Ok(worker_actors
+    //         .into_iter()
+    //         .map(|(id, actors)| {
+    //             (
+    //                 id as WorkerId,
+    //                 actors.into_iter().map(|id| id as ActorId).collect(),
+    //             )
+    //         })
+    //         .collect())
+    // }
 
     pub async fn get_job_id_to_internal_table_ids_mapping(&self) -> Option<Vec<(u32, Vec<u32>)>> {
         let job_internal_table_ids = self.catalog_controller.get_job_internal_table_ids().await;

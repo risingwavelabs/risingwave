@@ -354,7 +354,7 @@ impl SourceManager {
             .collect();
         let actor_splits = metadata_manager
             .catalog_controller
-            .load_actor_splits()
+            .deprecated_load_actor_splits()
             .await?
             .into_iter()
             .map(|(actor_id, splits)| {

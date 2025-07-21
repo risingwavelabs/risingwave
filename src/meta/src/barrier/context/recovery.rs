@@ -24,17 +24,18 @@ use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_meta_model::StreamingParallelism;
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tracing::{debug, info, warn};
 
 use super::BarrierWorkerRuntimeInfoSnapshot;
+
 use crate::barrier::context::GlobalBarrierWorkerContextImpl;
 use crate::barrier::info::InflightStreamingJobInfo;
 use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor, StreamJobFragments, TableParallelism};
+
 use crate::stream::cdc::assign_cdc_table_snapshot_splits_pairs;
 use crate::stream::{
     JobParallelismTarget, JobReschedulePolicy, JobRescheduleTarget, JobResourceGroupTarget,
@@ -761,6 +762,7 @@ impl GlobalBarrierWorkerContextImpl {
             return Err(anyhow!("scale_actors failed to acquire reschedule_lock").into());
         };
 
+<<<<<<< HEAD
         match self.scale_controller.integrity_check().await {
             Ok(_) => {
                 info!("integrity check passed");
@@ -917,6 +919,7 @@ impl GlobalBarrierWorkerContextImpl {
 
             info!(jobs=?reschedule_ids,"post applied reschedule for jobs in offline scaling");
         }
+
 
         info!("scaling actors succeed.");
         Ok(())
