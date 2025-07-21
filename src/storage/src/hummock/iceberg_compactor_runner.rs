@@ -20,7 +20,7 @@ use std::sync::{Arc, LazyLock};
 use derive_builder::Builder;
 use iceberg::{Catalog, TableIdent};
 use iceberg_compaction_core::compaction::{
-    Compaction, CompactionType, RewriteDataFilesCommitManagerRetryConfig,
+    CommitConsistencyParams, Compaction, CompactionType, RewriteDataFilesCommitManagerRetryConfig,
 };
 use iceberg_compaction_core::config::CompactionConfigBuilder;
 use iceberg_compaction_core::executor::RewriteFilesStat;
@@ -322,6 +322,7 @@ impl IcebergCompactorRunner {
                 .with_executor_type(iceberg_compaction_core::executor::ExecutorType::DataFusion)
                 .with_registry(BERGLOOM_METRICS_REGISTRY.clone())
                 .with_retry_config(retry_config)
+                .with_to_branch("ingestion".to_owned())
                 .build()
                 .await
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
@@ -341,11 +342,112 @@ impl IcebergCompactorRunner {
                 },
             );
 
-            let stat = compaction
+            let resp = compaction
                 .compact()
                 .await
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-            Ok::<RewriteFilesStat, HummockError>(stat)
+
+            let table = self
+                .catalog
+                .load_table(&self.table_ident)
+                .await
+                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+
+            let consistency_params = CommitConsistencyParams {
+                starting_snapshot_id: 0,
+                use_starting_sequence_number: false,
+                basic_schema_id: table.metadata().current_schema().schema_id(),
+            };
+
+            let rewrite_commit_manager =
+                compaction.build_rewrite_file_commit_manager(consistency_params, None);
+
+            let input_files = {
+                let mut input_files = vec![];
+                if let Some(snapshot) = table.metadata().current_snapshot() {
+                    let manifest_list = snapshot
+                        .load_manifest_list(table.file_io(), table.metadata())
+                        .await
+                        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+
+                    for manifest_file in manifest_list.entries() {
+                        let manifest = manifest_file
+                            .load_manifest(table.file_io())
+                            .await
+                            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+                        let (entry, _) = manifest.into_parts();
+                        for i in entry {
+                            match i.content_type() {
+                                iceberg::spec::DataContentType::Data => {
+                                    input_files.push(i.data_file().clone());
+                                }
+                                iceberg::spec::DataContentType::EqualityDeletes => {
+                                    unreachable!(
+                                        "Equality deletes are not supported in main branch"
+                                    );
+                                }
+                                iceberg::spec::DataContentType::PositionDeletes => {
+                                    unreachable!(
+                                        "Position deletes are not supported in main branch"
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    input_files
+                } else {
+                    vec![]
+                }
+            };
+
+            tracing::info!(
+                task_id = task_id,
+                table = ?self.table_ident,
+                delete_files_count = input_files.len(),
+                added_files_count = resp.data_files.len(),
+                "DEBUG-COW Iceberg compaction task rewriting files to main branch",
+            );
+
+            let new_table = rewrite_commit_manager
+                .rewrite_files(resp.data_files, input_files)
+                .await
+                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+
+            let snapshot = new_table.metadata().current_snapshot().ok_or_else(|| {
+                HummockError::compaction_executor("Don't find current_snapshot".to_owned())
+            })?;
+
+            let manifest_fest_list = snapshot
+                .load_manifest_list(new_table.file_io(), new_table.metadata())
+                .await
+                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+
+            for manifest in manifest_fest_list.entries() {
+                let manifest = manifest
+                    .load_manifest(new_table.file_io())
+                    .await
+                    .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+                let (entry, _) = manifest.into_parts();
+                for i in entry {
+                    tracing::info!(
+                        task_id = task_id,
+                        table = ?self.table_ident,
+                        file = ?i.data_file(),
+                        "DEBUG-COW Iceberg compaction task rewritten file to main",
+                    );
+                }
+            }
+
+            tracing::info!(
+                task_id = task_id,
+                table = ?self.table_ident,
+                elapsed_millis = now.elapsed().as_millis(),
+                snapshot = ?snapshot,
+                "DEBUG-COW Iceberg compaction task completed successfully",
+            );
+
+            Ok::<RewriteFilesStat, HummockError>(resp.stats)
         };
 
         tokio::select! {
@@ -383,9 +485,35 @@ impl IcebergCompactorRunner {
             .load_table(&self.table_ident)
             .await
             .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+        // let manifest_list = table
+        //     .metadata()
+        //     .current_snapshot()
+        //     .ok_or_else(|| HummockError::compaction_executor("Don't find current_snapshot"))?
+        //     .load_manifest_list(table.file_io(), table.metadata())
+        // .await
+        // .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+
+        {
+            // debug
+
+            // 1. get main_branch snapshot
+            let current_snapshot = table.metadata().current_snapshot();
+
+            // 2. get ingestion snapshot
+            let ingestion_snapshot = table.metadata().snapshot_for_ref("ingestion");
+
+            tracing::info!(
+                task_id = self.task_id,
+                table = ?self.table_ident,
+                current_snapshot = ?current_snapshot,
+                ingestion_snapshot = ?ingestion_snapshot,
+                "DEBUG-COW Analyzing task statistics for Iceberg compaction"
+            );
+        }
+
         let manifest_list = table
             .metadata()
-            .current_snapshot()
+            .snapshot_for_ref("ingestion")
             .ok_or_else(|| HummockError::compaction_executor("Don't find current_snapshot"))?
             .load_manifest_list(table.file_io(), table.metadata())
             .await

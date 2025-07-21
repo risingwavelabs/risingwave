@@ -1830,7 +1830,12 @@ impl IcebergSinkCommitter {
             .await?;
             let txn = Transaction::new(&table);
             let mut append_action = txn
-                .fast_append(Some(snapshot_id), None, vec![])
+                .fast_append(
+                    Some(snapshot_id),
+                    None,
+                    vec![],
+                    Some("ingestion".to_owned()),
+                )
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
             append_action
                 .add_data_files(data_files.clone())
