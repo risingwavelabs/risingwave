@@ -43,7 +43,7 @@ impl Loader<ClusterMetadata> for LoaderV1 {
         let backup_store = &self.backup_store;
         let snapshot_list = &backup_store.manifest().snapshot_metadata;
         let mut target_snapshot: MetaSnapshotV1 = backup_store.get(target_id).await?;
-        tracing::info!(
+        tracing::debug!(
             "snapshot {} before rewrite:\n{}",
             target_id,
             target_snapshot
@@ -77,7 +77,7 @@ impl Loader<ClusterMetadata> for LoaderV1 {
                 assert!(newest_v >= v, "violate monotonicity requirement");
             }
             target_snapshot.metadata.default_cf = newest_snapshot.metadata.default_cf;
-            tracing::info!(
+            tracing::debug!(
                 "snapshot {} after rewrite by snapshot {}:\n{}",
                 target_id,
                 newest_id,
