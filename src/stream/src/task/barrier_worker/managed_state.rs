@@ -959,6 +959,14 @@ impl DatabaseManagedBarrierState {
                         NewOutputRequest::Local(tx),
                     );
                 }
+                LocalBarrierEvent::ReportCdcTableBackfillProgress {
+                    actor_id,
+                    epoch,
+                    split_id_start_inclusive,
+                    split_id_end_inclusive,
+                } => {
+                    // TODO(zw):
+                }
             }
         }
 

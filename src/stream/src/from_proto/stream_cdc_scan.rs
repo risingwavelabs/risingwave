@@ -27,6 +27,7 @@ use risingwave_pb::stream_plan::StreamCdcScanNode;
 use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::executor::{CdcBackfillExecutor, ExternalStorageTable, ParallelizedCdcBackfillExecutor};
+use crate::task::cdc_progress::CdcProgressReporter;
 
 pub struct StreamCdcScanExecutorBuilder;
 
@@ -112,6 +113,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             let vnodes = None;
             let state_table =
                 StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes).await;
+            let progress = CdcProgressReporter::new(params.local_barrier_manager.clone());
             let exec = ParallelizedCdcBackfillExecutor::new(
                 params.actor_context.clone(),
                 external_table,
@@ -122,6 +124,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
                 state_table,
                 node.rate_limit,
                 scan_options,
+                progress,
             );
             Ok((params.info, exec).into())
         } else {

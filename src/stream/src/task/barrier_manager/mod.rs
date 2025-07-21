@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod cdc_progress;
 pub mod progress;
+
 pub use progress::CreateMviewProgressReporter;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_common::util::epoch::EpochPair;
@@ -46,6 +48,12 @@ pub(super) enum LocalBarrierEvent {
         actor_id: ActorId,
         upstream_actor_id: ActorId,
         tx: permit::Sender,
+    },
+    ReportCdcTableBackfillProgress {
+        actor_id: ActorId,
+        epoch: u64,
+        split_id_start_inclusive: i64,
+        split_id_end_inclusive: i64,
     },
 }
 
