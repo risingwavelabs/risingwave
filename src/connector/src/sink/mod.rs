@@ -30,6 +30,7 @@ pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
 use risingwave_common::bail;
+pub mod jdbc_jni_client;
 pub mod log_store;
 pub mod mock_coordination_client;
 pub mod mongodb;
