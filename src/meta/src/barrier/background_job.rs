@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub fn graph_check(_endpoint: String) -> anyhow::Result<()> {
-    // place holder
-    Ok(())
-}
+// pub(crate) struct BackgroundJobFragmentInfo {
+//     actor_ids
+// }
+//
+// pub(crate) struct BackgroundJobInfo {
+//     fragments: HashMap<FragmentId, BackgroundJobFragmentInfo>
+// }

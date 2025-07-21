@@ -273,6 +273,17 @@ impl Bitmap {
         }
     }
 
+    pub fn from_indices(num_bits: usize, ones: &[usize]) -> Self {
+        let mut builder = BitmapBuilder::zeroed(num_bits);
+
+        for &idx in ones {
+            debug_assert!(idx < num_bits);
+            builder.set(idx, true);
+        }
+
+        builder.finish()
+    }
+
     /// Creates a new bitmap from bytes.
     pub fn from_bytes(buf: &[u8]) -> Self {
         Self::from_bytes_with_len(buf, buf.len() * 8)
