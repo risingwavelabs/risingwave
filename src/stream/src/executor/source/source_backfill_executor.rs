@@ -315,6 +315,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             },
             source_desc.source.config.clone(),
             None,
+            risingwave_connector::source::cdc::SchemaChangeFailurePolicy::default(),
         );
 
         // We will check watermark to decide whether we need to backfill.

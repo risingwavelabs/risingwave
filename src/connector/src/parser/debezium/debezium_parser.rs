@@ -191,10 +191,6 @@ impl ByteStreamSourceParser for DebeziumParser {
         ParserFormat::Debezium
     }
 
-    fn get_schema_change_failure_policy(&self) -> crate::source::cdc::SchemaChangeFailurePolicy {
-        self.props.schema_change_failure_policy.clone()
-    }
-
     #[allow(clippy::unused_async)] // false positive for `async_trait`
     async fn parse_one<'a>(
         &'a mut self,

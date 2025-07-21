@@ -120,7 +120,7 @@ impl SpecificParserConfig {
             SourceFormat::Native => ProtocolProperties::Native,
             SourceFormat::None => ProtocolProperties::None,
             SourceFormat::Debezium => {
-                let debezium_props = DebeziumProps::from(&format_encode_options_with_secret);
+                let debezium_props = DebeziumProps::from(&options_with_secret);
                 ProtocolProperties::Debezium(debezium_props)
             }
             SourceFormat::DebeziumMongo => ProtocolProperties::DebeziumMongo,

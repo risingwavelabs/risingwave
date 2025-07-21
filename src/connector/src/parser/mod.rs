@@ -173,11 +173,6 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     /// The format of the specific parser.
     fn parser_format(&self) -> ParserFormat;
 
-    /// Get the schema change failure policy for CDC sources
-    fn get_schema_change_failure_policy(&self) -> crate::source::cdc::SchemaChangeFailurePolicy {
-        crate::source::cdc::SchemaChangeFailurePolicy::default()
-    }
-
     /// Parse one record from the given `payload` and write rows to the `writer`.
     ///
     /// Returns error if **any** of the rows in the message failed to parse.
@@ -331,14 +326,27 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                     if let Err(error) = res {
                         if let SourceMeta::DebeziumCdc(cdc_meta) = &msg.meta {
                             if matches!(cdc_meta.msg_type, CdcMessageType::SchemaChange) {
-                                tracing::error!(
-                                    error = %error.as_report(),
-                                    split_id = &*msg.split_id,
-                                    offset = msg.offset,
-                                    "Schema change message parsing failed, blocking source."
-                                );
-
-                                return Err(error.into());
+                                // Check the schema change failure policy
+                                match parser.source_ctx().schema_change_failure_policy {
+                                    crate::source::cdc::SchemaChangeFailurePolicy::Block => {
+                                        tracing::error!(
+                                            error = %error.as_report(),
+                                            split_id = &*msg.split_id,
+                                            offset = msg.offset,
+                                            "Schema change message parsing failed, blocking source."
+                                        );
+                                        return Err(error.into());
+                                    }
+                                    crate::source::cdc::SchemaChangeFailurePolicy::Skip => {
+                                        tracing::warn!(
+                                            error = %error.as_report(),
+                                            split_id = &*msg.split_id,
+                                            offset = msg.offset,
+                                            "Schema change message parsing failed, skipping due to policy."
+                                        );
+                                        // Continue processing, don't return error
+                                    }
+                                }
                             }
                         }
                         static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
