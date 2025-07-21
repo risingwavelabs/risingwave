@@ -154,6 +154,7 @@ impl SourceExecutor {
             },
             ConnectorProperties::default(),
             None,
+            risingwave_connector::source::cdc::SchemaChangeFailurePolicy::default(),
         ));
         let (stream, _) = self
             .source
