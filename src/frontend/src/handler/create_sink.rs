@@ -113,7 +113,7 @@ pub async fn gen_sink_plan(
     let user_specified_columns = !stmt.columns.is_empty();
     let db_name = &session.database();
     let (sink_schema_name, sink_table_name) =
-        Binder::resolve_schema_qualified_name(db_name, stmt.sink_name.clone())?;
+        Binder::resolve_schema_qualified_name(db_name, &stmt.sink_name)?;
 
     let mut with_options = handler_args.with_options.clone();
 
@@ -181,7 +181,7 @@ pub async fn gen_sink_plan(
 
     let (dependent_relations, dependent_udfs, bound) = {
         let mut binder = Binder::new_for_stream(session);
-        let bound = binder.bind_query(*query.clone())?;
+        let bound = binder.bind_query(&query)?;
         (
             binder.included_relations().clone(),
             binder.included_udfs().clone(),
