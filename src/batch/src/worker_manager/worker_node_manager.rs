@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::backtrace::Backtrace;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock, RwLockReadGuard};
 use std::time::Duration;
@@ -360,7 +361,11 @@ impl WorkerNodeSelector {
     pub fn fragment_mapping(&self, fragment_id: FragmentId) -> Result<WorkerSlotMapping> {
         Ok(self.fragment_mapping_inner(fragment_id).map_err(|e| {
             let e = anyhow!(e);
-            error!("failed to get fragment mapping: {:?}", e.as_report());
+            error!(
+                "failed to get fragment mapping: {:?} {:?}",
+                e.as_report(),
+                Backtrace::capture()
+            );
             e
         })?)
     }
