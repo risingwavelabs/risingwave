@@ -19,6 +19,7 @@ use std::ops::{BitAnd, BitOrAssign};
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
+use risingwave_common::hash::ActorMapping;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
@@ -42,7 +43,9 @@ use sea_orm::{
 use crate::barrier::Reschedule;
 use crate::controller::catalog::{ActorInfo, CatalogController};
 use crate::controller::utils::{get_existing_job_resource_group, get_fragment_actor_dispatchers};
-use crate::model::{ActorId, StreamActor};
+use crate::model::{
+    ActorId, DispatcherId, FragmentId as ModelFragmentId, StreamActor, StreamActorWithDispatchers,
+};
 use crate::stream::AssignerBuilder;
 use crate::{MetaError, MetaResult};
 
@@ -669,7 +672,7 @@ impl CatalogController {
     }
 }
 
-async fn render_fragments<C>(
+pub async fn render_fragments<C>(
     txn: &C,
     fragment_ids: &[FragmentId],
     workers: BTreeMap<WorkerId, NonZeroUsize>,
@@ -789,7 +792,10 @@ pub struct ActorGraph<'a> {
     pub locations: &'a HashMap<ActorId, WorkerId>,
 }
 
-fn diff_graph(prev: &ActorGraph<'_>, curr: &ActorGraph<'_>) -> MetaResult<HashMap<FragmentId, Reschedule>> {
+fn diff_graph(
+    prev: &ActorGraph<'_>,
+    curr: &ActorGraph<'_>,
+) -> MetaResult<HashMap<FragmentId, Reschedule>> {
     // Collect all unique fragment IDs from both previous and current graphs.
     let prev_fragment_ids: HashSet<_> = prev.fragments.keys().cloned().collect();
     let curr_fragment_ids: HashSet<_> = curr.fragments.keys().cloned().collect();
@@ -841,13 +847,10 @@ fn diff_graph(prev: &ActorGraph<'_>, curr: &ActorGraph<'_>) -> MetaResult<HashMa
             let curr_actor = curr_actor_map[&actor_id];
 
             // Check if the vnode distribution has changed.
-            //
-            // 检查 vnode 分布是否发生变化。
-            if prev_actor.vnode_bitmap != curr_actor.vnode_bitmap {
-                if let Some(bitmap) = curr_actor.vnode_bitmap.clone() {
+            if prev_actor.vnode_bitmap != curr_actor.vnode_bitmap
+                && let Some(bitmap) = curr_actor.vnode_bitmap.clone() {
                     vnode_bitmap_updates.insert(actor_id, bitmap);
                 }
-            }
         }
 
         // Only generate a reschedule plan if there are actual changes.
@@ -861,29 +864,118 @@ fn diff_graph(prev: &ActorGraph<'_>, curr: &ActorGraph<'_>) -> MetaResult<HashMa
                 added_actors: added_actors_by_worker,
                 removed_actors,
                 vnode_bitmap_updates,
-                // NOTE: The following fields require more context about graph topology
-                // (like upstream/downstream relations) and source configurations.
-                // They are left as placeholders and should be populated by the caller
-                // or with more context.
+                // TODO: The following fields require additional context not available in this function:
+                // 1. Fragment relationship data (upstream/downstream connections)
+                // 2. Dispatcher configuration and mapping information
+                // 3. Source split assignments
+                // 4. Complete actor metadata for building StreamActorWithDispatchers
                 //
-                // 注意: 以下字段需要更多关于 graph 拓扑（如上下游关系）和数据源配置的上下文信息。
-                // 这里作为占位符，应由调用者或在拥有更多上下文的地方填充。
-                upstream_fragment_dispatcher_ids: vec![], /* e.g., collect from prev_frag.upstreams */
-                upstream_dispatcher_mapping: None,
-                downstream_fragment_ids: vec![], // e.g., collect from prev_frag.downstreams
-                actor_splits: HashMap::new(),
-                newly_created_actors: HashMap::new(), /* This also needs more context to build `StreamActorWithDispatchers`. */
+                // These should be populated by the caller with access to:
+                // - Fragment relation tables (fragment_relation)
+                // - Dispatcher configurations
+                // - Source manager for split assignments
+                // - Actor creation context
+                //
+                // 以下字段需要此函数范围外的额外上下文信息，应由调用者填充。
+                upstream_fragment_dispatcher_ids: collect_upstream_dispatchers(
+                    &prev_state,
+                    &curr_state,
+                    fragment_id,
+                ),
+                upstream_dispatcher_mapping: build_dispatcher_mapping(
+                    prev_actors,
+                    curr_actors,
+                    fragment_id,
+                ),
+                downstream_fragment_ids: collect_downstream_fragments(
+                    &prev_state,
+                    &curr_state,
+                    fragment_id,
+                ),
+                actor_splits: collect_actor_splits(&added_actor_ids, fragment_id),
+                newly_created_actors: build_newly_created_actors(
+                    &added_actor_ids,
+                    curr_actors,
+                    fragment_id,
+                ),
             })
         } else {
             None // No changes, no reschedule needed.
         };
-        
+
         if let Some(reschedule) = reschedule {
             reschedules.insert(fragment_id, reschedule);
         }
     }
 
     Ok(reschedules)
+}
+
+/// Helper function to collect upstream fragment dispatcher IDs.
+/// TODO: This currently returns empty as fragment relationship data is not available.
+/// In a complete implementation, this should query `fragment_relation` table.
+fn collect_upstream_dispatchers(
+    _prev_state: &Option<&(Fragment, Vec<StreamActor>)>,
+    _curr_state: &Option<&(Fragment, Vec<StreamActor>)>,
+    _fragment_id: FragmentId,
+) -> Vec<(ModelFragmentId, DispatcherId)> {
+    // TODO: Query fragment_relation to find upstream fragments and their dispatcher IDs
+    // SELECT source_fragment_id FROM fragment_relation WHERE target_fragment_id = fragment_id
+    vec![]
+}
+
+/// Helper function to build dispatcher mapping for hash-sharded fragments.
+/// TODO: This requires access to dispatcher configuration and fragment distribution type.
+fn build_dispatcher_mapping(
+    _prev_actors: &[StreamActor],
+    _curr_actors: &[StreamActor],
+    _fragment_id: FragmentId,
+) -> Option<ActorMapping> {
+    // TODO: Check if fragment is hash-sharded and build appropriate ActorMapping
+    // This requires fragment distribution type and dispatcher configuration
+    None
+}
+
+/// Helper function to collect downstream fragment IDs.
+/// TODO: This currently returns empty as fragment relationship data is not available.
+fn collect_downstream_fragments(
+    _prev_state: &Option<&(Fragment, Vec<StreamActor>)>,
+    _curr_state: &Option<&(Fragment, Vec<StreamActor>)>,
+    _fragment_id: FragmentId,
+) -> Vec<ModelFragmentId> {
+    // TODO: Query fragment_relation to find downstream fragments
+    // SELECT target_fragment_id FROM fragment_relation WHERE source_fragment_id = fragment_id
+    vec![]
+}
+
+/// Helper function to collect actor splits for source actors.
+/// TODO: This requires access to source manager and split assignment logic.
+fn collect_actor_splits(
+    _added_actor_ids: &HashSet<ActorId>,
+    _fragment_id: FragmentId,
+) -> HashMap<ActorId, Vec<SplitImpl>> {
+    // TODO: Check if fragment contains source actors and assign appropriate splits
+    // This requires:
+    // 1. Fragment type checking (source/source_backfill)
+    // 2. Source manager access for split assignment
+    // 3. Split rebalancing logic
+    HashMap::new()
+}
+
+/// Helper function to build newly created actors with dispatchers.
+/// TODO: This requires complete actor creation context and dispatcher building.
+fn build_newly_created_actors(
+    _added_actor_ids: &HashSet<ActorId>,
+    _curr_actors: &[StreamActor],
+    _fragment_id: FragmentId,
+) -> HashMap<ActorId, (StreamActorWithDispatchers, WorkerId)> {
+    // TODO: Build StreamActorWithDispatchers for each new actor
+    // This requires:
+    // 1. Complete actor metadata
+    // 2. Dispatcher configuration
+    // 3. Worker assignment information
+    // 4. Fragment topology context
+    HashMap::new()
 }
 
 struct NoShuffleEnsemble {
