@@ -32,8 +32,8 @@ use crate::source::cdc::build_cdc_table_id;
 use crate::source::cdc::external::mysql::{
     mysql_type_to_rw_type, timestamp_val_to_timestamptz, type_name_to_mysql_type,
 };
+use crate::source::cdc::external::postgres::{pg_type_to_rw_type, type_name_to_pg_type};
 use crate::source::{ConnectorProperties, SourceColumnDesc};
-
 // Example of Debezium JSON value:
 // {
 //     "payload":
@@ -201,15 +201,28 @@ pub fn parse_schema_change(
                 for col in columns.array_elements().unwrap() {
                     let name = jsonb_access_field!(col, "name", string);
                     let type_name = jsonb_access_field!(col, "typeName", string);
-
+                    // Determine if this column is an enum type
+                    let is_enum = matches!(col.access_object_field("enumValues"), Some(val) if !val.is_jsonb_null());
                     let data_type = match *connector_props {
                         ConnectorProperties::PostgresCdc(_) => {
-                            DataType::from_str(type_name.as_str()).map_err(|err| {
-                                tracing::warn!(error=%err.as_report(), "unsupported postgres type in schema change message");
-                                AccessError::UnsupportedType {
-                                    ty: type_name.clone(),
+                            let ty = type_name_to_pg_type(type_name.as_str());
+                            if is_enum {
+                                tracing::debug!(target: "auto_schema_change",
+                                    "Convert PostgreSQL user defined enum type '{}' to VARCHAR", type_name);
+                                DataType::Varchar
+                            } else {
+                                match ty {
+                                    Some(ty) => pg_type_to_rw_type(&ty).map_err(|err| {
+                                        tracing::warn!(error=%err.as_report(), "unsupported postgres type in schema change message");
+                                        AccessError::UnsupportedType {
+                                            ty: type_name.clone(),
+                                        }
+                                    })?,
+                                    None => {
+                                        Err(AccessError::UnsupportedType { ty: type_name.clone() })?
+                                    }
                                 }
-                            })?
+                            }
                         }
                         ConnectorProperties::MysqlCdc(_) => {
                             let ty = type_name_to_mysql_type(type_name.as_str());
