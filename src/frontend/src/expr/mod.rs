@@ -262,30 +262,30 @@ impl ExprImpl {
     }
 
     /// Shorthand to create cast expr to `target` type in implicit context.
-    pub fn cast_implicit(mut self, target: DataType) -> Result<ExprImpl, CastError> {
+    pub fn cast_implicit(mut self, target: &DataType) -> Result<ExprImpl, CastError> {
         FunctionCall::cast_mut(&mut self, target, CastContext::Implicit)?;
         Ok(self)
     }
 
     /// Shorthand to create cast expr to `target` type in assign context.
-    pub fn cast_assign(mut self, target: DataType) -> Result<ExprImpl, CastError> {
+    pub fn cast_assign(mut self, target: &DataType) -> Result<ExprImpl, CastError> {
         FunctionCall::cast_mut(&mut self, target, CastContext::Assign)?;
         Ok(self)
     }
 
     /// Shorthand to create cast expr to `target` type in explicit context.
-    pub fn cast_explicit(mut self, target: DataType) -> Result<ExprImpl, CastError> {
+    pub fn cast_explicit(mut self, target: &DataType) -> Result<ExprImpl, CastError> {
         FunctionCall::cast_mut(&mut self, target, CastContext::Explicit)?;
         Ok(self)
     }
 
     /// Shorthand to inplace cast expr to `target` type in implicit context.
-    pub fn cast_implicit_mut(&mut self, target: DataType) -> Result<(), CastError> {
+    pub fn cast_implicit_mut(&mut self, target: &DataType) -> Result<(), CastError> {
         FunctionCall::cast_mut(self, target, CastContext::Implicit)
     }
 
     /// Shorthand to inplace cast expr to `target` type in explicit context.
-    pub fn cast_explicit_mut(&mut self, target: DataType) -> Result<(), CastError> {
+    pub fn cast_explicit_mut(&mut self, target: &DataType) -> Result<(), CastError> {
         FunctionCall::cast_mut(self, target, CastContext::Explicit)
     }
 
@@ -297,7 +297,7 @@ impl ExprImpl {
                 FunctionCall::new_unchecked(ExprType::CastRegclass, vec![self], DataType::Int32),
             ))),
             DataType::Int32 => Ok(self),
-            dt if dt.is_int() => Ok(self.cast_explicit(DataType::Int32)?),
+            dt if dt.is_int() => Ok(self.cast_explicit(&DataType::Int32)?),
             _ => bail_cast_error!("unsupported input type"),
         }
     }
@@ -338,7 +338,7 @@ impl ExprImpl {
     /// Shorthand to enforce implicit cast to boolean
     pub fn enforce_bool_clause(self, clause: &str) -> RwResult<ExprImpl> {
         if self.is_untyped() {
-            let inner = self.cast_implicit(DataType::Boolean)?;
+            let inner = self.cast_implicit(&DataType::Boolean)?;
             return Ok(inner);
         }
         let return_type = self.return_type();
@@ -368,7 +368,7 @@ impl ExprImpl {
         }
         // Use normal cast for other types. Both `assign` and `explicit` can pass the castability
         // check and there is no difference.
-        self.cast_assign(DataType::Varchar)
+        self.cast_assign(&DataType::Varchar)
             .map_err(|err| err.into())
     }
 
