@@ -28,6 +28,7 @@ use prometheus::HistogramTimer;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
+use risingwave_pb::stream_service::barrier_complete_response::PbCdcTableBackfillProgress;
 use risingwave_storage::StateStoreImpl;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::{mpsc, oneshot};
@@ -64,7 +65,7 @@ enum ManagedBarrierStateInner {
     Issued(IssuedState),
 
     /// The barrier has been collected by all remaining actors
-    AllCollected(Vec<PbCreateMviewProgress>),
+    AllCollected(Vec<PbCreateMviewProgress>, Vec<PbCdcTableBackfillProgress>),
 }
 
 #[derive(Debug)]
@@ -87,6 +88,7 @@ use crate::executor::exchange::permit;
 use crate::executor::exchange::permit::channel_from_config;
 use crate::task::barrier_worker::ScoredStreamError;
 use crate::task::barrier_worker::await_epoch_completed_future::AwaitEpochCompletedFuture;
+use crate::task::cdc_progress::CdcTableBackfillState;
 
 pub(super) struct ManagedBarrierStateDebugInfo<'a> {
     running_actors: BTreeSet<ActorId>,
@@ -149,7 +151,7 @@ impl Display for &'_ PartialGraphManagedBarrierState {
                     }
                     write!(f, "]")?;
                 }
-                ManagedBarrierStateInner::AllCollected(_) => {
+                ManagedBarrierStateInner::AllCollected(_, _) => {
                     write!(f, "AllCollected")?;
                 }
             }
@@ -307,6 +309,8 @@ pub(crate) struct PartialGraphManagedBarrierState {
     /// in [`crate::task::barrier_worker::BarrierCompleteResult`].
     pub(crate) create_mview_progress: HashMap<u64, HashMap<ActorId, BackfillState>>,
 
+    pub(crate) cdc_table_backfill_progress: HashMap<u64, HashMap<ActorId, CdcTableBackfillState>>,
+
     state_store: StateStoreImpl,
 
     streaming_metrics: Arc<StreamingMetrics>,
@@ -326,6 +330,7 @@ impl PartialGraphManagedBarrierState {
             prev_barrier_table_ids: None,
             mv_depended_subscriptions: Default::default(),
             create_mview_progress: Default::default(),
+            cdc_table_backfill_progress: Default::default(),
             state_store,
             streaming_metrics,
         }
@@ -959,6 +964,13 @@ impl DatabaseManagedBarrierState {
                         NewOutputRequest::Local(tx),
                     );
                 }
+                LocalBarrierEvent::ReportCdcTableBackfillProgress {
+                    actor_id,
+                    epoch,
+                    state,
+                } => {
+                    self.update_cdc_table_backfill_progress(epoch, actor_id, state);
+                }
             }
         }
 
@@ -1007,6 +1019,7 @@ impl DatabaseManagedBarrierState {
         Barrier,
         Option<HashSet<TableId>>,
         Vec<PbCreateMviewProgress>,
+        Vec<PbCdcTableBackfillProgress>,
     ) {
         self.graph_states
             .get_mut(&partial_graph_id)
@@ -1056,7 +1069,7 @@ impl PartialGraphManagedBarrierState {
                 ManagedBarrierStateInner::Issued(IssuedState {
                     remaining_actors, ..
                 }) if remaining_actors.is_empty() => {}
-                ManagedBarrierStateInner::AllCollected(_) => {
+                ManagedBarrierStateInner::AllCollected(_, _) => {
                     continue;
                 }
                 ManagedBarrierStateInner::Issued(_) => {
@@ -1074,9 +1087,20 @@ impl PartialGraphManagedBarrierState {
                 .map(|(actor, state)| state.to_pb(actor))
                 .collect();
 
+            let cdc_table_backfill_progress = self
+                .cdc_table_backfill_progress
+                .remove(&barrier_state.barrier.epoch.curr)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(actor, state)| state.to_pb(actor, barrier_state.barrier.epoch.curr))
+                .collect();
+
             let prev_state = replace(
                 &mut barrier_state.inner,
-                ManagedBarrierStateInner::AllCollected(create_mview_progress),
+                ManagedBarrierStateInner::AllCollected(
+                    create_mview_progress,
+                    cdc_table_backfill_progress,
+                ),
             );
 
             must_match!(prev_state, ManagedBarrierStateInner::Issued(IssuedState {
@@ -1098,6 +1122,7 @@ impl PartialGraphManagedBarrierState {
         Barrier,
         Option<HashSet<TableId>>,
         Vec<PbCreateMviewProgress>,
+        Vec<PbCdcTableBackfillProgress>,
     ) {
         let (popped_prev_epoch, barrier_state) = self
             .epoch_barrier_state_map
@@ -1106,13 +1131,14 @@ impl PartialGraphManagedBarrierState {
 
         assert_eq!(prev_epoch, popped_prev_epoch);
 
-        let create_mview_progress = must_match!(barrier_state.inner, ManagedBarrierStateInner::AllCollected(create_mview_progress) => {
-            create_mview_progress
+        let (create_mview_progress, cdc_table_backfill_progress) = must_match!(barrier_state.inner, ManagedBarrierStateInner::AllCollected(create_mview_progress, cdc_table_backfill_progress) => {
+            (create_mview_progress, cdc_table_backfill_progress)
         });
         (
             barrier_state.barrier,
             barrier_state.table_ids,
             create_mview_progress,
+            cdc_table_backfill_progress,
         )
     }
 }

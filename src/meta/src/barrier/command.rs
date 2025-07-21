@@ -25,13 +25,17 @@ use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
 use risingwave_connector::source::cdc::{
-    CdcTableSnapshotSplitAssignment, build_pb_actor_cdc_table_snapshot_splits,
+    CdcTableSnapshotSplitAssignment, CdcTableSnapshotSplitAssignmentWithGeneration,
+    build_pb_actor_cdc_table_snapshot_splits,
+    build_pb_actor_cdc_table_snapshot_splits_with_generation,
 };
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::common::ActorInfo;
-use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
+use risingwave_pb::source::{
+    ConnectorSplit, ConnectorSplits, PbCdcTableSnapshotSplitsWithGeneration,
+};
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
@@ -210,7 +214,7 @@ pub struct CreateStreamingJobCommandInfo {
     pub create_type: CreateType,
     pub streaming_job: StreamingJob,
     pub fragment_backfill_ordering: FragmentBackfillOrder,
-    pub cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignment,
+    pub cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignmentWithGeneration,
 }
 
 impl StreamJobFragments {
@@ -873,9 +877,11 @@ impl Command {
                     pause: is_currently_paused,
                     subscriptions_to_add,
                     backfill_nodes_to_pause,
-                    actor_cdc_table_snapshot_splits: build_pb_actor_cdc_table_snapshot_splits(
-                        cdc_table_snapshot_split_assignment.clone(),
-                    ),
+                    actor_cdc_table_snapshot_splits:
+                        build_pb_actor_cdc_table_snapshot_splits_with_generation(
+                            cdc_table_snapshot_split_assignment.clone(),
+                        )
+                        .into(),
                 }));
 
                 if let CreateStreamingJobType::SinkIntoTable(ReplaceStreamJobPlan {
@@ -1106,7 +1112,6 @@ impl Command {
                     .collect();
                 let mut actor_splits = HashMap::new();
                 let mut actor_cdc_table_snapshot_splits = HashMap::new();
-
                 for reschedule in reschedules.values() {
                     for (actor_id, splits) in &reschedule.actor_splits {
                         actor_splits.insert(
@@ -1125,7 +1130,14 @@ impl Command {
 
                 // we don't create dispatchers in reschedule scenario
                 let actor_new_dispatchers = HashMap::new();
-
+                let actor_cdc_table_snapshot_splits = PbCdcTableSnapshotSplitsWithGeneration {
+                    splits: actor_cdc_table_snapshot_splits,
+                    generation: control_stream_manager
+                        .env
+                        .cdc_table_backfill_tracker
+                        .next_generation(),
+                }
+                .into();
                 let mutation = Mutation::Update(UpdateMutation {
                     dispatcher_update,
                     merge_update,

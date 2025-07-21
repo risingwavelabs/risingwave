@@ -22,7 +22,7 @@ use risingwave_common::row::RowDeserializer;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{OrderType, cmp_datum};
 use risingwave_connector::source::cdc::CdcScanOptions;
-use risingwave_connector::source::cdc::external::ExternalTableReaderImpl;
+use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReaderImpl};
 use risingwave_connector::source::{CdcTableSnapshotSplit, CdcTableSnapshotSplitRaw};
 use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
@@ -37,12 +37,13 @@ use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTab
 use crate::executor::backfill::cdc::upstream_table::snapshot::{
     SplitSnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
 };
-use crate::executor::backfill::utils::{mapping_chunk, mapping_message};
+use crate::executor::backfill::utils::{get_cdc_chunk_last_offset, mapping_chunk, mapping_message};
 use crate::executor::prelude::*;
 use crate::executor::source::get_infinite_backoff_strategy;
+use crate::task::cdc_progress::CdcProgressReporter;
 
-/// `split_id`, `is_finished`, `row_count` all occupy 1 column each.
-const METADATA_STATE_LEN: usize = 3;
+/// `split_id`, `is_finished`, `row_count`, `cdc_offset_low`, `cdc_offset_high` all occupy 1 column each.
+const METADATA_STATE_LEN: usize = 5;
 
 pub struct ParallelizedCdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
@@ -65,6 +66,8 @@ pub struct ParallelizedCdcBackfillExecutor<S: StateStore> {
     options: CdcScanOptions,
 
     state_table: StateTable<S>,
+
+    progress: CdcProgressReporter,
 }
 
 impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
@@ -79,6 +82,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         state_table: StateTable<S>,
         rate_limit_rps: Option<u32>,
         options: CdcScanOptions,
+        progress: CdcProgressReporter,
     ) -> Self {
         Self {
             actor_ctx,
@@ -89,6 +93,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             rate_limit_rps,
             options,
             state_table,
+            progress,
         }
     }
 
@@ -126,14 +131,21 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         let mut is_reset = false;
         let mut state_impl =
             ParallelizedCdcBackfillState::new(self.state_table, METADATA_STATE_LEN);
+        // The buffered chunks have already been mapped.
         let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
         // Need reset on CDC table snapshot splits reschedule.
         'with_cdc_table_snapshot_splits: loop {
             assert!(upstream_chunk_buffer.is_empty());
             let reset_barrier = next_reset_barrier.take().unwrap();
-            let all_snapshot_splits = match reset_barrier.mutation.as_deref() {
-                Some(Mutation::Add(add)) => &add.actor_cdc_table_snapshot_splits,
-                Some(Mutation::Update(update)) => &update.actor_cdc_table_snapshot_splits,
+            let (all_snapshot_splits, generation) = match reset_barrier.mutation.as_deref() {
+                Some(Mutation::Add(add)) => (
+                    &add.actor_cdc_table_snapshot_splits.splits,
+                    add.actor_cdc_table_snapshot_splits.generation,
+                ),
+                Some(Mutation::Update(update)) => (
+                    &update.actor_cdc_table_snapshot_splits.splits,
+                    update.actor_cdc_table_snapshot_splits.generation,
+                ),
                 _ => {
                     return Err(anyhow::anyhow!("ParallelizedCdcBackfillExecutor expects either Mutation::Add or Mutation::Update to initialize CDC table snapshot splits.").into());
                 }
@@ -177,6 +189,8 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             }
 
             let mut current_actor_bounds = None;
+            let mut actor_cdc_offset_high: Option<CdcOffset> = None;
+            let mut actor_cdc_offset_low: Option<CdcOffset> = None;
             // Find next split that need backfill.
             let mut next_split_idx = actor_snapshot_splits.len();
             for (idx, split) in actor_snapshot_splits.iter().enumerate() {
@@ -186,10 +200,30 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                     break;
                 }
                 extends_current_actor_bound(&mut current_actor_bounds, split);
+                if let Some(ref cdc_offset) = state.cdc_offset_low {
+                    if let Some(ref cur) = actor_cdc_offset_low {
+                        if *cur > *cdc_offset {
+                            actor_cdc_offset_low = state.cdc_offset_low.clone();
+                        }
+                    } else {
+                        actor_cdc_offset_low = state.cdc_offset_low.clone();
+                    }
+                }
+                if let Some(ref cdc_offset) = state.cdc_offset_high {
+                    if let Some(ref cur) = actor_cdc_offset_high {
+                        if *cur < *cdc_offset {
+                            actor_cdc_offset_high = state.cdc_offset_high.clone();
+                        }
+                    } else {
+                        actor_cdc_offset_high = state.cdc_offset_high.clone();
+                    }
+                }
             }
             for split in actor_snapshot_splits.iter().skip(next_split_idx) {
                 // Initialize state so that overall progress can be measured.
-                state_impl.mutate_state(split.split_id, false, 0).await?;
+                state_impl
+                    .mutate_state(split.split_id, false, 0, None, None)
+                    .await?;
             }
 
             // After init the state table and forward the initial barrier to downstream,
@@ -258,6 +292,9 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                 self.external_table.clone(),
                 table_reader.expect("table reader must created"),
             );
+            // let mut upstream = upstream.peekable();
+            let offset_parse_func = upstream_table_reader.reader.get_cdc_offset_parser();
+
             // Backfill snapshot splits sequentially.
             for split in actor_snapshot_splits.iter().skip(next_split_idx) {
                 tracing::info!(
@@ -268,6 +305,26 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                     "start cdc backfill split"
                 );
                 extends_current_actor_bound(&mut current_actor_bounds, split);
+
+                let split_cdc_offset_low = {
+                    // Limit concurrent CDC connections globally to 10 using a semaphore.
+                    static CDC_CONN_SEMAPHORE: tokio::sync::Semaphore =
+                        tokio::sync::Semaphore::const_new(10);
+
+                    let _permit = CDC_CONN_SEMAPHORE.acquire().await.unwrap();
+                    upstream_table_reader.current_cdc_offset().await?
+                };
+                if let Some(ref cdc_offset) = split_cdc_offset_low {
+                    if let Some(ref cur) = actor_cdc_offset_low {
+                        if *cur > *cdc_offset {
+                            actor_cdc_offset_low = split_cdc_offset_low.clone();
+                        }
+                    } else {
+                        actor_cdc_offset_low = split_cdc_offset_low.clone();
+                    }
+                }
+                let mut split_cdc_offset_high = None;
+
                 let left_upstream = upstream.by_ref().map(Either::Left);
                 let read_args = SplitSnapshotReadArgs::new(
                     split.left_bound_inclusive.clone(),
@@ -334,10 +391,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                                         "CdcBackfill has been dropped due to config change"
                                                     );
                                                     for chunk in upstream_chunk_buffer.drain(..) {
-                                                        yield Message::Chunk(mapping_chunk(
-                                                            chunk,
-                                                            &self.output_indices,
-                                                        ));
+                                                        yield Message::Chunk(chunk);
                                                     }
                                                     yield Message::Barrier(barrier);
                                                     let () = futures::future::pending().await;
@@ -350,10 +404,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                     if is_reset_barrier(&barrier, self.actor_ctx.id) {
                                         next_reset_barrier = Some(barrier);
                                         for chunk in upstream_chunk_buffer.drain(..) {
-                                            yield Message::Chunk(mapping_chunk(
-                                                chunk,
-                                                &self.output_indices,
-                                            ));
+                                            yield Message::Chunk(chunk);
                                         }
                                         continue 'with_cdc_table_snapshot_splits;
                                     }
@@ -365,6 +416,15 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                     if chunk.cardinality() == 0 {
                                         continue;
                                     }
+                                    let chunk_cdc_offset =
+                                        get_cdc_chunk_last_offset(&offset_parse_func, &chunk)?;
+                                    if let Some(cur) = actor_cdc_offset_low.as_ref()
+                                        && let Some(chunk_offset) = chunk_cdc_offset
+                                        && chunk_offset < *cur
+                                    {
+                                        continue;
+                                    }
+                                    let chunk = mapping_chunk(chunk, &self.output_indices);
                                     if let Some(filtered_chunk) = filter_stream_chunk(
                                         chunk,
                                         &current_actor_bounds,
@@ -390,10 +450,26 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                         "snapshot read stream ends"
                                     );
                                     for chunk in upstream_chunk_buffer.drain(..) {
-                                        yield Message::Chunk(mapping_chunk(
-                                            chunk,
-                                            &self.output_indices,
-                                        ));
+                                        yield Message::Chunk(chunk);
+                                    }
+
+                                    split_cdc_offset_high = {
+                                        // Limit concurrent CDC connections globally to 10 using a semaphore.
+                                        static CDC_CONN_SEMAPHORE: tokio::sync::Semaphore =
+                                            tokio::sync::Semaphore::const_new(10);
+
+                                        let _permit = CDC_CONN_SEMAPHORE.acquire().await.unwrap();
+                                        upstream_table_reader.current_cdc_offset().await?
+                                    };
+                                    if let Some(ref cdc_offset) = split_cdc_offset_high {
+                                        if let Some(ref cur) = actor_cdc_offset_high {
+                                            if *cur < *cdc_offset {
+                                                actor_cdc_offset_high =
+                                                    split_cdc_offset_high.clone();
+                                            }
+                                        } else {
+                                            actor_cdc_offset_high = split_cdc_offset_high.clone();
+                                        }
                                     }
                                     // Next split.
                                     break;
@@ -412,7 +488,13 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                 }
                 // Mark current split backfill as finished. The state will be persisted by next barrier.
                 state_impl
-                    .mutate_state(split.split_id, true, row_count)
+                    .mutate_state(
+                        split.split_id,
+                        true,
+                        row_count,
+                        split_cdc_offset_low,
+                        split_cdc_offset_high,
+                    )
                     .await?;
             }
 
@@ -423,14 +505,13 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                 "CdcBackfill has already finished and will forward messages directly to the downstream"
             );
 
+            let mut should_report_actor_backfill_done = false;
             // After backfill progress finished
             // we can forward messages directly to the downstream,
             // as backfill is finished.
             #[for_await]
             for msg in &mut upstream {
-                let Some(msg) = mapping_message(msg?, &self.output_indices) else {
-                    continue;
-                };
+                let msg = msg?;
                 match msg {
                     Message::Barrier(barrier) => {
                         state_impl.commit_state(barrier.epoch).await?;
@@ -438,12 +519,42 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                             next_reset_barrier = Some(barrier);
                             continue 'with_cdc_table_snapshot_splits;
                         }
+                        if should_report_actor_backfill_done {
+                            should_report_actor_backfill_done = false;
+                            assert!(!actor_snapshot_splits.is_empty());
+                            self.progress.finish(
+                                self.actor_ctx.id,
+                                barrier.epoch,
+                                generation,
+                                (
+                                    actor_snapshot_splits[0].split_id,
+                                    actor_snapshot_splits[actor_snapshot_splits.len() - 1].split_id,
+                                ),
+                            );
+                        }
                         yield Message::Barrier(barrier);
                     }
                     Message::Chunk(chunk) => {
                         if chunk.cardinality() == 0 {
                             continue;
                         }
+
+                        let chunk_cdc_offset =
+                            get_cdc_chunk_last_offset(&offset_parse_func, &chunk)?;
+                        if let Some(cur) = actor_cdc_offset_low.as_ref()
+                            && let Some(ref chunk_offset) = chunk_cdc_offset
+                            && *chunk_offset < *cur
+                        {
+                            continue;
+                        }
+                        if let Some(high) = actor_cdc_offset_high.as_ref()
+                            && let Some(ref chunk_offset) = chunk_cdc_offset
+                            && *chunk_offset >= *high
+                        {
+                            actor_cdc_offset_high = None;
+                            should_report_actor_backfill_done = true;
+                        }
+                        let chunk = mapping_chunk(chunk, &self.output_indices);
                         if let Some(filtered_chunk) = filter_stream_chunk(
                             chunk,
                             &current_actor_bounds,
@@ -454,7 +565,9 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                         }
                     }
                     msg @ Message::Watermark(_) => {
-                        yield msg;
+                        if let Some(msg) = mapping_message(msg, &self.output_indices) {
+                            yield msg;
+                        }
                     }
                 }
             }
@@ -554,6 +667,7 @@ fn is_reset_barrier(barrier: &Barrier, actor_id: ActorId) -> bool {
     match barrier.mutation.as_deref() {
         Some(Mutation::Update(update)) => update
             .actor_cdc_table_snapshot_splits
+            .splits
             .contains_key(&actor_id),
         _ => false,
     }

@@ -53,6 +53,14 @@ message BarrierCompleteResponse {
     uint64 consumed_rows = 4;
     uint64 pending_epoch_lag = 5;
   }
+  message CdcTableBackfillProgress {
+    uint32 actor_id = 1;
+    uint64 epoch = 2;
+    bool done = 3;
+    int64 split_id_start_inclusive = 4;
+    int64 split_id_end_inclusive = 5;
+    uint64 generation = 6;
+  }
   string request_id = 1;
   common.Status status = 2;
   repeated CreateMviewProgress create_mview_progress = 3;
@@ -71,6 +79,7 @@ message BarrierCompleteResponse {
   // prev_epoch of barrier
   uint64 epoch = 9;
   uint32 database_id = 10;
+  repeated CdcTableBackfillProgress cdc_table_backfill_progress = 11;
 }
 
 message StreamingControlStreamRequest {
