@@ -52,7 +52,6 @@ pub const CDC_BACKFILL_SPLIT_PK_COLUMN_INDEX: &str = "backfill.split_pk_column_i
 // We enable transaction for shared cdc source by default
 pub const CDC_TRANSACTIONAL_KEY: &str = "transactional";
 pub const CDC_WAIT_FOR_STREAMING_START_TIMEOUT: &str = "cdc.source.wait.streaming.start.timeout";
-pub const CDC_AUTO_SCHEMA_CHANGE_KEY: &str = "auto.schema.change";
 pub const CDC_BACKFILL_MAX_PARALLELISM: u32 = 256;
 
 // User can set strong-schema='true' to enable strong schema for mongo cdc source

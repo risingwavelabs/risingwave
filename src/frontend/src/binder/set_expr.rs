@@ -235,7 +235,7 @@ impl Binder {
         &self,
         left: &BoundSetExpr,
         right: &BoundSetExpr,
-        corresponding: Corresponding,
+        corresponding: &Corresponding,
         op: &SetOperator,
     ) -> Result<(ColIndexMapping, ColIndexMapping)> {
         let check_duplicate_name = |set_expr: &BoundSetExpr| {
@@ -317,11 +317,11 @@ impl Binder {
         Ok((corresponding_mapping_l, corresponding_mapping_r))
     }
 
-    pub(super) fn bind_set_expr(&mut self, set_expr: SetExpr) -> Result<BoundSetExpr> {
+    pub(super) fn bind_set_expr(&mut self, set_expr: &SetExpr) -> Result<BoundSetExpr> {
         match set_expr {
-            SetExpr::Select(s) => Ok(BoundSetExpr::Select(Box::new(self.bind_select(*s)?))),
+            SetExpr::Select(s) => Ok(BoundSetExpr::Select(Box::new(self.bind_select(s)?))),
             SetExpr::Values(v) => Ok(BoundSetExpr::Values(Box::new(self.bind_values(v, None)?))),
-            SetExpr::Query(q) => Ok(BoundSetExpr::Query(Box::new(self.bind_query(*q)?))),
+            SetExpr::Query(q) => Ok(BoundSetExpr::Query(Box::new(self.bind_query(q)?))),
             SetExpr::SetOperation {
                 op,
                 all,
@@ -329,9 +329,9 @@ impl Binder {
                 left,
                 right,
             } => {
-                match op.clone() {
+                match op {
                     SetOperator::Union | SetOperator::Intersect | SetOperator::Except => {
-                        let mut left = self.bind_set_expr(*left)?;
+                        let mut left = self.bind_set_expr(left)?;
                         // Reset context for right side, but keep `cte_to_relation`.
                         let new_context = std::mem::take(&mut self.context);
                         self.context
@@ -339,23 +339,17 @@ impl Binder {
                             .clone_from(&new_context.cte_to_relation);
                         self.context.disable_security_invoker =
                             new_context.disable_security_invoker;
-                        let mut right = self.bind_set_expr(*right)?;
+                        let mut right = self.bind_set_expr(right)?;
 
                         let corresponding_col_indices = if corresponding.is_corresponding() {
-                            Some(Self::corresponding(
-                                self,
-                                &left,
-                                &right,
-                                corresponding,
-                                &op,
-                            )?)
+                            Some(Self::corresponding(self, &left, &right, corresponding, op)?)
                             // TODO: Align schema
                         } else {
-                            Self::align_schema(&mut left, &mut right, op.clone())?;
+                            Self::align_schema(&mut left, &mut right, *op)?;
                             None
                         };
 
-                        if all {
+                        if *all {
                             match op {
                                 SetOperator::Union => {}
                                 SetOperator::Intersect | SetOperator::Except => {
@@ -371,8 +365,8 @@ impl Binder {
                         self.context = BindContext::default();
                         self.context.cte_to_relation = new_context.cte_to_relation;
                         Ok(BoundSetExpr::SetOperation {
-                            op: op.into(),
-                            all,
+                            op: (*op).into(),
+                            all: *all,
                             corresponding_col_indices,
                             left: Box::new(left),
                             right: Box::new(right),
