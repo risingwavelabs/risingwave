@@ -150,9 +150,9 @@ impl BarrierWorkerRuntimeInfoSnapshot {
                         )
                         .into());
                     }
-                    if !stream_actors.contains_key(actor_id) {
-                        return Err(anyhow!("cannot find StreamActor of actor {}", actor_id).into());
-                    }
+                    // if !stream_actors.contains_key(actor_id) {
+                    //     return Err(anyhow!("cannot find StreamActor of actor {}", actor_id).into());
+                    // }
                 }
                 for state_table_id in &fragment.state_table_ids {
                     if !state_table_committed_epochs.contains_key(state_table_id) {
