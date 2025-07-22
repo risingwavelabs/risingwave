@@ -30,7 +30,7 @@ use crate::model::{ActorId, FragmentDownstreamRelation, StreamActor, StreamJobFr
 use crate::{MetaError, MetaResult};
 
 mod backfill_order_control;
-mod cdc_progress;
+pub mod cdc_progress;
 mod checkpoint;
 mod command;
 mod complete_task;

@@ -12,7 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
+use risingwave_common::catalog::TableId;
+use risingwave_pb::stream_service::PbBarrierCompleteResponse;
+
+use crate::MetaResult;
+use crate::barrier::info::BarrierInfo;
 use crate::controller::SqlMetaStore;
+
+pub type CdcTableBackfillTrackerRef = Arc<CdcTableBackfillTracker>;
 
 pub struct CdcTableBackfillTracker {
     meta_store: SqlMetaStore,
@@ -21,5 +30,19 @@ pub struct CdcTableBackfillTracker {
 impl CdcTableBackfillTracker {
     pub fn new(meta_store: SqlMetaStore) -> Self {
         Self { meta_store }
+    }
+
+    pub(super) fn apply_collected_command(
+        &self,
+        barrier_info: &BarrierInfo,
+        resps: impl IntoIterator<Item = &PbBarrierCompleteResponse>,
+    ) -> Vec<TableId> {
+        // TODO(zw): !!!
+        vec![]
+    }
+
+    pub(super) async fn finish_backfill(&self, job_id: TableId) -> MetaResult<()> {
+        // TODO(zw): !!!
+        Ok(())
     }
 }
