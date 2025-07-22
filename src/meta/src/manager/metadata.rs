@@ -619,19 +619,19 @@ impl MetadataManager {
         }
         Ok(table_fragments)
     }
-
-    pub async fn all_active_actors(&self) -> MetaResult<HashMap<ActorId, StreamActor>> {
-        let table_fragments = self.catalog_controller.table_fragments().await?;
-        let mut actor_maps = HashMap::new();
-        for (_, tf) in table_fragments {
-            for actor in tf.active_actors() {
-                actor_maps
-                    .try_insert(actor.actor_id, actor)
-                    .expect("non duplicate");
-            }
-        }
-        Ok(actor_maps)
-    }
+    //
+    // pub async fn all_active_actors(&self) -> MetaResult<HashMap<ActorId, StreamActor>> {
+    //     let table_fragments = self.catalog_controller.table_fragments().await?;
+    //     let mut actor_maps = HashMap::new();
+    //     for (_, tf) in table_fragments {
+    //         for actor in tf.active_actors() {
+    //             actor_maps
+    //                 .try_insert(actor.actor_id, actor)
+    //                 .expect("non duplicate");
+    //         }
+    //     }
+    //     Ok(actor_maps)
+    // }
 
     pub async fn worker_actor_count(&self) -> MetaResult<HashMap<WorkerId, usize>> {
         let actor_cnt = self.catalog_controller.worker_actor_count().await?;
