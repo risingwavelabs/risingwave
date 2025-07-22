@@ -150,6 +150,12 @@ impl StreamNode for StreamSimpleAgg {
             row_count_index: self.row_count_idx as u32,
             version: PbAggNodeVersion::LATEST as _,
             must_output_per_barrier: self.must_output_per_barrier,
+            extreme_cache_size: Some(
+                self.ctx()
+                    .session_ctx()
+                    .config()
+                    .stream_unsafe_extreme_cache_size(),
+            ),
         }))
     }
 }

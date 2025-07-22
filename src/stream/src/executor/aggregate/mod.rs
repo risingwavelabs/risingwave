@@ -47,9 +47,6 @@ pub struct AggExecutorArgs<S: StateStore, E: AggExecutorExtraArgs> {
     pub actor_ctx: ActorContextRef,
     pub info: ExecutorInfo,
 
-    // system configs
-    pub extreme_cache_size: usize,
-
     // agg common things
     pub agg_calls: Vec<AggCall>,
     pub row_count_index: usize,
@@ -57,6 +54,9 @@ pub struct AggExecutorArgs<S: StateStore, E: AggExecutorExtraArgs> {
     pub intermediate_state_table: StateTable<S>,
     pub distinct_dedup_tables: HashMap<usize, StateTable<S>>,
     pub watermark_epoch: AtomicU64Ref,
+
+    // agg common but for TopNStateCache only
+    pub extreme_cache_size: usize,
 
     // extra
     pub extra: E,
