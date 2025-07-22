@@ -15,6 +15,7 @@
 use std::backtrace::Backtrace;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock, RwLockReadGuard};
+use std::thread::sleep;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -372,14 +373,38 @@ impl WorkerNodeSelector {
 
     fn fragment_mapping_inner(&self, fragment_id: FragmentId) -> Result<WorkerSlotMapping> {
         if self.enable_barrier_read {
-            self.manager.get_streaming_fragment_mapping(&fragment_id)
+            self.manager
+                .get_streaming_fragment_mapping(&fragment_id)
+                .inspect_err(|_| {
+                    error!(
+                        "failed to get streaming fragment mapping for barrier read: {}",
+                        fragment_id
+                    );
+                })
         } else {
             let mapping = (self.manager.serving_fragment_mapping(fragment_id)).or_else(|_| {
                 tracing::warn!(
                     fragment_id,
                     "Serving fragment mapping not found, fall back to streaming one."
                 );
-                self.manager.get_streaming_fragment_mapping(&fragment_id)
+                match self.manager.get_streaming_fragment_mapping(&fragment_id) {
+                    Ok(mapping) => Ok(mapping),
+                    Err(_) => {
+                        error!(
+                            "failed to get streaming fragment mapping for: {} sleep to retry",
+                            fragment_id
+                        );
+                        sleep(Duration::from_secs(10));
+                        self.manager
+                            .get_streaming_fragment_mapping(&fragment_id)
+                            .inspect_err(|_| {
+                                error!(
+                                    "failed to get streaming fragment mapping for: {} again",
+                                    fragment_id
+                                );
+                            })
+                    }
+                }
             })?;
 
             // Filter out unavailable workers.
