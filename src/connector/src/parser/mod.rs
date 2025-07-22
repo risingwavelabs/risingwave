@@ -339,13 +339,13 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                                     return Err(error);
                                 }
                                 crate::source::cdc::SchemaChangeFailurePolicy::Skip => {
+                                    // Continue processing, don't return error
                                     tracing::warn!(
                                         error = %error.as_report(),
                                         split_id = &*msg.split_id,
                                         offset = msg.offset,
                                         "Schema change message parsing failed, skipping due to policy."
                                     );
-                                    // Continue processing, don't return error
                                 }
                             }
                         }
@@ -413,7 +413,7 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                         match oneshot_rx.await {
                             Ok(()) => {}
                             Err(e) => {
-                                tracing::error!(error = %e.as_report(), "faile111d to wait for schema change");
+                                tracing::error!(error = %e.as_report(), "failed to wait for schema change");
                                 return Err(anyhow::Error::from(e).into());
                             }
                         }
