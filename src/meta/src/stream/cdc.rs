@@ -108,6 +108,7 @@ pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
             split_id: Set(split.split_id.to_owned()),
             left: Set(split.left_bound_inclusive.value_serialize()),
             right: Set(split.right_bound_exclusive.value_serialize()),
+            is_backfill_finished: Set(false),
         });
         if insert_batch.len() >= insert_batch_size as usize {
             cdc_table_snapshot_split::Entity::insert_many(std::mem::take(&mut insert_batch))
