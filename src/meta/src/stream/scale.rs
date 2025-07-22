@@ -28,7 +28,9 @@ use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, FragmentTypeMask,
 use risingwave_common::hash::ActorMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::{bail, hash};
-use risingwave_meta_model::{ObjectId, WorkerId, actor, fragment, streaming_job};
+use risingwave_meta_model::{
+    ObjectId, StreamingParallelism, WorkerId, actor, fragment, streaming_job,
+};
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::FragmentWorkerSlotMappings;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -44,7 +46,7 @@ use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 
 use crate::barrier::{Command, Reschedule};
-use crate::controller::scale::RescheduleWorkingSet;
+use crate::controller::scale::{RescheduleWorkingSet, render_fragments};
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager};
 use crate::model::{
     ActorId, DispatcherId, FragmentId, StreamActor, StreamActorWithDispatchers, TableParallelism,
@@ -394,6 +396,50 @@ impl ScaleController {
             .await
     }
 
+    pub async fn render_actors(
+        &self,
+        salt: ObjectId,
+        parallelism: NonZeroUsize,
+        vnode_count: usize,
+        fragment_id: FragmentId,
+        fragment_distribution_type: DistributionType,
+        workers: BTreeMap<WorkerId, NonZeroUsize>,
+    ) -> MetaResult<HashMap<ActorId, InflightActorInfo>> {
+        let fact_parallelism = parallelism.get().min(vnode_count);
+        let assigner = AssignerBuilder::new(salt).build();
+
+        let actors = (0..fact_parallelism).collect_vec();
+        let vnodes = (0..vnode_count).collect_vec();
+
+        let assignment = assigner.assign_hierarchical(&workers, &actors, &vnodes)?;
+
+        let actors = assignment
+            .iter()
+            .flat_map(|(worker_id, actors)| {
+                actors
+                    .iter()
+                    .map(move |(actor_id, vnodes)| (worker_id, actor_id, vnodes))
+            })
+            .map(|(&worker_id, &actor_idx, vnodes)| {
+                let vnode_bitmap = match fragment_distribution_type {
+                    DistributionType::Single => None,
+                    DistributionType::Hash => Some(Bitmap::from_indices(vnode_count, vnodes)),
+                };
+
+                let actor_id = fragment_id << 16 as ActorId | actor_idx as ActorId;
+                (
+                    actor_id,
+                    InflightActorInfo {
+                        worker_id,
+                        vnode_bitmap,
+                    },
+                )
+            })
+            .collect();
+
+        Ok(actors)
+    }
+
     pub async fn diff_fragment(
         &self,
         fragment_info: &InflightFragmentInfo,
@@ -433,9 +479,10 @@ impl ScaleController {
 
             // Check if the vnode distribution has changed.
             if prev_actor.vnode_bitmap != curr_actor.vnode_bitmap
-                && let Some(bitmap) = curr_actor.vnode_bitmap.clone() {
-                    vnode_bitmap_updates.insert(actor_id, bitmap);
-                }
+                && let Some(bitmap) = curr_actor.vnode_bitmap.clone()
+            {
+                vnode_bitmap_updates.insert(actor_id, bitmap);
+            }
         }
 
         let actor_mapping = curr_actors
