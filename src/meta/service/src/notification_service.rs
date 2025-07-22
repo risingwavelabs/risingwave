@@ -372,8 +372,7 @@ impl NotificationService for NotificationServiceImpl {
         let (tx, rx) = mpsc::unbounded_channel();
         self.env
             .notification_manager()
-            .insert_sender(subscribe_type, worker_key.clone(), tx)
-            .await;
+            .insert_sender(subscribe_type, worker_key.clone(), tx);
 
         let meta_snapshot = match subscribe_type {
             SubscribeType::Compactor => self.compactor_subscribe().await?,

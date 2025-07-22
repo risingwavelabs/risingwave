@@ -1029,6 +1029,7 @@ impl LogicalPlanRoot {
         target_table: Option<Arc<TableCatalog>>,
         partition_info: Option<PartitionComputeInfo>,
         user_specified_columns: bool,
+        auto_refresh_schema_from_table: Option<Arc<TableCatalog>>,
     ) -> Result<StreamSink> {
         let stream_scan_type = if without_backfill {
             StreamScanType::UpstreamOnly
@@ -1040,6 +1041,15 @@ impl LogicalPlanRoot {
         } else {
             StreamScanType::Backfill
         };
+        if auto_refresh_schema_from_table.is_some()
+            && stream_scan_type != StreamScanType::ArrangementBackfill
+        {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "auto schema change only support for ArrangementBackfill, but got: {:?}",
+                stream_scan_type
+            ))
+            .into());
+        }
         assert_eq!(self.plan.convention(), Convention::Logical);
         let stream_plan =
             self.gen_optimized_stream_plan_inner(emit_on_window_close, stream_scan_type)?;
@@ -1059,6 +1069,7 @@ impl LogicalPlanRoot {
             properties,
             format_desc,
             partition_info,
+            auto_refresh_schema_from_table,
         )
     }
 }

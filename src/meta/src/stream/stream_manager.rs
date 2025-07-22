@@ -463,7 +463,7 @@ impl GlobalStreamManager {
         );
 
         let source_change = SourceChange::CreateJobFinished {
-            finished_backfill_fragments: stream_job_fragments.source_backfill_fragments()?,
+            finished_backfill_fragments: stream_job_fragments.source_backfill_fragments(),
         };
 
         let info = CreateStreamingJobCommandInfo {

@@ -37,7 +37,7 @@ use crate::connector_common::{PostgresExternalTable, SslMode, create_pg_client};
 use crate::enforce_secret::EnforceSecret;
 use crate::parser::scalar_adapter::{ScalarAdapter, validate_pg_type_to_rw_type};
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
-use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam};
+use crate::sink::{Result, Sink, SinkParam, SinkWriterParam};
 
 pub const POSTGRES_SINK: &str = "postgres";
 
@@ -145,7 +145,6 @@ impl TryFrom<SinkParam> for PostgresSink {
 }
 
 impl Sink for PostgresSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = PostgresSinkWriter;
 
     const SINK_NAME: &'static str = POSTGRES_SINK;
