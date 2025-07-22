@@ -552,7 +552,6 @@ pub(crate) mod tests {
             database_id: 0,
             associated_source_id: None,
             name: "test".to_owned(),
-            dependent_relations: vec![],
             columns: vec![
                 ColumnCatalog {
                     column_desc: ColumnDesc::named("a", 0.into(), DataType::Int32),

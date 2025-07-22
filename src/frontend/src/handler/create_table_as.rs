@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use either::Either;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
@@ -146,6 +148,7 @@ pub async fn handle_create_as(
             graph,
             TableJobType::Unspecified,
             if_not_exists,
+            HashSet::default(),
         )
         .await?;
 

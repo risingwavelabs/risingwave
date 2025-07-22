@@ -170,6 +170,9 @@ message DropMaterializedViewResponse {
 
 message CreateViewRequest {
   catalog.View view = 1;
+
+  // The list of object IDs that this view depends on.
+  repeated uint32 dependencies = 2;
 }
 
 message CreateViewResponse {
@@ -214,6 +217,8 @@ message CreateTableRequest {
   stream_plan.StreamFragmentGraph fragment_graph = 3;
   TableJobType job_type = 4;
   bool if_not_exists = 5;
+  // The list of object IDs that this table depends on, currently only used for `SHARED_CDC_SOURCE`.
+  repeated uint32 dependencies = 6;
 }
 
 message CreateTableResponse {
@@ -429,6 +434,7 @@ message DdlProgress {
   uint64 id = 1;
   string statement = 2;
   string progress = 3;
+  string create_type = 4;
 }
 
 message GetDdlProgressResponse {
@@ -563,6 +569,16 @@ message AlterDatabaseParamResponse {
   WaitVersion version = 2;
 }
 
+message CompactTableRequest {
+  uint32 table_id = 1;
+}
+
+message CompactTableResponse {
+  common.Status status = 1;
+  // The compaction task ID that was triggered
+  uint64 task_id = 2;
+}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -606,4 +622,5 @@ service DdlService {
   rpc AutoSchemaChange(AutoSchemaChangeRequest) returns (AutoSchemaChangeResponse);
   rpc AlterSwapRename(AlterSwapRenameRequest) returns (AlterSwapRenameResponse);
   rpc AlterDatabaseParam(AlterDatabaseParamRequest) returns (AlterDatabaseParamResponse);
+  rpc CompactTable(CompactTableRequest) returns (CompactTableResponse);
 }

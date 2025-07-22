@@ -126,7 +126,7 @@ mod bind {
                     }
                     AnalyzeTarget::Sink(_) => {
                         let (catalog, _schema_name) =
-                            catalog.get_sink_by_name(&db_name, schema_path, &name)?;
+                            catalog.get_any_sink_by_name(&db_name, schema_path, &name)?;
                         catalog.id.sink_id
                     }
                     AnalyzeTarget::MaterializedView(_) => {

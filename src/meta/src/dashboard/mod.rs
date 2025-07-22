@@ -64,7 +64,7 @@ pub(super) mod handlers {
     use risingwave_meta_model::WorkerId;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{
-        Index, PbDatabase, PbSchema, Sink, Source, Subscription, Table, View,
+        Index, PbDatabase, PbFunction, PbSchema, Sink, Source, Subscription, Table, View,
     };
     use risingwave_pb::common::{WorkerNode, WorkerType};
     use risingwave_pb::hummock::TableStats;
@@ -279,6 +279,19 @@ pub(super) mod handlers {
             .map_err(err)?;
 
         Ok(Json(views))
+    }
+
+    pub async fn list_functions(
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<Vec<PbFunction>>> {
+        let functions = srv
+            .metadata_manager
+            .catalog_controller
+            .list_functions()
+            .await
+            .map_err(err)?;
+
+        Ok(Json(functions))
     }
 
     pub async fn list_streaming_jobs(
@@ -699,6 +712,7 @@ impl DashboardService {
                 get(get_fragment_to_relation_map),
             )
             .route("/views", get(list_views))
+            .route("/functions", get(list_functions))
             .route("/materialized_views", get(list_materialized_views))
             .route("/tables", get(list_tables))
             .route("/indexes", get(list_index_tables))
