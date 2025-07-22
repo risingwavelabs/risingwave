@@ -25,6 +25,7 @@ use crate::error::{IntoUnexpectedExit, StreamError};
 use crate::executor::exchange::permit::{self, channel_from_config};
 use crate::executor::{Barrier, BarrierInner};
 use crate::task::barrier_manager::progress::BackfillState;
+use crate::task::cdc_progress::CdcTableBackfillState;
 use crate::task::{ActorId, StreamEnvironment};
 
 /// Events sent from actors via [`LocalBarrierManager`] to [`super::barrier_worker::managed_state::DatabaseManagedBarrierState`].
@@ -51,9 +52,8 @@ pub(super) enum LocalBarrierEvent {
     },
     ReportCdcTableBackfillProgress {
         actor_id: ActorId,
-        epoch: u64,
-        split_id_start_inclusive: i64,
-        split_id_end_inclusive: i64,
+        epoch: EpochPair,
+        state: CdcTableBackfillState,
     },
 }
 

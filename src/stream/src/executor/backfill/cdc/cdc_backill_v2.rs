@@ -533,7 +533,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                             assert!(!actor_snapshot_splits.is_empty());
                             self.progress.finish(
                                 self.actor_ctx.id,
-                                barrier.epoch.curr,
+                                barrier.epoch,
                                 (
                                     actor_snapshot_splits[0].split_id,
                                     actor_snapshot_splits[actor_snapshot_splits.len() - 1].split_id,

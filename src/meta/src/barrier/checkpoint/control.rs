@@ -31,6 +31,7 @@ use risingwave_pb::stream_service::streaming_control_stream_response::ResetDatab
 use thiserror_ext::AsReport;
 use tracing::{debug, warn};
 
+use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::creating_job::{CompleteJobType, CreatingStreamingJobControl};
 use crate::barrier::checkpoint::recovery::{
     DatabaseRecoveringState, DatabaseStatusAction, EnterInitializing, EnterRunning,
@@ -48,6 +49,7 @@ use crate::barrier::utils::{
     NodeToCollect, collect_creating_job_commit_epoch_info, is_valid_after_worker_err,
 };
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, InflightSubscriptionInfo};
+use crate::controller::SqlMetaStore;
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::fill_snapshot_backfill_epoch;
@@ -230,6 +232,7 @@ impl CheckpointControl {
                         let new_database = DatabaseCheckpointControl::new(
                             database_id,
                             self.env.shared_actor_infos().clone(),
+                            self.env.meta_store(),
                         );
                         control_stream_manager.add_partial_graph(database_id, None);
                         entry
@@ -540,12 +543,17 @@ pub(crate) struct DatabaseCheckpointControl {
     creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl>,
 
     create_mview_tracker: CreateMviewProgressTracker,
+    cdc_table_backfill_tracker: CdcTableBackfillTracker,
 
     metrics: DatabaseCheckpointControlMetrics,
 }
 
 impl DatabaseCheckpointControl {
-    fn new(database_id: DatabaseId, shared_actor_infos: SharedActorInfos) -> Self {
+    fn new(
+        database_id: DatabaseId,
+        shared_actor_infos: SharedActorInfos,
+        meta_store: SqlMetaStore,
+    ) -> Self {
         Self {
             database_id,
             state: BarrierWorkerState::new(database_id, shared_actor_infos),
@@ -554,6 +562,7 @@ impl DatabaseCheckpointControl {
             committed_epoch: None,
             creating_streaming_job_controls: Default::default(),
             create_mview_tracker: Default::default(),
+            cdc_table_backfill_tracker: CdcTableBackfillTracker::new(meta_store),
             metrics: DatabaseCheckpointControlMetrics::new(database_id),
         }
     }
@@ -564,6 +573,7 @@ impl DatabaseCheckpointControl {
         state: BarrierWorkerState,
         committed_epoch: u64,
         creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl>,
+        cdc_table_backfill_tracker: CdcTableBackfillTracker,
     ) -> Self {
         Self {
             database_id,
@@ -573,6 +583,7 @@ impl DatabaseCheckpointControl {
             committed_epoch: Some(committed_epoch),
             creating_streaming_job_controls,
             create_mview_tracker,
+            cdc_table_backfill_tracker,
             metrics: DatabaseCheckpointControlMetrics::new(database_id),
         }
     }

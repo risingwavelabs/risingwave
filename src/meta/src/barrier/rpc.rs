@@ -58,6 +58,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use super::{BarrierKind, Command, InflightSubscriptionInfo, TracedEpoch};
+use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::{
     BarrierWorkerState, CreatingStreamingJobControl, DatabaseCheckpointControl,
 };
@@ -387,6 +388,7 @@ pub(super) struct DatabaseInitialBarrierCollector {
     create_mview_tracker: CreateMviewProgressTracker,
     creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl>,
     committed_epoch: u64,
+    cdc_table_backfill_tracker: CdcTableBackfillTracker,
 }
 
 impl Debug for DatabaseInitialBarrierCollector {
@@ -441,6 +443,7 @@ impl DatabaseInitialBarrierCollector {
             self.database_state,
             self.committed_epoch,
             self.creating_streaming_job_controls,
+            self.cdc_table_backfill_tracker,
         )
     }
 
@@ -755,6 +758,7 @@ impl ControlStreamManager {
             subscription_info,
             is_paused,
         );
+        let cdc_table_backfill_tracker = CdcTableBackfillTracker::new(self.env.meta_store());
         Ok(DatabaseInitialBarrierCollector {
             database_id,
             node_to_collect,
@@ -762,6 +766,7 @@ impl ControlStreamManager {
             create_mview_tracker: tracker,
             creating_streaming_job_controls,
             committed_epoch,
+            cdc_table_backfill_tracker,
         })
     }
 
