@@ -21,10 +21,7 @@ use tracing::info;
 
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
-use crate::sink::{
-    DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkError, SinkLogReader, SinkParam,
-    SinkWriterParam,
-};
+use crate::sink::{LogSinker, Result, Sink, SinkError, SinkLogReader, SinkParam, SinkWriterParam};
 
 pub const BLACKHOLE_SINK: &str = "blackhole";
 pub const TABLE_SINK: &str = "table";
@@ -67,7 +64,6 @@ impl<T: TrivialSinkName> TryFrom<SinkParam> for TrivialSink<T> {
 }
 
 impl<T: TrivialSinkName> Sink for TrivialSink<T> {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = Self;
 
     const SINK_NAME: &'static str = T::SINK_NAME;

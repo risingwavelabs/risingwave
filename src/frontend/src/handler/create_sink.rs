@@ -114,7 +114,7 @@ pub async fn gen_sink_plan(
     let user_specified_columns = !stmt.columns.is_empty();
     let db_name = &session.database();
     let (sink_schema_name, sink_table_name) =
-        Binder::resolve_schema_qualified_name(db_name, stmt.sink_name.clone())?;
+        Binder::resolve_schema_qualified_name(db_name, &stmt.sink_name)?;
 
     let mut with_options = handler_args.with_options.clone();
 
@@ -170,6 +170,12 @@ pub async fn gen_sink_plan(
         .transpose()?
         .unwrap_or(false);
 
+    if is_auto_schema_change {
+        Feature::SinkAutoSchemaChange
+            .check_available()
+            .map_err(|e| anyhow::anyhow!(e))?;
+    }
+
     // Used for debezium's table name
     let sink_from_table_name;
     // `true` means that sink statement has the form: `CREATE SINK s1 FROM ...`
@@ -207,8 +213,7 @@ pub async fn gen_sink_plan(
         let mut binder = Binder::new_for_stream(session);
         let auto_refresh_schema_from_table = if let Some((from_name, true)) = &direct_sink_from_name
         {
-            let from_relation =
-                binder.bind_relation_by_name(from_name.clone(), None, None, true)?;
+            let from_relation = binder.bind_relation_by_name(from_name, None, None, true)?;
             if let Relation::BaseTable(table) = from_relation {
                 if table.table_catalog.table_type != TableType::Table {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
@@ -238,7 +243,8 @@ pub async fn gen_sink_plan(
         } else {
             None
         };
-        let bound = binder.bind_query(*query.clone())?;
+
+        let bound = binder.bind_query(&query)?;
 
         (
             binder.included_relations().clone(),

@@ -22,7 +22,7 @@ use replace_job_plan::{ReplaceSource, ReplaceTable};
 use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkId;
-use risingwave_meta::manager::{EventLogManagerRef, MetadataManager};
+use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
 use risingwave_meta::model::TableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
 use risingwave_meta::stream::{JobParallelismTarget, JobRescheduleTarget, JobResourceGroupTarget};
@@ -57,6 +57,7 @@ pub struct DdlServiceImpl {
     sink_manager: SinkCoordinatorManager,
     ddl_controller: DdlController,
     meta_metrics: Arc<MetaMetrics>,
+    iceberg_compaction_manager: iceberg_compaction::IcebergCompactionManagerRef,
 }
 
 impl DdlServiceImpl {
@@ -69,6 +70,7 @@ impl DdlServiceImpl {
         barrier_manager: BarrierManagerRef,
         sink_manager: SinkCoordinatorManager,
         meta_metrics: Arc<MetaMetrics>,
+        iceberg_compaction_manager: iceberg_compaction::IcebergCompactionManagerRef,
     ) -> Self {
         let ddl_controller = DdlController::new(
             env.clone(),
@@ -84,6 +86,7 @@ impl DdlServiceImpl {
             sink_manager,
             ddl_controller,
             meta_metrics,
+            iceberg_compaction_manager,
         }
     }
 
@@ -905,6 +908,25 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(WaitResponse {}))
     }
 
+    async fn alter_cdc_table_backfill_parallelism(
+        &self,
+        request: Request<AlterCdcTableBackfillParallelismRequest>,
+    ) -> Result<Response<AlterCdcTableBackfillParallelismResponse>, Status> {
+        let req = request.into_inner();
+        let job_id = req.get_table_id();
+        let parallelism = *req.get_parallelism()?;
+        self.ddl_controller
+            .reschedule_cdc_table_backfill(
+                job_id,
+                JobRescheduleTarget {
+                    parallelism: JobParallelismTarget::Update(TableParallelism::from(parallelism)),
+                    resource_group: JobResourceGroupTarget::Keep,
+                },
+            )
+            .await?;
+        Ok(Response::new(AlterCdcTableBackfillParallelismResponse {}))
+    }
+
     async fn alter_parallelism(
         &self,
         request: Request<AlterParallelismRequest>,
@@ -1212,6 +1234,28 @@ impl DdlService for DdlServiceImpl {
             status: None,
             version,
         }));
+    }
+
+    async fn compact_iceberg_table(
+        &self,
+        request: Request<CompactIcebergTableRequest>,
+    ) -> Result<Response<CompactIcebergTableResponse>, Status> {
+        let req = request.into_inner();
+        let sink_id = risingwave_connector::sink::catalog::SinkId::new(req.sink_id);
+
+        // Trigger manual compaction directly using the sink ID
+        let task_id = self
+            .iceberg_compaction_manager
+            .trigger_manual_compaction(sink_id)
+            .await
+            .map_err(|e| {
+                Status::internal(format!("Failed to trigger compaction: {}", e.as_report()))
+            })?;
+
+        Ok(Response::new(CompactIcebergTableResponse {
+            status: None,
+            task_id,
+        }))
     }
 }
 

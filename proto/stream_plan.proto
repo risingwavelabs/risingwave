@@ -32,6 +32,8 @@ message AddMutation {
   repeated SubscriptionUpstreamInfo subscriptions_to_add = 5;
   // nodes which should be paused initially.
   repeated uint32 backfill_nodes_to_pause = 6;
+  // CDC table snapshot splits
+  map<uint32, source.CdcTableSnapshotSplits> actor_cdc_table_snapshot_splits = 7;
 }
 
 message StopMutation {
@@ -84,6 +86,8 @@ message UpdateMutation {
   // Consistent with the semantics in AddMutation.
   map<uint32, Dispatchers> actor_new_dispatchers = 6;
   map<uint32, SinkAddColumns> sink_add_columns = 7;
+  // CDC table snapshot splits
+  map<uint32, source.CdcTableSnapshotSplits> actor_cdc_table_snapshot_splits = 8;
 }
 
 message SourceChangeSplitMutation {
@@ -689,6 +693,14 @@ message StreamCdcScanOptions {
   uint32 snapshot_barrier_interval = 2;
 
   uint32 snapshot_batch_size = 3;
+
+  uint32 backfill_parallelism = 4;
+
+  uint64 backfill_num_rows_per_split = 5;
+
+  bool backfill_as_even_splits = 6;
+
+  uint32 backfill_split_pk_column_index = 7;
 }
 
 message StreamCdcScanNode {

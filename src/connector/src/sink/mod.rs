@@ -658,7 +658,8 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     const SINK_NAME: &'static str;
 
     type LogSinker: LogSinker;
-    type Coordinator: SinkCommitCoordinator;
+    #[expect(deprecated)]
+    type Coordinator: SinkCommitCoordinator = NoSinkCommitCoordinator;
 
     fn set_default_commit_checkpoint_interval(
         desc: &mut SinkDesc,
@@ -793,10 +794,25 @@ pub trait SinkCommitCoordinator {
     ) -> Result<()>;
 }
 
-pub struct DummySinkCommitCoordinator(!);
+#[deprecated]
+/// A place holder struct of `SinkCommitCoordinator` for sink without coordinator.
+///
+/// It can never be constructed because it holds a never type, and therefore it's safe to
+/// mark all its methods as unreachable.
+///
+/// Explicitly mark this struct as `deprecated` so that when developers accidentally declare it explicitly as
+/// the associated type `Coordinator` when implementing `Sink` trait, they can be warned, and remove the explicit
+/// declaration.
+///
+/// Note:
+///     When we implement a sink without coordinator, don't explicitly write `type Coordinator = NoSinkCommitCoordinator`.
+///     Just remove the explicit declaration and use the default associated type, and besides, don't explicitly implement
+///     `fn new_coordinator(...)` and use the default implementation.
+pub struct NoSinkCommitCoordinator(!);
 
+#[expect(deprecated)]
 #[async_trait]
-impl SinkCommitCoordinator for DummySinkCommitCoordinator {
+impl SinkCommitCoordinator for NoSinkCommitCoordinator {
     async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
         unreachable!()
     }

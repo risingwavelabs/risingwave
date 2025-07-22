@@ -12,13 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_meta_model::WorkerId;
+use risingwave_pb::meta::subscribe_response::Operation;
 use risingwave_pb::stream_plan::PbSubscriptionUpstreamInfo;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use tracing::warn;
@@ -27,7 +30,57 @@ use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder}
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
+use crate::controller::utils::rebuild_fragment_mapping;
+use crate::manager::NotificationManagerRef;
 use crate::model::{ActorId, FragmentId, SubscriptionId};
+
+#[derive(Clone, educe::Educe)]
+#[educe(Debug)]
+pub(crate) struct SharedActorInfos {
+    inner: Arc<parking_lot::RwLock<HashMap<DatabaseId, HashMap<FragmentId, InflightFragmentInfo>>>>,
+    #[educe(Debug(ignore))]
+    notification_manager: NotificationManagerRef,
+}
+
+impl SharedActorInfos {
+    pub(crate) fn new(notification_manager: NotificationManagerRef) -> Self {
+        Self {
+            inner: Arc::new(Default::default()),
+            notification_manager,
+        }
+    }
+
+    pub(super) fn remove_database(&self, database_id: DatabaseId) {
+        if let Some(database) = self.inner.write().remove(&database_id) {
+            let mapping = database
+                .into_values()
+                .map(|fragment| rebuild_fragment_mapping(&fragment))
+                .collect_vec();
+            if !mapping.is_empty() {
+                self.notification_manager
+                    .notify_fragment_mapping(Operation::Delete, mapping);
+            }
+        }
+    }
+
+    pub(super) fn retain_databases(&self, database_ids: impl IntoIterator<Item = DatabaseId>) {
+        let database_ids: HashSet<_> = database_ids.into_iter().collect();
+
+        let mut mapping = Vec::new();
+        for fragment in self
+            .inner
+            .write()
+            .extract_if(|database_id, _| !database_ids.contains(database_id))
+            .flat_map(|(_, fragments)| fragments.into_values())
+        {
+            mapping.push(rebuild_fragment_mapping(&fragment));
+        }
+        if !mapping.is_empty() {
+            self.notification_manager
+                .notify_fragment_mapping(Operation::Delete, mapping);
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub(super) struct BarrierInfo {
@@ -91,8 +144,10 @@ impl<'a> IntoIterator for &'a InflightStreamingJobInfo {
 
 #[derive(Clone, Debug)]
 pub struct InflightDatabaseInfo {
+    database_id: DatabaseId,
     jobs: HashMap<TableId, InflightStreamingJobInfo>,
     fragment_location: HashMap<FragmentId, TableId>,
+    shared_actor_infos: SharedActorInfos,
 }
 
 impl InflightDatabaseInfo {
@@ -123,21 +178,60 @@ impl InflightDatabaseInfo {
             .get_mut(&fragment_id)
             .expect("should exist")
     }
-}
 
-impl InflightDatabaseInfo {
-    pub fn empty() -> Self {
+    fn empty_inner(database_id: DatabaseId, shared_actor_infos: SharedActorInfos) -> Self {
         Self {
+            database_id,
             jobs: Default::default(),
             fragment_location: Default::default(),
+            shared_actor_infos,
         }
+    }
+
+    pub fn empty(database_id: DatabaseId, shared_actor_infos: SharedActorInfos) -> Self {
+        // remove the database because it's empty.
+        shared_actor_infos.remove_database(database_id);
+        Self::empty_inner(database_id, shared_actor_infos)
+    }
+
+    pub fn recover(
+        database_id: DatabaseId,
+        jobs: impl Iterator<Item = InflightStreamingJobInfo>,
+        shared_actor_infos: SharedActorInfos,
+    ) -> Self {
+        let mut info = Self::empty_inner(database_id, shared_actor_infos);
+        for job in jobs {
+            info.extend_inner(job);
+        }
+
+        // delete the fragments that exist previously, but not included in the recovered fragments
+        let mut guard = info.shared_actor_infos.inner.write();
+        let database = guard.entry(database_id).or_default();
+        let mut deleted_mapping = Vec::new();
+        for (_, fragment) in
+            database.extract_if(|fragment_id, _| !info.fragment_location.contains_key(fragment_id))
+        {
+            deleted_mapping.push(rebuild_fragment_mapping(&fragment));
+        }
+        if !deleted_mapping.is_empty() {
+            info.shared_actor_infos
+                .notification_manager
+                .notify_fragment_mapping(Operation::Delete, deleted_mapping);
+        }
+
+        drop(guard);
+        info
+    }
+
+    pub fn extend(&mut self, job: InflightStreamingJobInfo) {
+        self.extend_inner(job)
     }
 
     pub fn is_empty(&self) -> bool {
         self.jobs.is_empty()
     }
 
-    pub(crate) fn extend(&mut self, job: InflightStreamingJobInfo) {
+    fn extend_inner(&mut self, job: InflightStreamingJobInfo) {
         self.apply_add(job.fragment_infos.into_iter().map(|(fragment_id, info)| {
             (
                 fragment_id,
@@ -163,6 +257,11 @@ impl InflightDatabaseInfo {
         &mut self,
         fragment_changes: impl Iterator<Item = (FragmentId, CommandFragmentChanges)>,
     ) {
+        let mut added_mapping = Vec::new();
+        let mut updated_mapping = Vec::new();
+        let inner = self.shared_actor_infos.inner.clone();
+        let mut guard = inner.write();
+        let database = guard.entry(self.database_id).or_default();
         {
             for (fragment_id, change) in fragment_changes {
                 match change {
@@ -174,6 +273,16 @@ impl InflightDatabaseInfo {
                                     job_id,
                                     fragment_infos: Default::default(),
                                 });
+                        match database.entry(fragment_id) {
+                            Entry::Occupied(mut entry) => {
+                                entry.insert(info.clone());
+                                updated_mapping.push(rebuild_fragment_mapping(&info));
+                            }
+                            Entry::Vacant(entry) => {
+                                entry.insert(info.clone());
+                                added_mapping.push(rebuild_fragment_mapping(&info));
+                            }
+                        }
                         fragment_infos
                             .fragment_infos
                             .try_insert(fragment_id, info)
@@ -238,6 +347,16 @@ impl InflightDatabaseInfo {
                     }
                 }
             }
+        }
+        if !added_mapping.is_empty() {
+            self.shared_actor_infos
+                .notification_manager
+                .notify_fragment_mapping(Operation::Add, added_mapping);
+        }
+        if !updated_mapping.is_empty() {
+            self.shared_actor_infos
+                .notification_manager
+                .notify_fragment_mapping(Operation::Update, updated_mapping);
         }
     }
 
@@ -392,6 +511,11 @@ impl InflightDatabaseInfo {
         &mut self,
         fragment_changes: &HashMap<FragmentId, CommandFragmentChanges>,
     ) {
+        let mut updated_mapping = Vec::new();
+        let mut deleted_mapping = Vec::new();
+        let inner = self.shared_actor_infos.inner.clone();
+        let mut guard = inner.write();
+        let database = guard.entry(self.database_id).or_default();
         {
             for (fragment_id, changes) in fragment_changes {
                 match changes {
@@ -408,6 +532,8 @@ impl InflightDatabaseInfo {
                         for actor_id in to_remove {
                             assert!(info.actors.remove(&(*actor_id as _)).is_some());
                         }
+                        database.insert(*fragment_id, info.clone());
+                        updated_mapping.push(rebuild_fragment_mapping(info));
                     }
                     CommandFragmentChanges::RemoveFragment => {
                         let job_id = self
@@ -415,9 +541,12 @@ impl InflightDatabaseInfo {
                             .remove(fragment_id)
                             .expect("should exist");
                         let job = self.jobs.get_mut(&job_id).expect("should exist");
-                        job.fragment_infos
+                        let fragment = job
+                            .fragment_infos
                             .remove(fragment_id)
                             .expect("should exist");
+                        database.remove(fragment_id);
+                        deleted_mapping.push(rebuild_fragment_mapping(&fragment));
                         if job.fragment_infos.is_empty() {
                             self.jobs.remove(&job_id).expect("should exist");
                         }
@@ -425,6 +554,16 @@ impl InflightDatabaseInfo {
                     CommandFragmentChanges::ReplaceNodeUpstream(_) => {}
                 }
             }
+        }
+        if !updated_mapping.is_empty() {
+            self.shared_actor_infos
+                .notification_manager
+                .notify_fragment_mapping(Operation::Update, updated_mapping);
+        }
+        if !deleted_mapping.is_empty() {
+            self.shared_actor_infos
+                .notification_manager
+                .notify_fragment_mapping(Operation::Delete, deleted_mapping);
         }
     }
 }

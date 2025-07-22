@@ -209,6 +209,7 @@ pub struct StreamingMetrics {
 
     // Materialized view
     materialize_cache_hit_count: RelabeledGuardedIntCounterVec,
+    materialize_data_exist_count: RelabeledGuardedIntCounterVec,
     materialize_cache_total_count: RelabeledGuardedIntCounterVec,
     materialize_input_row_count: RelabeledGuardedIntCounterVec,
     pub materialize_current_epoch: RelabeledGuardedIntGaugeVec,
@@ -1158,6 +1159,15 @@ impl StreamingMetrics {
         .unwrap()
         .relabel_debug_1(level);
 
+        let materialize_data_exist_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_materialize_data_exist_count",
+            "Materialize executor data exist count",
+            &["actor_id", "table_id", "fragment_id"],
+            registry
+        )
+        .unwrap()
+        .relabel_debug_1(level);
+
         let materialize_cache_total_count = register_guarded_int_counter_vec_with_registry!(
             "stream_materialize_cache_total_count",
             "Materialize executor cache total operation",
@@ -1290,6 +1300,7 @@ impl StreamingMetrics {
             jvm_active_bytes,
             stream_memory_usage,
             materialize_cache_hit_count,
+            materialize_data_exist_count,
             materialize_cache_total_count,
             materialize_input_row_count,
             materialize_current_epoch,
@@ -1647,6 +1658,9 @@ impl StreamingMetrics {
             materialize_cache_hit_count: self
                 .materialize_cache_hit_count
                 .with_guarded_label_values(label_list),
+            materialize_data_exist_count: self
+                .materialize_data_exist_count
+                .with_guarded_label_values(label_list),
             materialize_cache_total_count: self
                 .materialize_cache_total_count
                 .with_guarded_label_values(label_list),
@@ -1688,6 +1702,7 @@ pub struct SinkExecutorMetrics {
 
 pub struct MaterializeMetrics {
     pub materialize_cache_hit_count: LabelGuardedIntCounter,
+    pub materialize_data_exist_count: LabelGuardedIntCounter,
     pub materialize_cache_total_count: LabelGuardedIntCounter,
     pub materialize_input_row_count: LabelGuardedIntCounter,
     pub materialize_current_epoch: LabelGuardedIntGauge,

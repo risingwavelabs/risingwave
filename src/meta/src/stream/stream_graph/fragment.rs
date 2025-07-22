@@ -472,6 +472,7 @@ pub fn rewrite_refresh_schema_sink_fragment(
         .into());
     };
     // update sink_node
+    // following logic in <StreamSink as Explain>::distill
     sink_node.identity = {
         let sink_type = SinkType::from_proto(sink.sink_type());
         let sink_type_str = if sink_type.is_append_only() {
@@ -529,6 +530,7 @@ pub fn rewrite_refresh_schema_sink_fragment(
             )
             .to_prost()
         }));
+    // following logic in <StreamTableScan as Explain>::distill
     stream_scan_node.identity = {
         let columns = stream_scan_node
             .fields

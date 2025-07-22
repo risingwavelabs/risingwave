@@ -437,20 +437,21 @@ impl StreamSink {
                 .into());
             }
         };
-        // For file sink, it must have sink_decouple turned on.
+        let hint_string =
+            |expected: bool| format!("Please run `set sink_decouple = {}` first.", expected);
         if !sink_decouple {
-            let hint_string = || "Please run `set sink_decouple = true` first.".to_owned();
+            // For file sink, it must have sink_decouple turned on.
             if sink_desc.is_file_sink() {
                 return Err(ErrorCode::NotSupported(
-                    "File sink can only be created with sink_decouple enabled. ".to_owned(),
-                    hint_string(),
+                    "File sink can only be created with sink_decouple enabled.".to_owned(),
+                    hint_string(true),
                 )
                 .into());
             }
             if sink_desc.is_exactly_once {
                 return Err(ErrorCode::NotSupported(
                     "Exactly once sink can only be created with sink_decouple enabled.".to_owned(),
-                    hint_string(),
+                    hint_string(true),
                 )
                 .into());
             }
@@ -459,7 +460,7 @@ impl StreamSink {
             return Err(ErrorCode::NotSupported(
                 "sink with auto schema refresh can only be created with sink_decouple disabled."
                     .to_owned(),
-                "Please run `set sink_decouple = false` first".to_owned(),
+                hint_string(false),
             )
             .into());
         }

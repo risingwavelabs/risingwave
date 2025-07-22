@@ -244,7 +244,6 @@ impl CommandContext {
                     stream_job_fragments,
                     upstream_fragment_downstreams,
                     init_split_assignment,
-                    streaming_job,
                     ..
                 } = info;
                 barrier_manager_context
@@ -255,7 +254,6 @@ impl CommandContext {
                         stream_job_fragments.actor_ids(),
                         upstream_fragment_downstreams,
                         init_split_assignment,
-                        streaming_job.should_notify_creating(),
                     )
                     .await?;
 
