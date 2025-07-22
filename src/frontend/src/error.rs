@@ -145,7 +145,7 @@ pub enum ErrorCode {
     ItemNotFound(String),
     #[error("Invalid input syntax: {0}")]
     InvalidInputSyntax(String),
-    #[error("Can not compare in memory: {0}")]
+    #[error("Cannot compare in memory: {0}")]
     MemComparableError(#[from] memcomparable::Error),
     #[error("Error while de/se values: {0}")]
     ValueEncodingError(

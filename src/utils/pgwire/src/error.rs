@@ -69,7 +69,7 @@ This is a bug. We would appreciate a bug report at:
   https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Fbug&template=bug_report.yml")]
     Panic(String),
 
-    #[error("Unable to setup an SSL connection")]
+    #[error("Unable to set up SSL connection")]
     SslError(#[from] openssl::ssl::Error),
 
     #[error("terminating connection due to idle-in-transaction timeout")]

@@ -36,7 +36,7 @@ pub enum TraceError {
     #[error("try to close a non-existing record {0}")]
     FinRecord(RecordId),
 
-    #[error("failed to create a iter {0}")]
+    #[error("failed to create iterator: {0}")]
     IterFailed(String),
 
     #[error("failed to get key  {0}")]
