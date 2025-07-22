@@ -380,7 +380,7 @@ mod tests {
         assert_eq!(config.addr, "https://vault.example.com");
         assert_eq!(config.path, "secret/data/myapp");
         assert_eq!(config.field, "api_key");
-        assert_eq!(config.tls_skip_verify, true);
+        assert!(config.tls_skip_verify);
 
         match config.auth {
             HashiCorpVaultAuth::Token { auth_token } => {
@@ -407,7 +407,7 @@ mod tests {
         assert_eq!(config.addr, "https://vault.example.com");
         assert_eq!(config.path, "secret/data/myapp");
         assert_eq!(config.field, "password");
-        assert_eq!(config.tls_skip_verify, false);
+        assert!(!config.tls_skip_verify);
 
         match config.auth {
             HashiCorpVaultAuth::AppRole {
