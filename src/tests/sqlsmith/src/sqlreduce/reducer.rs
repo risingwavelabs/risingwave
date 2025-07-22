@@ -137,7 +137,7 @@ impl<'a> Reducer<'a> {
     ///
     /// # Returns
     /// - A reduced SQL string (still failing) that is minimized w.r.t the current passes.
-    pub async fn reduce_until_fixed_point(&self, sql: &str) -> String {
+    async fn reduce_until_fixed_point(&self, sql: &str) -> String {
         let mut global_fixed_point = false;
         let mut ast = parse_sql(sql)[0].clone();
         let mut iteration = 0;
