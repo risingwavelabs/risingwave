@@ -54,11 +54,59 @@ SET STREAMING_USE_ARRANGEMENT_BACKFILL=true;
 
 ## end
 
+## test successful create sink and alter
+
 statement ok
 create sink s from t with (connector = 'blackhole', auto.schema.change = 'true');
 
+query TTTT
+describe s;
+----
+id                  integer             false     NULL
+name                character varying   false     NULL
+"t._row_id"         serial              true      NULL
+distribution key    t._row_id           NULL      NULL
+table description   s                   NULL      NULL
+
+statement ok
+create sink s_unchange from t with (connector = 'blackhole');
+
+query TTTT
+describe s_unchange;
+----
+id                  integer             false     NULL
+name                character varying   false     NULL
+"t._row_id"         serial              true      NULL
+distribution key    t._row_id           NULL      NULL
+table description   s_unchange          NULL      NULL
+
+statement ok
+alter table t add column name1 string;
+
+query TTTT
+describe s;
+----
+id                  integer             false     NULL
+name                character varying   false     NULL
+"t._row_id"         serial              true      NULL
+name1               character varying   false     NULL
+distribution key    t._row_id           NULL      NULL
+table description   s                   NULL      NULL
+
+query TTTT
+describe s_unchange;
+----
+id                  integer             false     NULL
+name                character varying   false     NULL
+"t._row_id"         serial              true      NULL
+distribution key    t._row_id           NULL      NULL
+table description   s_unchange          NULL      NULL
+
 statement ok
 drop sink s;
+
+statement ok
+drop sink s_unchange;
 
 statement ok
 drop table t
@@ -79,14 +127,113 @@ create sink s from t_with_pk with (connector = 'blackhole', primary_key = 'id',a
 statement ok
 drop sink s;
 
+## test successful create sink and alter
+
 statement ok
 create sink s from t_with_pk with (connector = 'blackhole', auto.schema.change = 'true');
+
+query TTTT
+describe s;
+----
+id                  integer             false     NULL
+name                character varying   false     NULL
+distribution key    id                  NULL      NULL
+table description   s                   NULL      NULL
+
+statement ok
+create sink s_unchange from t_with_pk with (connector = 'blackhole');
+
+query TTTT
+describe s_unchange;
+----
+id                  integer             false     NULL
+name                character varying   false     NULL
+distribution key    id                  NULL      NULL
+table description   s_unchange          NULL      NULL
+
+statement ok
+alter table t_with_pk add column name1 string;
+
+query TTTT
+describe s;
+----
+id                  integer             false     NULL
+name                character varying   false     NULL
+name1               character varying   false     NULL
+distribution key    id                  NULL      NULL
+table description   s                   NULL      NULL
+
+query TTTT
+describe s_unchange;
+----
+id                  integer             false     NULL
+name                character varying   false     NULL
+distribution key    id                  NULL      NULL
+table description   s_unchange          NULL      NULL
 
 statement ok
 drop sink s;
 
 statement ok
+drop sink s_unchange;
+
+statement ok
 drop table t_with_pk;
+
+# end
+
+# test auto schema change on empty table
+
+statement ok
+create table empty_table;
+
+statement ok
+create sink s from empty_table with (connector = 'blackhole', auto.schema.change = 'true');
+
+
+query TTTT
+describe s;
+----
+"empty_table._row_id"         serial              true      NULL
+distribution key         empty_table._row_id           NULL      NULL
+table description       s                   NULL      NULL
+
+statement ok
+create sink s_unchange from empty_table with (connector = 'blackhole');
+
+query TTTT
+describe s_unchange;
+----
+"empty_table._row_id"         serial              true      NULL
+distribution key    empty_table._row_id           NULL      NULL
+table description   s_unchange          NULL      NULL
+
+statement ok
+alter table empty_table add column name1 string;
+
+query TTTT
+describe s;
+----
+"empty_table._row_id"         serial              true      NULL
+name1               character varying   false     NULL
+distribution key    empty_table._row_id           NULL      NULL
+table description   s                   NULL      NULL
+
+query TTTT
+describe s_unchange;
+----
+"empty_table._row_id"         serial              true      NULL
+distribution key    empty_table._row_id           NULL      NULL
+table description   s_unchange          NULL      NULL
+
+statement ok
+drop sink s;
+
+statement ok
+drop sink s_unchange;
+
+statement ok
+drop table empty_table;
 
 # end
 
