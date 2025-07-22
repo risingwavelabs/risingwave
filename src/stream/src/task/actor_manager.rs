@@ -204,60 +204,23 @@ impl StreamActorManager {
         }
     }
 
-    /// Create a chain(tree) of nodes, with given `store`.
     #[expect(clippy::too_many_arguments)]
-    #[async_recursion]
-    async fn create_nodes_inner(
+    async fn create_union_node(
         &self,
         fragment_id: FragmentId,
-        node: &stream_plan::StreamNode,
+        node: &StreamNode,
         env: StreamEnvironment,
         store: impl StateStore,
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
-        has_stateful: bool,
         subtasks: &mut Vec<SubtaskHandle>,
         local_barrier_manager: &LocalBarrierManager,
     ) -> StreamResult<Executor> {
-        if let NodeBody::StreamScan(stream_scan) = node.get_node_body().unwrap()
-            && let Ok(StreamScanType::SnapshotBackfill) = stream_scan.get_stream_scan_type()
-        {
-            return dispatch_state_store!(env.state_store(), store, {
-                self.create_snapshot_backfill_node(
-                    node,
-                    stream_scan,
-                    actor_context,
-                    vnode_bitmap,
-                    env,
-                    local_barrier_manager,
-                    store,
-                )
-                .await
-            });
-        }
-
-        // The "stateful" here means that the executor may issue read operations to the state store
-        // massively and continuously. Used to decide whether to apply the optimization of subtasks.
-        fn is_stateful_executor(stream_node: &StreamNode) -> bool {
-            matches!(
-                stream_node.get_node_body().unwrap(),
-                NodeBody::HashAgg(_)
-                    | NodeBody::HashJoin(_)
-                    | NodeBody::DeltaIndexJoin(_)
-                    | NodeBody::Lookup(_)
-                    | NodeBody::StreamScan(_)
-                    | NodeBody::StreamCdcScan(_)
-                    | NodeBody::DynamicFilter(_)
-                    | NodeBody::GroupTopN(_)
-                    | NodeBody::Now(_)
-            )
-        }
-        let is_stateful = is_stateful_executor(node);
-
         // Create the input executor before creating itself
         let mut input = Vec::with_capacity(node.input.iter().len());
 
         let mut sink_into_streams = Vec::new();
+
         for input_stream_node in &node.input {
             // Check if the input stream node is for sink-into operation.
             let mut is_sink_into = false;
@@ -302,7 +265,7 @@ impl StreamActorManager {
                         store.clone(),
                         actor_context,
                         vnode_bitmap.clone(),
-                        has_stateful || is_stateful,
+                        false,
                         subtasks,
                         local_barrier_manager,
                     )
@@ -351,6 +314,136 @@ impl StreamActorManager {
             let executor = (info, upstream_sink_union_executor).into();
             input.push(executor);
         }
+
+        // Build the executor with params.
+        let executor_params = ExecutorParams {
+            env: env.clone(),
+            info: info.clone(),
+            executor_id,
+            operator_id,
+            op_info,
+            input,
+            fragment_id,
+            executor_stats: self.streaming_metrics.clone(),
+            actor_context: actor_context.clone(),
+            vnode_bitmap,
+            eval_error_report,
+            watermark_epoch: self.watermark_epoch.clone(),
+            local_barrier_manager: local_barrier_manager.clone(),
+        };
+
+        let executor = create_executor(executor_params, node, store).await?;
+
+        // Wrap the executor for debug purpose.
+        let wrapped = WrapperExecutor::new(
+            executor,
+            actor_context.clone(),
+            env.config().developer.enable_executor_row_count,
+            env.config().developer.enable_explain_analyze_stats,
+        );
+        let executor = (info, wrapped).into();
+
+        Ok(executor)
+    }
+
+    /// Create a chain(tree) of nodes, with given `store`.
+    #[expect(clippy::too_many_arguments)]
+    #[async_recursion]
+    async fn create_nodes_inner(
+        &self,
+        fragment_id: FragmentId,
+        node: &stream_plan::StreamNode,
+        env: StreamEnvironment,
+        store: impl StateStore,
+        actor_context: &ActorContextRef,
+        vnode_bitmap: Option<Bitmap>,
+        has_stateful: bool,
+        subtasks: &mut Vec<SubtaskHandle>,
+        local_barrier_manager: &LocalBarrierManager,
+    ) -> StreamResult<Executor> {
+        if let NodeBody::StreamScan(stream_scan) = node.get_node_body().unwrap()
+            && let Ok(StreamScanType::SnapshotBackfill) = stream_scan.get_stream_scan_type()
+        {
+            return dispatch_state_store!(env.state_store(), store, {
+                self.create_snapshot_backfill_node(
+                    node,
+                    stream_scan,
+                    actor_context,
+                    vnode_bitmap,
+                    env,
+                    local_barrier_manager,
+                    store,
+                )
+                .await
+            });
+        }
+
+        if let NodeBody::Union(_) = node.get_node_body().unwrap() {
+            return dispatch_state_store!(env.state_store(), store, {
+                self.create_union_node(
+                    fragment_id,
+                    node,
+                    env,
+                    store,
+                    actor_context,
+                    vnode_bitmap,
+                    subtasks,
+                    local_barrier_manager,
+                )
+                .await
+            });
+        }
+
+        // The "stateful" here means that the executor may issue read operations to the state store
+        // massively and continuously. Used to decide whether to apply the optimization of subtasks.
+        fn is_stateful_executor(stream_node: &StreamNode) -> bool {
+            matches!(
+                stream_node.get_node_body().unwrap(),
+                NodeBody::HashAgg(_)
+                    | NodeBody::HashJoin(_)
+                    | NodeBody::DeltaIndexJoin(_)
+                    | NodeBody::Lookup(_)
+                    | NodeBody::StreamScan(_)
+                    | NodeBody::StreamCdcScan(_)
+                    | NodeBody::DynamicFilter(_)
+                    | NodeBody::GroupTopN(_)
+                    | NodeBody::Now(_)
+            )
+        }
+        let is_stateful = is_stateful_executor(node);
+
+        // Create the input executor before creating itself
+        let mut input = Vec::with_capacity(node.input.iter().len());
+        for input_stream_node in &node.input {
+            input.push(
+                self.create_nodes_inner(
+                    fragment_id,
+                    input_stream_node,
+                    env.clone(),
+                    store.clone(),
+                    actor_context,
+                    vnode_bitmap.clone(),
+                    has_stateful || is_stateful,
+                    subtasks,
+                    local_barrier_manager,
+                )
+                .await?,
+            );
+        }
+
+        let op_info = node.get_identity().clone();
+
+        // We assume that the operator_id of different instances from the same RelNode will be the
+        // same.
+        let executor_id = Self::get_executor_id(actor_context, node);
+        let operator_id = unique_operator_id(fragment_id, node.operator_id);
+
+        let info = Self::get_executor_info(node, executor_id);
+
+        let eval_error_report = ActorEvalErrorReport {
+            actor_context: actor_context.clone(),
+            identity: info.identity.clone().into(),
+        };
 
         // Build the executor with params.
         let executor_params = ExecutorParams {

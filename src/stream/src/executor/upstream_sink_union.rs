@@ -16,6 +16,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use futures::future::try_join_all;
+use pin_project::pin_project;
 use risingwave_expr::expr::NonStrictExpression;
 
 use crate::executor::exchange::input::{Input, new_input};
@@ -24,37 +25,17 @@ use crate::executor::project::apply_project_exprs;
 use crate::executor::{BarrierMutationType, BoxedMessageInput, DynamicReceivers, MergeExecutor};
 use crate::task::{FragmentId, LocalBarrierManager};
 
-/// `MergeProjectExecutor` applies a projection to the output of a merge executor.
-struct MergeProjectExecutor {
-    /// Expressions of the current projection.
-    project_exprs: Vec<NonStrictExpression>,
+type MergeStream = impl Stream<Item = MessageStreamItem>;
+type ProcessedMessageStream = impl Stream<Item = MessageStreamItem>;
 
-    /// The stream of messages after handled by merge executor.
-    merge: BoxedMessageStream,
-}
-
-impl MergeProjectExecutor {
-    #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(mut self) {
-        while let Some(msg) = self.merge.next().await {
-            let msg = msg?;
-            if let Message::Chunk(chunk) = msg {
-                // Apply the projection expressions to the chunk.
-                let new_chunk = apply_project_exprs(&self.project_exprs, chunk).await?;
-                yield Message::Chunk(new_chunk);
-            } else {
-                yield msg;
-            }
-        }
-    }
-}
-
+#[pin_project]
 pub struct SinkHandlerInput {
     /// The ID of the upstream fragment that this input is associated with.
     upstream_fragment_id: FragmentId,
 
     /// The stream of messages from the upstream fragment.
-    executor_stream: BoxedMessageStream,
+    #[pin]
+    processed_stream: ProcessedMessageStream,
 }
 
 impl SinkHandlerInput {
@@ -63,15 +44,43 @@ impl SinkHandlerInput {
         merge: Box<MergeExecutor>,
         project_exprs: Vec<NonStrictExpression>,
     ) -> Self {
-        let merge_stream = merge.execute();
-        let executor = MergeProjectExecutor {
-            project_exprs,
-            merge: merge_stream,
-        };
-        let executor_stream = executor.execute_inner().boxed();
+        let merge_stream = Self::generate_stream_from_merge(merge);
+        let processed_stream = Self::apply_project_exprs_stream(merge_stream, project_exprs);
         Self {
             upstream_fragment_id,
-            executor_stream,
+            processed_stream,
+        }
+    }
+
+    #[define_opaque(MergeStream)]
+    fn generate_stream_from_merge(merge: Box<MergeExecutor>) -> MergeStream {
+        merge.execute_inner()
+    }
+
+    #[define_opaque(ProcessedMessageStream)]
+    fn apply_project_exprs_stream(
+        merge_stream: MergeStream,
+        project_exprs: Vec<NonStrictExpression>,
+    ) -> ProcessedMessageStream {
+        Self::apply_project_exprs_stream_impl(merge_stream, project_exprs)
+    }
+
+    /// Applies a projection to the output of a merge executor.
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn apply_project_exprs_stream_impl(
+        merge_stream: MergeStream,
+        project_exprs: Vec<NonStrictExpression>,
+    ) {
+        pin_mut!(merge_stream);
+        while let Some(msg) = merge_stream.next().await {
+            let msg = msg?;
+            if let Message::Chunk(chunk) = msg {
+                // Apply the projection expressions to the chunk.
+                let new_chunk = apply_project_exprs(&project_exprs, chunk).await?;
+                yield Message::Chunk(new_chunk);
+            } else {
+                yield msg;
+            }
         }
     }
 }
@@ -88,8 +97,8 @@ impl Input for SinkHandlerInput {
 impl Stream for SinkHandlerInput {
     type Item = MessageStreamItem;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.executor_stream.poll_next_unpin(cx)
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.project().processed_stream.poll_next(cx)
     }
 }
 

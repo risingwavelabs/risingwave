@@ -41,7 +41,7 @@ pub(crate) enum MergeExecutorUpstream {
 pub(crate) struct MergeExecutorInput {
     upstream: MergeExecutorUpstream,
     actor_context: ActorContextRef,
-    pub(crate) upstream_fragment_id: UpstreamFragmentId,
+    upstream_fragment_id: UpstreamFragmentId,
     local_barrier_manager: LocalBarrierManager,
     executor_stats: Arc<StreamingMetrics>,
     pub(crate) info: ExecutorInfo,
@@ -226,7 +226,7 @@ impl MergeExecutor {
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(mut self: Box<Self>) {
+    pub(crate) async fn execute_inner(mut self: Box<Self>) {
         let select_all = self.upstreams;
         let select_all = BufferChunks::new(select_all, self.chunk_size, self.schema);
         let actor_id = self.actor_context.id;
