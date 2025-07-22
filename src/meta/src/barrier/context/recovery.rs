@@ -25,12 +25,13 @@ use risingwave_common::config::DefaultParallelism;
 use risingwave_hummock_sdk::version::HummockVersion;
 use thiserror_ext::AsReport;
 use tracing::{info, warn};
-
+use risingwave_pb::plan_common::ExprContext;
 use super::BarrierWorkerRuntimeInfoSnapshot;
 
 use crate::barrier::context::GlobalBarrierWorkerContextImpl;
 use crate::barrier::info::InflightStreamingJobInfo;
 use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
+use crate::controller::fragment::InflightActorInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor, StreamJobFragments, TableParallelism};
 
@@ -342,11 +343,11 @@ impl GlobalBarrierWorkerContextImpl {
                         && unreschedulable_jobs.is_empty()
                     {
                         info!("trigger offline scaling");
-                        self.scale_actors(&active_streaming_nodes)
-                            .await
-                            .inspect_err(|err| {
-                                warn!(error = %err.as_report(), "scale actors failed");
-                            })?;
+                        // self.scale_actors(&active_streaming_nodes)
+                        //     .await
+                        //     .inspect_err(|err| {
+                        //         warn!(error = %err.as_report(), "scale actors failed");
+                        //     })?;
 
                         self.resolve_graph_info(None, &active_streaming_nodes)
                             .await
@@ -409,9 +410,11 @@ impl GlobalBarrierWorkerContextImpl {
                         .collect();
 
                     // update and build all actors.
-                    let stream_actors = self.load_all_actors().await.inspect_err(|err| {
-                        warn!(error = %err.as_report(), "update actors failed");
-                    })?;
+                    // let stream_actors = self.load_all_actors().await.inspect_err(|err| {
+                    //     warn!(error = %err.as_report(), "update actors failed");
+                    // })?;
+
+                    let stream_actors = Self::fake_stream_actors(info.clone());
 
                     let fragment_relations = self
                         .metadata_manager
@@ -507,13 +510,22 @@ impl GlobalBarrierWorkerContextImpl {
         let active_streaming_nodes =
             ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
 
-        let info = self
-            .resolve_graph_info(Some(database_id), &active_streaming_nodes)
+        // let info = self
+        //     .resolve_graph_info(Some(database_id), &active_streaming_nodes)
+        //     .await
+        //     .inspect_err(|err| {
+        //         warn!(error = %err.as_report(), "resolve actor info failed");
+        //     })?;
+        // assert!(info.len() <= 1);
+        let all_info = self
+            .resolve_graph_info(None, &active_streaming_nodes)
             .await
             .inspect_err(|err| {
                 warn!(error = %err.as_report(), "resolve actor info failed");
             })?;
-        assert!(info.len() <= 1);
+
+        let info = HashMap::from([(database_id, all_info[&database_id].clone())]);
+
         let Some(info) = info.into_iter().next().map(|(loaded_database_id, info)| {
             assert_eq!(loaded_database_id, database_id);
             info
@@ -584,10 +596,12 @@ impl GlobalBarrierWorkerContextImpl {
             )
             .await?;
 
-        // update and build all actors.
-        let stream_actors = self.load_all_actors().await.inspect_err(|err| {
-            warn!(error = %err.as_report(), "update actors failed");
-        })?;
+        // // update and build all actors.
+        // let stream_actors = self.load_all_actors().await.inspect_err(|err| {
+        //     warn!(error = %err.as_report(), "update actors failed");
+        // })?;
+
+        let stream_actors = Self::fake_stream_actors(all_info);
 
         // get split assignments for all actors
         let source_splits = self.source_manager.list_assignments().await;
@@ -614,12 +628,33 @@ impl GlobalBarrierWorkerContextImpl {
             cdc_table_snapshot_split_assignment,
         }))
     }
+
+    fn fake_stream_actors(
+        all_info: HashMap<DatabaseId, HashMap<TableId, InflightStreamingJobInfo>>,
+    ) -> HashMap<ActorId, StreamActor> {
+        let mut stream_actors = HashMap::new();
+
+        for (_, streaming_info) in all_info.values().flatten() {
+            for (fragment_id, fragment_info) in &streaming_info.fragment_infos {
+                for (actor_id, InflightActorInfo { vnode_bitmap, .. }) in &fragment_info.actors {
+                    stream_actors.insert(
+                        *actor_id,
+                        StreamActor {
+                            actor_id: *actor_id as _,
+                            fragment_id: *fragment_id as _,
+                            vnode_bitmap: vnode_bitmap.clone(),
+                            mview_definition: "".to_string(),
+                            expr_context: Some(ExprContext::default()),
+                        },
+                    );
+                }
+            }
+        }
+        stream_actors
+    }
 }
 
 impl GlobalBarrierWorkerContextImpl {
-    // Migration timeout.
-    const RECOVERY_FORCE_MIGRATION_TIMEOUT: Duration = Duration::from_secs(300);
-
     async fn scale_actors(&self, active_nodes: &ActiveStreamingWorkerNodes) -> MetaResult<()> {
         let Ok(_guard) = self.scale_controller.reschedule_lock.try_write() else {
             return Err(anyhow!("scale_actors failed to acquire reschedule_lock").into());
