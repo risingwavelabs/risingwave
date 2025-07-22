@@ -411,7 +411,7 @@ services:
       retries: 3
 
   vault-server:
-    image: hashicorp/vault:1.17.7
+    image: hashicorp/vault:1.20
     ports:
       - "8200:8200"
     environment:

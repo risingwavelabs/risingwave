@@ -11674,6 +11674,7 @@ dependencies = [
  "anyhow",
  "aws-lc-rs",
  "bincode 1.3.3",
+ "cfg-or-panic",
  "hex",
  "madsim-tokio",
  "moka",

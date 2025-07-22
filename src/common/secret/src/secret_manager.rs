@@ -206,6 +206,7 @@ impl LocalSecretManager {
         }
     }
 
+    #[cfg_or_panic::cfg_or_panic(not(madsim))]
     fn get_secret_value(pb_secret_bytes: &[u8]) -> SecretResult<Vec<u8>> {
         let secret_value = match Self::get_pb_secret_backend(pb_secret_bytes)? {
             risingwave_pb::secret::secret::SecretBackend::Meta(backend) => backend.value.clone(),
