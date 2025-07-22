@@ -1072,17 +1072,24 @@ impl DatabaseCheckpointControl {
                         .cloned()
                         .collect();
 
-                    self.creating_streaming_job_controls.insert(
-                        job_id,
-                        CreatingStreamingJobControl::new(
-                            info,
-                            snapshot_backfill_upstream_tables,
-                            barrier_info.prev_epoch(),
-                            hummock_version_stats,
-                            control_stream_manager,
-                            edges.as_mut().expect("should exist"),
-                        )?,
-                    );
+                    let job = CreatingStreamingJobControl::new(
+                        info,
+                        snapshot_backfill_upstream_tables,
+                        barrier_info.prev_epoch(),
+                        hummock_version_stats,
+                        control_stream_manager,
+                        edges.as_mut().expect("should exist"),
+                    )?;
+
+                    let mut shared_actor_writer = self
+                        .state
+                        .inflight_graph_info
+                        .shared_actor_infos
+                        .start_writer(self.database_id);
+                    shared_actor_writer.upsert(job.graph_info().fragment_infos.values());
+                    shared_actor_writer.finish();
+
+                    self.creating_streaming_job_controls.insert(job_id, job);
                 }
             }
         }

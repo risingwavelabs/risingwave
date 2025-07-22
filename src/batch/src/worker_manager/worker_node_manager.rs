@@ -12,20 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::backtrace::Backtrace;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock, RwLockReadGuard};
-use std::thread::sleep;
 use std::time::Duration;
 
-use anyhow::anyhow;
 use rand::seq::IndexedRandom;
 use risingwave_common::bail;
 use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_pb::common::{WorkerNode, WorkerType};
-use thiserror_ext::AsReport;
 
 use crate::error::{BatchError, Result};
 
@@ -360,51 +356,15 @@ impl WorkerNodeSelector {
     }
 
     pub fn fragment_mapping(&self, fragment_id: FragmentId) -> Result<WorkerSlotMapping> {
-        Ok(self.fragment_mapping_inner(fragment_id).map_err(|e| {
-            let e = anyhow!(e);
-            error!(
-                "failed to get fragment mapping: {:?} {:?}",
-                e.as_report(),
-                Backtrace::capture()
-            );
-            e
-        })?)
-    }
-
-    fn fragment_mapping_inner(&self, fragment_id: FragmentId) -> Result<WorkerSlotMapping> {
         if self.enable_barrier_read {
-            self.manager
-                .get_streaming_fragment_mapping(&fragment_id)
-                .inspect_err(|_| {
-                    error!(
-                        "failed to get streaming fragment mapping for barrier read: {}",
-                        fragment_id
-                    );
-                })
+            self.manager.get_streaming_fragment_mapping(&fragment_id)
         } else {
             let mapping = (self.manager.serving_fragment_mapping(fragment_id)).or_else(|_| {
                 tracing::warn!(
                     fragment_id,
                     "Serving fragment mapping not found, fall back to streaming one."
                 );
-                match self.manager.get_streaming_fragment_mapping(&fragment_id) {
-                    Ok(mapping) => Ok(mapping),
-                    Err(_) => {
-                        error!(
-                            "failed to get streaming fragment mapping for: {} sleep to retry",
-                            fragment_id
-                        );
-                        sleep(Duration::from_secs(2));
-                        self.manager
-                            .get_streaming_fragment_mapping(&fragment_id)
-                            .inspect_err(|_| {
-                                error!(
-                                    "failed to get streaming fragment mapping for: {} again",
-                                    fragment_id
-                                );
-                            })
-                    }
-                }
+                self.manager.get_streaming_fragment_mapping(&fragment_id)
             })?;
 
             // Filter out unavailable workers.

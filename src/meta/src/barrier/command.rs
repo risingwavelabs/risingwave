@@ -128,8 +128,11 @@ impl ReplaceStreamJobPlan {
     fn fragment_changes(&self) -> HashMap<FragmentId, CommandFragmentChanges> {
         let mut fragment_changes = HashMap::new();
         for (fragment_id, new_fragment) in self.new_fragments.new_fragment_info() {
-            let fragment_change =
-                CommandFragmentChanges::NewFragment(self.streaming_job.id().into(), new_fragment);
+            let fragment_change = CommandFragmentChanges::NewFragment {
+                job_id: self.streaming_job.id().into(),
+                info: new_fragment,
+                is_existing: false,
+            };
             fragment_changes
                 .try_insert(fragment_id, fragment_change)
                 .expect("non-duplicate");
@@ -448,10 +451,11 @@ impl Command {
                     .map(|(fragment_id, fragment_info)| {
                         (
                             fragment_id,
-                            CommandFragmentChanges::NewFragment(
-                                info.streaming_job.id().into(),
-                                fragment_info,
-                            ),
+                            CommandFragmentChanges::NewFragment {
+                                job_id: info.streaming_job.id().into(),
+                                info: fragment_info,
+                                is_existing: false,
+                            },
                         )
                     })
                     .collect();

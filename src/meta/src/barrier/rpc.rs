@@ -727,6 +727,15 @@ impl ControlStreamManager {
             );
         }
 
+        self.env.shared_actor_infos().recover_database(
+            database_id,
+            database_jobs.values().flatten().chain(
+                creating_streaming_job_controls
+                    .values()
+                    .flat_map(|job| job.graph_info().fragment_infos()),
+            ),
+        );
+
         let committed_epoch = barrier_info.prev_epoch();
         let new_epoch = barrier_info.curr_epoch;
         let database_state = BarrierWorkerState::recovery(
