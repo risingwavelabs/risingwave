@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::debug_assert_matches;
 use std::sync::Arc;
 
 use risingwave_common::catalog::ConflictBehavior;
@@ -21,7 +22,7 @@ use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAw
 use risingwave_pb::stream_plan::{ArrangeNode, MaterializeNode};
 
 use super::*;
-use crate::executor::MaterializeExecutor;
+use crate::executor::{MaterializeExecutor, RefreshableMaterializeExecutor};
 
 pub struct MaterializeExecutorBuilder;
 
@@ -43,6 +44,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
 
         let table = node.get_table()?;
         let versioned = table.version.is_some();
+        let refreshable = table.refreshable;
 
         let conflict_behavior =
             ConflictBehavior::from_protobuf(&table.handle_pk_conflict_behavior());
@@ -68,10 +70,32 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             };
         }
 
-        let exec = if versioned {
-            new_executor!(ColumnAwareSerde)
+        let exec = if refreshable {
+            // Use RefreshableMaterializeExecutor for tables marked as refreshable
+            debug_assert_matches!(conflict_behavior, ConflictBehavior::Overwrite);
+            RefreshableMaterializeExecutor::<_, ColumnAwareSerde>::new(
+                input,
+                params.info.schema.clone(),
+                store,
+                order_key,
+                params.actor_context,
+                params.vnode_bitmap.map(Arc::new),
+                table,
+                node.staging_table.as_ref().unwrap(),
+                params.watermark_epoch,
+                conflict_behavior,
+                version_column_index,
+                params.executor_stats.clone(),
+            )
+            .await
+            .boxed()
         } else {
-            new_executor!(BasicSerde)
+            // Use standard MaterializeExecutor for regular tables
+            if versioned {
+                new_executor!(ColumnAwareSerde)
+            } else {
+                new_executor!(BasicSerde)
+            }
         };
 
         Ok((params.info, exec).into())
