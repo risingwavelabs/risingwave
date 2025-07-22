@@ -53,6 +53,7 @@ statement ok
 SET STREAMING_USE_ARRANGEMENT_BACKFILL=true;
 
 ## end
+
 ## test successful create sink and alter
 
 statement ok
@@ -111,6 +112,7 @@ statement ok
 drop table t
 
 # end
+
 # test auto schema change on table with specified pk
 
 statement ok
@@ -126,6 +128,7 @@ statement ok
 drop sink s;
 
 ## test successful create sink and alter
+
 statement ok
 create sink s from t_with_pk with (connector = 'blackhole', auto.schema.change = 'true');
 
@@ -178,7 +181,9 @@ statement ok
 drop table t_with_pk;
 
 # end
+
 # test auto schema change on empty table
+
 statement ok
 create table empty_table;
 
@@ -231,6 +236,7 @@ statement ok
 drop table empty_table;
 
 # end
+
 # error on auto schema change on cross database table
 statement ok
 create database d1;

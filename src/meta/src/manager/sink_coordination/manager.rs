@@ -590,11 +590,11 @@ mod tests {
                 client2
                     .commit(
                         epoch1,
-                        Some(SinkMetadata {
+                        SinkMetadata {
                             metadata: Some(Metadata::Serialized(SerializedMetadata {
                                 metadata: metadata[0][1].clone(),
                             })),
-                        }),
+                        },
                         None,
                     )
                     .map(|result| result.unwrap())
@@ -609,11 +609,11 @@ mod tests {
                 client1
                     .commit(
                         epoch1,
-                        Some(SinkMetadata {
+                        SinkMetadata {
                             metadata: Some(Metadata::Serialized(SerializedMetadata {
                                 metadata: metadata[0][0].clone(),
                             })),
-                        }),
+                        },
                         None,
                     )
                     .map(|result| result.unwrap()),
@@ -626,11 +626,11 @@ mod tests {
             client1
                 .commit(
                     epoch2,
-                    Some(SinkMetadata {
+                    SinkMetadata {
                         metadata: Some(Metadata::Serialized(SerializedMetadata {
                             metadata: metadata[1][0].clone(),
                         })),
-                    }),
+                    },
                     None,
                 )
                 .map(|result| result.unwrap())
@@ -645,11 +645,11 @@ mod tests {
             client2
                 .commit(
                     epoch2,
-                    Some(SinkMetadata {
+                    SinkMetadata {
                         metadata: Some(Metadata::Serialized(SerializedMetadata {
                             metadata: metadata[1][1].clone(),
                         })),
-                    }),
+                    },
                     None,
                 )
                 .map(|result| result.unwrap()),
@@ -770,11 +770,11 @@ mod tests {
         client
             .commit(
                 epoch1,
-                Some(SinkMetadata {
+                SinkMetadata {
                     metadata: Some(Metadata::Serialized(SerializedMetadata {
                         metadata: metadata[0].clone(),
                     })),
-                }),
+                },
                 None,
             )
             .await
@@ -783,11 +783,11 @@ mod tests {
         client
             .commit(
                 epoch2,
-                Some(SinkMetadata {
+                SinkMetadata {
                     metadata: Some(Metadata::Serialized(SerializedMetadata {
                         metadata: metadata[1].clone(),
                     })),
-                }),
+                },
                 None,
             )
             .await
@@ -870,11 +870,11 @@ mod tests {
         // commit epoch
         let mut commit_future = pin!(client1.commit(
             epoch,
-            Some(SinkMetadata {
+            SinkMetadata {
                 metadata: Some(Metadata::Serialized(SerializedMetadata {
                     metadata: vec![],
                 })),
-            }),
+            },
             None,
         ));
         assert!(
@@ -965,11 +965,11 @@ mod tests {
         // commit epoch
         let mut commit_future = pin!(client1.commit(
             epoch,
-            Some(SinkMetadata {
+            SinkMetadata {
                 metadata: Some(Metadata::Serialized(SerializedMetadata {
                     metadata: vec![],
                 })),
-            })
+            },
             None,
         ));
         assert!(
@@ -981,11 +981,11 @@ mod tests {
             commit_future,
             client2.commit(
                 epoch,
-                Some(SinkMetadata {
+                SinkMetadata {
                     metadata: Some(Metadata::Serialized(SerializedMetadata {
                         metadata: vec![],
                     })),
-                }),
+                },
                 None,
             ),
         )
@@ -1129,11 +1129,11 @@ mod tests {
                 client2
                     .commit(
                         epoch1,
-                        Some(SinkMetadata {
+                        SinkMetadata {
                             metadata: Some(Metadata::Serialized(SerializedMetadata {
                                 metadata: metadata[0][1].clone(),
                             })),
-                        }),
+                        },
                         None,
                     )
                     .map(|result| result.unwrap())
@@ -1148,11 +1148,11 @@ mod tests {
                 client1
                     .commit(
                         epoch1,
-                        Some(SinkMetadata {
+                        SinkMetadata {
                             metadata: Some(Metadata::Serialized(SerializedMetadata {
                                 metadata: metadata[0][0].clone(),
                             })),
-                        }),
+                        },
                         None,
                     )
                     .map(|result| result.unwrap()),
@@ -1184,11 +1184,11 @@ mod tests {
                     client1
                         .commit(
                             epoch2,
-                            Some(SinkMetadata {
+                            SinkMetadata {
                                 metadata: Some(Metadata::Serialized(SerializedMetadata {
                                     metadata: metadata[1][0].clone(),
                                 })),
-                            }),
+                            },
                             None,
                         )
                         .map_err(Into::into)
@@ -1202,11 +1202,11 @@ mod tests {
                     commit_future,
                     client2.commit(
                         epoch2,
-                        Some(SinkMetadata {
+                        SinkMetadata {
                             metadata: Some(Metadata::Serialized(SerializedMetadata {
                                 metadata: metadata[1][1].clone(),
                             })),
-                        }),
+                        },
                         None,
                     ),
                 )
@@ -1235,11 +1235,11 @@ mod tests {
             };
             let mut commit_future3 = pin!(client3.commit(
                 epoch3,
-                Some(SinkMetadata {
+                SinkMetadata {
                     metadata: Some(Metadata::Serialized(SerializedMetadata {
                         metadata: metadata_scale_out[2].clone(),
                     })),
-                }),
+                },
                 None,
             ));
             assert!(
@@ -1249,11 +1249,11 @@ mod tests {
             );
             let mut commit_future1 = pin!(client1.commit(
                 epoch3,
-                Some(SinkMetadata {
+                SinkMetadata {
                     metadata: Some(Metadata::Serialized(SerializedMetadata {
                         metadata: metadata_scale_out[0].clone(),
                     })),
-                }),
+                },
                 None,
             ));
             assert!(
@@ -1269,11 +1269,11 @@ mod tests {
             try_join(
                 client2.commit(
                     epoch3,
-                    Some(SinkMetadata {
+                    SinkMetadata {
                         metadata: Some(Metadata::Serialized(SerializedMetadata {
                             metadata: metadata_scale_out[1].clone(),
                         })),
-                    }),
+                    },
                     None,
                 ),
                 try_join(commit_future1, commit_future3),
@@ -1306,11 +1306,11 @@ mod tests {
                 client2
                     .commit(
                         epoch4,
-                        Some(SinkMetadata {
+                        SinkMetadata {
                             metadata: Some(Metadata::Serialized(SerializedMetadata {
                                 metadata: metadata_scale_in[0].clone(),
                             })),
-                        }),
+                        },
                         None,
                     )
                     .map(|result| result.unwrap())
@@ -1325,11 +1325,11 @@ mod tests {
                 client3
                     .commit(
                         epoch4,
-                        Some(SinkMetadata {
+                        SinkMetadata {
                             metadata: Some(Metadata::Serialized(SerializedMetadata {
                                 metadata: metadata_scale_in[1].clone(),
                             })),
-                        }),
+                        },
                         None,
                     )
                     .map(|result| result.unwrap()),
