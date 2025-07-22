@@ -863,10 +863,10 @@ impl GlobalBarrierWorkerContextImpl {
         }
     }
 
-    /// Update all actors in compute nodes.
-    async fn load_all_actors(&self) -> MetaResult<HashMap<ActorId, StreamActor>> {
-        self.metadata_manager.all_active_actors().await
-    }
+    // /// Update all actors in compute nodes.
+    // async fn load_all_actors(&self) -> MetaResult<HashMap<ActorId, StreamActor>> {
+    //     self.metadata_manager.all_active_actors().await
+    // }
 }
 
 #[cfg(test)]
