@@ -156,7 +156,7 @@ pub struct StateTableInner<
     /// Used for:
     /// 1. Computing `output_value_indices` to ser/de replicated rows.
     /// 2. Computing output pk indices to used them for backfill state.
-    output_indices: Vec<usize>,
+    pub output_indices: Vec<usize>,
 
     op_consistency_level: StateTableOpConsistencyLevel,
 
@@ -651,6 +651,42 @@ where
     pub async fn get_encoded_row(&self, pk: impl Row) -> StreamExecutorResult<Option<Bytes>> {
         self.get_inner(pk, |_, value| Ok(Bytes::copy_from_slice(value)))
             .await
+    }
+
+    /// Clear all rows from the state table for refresh operations
+    ///
+    /// FIXME: implement correct truncating.
+    pub async fn clear_all_rows(&mut self) -> StreamExecutorResult<()> {
+        let all_vnodes = self.vnodes().iter_vnodes().collect::<Vec<_>>();
+
+        // First collect all keys to delete from all vnodes
+        let mut all_keys_to_delete = Vec::new();
+
+        for vnode in all_vnodes {
+            // Create range for all keys with this vnode prefix
+            let table_key_range = prefixed_range_with_vnode::<Bytes>(.., vnode);
+
+            // Iterate through all keys in this vnode and collect them for deletion
+            let mut iter = self
+                .local_store
+                .iter(table_key_range, Default::default())
+                .await?;
+
+            // Collect all keys to delete
+            while let Some((key, value)) = iter.try_next().await? {
+                all_keys_to_delete.push((
+                    key.user_key.table_key.copy_into(),
+                    Bytes::copy_from_slice(value),
+                ));
+            }
+        }
+
+        // Now delete all collected keys
+        for (key, old_value) in all_keys_to_delete {
+            self.local_store.delete(key, old_value)?;
+        }
+
+        Ok(())
     }
 
     async fn get_inner<O: Send + 'static>(
@@ -1316,6 +1352,11 @@ where
         Ok(stream.map(|row| row.map(|row| row.project(&self.output_indices).into_owned_row())))
     }
 
+    /// The lowest-level API.
+    ///
+    /// Middle-level APIs:
+    /// - [`StateTableInner::iter_with_prefix_inner`]
+    /// - [`StateTableInner::iter_kv_with_pk_range`]
     async fn iter_kv(
         &self,
         table_key_range: TableKeyRange,

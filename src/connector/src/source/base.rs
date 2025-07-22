@@ -707,11 +707,10 @@ impl SplitImpl {
     }
 
     pub fn into_batch_split(self) -> Option<BatchSourceSplitImpl> {
-        #[expect(clippy::match_single_binding)]
         match self {
-            // SplitImpl::BatchPosixFs(batch_posix_fs_split) => {
-            //     Some(BatchSourceSplitImpl::BatchPosixFs(batch_posix_fs_split))
-            // }
+            SplitImpl::BatchPosixFs(batch_posix_fs_split) => {
+                Some(BatchSourceSplitImpl::BatchPosixFs(batch_posix_fs_split))
+            }
             _ => None,
         }
     }
