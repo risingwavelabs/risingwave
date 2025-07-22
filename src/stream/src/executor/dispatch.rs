@@ -1384,6 +1384,7 @@ mod tests {
                 actor_splits: Default::default(),
                 actor_new_dispatchers: Default::default(),
                 sink_add_columns: Default::default(),
+                actor_cdc_table_snapshot_splits: Default::default(),
             },
         ));
         barrier_test_env.inject_barrier(&b1, [actor_id]);

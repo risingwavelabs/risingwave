@@ -786,6 +786,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 mut background_jobs,
                 hummock_version_stats,
                 database_infos,
+                mut cdc_table_snapshot_split_assignment,
             } = runtime_info_snapshot;
 
             self.sink_manager.reset().await;
@@ -823,6 +824,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         subscription_infos.remove(&database_id).unwrap_or_default(),
                         is_paused,
                         &hummock_version_stats,
+                        &mut cdc_table_snapshot_split_assignment,
                     );
                     let node_to_collect = match result {
                         Ok(info) => {
