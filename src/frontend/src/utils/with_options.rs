@@ -252,10 +252,8 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
         // at most one connection ref in the map
         connection_params = {
             // get connection params from catalog
-            let (schema_name, connection_name) = Binder::resolve_schema_qualified_name(
-                db_name,
-                connection_ref.connection_name.clone(),
-            )?;
+            let (schema_name, connection_name) =
+                Binder::resolve_schema_qualified_name(db_name, &connection_ref.connection_name)?;
             let connection_catalog =
                 session.get_connection_by_name(schema_name, &connection_name)?;
             if let ConnectionInfo::ConnectionParams(params) = &connection_catalog.info {
@@ -382,7 +380,7 @@ fn resolve_secret_refs_inner(
     let mut resolved_secret_refs = BTreeMap::new();
     for (key, secret_ref) in secret_refs {
         let (schema_name, secret_name) =
-            Binder::resolve_schema_qualified_name(db_name, secret_ref.secret_name.clone())?;
+            Binder::resolve_schema_qualified_name(db_name, &secret_ref.secret_name)?;
         let secret_catalog = session.get_secret_by_name(schema_name, &secret_name)?;
         let ref_as = match secret_ref.ref_as {
             SecretRefAsType::Text => PbRefAsType::Text,

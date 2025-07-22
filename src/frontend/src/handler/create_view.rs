@@ -35,7 +35,7 @@ pub async fn handle_create_view(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
     let db_name = &session.database();
-    let (schema_name, view_name) = Binder::resolve_schema_qualified_name(db_name, name.clone())?;
+    let (schema_name, view_name) = Binder::resolve_schema_qualified_name(db_name, &name)?;
 
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 

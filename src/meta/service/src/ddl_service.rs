@@ -1217,50 +1217,14 @@ impl DdlService for DdlServiceImpl {
         }));
     }
 
-    async fn compact_table(
+    async fn compact_iceberg_table(
         &self,
-        request: Request<CompactTableRequest>,
-    ) -> Result<Response<CompactTableResponse>, Status> {
+        request: Request<CompactIcebergTableRequest>,
+    ) -> Result<Response<CompactIcebergTableResponse>, Status> {
         let req = request.into_inner();
-        let table_id = req.table_id;
+        let sink_id = risingwave_connector::sink::catalog::SinkId::new(req.sink_id);
 
-        // Find the associated iceberg sink for this table
-        let table = self
-            .metadata_manager
-            .catalog_controller
-            .get_table_by_ids(vec![table_id as i32], false)
-            .await?
-            .remove(0);
-
-        // For iceberg engine tables, we need to find the associated sink
-        // The sink name follows the pattern: _iceberg_sink_<table_name>
-        let sink_name = format!("__iceberg_sink_{}", table.name);
-
-        // Find the sink by name in the same database and schema
-        let sinks = self
-            .metadata_manager
-            .catalog_controller
-            .list_sinks()
-            .await?;
-
-        let sink = sinks
-            .into_iter()
-            .find(|s| {
-                s.name == sink_name
-                    && s.database_id == table.database_id
-                    && s.schema_id == table.schema_id
-            })
-            .ok_or_else(|| {
-                Status::not_found(format!(
-                    "No iceberg sink found for table {} (sink name: {})",
-                    table.name, sink_name
-                ))
-            })?;
-
-        // Get the sink ID and trigger manual compaction
-        let sink_id = risingwave_connector::sink::catalog::SinkId::new(sink.id);
-
-        // Use the new manual compaction method
+        // Trigger manual compaction directly using the sink ID
         let task_id = self
             .iceberg_compaction_manager
             .trigger_manual_compaction(sink_id)
@@ -1269,7 +1233,7 @@ impl DdlService for DdlServiceImpl {
                 Status::internal(format!("Failed to trigger compaction: {}", e.as_report()))
             })?;
 
-        Ok(Response::new(CompactTableResponse {
+        Ok(Response::new(CompactIcebergTableResponse {
             status: None,
             task_id,
         }))

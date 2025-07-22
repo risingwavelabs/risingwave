@@ -33,7 +33,7 @@ pub async fn handle_alter_streaming_rate_limit(
     let session = handler_args.session;
     let db_name = &session.database();
     let (schema_name, real_table_name) =
-        Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
+        Binder::resolve_schema_qualified_name(db_name, &table_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
 

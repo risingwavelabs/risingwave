@@ -125,6 +125,7 @@ impl CatalogController {
         inner.list_schemas().await
     }
 
+    /// [`Self::list_tables_by_type`] with all types.
     pub async fn list_all_state_tables(&self) -> MetaResult<Vec<PbTable>> {
         let inner = self.inner.read().await;
         inner.list_all_state_tables().await
@@ -177,6 +178,7 @@ impl CatalogController {
         Ok(view_ids)
     }
 
+    /// Use [`Self::list_all_state_tables`] to get all types.
     pub async fn list_tables_by_type(&self, table_type: TableType) -> MetaResult<Vec<PbTable>> {
         let inner = self.inner.read().await;
         let table_objs = Table::find()

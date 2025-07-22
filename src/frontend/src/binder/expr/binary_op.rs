@@ -23,9 +23,9 @@ use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall};
 impl Binder {
     pub(super) fn bind_binary_op(
         &mut self,
-        left: Expr,
-        op: BinaryOperator,
-        mut right: Expr,
+        left: &Expr,
+        op: &BinaryOperator,
+        mut right: &Expr,
     ) -> Result<ExprImpl> {
         let bound_left = self.bind_expr_inner(left)?;
 
@@ -34,11 +34,11 @@ impl Binder {
         right = match right {
             Expr::SomeOp(expr) => {
                 func_types.push(ExprType::Some);
-                *expr
+                expr
             }
             Expr::AllOp(expr) => {
                 func_types.push(ExprType::All);
-                *expr
+                expr
             }
             right => right,
         };
@@ -77,7 +77,7 @@ impl Binder {
     }
 
     fn resolve_binary_operator(
-        op: BinaryOperator,
+        op: &BinaryOperator,
         bound_left: &ExprImpl,
         bound_right: &ExprImpl,
     ) -> Result<Vec<ExprType>> {
