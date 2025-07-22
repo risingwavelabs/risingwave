@@ -252,11 +252,21 @@ impl CdcTableSnapshotSplitAssignmentWithGeneration {
     }
 }
 
-pub fn build_pb_actor_cdc_table_snapshot_splits(
+pub fn build_pb_actor_cdc_table_snapshot_splits_with_generation(
     cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignmentWithGeneration,
 ) -> PbCdcTableSnapshotSplitsWithGeneration {
-    let splits = cdc_table_snapshot_split_assignment
-        .splits
+    let splits =
+        build_pb_actor_cdc_table_snapshot_splits(cdc_table_snapshot_split_assignment.splits);
+    PbCdcTableSnapshotSplitsWithGeneration {
+        splits,
+        generation: cdc_table_snapshot_split_assignment.generation,
+    }
+}
+
+pub fn build_pb_actor_cdc_table_snapshot_splits(
+    cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignment,
+) -> HashMap<u32, PbCdcTableSnapshotSplits> {
+    cdc_table_snapshot_split_assignment
         .into_iter()
         .map(|(actor_id, splits)| {
             let splits = PbCdcTableSnapshotSplits {
@@ -271,14 +281,10 @@ pub fn build_pb_actor_cdc_table_snapshot_splits(
             };
             (actor_id, splits)
         })
-        .collect();
-    PbCdcTableSnapshotSplitsWithGeneration {
-        splits,
-        generation: cdc_table_snapshot_split_assignment.generation,
-    }
+        .collect()
 }
 
-pub fn build_actor_cdc_table_snapshot_splits(
+pub fn build_actor_cdc_table_snapshot_splits_with_generation(
     pb_cdc_table_snapshot_split_assignment: PbCdcTableSnapshotSplitsWithGeneration,
 ) -> CdcTableSnapshotSplitAssignmentWithGeneration {
     let splits = pb_cdc_table_snapshot_split_assignment

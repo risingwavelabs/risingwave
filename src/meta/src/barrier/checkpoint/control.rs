@@ -838,7 +838,7 @@ impl DatabaseCheckpointControl {
                 );
                 let finished_cdc_backfill = self
                     .cdc_table_backfill_tracker
-                    .apply_collected_command(&node.command_ctx.barrier_info, &node.state.resps);
+                    .apply_collected_command(&node.state.resps);
                 if !node.command_ctx.barrier_info.kind.is_checkpoint() {
                     assert!(finished_jobs.is_empty());
                     node.notifiers.into_iter().for_each(|notifier| {

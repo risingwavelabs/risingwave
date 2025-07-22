@@ -13,36 +13,55 @@
 // limitations under the License.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use tokio::sync::Mutex;
 
 use risingwave_common::catalog::TableId;
 use risingwave_pb::stream_service::PbBarrierCompleteResponse;
 
-use crate::MetaResult;
-use crate::barrier::info::BarrierInfo;
 use crate::controller::SqlMetaStore;
+use crate::MetaResult;
 
 pub type CdcTableBackfillTrackerRef = Arc<CdcTableBackfillTracker>;
 
 pub struct CdcTableBackfillTracker {
     meta_store: SqlMetaStore,
+    inner: Mutex<CdcTableBackfillTrackerInner>,
+    next_generation: AtomicU64,
 }
 
 impl CdcTableBackfillTracker {
     pub fn new(meta_store: SqlMetaStore) -> Self {
-        Self { meta_store }
+        Self {
+            meta_store,
+            inner: Mutex::new(CdcTableBackfillTrackerInner::new()),
+            next_generation: AtomicU64::new(1),
+        }
     }
 
-    pub(super) fn apply_collected_command(
+    pub fn apply_collected_command(
         &self,
-        barrier_info: &BarrierInfo,
         resps: impl IntoIterator<Item = &PbBarrierCompleteResponse>,
     ) -> Vec<TableId> {
         // TODO(zw): !!!
         vec![]
     }
 
-    pub(super) async fn finish_backfill(&self, job_id: TableId) -> MetaResult<()> {
+    pub async fn finish_backfill(&self, job_id: TableId) -> MetaResult<()> {
         // TODO(zw): !!!
         Ok(())
+    }
+
+    pub fn next_generation(&self) -> u64 {
+        self.next_generation.fetch_add(1, Ordering::Relaxed)
+    }
+}
+
+struct CdcTableBackfillTrackerInner {}
+
+impl CdcTableBackfillTrackerInner {
+    fn new() -> Self {
+        Self {}
     }
 }

@@ -25,7 +25,9 @@ use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
 use risingwave_connector::source::cdc::{
-    CdcTableSnapshotSplitAssignmentWithGeneration, build_pb_actor_cdc_table_snapshot_splits,
+    CdcTableSnapshotSplitAssignment, CdcTableSnapshotSplitAssignmentWithGeneration,
+    build_pb_actor_cdc_table_snapshot_splits,
+    build_pb_actor_cdc_table_snapshot_splits_with_generation,
 };
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_meta_model::WorkerId;
@@ -99,7 +101,7 @@ pub struct Reschedule {
 
     pub newly_created_actors: HashMap<ActorId, (StreamActorWithDispatchers, WorkerId)>,
 
-    pub cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignmentWithGeneration,
+    pub cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignment,
 }
 
 /// Replacing an old job with a new one. All actors in the job will be rebuilt.
@@ -823,10 +825,11 @@ impl Command {
                     pause: is_currently_paused,
                     subscriptions_to_add,
                     backfill_nodes_to_pause,
-                    actor_cdc_table_snapshot_splits: build_pb_actor_cdc_table_snapshot_splits(
-                        cdc_table_snapshot_split_assignment.clone(),
-                    )
-                    .into(),
+                    actor_cdc_table_snapshot_splits:
+                        build_pb_actor_cdc_table_snapshot_splits_with_generation(
+                            cdc_table_snapshot_split_assignment.clone(),
+                        )
+                        .into(),
                 }));
 
                 if let CreateStreamingJobType::SinkIntoTable(ReplaceStreamJobPlan {
@@ -1040,8 +1043,6 @@ impl Command {
                     .collect();
                 let mut actor_splits = HashMap::new();
                 let mut actor_cdc_table_snapshot_splits = HashMap::new();
-
-                let mut cdc_table_snapshot_split_generation = 0;
                 for reschedule in reschedules.values() {
                     for (actor_id, splits) in &reschedule.actor_splits {
                         actor_splits.insert(
@@ -1051,15 +1052,10 @@ impl Command {
                             },
                         );
                     }
-                    cdc_table_snapshot_split_generation = std::cmp::max(
-                        reschedule.cdc_table_snapshot_split_assignment.generation,
-                        cdc_table_snapshot_split_generation,
-                    );
                     actor_cdc_table_snapshot_splits.extend(
                         build_pb_actor_cdc_table_snapshot_splits(
                             reschedule.cdc_table_snapshot_split_assignment.clone(),
-                        )
-                        .splits,
+                        ),
                     );
                 }
 
@@ -1067,7 +1063,10 @@ impl Command {
                 let actor_new_dispatchers = HashMap::new();
                 let actor_cdc_table_snapshot_splits = PbCdcTableSnapshotSplitsWithGeneration {
                     splits: actor_cdc_table_snapshot_splits,
-                    generation: cdc_table_snapshot_split_generation,
+                    generation: control_stream_manager
+                        .env
+                        .cdc_table_backfill_tracker
+                        .next_generation(),
                 }
                 .into();
                 let mutation = Mutation::Update(UpdateMutation {

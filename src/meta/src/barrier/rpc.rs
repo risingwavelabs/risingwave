@@ -31,7 +31,8 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_connector::source::SplitImpl;
 use risingwave_connector::source::cdc::{
-    CdcTableSnapshotSplitAssignmentWithGeneration, build_pb_actor_cdc_table_snapshot_splits,
+    CdcTableSnapshotSplitAssignmentWithGeneration,
+    build_pb_actor_cdc_table_snapshot_splits_with_generation,
 };
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{HostAddress, WorkerNode};
@@ -99,7 +100,7 @@ struct ControlStreamNode {
 pub(super) struct ControlStreamManager {
     connected_nodes: HashMap<WorkerId, ControlStreamNode>,
     workers: HashMap<WorkerId, WorkerNode>,
-    env: MetaSrvEnv,
+    pub env: MetaSrvEnv,
 }
 
 impl ControlStreamManager {
@@ -508,10 +509,11 @@ impl ControlStreamManager {
             actor_dispatchers: Default::default(),
             added_actors: Default::default(),
             actor_splits: build_actor_connector_splits(&source_split_assignments),
-            actor_cdc_table_snapshot_splits: build_pb_actor_cdc_table_snapshot_splits(
-                database_cdc_table_snapshot_split_assignment,
-            )
-            .into(),
+            actor_cdc_table_snapshot_splits:
+                build_pb_actor_cdc_table_snapshot_splits_with_generation(
+                    database_cdc_table_snapshot_split_assignment,
+                )
+                .into(),
             pause: is_paused,
             subscriptions_to_add: Default::default(),
             // TODO(kwannoel): recover using backfill order plan
