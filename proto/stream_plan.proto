@@ -456,6 +456,12 @@ message InequalityPair {
   DeltaExpression delta_expression = 4;
 }
 
+enum JoinEncodingType {
+  UNSPECIFIED = 0;
+  MEMORY_OPTIMIZED = 1;
+  CPU_OPTIMIZED = 2;
+}
+
 message HashJoinNode {
   plan_common.JoinType join_type = 1;
   repeated int32 left_key = 2;
@@ -487,6 +493,9 @@ message HashJoinNode {
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 14;
+
+  // Which encoding will be used to encode join rows in operator cache.
+  JoinEncodingType join_encoding_type = 15;
 }
 
 message AsOfJoinNode {
@@ -509,6 +518,8 @@ message AsOfJoinNode {
   repeated uint32 right_deduped_input_pk_indices = 8;
   repeated bool null_safe = 9;
   optional plan_common.AsOfJoinDesc asof_desc = 10;
+  // Which encoding will be used to encode join rows in operator cache.
+  JoinEncodingType join_encoding_type = 11;
 }
 
 message TemporalJoinNode {
@@ -1048,26 +1059,6 @@ message StreamActor {
   string mview_definition = 9;
   // Provide the necessary context, e.g. session info like time zone, for the actor.
   plan_common.ExprContext expr_context = 10;
-}
-
-// Indicates whether the fragment contains some special kind of nodes.
-enum FragmentTypeFlag {
-  FRAGMENT_TYPE_FLAG_FRAGMENT_UNSPECIFIED = 0;
-  FRAGMENT_TYPE_FLAG_SOURCE = 1;
-  FRAGMENT_TYPE_FLAG_MVIEW = 2;
-  FRAGMENT_TYPE_FLAG_SINK = 4;
-  FRAGMENT_TYPE_FLAG_NOW = 8; // TODO: Remove this and insert a `BarrierRecv` instead.
-  // Include StreamScan and StreamCdcScan
-  FRAGMENT_TYPE_FLAG_STREAM_SCAN = 16;
-  FRAGMENT_TYPE_FLAG_BARRIER_RECV = 32;
-  FRAGMENT_TYPE_FLAG_VALUES = 64;
-  FRAGMENT_TYPE_FLAG_DML = 128;
-  FRAGMENT_TYPE_FLAG_CDC_FILTER = 256;
-  FRAGMENT_TYPE_FLAG_SOURCE_SCAN = 1024;
-  FRAGMENT_TYPE_FLAG_SNAPSHOT_BACKFILL_STREAM_SCAN = 2048;
-  // Note: this flag is not available in old fragments, so only suitable for debugging purpose.
-  FRAGMENT_TYPE_FLAG_FS_FETCH = 4096;
-  FRAGMENT_TYPE_FLAG_CROSS_DB_SNAPSHOT_BACKFILL_STREAM_SCAN = 8192;
 }
 
 // The streaming context associated with a stream plan

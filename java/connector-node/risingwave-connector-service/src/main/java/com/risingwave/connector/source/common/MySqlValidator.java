@@ -213,16 +213,32 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             stmt.setString(1, dbName);
             stmt.setString(2, tableName);
 
-            // Field name in lower case -> data type, because MySQL column name is case-insensitive
-            // https://dev.mysql.com/doc/refman/5.7/en/identifier-case-sensitivity.html
-            var upstreamSchema = new HashMap<String, String>();
+            // Record charMaxLength for each column
+            class ColumnInfo {
+                String dataType;
+                long charMaxLength; // Use long to avoid overflow for 4294967295
+
+                ColumnInfo(String dataType, long charMaxLength) {
+                    this.dataType = dataType;
+                    this.charMaxLength = charMaxLength;
+                }
+            }
+
+            // field name (lowercase) -> ColumnInfo
+            var upstreamSchema = new HashMap<String, ColumnInfo>();
             var pkFields = new HashSet<String>();
             var res = stmt.executeQuery();
             while (res.next()) {
                 var field = res.getString(1);
                 var dataType = res.getString(2);
                 var key = res.getString(3);
-                upstreamSchema.put(field.toLowerCase(), dataType);
+                long charMaxLength = res.getLong(4);
+                // In MySQL, some types (such as text/blob) will return 4294967295 for
+                // charMaxLength, need special handling
+                if (res.wasNull()) {
+                    charMaxLength = -1;
+                }
+                upstreamSchema.put(field.toLowerCase(), new ColumnInfo(dataType, charMaxLength));
                 if (key.equalsIgnoreCase("PRI")) {
                     pkFields.add(field.toLowerCase());
                 }
@@ -234,12 +250,13 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 if (e.getKey().startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
                     continue;
                 }
-                var dataType = upstreamSchema.get(e.getKey().toLowerCase());
-                if (dataType == null) {
+                var columnInfo = upstreamSchema.get(e.getKey().toLowerCase());
+                if (columnInfo == null) {
                     throw ValidatorUtils.invalidArgument(
                             "Column '" + e.getKey() + "' not found in the upstream database");
                 }
-                if (!isDataTypeCompatible(dataType, e.getValue())) {
+                if (!isDataTypeCompatible(
+                        columnInfo.dataType, e.getValue(), columnInfo.charMaxLength)) {
                     throw ValidatorUtils.invalidArgument(
                             "Incompatible data type of column " + e.getKey());
                 }
@@ -276,8 +293,10 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         }
     }
 
-    private boolean isDataTypeCompatible(String mysqlDataType, Data.DataType.TypeName typeName) {
+    private boolean isDataTypeCompatible(
+            String mysqlDataType, Data.DataType.TypeName typeName, long charMaxLength) {
         int val = typeName.getNumber();
+
         switch (mysqlDataType) {
             case "tinyint": // boolean
                 return (val == Data.DataType.TypeName.BOOLEAN_VALUE)
@@ -292,16 +311,29 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                         && val <= Data.DataType.TypeName.INT64_VALUE;
             case "bigint":
                 return val == Data.DataType.TypeName.INT64_VALUE;
+            case "boolean":
+            case "bool":
+                return val == Data.DataType.TypeName.BOOLEAN_VALUE;
+            case "enum":
+                return val == Data.DataType.TypeName.VARCHAR_VALUE;
+            case "char":
+            case "varchar":
+            case "text":
+            case "tinytext":
+            case "mediumtext":
+                return val == Data.DataType.TypeName.VARCHAR_VALUE;
+            case "longtext":
+                return val == Data.DataType.TypeName.BYTEA_VALUE
+                        || val == Data.DataType.TypeName.VARCHAR_VALUE;
             case "float":
             case "real":
                 return val == Data.DataType.TypeName.FLOAT_VALUE
                         || val == Data.DataType.TypeName.DOUBLE_VALUE;
             case "double":
                 return val == Data.DataType.TypeName.DOUBLE_VALUE;
+            case "numeric":
             case "decimal":
                 return val == Data.DataType.TypeName.DECIMAL_VALUE;
-            case "varchar":
-                return val == Data.DataType.TypeName.VARCHAR_VALUE;
             case "date":
                 return val == Data.DataType.TypeName.DATE_VALUE;
             case "time":
@@ -310,8 +342,27 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 return val == Data.DataType.TypeName.TIMESTAMP_VALUE;
             case "timestamp":
                 return val == Data.DataType.TypeName.TIMESTAMPTZ_VALUE;
+            case "json":
+                return val == Data.DataType.TypeName.JSONB_VALUE;
+                // For 'bit' type, compatibility depends on charMaxLength
+            case "bit":
+                // bit(1) matches bool, bit(n>1) matches bytea
+                if (charMaxLength == 1) {
+                    return val == Data.DataType.TypeName.BOOLEAN_VALUE;
+                } else {
+                    return val == Data.DataType.TypeName.BYTEA_VALUE;
+                }
+            case "tinyblob":
+            case "blob":
+            case "mediumblob":
+            case "longblob":
+            case "binary":
+            case "varbinary":
+                return val == Data.DataType.TypeName.BYTEA_VALUE;
+            case "year":
+                return val == Data.DataType.TypeName.INT32_VALUE;
             default:
-                return true; // true for other uncovered types
+                return false; // false for other uncovered types
         }
     }
 }

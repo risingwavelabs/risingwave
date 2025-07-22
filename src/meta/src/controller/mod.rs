@@ -219,7 +219,6 @@ impl From<ObjectModel<table::Model>> for PbTable {
             name: value.0.name,
             columns: value.0.columns.to_protobuf(),
             pk: value.0.pk.to_protobuf(),
-            dependent_relations: vec![], // todo: deprecate it.
             table_type: PbTableType::from(value.0.table_type) as _,
             distribution_key: value.0.distribution_key.0,
             stream_key: value.0.stream_key.0,
@@ -317,7 +316,6 @@ impl From<ObjectModel<sink::Model>> for PbSink {
         if let Some(secret_ref) = value.0.secret_ref {
             secret_ref_map = secret_ref.to_protobuf();
         }
-        #[allow(deprecated)] // for `dependent_relations`
         Self {
             id: value.0.sink_id as _,
             schema_id: value.1.schema_id.unwrap() as _,
@@ -325,7 +323,6 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             name: value.0.name,
             columns: value.0.columns.to_protobuf(),
             plan_pk: value.0.plan_pk.to_protobuf(),
-            dependent_relations: vec![],
             distribution_key: value.0.distribution_key.0,
             downstream_pk: value.0.downstream_pk.0,
             sink_type: PbSinkType::from(value.0.sink_type) as _,
@@ -421,7 +418,6 @@ impl From<ObjectModel<view::Model>> for PbView {
             owner: value.1.owner_id as _,
             properties: value.0.properties.0,
             sql: value.0.definition,
-            dependent_relations: vec![], // todo: deprecate it.
             columns: value.0.columns.to_protobuf(),
         }
     }

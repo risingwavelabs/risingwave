@@ -30,7 +30,7 @@ mod session_config;
 /// Sections in the configuration file can use `#[derive(OverrideConfig)]` to generate the
 /// implementation of overwriting configs from the file.
 ///
-/// In the struct definition, use #[override_opts(path = ...)] on a field to indicate the field in
+/// In the struct definition, use `#[override_opts(path = ...)]` on a field to indicate the field in
 /// `RwConfig` to override.
 ///
 /// An example:

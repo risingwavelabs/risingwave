@@ -100,35 +100,17 @@ pub(super) struct GlobalBarrierWorker<C> {
     term_id: String,
 }
 
-impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
-    /// Create a new [`crate::barrier::worker::GlobalBarrierWorker`].
-    pub async fn new(
-        scheduled_barriers: schedule::ScheduledBarriers,
+impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
+    pub(super) async fn new_inner(
         env: MetaSrvEnv,
-        metadata_manager: MetadataManager,
-        hummock_manager: HummockManagerRef,
-        source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
-        scale_controller: ScaleControllerRef,
         request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
+        context: Arc<C>,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
 
-        let active_streaming_nodes =
-            ActiveStreamingWorkerNodes::uninitialized(metadata_manager.clone());
-
-        let status = Arc::new(ArcSwap::new(Arc::new(BarrierManagerStatus::Starting)));
-
-        let context = Arc::new(GlobalBarrierWorkerContextImpl::new(
-            scheduled_barriers,
-            status,
-            metadata_manager,
-            hummock_manager,
-            source_manager,
-            scale_controller,
-            env.clone(),
-        ));
+        let active_streaming_nodes = ActiveStreamingWorkerNodes::uninitialized();
 
         let control_stream_manager = ControlStreamManager::new(env.clone());
 
@@ -153,6 +135,34 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             control_stream_manager,
             term_id: "uninitialized".into(),
         }
+    }
+}
+
+impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
+    /// Create a new [`crate::barrier::worker::GlobalBarrierWorker`].
+    pub async fn new(
+        scheduled_barriers: schedule::ScheduledBarriers,
+        env: MetaSrvEnv,
+        metadata_manager: MetadataManager,
+        hummock_manager: HummockManagerRef,
+        source_manager: SourceManagerRef,
+        sink_manager: SinkCoordinatorManager,
+        scale_controller: ScaleControllerRef,
+        request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
+    ) -> Self {
+        let status = Arc::new(ArcSwap::new(Arc::new(BarrierManagerStatus::Starting)));
+
+        let context = Arc::new(GlobalBarrierWorkerContextImpl::new(
+            scheduled_barriers,
+            status,
+            metadata_manager,
+            hummock_manager,
+            source_manager,
+            scale_controller,
+            env.clone(),
+        ));
+
+        Self::new_inner(env, sink_manager, request_rx, context).await
     }
 
     pub fn start(self) -> (JoinHandle<()>, Sender<()>) {
@@ -251,7 +261,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         }
     }
 
-    async fn run_inner(mut self, mut shutdown_rx: Receiver<()>) {
+    pub(super) async fn run_inner(mut self, mut shutdown_rx: Receiver<()>) {
         let (local_notification_tx, mut local_notification_rx) =
             tokio::sync::mpsc::unbounded_channel();
         self.env
@@ -653,30 +663,42 @@ mod retry_strategy {
     // Retry max interval.
     const RECOVERY_RETRY_MAX_INTERVAL: Duration = Duration::from_secs(5);
 
-    mod retry_backoff_future {
-        use std::future::Future;
-        use std::time::Duration;
+    // MrCroxx: Use concrete type here to prevent unsolved compiler issue.
+    // Feel free to replace the concrete type with TAIT after fixed.
 
-        use tokio::time::sleep;
+    // mod retry_backoff_future {
+    //     use std::future::Future;
+    //     use std::time::Duration;
+    //
+    //     use tokio::time::sleep;
+    //
+    //     pub(crate) type RetryBackoffFuture = impl Future<Output = ()> + Unpin + Send + 'static;
+    //
+    //     #[define_opaque(RetryBackoffFuture)]
+    //     pub(super) fn get_retry_backoff_future(duration: Duration) -> RetryBackoffFuture {
+    //         Box::pin(sleep(duration))
+    //     }
+    // }
+    // pub(crate) use retry_backoff_future::*;
 
-        pub(crate) type RetryBackoffFuture = impl Future<Output = ()> + Unpin + Send + 'static;
-        pub(super) fn get_retry_backoff_future(duration: Duration) -> RetryBackoffFuture {
-            Box::pin(sleep(duration))
-        }
+    pub(crate) type RetryBackoffFuture = std::pin::Pin<Box<tokio::time::Sleep>>;
+
+    pub(crate) fn get_retry_backoff_future(duration: Duration) -> RetryBackoffFuture {
+        Box::pin(tokio::time::sleep(duration))
     }
-    pub(crate) use retry_backoff_future::*;
 
     pub(crate) type RetryBackoffStrategy =
         impl Iterator<Item = RetryBackoffFuture> + Send + 'static;
 
-    #[inline(always)]
     /// Initialize a retry strategy for operation in recovery.
-    pub(crate) fn get_retry_strategy() -> impl Iterator<Item = Duration> {
+    #[inline(always)]
+    pub(crate) fn get_retry_strategy() -> impl Iterator<Item = Duration> + Send + 'static {
         ExponentialBackoff::from_millis(RECOVERY_RETRY_BASE_INTERVAL)
             .max_delay(RECOVERY_RETRY_MAX_INTERVAL)
             .map(jitter)
     }
 
+    #[define_opaque(RetryBackoffStrategy)]
     pub(crate) fn get_retry_backoff_strategy() -> RetryBackoffStrategy {
         get_retry_strategy().map(get_retry_backoff_future)
     }

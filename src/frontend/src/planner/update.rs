@@ -23,10 +23,10 @@ use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalProject, LogicalUpdate, generic};
 use crate::optimizer::property::{Order, RequiredDist};
-use crate::optimizer::{PlanRef, PlanRoot};
+use crate::optimizer::{LogicalPlanRoot, PlanRef, PlanRoot};
 
 impl Planner {
-    pub(super) fn plan_update(&mut self, update: BoundUpdate) -> Result<PlanRoot> {
+    pub(super) fn plan_update(&mut self, update: BoundUpdate) -> Result<LogicalPlanRoot> {
         let returning = !update.returning_list.is_empty();
 
         let scan = self.plan_base_table(&update.table)?;

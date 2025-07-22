@@ -812,7 +812,7 @@ mod tests {
         // ROOT grant CONN with grant option to user_1.
         mgr.grant_privilege(
             vec![user_1.user_id],
-            &[conn_with_option.clone()],
+            std::slice::from_ref(&conn_with_option),
             TEST_ROOT_USER_ID,
             true,
         )
@@ -820,7 +820,7 @@ mod tests {
         // ROOT grant CREATE without grant option to user_1.
         mgr.grant_privilege(
             vec![user_1.user_id],
-            &[create_without_option.clone()],
+            std::slice::from_ref(&create_without_option),
             TEST_ROOT_USER_ID,
             false,
         )
@@ -828,14 +828,14 @@ mod tests {
         // user_1 grant CONN with grant option to user_2.
         mgr.grant_privilege(
             vec![user_2.user_id],
-            &[conn_with_option.clone()],
+            std::slice::from_ref(&conn_with_option),
             user_1.user_id,
             true,
         )
         .await?;
         mgr.grant_privilege(
             vec![user_2.user_id],
-            &[create_without_option.clone()],
+            std::slice::from_ref(&create_without_option),
             user_1.user_id,
             false,
         )
@@ -863,7 +863,7 @@ mod tests {
         assert!(
             mgr.revoke_privilege(
                 vec![user_1.user_id],
-                &[conn_with_option.clone()],
+                std::slice::from_ref(&conn_with_option),
                 TEST_ROOT_USER_ID,
                 user_2.user_id,
                 false,
@@ -878,7 +878,7 @@ mod tests {
         assert!(
             mgr.revoke_privilege(
                 vec![user_2.user_id],
-                &[create_without_option.clone()],
+                std::slice::from_ref(&create_without_option),
                 user_1.user_id,
                 user_1.user_id,
                 false,
@@ -893,7 +893,7 @@ mod tests {
         assert!(
             mgr.revoke_privilege(
                 vec![user_1.user_id],
-                &[conn_with_option.clone()],
+                std::slice::from_ref(&conn_with_option),
                 TEST_ROOT_USER_ID,
                 TEST_ROOT_USER_ID,
                 false,
@@ -907,7 +907,7 @@ mod tests {
         // revoke non-referred privilege in restrict mode.
         mgr.revoke_privilege(
             vec![user_1.user_id],
-            &[create_without_option.clone()],
+            std::slice::from_ref(&create_without_option),
             TEST_ROOT_USER_ID,
             TEST_ROOT_USER_ID,
             false,
@@ -924,7 +924,7 @@ mod tests {
         // revoke grant option for referred privilege in cascade mode.
         mgr.revoke_privilege(
             vec![user_1.user_id],
-            &[conn_with_option.clone()],
+            std::slice::from_ref(&conn_with_option),
             TEST_ROOT_USER_ID,
             TEST_ROOT_USER_ID,
             true,
@@ -947,7 +947,7 @@ mod tests {
         // revoke referred privilege in cascade mode.
         mgr.revoke_privilege(
             vec![user_1.user_id],
-            &[conn_with_option.clone()],
+            std::slice::from_ref(&conn_with_option),
             TEST_ROOT_USER_ID,
             TEST_ROOT_USER_ID,
             false,

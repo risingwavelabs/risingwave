@@ -23,6 +23,7 @@ use bytes::BytesMut;
 use chrono::{TimeZone, Utc};
 use opendal::{FuturesAsyncWriter, Operator, Writer as OpendalWriter};
 use parquet::arrow::AsyncArrowWriter;
+use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::arrow::arrow_schema_iceberg::{self, SchemaRef};
@@ -435,7 +436,7 @@ impl OpenDalSinkWriter {
         let object_writer = self.create_object_writer().await?;
         match self.encode_type {
             SinkEncode::Parquet => {
-                let props = WriterProperties::builder();
+                let props = WriterProperties::builder().set_compression(Compression::SNAPPY);
                 let parquet_writer: tokio_util::compat::Compat<opendal::FuturesAsyncWriter> =
                     object_writer.into_futures_async_write().compat_write();
                 self.sink_writer = Some(FileWriterEnum::ParquetFileWriter(

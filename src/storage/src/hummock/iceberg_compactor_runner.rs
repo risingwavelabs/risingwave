@@ -288,8 +288,8 @@ impl IcebergCompactorRunner {
 
             let compaction_config = Arc::new(
                 CompactionConfigBuilder::default()
-                    .batch_parallelism(input_parallelism as usize)
-                    .target_partitions(output_parallelism as usize)
+                    .output_parallelism(output_parallelism as usize)
+                    .executor_parallelism(input_parallelism as usize)
                     .target_file_size(self.config.target_file_size_bytes)
                     .enable_validate_compaction(self.config.enable_validate_compaction)
                     .max_record_batch_rows(self.config.max_record_batch_rows)

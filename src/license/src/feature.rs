@@ -12,106 +12,64 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(clippy::doc_markdown)]
+
+use strum::VariantArray;
 use thiserror::Error;
 
-use super::{LicenseError, LicenseManager, Tier, report_telemetry};
+use super::{LicenseError, LicenseManager, report_telemetry};
 
-/// Define all features that are available based on the tier of the license.
-///
-/// # Define a new feature
-///
-/// To add a new feature, add a new entry below following the same pattern as the existing ones.
-///
-/// Check the definition of [`Tier`] for all available tiers. Note that normally there's no need to
-/// add a feature with the minimum tier of `Free`, as you can directly write the code without
-/// gating it with a feature check.
-///
-/// # Check the availability of a feature
-///
-/// To check the availability of a feature during runtime, call the method
-/// [`check_available`](Feature::check_available) on the feature. If the feature is not available,
-/// an error of type [`FeatureNotAvailable`] will be returned and you should handle it properly,
-/// generally by returning an error to the user.
-///
-/// # Feature availability in tests
-///
-/// In tests with `debug_assertions` enabled, a license key of the paid (maximum) tier is set by
-/// default. As a result, all features are available in tests. To test the behavior when a feature
-/// is not available, you can manually set a license key with a lower tier. Check the e2e test cases
-/// under `error_ui` for examples.
-macro_rules! for_all_features {
-    ($macro:ident) => {
-        $macro! {
-            // name                      min tier    doc
-            { TestPaid,                  Paid,       "A dummy feature that's only available on paid tier for testing purposes." },
-            { TimeTravel,                Paid,       "Query historical data within the retention period."},
-            { GlueSchemaRegistry,        Paid,       "Use Schema Registry from AWS Glue rather than Confluent." },
-            { SnowflakeSink,             Paid,       "Delivering data to SnowFlake." },
-            { DynamoDbSink,              Paid,       "Delivering data to DynamoDb." },
-            { OpenSearchSink,            Paid,       "Delivering data to OpenSearch." },
-            { BigQuerySink,              Paid,       "Delivering data to BigQuery." },
-            { ClickHouseSharedEngine,    Paid,       "Delivering data to Shared tree on clickhouse cloud"},
-            { SecretManagement,          Paid,       "Secret management." },
-            { SqlServerSink,             Paid,       "Sink data from RisingWave to SQL Server." },
-            { SqlServerCdcSource,        Paid,       "CDC source connector for Sql Server." },
-            { CdcAutoSchemaChange,       Paid,       "Auto replicate upstream DDL to CDC Table." },
-            { IcebergSinkWithGlue,       Paid,       "Delivering data to Iceberg with Glue catalog." },
-            { ElasticDiskCache,          Paid,       "Disk cache and refilling to boost performance and reduce object store access cost." },
-            { ResourceGroup,             Paid,       "Resource group to isolate workload and failure." },
-            { DatabaseFailureIsolation,  Paid,       "Failure isolation between databases." },
-            { IcebergCompaction,         Paid,       "Auto iceberg compaction." },
-        }
-    };
+// Define all features that require a license to use.
+//
+// # Define a new feature
+//
+// To add a new feature, add a new entry at the END of `feature.json`, following the same pattern
+// as the existing ones.
+//
+// # Check the availability of a feature
+//
+// To check the availability of a feature during runtime, call the method
+// [`check_available`](Feature::check_available) on the feature. If the feature is not available,
+// an error of type [`FeatureNotAvailable`] will be returned and you should handle it properly,
+// generally by returning an error to the user.
+//
+// # Feature availability in tests
+//
+// In tests with `debug_assertions` enabled, a special license key with all features enabled is set by
+// default. To test the behavior when a feature is not available, you can manually set a license key.
+// Check the e2e test cases under `error_ui` for examples.
+typify::import_types!(
+    schema = "src/feature.json",
+    derives = [strum::VariantArray, strum::IntoStaticStr],
+);
+
+impl Feature {
+    /// Name of the feature.
+    pub(crate) fn name(self) -> &'static str {
+        self.into()
+    }
+
+    /// Get a slice of all features.
+    pub(crate) fn all() -> &'static [Feature] {
+        Feature::VARIANTS
+    }
+
+    /// Get a slice of all features available as of 2.5 (before we introduce custom tier).
+    pub(crate) fn all_as_of_2_5() -> &'static [Feature] {
+        // `IcebergCompaction` was the last feature introduced.
+        &Feature::all()[..=Feature::IcebergCompaction as usize]
+    }
 }
-
-macro_rules! def_feature {
-    ($({ $name:ident, $min_tier:ident, $doc:literal },)*) => {
-        /// A set of features that are available based on the tier of the license.
-        ///
-        /// To define a new feature, add a new entry in the macro [`for_all_features`].
-        #[derive(Clone, Copy, Debug)]
-        pub enum Feature {
-            $(
-                #[doc = concat!($doc, "\n\nAvailable for tier `", stringify!($min_tier), "` and above.")]
-                $name,
-            )*
-        }
-
-        impl Feature {
-            /// Minimum tier required to use this feature.
-            fn min_tier(self) -> Tier {
-                match self {
-                    $(
-                        Self::$name => Tier::$min_tier,
-                    )*
-                }
-            }
-
-            fn get_feature_name(&self) -> &'static str {
-                match &self {
-                    $(
-                        Self::$name => stringify!($name),
-                    )*
-                }
-            }
-        }
-    };
-}
-
-for_all_features!(def_feature);
 
 /// The error type for feature not available due to license.
 #[derive(Debug, Error)]
 pub enum FeatureNotAvailable {
+    // TODO(license): refine error message to include tier name & better instructions
     #[error(
-    "feature {:?} is only available for tier {:?} and above, while the current tier is {:?}\n\n\
-        Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.",
-    feature, feature.min_tier(), current_tier,
+        "feature {feature:?} is not available based on your license\n\n\
+        Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command."
     )]
-    InsufficientTier {
-        feature: Feature,
-        current_tier: Tier,
-    },
+    NotAvailable { feature: Feature },
 
     #[error("feature {feature:?} is not available due to license error")]
     LicenseError {
@@ -128,13 +86,10 @@ impl Feature {
     ) -> Result<(), FeatureNotAvailable> {
         let check_res = match manager.license() {
             Ok(license) => {
-                if license.tier >= self.min_tier() {
+                if license.tier.available_features().any(|x| x == self) {
                     Ok(())
                 } else {
-                    Err(FeatureNotAvailable::InsufficientTier {
-                        feature: self,
-                        current_tier: license.tier,
-                    })
+                    Err(FeatureNotAvailable::NotAvailable { feature: self })
                 }
             }
             Err(error) => Err(FeatureNotAvailable::LicenseError {
@@ -143,7 +98,7 @@ impl Feature {
             }),
         };
 
-        report_telemetry(&self, self.get_feature_name(), check_res.is_ok());
+        report_telemetry(&self, self.name(), check_res.is_ok());
 
         check_res
     }

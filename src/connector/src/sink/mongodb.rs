@@ -58,6 +58,7 @@ mod send_bulk_write_command_future {
 
     pub(super) type SendBulkWriteCommandFuture = impl Future<Output = Result<()>> + 'static;
 
+    #[define_opaque(SendBulkWriteCommandFuture)]
     pub(super) fn send_bulk_write_commands(
         db: Database,
         upsert: Option<Document>,
@@ -480,6 +481,7 @@ pub type MongodbSinkDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> 
 impl AsyncTruncateSinkWriter for MongodbSinkWriter {
     type DeliveryFuture = MongodbSinkDeliveryFuture;
 
+    #[define_opaque(MongodbSinkDeliveryFuture)]
     async fn write_chunk<'a>(
         &'a mut self,
         chunk: StreamChunk,

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::{DefaultBehavior, Merge};
-use crate::PlanRef;
+use crate::optimizer::BatchPlanRoot;
 use crate::optimizer::plan_node::{BatchSysSeqScan, LogicalSysScan, StreamTableScan};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
@@ -21,9 +21,9 @@ use crate::optimizer::plan_visitor::PlanVisitor;
 pub struct SysTableVisitor {}
 
 impl SysTableVisitor {
-    pub fn has_sys_table(plan: PlanRef) -> bool {
+    pub fn has_sys_table(plan: &BatchPlanRoot) -> bool {
         let mut visitor = SysTableVisitor {};
-        visitor.visit(plan)
+        visitor.visit(plan.plan.clone())
     }
 }
 

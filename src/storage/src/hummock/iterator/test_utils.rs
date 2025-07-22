@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use foyer::{Engine, HybridCacheBuilder, LargeEngineOptions};
+use foyer::{CacheBuilder, Engine, HybridCacheBuilder, LargeEngineOptions};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
@@ -94,6 +94,8 @@ pub async fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> Ssta
 
         meta_cache,
         block_cache,
+        vector_meta_cache: CacheBuilder::new(64 << 20).build(),
+        vector_block_cache: CacheBuilder::new(64 << 20).build(),
     }))
 }
 

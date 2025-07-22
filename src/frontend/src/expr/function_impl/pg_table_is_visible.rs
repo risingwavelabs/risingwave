@@ -54,16 +54,16 @@ fn pg_table_is_visible_impl(
     // 1. The schema of the object exists in the search path.
     // 2. User have `USAGE` privilege on the schema.
     for schema in search_path.path() {
-        if let Ok(schema) = catalog_reader.get_schema_by_name(db_name, schema) {
-            if schema.contains_object(oid as u32) {
-                return if user_info.is_super
-                    || user_info.has_privilege(&GrantObject::SchemaId(schema.id()), AclMode::Usage)
-                {
-                    Ok(Some(true))
-                } else {
-                    Ok(Some(false))
-                };
-            }
+        if let Ok(schema) = catalog_reader.get_schema_by_name(db_name, schema)
+            && schema.contains_object(oid as u32)
+        {
+            return if user_info.is_super
+                || user_info.has_privilege(&GrantObject::SchemaId(schema.id()), AclMode::Usage)
+            {
+                Ok(Some(true))
+            } else {
+                Ok(Some(false))
+            };
         }
     }
 

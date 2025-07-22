@@ -118,6 +118,10 @@ static FUNC_BAN_LIST: LazyLock<HashSet<ExprType>> = LazyLock::new(|| {
         ExprType::Sqrt,
         // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
         ExprType::Pow,
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7328
+        ExprType::Position,
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7328
+        ExprType::Strpos,
     ]
     .into_iter()
     .collect()

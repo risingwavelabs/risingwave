@@ -1098,51 +1098,52 @@ where
         self.epoch = Some(new_epoch);
 
         // Refresh watermark cache if it is out of sync.
-        if USE_WATERMARK_CACHE && !self.watermark_cache.is_synced() {
-            if let Some(ref watermark) = self.committed_watermark {
-                let range: (Bound<Once<Datum>>, Bound<Once<Datum>>) =
-                    (Included(once(Some(watermark.clone()))), Unbounded);
-                // NOTE(kwannoel): We buffer `pks` before inserting into watermark cache
-                // because we can't hold an immutable ref (via `iter_key_and_val_with_pk_range`)
-                // and a mutable ref (via `self.watermark_cache.insert`) at the same time.
-                // TODO(kwannoel): We can optimize it with:
-                // 1. Either use `RefCell`.
-                // 2. Or pass in a direct reference to LocalStateStore,
-                //    instead of referencing it indirectly from `self`.
-                //    Similar to how we do for pk_indices.
-                let mut pks = Vec::with_capacity(self.watermark_cache.capacity());
-                {
-                    let mut streams = vec![];
-                    for vnode in self.vnodes().iter_vnodes() {
-                        let stream = self
-                            .iter_keyed_row_with_vnode(vnode, &range, PrefetchOptions::default())
-                            .await?;
-                        streams.push(Box::pin(stream));
+        if USE_WATERMARK_CACHE
+            && !self.watermark_cache.is_synced()
+            && let Some(ref watermark) = self.committed_watermark
+        {
+            let range: (Bound<Once<Datum>>, Bound<Once<Datum>>) =
+                (Included(once(Some(watermark.clone()))), Unbounded);
+            // NOTE(kwannoel): We buffer `pks` before inserting into watermark cache
+            // because we can't hold an immutable ref (via `iter_key_and_val_with_pk_range`)
+            // and a mutable ref (via `self.watermark_cache.insert`) at the same time.
+            // TODO(kwannoel): We can optimize it with:
+            // 1. Either use `RefCell`.
+            // 2. Or pass in a direct reference to LocalStateStore,
+            //    instead of referencing it indirectly from `self`.
+            //    Similar to how we do for pk_indices.
+            let mut pks = Vec::with_capacity(self.watermark_cache.capacity());
+            {
+                let mut streams = vec![];
+                for vnode in self.vnodes().iter_vnodes() {
+                    let stream = self
+                        .iter_keyed_row_with_vnode(vnode, &range, PrefetchOptions::default())
+                        .await?;
+                    streams.push(Box::pin(stream));
+                }
+                let merged_stream = merge_sort(streams);
+                pin_mut!(merged_stream);
+
+                #[for_await]
+                for entry in merged_stream.take(self.watermark_cache.capacity()) {
+                    let keyed_row = entry?;
+                    let pk = self.pk_serde.deserialize(keyed_row.key())?;
+                    // watermark column should be part of the pk
+                    if !pk.is_null_at(self.clean_watermark_index_in_pk.unwrap_or(0) as usize) {
+                        pks.push(pk);
                     }
-                    let merged_stream = merge_sort(streams);
-                    pin_mut!(merged_stream);
-
-                    #[for_await]
-                    for entry in merged_stream.take(self.watermark_cache.capacity()) {
-                        let keyed_row = entry?;
-                        let pk = self.pk_serde.deserialize(keyed_row.key())?;
-                        // watermark column should be part of the pk
-                        if !pk.is_null_at(self.clean_watermark_index_in_pk.unwrap_or(0) as usize) {
-                            pks.push(pk);
-                        }
-                    }
                 }
+            }
 
-                let mut filler = self.watermark_cache.begin_syncing();
-                for pk in pks {
-                    filler.insert_unchecked(DefaultOrdered(pk), ());
-                }
-                filler.finish();
+            let mut filler = self.watermark_cache.begin_syncing();
+            for pk in pks {
+                filler.insert_unchecked(DefaultOrdered(pk), ());
+            }
+            filler.finish();
 
-                let n_cache_entries = self.watermark_cache.len();
-                if n_cache_entries < self.watermark_cache.capacity() {
-                    self.watermark_cache.set_table_row_count(n_cache_entries);
-                }
+            let n_cache_entries = self.watermark_cache.len();
+            if n_cache_entries < self.watermark_cache.capacity() {
+                self.watermark_cache.set_table_row_count(n_cache_entries);
             }
         }
 

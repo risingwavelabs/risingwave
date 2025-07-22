@@ -194,15 +194,7 @@ fn format_rows(rows: &[SimpleQueryMessage]) -> String {
             SimpleQueryMessage::Row(row) => {
                 let n_cols = row.columns().len();
                 let formatted_row: String = (0..n_cols)
-                    .map(|i| {
-                        format!(
-                            "{:#?}",
-                            match row.get(i) {
-                                Some(s) => s,
-                                _ => "NULL",
-                            }
-                        )
-                    })
+                    .map(|i| format!("{:#?}", row.get(i).unwrap_or("NULL")))
                     .join(", ");
                 Some(formatted_row)
             }

@@ -288,6 +288,8 @@ impl StreamManagerService for StreamServiceImpl {
                      parallelism,
                      max_parallelism,
                      resource_group,
+                     database_id,
+                     schema_id,
                      ..
                  }| {
                     let parallelism = match parallelism {
@@ -303,6 +305,8 @@ impl StreamManagerService for StreamServiceImpl {
                         parallelism: Some(parallelism.into()),
                         max_parallelism: max_parallelism as _,
                         resource_group,
+                        database_id: database_id as _,
+                        schema_id: schema_id as _,
                     }
                 },
             )

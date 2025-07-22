@@ -70,11 +70,11 @@ pub(crate) fn new_vector_file_builder(
 
 pub(crate) struct VectorWriterImpl {
     flushed_vector_files: Vec<VectorFileInfo>,
+    sstable_store: SstableStoreRef,
     vector_file_builder: VectorFileBuilder,
 }
 
 impl VectorWriterImpl {
-    #[expect(dead_code)]
     pub(crate) fn new(
         index: &VectorIndex,
         sstable_store: SstableStoreRef,
@@ -84,6 +84,7 @@ impl VectorWriterImpl {
         let VectorIndexImpl::Flat(flat_index) = &index.inner;
         Self {
             flushed_vector_files: vec![],
+            sstable_store: sstable_store.clone(),
             vector_file_builder: new_vector_file_builder(
                 index.dimension,
                 flat_index.vector_store_info.next_vector_id,
@@ -94,13 +95,11 @@ impl VectorWriterImpl {
         }
     }
 
-    #[expect(dead_code)]
     pub(crate) fn insert(&mut self, vec: Vector, info: Bytes) -> HummockResult<()> {
         self.vector_file_builder.add(vec.to_ref(), info.as_ref());
         Ok(())
     }
 
-    #[expect(dead_code)]
     pub(crate) fn seal_current_epoch(&mut self) -> Option<VectorIndexAdd> {
         assert!(self.vector_file_builder.is_empty());
         if self.flushed_vector_files.is_empty() {
@@ -114,9 +113,10 @@ impl VectorWriterImpl {
         }))
     }
 
-    #[expect(dead_code)]
     pub(crate) async fn flush(&mut self) -> HummockResult<usize> {
-        if let Some((file_info, _blocks, _meta)) = self.vector_file_builder.finish().await? {
+        if let Some((file_info, blocks, meta)) = self.vector_file_builder.finish().await? {
+            self.sstable_store
+                .insert_vector_cache(file_info.object_id, meta, blocks);
             let size = file_info.file_size as _;
             self.flushed_vector_files.push(file_info);
             Ok(size)
@@ -125,7 +125,6 @@ impl VectorWriterImpl {
         }
     }
 
-    #[expect(dead_code)]
     pub(crate) async fn try_flush(&mut self) -> HummockResult<()> {
         self.vector_file_builder.try_flush().await
     }

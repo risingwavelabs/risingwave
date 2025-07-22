@@ -41,7 +41,7 @@ impl LogSinker for BatchingLogSinker {
             /// Mark that the log consumer is not initialized yet
             Uninitialized,
 
-            /// Mark that a new epoch has begun, and store the max_uncommitted_epoch for cross-barrier batching.
+            /// Mark that a new epoch has begun, and store the `max_uncommitted_epoch` for cross-barrier batching.
             /// For example, suppose the current order is (chunk1, barrier1, chunk2, barrier2, chunk3), and the batching is not completed until chunk3,
             /// that is, barrier2 and its previous chunks are not truncated, the `max_uncommitted_epoch` is barrier2.
             /// When we truncate chunk3, we should first truncate barrier2, and then truncate chunk3.

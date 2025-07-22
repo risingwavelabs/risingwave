@@ -565,18 +565,6 @@ dependencies = [
     "prepare-config",
 ]
 
-[tasks.pre-start-benchmark]
-category = "RiseDev - Prepare"
-description = "Download necessary tools to deploy a benchmark env"
-dependencies = [
-    "download-minio",
-    "download-mcli",
-    "download-grafana",
-    "download-prometheus",
-    "download-tempo",
-    "download-redis",
-]
-
 [tasks.pre-start-playground]
 category = "RiseDev - Prepare"
 description = "Preparation steps for playground"
@@ -1411,9 +1399,10 @@ UPDATE_EXPECT=1 cargo test --package risingwave_common --lib -- config::tests::t
 [tasks.generate-with-options]
 private = true
 category = "Misc"
-description = "This command extracts WITH options from the Rust code and maintains them in a single source of truth `with_options.yaml`"
+description = "This command extracts WITH options from the Rust code and maintains them in a single source of truth `with_options.yaml` and generates changeable fields Rust code"
 script = '''
 UPDATE_EXPECT=1 cargo test -p risingwave_connector tests::test_with_options_yaml_up_to_date
+UPDATE_EXPECT=1 cargo test -p risingwave_connector tests::test_allow_alter_on_fly_fields_rust_up_to_date
 '''
 
 [tasks.backwards-compat-test]
@@ -1486,3 +1475,8 @@ eval "${COMMAND}"
 
 echo "Node ${NODE_NAME} restarted."
 '''
+
+[tasks.sql-bench]
+category = "RiseDev - Benchmark"
+description = "Run a local or remote sql benchmark on a RisingWave instance"
+script = "./develop/sql_bench/main.py $@"

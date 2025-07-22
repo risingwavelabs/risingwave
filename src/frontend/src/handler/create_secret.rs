@@ -71,7 +71,7 @@ pub async fn handle_create_secret(
 
 pub fn secret_to_str(value: &Value) -> Result<String> {
     match value {
-        Value::DoubleQuotedString(s) | Value::SingleQuotedString(s) => Ok(s.to_string()),
+        Value::DoubleQuotedString(s) | Value::SingleQuotedString(s) => Ok(s.clone()),
         _ => Err(ErrorCode::InvalidInputSyntax(
             "secret value should be quoted by ' or \" ".to_owned(),
         )

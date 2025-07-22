@@ -187,16 +187,15 @@ impl ExprRewriter for FilterArithmeticRewriter {
                 let inputs = func_call.inputs();
                 if inputs.len() == 2 {
                     // Check if left operand is an arithmetic expression and right operand is a constant
-                    if let ExprImpl::FunctionCall(left_func) = &inputs[0] {
-                        if inputs[1].is_const() {
-                            if let Some(simplified) = self.simplify_arithmetic_comparison(
-                                left_func,
-                                &inputs[1],
-                                func_call.func_type(),
-                            ) {
-                                return simplified;
-                            }
-                        }
+                    if let ExprImpl::FunctionCall(left_func) = &inputs[0]
+                        && inputs[1].is_const()
+                        && let Some(simplified) = self.simplify_arithmetic_comparison(
+                            left_func,
+                            &inputs[1],
+                            func_call.func_type(),
+                        )
+                    {
+                        return simplified;
                     }
                 }
             }

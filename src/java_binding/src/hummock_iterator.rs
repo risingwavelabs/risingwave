@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use bytes::Bytes;
-use foyer::{Engine, HybridCacheBuilder, LargeEngineOptions};
+use foyer::{CacheBuilder, Engine, HybridCacheBuilder, LargeEngineOptions};
 use futures::{TryFutureExt, TryStreamExt};
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
@@ -109,6 +109,8 @@ pub(crate) async fn new_hummock_java_binding_iter(
             use_new_object_prefix_strategy: read_plan.use_new_object_prefix_strategy,
             meta_cache,
             block_cache,
+            vector_meta_cache: CacheBuilder::new(1 << 10).build(),
+            vector_block_cache: CacheBuilder::new(1 << 10).build(),
         }));
         let reader = HummockVersionReader::new(
             sstable_store,

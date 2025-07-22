@@ -165,7 +165,7 @@ impl DorisSink {
                     i.name
                 ))
             })?;
-            if !Self::check_and_correct_column_type(&i.data_type, value.to_string())? {
+            if !Self::check_and_correct_column_type(&i.data_type, value.clone())? {
                 return Err(SinkError::Doris(format!(
                     "Column type don't match, column name is {:?}. doris type is {:?} risingwave type is {:?} ",
                     i.name, value, i.data_type

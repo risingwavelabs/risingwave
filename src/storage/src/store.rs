@@ -435,7 +435,7 @@ pub struct VectorNearestOptions {
     pub measure: DistanceMeasurement,
 }
 
-pub trait OnNearestItemFn<O> = OnNearestItem<O> + Send + 'static;
+pub trait OnNearestItemFn<O> = OnNearestItem<O> + Send + Sync + 'static;
 
 pub trait StateStoreReadVector: StaticSendSync {
     fn nearest<O: Send + 'static>(

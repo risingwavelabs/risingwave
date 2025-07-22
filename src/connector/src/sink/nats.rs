@@ -165,6 +165,7 @@ impl NatsSinkWriter {
 impl AsyncTruncateSinkWriter for NatsSinkWriter {
     type DeliveryFuture = NatsSinkDeliveryFuture;
 
+    #[define_opaque(NatsSinkDeliveryFuture)]
     async fn write_chunk<'a>(
         &'a mut self,
         chunk: StreamChunk,

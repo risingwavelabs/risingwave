@@ -650,6 +650,7 @@ mod await_epoch_completed_future {
     pub(super) type AwaitEpochCompletedFuture = impl Future<Output = (PartialGraphId, Barrier, StreamResult<BarrierCompleteResult>)>
         + 'static;
 
+    #[define_opaque(AwaitEpochCompletedFuture)]
     pub(super) fn instrument_complete_barrier_future(
         partial_graph_id: PartialGraphId,
         complete_barrier_future: Option<BoxFuture<'static, StreamResult<SyncResult>>>,

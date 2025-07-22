@@ -16,6 +16,7 @@ RUN apt-get update -yy && \
     python3.12 python3.12-dev \
     golang perl \
     dumb-init \
+    libblas-dev liblapack-dev libomp-dev \
     && rm -rf /var/lib/{apt,dpkg,cache,log}/
 ENV PYO3_PYTHON=python3.12
 
@@ -79,7 +80,7 @@ RUN cargo binstall -y --locked cargo-llvm-cov cargo-nextest cargo-sort cargo-cac
     && rm -rf "/root/.cargo/registry/cache" \
     && rm -rf "/root/.cargo/git/db" \
     && cargo uninstall cargo-cache
-RUN cargo install cargo-dylint@4.0.1 dylint-link@4.0.1
+RUN cargo install cargo-dylint@4.1.0 dylint-link@4.1.0
 
 # install risedev
 COPY <<EOF /root/.cargo/bin/risedev

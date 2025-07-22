@@ -20,6 +20,7 @@ use iceberg::table::Table;
 use iceberg::transaction::Transaction;
 use itertools::Itertools;
 use parking_lot::RwLock;
+use risingwave_common::bail;
 use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkId};
 use risingwave_connector::sink::iceberg::IcebergConfig;
@@ -297,12 +298,15 @@ impl IcebergCompactionManager {
     }
 
     pub async fn get_sink_param(&self, sink_id: &SinkId) -> MetaResult<SinkParam> {
-        let prost_sink_catalog: PbSink = self
+        let mut sinks = self
             .metadata_manager
             .catalog_controller
             .get_sink_by_ids(vec![sink_id.sink_id as i32])
-            .await?
-            .remove(0);
+            .await?;
+        if sinks.is_empty() {
+            bail!("Sink not found: {}", sink_id.sink_id);
+        }
+        let prost_sink_catalog: PbSink = sinks.remove(0);
         let sink_catalog = SinkCatalog::from(prost_sink_catalog);
         let param = SinkParam::try_from_sink_catalog(sink_catalog)?;
         Ok(param)

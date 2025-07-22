@@ -32,7 +32,17 @@ CREATE TABLE test (
     v20 time,
     v21 timestamp,
     v22 json,
-    v23 int
+    v23 int,
+    v24 bit(1),
+    v25 year,
+    v26 enum('a', 'b', 'c'),
+    v27 varbinary(10),
+    v28 text,
+    v29 tinytext,
+    v30 mediumtext,
+    v31 longtext,
+    v32 datetime,
+    v33 binary(4)
 );
 INSERT INTO test SELECT
   1 as id,
@@ -59,7 +69,17 @@ INSERT INTO test SELECT
   '12:34:56' as v20,
   '2021-01-01 12:34:56' as v21,
   JSON_OBJECT('key1', 1, 'key2', 'abc') as v22,
-  null as v23;
+  null as v23,
+  true as v24,
+  2023 as v25,
+  'b' as v26,
+  x'3132333435' as v27,
+  'text' as v28,
+  'tinytext' as v29,
+  'mediumtext' as v30,
+  'longtext' as v31,
+  '2021-01-01 12:34:56' as v32,
+  x'01020304' as v33;
 "
 
 statement ok
@@ -73,12 +93,12 @@ create source mysql_cdc_source with (
 query
 select * from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'tvf', 'select * from test;');
 ----
-1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL
+1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 b \x3132333435 \x74657874 \x74696e7974657874 \x6d656469756d74657874 \x6c6f6e6774657874 2021-01-01 12:34:56 \x01020304
 
 query
 select * from mysql_query('mysql_cdc_source', 'select * from test;');
 ----
-1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL
+1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 b \x3132333435 \x74657874 \x74696e7974657874 \x6d656469756d74657874 \x6c6f6e6774657874 2021-01-01 12:34:56 \x01020304
 
 
 system ok
@@ -110,7 +130,17 @@ INSERT INTO test SELECT
   '12:34:56' as v20,
   '0000-00-00' as v21,
   JSON_OBJECT('key1', 1, 'key2', 'abc') as v22,
-  null as v23;
+  null as v23,
+  false as v24,
+  2022 as v25,
+  'c' as v26,
+  x'6162636465' as v27,
+  'text2' as v28,
+  'tinytext2' as v29,
+  'mediumtext2' as v30,
+  'longtext2' as v31,
+  '2021-01-01 12:34:56' as v32,
+  x'05060708' as v33;
 "
 
 statement error db error: ERROR: Failed to run the query
@@ -150,8 +180,19 @@ create table test (
     v20 time,
     v21 timestamptz,
     v22 jsonb,
-    v23 int
-) with (
+    v23 int,
+    v24 bool,
+    v25 int,
+    v26 varchar,
+    v27 bytea,
+    v28 varchar,
+    v29 varchar,
+    v30 varchar,
+    v31 varchar,
+    v32 timestamp,
+    v33 bytea
+)
+with (
  connector = 'mysql-cdc',
  hostname = '$MYSQL_HOST',
  port = '$MYSQL_TCP_PORT',
@@ -166,8 +207,8 @@ sleep 5s
 query I
 select * from test order by id;
 ----
-1 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL
-2 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 NULL {"key1": 1, "key2": "abc"} NULL
+1 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 b \x3132333435 text tinytext mediumtext longtext 2021-01-01 12:34:56 \x01020304
+2 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 NULL {"key1": 1, "key2": "abc"} NULL f 2022 c \x6162636465 text2 tinytext2 mediumtext2 longtext2 2021-01-01 12:34:56 \x05060708
 
 system ok
 mysql -e "

@@ -14,10 +14,9 @@
 
 use std::sync::Arc;
 
-use risingwave_common::catalog::DatabaseId;
+use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::stream_plan::PbFragmentTypeFlag;
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
 
@@ -201,10 +200,9 @@ impl CommandContext {
                             .fill_snapshot_backfill_epoch(
                                 info.stream_job_fragments.fragments.iter().filter_map(
                                     |(fragment_id, fragment)| {
-                                        if (fragment.fragment_type_mask
-                                            & PbFragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32)
-                                            != 0
-                                        {
+                                        if fragment.fragment_type_mask.contains(
+                                            FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan,
+                                        ) {
                                             Some(*fragment_id as _)
                                         } else {
                                             None
@@ -223,10 +221,10 @@ impl CommandContext {
                             .fill_snapshot_backfill_epoch(
                                 info.stream_job_fragments.fragments.iter().filter_map(
                                     |(fragment_id, fragment)| {
-                                        if (fragment.fragment_type_mask
-                                            & (PbFragmentTypeFlag::SnapshotBackfillStreamScan as u32 | PbFragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32))
-                                            != 0
-                                        {
+                                        if fragment.fragment_type_mask.contains_any([
+                                            FragmentTypeFlag::SnapshotBackfillStreamScan,
+                                            FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan,
+                                        ]) {
                                             Some(*fragment_id as _)
                                         } else {
                                             None
@@ -257,13 +255,13 @@ impl CommandContext {
                         stream_job_fragments.actor_ids(),
                         upstream_fragment_downstreams,
                         init_split_assignment,
-                        streaming_job.is_materialized_view(),
+                        streaming_job.should_notify_creating(),
                     )
                     .await?;
 
                 let source_change = SourceChange::CreateJob {
                     added_source_fragments: stream_job_fragments.stream_source_fragments(),
-                    added_backfill_fragments: stream_job_fragments.source_backfill_fragments()?,
+                    added_backfill_fragments: stream_job_fragments.source_backfill_fragments(),
                     split_assignment: init_split_assignment.clone(),
                 };
 

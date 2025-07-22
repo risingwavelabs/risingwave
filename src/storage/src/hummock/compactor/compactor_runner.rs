@@ -300,15 +300,15 @@ pub fn partition_overlapping_sstable_infos(
     });
     for sst in origin_infos {
         // Pick group with the smallest right bound for every new sstable. So do not check the larger one if the smallest one does not meet condition.
-        if let Some(mut prev_group) = groups.peek_mut() {
-            if KeyComparator::encoded_full_key_less_than(
+        if let Some(mut prev_group) = groups.peek_mut()
+            && KeyComparator::encoded_full_key_less_than(
                 &prev_group.max_right_bound,
                 &sst.key_range.left,
-            ) {
-                prev_group.max_right_bound.clone_from(&sst.key_range.right);
-                prev_group.ssts.push(sst);
-                continue;
-            }
+            )
+        {
+            prev_group.max_right_bound.clone_from(&sst.key_range.right);
+            prev_group.ssts.push(sst);
+            continue;
         }
         groups.push(SstableGroup {
             max_right_bound: sst.key_range.right.clone(),

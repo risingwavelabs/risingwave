@@ -286,11 +286,10 @@ fn infer_struct_cast_target_type(
             } else if cast_ok(&r, &l, CastContext::Implicit) {
                 Ok((false, true, l))
             } else {
-                return Err(ErrorCode::BindError(format!(
-                    "cannot cast {} to {} or {} to {}",
-                    l, r, r, l
-                ))
-                .into());
+                Err(
+                    ErrorCode::BindError(format!("cannot cast {} to {} or {} to {}", l, r, r, l))
+                        .into(),
+                )
             }
         }
         (NestedType::Type(ty), NestedType::Infer(ity)) => {

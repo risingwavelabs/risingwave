@@ -15,7 +15,6 @@
 //! Handle creation of logical (non-materialized) views.
 
 use either::Either;
-use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::PbView;
@@ -103,16 +102,20 @@ pub async fn handle_create_view(
         name: view_name,
         properties,
         owner: session.user_id(),
-        dependent_relations: dependent_relations
-            .into_iter()
-            .map(|t| t.table_id)
-            .collect_vec(),
         sql: format!("{}", query),
         columns: columns.into_iter().map(|f| f.to_prost()).collect(),
     };
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.create_view(view).await?;
+    catalog_writer
+        .create_view(
+            view,
+            dependent_relations
+                .into_iter()
+                .map(|t| t.table_id)
+                .collect(),
+        )
+        .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_VIEW))
 }
