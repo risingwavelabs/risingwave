@@ -56,7 +56,7 @@ curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
      "$VAULT_ADDR/v1/secret/data/myapp/db"
 
 # Secret for database credentials
-# refer to `./ci/docker-compose.yml` message_queue_sasl_1 
+# refer to `./ci/docker-compose.yml` message_queue_sasl_1
 curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
      -H "Content-Type: application/json" \
      -X POST \
