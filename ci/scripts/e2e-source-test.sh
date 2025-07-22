@@ -43,7 +43,28 @@ export PATH="/opt/mssql-tools/bin/:$PATH"
 export SQLCMDSERVER=sqlserver-server SQLCMDUSER=SA SQLCMDPASSWORD="SomeTestOnly@SA" SQLCMDDBNAME=mydb SQLCMDPORT=1433
 
 echo "--- Setup HashiCorp Vault for testing"
+# Set vault environment variables, used in `ci/scripts/setup-vault.sh`
+export VAULT_ADDR="http://vault-server:8200"
+export VAULT_TOKEN="root-token"
 ./ci/scripts/setup-vault.sh
+# Get role ID and secret ID for testing
+ROLE_ID=$(curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
+               "$VAULT_ADDR/v1/auth/approle/role/test-role/role-id" | \
+               grep -o '"role_id":"[^"]*"' | cut -d'"' -f4)
+
+SECRET_ID=$(curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
+                 -X POST \
+                 "$VAULT_ADDR/v1/auth/approle/role/test-role/secret-id" | \
+                 grep -o '"secret_id":"[^"]*"' | cut -d'"' -f4)
+
+echo "Setup complete!"
+echo "Root token: root-token"
+echo "Test AppRole - Role ID: $ROLE_ID"
+echo "Test AppRole - Secret ID: $SECRET_ID"
+
+# Store these values in environment variables for tests to use
+export VAULT_TEST_ROLE_ID="$ROLE_ID"
+export VAULT_TEST_SECRET_ID="$SECRET_ID"
 
 echo "--- e2e, inline test"
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_meta=info" \

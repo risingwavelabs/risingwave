@@ -22,6 +22,7 @@ use reqwest::Client;
 use risingwave_pb::secret;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use serde_with::{DisplayFromStr, serde_as};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct TokenCacheKey {
@@ -44,6 +45,7 @@ static GLOBAL_VAULT_TOKEN_CACHE: LazyLock<MokaCache<TokenCacheKey, CachedToken>>
             .build()
     });
 
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HashiCorpVaultConfig {
     pub addr: String,
@@ -53,6 +55,7 @@ pub struct HashiCorpVaultConfig {
     #[serde(flatten)]
     pub auth: HashiCorpVaultAuth,
     #[serde(default)]
+    #[serde_as(as = "DisplayFromStr")]
     pub tls_skip_verify: bool,
 }
 
@@ -351,6 +354,70 @@ impl HashiCorpVaultClient {
 
                 Ok(token)
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn test_hashicorp_vault_config_token_auth_full() {
+        let json_config = json!({
+            "addr": "https://vault.example.com",
+            "path": "secret/data/myapp",
+            "field": "api_key",
+            "auth_method": "token",
+            "auth_token": "hvs.123abc",
+            "tls_skip_verify": "true"
+        });
+
+        let config: HashiCorpVaultConfig = serde_json::from_value(json_config).unwrap();
+
+        assert_eq!(config.addr, "https://vault.example.com");
+        assert_eq!(config.path, "secret/data/myapp");
+        assert_eq!(config.field, "api_key");
+        assert_eq!(config.tls_skip_verify, true);
+
+        match config.auth {
+            HashiCorpVaultAuth::Token { auth_token } => {
+                assert_eq!(auth_token, "hvs.123abc");
+            }
+            _ => panic!("Expected Token auth method"),
+        }
+    }
+
+    #[test]
+    fn test_hashicorp_vault_config_approle_auth_full() {
+        let json_config = json!({
+            "addr": "https://vault.example.com",
+            "path": "secret/data/myapp",
+            "field": "password",
+            "auth_method": "approle",
+            "auth_role_id": "role123",
+            "auth_secret_id": "secret456",
+            "tls_skip_verify": "false"
+        });
+
+        let config: HashiCorpVaultConfig = serde_json::from_value(json_config).unwrap();
+
+        assert_eq!(config.addr, "https://vault.example.com");
+        assert_eq!(config.path, "secret/data/myapp");
+        assert_eq!(config.field, "password");
+        assert_eq!(config.tls_skip_verify, false);
+
+        match config.auth {
+            HashiCorpVaultAuth::AppRole {
+                auth_role_id,
+                auth_secret_id,
+            } => {
+                assert_eq!(auth_role_id, "role123");
+                assert_eq!(auth_secret_id, "secret456");
+            }
+            _ => panic!("Expected AppRole auth method"),
         }
     }
 }
