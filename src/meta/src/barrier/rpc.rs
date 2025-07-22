@@ -31,7 +31,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_connector::source::SplitImpl;
 use risingwave_connector::source::cdc::{
-    CdcTableSnapshotSplitAssignment, build_pb_actor_cdc_table_snapshot_splits,
+    CdcTableSnapshotSplitAssignmentWithGeneration, build_pb_actor_cdc_table_snapshot_splits,
 };
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{HostAddress, WorkerNode};
@@ -472,7 +472,7 @@ impl ControlStreamManager {
         mut subscription_info: InflightSubscriptionInfo,
         is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
-        cdc_table_snapshot_split_assignment: &mut CdcTableSnapshotSplitAssignment,
+        cdc_table_snapshot_split_assignment: &mut CdcTableSnapshotSplitAssignmentWithGeneration,
     ) -> MetaResult<DatabaseInitialBarrierCollector> {
         self.add_partial_graph(database_id, None);
         let source_split_assignments = jobs
@@ -493,10 +493,16 @@ impl ControlStreamManager {
             .filter_map(|actor_id| {
                 let actor_id = *actor_id as ActorId;
                 cdc_table_snapshot_split_assignment
+                    .splits
                     .remove(&actor_id)
                     .map(|splits| (actor_id, splits))
             })
             .collect();
+        let database_cdc_table_snapshot_split_assignment =
+            CdcTableSnapshotSplitAssignmentWithGeneration::new(
+                database_cdc_table_snapshot_split_assignment,
+                cdc_table_snapshot_split_assignment.generation,
+            );
         let mutation = Mutation::Add(AddMutation {
             // Actors built during recovery is not treated as newly added actors.
             actor_dispatchers: Default::default(),
@@ -504,7 +510,8 @@ impl ControlStreamManager {
             actor_splits: build_actor_connector_splits(&source_split_assignments),
             actor_cdc_table_snapshot_splits: build_pb_actor_cdc_table_snapshot_splits(
                 database_cdc_table_snapshot_split_assignment,
-            ),
+            )
+            .into(),
             pause: is_paused,
             subscriptions_to_add: Default::default(),
             // TODO(kwannoel): recover using backfill order plan

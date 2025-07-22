@@ -49,7 +49,7 @@ mod utils;
 mod worker;
 
 pub use backfill_order_control::{BackfillNode, BackfillOrderState};
-use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignment;
+use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 
 pub use self::command::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
@@ -126,7 +126,7 @@ struct BarrierWorkerRuntimeInfoSnapshot {
     background_jobs: HashMap<TableId, (String, StreamJobFragments)>,
     hummock_version_stats: HummockVersionStats,
     database_infos: Vec<Database>,
-    cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignment,
+    cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignmentWithGeneration,
 }
 
 impl BarrierWorkerRuntimeInfoSnapshot {
@@ -225,7 +225,7 @@ struct DatabaseRuntimeInfoSnapshot {
     fragment_relations: FragmentDownstreamRelation,
     source_splits: HashMap<ActorId, Vec<SplitImpl>>,
     background_jobs: HashMap<TableId, (String, StreamJobFragments)>,
-    cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignment,
+    cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignmentWithGeneration,
 }
 
 impl DatabaseRuntimeInfoSnapshot {

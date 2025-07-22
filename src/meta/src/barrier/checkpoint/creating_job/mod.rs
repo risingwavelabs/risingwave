@@ -143,7 +143,8 @@ impl CreatingStreamingJobControl {
             backfill_nodes_to_pause,
             actor_cdc_table_snapshot_splits: build_pb_actor_cdc_table_snapshot_splits(
                 info.cdc_table_snapshot_split_assignment.clone(),
-            ),
+            )
+            .into(),
         });
 
         control_stream_manager.add_partial_graph(database_id, Some(job_id));

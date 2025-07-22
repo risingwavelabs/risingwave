@@ -137,8 +137,8 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             assert!(upstream_chunk_buffer.is_empty());
             let reset_barrier = next_reset_barrier.take().unwrap();
             let all_snapshot_splits = match reset_barrier.mutation.as_deref() {
-                Some(Mutation::Add(add)) => &add.actor_cdc_table_snapshot_splits,
-                Some(Mutation::Update(update)) => &update.actor_cdc_table_snapshot_splits,
+                Some(Mutation::Add(add)) => &add.actor_cdc_table_snapshot_splits.splits,
+                Some(Mutation::Update(update)) => &update.actor_cdc_table_snapshot_splits.splits,
                 _ => {
                     return Err(anyhow::anyhow!("ParallelizedCdcBackfillExecutor expects either Mutation::Add or Mutation::Update to initialize CDC table snapshot splits.").into());
                 }
@@ -667,6 +667,7 @@ fn is_reset_barrier(barrier: &Barrier, actor_id: ActorId) -> bool {
     match barrier.mutation.as_deref() {
         Some(Mutation::Update(update)) => update
             .actor_cdc_table_snapshot_splits
+            .splits
             .contains_key(&actor_id),
         _ => false,
     }

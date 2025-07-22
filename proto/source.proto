@@ -19,6 +19,11 @@ message SourceActorInfo {
   ConnectorSplits splits = 2;
 }
 
+message CdcTableSnapshotSplitsWithGeneration {
+  map<uint32, CdcTableSnapshotSplits> splits = 1;
+  uint64 generation = 2;
+}
+
 message CdcTableSnapshotSplits {
   repeated CdcTableSnapshotSplit splits = 1;
 }

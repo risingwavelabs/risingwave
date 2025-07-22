@@ -23,6 +23,7 @@ use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::{CreateType, Subscription, Table};
 use risingwave_pb::meta::object::PbObjectInfo;
@@ -470,6 +471,12 @@ impl GlobalStreamManager {
             self.env.meta_store_ref(),
         )
         .await?;
+        // TODO(zw): !!!
+        let cdc_table_snapshot_split_assignment =
+            CdcTableSnapshotSplitAssignmentWithGeneration::new(
+                cdc_table_snapshot_split_assignment,
+                0,
+            );
 
         let source_change = SourceChange::CreateJobFinished {
             finished_backfill_fragments: stream_job_fragments.source_backfill_fragments(),

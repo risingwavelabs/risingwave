@@ -27,7 +27,9 @@ use risingwave_pb::catalog::PbSource;
 use risingwave_pb::connector_service::{PbSourceType, PbTableSchema, SourceType, TableSchema};
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
-use risingwave_pb::source::{PbCdcTableSnapshotSplit, PbCdcTableSnapshotSplits};
+use risingwave_pb::source::{
+    PbCdcTableSnapshotSplit, PbCdcTableSnapshotSplits, PbCdcTableSnapshotSplitsWithGeneration,
+};
 use risingwave_pb::stream_plan::StreamCdcScanOptions;
 use simd_json::prelude::ArrayTrait;
 pub use source::*;
@@ -238,10 +240,23 @@ impl<T: CdcSourceTypeTrait> CdcProperties<T> {
 
 pub type CdcTableSnapshotSplitAssignment = HashMap<u32, Vec<CdcTableSnapshotSplitRaw>>;
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct CdcTableSnapshotSplitAssignmentWithGeneration {
+    pub splits: HashMap<u32, Vec<CdcTableSnapshotSplitRaw>>,
+    pub generation: u64,
+}
+
+impl CdcTableSnapshotSplitAssignmentWithGeneration {
+    pub fn new(splits: HashMap<u32, Vec<CdcTableSnapshotSplitRaw>>, generation: u64) -> Self {
+        Self { splits, generation }
+    }
+}
+
 pub fn build_pb_actor_cdc_table_snapshot_splits(
-    cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignment,
-) -> HashMap<u32, PbCdcTableSnapshotSplits> {
-    cdc_table_snapshot_split_assignment
+    cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignmentWithGeneration,
+) -> PbCdcTableSnapshotSplitsWithGeneration {
+    let splits = cdc_table_snapshot_split_assignment
+        .splits
         .into_iter()
         .map(|(actor_id, splits)| {
             let splits = PbCdcTableSnapshotSplits {
@@ -256,13 +271,18 @@ pub fn build_pb_actor_cdc_table_snapshot_splits(
             };
             (actor_id, splits)
         })
-        .collect()
+        .collect();
+    PbCdcTableSnapshotSplitsWithGeneration {
+        splits,
+        generation: cdc_table_snapshot_split_assignment.generation,
+    }
 }
 
 pub fn build_actor_cdc_table_snapshot_splits(
-    pb_cdc_table_snapshot_split_assignment: HashMap<u32, PbCdcTableSnapshotSplits>,
-) -> CdcTableSnapshotSplitAssignment {
-    pb_cdc_table_snapshot_split_assignment
+    pb_cdc_table_snapshot_split_assignment: PbCdcTableSnapshotSplitsWithGeneration,
+) -> CdcTableSnapshotSplitAssignmentWithGeneration {
+    let splits = pb_cdc_table_snapshot_split_assignment
+        .splits
         .into_iter()
         .map(|(actor_id, splits)| {
             let splits = splits
@@ -276,7 +296,9 @@ pub fn build_actor_cdc_table_snapshot_splits(
                 .collect();
             (actor_id, splits)
         })
-        .collect()
+        .collect();
+    let generation = pb_cdc_table_snapshot_split_assignment.generation;
+    CdcTableSnapshotSplitAssignmentWithGeneration { splits, generation }
 }
 
 #[derive(Debug, Clone, Hash, PartialEq)]

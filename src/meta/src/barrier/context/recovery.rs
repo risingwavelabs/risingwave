@@ -23,6 +23,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
+use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_meta_model::StreamingParallelism;
 use thiserror_ext::AsReport;
@@ -455,6 +456,12 @@ impl GlobalBarrierWorkerContextImpl {
                             self.env.meta_store_ref(),
                         )
                         .await?;
+                    // TODO(zw): !!!
+                    let cdc_table_snapshot_split_assignment =
+                        CdcTableSnapshotSplitAssignmentWithGeneration::new(
+                            cdc_table_snapshot_split_assignment,
+                            0,
+                        );
                     Ok(BarrierWorkerRuntimeInfoSnapshot {
                         active_streaming_nodes,
                         database_job_infos: info,
@@ -596,6 +603,12 @@ impl GlobalBarrierWorkerContextImpl {
             self.env.meta_store_ref(),
         )
         .await?;
+        // TODO(zw): !!!
+        let cdc_table_snapshot_split_assignment =
+            CdcTableSnapshotSplitAssignmentWithGeneration::new(
+                cdc_table_snapshot_split_assignment,
+                0,
+            );
         Ok(Some(DatabaseRuntimeInfoSnapshot {
             job_infos: info,
             state_table_committed_epochs,

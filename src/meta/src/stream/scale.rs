@@ -85,6 +85,7 @@ use futures::future::try_join_all;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
+use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 use risingwave_meta_model::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
@@ -1372,6 +1373,12 @@ impl ScaleController {
             } else {
                 HashMap::default()
             };
+            // TODO(zw): !!!
+            let cdc_table_snapshot_split_assignment =
+                CdcTableSnapshotSplitAssignmentWithGeneration::new(
+                    cdc_table_snapshot_split_assignment,
+                    0,
+                );
 
             reschedule_fragment.insert(
                 fragment_id,
