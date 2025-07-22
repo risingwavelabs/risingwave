@@ -853,6 +853,10 @@ mod tests {
         ) -> MetaResult<Option<crate::barrier::DatabaseRuntimeInfoSnapshot>> {
             unimplemented!()
         }
+
+        fn handle_load_finished_source_ids(&self, _load_finished_source_ids: Vec<u32>) {
+            unimplemented!()
+        }
     }
 
     #[tokio::test]

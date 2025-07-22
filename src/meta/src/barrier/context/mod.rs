@@ -30,8 +30,8 @@ use crate::barrier::command::CommandContext;
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::{MarkReadyOptions, ScheduledBarriers};
 use crate::barrier::{
-    BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, DatabaseRuntimeInfoSnapshot,
-    RecoveryReason, Scheduled,
+    BarrierManagerStatus, BarrierScheduler, BarrierWorkerRuntimeInfoSnapshot,
+    DatabaseRuntimeInfoSnapshot, RecoveryReason, Scheduled,
 };
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::{MetaSrvEnv, MetadataManager};
@@ -75,6 +75,8 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         &self,
         database_id: DatabaseId,
     ) -> MetaResult<Option<DatabaseRuntimeInfoSnapshot>>;
+
+    fn handle_load_finished_source_ids(&self, load_finished_source_ids: Vec<u32>);
 }
 
 pub(super) struct GlobalBarrierWorkerContextImpl {
@@ -91,6 +93,9 @@ pub(super) struct GlobalBarrierWorkerContextImpl {
     scale_controller: ScaleControllerRef,
 
     pub(super) env: MetaSrvEnv,
+
+    /// Barrier scheduler for scheduling load finish commands
+    barrier_scheduler: BarrierScheduler,
 }
 
 impl GlobalBarrierWorkerContextImpl {
@@ -102,6 +107,7 @@ impl GlobalBarrierWorkerContextImpl {
         source_manager: SourceManagerRef,
         scale_controller: ScaleControllerRef,
         env: MetaSrvEnv,
+        barrier_scheduler: BarrierScheduler,
     ) -> Self {
         Self {
             scheduled_barriers,
@@ -111,6 +117,7 @@ impl GlobalBarrierWorkerContextImpl {
             source_manager,
             scale_controller,
             env,
+            barrier_scheduler,
         }
     }
 

@@ -673,9 +673,14 @@ impl CommandContext {
         info: &mut CommitEpochInfo,
         resps: Vec<BarrierCompleteResponse>,
         backfill_pinned_log_epoch: HashMap<TableId, (u64, HashSet<TableId>)>,
-    ) {
-        let (sst_to_context, synced_ssts, new_table_watermarks, old_value_ssts) =
-            collect_resp_info(resps);
+    ) -> Vec<u32> {
+        let (
+            sst_to_context,
+            synced_ssts,
+            new_table_watermarks,
+            old_value_ssts,
+            load_finished_source_ids,
+        ) = collect_resp_info(resps);
 
         let new_table_fragment_infos =
             if let Some(Command::CreateStreamingJob { info, job_type, .. }) = &self.command
@@ -747,6 +752,17 @@ impl CommandContext {
         info.new_table_fragment_infos
             .extend(new_table_fragment_infos);
         info.change_log_delta.extend(table_new_change_log);
+
+        // Handle load finished source IDs for refreshable batch sources
+        if !load_finished_source_ids.is_empty() {
+            tracing::info!(
+                "Received load finished source IDs: {:?}",
+                load_finished_source_ids
+            );
+        }
+
+        // Return load_finished_source_ids for the caller to handle
+        load_finished_source_ids
     }
 }
 
