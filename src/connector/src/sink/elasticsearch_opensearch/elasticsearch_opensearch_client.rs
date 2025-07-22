@@ -195,6 +195,7 @@ pub type ElasticSearchOpenSearchSinkDeliveryFuture =
 impl AsyncTruncateSinkWriter for ElasticSearchOpenSearchSinkWriter {
     type DeliveryFuture = ElasticSearchOpenSearchSinkDeliveryFuture;
 
+    #[define_opaque(ElasticSearchOpenSearchSinkDeliveryFuture)]
     async fn write_chunk<'a>(
         &'a mut self,
         chunk: StreamChunk,

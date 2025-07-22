@@ -12,15 +12,4 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use tokio_retry::Condition;
-
-use crate::hummock::error::Error;
-
-#[derive(Default)]
-pub struct RetryableError {}
-
-impl Condition<Error> for RetryableError {
-    fn should_retry(&mut self, error: &Error) -> bool {
-        error.retryable()
-    }
-}
+mod worker_crash_no_early_commit;

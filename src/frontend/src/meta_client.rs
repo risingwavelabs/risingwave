@@ -41,7 +41,7 @@ use risingwave_pb::secret::PbSecretRef;
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
-use crate::catalog::DatabaseId;
+use crate::catalog::{DatabaseId, SinkId};
 
 /// A wrapper around the `MetaClient` that only provides a minor set of meta rpc.
 /// Most of the rpc to meta are delegated by other separate structs like `CatalogWriter`,
@@ -97,7 +97,7 @@ pub trait FrontendMetaClient: Send + Sync {
         include_dropped_table: bool,
     ) -> Result<HashMap<u32, Table>>;
 
-    /// Returns vector of (worker_id, min_pinned_version_id)
+    /// Returns vector of (`worker_id`, `min_pinned_version_id`)
     async fn list_hummock_pinned_versions(&self) -> Result<Vec<(u32, u64)>>;
 
     async fn get_hummock_current_version(&self) -> Result<HummockVersion>;
@@ -159,6 +159,8 @@ pub trait FrontendMetaClient: Send + Sync {
     fn worker_id(&self) -> u32;
 
     async fn set_sync_log_store_aligned(&self, job_id: u32, aligned: bool) -> Result<()>;
+
+    async fn compact_iceberg_table(&self, sink_id: SinkId) -> Result<u64>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -395,5 +397,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn set_sync_log_store_aligned(&self, job_id: u32, aligned: bool) -> Result<()> {
         self.0.set_sync_log_store_aligned(job_id, aligned).await
+    }
+
+    async fn compact_iceberg_table(&self, sink_id: SinkId) -> Result<u64> {
+        self.0.compact_iceberg_table(sink_id).await
     }
 }

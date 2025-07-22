@@ -34,7 +34,7 @@ pub async fn handle_rename_table(
     let session = handler_args.session;
     let db_name = &session.database();
     let (schema_name, real_table_name) =
-        Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
+        Binder::resolve_schema_qualified_name(db_name, &table_name)?;
     let new_table_name = Binder::resolve_table_name(new_table_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
@@ -81,7 +81,7 @@ pub async fn handle_rename_index(
     let session = handler_args.session;
     let db_name = &session.database();
     let (schema_name, real_index_name) =
-        Binder::resolve_schema_qualified_name(db_name, index_name.clone())?;
+        Binder::resolve_schema_qualified_name(db_name, &index_name)?;
     let new_index_name = Binder::resolve_index_name(new_index_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
@@ -114,8 +114,7 @@ pub async fn handle_rename_view(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let db_name = &session.database();
-    let (schema_name, real_view_name) =
-        Binder::resolve_schema_qualified_name(db_name, view_name.clone())?;
+    let (schema_name, real_view_name) = Binder::resolve_schema_qualified_name(db_name, &view_name)?;
     let new_view_name = Binder::resolve_view_name(new_view_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
@@ -144,8 +143,7 @@ pub async fn handle_rename_sink(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let db_name = &session.database();
-    let (schema_name, real_sink_name) =
-        Binder::resolve_schema_qualified_name(db_name, sink_name.clone())?;
+    let (schema_name, real_sink_name) = Binder::resolve_schema_qualified_name(db_name, &sink_name)?;
     let new_sink_name = Binder::resolve_sink_name(new_sink_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
@@ -154,7 +152,8 @@ pub async fn handle_rename_sink(
 
     let sink_id = {
         let reader = session.env().catalog_reader().read_guard();
-        let (sink, schema_name) = reader.get_sink_by_name(db_name, schema_path, &real_sink_name)?;
+        let (sink, schema_name) =
+            reader.get_created_sink_by_name(db_name, schema_path, &real_sink_name)?;
         session.check_privilege_for_drop_alter(schema_name, &**sink)?;
         sink.id
     };
@@ -178,7 +177,7 @@ pub async fn handle_rename_subscription(
     let session = handler_args.session;
     let db_name = &session.database();
     let (schema_name, real_subscription_name) =
-        Binder::resolve_schema_qualified_name(db_name, subscription_name.clone())?;
+        Binder::resolve_schema_qualified_name(db_name, &subscription_name)?;
     let new_subscription_name = Binder::resolve_subscription_name(new_subscription_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
@@ -212,7 +211,7 @@ pub async fn handle_rename_source(
     let session = handler_args.session;
     let db_name = &session.database();
     let (schema_name, real_source_name) =
-        Binder::resolve_schema_qualified_name(db_name, source_name.clone())?;
+        Binder::resolve_schema_qualified_name(db_name, &source_name)?;
     let new_source_name = Binder::resolve_source_name(new_source_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();

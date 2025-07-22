@@ -27,11 +27,11 @@ use tokio_retry::Retry;
 use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use with_options::WithOptions;
 
+use super::SinkWriterParam;
 use super::encoder::{
     DateHandlingMode, JsonbHandlingMode, TimeHandlingMode, TimestamptzHandlingMode,
 };
 use super::utils::chunk_to_json;
-use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::connector_common::NatsCommon;
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
@@ -112,7 +112,6 @@ impl TryFrom<SinkParam> for NatsSink {
 }
 
 impl Sink for NatsSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = AsyncTruncateLogSinkerOf<NatsSinkWriter>;
 
     const SINK_NAME: &'static str = NATS_SINK;
@@ -165,6 +164,7 @@ impl NatsSinkWriter {
 impl AsyncTruncateSinkWriter for NatsSinkWriter {
     type DeliveryFuture = NatsSinkDeliveryFuture;
 
+    #[define_opaque(NatsSinkDeliveryFuture)]
     async fn write_chunk<'a>(
         &'a mut self,
         chunk: StreamChunk,

@@ -26,7 +26,9 @@ use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
 };
-use risingwave_pb::ddl_service::replace_job_plan::{ReplaceJob, ReplaceSource, ReplaceTable};
+use risingwave_pb::ddl_service::replace_job_plan::{
+    ReplaceJob, ReplaceMaterializedView, ReplaceSource, ReplaceTable,
+};
 use risingwave_pb::ddl_service::{
     PbReplaceJobPlan, PbTableJobType, ReplaceJobPlan, TableJobType, WaitVersion,
     alter_name_request, alter_owner_request, alter_set_schema_request, alter_swap_rename_request,
@@ -83,7 +85,7 @@ pub trait CatalogWriter: Send + Sync {
         owner: UserId,
     ) -> Result<()>;
 
-    async fn create_view(&self, view: PbView) -> Result<()>;
+    async fn create_view(&self, view: PbView, dependencies: HashSet<ObjectId>) -> Result<()>;
 
     async fn create_materialized_view(
         &self,
@@ -107,6 +109,7 @@ pub trait CatalogWriter: Send + Sync {
         graph: StreamFragmentGraph,
         job_type: PbTableJobType,
         if_not_exists: bool,
+        dependencies: HashSet<ObjectId>,
     ) -> Result<()>;
 
     async fn replace_table(
@@ -335,11 +338,19 @@ impl CatalogWriter for CatalogWriterImpl {
         notice_to_user(format!("table: {table:#?}"));
         notice_to_user(format!("graph: {graph:#?}"));
 
-        Ok(())
+        let version = self
+            .meta_client
+            .replace_job(
+                graph,
+                ReplaceJob::ReplaceMaterializedView(ReplaceMaterializedView { table: Some(table) }),
+            )
+            .await?;
+
+        self.wait_version(version).await
     }
 
-    async fn create_view(&self, view: PbView) -> Result<()> {
-        let version = self.meta_client.create_view(view).await?;
+    async fn create_view(&self, view: PbView, dependencies: HashSet<ObjectId>) -> Result<()> {
+        let version = self.meta_client.create_view(view, dependencies).await?;
         self.wait_version(version).await
     }
 
@@ -364,10 +375,11 @@ impl CatalogWriter for CatalogWriterImpl {
         graph: StreamFragmentGraph,
         job_type: PbTableJobType,
         if_not_exists: bool,
+        dependencies: HashSet<ObjectId>,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .create_table(source, table, graph, job_type, if_not_exists)
+            .create_table(source, table, graph, job_type, if_not_exists, dependencies)
             .await?;
         self.wait_version(version).await
     }

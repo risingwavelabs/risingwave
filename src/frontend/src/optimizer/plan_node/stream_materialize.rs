@@ -15,7 +15,6 @@
 use std::assert_matches::assert_matches;
 use std::num::NonZeroU32;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{
@@ -35,6 +34,7 @@ use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode, reorganize_e
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::catalog::{DatabaseId, SchemaId};
 use crate::error::Result;
+use crate::optimizer::StreamOptimizedLogicalPlanRoot;
 use crate::optimizer::plan_node::derive::derive_pk;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::plan_can_use_background_ddl;
@@ -74,14 +74,17 @@ impl StreamMaterialize {
     /// using `user_distributed_by`.
     #[allow(clippy::too_many_arguments)]
     pub fn create(
-        input: PlanRef,
+        StreamOptimizedLogicalPlanRoot {
+            plan: input,
+            required_dist: user_distributed_by,
+            required_order: user_order_by,
+            out_fields: user_cols,
+            out_names,
+            ..
+        }: StreamOptimizedLogicalPlanRoot,
         name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
-        user_distributed_by: RequiredDist,
-        user_order_by: Order,
-        user_cols: FixedBitSet,
-        out_names: Vec<String>,
         definition: String,
         table_type: TableType,
         cardinality: Cardinality,
@@ -275,7 +278,6 @@ impl StreamMaterialize {
             database_id,
             associated_source_id: None,
             name,
-            dependent_relations: vec![],
             columns,
             pk: table_pk,
             stream_key,

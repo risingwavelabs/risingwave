@@ -128,12 +128,13 @@ pub struct IcebergConfig {
     /// Commit every n(>0) checkpoints, default is 10.
     #[serde(default = "default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub commit_checkpoint_interval: u64,
 
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,
 
-    /// Whether it is exactly_once, the default is not.
+    /// Whether it is `exactly_once`, the default is not.
     #[serde(default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub is_exactly_once: Option<bool>,
@@ -146,15 +147,18 @@ pub struct IcebergConfig {
 
     /// Whether to enable iceberg compaction.
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    #[with_option(allow_alter_on_fly)]
     pub enable_compaction: bool,
 
     /// The interval of iceberg compaction
     #[serde(default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub compaction_interval_sec: Option<u64>,
 
     /// Whether to enable iceberg expired snapshots.
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    #[with_option(allow_alter_on_fly)]
     pub enable_snapshot_expiration: bool,
 }
 
@@ -213,7 +217,7 @@ impl IcebergConfig {
                     && k != &"catalog.type"
                     && k != &"catalog.name"
             })
-            .map(|(k, v)| (k[8..].to_string(), v.to_string()))
+            .map(|(k, v)| (k[8..].to_string(), v.clone()))
             .collect();
 
         if config.commit_checkpoint_interval == 0 {
@@ -488,12 +492,6 @@ impl Sink for IcebergSink {
     type Coordinator = IcebergSinkCommitter;
     type LogSinker = CoordinatedLogSinker<IcebergSinkWriter>;
 
-    const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &[
-        "commit_checkpoint_interval",
-        "enable_compaction",
-        "compaction_interval_sec",
-        "enable_snapshot_expiration",
-    ];
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
     async fn validate(&self) -> Result<()> {
@@ -723,8 +721,17 @@ impl IcebergSinkWriter {
         // To avoid duplicate file name, each time the sink created will generate a unique uuid as file name suffix.
         let unique_uuid_suffix = Uuid::now_v7();
 
+        let parquet_writer_properties = WriterProperties::builder()
+            .set_max_row_group_size(
+                writer_param
+                    .streaming_config
+                    .developer
+                    .iceberg_sink_write_parquet_max_row_group_rows,
+            )
+            .build();
+
         let parquet_writer_builder = ParquetWriterBuilder::new(
-            WriterProperties::new(),
+            parquet_writer_properties,
             schema.clone(),
             table.file_io().clone(),
             DefaultLocationGenerator::new(table.metadata().clone())
@@ -862,9 +869,18 @@ impl IcebergSinkWriter {
         // To avoid duplicate file name, each time the sink created will generate a unique uuid as file name suffix.
         let unique_uuid_suffix = Uuid::now_v7();
 
+        let parquet_writer_properties = WriterProperties::builder()
+            .set_max_row_group_size(
+                writer_param
+                    .streaming_config
+                    .developer
+                    .iceberg_sink_write_parquet_max_row_group_rows,
+            )
+            .build();
+
         let data_file_builder = {
             let parquet_writer_builder = ParquetWriterBuilder::new(
-                WriterProperties::new(),
+                parquet_writer_properties.clone(),
                 schema.clone(),
                 table.file_io().clone(),
                 DefaultLocationGenerator::new(table.metadata().clone())
@@ -883,7 +899,7 @@ impl IcebergSinkWriter {
         };
         let position_delete_builder = {
             let parquet_writer_builder = ParquetWriterBuilder::new(
-                WriterProperties::new(),
+                parquet_writer_properties.clone(),
                 POSITION_DELETE_SCHEMA.clone(),
                 table.file_io().clone(),
                 DefaultLocationGenerator::new(table.metadata().clone())
@@ -916,7 +932,7 @@ impl IcebergSinkWriter {
             )
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
             let parquet_writer_builder = ParquetWriterBuilder::new(
-                WriterProperties::new(),
+                parquet_writer_properties.clone(),
                 Arc::new(
                     arrow_schema_to_schema(config.projected_arrow_schema_ref())
                         .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,

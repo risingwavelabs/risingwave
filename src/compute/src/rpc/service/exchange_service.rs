@@ -73,6 +73,7 @@ impl ExchangeService for ExchangeServiceImpl {
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 
+    #[define_opaque(StreamDataStream)]
     async fn get_stream(
         &self,
         request: Request<Streaming<GetStreamRequest>>,

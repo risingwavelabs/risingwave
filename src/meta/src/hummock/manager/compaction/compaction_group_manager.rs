@@ -845,7 +845,7 @@ mod tests {
 
         // Test unregister_table_fragments
         compaction_group_manager
-            .unregister_table_fragments_vec(&[table_fragment_1.clone()])
+            .unregister_table_fragments_vec(std::slice::from_ref(&table_fragment_1))
             .await;
         assert_eq!(registered_number().await, 4);
 

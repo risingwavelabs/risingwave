@@ -35,6 +35,7 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::{
     PkPrefixTableWatermarksIndex, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
+use risingwave_hummock_sdk::vector_index::VectorIndexImpl;
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::LevelType;
 use sync_point::sync_point;
@@ -65,7 +66,10 @@ use crate::mem_table::{
 use crate::monitor::{
     GetLocalMetricsGuard, HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic,
 };
-use crate::store::{ReadLogOptions, ReadOptions, gen_min_epoch};
+use crate::store::{
+    OnNearestItemFn, ReadLogOptions, ReadOptions, Vector, VectorNearestOptions, gen_min_epoch,
+};
+use crate::vector::{MeasureDistanceBuilder, NearestBuilder};
 
 pub type CommittedVersion = PinnedVersion;
 
@@ -944,15 +948,15 @@ impl HummockVersionReader {
                 .sstable(sstable_info, local_stats)
                 .await?;
 
-            if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
-                if !hit_sstable_bloom_filter(
+            if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref()
+                && !hit_sstable_bloom_filter(
                     &table_holder,
                     &user_key_range_ref,
                     *prefix_hash,
                     local_stats,
-                ) {
-                    continue;
-                }
+                )
+            {
+                continue;
             }
 
             staging_sst_iter_count += 1;
@@ -997,15 +1001,15 @@ impl HummockVersionReader {
                         .sstable(&sstable_infos[0], local_stats)
                         .await?;
 
-                    if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
-                        if !hit_sstable_bloom_filter(
+                    if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref()
+                        && !hit_sstable_bloom_filter(
                             &sstable,
                             &user_key_range_ref,
                             *dist_hash,
                             local_stats,
-                        ) {
-                            continue;
-                        }
+                        )
+                    {
+                        continue;
                     }
                     // Since there is only one sst to be included for the current non-overlapping
                     // level, there is no need to create a ConcatIterator on it.
@@ -1034,15 +1038,15 @@ impl HummockVersionReader {
                         .sstable(sstable_info, local_stats)
                         .await?;
                     assert_eq!(sstable_info.object_id, sstable.id);
-                    if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
-                        if !hit_sstable_bloom_filter(
+                    if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref()
+                        && !hit_sstable_bloom_filter(
                             &sstable,
                             &user_key_range_ref,
                             *dist_hash,
                             local_stats,
-                        ) {
-                            continue;
-                        }
+                        )
+                    {
+                        continue;
                     }
                     factory.add_overlapping_sst_iter(F::SstableIteratorType::create(
                         sstable,
@@ -1172,5 +1176,41 @@ impl HummockVersionReader {
             ),
         )
         .await
+    }
+
+    pub async fn nearest<M: MeasureDistanceBuilder, O: Send>(
+        &self,
+        version: PinnedVersion,
+        table_id: TableId,
+        target: Vector,
+        options: VectorNearestOptions,
+        on_nearest_item_fn: impl OnNearestItemFn<O>,
+    ) -> HummockResult<Vec<O>> {
+        let Some(index) = version.vector_indexes.get(&table_id) else {
+            return Ok(vec![]);
+        };
+        if target.dimension() != index.dimension {
+            return Err(HummockError::other(format!(
+                "target dimension {} not match index dimension {}",
+                target.dimension(),
+                index.dimension
+            )));
+        }
+        match &index.inner {
+            VectorIndexImpl::Flat(flat) => {
+                let mut builder = NearestBuilder::<'_, O, M>::new(target.to_ref(), options.top_n);
+                for vector_file in &flat.vector_store_info.vector_files {
+                    let meta = self.sstable_store.get_vector_file_meta(vector_file).await?;
+                    for (i, block_meta) in meta.block_metas.iter().enumerate() {
+                        let block = self
+                            .sstable_store
+                            .get_vector_block(vector_file, i, block_meta)
+                            .await?;
+                        builder.add(&**block, &on_nearest_item_fn);
+                    }
+                }
+                Ok(builder.finish())
+            }
+        }
     }
 }

@@ -173,7 +173,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     ))
                 })?;
 
-            let sink_type_str = sink_type.to_string().to_lowercase();
+            let sink_type_str = sink_type.to_lowercase();
             match_sink_name_str!(
                 sink_type_str.as_str(),
                 SinkType,

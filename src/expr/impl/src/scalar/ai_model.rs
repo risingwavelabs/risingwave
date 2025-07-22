@@ -97,10 +97,10 @@ impl Expression for OpenAiEmbedding {
         let mut texts_to_embed = Vec::new();
 
         for i in 0..input.capacity() {
-            if let Some(text) = text_array.value_at(i) {
-                if !text.is_empty() {
-                    texts_to_embed.push(text.to_owned());
-                }
+            if let Some(text) = text_array.value_at(i)
+                && !text.is_empty()
+            {
+                texts_to_embed.push(text.to_owned());
             }
         }
         let n_texts_to_embed = texts_to_embed.len();

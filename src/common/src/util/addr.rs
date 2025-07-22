@@ -76,7 +76,7 @@ impl FromStr for HostAddr {
 impl From<&PbHostAddress> for HostAddr {
     fn from(addr: &PbHostAddress) -> Self {
         HostAddr {
-            host: addr.get_host().to_string(),
+            host: addr.get_host().clone(),
             port: addr.get_port() as u16,
         }
     }

@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use risingwave_pb::catalog::PbTable;
+use risingwave_pb::catalog::subscription::PbSubscriptionState;
 use risingwave_pb::telemetry::PbTelemetryDatabaseObject;
-use sea_orm::{ColumnTrait, DatabaseTransaction, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, DatabaseTransaction, EntityTrait, ModelTrait, QueryFilter};
 
 use super::*;
 impl CatalogController {
@@ -259,12 +260,12 @@ impl CatalogController {
 
         // TODO: Support drop cascade for cross-database query.
         for obj in removed_objects.values() {
-            if let Some(obj_database_id) = obj.database_id {
-                if obj_database_id != database_id {
-                    return Err(MetaError::permission_denied(format!(
-                        "Referenced by other objects in database {obj_database_id}, please drop them manually"
-                    )));
-                }
+            if let Some(obj_database_id) = obj.database_id
+                && obj_database_id != database_id
+            {
+                return Err(MetaError::permission_denied(format!(
+                    "Referenced by other objects in database {obj_database_id}, please drop them manually"
+                )));
             }
         }
 
@@ -350,17 +351,6 @@ impl CatalogController {
             }
         };
 
-        let fragment_mappings = removed_fragments
-            .iter()
-            .map(|fragment_id| PbFragmentWorkerSlotMapping {
-                fragment_id: *fragment_id as _,
-                mapping: None,
-            })
-            .collect();
-
-        self.notify_fragment_mapping(NotificationOperation::Delete, fragment_mappings)
-            .await;
-
         Ok((
             ReleaseContext {
                 database_id,
@@ -374,6 +364,34 @@ impl CatalogController {
             },
             version,
         ))
+    }
+
+    pub async fn try_abort_creating_subscription(
+        &self,
+        subscription_id: SubscriptionId,
+    ) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let subscription = Subscription::find_by_id(subscription_id).one(&txn).await?;
+        let Some(subscription) = subscription else {
+            tracing::warn!(
+                subscription_id,
+                "subscription not found when aborting creation, might be cleaned by recovery"
+            );
+            return Ok(());
+        };
+
+        if subscription.subscription_state == PbSubscriptionState::Created as i32 {
+            tracing::warn!(
+                subscription_id,
+                "subscription is already created when aborting creation"
+            );
+            return Ok(());
+        }
+
+        subscription.delete(&txn).await?;
+        Ok(())
     }
 }
 

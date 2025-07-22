@@ -70,10 +70,9 @@ use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::scale::resolve_streaming_job_definition;
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, get_fragment_actor_dispatchers,
-    get_fragment_mappings, rebuild_fragment_mapping_from_actors,
-    resolve_no_shuffle_actor_dispatcher,
+    get_fragment_mappings, resolve_no_shuffle_actor_dispatcher,
 };
-use crate::manager::LocalNotification;
+use crate::manager::{LocalNotification, NotificationManager};
 use crate::model::{
     DownstreamFragmentRelation, Fragment, FragmentActorDispatchers, FragmentDownstreamRelation,
     StreamActor, StreamContext, StreamJobFragments, TableParallelism,
@@ -144,8 +143,8 @@ impl CatalogControllerInner {
     }
 }
 
-impl CatalogController {
-    pub(crate) async fn notify_fragment_mapping(
+impl NotificationManager {
+    pub(crate) fn notify_fragment_mapping(
         &self,
         operation: NotificationOperation,
         fragment_mappings: Vec<PbFragmentWorkerSlotMapping>,
@@ -154,41 +153,37 @@ impl CatalogController {
             .iter()
             .map(|mapping| mapping.fragment_id)
             .collect_vec();
+        if fragment_ids.is_empty() {
+            return;
+        }
         // notify all fragment mappings to frontend.
         for fragment_mapping in fragment_mappings {
-            self.env
-                .notification_manager()
-                .notify_frontend(
-                    operation,
-                    NotificationInfo::StreamingWorkerSlotMapping(fragment_mapping),
-                )
-                .await;
+            self.notify_frontend_without_version(
+                operation,
+                NotificationInfo::StreamingWorkerSlotMapping(fragment_mapping),
+            );
         }
 
         // update serving vnode mappings.
         match operation {
             NotificationOperation::Add | NotificationOperation::Update => {
-                self.env
-                    .notification_manager()
-                    .notify_local_subscribers(LocalNotification::FragmentMappingsUpsert(
-                        fragment_ids,
-                    ))
-                    .await;
+                self.notify_local_subscribers(LocalNotification::FragmentMappingsUpsert(
+                    fragment_ids,
+                ));
             }
             NotificationOperation::Delete => {
-                self.env
-                    .notification_manager()
-                    .notify_local_subscribers(LocalNotification::FragmentMappingsDelete(
-                        fragment_ids,
-                    ))
-                    .await;
+                self.notify_local_subscribers(LocalNotification::FragmentMappingsDelete(
+                    fragment_ids,
+                ));
             }
             op => {
                 tracing::warn!("unexpected fragment mapping op: {}", op.as_str_name());
             }
         }
     }
+}
 
+impl CatalogController {
     pub fn extract_fragment_and_actors_from_fragments(
         stream_job_fragments: &StreamJobFragments,
     ) -> MetaResult<Vec<(fragment::Model, Vec<actor::Model>)>> {
@@ -772,23 +767,22 @@ impl CatalogController {
 
     /// Try to get internal table ids of each streaming job, used by metrics collection.
     pub async fn get_job_internal_table_ids(&self) -> Option<Vec<(ObjectId, Vec<TableId>)>> {
-        if let Ok(inner) = self.inner.try_read() {
-            if let Ok(job_state_tables) = FragmentModel::find()
+        if let Ok(inner) = self.inner.try_read()
+            && let Ok(job_state_tables) = FragmentModel::find()
                 .select_only()
                 .columns([fragment::Column::JobId, fragment::Column::StateTableIds])
                 .into_tuple::<(ObjectId, I32Array)>()
                 .all(&inner.db)
                 .await
-            {
-                let mut job_internal_table_ids = HashMap::new();
-                for (job_id, state_table_ids) in job_state_tables {
-                    job_internal_table_ids
-                        .entry(job_id)
-                        .or_insert_with(Vec::new)
-                        .extend(state_table_ids.into_inner());
-                }
-                return Some(job_internal_table_ids.into_iter().collect());
+        {
+            let mut job_internal_table_ids = HashMap::new();
+            for (job_id, state_table_ids) in job_state_tables {
+                job_internal_table_ids
+                    .entry(job_id)
+                    .or_insert_with(Vec::new)
+                    .extend(state_table_ids.into_inner());
             }
+            return Some(job_internal_table_ids.into_iter().collect());
         }
         None
     }
@@ -1240,12 +1234,6 @@ impl CatalogController {
         }
 
         txn.commit().await?;
-
-        self.notify_fragment_mapping(
-            NotificationOperation::Update,
-            rebuild_fragment_mapping_from_actors(actors),
-        )
-        .await;
 
         Ok(())
     }

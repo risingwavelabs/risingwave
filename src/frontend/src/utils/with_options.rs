@@ -166,10 +166,10 @@ impl WithOptions {
     }
 
     pub fn value_eq_ignore_case(&self, key: &str, val: &str) -> bool {
-        if let Some(inner_val) = self.inner.get(key) {
-            if inner_val.eq_ignore_ascii_case(val) {
-                return true;
-            }
+        if let Some(inner_val) = self.inner.get(key)
+            && inner_val.eq_ignore_ascii_case(val)
+        {
+            return true;
         }
         false
     }
@@ -252,10 +252,8 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
         // at most one connection ref in the map
         connection_params = {
             // get connection params from catalog
-            let (schema_name, connection_name) = Binder::resolve_schema_qualified_name(
-                db_name,
-                connection_ref.connection_name.clone(),
-            )?;
+            let (schema_name, connection_name) =
+                Binder::resolve_schema_qualified_name(db_name, &connection_ref.connection_name)?;
             let connection_catalog =
                 session.get_connection_by_name(schema_name, &connection_name)?;
             if let ConnectionInfo::ConnectionParams(params) = &connection_catalog.info {
@@ -306,15 +304,13 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
         if let Some(broker_rewrite_map) = connection_params
             .get_properties()
             .get(PRIVATE_LINK_BROKER_REWRITE_MAP_KEY)
+            && (options.contains_key(PRIVATE_LINK_TARGETS_KEY)
+                || options.contains_key(PRIVATELINK_ENDPOINT_KEY))
         {
-            if options.contains_key(PRIVATE_LINK_TARGETS_KEY)
-                || options.contains_key(PRIVATELINK_ENDPOINT_KEY)
-            {
-                return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                    "PrivateLink related options already defined in Connection (rewrite map: {}), please remove {} and {} from WITH clause",
-                    broker_rewrite_map, PRIVATE_LINK_TARGETS_KEY, PRIVATELINK_ENDPOINT_KEY
-                ))));
-            }
+            return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                "PrivateLink related options already defined in Connection (rewrite map: {}), please remove {} and {} from WITH clause",
+                broker_rewrite_map, PRIVATE_LINK_TARGETS_KEY, PRIVATELINK_ENDPOINT_KEY
+            ))));
         }
 
         // Extract connection type and merge properties
@@ -384,7 +380,7 @@ fn resolve_secret_refs_inner(
     let mut resolved_secret_refs = BTreeMap::new();
     for (key, secret_ref) in secret_refs {
         let (schema_name, secret_name) =
-            Binder::resolve_schema_qualified_name(db_name, secret_ref.secret_name.clone())?;
+            Binder::resolve_schema_qualified_name(db_name, &secret_ref.secret_name)?;
         let secret_catalog = session.get_secret_by_name(schema_name, &secret_name)?;
         let ref_as = match secret_ref.ref_as {
             SecretRefAsType::Text => PbRefAsType::Text,

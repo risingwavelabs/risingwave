@@ -36,13 +36,13 @@ DatagenProperties:
   fields:
   - name: datagen.split.num
     field_type: String
-    comments: split_num means data source partition
+    comments: '`split_num` means data source partition'
     required: false
   - name: datagen.rows.per.second
     field_type: u64
     comments: |-
-      default_rows_per_second =10
-      when the split_num = 3 and default_rows_per_second =10
+      `default_rows_per_second` =10
+      when the `split_num` = 3 and `default_rows_per_second` =10
       there will be three readers that generate respectively 4,3,3 message per second
     required: false
     default: '10'
@@ -56,7 +56,7 @@ DatagenProperties:
       'fields.v1.end'='1000',
       'fields.v2.kind'='random',
       datagen will create v1 by self-incrementing from 1 to 1000
-      datagen will create v2 by randomly generating from default_min to default_max
+      datagen will create v2 by randomly generating from `default_min` to `default_max`
     required: false
 GcsProperties:
   fields:
@@ -145,7 +145,7 @@ IcebergProperties:
     field_type: String
     comments: |-
       Credential for accessing iceberg catalog, only applicable in rest catalog.
-      A credential to exchange for a token in the OAuth2 client credentials flow.
+      A credential to exchange for a token in the `OAuth2` client credentials flow.
     required: false
   - name: catalog.token
     field_type: String
@@ -163,7 +163,7 @@ IcebergProperties:
     field_type: String
     comments: |-
       scope for accessing iceberg catalog, only applicable in rest catalog.
-      Additional scope for OAuth2.
+      Additional scope for `OAuth2`.
     required: false
   - name: catalog.rest.signing_region
     field_type: String
@@ -175,7 +175,7 @@ IcebergProperties:
     required: false
   - name: catalog.rest.sigv4_enabled
     field_type: bool
-    comments: Whether to use SigV4 for signing requests to the REST catalog.
+    comments: Whether to use `SigV4` for signing requests to the REST catalog.
     required: false
     default: Default::default
   - name: s3.path.style.access
@@ -246,6 +246,7 @@ KafkaProperties:
       offsets, and does not join the consumer group. It just reports offsets
       to the group.
     required: false
+    allow_alter_on_fly: true
   - name: upsert
     field_type: String
     comments: |-
@@ -262,6 +263,7 @@ KafkaProperties:
     field_type: Duration
     required: false
     default: 'Duration :: from_secs (5)'
+    allow_alter_on_fly: true
   - name: properties.bootstrap.server
     field_type: String
     required: true
@@ -271,11 +273,13 @@ KafkaProperties:
     field_type: String
     comments: |-
       Security protocol used for RisingWave to communicate with Kafka brokers. Could be
-      PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
+      PLAINTEXT, SSL, `SASL_PLAINTEXT` or `SASL_SSL`.
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.endpoint.identification.algorithm
     field_type: String
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.ca.location
     field_type: String
     comments: Path to CA certificate file for verifying the broker's key.
@@ -306,16 +310,19 @@ KafkaProperties:
     required: false
   - name: properties.sasl.mechanism
     field_type: String
-    comments: SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and AWS_MSK_IAM.
+    comments: SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and `AWS_MSK_IAM`.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.username
     field_type: String
     comments: SASL username for SASL/PLAIN and SASL/SCRAM.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.password
     field_type: String
     comments: SASL password for SASL/PLAIN and SASL/SCRAM.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.kerberos.service.name
     field_type: String
     comments: Kafka server's Kerberos principal name under SASL/GSSAPI, not including /hostname@REALM.
@@ -345,9 +352,10 @@ KafkaProperties:
     comments: |-
       Maximum Kafka protocol request message size. Due to differing framing overhead between
       protocol versions the producer is unable to reliably enforce a strict max message limit at
-      produce time and may exceed the maximum size by one message in protocol ProduceRequests,
+      produce time and may exceed the maximum size by one message in protocol `ProduceRequests`,
       the broker will enforce the topic's max.message.bytes limit
     required: false
+    allow_alter_on_fly: true
   - name: properties.receive.message.max.bytes
     field_type: usize
     comments: |-
@@ -356,16 +364,20 @@ KafkaProperties:
       + 512 to allow for protocol overhead; the value is adjusted automatically unless the
       configuration property is explicitly set.
     required: false
+    allow_alter_on_fly: true
   - name: properties.statistics.interval.ms
     field_type: usize
     required: false
+    allow_alter_on_fly: true
   - name: properties.client.id
     field_type: String
     comments: Client identifier
     required: false
+    allow_alter_on_fly: true
   - name: properties.enable.ssl.certificate.verification
     field_type: bool
     required: false
+    allow_alter_on_fly: true
   - name: properties.socket.keepalive.enable
     field_type: bool
     required: false
@@ -376,15 +388,18 @@ KafkaProperties:
       Minimum number of messages per topic+partition librdkafka tries to maintain in the local
       consumer queue.
     required: false
+    allow_alter_on_fly: true
   - name: properties.queued.max.messages.kbytes
     field_type: usize
     required: false
+    allow_alter_on_fly: true
   - name: properties.fetch.wait.max.ms
     field_type: usize
     comments: |-
       Maximum time the broker may wait to fill the Fetch response with `fetch.min.`bytes of
       messages.
     required: false
+    allow_alter_on_fly: true
   - name: properties.fetch.min.bytes
     field_type: usize
     comments: Minimum number of bytes the broker responds with. If fetch.wait.max.ms expires the accumulated data will be sent to the client regardless of this setting.
@@ -402,6 +417,7 @@ KafkaProperties:
       and the application is experiencing long (~1s) delays between messages. Low values may
       increase CPU utilization.
     required: false
+    allow_alter_on_fly: true
   - name: properties.fetch.max.bytes
     field_type: usize
     comments: |-
@@ -409,20 +425,22 @@ KafkaProperties:
       batches by the consumer and if the first message batch in the first non-empty partition of
       the Fetch request is larger than this value, then the message batch will still be returned
       to ensure the consumer can make progress. The maximum message batch size accepted by the
-      broker is defined via `message.max.bytes` (broker config) or `max.message.bytes` (broker
-      topic config). `fetch.max.bytes` is automatically adjusted upwards to be at least
-      `message.max.bytes` (consumer config).
+      broker is defined via `message.max.bytes` (broker config) or `max.message.bytes` (broker
+      topic config). `fetch.max.bytes` is automatically adjusted upwards to be at least
+      `message.max.bytes` (consumer config).
     required: false
+    allow_alter_on_fly: true
   - name: properties.enable.auto.commit
     field_type: bool
     comments: |-
       Whether to automatically and periodically commit offsets in the background.
 
-      Note that RisingWave does NOT rely on committed offsets. Committing offset is only for exposing the
+      Note that RisingWave does NOT rely on committed offsets. Committing offset is only for exposing the
       progress for monitoring. Setting this to false can avoid creating consumer groups.
 
       default: true
     required: false
+    allow_alter_on_fly: true
   - name: broker.rewrite.endpoints
     field_type: BTreeMap<String,String>
     comments: This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
@@ -567,7 +585,7 @@ MongodbCommon:
   fields:
   - name: mongodb.url
     field_type: String
-    comments: The URL of MongoDB
+    comments: The URL of `MongoDB`
     required: true
   - name: collection.name
     field_type: String
@@ -581,7 +599,7 @@ MqttProperties:
   - name: url
     field_type: String
     comments: |-
-      The url of the broker to connect to. e.g. tcp://localhost.
+      The url of the broker to connect to. e.g. <tcp://localhost>.
       Must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,
       to denote the protocol for establishing a connection with the broker.
       `mqtts://`, `ssl://` will use the native certificates if no ca is specified
@@ -589,8 +607,8 @@ MqttProperties:
   - name: qos
     field_type: QualityOfService
     comments: |-
-      The quality of service to use when publishing messages. Defaults to at_most_once.
-      Could be at_most_once, at_least_once or exactly_once
+      The quality of service to use when publishing messages. Defaults to `at_most_once`.
+      Could be `at_most_once`, `at_least_once` or `exactly_once`
     required: false
   - name: username
     field_type: String
@@ -648,8 +666,8 @@ MqttProperties:
   - name: qos
     field_type: MqttQualityOfService
     comments: |-
-      The quality of service to use when publishing messages. Defaults to at_most_once.
-      Could be at_most_once, at_least_once or exactly_once
+      The quality of service to use when publishing messages. Defaults to `at_most_once`.
+      Could be `at_most_once`, `at_least_once` or `exactly_once`
     required: false
 NatsProperties:
   fields:

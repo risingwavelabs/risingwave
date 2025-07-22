@@ -60,8 +60,7 @@ pub async fn handle_alter_owner(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let db_name = &session.database();
-    let (schema_name, real_obj_name) =
-        Binder::resolve_schema_qualified_name(db_name, obj_name.clone())?;
+    let (schema_name, real_obj_name) = Binder::resolve_schema_qualified_name(db_name, &obj_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -125,8 +124,11 @@ pub async fn handle_alter_owner(
                     Object::SourceId(source.id)
                 }
                 StatementType::ALTER_SINK => {
-                    let (sink, schema_name) =
-                        catalog_reader.get_sink_by_name(db_name, schema_path, &real_obj_name)?;
+                    let (sink, schema_name) = catalog_reader.get_created_sink_by_name(
+                        db_name,
+                        schema_path,
+                        &real_obj_name,
+                    )?;
                     session.check_privilege_for_drop_alter(schema_name, &**sink)?;
                     let schema_id = catalog_reader
                         .get_schema_by_name(db_name, schema_name)?

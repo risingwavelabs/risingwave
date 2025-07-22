@@ -24,7 +24,7 @@ create materialized view m3 with ( resource_group = 'default' ) as select * from
 db error: ERROR: Failed to run the query
 
 Caused by:
-  feature ResourceGroup is only available for tier Paid and above, while the current tier is Free
+  feature ResourceGroup is not available based on your license
 
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
 
@@ -35,7 +35,7 @@ alter materialized view m1 set resource_group to test;
 db error: ERROR: Failed to run the query
 
 Caused by:
-  feature ResourceGroup is only available for tier Paid and above, while the current tier is Free
+  feature ResourceGroup is not available based on your license
 
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
 

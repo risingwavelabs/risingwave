@@ -25,7 +25,6 @@ mod metrics_utils;
 pub mod mock_hummock_meta_client;
 pub mod model;
 pub mod test_utils;
-mod utils;
 use std::time::Duration;
 
 pub use compactor_manager::*;

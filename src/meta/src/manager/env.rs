@@ -32,6 +32,7 @@ use risingwave_sqlparser::ast::RedactSqlOptionKeywordsRef;
 use sea_orm::EntityTrait;
 
 use crate::MetaResult;
+use crate::barrier::SharedActorInfos;
 use crate::controller::SqlMetaStore;
 use crate::controller::id::{
     IdGeneratorManager as SqlIdGeneratorManager, IdGeneratorManagerRef as SqlIdGeneratorManagerRef,
@@ -61,6 +62,8 @@ pub struct MetaSrvEnv {
 
     /// notification manager.
     notification_manager: NotificationManagerRef,
+
+    shared_actor_info: SharedActorInfos,
 
     /// stream client pool memorization.
     stream_client_pool: StreamClientPoolRef,
@@ -441,6 +444,7 @@ impl MetaSrvEnv {
             system_param_manager_impl: system_param_controller,
             session_param_manager_impl: session_param_controller,
             meta_store_impl: meta_store_impl.clone(),
+            shared_actor_info: SharedActorInfos::new(notification_manager.clone()),
             notification_manager,
             stream_client_pool,
             frontend_client_pool,
@@ -517,19 +521,28 @@ impl MetaSrvEnv {
     pub fn await_tree_reg(&self) -> &await_tree::Registry {
         &self.await_tree_reg
     }
+
+    pub(crate) fn shared_actor_infos(&self) -> &SharedActorInfos {
+        &self.shared_actor_info
+    }
 }
 
 #[cfg(any(test, feature = "test"))]
 impl MetaSrvEnv {
     // Instance for test.
     pub async fn for_test() -> Self {
-        Self::for_test_opts(MetaOpts::test(false)).await
+        Self::for_test_opts(MetaOpts::test(false), |_| ()).await
     }
 
-    pub async fn for_test_opts(opts: MetaOpts) -> Self {
+    pub async fn for_test_opts(
+        opts: MetaOpts,
+        on_test_system_params: impl FnOnce(&mut risingwave_pb::meta::PbSystemParams),
+    ) -> Self {
+        let mut system_params = risingwave_common::system_param::system_params_for_test();
+        on_test_system_params(&mut system_params);
         Self::new(
             opts,
-            risingwave_common::system_param::system_params_for_test(),
+            system_params,
             Default::default(),
             SqlMetaStore::for_test().await,
         )

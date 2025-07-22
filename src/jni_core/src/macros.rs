@@ -314,10 +314,8 @@ macro_rules! cast_jvalue {
 /// assert_eq!(cast_jvalue!({ int }, to_jvalue!({ int }, 10)), 10);
 /// assert_eq!(cast_jvalue!({ long }, to_jvalue!({ long }, 10)), 10);
 /// assert_eq!(cast_jvalue!({ short }, to_jvalue!({ short }, 10)), 10);
-/// cast_jvalue!(
-///     { String },
-///     to_jvalue!({ String }, &jni::objects::JObject::null())
-/// );
+/// let obj = jni::objects::JObject::null();
+/// cast_jvalue!({ String }, to_jvalue!({ String }, &obj));
 /// ```
 #[macro_export]
 macro_rules! to_jvalue {

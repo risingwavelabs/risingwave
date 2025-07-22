@@ -190,6 +190,7 @@ pub(crate) type LogStoreStateWriteChunkFuture<S: LocalStateStore> =
     impl Future<Output = (LogStoreWriteState<S>, LogStoreResult<(FlushInfo, Bitmap)>)> + 'static;
 
 impl<S: LocalStateStore> LogStoreWriteState<S> {
+    #[define_opaque(LogStoreStateWriteChunkFuture)]
     pub(crate) fn into_write_chunk_future(
         mut self,
         chunk: StreamChunk,

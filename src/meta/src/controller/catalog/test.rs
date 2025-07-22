@@ -100,8 +100,8 @@ mod tests {
             sql: "CREATE VIEW view AS SELECT 1".to_owned(),
             ..Default::default()
         };
-        mgr.create_view(pb_view.clone()).await?;
-        assert!(mgr.create_view(pb_view).await.is_err());
+        mgr.create_view(pb_view.clone(), HashSet::new()).await?;
+        assert!(mgr.create_view(pb_view, HashSet::new()).await.is_err());
 
         let view = View::find().one(&mgr.inner.read().await.db).await?.unwrap();
         mgr.drop_object(ObjectType::View, view.view_id, DropMode::Cascade)
@@ -207,10 +207,9 @@ mod tests {
             name: "view_1".to_owned(),
             owner: TEST_OWNER_ID as _,
             sql: "CREATE VIEW view_1 AS SELECT v1 FROM s1".to_owned(),
-            dependent_relations: vec![source_id as _],
             ..Default::default()
         };
-        mgr.create_view(pb_view).await?;
+        mgr.create_view(pb_view, HashSet::from([source_id])).await?;
         let view_id: ViewId = View::find()
             .select_only()
             .column(view::Column::ViewId)
