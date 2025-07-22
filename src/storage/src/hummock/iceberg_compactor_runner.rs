@@ -348,6 +348,7 @@ impl IcebergCompactorRunner {
                 .await
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
+            // Overwrite Main branch
             let table = self
                 .catalog
                 .load_table(&self.table_ident)
@@ -368,7 +369,7 @@ impl IcebergCompactorRunner {
 
             let input_files = {
                 let mut input_files = vec![];
-                if let Some(snapshot) = table.metadata().current_snapshot() {
+                if let Some(snapshot) = table.metadata().snapshot_for_ref("main") {
                     let manifest_list = snapshot
                         .load_manifest_list(table.file_io(), table.metadata())
                         .await
@@ -418,36 +419,36 @@ impl IcebergCompactorRunner {
                 .await
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
-            let snapshot = new_table.metadata().current_snapshot().ok_or_else(|| {
-                HummockError::compaction_executor("Don't find current_snapshot".to_owned())
-            })?;
+            // let snapshot = new_table.metadata().current_snapshot().ok_or_else(|| {
+            //     HummockError::compaction_executor("Don't find current_snapshot".to_owned())
+            // })?;
 
-            let manifest_fest_list = snapshot
-                .load_manifest_list(new_table.file_io(), new_table.metadata())
-                .await
-                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+            // let manifest_fest_list = snapshot
+            //     .load_manifest_list(new_table.file_io(), new_table.metadata())
+            //     .await
+            //     .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
-            for manifest in manifest_fest_list.entries() {
-                let manifest = manifest
-                    .load_manifest(new_table.file_io())
-                    .await
-                    .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-                let (entry, _) = manifest.into_parts();
-                for i in entry {
-                    tracing::info!(
-                        task_id = task_id,
-                        table = ?self.table_ident,
-                        file = ?i.data_file(),
-                        "DEBUG-COW Iceberg compaction task rewritten file to main",
-                    );
-                }
-            }
+            // for manifest in manifest_fest_list.entries() {
+            //     let manifest = manifest
+            //         .load_manifest(new_table.file_io())
+            //         .await
+            //         .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+            //     let (entry, _) = manifest.into_parts();
+            //     for i in entry {
+            //         tracing::info!(
+            //             task_id = task_id,
+            //             table = ?self.table_ident,
+            //             file = ?i.data_file(),
+            //             "DEBUG-COW Iceberg compaction task rewritten file to main",
+            //         );
+            //     }
+            // }
 
             tracing::info!(
                 task_id = task_id,
                 table = ?self.table_ident,
                 elapsed_millis = now.elapsed().as_millis(),
-                snapshot = ?snapshot,
+                // snapshot = ?snapshot,
                 "DEBUG-COW Iceberg compaction task completed successfully",
             );
 
