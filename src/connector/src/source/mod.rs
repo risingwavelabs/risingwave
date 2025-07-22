@@ -210,7 +210,7 @@ impl WaitCheckpointTask {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct CdcTableSnapshotSplitCommon<T> {
+pub struct CdcTableSnapshotSplitCommon<T: Clone> {
     pub split_id: i64,
     pub left_bound_inclusive: T,
     pub right_bound_exclusive: T,

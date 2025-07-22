@@ -224,6 +224,37 @@ pub(crate) async fn assign_cdc_table_snapshot_splits_impl(
     Ok(assignments)
 }
 
+pub(crate) async fn assign_cdc_table_snapshot_splits_for_replace_table(
+    original_table_id: u32,
+    job: &StreamJobFragments,
+    meta_store: &SqlMetaStore,
+) -> MetaResult<CdcTableSnapshotSplitAssignment> {
+    let mut stream_scan_fragments = job
+        .fragments
+        .values()
+        .filter(|f| is_parallelized_backfill_enabled_cdc_scan_fragment(f))
+        .collect_vec();
+    if stream_scan_fragments.len() != 1 {
+        return Err(anyhow::anyhow!(
+            "Expect 1 CDC table snapshot splits, {} was found.",
+            stream_scan_fragments.len()
+        )
+        .into());
+    }
+    let stream_scan_fragment = stream_scan_fragments.swap_remove(0);
+    let assignment = assign_cdc_table_snapshot_splits_impl(
+        original_table_id,
+        stream_scan_fragment
+            .actors
+            .iter()
+            .map(|a| a.actor_id)
+            .collect(),
+        meta_store,
+    )
+    .await?;
+    Ok(assignment)
+}
+
 pub async fn try_get_cdc_table_snapshot_splits(
     table_id: u32,
     meta_store: &SqlMetaStore,

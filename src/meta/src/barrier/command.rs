@@ -127,6 +127,7 @@ pub struct ReplaceStreamJobPlan {
     /// The state table ids to be dropped.
     pub to_drop_state_table_ids: Vec<TableId>,
     pub auto_refresh_schema_sinks: Option<Vec<AutoRefreshSchemaSinkContext>>,
+    pub cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignment,
 }
 
 impl ReplaceStreamJobPlan {
@@ -848,6 +849,7 @@ impl Command {
                     init_split_assignment,
                     replace_upstream,
                     upstream_fragment_downstreams,
+                    cdc_table_snapshot_split_assignment,
                     ..
                 }) = job_type
                 {
@@ -867,6 +869,7 @@ impl Command {
                         dispatchers,
                         init_split_assignment,
                         None,
+                        cdc_table_snapshot_split_assignment,
                     );
 
                     Some(Mutation::Combined(CombinedMutation {
@@ -901,6 +904,7 @@ impl Command {
                 upstream_fragment_downstreams,
                 init_split_assignment,
                 auto_refresh_schema_sinks,
+                cdc_table_snapshot_split_assignment,
                 ..
             }) => {
                 let edges = edges.as_mut().expect("should exist");
@@ -932,6 +936,7 @@ impl Command {
                     dispatchers,
                     init_split_assignment,
                     auto_refresh_schema_sinks.as_ref(),
+                    cdc_table_snapshot_split_assignment,
                 )
             }
 
@@ -1257,6 +1262,7 @@ impl Command {
         dispatchers: FragmentActorDispatchers,
         init_split_assignment: &SplitAssignment,
         auto_refresh_schema_sinks: Option<&Vec<AutoRefreshSchemaSinkContext>>,
+        cdc_table_snapshot_split_assignment: &CdcTableSnapshotSplitAssignment,
     ) -> Option<Mutation> {
         let dropped_actors = dropped_actors.into_iter().collect();
 
@@ -1294,6 +1300,9 @@ impl Command {
                     })
                 })
                 .collect(),
+            actor_cdc_table_snapshot_splits: build_pb_actor_cdc_table_snapshot_splits(
+                cdc_table_snapshot_split_assignment.clone(),
+            ),
             ..Default::default()
         }))
     }
