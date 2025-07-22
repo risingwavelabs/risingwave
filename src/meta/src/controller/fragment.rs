@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use anyhow::{Context, anyhow};
-use futures::stream::BoxStream;
 use futures::{StreamExt, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
@@ -69,12 +67,12 @@ use tracing::debug;
 
 use crate::barrier::SnapshotBackfillInfo;
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
-use crate::controller::scale::resolve_streaming_job_definition;
+use crate::controller::scale::{load_fragments, resolve_streaming_job_definition};
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, get_fragment_actor_dispatchers,
     get_fragment_mappings_txn, resolve_no_shuffle_actor_dispatcher,
 };
-use crate::manager::{LocalNotification, NotificationManager};
+use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, NotificationManager};
 use crate::model::{
     DownstreamFragmentRelation, Fragment, FragmentActorDispatchers, FragmentDownstreamRelation,
     StreamActor, StreamContext, StreamJobFragments, TableParallelism,
@@ -1521,107 +1519,16 @@ impl CatalogController {
 
     /// Used in [`crate::barrier::GlobalBarrierManager`], load all running actor that need to be sent or
     /// collected
-    pub async fn load_all_actors(
+    pub async fn load_all_actors_dynamic(
         &self,
         database_id: Option<DatabaseId>,
+        worker_nodes: &ActiveStreamingWorkerNodes,
     ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>>
     {
         let inner = self.inner.read().await;
-        let filter_condition = actor::Column::Status.eq(ActorStatus::Running);
-        let filter_condition = if let Some(database_id) = database_id {
-            filter_condition.and(object::Column::DatabaseId.eq(database_id))
-        } else {
-            filter_condition
-        };
-        #[expect(clippy::type_complexity)]
-        let mut actor_info_stream: BoxStream<
-            '_,
-            Result<
-                (
-                    ActorId,
-                    WorkerId,
-                    Option<VnodeBitmap>,
-                    FragmentId,
-                    StreamNode,
-                    I32Array,
-                    DistributionType,
-                    i32,
-                    i32,
-                    DatabaseId,
-                    ObjectId,
-                ),
-                _,
-            >,
-        > = Actor::find()
-            .select_only()
-            .column(actor::Column::ActorId)
-            .column(actor::Column::WorkerId)
-            .column(actor::Column::VnodeBitmap)
-            .column(fragment::Column::FragmentId)
-            .column(fragment::Column::StreamNode)
-            .column(fragment::Column::StateTableIds)
-            .column(fragment::Column::DistributionType)
-            .column(fragment::Column::FragmentTypeMask)
-            .column(fragment::Column::VnodeCount)
-            .column(object::Column::DatabaseId)
-            .column(object::Column::Oid)
-            .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
-            .join(JoinType::InnerJoin, fragment::Relation::Object.def())
-            .filter(filter_condition)
-            .into_tuple()
-            .stream(&inner.db)
-            .await?;
+        let txn = inner.db.begin().await?;
 
-        let mut database_fragment_infos: HashMap<_, HashMap<_, HashMap<_, InflightFragmentInfo>>> =
-            HashMap::new();
-
-        while let Some((
-            actor_id,
-            worker_id,
-            vnode_bitmap,
-            fragment_id,
-            node,
-            state_table_ids,
-            distribution_type,
-            fragment_type_mask,
-            vnode_count,
-            database_id,
-            job_id,
-        )) = actor_info_stream.try_next().await?
-        {
-            let fragment_infos = database_fragment_infos
-                .entry(database_id)
-                .or_default()
-                .entry(job_id)
-                .or_default();
-            let state_table_ids = state_table_ids.into_inner();
-            let state_table_ids = state_table_ids
-                .into_iter()
-                .map(|table_id| risingwave_common::catalog::TableId::new(table_id as _))
-                .collect();
-            let actor_info = InflightActorInfo {
-                worker_id,
-                vnode_bitmap: vnode_bitmap.map(|bitmap| bitmap.to_protobuf().into()),
-            };
-            match fragment_infos.entry(fragment_id) {
-                Entry::Occupied(mut entry) => {
-                    let info: &mut InflightFragmentInfo = entry.get_mut();
-                    assert_eq!(info.state_table_ids, state_table_ids);
-                    assert!(info.actors.insert(actor_id as _, actor_info).is_none());
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(InflightFragmentInfo {
-                        fragment_id: fragment_id as _,
-                        distribution_type,
-                        fragment_type_mask: FragmentTypeMask::from(fragment_type_mask),
-                        vnode_count: vnode_count as _,
-                        nodes: node.to_protobuf(),
-                        actors: HashMap::from_iter([(actor_id as _, actor_info)]),
-                        state_table_ids,
-                    });
-                }
-            }
-        }
+        let database_fragment_infos = load_fragments(&txn, database_id, worker_nodes).await?;
 
         debug!(?database_fragment_infos, "reload all actors");
 
