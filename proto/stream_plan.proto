@@ -393,6 +393,7 @@ message SimpleAggNode {
   // Required by the downstream `RowMergeNode`,
   // currently only used by the `approx_percentile`'s two phase plan
   bool must_output_per_barrier = 9;
+  optional uint32 extreme_cache_size = 10;
 }
 
 message HashAggNode {
@@ -407,6 +408,7 @@ message HashAggNode {
   uint32 row_count_index = 7;
   bool emit_on_window_close = 8;
   AggNodeVersion version = 9;
+  optional uint32 extreme_cache_size = 10;
 }
 
 message TopNNode {

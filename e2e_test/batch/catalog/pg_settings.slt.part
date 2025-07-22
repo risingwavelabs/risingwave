@@ -61,6 +61,7 @@ user sink_rate_limit
 user source_rate_limit
 user standard_conforming_strings
 user statement_timeout
+user stream_unsafe_extreme_cache_size
 user streaming_allow_jsonb_in_stream_key
 user streaming_enable_bushy_join
 user streaming_enable_delta_join
