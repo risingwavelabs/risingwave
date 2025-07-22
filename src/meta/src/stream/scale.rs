@@ -28,9 +28,7 @@ use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, FragmentTypeMask,
 use risingwave_common::hash::ActorMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::{bail, hash};
-use risingwave_meta_model::{
-    ObjectId, StreamingParallelism, WorkerId, actor, fragment, streaming_job,
-};
+use risingwave_meta_model::{ObjectId, WorkerId, actor, fragment, streaming_job};
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::FragmentWorkerSlotMappings;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -46,7 +44,7 @@ use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 
 use crate::barrier::{Command, Reschedule};
-use crate::controller::scale::{RescheduleWorkingSet, render_fragments};
+use crate::controller::scale::RescheduleWorkingSet;
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager};
 use crate::model::{
     ActorId, DispatcherId, FragmentId, StreamActor, StreamActorWithDispatchers, TableParallelism,
