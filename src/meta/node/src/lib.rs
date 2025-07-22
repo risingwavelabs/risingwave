@@ -79,6 +79,11 @@ pub struct MetaNodeOpts {
     #[clap(long, hide = true, env = "RW_SQL_DATABASE", default_value = "")]
     pub sql_database: String,
 
+    /// Params for the URL connection, such as `sslmode=disable`.
+    /// Example: `param1=value1&param2=value2`
+    #[clap(long, hide = true, env = "RW_SQL_URL_PARAMS")]
+    pub sql_url_params: Option<String>,
+
     /// The HTTP REST-API address of the Prometheus instance associated to this cluster.
     /// This address is used to serve `PromQL` queries to Prometheus.
     /// It is also used by Grafana Dashboard Service to fetch metrics and visualize them.
@@ -250,7 +255,7 @@ pub fn start(
             },
             MetaBackend::Sqlite => MetaStoreBackend::Sql {
                 endpoint: format!(
-                    "sqlite://{}",
+                    "sqlite://{}?mode=rwc",
                     opts.sql_endpoint
                         .expect("sql endpoint is required")
                         .expose_secret()
@@ -259,25 +264,39 @@ pub fn start(
             },
             MetaBackend::Postgres => MetaStoreBackend::Sql {
                 endpoint: format!(
-                    "postgres://{}:{}@{}/{}",
+                    "postgres://{}:{}@{}/{}{}",
                     opts.sql_username,
                     opts.sql_password.expose_secret(),
                     opts.sql_endpoint
                         .expect("sql endpoint is required")
                         .expose_secret(),
-                    opts.sql_database
+                    opts.sql_database,
+                    if let Some(params) = &opts.sql_url_params
+                        && !params.is_empty()
+                    {
+                        format!("?{}", params)
+                    } else {
+                        "".to_owned()
+                    }
                 ),
                 config: meta_store_config,
             },
             MetaBackend::Mysql => MetaStoreBackend::Sql {
                 endpoint: format!(
-                    "mysql://{}:{}@{}/{}",
+                    "mysql://{}:{}@{}/{}{}",
                     opts.sql_username,
                     opts.sql_password.expose_secret(),
                     opts.sql_endpoint
                         .expect("sql endpoint is required")
                         .expose_secret(),
-                    opts.sql_database
+                    opts.sql_database,
+                    if let Some(params) = &opts.sql_url_params
+                        && !params.is_empty()
+                    {
+                        format!("?{}", params)
+                    } else {
+                        "".to_owned()
+                    }
                 ),
                 config: meta_store_config,
             },

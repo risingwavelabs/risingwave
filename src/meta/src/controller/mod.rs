@@ -108,21 +108,6 @@ impl SqlMetaStore {
                 }
             }
             MetaStoreBackend::Sql { endpoint, config } => {
-                // concatenate the URL options to the endpoint.
-                let is_sqlite = DbBackend::Sqlite.is_prefix_of(&endpoint);
-                let mut endpoint = endpoint;
-                // If the endpoint is SQLite, we need to ensure that it is opened in read-write mode.
-                if is_sqlite && !endpoint.contains("?mode=rwc") {
-                    endpoint.push_str("?mode=rwc");
-                }
-                // If the url connection options are provided, append them to the endpoint.
-                if let Some(options) = &config.url_connection_options
-                    && !options.is_empty()
-                {
-                    endpoint.push(if !endpoint.contains('?') { '?' } else { '&' });
-                    endpoint.push_str(options);
-                }
-
                 let mut options = ConnectOptions::new(endpoint.clone());
                 options
                     .max_connections(config.max_connections)
