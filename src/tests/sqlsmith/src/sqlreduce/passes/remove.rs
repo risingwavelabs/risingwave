@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_sqlparser::ast::{SetExpr, Statement};
+use risingwave_sqlparser::ast::SetExpr;
 
-use crate::sqlreduce::passes::{Ast, Transform};
+use crate::sqlreduce::passes::{Ast, Transform, extract_query, extract_query_mut};
 
 /// Remove individual expressions from the GROUP BY clause.
 ///
@@ -35,7 +35,7 @@ impl Transform for GroupByRemove {
 
     fn get_reduction_points(&self, ast: Ast) -> Vec<usize> {
         let mut reduction_points = Vec::new();
-        if let Statement::Query(query) = &ast
+        if let Some(query) = extract_query(&ast)
             && let SetExpr::Select(select) = &query.body
         {
             for i in 0..select.group_by.len() {
@@ -46,7 +46,7 @@ impl Transform for GroupByRemove {
     }
 
     fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
-        if let Statement::Query(query) = ast
+        if let Some(query) = extract_query_mut(ast)
             && let SetExpr::Select(select) = &mut query.body
         {
             for i in reduction_points {
@@ -76,7 +76,7 @@ impl Transform for OrderByRemove {
 
     fn get_reduction_points(&self, ast: Ast) -> Vec<usize> {
         let mut reduction_points = Vec::new();
-        if let Statement::Query(query) = &ast {
+        if let Some(query) = extract_query(&ast) {
             for i in 0..query.order_by.len() {
                 reduction_points.push(i);
             }
@@ -85,7 +85,7 @@ impl Transform for OrderByRemove {
     }
 
     fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
-        if let Statement::Query(query) = ast {
+        if let Some(query) = extract_query_mut(ast) {
             for i in reduction_points {
                 query.order_by.remove(i);
             }
@@ -113,7 +113,7 @@ impl Transform for WhereRemove {
 
     fn get_reduction_points(&self, ast: Ast) -> Vec<usize> {
         let mut reduction_points = Vec::new();
-        if let Statement::Query(query) = &ast
+        if let Some(query) = extract_query(&ast)
             && let SetExpr::Select(select) = &query.body
             && select.selection.is_some()
         {
@@ -123,13 +123,14 @@ impl Transform for WhereRemove {
     }
 
     fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
-        if let Statement::Query(query) = ast
+        if let Some(query) = extract_query_mut(ast)
             && let SetExpr::Select(select) = &mut query.body
         {
             for _ in reduction_points {
                 select.selection = None;
             }
         }
+        tracing::info!("where_remove ast: {:?}", ast);
         ast.clone()
     }
 }
@@ -153,7 +154,7 @@ impl Transform for FromRemove {
 
     fn get_reduction_points(&self, ast: Ast) -> Vec<usize> {
         let mut reduction_points = Vec::new();
-        if let Statement::Query(query) = &ast
+        if let Some(query) = extract_query(&ast)
             && let SetExpr::Select(select) = &query.body
         {
             for i in 0..select.from.len() {
@@ -164,7 +165,7 @@ impl Transform for FromRemove {
     }
 
     fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
-        if let Statement::Query(query) = ast
+        if let Some(query) = extract_query_mut(ast)
             && let SetExpr::Select(select) = &mut query.body
         {
             for i in reduction_points {
@@ -194,7 +195,7 @@ impl Transform for SelectItemRemove {
 
     fn get_reduction_points(&self, ast: Ast) -> Vec<usize> {
         let mut reduction_points = Vec::new();
-        if let Statement::Query(query) = &ast
+        if let Some(query) = extract_query(&ast)
             && let SetExpr::Select(select) = &query.body
         {
             for i in 0..select.projection.len() {
@@ -205,11 +206,42 @@ impl Transform for SelectItemRemove {
     }
 
     fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
-        if let Statement::Query(query) = ast
+        if let Some(query) = extract_query_mut(ast)
             && let SetExpr::Select(select) = &mut query.body
         {
             for i in reduction_points {
                 select.projection.remove(i);
+            }
+        }
+        ast.clone()
+    }
+}
+
+pub struct HavingRemove;
+
+impl Transform for HavingRemove {
+    fn name(&self) -> String {
+        "having_remove".to_owned()
+    }
+
+    fn get_reduction_points(&self, ast: Ast) -> Vec<usize> {
+        let mut reduction_points = Vec::new();
+        if let Some(query) = extract_query(&ast)
+            && let SetExpr::Select(select) = &query.body
+            && select.having.is_some()
+        {
+            reduction_points.push(0);
+        }
+
+        reduction_points
+    }
+
+    fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
+        if let Some(query) = extract_query_mut(ast)
+            && let SetExpr::Select(select) = &mut query.body
+        {
+            for _ in reduction_points {
+                select.having = None;
             }
         }
         ast.clone()

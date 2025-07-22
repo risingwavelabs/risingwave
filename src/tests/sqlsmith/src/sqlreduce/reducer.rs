@@ -22,7 +22,6 @@
 //! This is used for SQL test case minimization, debugging, or fuzzing feedback reduction.
 
 use anyhow::{Result, anyhow};
-use tracing::{debug, error, info, trace};
 
 use crate::parse_sql;
 use crate::sqlreduce::checker::Checker;
@@ -30,7 +29,7 @@ use crate::sqlreduce::passes::pullup::{
     ArrayPullup, BinaryOperatorPullup, CasePullup, RowPullup, SetOperationPullup,
 };
 use crate::sqlreduce::passes::remove::{
-    FromRemove, GroupByRemove, OrderByRemove, SelectItemRemove, WhereRemove,
+    FromRemove, GroupByRemove, HavingRemove, OrderByRemove, SelectItemRemove, WhereRemove,
 };
 use crate::sqlreduce::passes::replace::{NullReplace, ScalarReplace};
 use crate::sqlreduce::passes::{Strategy, Transform};
@@ -56,6 +55,7 @@ impl<'a> Reducer<'a> {
             Box::new(RowPullup),
             Box::new(ArrayPullup),
             Box::new(SetOperationPullup),
+            Box::new(HavingRemove),
         ];
         Self {
             transforms,
@@ -85,7 +85,7 @@ impl<'a> Reducer<'a> {
     /// - Returns an error if SQL parsing fails or if no statements are found.
     /// - Panics if the checker fails to validate failure preservation on the original failing query.
     pub async fn reduce(&mut self, sql: &str) -> Result<String> {
-        info!("Starting reduction...");
+        tracing::info!("Starting reduction...");
         let sql_statements = parse_sql(sql);
 
         let (failing_query, proceeding_stmts) = sql_statements
@@ -93,7 +93,7 @@ impl<'a> Reducer<'a> {
             .ok_or_else(|| anyhow!("No SQL statements found"))?;
 
         for s in proceeding_stmts {
-            debug!("Executing preceding statement: {}", s);
+            tracing::info!("Executing preceding statement: {}", s);
             self.checker.client.simple_query(&s.to_string()).await?;
         }
 
@@ -102,16 +102,16 @@ impl<'a> Reducer<'a> {
             .is_failure_preserved(&failing_query.to_string(), &failing_query.to_string())
             .await
         {
-            error!("Checker failed: failing query does not fail on itself");
+            tracing::error!("Checker failed: failing query does not fail on itself");
             panic!("There is a bug in the checker!")
         }
 
-        info!("Beginning fixed-point reduction...");
+        tracing::info!("Beginning fixed-point reduction...");
         let reduced_sql = self
             .reduce_until_fixed_point(&failing_query.to_string())
             .await;
 
-        info!("Reduction complete.");
+        tracing::info!("Reduction complete.");
 
         let mut reduced_sqls = String::new();
         for s in proceeding_stmts {
@@ -144,25 +144,26 @@ impl<'a> Reducer<'a> {
 
         while !global_fixed_point {
             iteration += 1;
-            info!("Global iteration {} starting", iteration);
+            tracing::info!("Global iteration {} starting", iteration);
             global_fixed_point = true;
             for trans in &self.transforms {
                 let mut local_fixed_point = false;
                 let mut idx = 0;
                 let mut sql_len = ast.to_string().len();
-                debug!("Applying transform: {}", trans.name());
+                tracing::info!("Applying transform: {}", trans.name());
 
                 while !local_fixed_point {
                     local_fixed_point = true;
-                    trace!("  Transform iteration starting at index {}", idx);
+                    tracing::info!("  Transform iteration starting at index {}", idx);
 
                     let items = trans.transform(ast.clone(), idx, self.strategy.clone());
 
                     for (new_ast, i) in items {
                         let ast_sql = ast.to_string();
                         let new_ast_sql = new_ast.to_string();
+                        tracing::info!("  SQL changes from \n{} \n to \n{}", ast_sql, new_ast_sql);
                         if new_ast_sql.len() < sql_len {
-                            debug!(
+                            tracing::info!(
                                 "  Candidate reduction found: len {} → {}",
                                 sql_len,
                                 new_ast_sql.len()
@@ -172,7 +173,7 @@ impl<'a> Reducer<'a> {
                                 .is_failure_preserved(&ast_sql, &new_ast_sql)
                                 .await
                             {
-                                info!(
+                                tracing::info!(
                                     "    Valid reduction applied at index {} ({} → {})",
                                     i,
                                     sql_len,
@@ -185,13 +186,13 @@ impl<'a> Reducer<'a> {
                                 sql_len = new_ast_sql.len();
                                 break;
                             } else {
-                                trace!("    Reduction not valid; failure not preserved.");
+                                tracing::info!("    Reduction not valid; failure not preserved.");
                             }
                         }
                     }
                 }
             }
-            info!("Global iteration {} complete", iteration);
+            tracing::info!("Global iteration {} complete", iteration);
         }
 
         ast.to_string()

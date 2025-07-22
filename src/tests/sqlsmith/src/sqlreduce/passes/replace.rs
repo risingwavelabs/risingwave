@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_sqlparser::ast::{Expr, SelectItem, SetExpr, Statement, Value};
+use risingwave_sqlparser::ast::{Expr, SelectItem, SetExpr, Value};
 
-use crate::sqlreduce::passes::{Ast, Transform};
+use crate::sqlreduce::passes::{Ast, Transform, extract_query, extract_query_mut};
 
 /// Replace scalar constants in SELECT projections with canonical placeholders.
 ///
@@ -58,7 +58,7 @@ impl Transform for ScalarReplace {
 
     fn get_reduction_points(&self, ast: Ast) -> Vec<usize> {
         let mut reduction_points = Vec::new();
-        if let Statement::Query(query) = &ast
+        if let Some(query) = extract_query(&ast)
             && let SetExpr::Select(select) = &query.body
         {
             for (i, item) in select.projection.iter().enumerate() {
@@ -71,7 +71,7 @@ impl Transform for ScalarReplace {
     }
 
     fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
-        if let Statement::Query(query) = ast
+        if let Some(query) = extract_query_mut(ast)
             && let SetExpr::Select(select) = &mut query.body
         {
             for i in reduction_points {
@@ -111,26 +111,22 @@ impl Transform for NullReplace {
 
     fn get_reduction_points(&self, ast: Ast) -> Vec<usize> {
         let mut reduction_points = Vec::new();
-        if let Statement::Query(query) = &ast
+        if let Some(query) = extract_query(&ast)
             && let SetExpr::Select(select) = &query.body
         {
-            for (i, item) in select.projection.iter().enumerate() {
-                if let SelectItem::UnnamedExpr(_) = item {
-                    reduction_points.push(i);
-                }
+            for (i, _) in select.projection.iter().enumerate() {
+                reduction_points.push(i);
             }
         }
         reduction_points
     }
 
     fn apply_on(&self, ast: &mut Ast, reduction_points: Vec<usize>) -> Ast {
-        if let Statement::Query(query) = ast
+        if let Some(query) = extract_query_mut(ast)
             && let SetExpr::Select(select) = &mut query.body
         {
             for i in reduction_points {
-                if let SelectItem::UnnamedExpr(ref mut v) = select.projection[i] {
-                    *v = Expr::Value(Value::Null);
-                }
+                select.projection[i] = SelectItem::UnnamedExpr(Expr::Value(Value::Null));
             }
         }
         ast.clone()

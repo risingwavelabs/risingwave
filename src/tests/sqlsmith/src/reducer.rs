@@ -107,7 +107,10 @@ fn shrink_statements(sql: &str) -> Result<String> {
 }
 
 async fn shrink(sql: &str, strategy: Strategy, client: &Client) -> Result<String> {
-    let checker = Checker::new(client);
+    let sql_statements = parse_sql(sql);
+    let proceeding_stmts = sql_statements.split_last().unwrap().1.to_vec();
+    let objects_to_cleanup = find_ddl_references(&sql_statements);
+    let checker = Checker::new(client, proceeding_stmts, objects_to_cleanup);
     let mut reducer = Reducer::new(checker, strategy);
 
     let reduced_sql = reducer.reduce(sql).await?;
