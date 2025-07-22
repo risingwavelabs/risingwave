@@ -150,7 +150,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                 tracing::info!(%table_id, %associated_source_id, "LoadFinish command scheduled successfully");
             };
             if let Err(e) = res {
-                tracing::error!(error = %e.as_report(),%associated_source_id, "Failed to handle source load finished");
+                tracing::error!(error = %e.as_report(), %associated_source_id, "Failed to handle source load finished");
             }
         }
 
