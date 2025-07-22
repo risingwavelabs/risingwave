@@ -416,16 +416,10 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
 
                                     let chunk_cdc_offset =
                                         get_cdc_chunk_last_offset(&offset_parse_func, &chunk)?;
-
                                     if let Some(cur) = actor_cdc_offset_low.as_ref()
                                         && let Some(chunk_offset) = chunk_cdc_offset
                                         && chunk_offset < *cur
                                     {
-                                        tracing::trace!(
-                                            "skip changelog chunk: chunk_offset {:?}, capacity {}",
-                                            chunk_offset,
-                                            chunk.capacity()
-                                        );
                                         continue;
                                     }
 
@@ -549,14 +543,18 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
 
                         let chunk_cdc_offset =
                             get_cdc_chunk_last_offset(&offset_parse_func, &chunk)?;
-                        if let Some(high) = actor_cdc_offset_high.as_ref()
-                            && let Some(chunk_offset) = chunk_cdc_offset
+                        if let Some(cur) = actor_cdc_offset_low.as_ref()
+                            && let Some(ref chunk_offset) = chunk_cdc_offset
+                            && *chunk_offset < *cur
                         {
-                            if chunk_offset >= *high {
-                                // Report once.
-                                actor_cdc_offset_high = None;
-                                report_actor_backfill_done = true;
-                            }
+                            continue;
+                        }
+                        if let Some(high) = actor_cdc_offset_high.as_ref()
+                            && let Some(ref chunk_offset) = chunk_cdc_offset
+                            && *chunk_offset >= *high
+                        {
+                            actor_cdc_offset_high = None;
+                            report_actor_backfill_done = true;
                         }
 
                         if let Some(filtered_chunk) = filter_stream_chunk(
