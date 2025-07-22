@@ -17,6 +17,7 @@ use prost::Message;
 use risingwave_common::license::Feature;
 use risingwave_common::secret::vault_client::{HashiCorpVaultClient, HashiCorpVaultConfig};
 use risingwave_sqlparser::ast::{CreateSecretStatement, SqlOption, Value};
+use thiserror_ext::AsReport;
 
 use crate::error::{ErrorCode, Result};
 use crate::handler::{HandlerArgs, RwPgResponse};
@@ -127,7 +128,7 @@ pub(crate) async fn get_secret_payload(
                     .map_err(|e| {
                         ErrorCode::InvalidParameterValue(format!(
                             "Invalid HashiCorp Vault configuration: {}",
-                            e
+                            e.as_report()
                         ))
                     })?;
 

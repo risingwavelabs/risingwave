@@ -5,7 +5,7 @@ set -euo pipefail
 echo "Setting up HashiCorp Vault test data..."
 
 # Set vault environment variables
-export VAULT_ADDR="http://localhost:8200"
+export VAULT_ADDR="http://vault-server:8200"
 export VAULT_TOKEN="root-token"
 
 # Wait for Vault to be ready
