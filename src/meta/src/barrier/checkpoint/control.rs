@@ -853,7 +853,7 @@ impl DatabaseCheckpointControl {
                         }));
                     });
                 let task = task.get_or_insert_default();
-                node.command_ctx.collect_commit_epoch_info(
+                let load_finished_source_ids = node.command_ctx.collect_commit_epoch_info(
                     &mut task.commit_info,
                     take(&mut node.state.resps),
                     self.collect_backfill_pinned_upstream_log_epoch(),
@@ -861,6 +861,8 @@ impl DatabaseCheckpointControl {
                 self.completing_barrier = Some(node.command_ctx.barrier_info.prev_epoch());
                 task.finished_jobs.extend(finished_jobs);
                 task.notifiers.extend(node.notifiers);
+                task.load_finished_source_ids
+                    .extend(load_finished_source_ids);
                 task.epoch_infos
                     .try_insert(
                         self.database_id,

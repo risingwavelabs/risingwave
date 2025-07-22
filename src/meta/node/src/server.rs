@@ -524,6 +524,7 @@ pub async fn start_service_as_election_leader(
         source_manager.clone(),
         sink_manager.clone(),
         scale_controller.clone(),
+        barrier_scheduler.clone(),
     )
     .await;
     tracing::info!("GlobalBarrierManager started");
