@@ -151,6 +151,16 @@ impl SharedActorInfos {
         writer.finish();
     }
 
+    pub(super) fn upsert(
+        &self,
+        database_id: DatabaseId,
+        infos: impl IntoIterator<Item = &InflightFragmentInfo>,
+    ) {
+        let mut writer = self.start_writer(database_id);
+        writer.upsert(infos);
+        writer.finish();
+    }
+
     pub(super) fn start_writer(&self, database_id: DatabaseId) -> SharedActorInfoWriter<'_> {
         SharedActorInfoWriter {
             database_id,

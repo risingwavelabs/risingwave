@@ -1081,13 +1081,10 @@ impl DatabaseCheckpointControl {
                         edges.as_mut().expect("should exist"),
                     )?;
 
-                    let mut shared_actor_writer = self
-                        .state
+                    self.state
                         .inflight_graph_info
                         .shared_actor_infos
-                        .start_writer(self.database_id);
-                    shared_actor_writer.upsert(job.graph_info().fragment_infos.values());
-                    shared_actor_writer.finish();
+                        .upsert(self.database_id, job.graph_info().fragment_infos.values());
 
                     self.creating_streaming_job_controls.insert(job_id, job);
                 }
