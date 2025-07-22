@@ -53,7 +53,9 @@ use crate::model::{
     ActorId, Fragment, FragmentDownstreamRelation, FragmentId, FragmentNewNoShuffle,
     FragmentReplaceUpstream, StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
 };
-use crate::stream::cdc::assign_cdc_table_snapshot_splits;
+use crate::stream::cdc::{
+    assign_cdc_table_snapshot_splits, assign_cdc_table_snapshot_splits_for_replace_table,
+};
 use crate::stream::{SourceChange, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
@@ -468,6 +470,13 @@ impl GlobalStreamManager {
                 .source_manager
                 .allocate_splits(&stream_job_fragments)
                 .await?;
+            let cdc_table_snapshot_split_assignment =
+                assign_cdc_table_snapshot_splits_for_replace_table(
+                    context.old_fragments.stream_job_id.table_id,
+                    &stream_job_fragments.inner,
+                    self.env.meta_store_ref(),
+                )
+                .await?;
 
             replace_table_command = Some(ReplaceStreamJobPlan {
                 old_fragments: context.old_fragments,
@@ -479,6 +488,7 @@ impl GlobalStreamManager {
                 tmp_id: tmp_table_id.table_id,
                 to_drop_state_table_ids: Vec::new(), /* the create streaming job command will not drop any state table */
                 auto_refresh_schema_sinks: None,
+                cdc_table_snapshot_split_assignment,
             });
         }
 
@@ -584,6 +594,14 @@ impl GlobalStreamManager {
             init_split_assignment
         );
 
+        let cdc_table_snapshot_split_assignment =
+            assign_cdc_table_snapshot_splits_for_replace_table(
+                old_fragments.stream_job_id.table_id,
+                &new_fragments.inner,
+                self.env.meta_store_ref(),
+            )
+            .await?;
+
         self.barrier_scheduler
             .run_command(
                 streaming_job.database_id().into(),
@@ -605,6 +623,7 @@ impl GlobalStreamManager {
                         }
                     },
                     auto_refresh_schema_sinks,
+                    cdc_table_snapshot_split_assignment,
                 }),
             )
             .await?;
