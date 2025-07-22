@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::num::NonZero;
+
 use anyhow::anyhow;
 use phf::{Set, phf_set};
 use risingwave_common::catalog::Field;
@@ -25,10 +27,12 @@ use with_options::WithOptions;
 
 use crate::connector_common::IcebergSinkCompactionUpdate;
 use crate::enforce_secret::EnforceSecret;
+use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::jdbc_jni_client::{JdbcJniClient, build_alter_add_column_sql};
-use crate::sink::remote::{Jdbc, RemoteLogSinker, RemoteSink};
+use crate::sink::remote::{CoordinatedRemoteSinkWriter, Jdbc, RemoteSink};
 use crate::sink::{
     Result, Sink, SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkError, SinkParam,
+    SinkWriterMetrics,
 };
 
 pub const REDSHIFT_SINK: &str = "redshift";
@@ -53,6 +57,7 @@ pub struct RedShiftConfig {
 pub struct RedshiftSink {
     remote_sink: RemoteSink<Jdbc>,
     config: RedShiftConfig,
+    param: SinkParam,
 }
 impl EnforceSecret for RedshiftSink {
     const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
@@ -70,17 +75,18 @@ impl TryFrom<SinkParam> for RedshiftSink {
             serde_json::to_value(param.properties.clone()).unwrap(),
         )
         .map_err(|e| SinkError::Config(anyhow!(e)))?;
-        let remote_sink = RemoteSink::try_from(param)?;
+        let remote_sink = RemoteSink::try_from(param.clone())?;
         Ok(Self {
             remote_sink,
             config,
+            param,
         })
     }
 }
 
 impl Sink for RedshiftSink {
     type Coordinator = RedshiftSinkCommitter;
-    type LogSinker = RemoteLogSinker;
+    type LogSinker = CoordinatedLogSinker<CoordinatedRemoteSinkWriter>;
 
     const SINK_NAME: &'static str = REDSHIFT_SINK;
 
@@ -96,7 +102,14 @@ impl Sink for RedshiftSink {
         &self,
         writer_param: crate::sink::SinkWriterParam,
     ) -> Result<Self::LogSinker> {
-        self.remote_sink.new_log_sinker(writer_param).await
+        let metrics = SinkWriterMetrics::new(&writer_param);
+        CoordinatedLogSinker::new(
+            &writer_param,
+            self.param.clone(),
+            CoordinatedRemoteSinkWriter::new(self.param.clone(), metrics.clone()).await?,
+            NonZero::new(1).unwrap(),
+        )
+        .await
     }
 
     fn is_coordinated_sink(&self) -> bool {
