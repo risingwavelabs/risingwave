@@ -167,13 +167,13 @@ hashbrown = { version = "0.15", features = [
 ] }
 hytra = "0.1"
 # branch dev_rebase_main_20250325
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "1f28606c1bbca32325070cdde16c42b7fadaa536", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "3d93932fdb413d9b5877aea070e290d243af195f", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "1f28606c1bbca32325070cdde16c42b7fadaa536" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "1f28606c1bbca32325070cdde16c42b7fadaa536" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "3d93932fdb413d9b5877aea070e290d243af195f" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "3d93932fdb413d9b5877aea070e290d243af195f" }
 
 itertools = "0.14.0"
 jni = { version = "0.21.1", features = ["invocation"] }

@@ -18,6 +18,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock};
 
 use derive_builder::Builder;
+use iceberg::spec::Operation;
 use iceberg::{Catalog, TableIdent};
 use iceberg_compaction_core::compaction::{
     CommitConsistencyParams, Compaction, CompactionType, RewriteDataFilesCommitManagerRetryConfig,
@@ -359,8 +360,11 @@ impl IcebergCompactorRunner {
                 basic_schema_id: table.metadata().current_schema().schema_id(),
             };
 
-            let rewrite_commit_manager =
-                compaction.build_rewrite_file_commit_manager(consistency_params, None);
+            let rewrite_commit_manager = compaction.build_rewrite_file_commit_manager(
+                consistency_params,
+                None,
+                Some(Operation::Overwrite),
+            );
 
             let input_files = {
                 let mut input_files = vec![];
