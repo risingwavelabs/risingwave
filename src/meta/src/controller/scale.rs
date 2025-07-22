@@ -19,16 +19,17 @@ use std::ops::{BitAnd, BitOrAssign};
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::hash::ActorMapping;
+use risingwave_common::catalog;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::prelude::{
-    Actor, Fragment, FragmentRelation, Sink, Source, StreamingJob, Table,
+    Actor, Fragment, FragmentRelation, Object, Sink, Source, StreamingJob, Table,
 };
 use risingwave_meta_model::{
-    ConnectorSplits, DispatcherType, FragmentId, ObjectId, StreamingParallelism, VnodeBitmap,
-    WorkerId, actor, fragment, fragment_relation, object, sink, source, streaming_job, table,
+    ConnectorSplits, DatabaseId, DispatcherType, FragmentId, ObjectId, StreamingParallelism,
+    TableId, VnodeBitmap, WorkerId, actor, fragment, fragment_relation, object, sink, source,
+    streaming_job, table,
 };
 use risingwave_meta_model_migration::{
     Alias, CommonTableExpression, Expr, IntoColumnRef, QueryStatementBuilder, SelectStatement,
@@ -40,11 +41,12 @@ use sea_orm::{
     JoinType, QueryFilter, QuerySelect, RelationTrait, Statement, TransactionTrait,
 };
 
-use crate::barrier::Reschedule;
 use crate::controller::catalog::{ActorInfo, CatalogController};
+use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::utils::{get_existing_job_resource_group, get_fragment_actor_dispatchers};
+use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{
-    ActorId, DispatcherId, FragmentId as ModelFragmentId, StreamActor, StreamActorWithDispatchers,
+    ActorId, StreamActor,
 };
 use crate::stream::AssignerBuilder;
 use crate::{MetaError, MetaResult};
@@ -672,11 +674,56 @@ impl CatalogController {
     }
 }
 
+pub async fn load_fragments<C>(
+    txn: &C,
+    database_id: Option<DatabaseId>,
+    worker_nodes: &ActiveStreamingWorkerNodes,
+) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>>
+where
+    C: ConnectionTrait,
+{
+    let mut query = Fragment::find()
+        .select_only()
+        .column(fragment::Column::FragmentId);
+
+    if let Some(database_id) = database_id {
+        query = query
+            .join(JoinType::InnerJoin, fragment::Relation::Object.def())
+            .filter(object::Column::DatabaseId.eq(database_id));
+    }
+
+    let fragments: Vec<FragmentId> = query.into_tuple().all(txn).await?;
+
+    if fragments.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    // let workers: BTreeMap<_, _> = worker_nodes
+    //     .active_workers()
+    //     .iter()
+    //     .map(|worker| (worker.worker_id, worker.parallelism))
+    //     .collect();
+
+    let available_workers: BTreeMap<_, _> = worker_nodes
+        .current()
+        .values()
+        .filter(|worker| worker.is_streaming_schedulable())
+        .map(|worker| {
+            (
+                worker.id as i32,
+                NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
+            )
+        })
+        .collect();
+
+    render_fragments(txn, &fragments, available_workers).await
+}
+
 pub async fn render_fragments<C>(
     txn: &C,
     fragment_ids: &[FragmentId],
     workers: BTreeMap<WorkerId, NonZeroUsize>,
-) -> MetaResult<Vec<()>>
+) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>>
 where
     C: ConnectionTrait,
 {
@@ -694,7 +741,8 @@ where
         .all(txn)
         .await?;
 
-    let fragment_map: HashMap<_, _> = fragments.into_iter().map(|f| (f.fragment_id, f)).collect();
+    let mut fragment_map: HashMap<_, _> =
+        fragments.into_iter().map(|f| (f.fragment_id, f)).collect();
 
     let streaming_jobs = StreamingJob::find()
         .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
@@ -708,11 +756,22 @@ where
         .map(|job| (job.job_id, job))
         .collect();
 
-    let job_definitions =
-        resolve_streaming_job_definition(txn, &streaming_jobs_map.keys().cloned().collect())
-            .await?;
+    // let job_definitions =
+    //     resolve_streaming_job_definition(txn, &streaming_jobs_map.keys().cloned().collect())
+    //         .await?;
 
-    let mut fragment_actors = HashMap::new();
+    let object_databases: Vec<(ObjectId, DatabaseId)> = Object::find()
+        .columns([object::Column::Oid, object::Column::DatabaseId])
+        .into_tuple()
+        .all(txn)
+        .await?;
+
+    let streaming_job_database: HashMap<_, _> = object_databases.into_iter().collect();
+
+    let mut result: HashMap<
+        DatabaseId,
+        HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>,
+    > = HashMap::new();
 
     for NoShuffleEnsemble {
         entries,
@@ -727,6 +786,7 @@ where
         let (job_id, vnode_count) = entry_fragments
             .iter()
             .map(|f| (f.job_id, f.vnode_count as usize))
+            .dedup()
             .exactly_one()
             .map_err(|_| anyhow!("Multiple jobs found in no-shuffle ensemble"))?;
 
@@ -750,9 +810,17 @@ where
         let assignment = assigner.assign_hierarchical(&workers, &actors, &vnodes)?;
 
         for fragment_id in components {
-            let fragment = fragment_map.get(&fragment_id).unwrap();
+            let fragment::Model {
+                fragment_id,
+                job_id,
+                fragment_type_mask,
+                distribution_type,
+                stream_node,
+                state_table_ids,
+                ..
+            } = fragment_map.remove(&fragment_id).unwrap();
 
-            let actors = assignment
+            let actors: HashMap<crate::model::ActorId, InflightActorInfo> = assignment
                 .iter()
                 .flat_map(|(worker_id, actors)| {
                     actors
@@ -760,29 +828,46 @@ where
                         .map(move |(actor_id, vnodes)| (worker_id, actor_id, vnodes))
                 })
                 .map(|(&worker_id, &actor_idx, vnodes)| {
-                    let vnode_bitmap = match fragment.distribution_type {
+                    let vnode_bitmap = match distribution_type {
                         DistributionType::Single => None,
                         DistributionType::Hash => Some(Bitmap::from_indices(vnode_count, vnodes)),
                     };
-                    let mview_definition = job_definitions
-                        .get(&fragment.job_id)
-                        .cloned()
-                        .unwrap_or_else(|| "unknown".to_owned());
-                    StreamActor {
-                        actor_id: (fragment_id << 16) as u32 | actor_idx as u32,
-                        fragment_id: fragment_id as u32,
-                        vnode_bitmap,
-                        mview_definition,
-                        expr_context: None,
-                    }
-                })
-                .collect_vec();
 
-            fragment_actors.insert(fragment_id, actors);
+                    let actor_id = (fragment_id << 16) as u32 | actor_idx as u32;
+                    (
+                        actor_id,
+                        InflightActorInfo {
+                            worker_id,
+                            vnode_bitmap,
+                        },
+                    )
+                })
+                .collect();
+
+            let fragment = InflightFragmentInfo {
+                fragment_id: fragment_id as u32,
+                distribution_type,
+                fragment_type_mask: fragment_type_mask.into(),
+                vnode_count,
+                nodes: stream_node.to_protobuf(),
+                actors,
+                state_table_ids: state_table_ids
+                    .into_inner()
+                    .into_iter()
+                    .map(|id| catalog::TableId::new(id as _))
+                    .collect(),
+            };
+
+            result
+                .entry(streaming_job_database[&job_id])
+                .or_default()
+                .entry(job_id)
+                .or_default()
+                .insert(fragment_id, fragment);
         }
     }
 
-    todo!()
+    Ok(result)
 }
 
 // Helper struct to make the function signature cleaner and to properly bundle the required data.
@@ -790,192 +875,6 @@ where
 pub struct ActorGraph<'a> {
     pub fragments: &'a HashMap<FragmentId, (Fragment, Vec<StreamActor>)>,
     pub locations: &'a HashMap<ActorId, WorkerId>,
-}
-
-fn diff_graph(
-    prev: &ActorGraph<'_>,
-    curr: &ActorGraph<'_>,
-) -> MetaResult<HashMap<FragmentId, Reschedule>> {
-    // Collect all unique fragment IDs from both previous and current graphs.
-    let prev_fragment_ids: HashSet<_> = prev.fragments.keys().cloned().collect();
-    let curr_fragment_ids: HashSet<_> = curr.fragments.keys().cloned().collect();
-    let all_fragment_ids = prev_fragment_ids.union(&curr_fragment_ids);
-
-    let mut reschedules = HashMap::new();
-
-    for &fragment_id in all_fragment_ids {
-        let prev_state = prev.fragments.get(&fragment_id);
-        let curr_state = curr.fragments.get(&fragment_id);
-
-        let prev_actors = match prev_state {
-            Some((_, actors)) => actors.as_slice(),
-            None => &[],
-        };
-        let curr_actors = match curr_state {
-            Some((_, actors)) => actors.as_slice(),
-            None => &[],
-        };
-
-        let prev_actor_map: HashMap<_, _> = prev_actors.iter().map(|a| (a.actor_id, a)).collect();
-        let curr_actor_map: HashMap<_, _> = curr_actors.iter().map(|a| (a.actor_id, a)).collect();
-
-        let prev_ids: HashSet<_> = prev_actor_map.keys().cloned().collect();
-        let curr_ids: HashSet<_> = curr_actor_map.keys().cloned().collect();
-
-        // Find removed, added, and kept actors.
-        //
-        // 找出被移除、被添加和被保留的 actor。
-        let removed_actors: HashSet<_> = &prev_ids - &curr_ids;
-        let added_actor_ids: HashSet<_> = &curr_ids - &prev_ids;
-        let kept_ids: HashSet<_> = prev_ids.intersection(&curr_ids).cloned().collect();
-
-        let mut added_actors_by_worker = HashMap::new();
-        for &actor_id in &added_actor_ids {
-            let worker_id = curr
-                .locations
-                .get(&actor_id)
-                .ok_or_else(|| anyhow!("BUG: Worker not found for new actor {}", actor_id))?;
-            added_actors_by_worker
-                .entry(*worker_id)
-                .or_insert_with(Vec::new)
-                .push(actor_id);
-        }
-
-        let mut vnode_bitmap_updates = HashMap::new();
-        for actor_id in kept_ids {
-            let prev_actor = prev_actor_map[&actor_id];
-            let curr_actor = curr_actor_map[&actor_id];
-
-            // Check if the vnode distribution has changed.
-            if prev_actor.vnode_bitmap != curr_actor.vnode_bitmap
-                && let Some(bitmap) = curr_actor.vnode_bitmap.clone() {
-                    vnode_bitmap_updates.insert(actor_id, bitmap);
-                }
-        }
-
-        // Only generate a reschedule plan if there are actual changes.
-        //
-        // 只有在确实发生变更时才生成 reschedule 计划。
-        let reschedule = if !added_actors_by_worker.is_empty()
-            || !removed_actors.is_empty()
-            || !vnode_bitmap_updates.is_empty()
-        {
-            Some(Reschedule {
-                added_actors: added_actors_by_worker,
-                removed_actors,
-                vnode_bitmap_updates,
-                // TODO: The following fields require additional context not available in this function:
-                // 1. Fragment relationship data (upstream/downstream connections)
-                // 2. Dispatcher configuration and mapping information
-                // 3. Source split assignments
-                // 4. Complete actor metadata for building StreamActorWithDispatchers
-                //
-                // These should be populated by the caller with access to:
-                // - Fragment relation tables (fragment_relation)
-                // - Dispatcher configurations
-                // - Source manager for split assignments
-                // - Actor creation context
-                //
-                // 以下字段需要此函数范围外的额外上下文信息，应由调用者填充。
-                upstream_fragment_dispatcher_ids: collect_upstream_dispatchers(
-                    &prev_state,
-                    &curr_state,
-                    fragment_id,
-                ),
-                upstream_dispatcher_mapping: build_dispatcher_mapping(
-                    prev_actors,
-                    curr_actors,
-                    fragment_id,
-                ),
-                downstream_fragment_ids: collect_downstream_fragments(
-                    &prev_state,
-                    &curr_state,
-                    fragment_id,
-                ),
-                actor_splits: collect_actor_splits(&added_actor_ids, fragment_id),
-                newly_created_actors: build_newly_created_actors(
-                    &added_actor_ids,
-                    curr_actors,
-                    fragment_id,
-                ),
-            })
-        } else {
-            None // No changes, no reschedule needed.
-        };
-
-        if let Some(reschedule) = reschedule {
-            reschedules.insert(fragment_id, reschedule);
-        }
-    }
-
-    Ok(reschedules)
-}
-
-/// Helper function to collect upstream fragment dispatcher IDs.
-/// TODO: This currently returns empty as fragment relationship data is not available.
-/// In a complete implementation, this should query `fragment_relation` table.
-fn collect_upstream_dispatchers(
-    _prev_state: &Option<&(Fragment, Vec<StreamActor>)>,
-    _curr_state: &Option<&(Fragment, Vec<StreamActor>)>,
-    _fragment_id: FragmentId,
-) -> Vec<(ModelFragmentId, DispatcherId)> {
-    // TODO: Query fragment_relation to find upstream fragments and their dispatcher IDs
-    // SELECT source_fragment_id FROM fragment_relation WHERE target_fragment_id = fragment_id
-    vec![]
-}
-
-/// Helper function to build dispatcher mapping for hash-sharded fragments.
-/// TODO: This requires access to dispatcher configuration and fragment distribution type.
-fn build_dispatcher_mapping(
-    _prev_actors: &[StreamActor],
-    _curr_actors: &[StreamActor],
-    _fragment_id: FragmentId,
-) -> Option<ActorMapping> {
-    // TODO: Check if fragment is hash-sharded and build appropriate ActorMapping
-    // This requires fragment distribution type and dispatcher configuration
-    None
-}
-
-/// Helper function to collect downstream fragment IDs.
-/// TODO: This currently returns empty as fragment relationship data is not available.
-fn collect_downstream_fragments(
-    _prev_state: &Option<&(Fragment, Vec<StreamActor>)>,
-    _curr_state: &Option<&(Fragment, Vec<StreamActor>)>,
-    _fragment_id: FragmentId,
-) -> Vec<ModelFragmentId> {
-    // TODO: Query fragment_relation to find downstream fragments
-    // SELECT target_fragment_id FROM fragment_relation WHERE source_fragment_id = fragment_id
-    vec![]
-}
-
-/// Helper function to collect actor splits for source actors.
-/// TODO: This requires access to source manager and split assignment logic.
-fn collect_actor_splits(
-    _added_actor_ids: &HashSet<ActorId>,
-    _fragment_id: FragmentId,
-) -> HashMap<ActorId, Vec<SplitImpl>> {
-    // TODO: Check if fragment contains source actors and assign appropriate splits
-    // This requires:
-    // 1. Fragment type checking (source/source_backfill)
-    // 2. Source manager access for split assignment
-    // 3. Split rebalancing logic
-    HashMap::new()
-}
-
-/// Helper function to build newly created actors with dispatchers.
-/// TODO: This requires complete actor creation context and dispatcher building.
-fn build_newly_created_actors(
-    _added_actor_ids: &HashSet<ActorId>,
-    _curr_actors: &[StreamActor],
-    _fragment_id: FragmentId,
-) -> HashMap<ActorId, (StreamActorWithDispatchers, WorkerId)> {
-    // TODO: Build StreamActorWithDispatchers for each new actor
-    // This requires:
-    // 1. Complete actor metadata
-    // 2. Dispatcher configuration
-    // 3. Worker assignment information
-    // 4. Fragment topology context
-    HashMap::new()
 }
 
 struct NoShuffleEnsemble {
