@@ -234,13 +234,15 @@ pub(crate) async fn assign_cdc_table_snapshot_splits_for_replace_table(
         .values()
         .filter(|f| is_parallelized_backfill_enabled_cdc_scan_fragment(f))
         .collect_vec();
-    if stream_scan_fragments.len() != 1 {
-        return Err(anyhow::anyhow!(
-            "Expect 1 CDC table snapshot splits, {} was found.",
-            stream_scan_fragments.len()
-        )
-        .into());
+    if stream_scan_fragments.is_empty() {
+        return Ok(HashMap::default());
     }
+    assert_eq!(
+        stream_scan_fragments.len(),
+        1,
+        "Expect 1 scan fragment, {} was found.",
+        stream_scan_fragments.len()
+    );
     let stream_scan_fragment = stream_scan_fragments.swap_remove(0);
     let assignment = assign_cdc_table_snapshot_splits_impl(
         original_table_id,
