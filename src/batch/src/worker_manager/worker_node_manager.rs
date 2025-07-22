@@ -394,7 +394,7 @@ impl WorkerNodeSelector {
                             "failed to get streaming fragment mapping for: {} sleep to retry",
                             fragment_id
                         );
-                        sleep(Duration::from_secs(10));
+                        sleep(Duration::from_secs(2));
                         self.manager
                             .get_streaming_fragment_mapping(&fragment_id)
                             .inspect_err(|_| {
