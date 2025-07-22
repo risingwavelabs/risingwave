@@ -45,9 +45,7 @@ use crate::controller::catalog::{ActorInfo, CatalogController};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::utils::{get_existing_job_resource_group, get_fragment_actor_dispatchers};
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{
-    ActorId, StreamActor,
-};
+use crate::model::{ActorId, StreamActor};
 use crate::stream::AssignerBuilder;
 use crate::{MetaError, MetaResult};
 
@@ -692,7 +690,10 @@ where
             .filter(object::Column::DatabaseId.eq(database_id));
     }
 
+    println!("before 1");
     let fragments: Vec<FragmentId> = query.into_tuple().all(txn).await?;
+
+    println!("after 1");
 
     if fragments.is_empty() {
         return Ok(HashMap::new());
@@ -715,6 +716,8 @@ where
             )
         })
         .collect();
+
+    println!("before render");
 
     render_fragments(txn, &fragments, available_workers).await
 }
@@ -751,6 +754,8 @@ where
         .all(txn)
         .await?;
 
+    println!("xxxx");
+
     let streaming_jobs_map: HashMap<_, _> = streaming_jobs
         .into_iter()
         .map(|job| (job.job_id, job))
@@ -760,8 +765,18 @@ where
     //     resolve_streaming_job_definition(txn, &streaming_jobs_map.keys().cloned().collect())
     //         .await?;
 
-    let object_databases: Vec<(ObjectId, DatabaseId)> = Object::find()
-        .columns([object::Column::Oid, object::Column::DatabaseId])
+    // let object_databases: Vec<(ObjectId, DatabaseId)> = Object::find()
+    //     .columns([object::Column::Oid, object::Column::DatabaseId])
+    //     .filter(object::Column::DatabaseId.is_not_null())
+    //     .into_tuple()
+    //     .all(txn)
+    //     .await?;
+
+    let object_databases: Vec<(ObjectId, DatabaseId)> = StreamingJob::find()
+        .select_only()
+        .column(streaming_job::Column::JobId)
+        .column(object::Column::DatabaseId)
+        .join(JoinType::LeftJoin, streaming_job::Relation::Object.def())
         .into_tuple()
         .all(txn)
         .await?;
@@ -772,6 +787,8 @@ where
         DatabaseId,
         HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>,
     > = HashMap::new();
+
+    println!("yyyyy");
 
     for NoShuffleEnsemble {
         entries,
@@ -846,6 +863,7 @@ where
 
             let fragment = InflightFragmentInfo {
                 fragment_id: fragment_id as u32,
+                job_id,
                 distribution_type,
                 fragment_type_mask: fragment_type_mask.into(),
                 vnode_count,

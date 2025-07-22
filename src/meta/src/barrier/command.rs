@@ -227,6 +227,7 @@ impl StreamJobFragments {
                 fragment.fragment_id,
                 InflightFragmentInfo {
                     fragment_id: fragment.fragment_id,
+                    job_id: self.stream_job_id.table_id as _,
                     distribution_type: fragment.distribution_type.into(),
                     fragment_type_mask: fragment.fragment_type_mask,
                     vnode_count: fragment.vnode_count(),

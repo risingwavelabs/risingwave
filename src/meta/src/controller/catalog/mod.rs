@@ -568,8 +568,6 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        inner.actors.drop_actors_by_fragments(&dirty_fragment_ids);
-
         // We don't need to notify the frontend, because the Init subscription is not send to frontend.
         Ok(())
     }
@@ -746,8 +744,6 @@ impl CatalogController {
         assert!(res.rows_affected > 0);
 
         txn.commit().await?;
-
-        inner.actors.drop_actors_by_fragments(&dirty_fragment_ids);
 
         let object_group = build_object_group_for_delete(
             to_notify_objs

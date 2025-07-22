@@ -90,6 +90,7 @@ pub struct InflightActorInfo {
 #[derive(Clone, Debug)]
 pub struct InflightFragmentInfo {
     pub fragment_id: crate::model::FragmentId,
+    pub job_id: ObjectId,
     pub distribution_type: DistributionType,
     pub fragment_type_mask: FragmentTypeMask,
     pub vnode_count: usize,
@@ -449,103 +450,25 @@ impl CatalogController {
         &self,
         id_filter: Option<HashSet<FragmentId>>,
     ) -> MetaResult<HashMap<FragmentId, FragmentParallelismInfo>> {
-        let inner = self.inner.read().await;
-
-        // 1. Determine which fragments to process (apply id_filter if present)
-        let fragment_ids: Vec<FragmentId> = if let Some(ref ids) = id_filter {
-            ids.iter().copied().collect()
-        } else {
-            inner.actors.actors_by_fragment_id.keys().copied().collect()
-        };
-
-        // 2. Fetch fragment metadata (distribution_type and vnode_count) from the DB
-        let fragment_meta: Vec<(FragmentId, DistributionType, i32)> = FragmentModel::find()
-            .select_only()
-            .columns([
-                fragment::Column::FragmentId,
-                fragment::Column::DistributionType,
-                fragment::Column::VnodeCount,
-            ])
-            .filter(fragment::Column::FragmentId.is_in(fragment_ids.clone()))
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-
-        // 3. Compute parallelism (actor counts) from the in-memory cache
-        let fragment_parallelisms_from_cache: Vec<(FragmentId, i64, DistributionType, i32)> =
-            fragment_meta
-                .into_iter()
-                .map(|(fragment_id, distribution_type, vnode_count)| {
-                    let count = inner
-                        .actors
-                        .actors_by_fragment_id
-                        .get(&fragment_id)
-                        .map(|ids| ids.len() as i64)
-                        .unwrap_or(0);
-                    (fragment_id, count, distribution_type, vnode_count)
-                })
-                .collect();
-
-        {
-            let query_alias = Alias::new("fragment_actor_count");
-            let count_alias = Alias::new("count");
-
-            let mut query = SelectStatement::new()
-                .column(actor::Column::FragmentId)
-                .expr_as(actor::Column::ActorId.count(), count_alias.clone())
-                .from(Actor)
-                .group_by_col(actor::Column::FragmentId)
-                .to_owned();
-
-            if let Some(id_filter) = id_filter {
-                query.cond_having(actor::Column::FragmentId.is_in(id_filter));
+        let info = self.env.shared_actor_infos().read_guard();
+        let fragments = info.values().flatten();
+        let mut result = HashMap::new();
+        for (fragment_id, fragment) in fragments {
+            if let Some(id_filter) = &id_filter {
+                if !id_filter.contains(&(*fragment_id as _)) {
+                    continue; // Skip fragments not in the filter
+                }
             }
 
-            let outer = SelectStatement::new()
-                .column((FragmentModel, fragment::Column::FragmentId))
-                .column(count_alias)
-                .column(fragment::Column::DistributionType)
-                .column(fragment::Column::VnodeCount)
-                .from_subquery(query, query_alias.clone())
-                .inner_join(
-                    FragmentModel,
-                    Expr::col((query_alias, actor::Column::FragmentId))
-                        .equals((FragmentModel, fragment::Column::FragmentId)),
-                )
-                .to_owned();
-
-            let fragment_parallelisms_from_db: Vec<(FragmentId, i64, DistributionType, i32)> =
-                Selector::<SelectGetableTuple<(FragmentId, i64, DistributionType, i32)>>::into_tuple(
-                    outer,
-                )
-                    .all(&inner.db)
-                    .await?;
-
-            let set_db: HashSet<(FragmentId, i64, DistributionType, i32)> =
-                fragment_parallelisms_from_db.into_iter().collect();
-            let set_cache: HashSet<(FragmentId, i64, DistributionType, i32)> =
-                fragment_parallelisms_from_cache.iter().cloned().collect();
-
-            debug_assert_eq!(
-                set_db, set_cache,
-                "Fragment parallelisms mismatch between DB and cache"
+            result.insert(
+                *fragment_id as _,
+                FragmentParallelismInfo {
+                    distribution_type: fragment.distribution_type.into(),
+                    actor_count: fragment.actors.len() as _,
+                    vnode_count: fragment.vnode_count,
+                },
             );
         }
-
-        // 6. Map to the desired result type
-        let result = fragment_parallelisms_from_cache
-            .into_iter()
-            .map(|(fragment_id, count, distribution_type, vnode_count)| {
-                (
-                    fragment_id,
-                    FragmentParallelismInfo {
-                        distribution_type: distribution_type.into(),
-                        actor_count: count as usize,
-                        vnode_count: vnode_count as usize,
-                    },
-                )
-            })
-            .collect();
 
         Ok(result)
     }
@@ -910,56 +833,56 @@ impl CatalogController {
         Ok(max_parallelism as usize)
     }
 
-    /// Get all actor ids in the target streaming jobs.
-    pub async fn get_job_actor_mapping(
-        &self,
-        job_ids: Vec<ObjectId>,
-    ) -> MetaResult<HashMap<ObjectId, Vec<ActorId>>> {
-        let inner = self.inner.read().await;
-
-        let fragment_job_ids: Vec<(FragmentId, ObjectId)> = FragmentModel::find()
-            .select_only()
-            .columns([fragment::Column::FragmentId, fragment::Column::JobId])
-            .filter(fragment::Column::JobId.is_in(job_ids.clone()))
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-
-        let job_actors: HashSet<(_, _)> = fragment_job_ids
-            .into_iter()
-            .flat_map(|(fragment_id, job_id)| {
-                let actors = inner
-                    .actors
-                    .actors_by_fragment_id
-                    .get(&fragment_id)
-                    .cloned()
-                    .unwrap_or_default();
-
-                actors.into_iter().map(move |actor_id| (job_id, actor_id))
-            })
-            .collect();
-
-        {
-            let job_actors_from_db: Vec<(ObjectId, ActorId)> = Actor::find()
-                .select_only()
-                .column(fragment::Column::JobId)
-                .column(actor::Column::ActorId)
-                .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
-                .filter(fragment::Column::JobId.is_in(job_ids))
-                .into_tuple()
-                .all(&inner.db)
-                .await?;
-
-            let job_actors_from_db = job_actors_from_db
-                .into_iter()
-                .map(|(job_id, actor_id)| (job_id as ObjectId, actor_id as ActorId))
-                .collect::<HashSet<_>>();
-
-            debug_assert_eq!(job_actors, job_actors_from_db);
-        }
-
-        Ok(job_actors.into_iter().into_group_map())
-    }
+    // /// Get all actor ids in the target streaming jobs.
+    // pub async fn get_job_actor_mapping(
+    //     &self,
+    //     job_ids: Vec<ObjectId>,
+    // ) -> MetaResult<HashMap<ObjectId, Vec<ActorId>>> {
+    //     let inner = self.inner.read().await;
+    //
+    //     let fragment_job_ids: Vec<(FragmentId, ObjectId)> = FragmentModel::find()
+    //         .select_only()
+    //         .columns([fragment::Column::FragmentId, fragment::Column::JobId])
+    //         .filter(fragment::Column::JobId.is_in(job_ids.clone()))
+    //         .into_tuple()
+    //         .all(&inner.db)
+    //         .await?;
+    //
+    //     let job_actors: HashSet<(_, _)> = fragment_job_ids
+    //         .into_iter()
+    //         .flat_map(|(fragment_id, job_id)| {
+    //             let actors = inner
+    //                 .actors
+    //                 .actors_by_fragment_id
+    //                 .get(&fragment_id)
+    //                 .cloned()
+    //                 .unwrap_or_default();
+    //
+    //             actors.into_iter().map(move |actor_id| (job_id, actor_id))
+    //         })
+    //         .collect();
+    //
+    //     {
+    //         let job_actors_from_db: Vec<(ObjectId, ActorId)> = Actor::find()
+    //             .select_only()
+    //             .column(fragment::Column::JobId)
+    //             .column(actor::Column::ActorId)
+    //             .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
+    //             .filter(fragment::Column::JobId.is_in(job_ids))
+    //             .into_tuple()
+    //             .all(&inner.db)
+    //             .await?;
+    //
+    //         let job_actors_from_db = job_actors_from_db
+    //             .into_iter()
+    //             .map(|(job_id, actor_id)| (job_id as ObjectId, actor_id as ActorId))
+    //             .collect::<HashSet<_>>();
+    //
+    //         debug_assert_eq!(job_actors, job_actors_from_db);
+    //     }
+    //
+    //     Ok(job_actors.into_iter().into_group_map())
+    // }
 
     /// Try to get internal table ids of each streaming job, used by metrics collection.
     pub async fn get_job_internal_table_ids(&self) -> Option<Vec<(ObjectId, Vec<TableId>)>> {
@@ -1121,34 +1044,23 @@ impl CatalogController {
     }
 
     pub async fn list_actor_locations(&self) -> MetaResult<Vec<PartialActorLocation>> {
-        let inner = self.inner.read().await;
+        let info = self.env.shared_actor_infos().read_guard();
 
-        let actor_locations = inner
-            .actors
-            .models
+        let actor_locations = info
             .values()
-            .map(|actor| PartialActorLocation {
-                actor_id: actor.actor_id,
-                fragment_id: actor.fragment_id,
-                worker_id: actor.worker_id,
-                status: actor.status.clone(),
+            .flatten()
+            .flat_map(|(fragment_id, fragment)| {
+                fragment
+                    .actors
+                    .iter()
+                    .map(|(actor_id, actor)| PartialActorLocation {
+                        actor_id: *actor_id as _,
+                        fragment_id: *fragment_id as _,
+                        worker_id: actor.worker_id,
+                        status: ActorStatus::Running,
+                    })
             })
             .collect_vec();
-
-        {
-            let actor_locations_from_db: Vec<PartialActorLocation> =
-                Actor::find().into_partial_model().all(&inner.db).await?;
-
-            let actor_locations_from_db = actor_locations_from_db
-                .iter()
-                .cloned()
-                .collect::<HashSet<_>>();
-
-            let actor_locations_from_cache =
-                actor_locations.iter().cloned().collect::<HashSet<_>>();
-
-            debug_assert_eq!(actor_locations_from_cache, actor_locations_from_db);
-        }
 
         Ok(actor_locations)
     }
@@ -1441,56 +1353,54 @@ impl CatalogController {
         let (sink_ids, _): (Vec<_>, Vec<_>) = sink_id_names.iter().cloned().unzip();
         let sink_name_mapping: HashMap<SinkId, String> = sink_id_names.into_iter().collect();
 
-        let actor_with_type: Vec<(ActorId, SinkId, i32)> = Actor::find()
-            .select_only()
-            .column(actor::Column::ActorId)
-            .columns([fragment::Column::JobId, fragment::Column::FragmentTypeMask])
-            .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
-            .filter(fragment::Column::JobId.is_in(sink_ids.clone()))
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
+        // let sink_fragments: Vec<(FragmentId, SinkId, i32)> = FragmentModel::find()
+        //     .select_only()
+        //     .columns([
+        //         fragment::Column::FragmentId,
+        //         fragment::Column::JobId,
+        //         fragment::Column::FragmentTypeMask,
+        //     ])
+        //     .filter(fragment::Column::JobId.is_in(sink_ids))
+        //     .into_tuple()
+        //     .all(&inner.db)
+        //     .await?;
+        //
+        // let actor_with_type_from_cache = sink_fragments
+        //     .into_iter()
+        //     .flat_map(|(fragment_id, sink_id, type_mask)| {
+        //         let actor_ids = inner
+        //             .actors
+        //             .actors_by_fragment_id
+        //             .get(&fragment_id)
+        //             .cloned()
+        //             .unwrap_or_default();
+        //         actor_ids
+        //             .into_iter()
+        //             .map(move |actor_id| (actor_id, sink_id, type_mask))
+        //     })
+        //     .collect_vec();
 
-        {
-            let sink_fragments: Vec<(FragmentId, SinkId, i32)> = FragmentModel::find()
-                .select_only()
-                .columns([
-                    fragment::Column::FragmentId,
-                    fragment::Column::JobId,
-                    fragment::Column::FragmentTypeMask,
-                ])
-                .filter(fragment::Column::JobId.is_in(sink_ids))
-                .into_tuple()
-                .all(&inner.db)
-                .await?;
+        let actor_with_type_from_cache: Vec<(ActorId, ObjectId, FragmentTypeMask)> = {
+            let info = self.env.shared_actor_infos().read_guard();
 
-            let actor_with_type_from_cache = sink_fragments
-                .into_iter()
-                .flat_map(|(fragment_id, sink_id, type_mask)| {
-                    let actor_ids = inner
-                        .actors
-                        .actors_by_fragment_id
-                        .get(&fragment_id)
-                        .cloned()
-                        .unwrap_or_default();
-                    actor_ids
-                        .into_iter()
-                        .map(move |actor_id| (actor_id, sink_id, type_mask))
+            info.values()
+                .flatten()
+                .filter(|(fragment_id, fragment)| sink_ids.contains(&fragment.job_id))
+                .flat_map(|(fragment_id, fragment)| {
+                    fragment.actors.keys().map(move |actor_id| {
+                        (
+                            *actor_id as _,
+                            fragment.job_id as _,
+                            fragment.fragment_type_mask,
+                        )
+                    })
                 })
-                .collect_vec();
-
-            let actor_with_type_from_db = actor_with_type.iter().cloned().collect::<HashSet<_>>();
-            let actor_with_type_from_cache = actor_with_type_from_cache
-                .iter()
-                .cloned()
-                .collect::<HashSet<_>>();
-
-            debug_assert_eq!(actor_with_type_from_cache, actor_with_type_from_db);
-        }
+                .collect()
+        };
 
         let mut sink_actor_mapping = HashMap::new();
-        for (actor_id, sink_id, type_mask) in actor_with_type {
-            if FragmentTypeMask::from(type_mask).contains(FragmentTypeFlag::Sink) {
+        for (actor_id, sink_id, type_mask) in actor_with_type_from_cache {
+            if type_mask.contains(FragmentTypeFlag::Sink) {
                 sink_actor_mapping
                     .entry(sink_id)
                     .or_insert_with(|| (sink_name_mapping.get(&sink_id).unwrap().clone(), vec![]))
@@ -1528,6 +1438,7 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
+        println!("111");
         let database_fragment_infos = load_fragments(&txn, database_id, worker_nodes).await?;
 
         debug!(?database_fragment_infos, "reload all actors");
@@ -1535,163 +1446,163 @@ impl CatalogController {
         Ok(database_fragment_infos)
     }
 
-    pub async fn migrate_actors(
-        &self,
-        plan: HashMap<WorkerSlotId, WorkerSlotId>,
-    ) -> MetaResult<()> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
+    // pub async fn migrate_actors(
+    //     &self,
+    //     plan: HashMap<WorkerSlotId, WorkerSlotId>,
+    // ) -> MetaResult<()> {
+    //     let inner = self.inner.write().await;
+    //     let txn = inner.db.begin().await?;
+    //
+    //     let actors: Vec<(
+    //         FragmentId,
+    //         DistributionType,
+    //         ActorId,
+    //         Option<VnodeBitmap>,
+    //         WorkerId,
+    //         ActorStatus,
+    //     )> = Actor::find()
+    //         .select_only()
+    //         .columns([
+    //             fragment::Column::FragmentId,
+    //             fragment::Column::DistributionType,
+    //         ])
+    //         .columns([
+    //             actor::Column::ActorId,
+    //             actor::Column::VnodeBitmap,
+    //             actor::Column::WorkerId,
+    //             actor::Column::Status,
+    //         ])
+    //         .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
+    //         .into_tuple()
+    //         .all(&txn)
+    //         .await?;
+    //
+    //     let mut actor_locations = HashMap::new();
+    //
+    //     for (fragment_id, _, actor_id, _, worker_id, status) in &actors {
+    //         if *status != ActorStatus::Running {
+    //             tracing::warn!(
+    //                 "skipping actor {} in fragment {} with status {:?}",
+    //                 actor_id,
+    //                 fragment_id,
+    //                 status
+    //             );
+    //             continue;
+    //         }
+    //
+    //         actor_locations
+    //             .entry(*worker_id)
+    //             .or_insert(HashMap::new())
+    //             .entry(*fragment_id)
+    //             .or_insert(BTreeSet::new())
+    //             .insert(*actor_id);
+    //     }
+    //
+    //     let expired_or_changed_workers: HashSet<_> =
+    //         plan.keys().map(|k| k.worker_id() as WorkerId).collect();
+    //
+    //     let mut actor_migration_plan = HashMap::new();
+    //     for (worker, fragment) in actor_locations {
+    //         if expired_or_changed_workers.contains(&worker) {
+    //             for (fragment_id, actors) in fragment {
+    //                 debug!(
+    //                     "worker {} expired or changed, migrating fragment {}",
+    //                     worker, fragment_id
+    //                 );
+    //                 let worker_slot_to_actor: HashMap<_, _> = actors
+    //                     .iter()
+    //                     .enumerate()
+    //                     .map(|(idx, actor_id)| {
+    //                         (WorkerSlotId::new(worker as _, idx as _), *actor_id)
+    //                     })
+    //                     .collect();
+    //
+    //                 for (worker_slot, actor) in worker_slot_to_actor {
+    //                     if let Some(target) = plan.get(&worker_slot) {
+    //                         actor_migration_plan.insert(actor, target.worker_id() as WorkerId);
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     }
+    //
+    //     for (actor, worker) in &actor_migration_plan {
+    //         Actor::update_many()
+    //             .col_expr(
+    //                 actor::Column::WorkerId,
+    //                 Expr::value(Value::Int(Some(*worker))),
+    //             )
+    //             .filter(actor::Column::ActorId.eq(*actor))
+    //             .exec(&txn)
+    //             .await?;
+    //     }
+    //
+    //     txn.commit().await?;
+    //
+    //     Ok(())
+    // }
 
-        let actors: Vec<(
-            FragmentId,
-            DistributionType,
-            ActorId,
-            Option<VnodeBitmap>,
-            WorkerId,
-            ActorStatus,
-        )> = Actor::find()
-            .select_only()
-            .columns([
-                fragment::Column::FragmentId,
-                fragment::Column::DistributionType,
-            ])
-            .columns([
-                actor::Column::ActorId,
-                actor::Column::VnodeBitmap,
-                actor::Column::WorkerId,
-                actor::Column::Status,
-            ])
-            .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
-            .into_tuple()
-            .all(&txn)
-            .await?;
-
-        let mut actor_locations = HashMap::new();
-
-        for (fragment_id, _, actor_id, _, worker_id, status) in &actors {
-            if *status != ActorStatus::Running {
-                tracing::warn!(
-                    "skipping actor {} in fragment {} with status {:?}",
-                    actor_id,
-                    fragment_id,
-                    status
-                );
-                continue;
-            }
-
-            actor_locations
-                .entry(*worker_id)
-                .or_insert(HashMap::new())
-                .entry(*fragment_id)
-                .or_insert(BTreeSet::new())
-                .insert(*actor_id);
-        }
-
-        let expired_or_changed_workers: HashSet<_> =
-            plan.keys().map(|k| k.worker_id() as WorkerId).collect();
-
-        let mut actor_migration_plan = HashMap::new();
-        for (worker, fragment) in actor_locations {
-            if expired_or_changed_workers.contains(&worker) {
-                for (fragment_id, actors) in fragment {
-                    debug!(
-                        "worker {} expired or changed, migrating fragment {}",
-                        worker, fragment_id
-                    );
-                    let worker_slot_to_actor: HashMap<_, _> = actors
-                        .iter()
-                        .enumerate()
-                        .map(|(idx, actor_id)| {
-                            (WorkerSlotId::new(worker as _, idx as _), *actor_id)
-                        })
-                        .collect();
-
-                    for (worker_slot, actor) in worker_slot_to_actor {
-                        if let Some(target) = plan.get(&worker_slot) {
-                            actor_migration_plan.insert(actor, target.worker_id() as WorkerId);
-                        }
-                    }
-                }
-            }
-        }
-
-        for (actor, worker) in &actor_migration_plan {
-            Actor::update_many()
-                .col_expr(
-                    actor::Column::WorkerId,
-                    Expr::value(Value::Int(Some(*worker))),
-                )
-                .filter(actor::Column::ActorId.eq(*actor))
-                .exec(&txn)
-                .await?;
-        }
-
-        txn.commit().await?;
-
-        Ok(())
-    }
-
-    pub async fn all_inuse_worker_slots(&self) -> MetaResult<HashSet<WorkerSlotId>> {
-        let inner = self.inner.read().await;
-
-        // Build the fragment–actor–worker triples entirely from the in-memory cache
-        let actors_from_cache: Vec<(FragmentId, ActorId, WorkerId)> = inner
-            .actors
-            .actors_by_fragment_id
-            .iter()
-            .flat_map(|(fragment_id, actor_ids)| {
-                actor_ids.iter().map(|actor_id| {
-                    let worker_id = inner.actors.models[actor_id].worker_id;
-                    (*fragment_id, *actor_id, worker_id)
-                })
-            })
-            .collect();
-
-        {
-            // Execute original DB query for comparison
-            let actors_from_db: Vec<(FragmentId, ActorId, WorkerId)> = Actor::find()
-                .select_only()
-                .columns([fragment::Column::FragmentId])
-                .columns([actor::Column::ActorId, actor::Column::WorkerId])
-                .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
-                .into_tuple()
-                .all(&inner.db)
-                .await?;
-
-            // Compare as sets to ignore ordering differences
-            let set_db: HashSet<(FragmentId, ActorId, WorkerId)> =
-                actors_from_db.into_iter().collect();
-            let set_cache: HashSet<(FragmentId, ActorId, WorkerId)> =
-                actors_from_cache.iter().copied().collect();
-
-            debug_assert_eq!(
-                set_db, set_cache,
-                "Fragment–Actor–Worker triples mismatch between DB and cache"
-            );
-        }
-
-        // Use the cache-based result from here on
-        let actors = actors_from_cache;
-        let mut actor_locations = HashMap::new();
-
-        for (fragment_id, _, worker_id) in actors {
-            *actor_locations
-                .entry(worker_id)
-                .or_insert(HashMap::new())
-                .entry(fragment_id)
-                .or_insert(0_usize) += 1;
-        }
-
-        let mut result = HashSet::new();
-        for (worker_id, mapping) in actor_locations {
-            let max_fragment_len = mapping.values().max().unwrap();
-
-            result
-                .extend((0..*max_fragment_len).map(|idx| WorkerSlotId::new(worker_id as u32, idx)))
-        }
-
-        Ok(result)
-    }
+    // pub async fn all_inuse_worker_slots(&self) -> MetaResult<HashSet<WorkerSlotId>> {
+    //     let inner = self.inner.read().await;
+    //
+    //     // Build the fragment–actor–worker triples entirely from the in-memory cache
+    //     let actors_from_cache: Vec<(FragmentId, ActorId, WorkerId)> = inner
+    //         .actors
+    //         .actors_by_fragment_id
+    //         .iter()
+    //         .flat_map(|(fragment_id, actor_ids)| {
+    //             actor_ids.iter().map(|actor_id| {
+    //                 let worker_id = inner.actors.models[actor_id].worker_id;
+    //                 (*fragment_id, *actor_id, worker_id)
+    //             })
+    //         })
+    //         .collect();
+    //
+    //     {
+    //         // Execute original DB query for comparison
+    //         let actors_from_db: Vec<(FragmentId, ActorId, WorkerId)> = Actor::find()
+    //             .select_only()
+    //             .columns([fragment::Column::FragmentId])
+    //             .columns([actor::Column::ActorId, actor::Column::WorkerId])
+    //             .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
+    //             .into_tuple()
+    //             .all(&inner.db)
+    //             .await?;
+    //
+    //         // Compare as sets to ignore ordering differences
+    //         let set_db: HashSet<(FragmentId, ActorId, WorkerId)> =
+    //             actors_from_db.into_iter().collect();
+    //         let set_cache: HashSet<(FragmentId, ActorId, WorkerId)> =
+    //             actors_from_cache.iter().copied().collect();
+    //
+    //         debug_assert_eq!(
+    //             set_db, set_cache,
+    //             "Fragment–Actor–Worker triples mismatch between DB and cache"
+    //         );
+    //     }
+    //
+    //     // Use the cache-based result from here on
+    //     let actors = actors_from_cache;
+    //     let mut actor_locations = HashMap::new();
+    //
+    //     for (fragment_id, _, worker_id) in actors {
+    //         *actor_locations
+    //             .entry(worker_id)
+    //             .or_insert(HashMap::new())
+    //             .entry(fragment_id)
+    //             .or_insert(0_usize) += 1;
+    //     }
+    //
+    //     let mut result = HashSet::new();
+    //     for (worker_id, mapping) in actor_locations {
+    //         let max_fragment_len = mapping.values().max().unwrap();
+    //
+    //         result
+    //             .extend((0..*max_fragment_len).map(|idx| WorkerSlotId::new(worker_id as u32, idx)))
+    //     }
+    //
+    //     Ok(result)
+    // }
 
     // pub async fn all_node_actors(
     //     &self,
