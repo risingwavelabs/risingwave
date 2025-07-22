@@ -1,3 +1,5 @@
+# test auto schema change on table without specified pk
+
 statement ok
 create table t(id int, name string);
 
@@ -10,7 +12,8 @@ create sink s from t with (connector = 'kafka', auto.schema.change = 'true');
 statement error auto schema change not supported for CREATE SINK AS QUERY
 create sink s as select * from t with (connector = 'blackhole', auto.schema.change = 'true');
 
-# error on auto schema change on MV
+## test error on auto schema change on MV
+
 statement ok
 create materialized view m1 as select * from t;
 
@@ -19,6 +22,10 @@ create sink s from m1 with (connector = 'blackhole', auto.schema.change = 'true'
 
 statement ok
 drop materialized view m1;
+
+## end
+
+## test error on generated columns and sink-into-table
 
 statement ok
 create table t1 (id int primary key, name string, g int  as id + 1);
@@ -32,7 +39,10 @@ create sink s from t1 with (connector = 'blackhole', auto.schema.change = 'true'
 statement ok
 drop table t1;
 
-# test only support backfill type as ArrangementBackfill
+## end
+
+## test only support backfill type as ArrangementBackfill
+
 statement ok
 SET STREAMING_USE_ARRANGEMENT_BACKFILL=false;
 
@@ -42,6 +52,8 @@ create sink s from t with (connector = 'blackhole', auto.schema.change = 'true')
 statement ok
 SET STREAMING_USE_ARRANGEMENT_BACKFILL=true;
 
+## end
+
 statement ok
 create sink s from t with (connector = 'blackhole', auto.schema.change = 'true');
 
@@ -50,6 +62,33 @@ drop sink s;
 
 statement ok
 drop table t
+
+# end
+
+# test auto schema change on table with specified pk
+
+statement ok
+create table t_with_pk(id int primary key, name string);
+
+statement error sink with auto schema change should have same pk as upstream table
+create sink s from t_with_pk with (connector = 'blackhole', primary_key = 'name', auto.schema.change = 'true');
+
+statement ok
+create sink s from t_with_pk with (connector = 'blackhole', primary_key = 'id',auto.schema.change = 'true');
+
+statement ok
+drop sink s;
+
+statement ok
+create sink s from t_with_pk with (connector = 'blackhole', auto.schema.change = 'true');
+
+statement ok
+drop sink s;
+
+statement ok
+drop table t_with_pk;
+
+# end
 
 # error on auto schema change on cross database table
 statement ok
@@ -76,3 +115,5 @@ drop database d1;
 connection other
 statement ok
 drop database d2;
+
+#end
