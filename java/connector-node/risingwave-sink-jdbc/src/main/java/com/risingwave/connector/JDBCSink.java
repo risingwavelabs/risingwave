@@ -69,18 +69,7 @@ public class JDBCSink implements SinkWriter {
             // A vector of upstream column types
             List<Integer> columnSqlTypes =
                     Arrays.stream(tableSchema.getColumnNames())
-                            .map(
-                                    columnName -> {
-                                        Integer sqlType = columnTypeMapping.get(columnName);
-                                        if (sqlType != null) {
-                                            return sqlType;
-                                        }
-                                        // Default conversion logic for PostgreSQL data types
-                                        int columnIndex = tableSchema.getColumnIndex(columnName);
-                                        var columnDesc = tableSchema.getColumnDesc(columnIndex);
-                                        return convertRisingWaveTypeToSqlType(
-                                                columnDesc.getDataType());
-                                    })
+                            .map(columnTypeMapping::get)
                             .collect(Collectors.toList());
 
             List<Integer> pkIndices =

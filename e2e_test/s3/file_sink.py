@@ -370,6 +370,7 @@ def do_sink(config, file_num, item_num_per_file, prefix):
     print('File sink test pass!')
     cur.execute(f'drop sink test_file_sink_parquet')
     cur.execute(f'drop table test_parquet_sink_table')
+    cur.execute(f'drop sink test_file_sink_json')
     cur.execute(f'drop table test_json_sink_table')
     cur.execute(f'drop table s3_test_parquet')
     cur.close()
