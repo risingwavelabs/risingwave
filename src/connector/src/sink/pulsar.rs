@@ -30,13 +30,13 @@ use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam, SinkWriterParam};
 use crate::connector_common::{AwsAuthProps, PulsarCommon, PulsarOauthCommon};
 use crate::enforce_secret::EnforceSecret;
+use crate::sink::Result;
 use crate::sink::encoder::SerTo;
 use crate::sink::formatter::{SinkFormatter, SinkFormatterImpl};
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt, FormattedSink,
 };
-use crate::sink::{DummySinkCommitCoordinator, Result};
 use crate::{deserialize_duration_from_string, dispatch_sink_formatter_str_key_impl};
 
 pub const PULSAR_SINK: &str = "pulsar";
@@ -182,7 +182,6 @@ impl TryFrom<SinkParam> for PulsarSink {
 }
 
 impl Sink for PulsarSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = AsyncTruncateLogSinkerOf<PulsarSinkWriter>;
 
     const SINK_NAME: &'static str = PULSAR_SINK;
@@ -249,6 +248,7 @@ mod opaque_type {
     use super::*;
     pub type PulsarDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
 
+    #[define_opaque(PulsarDeliveryFuture)]
     pub(super) fn may_delivery_future(future: SendFuture) -> PulsarDeliveryFuture {
         future.map(|result| {
             result

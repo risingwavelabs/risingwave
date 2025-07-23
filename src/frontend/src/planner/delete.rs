@@ -19,10 +19,10 @@ use crate::binder::BoundDelete;
 use crate::error::Result;
 use crate::optimizer::plan_node::{LogicalDelete, LogicalProject, generic};
 use crate::optimizer::property::{Order, RequiredDist};
-use crate::optimizer::{PlanRef, PlanRoot};
+use crate::optimizer::{LogicalPlanRoot, PlanRef, PlanRoot};
 
 impl Planner {
-    pub(super) fn plan_delete(&mut self, delete: BoundDelete) -> Result<PlanRoot> {
+    pub(super) fn plan_delete(&mut self, delete: BoundDelete) -> Result<LogicalPlanRoot> {
         let scan = self.plan_base_table(&delete.table)?;
         let input = if let Some(expr) = delete.selection {
             self.plan_where(scan, expr)?

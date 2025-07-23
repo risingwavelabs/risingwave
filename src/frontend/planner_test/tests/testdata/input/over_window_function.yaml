@@ -393,6 +393,68 @@
     - stream_plan
     - batch_plan
 
+# TopN with arithmetic on row_number/rank function
+- name: test ibis window function optimization
+  sql: |
+    CREATE TABLE t (a INT, b INT, c INT);
+    SELECT a, b, c
+    FROM (
+      SELECT
+        a, b, c,
+        ROW_NUMBER() OVER (PARTITION BY a ORDER BY b) - 1 AS rn
+      FROM t
+    )
+    WHERE rn < 10;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - optimized_logical_plan_for_stream
+- name: test arithmetic with addition
+  sql: |
+    CREATE TABLE t (a INT, b INT, c INT);
+    SELECT a, b, c
+    FROM (
+      SELECT
+        a, b, c,
+        ROW_NUMBER() OVER (PARTITION BY a ORDER BY b) + 5 AS rn_plus_five
+      FROM t
+    )
+    WHERE rn_plus_five = 6;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - optimized_logical_plan_for_stream
+- name: test optimization when rn column is kept
+  sql: |
+    CREATE TABLE t (a INT, b INT, c INT);
+    SELECT a, b, c, rn_plus_one
+    FROM (
+      SELECT
+        a, b, c,
+        ROW_NUMBER() OVER (PARTITION BY a ORDER BY b) + 1 AS rn_plus_one
+      FROM t
+    )
+    WHERE rn_plus_one = 2;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - optimized_logical_plan_for_stream
+- name: test complex arithmetic not optimized
+  sql: |
+    CREATE TABLE t (a INT, b INT, c INT);
+    SELECT a, b, c, rn
+    FROM (
+      SELECT
+        a, b, c,
+        ROW_NUMBER() OVER (PARTITION BY a ORDER BY b) * 2 + 1 AS rn
+      FROM t
+    )
+    WHERE rn = 3;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_batch
+    - optimized_logical_plan_for_stream
+
 # TopN on nexmark schema
 - id: create_bid
   sql: |

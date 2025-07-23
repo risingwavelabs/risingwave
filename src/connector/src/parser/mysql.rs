@@ -195,6 +195,7 @@ pub fn mysql_datum_to_rw_datum(
                 JsonbVal
             )
         }
+        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
         DataType::Interval
         | DataType::Struct(_)
         | DataType::List(_)

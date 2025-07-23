@@ -119,6 +119,14 @@ pub struct StorageOpts {
     pub meta_file_cache_runtime_config: foyer::RuntimeOptions,
     pub meta_file_cache_throttle: foyer::Throttle,
 
+    pub vector_file_block_size_kb: usize,
+    pub vector_block_cache_capacity_mb: usize,
+    pub vector_block_cache_shard_num: usize,
+    pub vector_block_cache_eviction_config: EvictionConfig,
+    pub vector_meta_cache_capacity_mb: usize,
+    pub vector_meta_cache_shard_num: usize,
+    pub vector_meta_cache_eviction_config: EvictionConfig,
+
     /// The storage url for storing backups.
     pub backup_storage_url: String,
     /// The storage directory for storing backups.
@@ -147,6 +155,13 @@ pub struct StorageOpts {
 
     pub object_store_config: ObjectStoreConfig,
     pub time_travel_version_cache_capacity: u64,
+
+    pub iceberg_compaction_target_file_size_mb: u32,
+    pub iceberg_compaction_enable_validate: bool,
+    pub iceberg_compaction_max_record_batch_rows: usize,
+    pub iceberg_compaction_write_parquet_max_row_group_rows: usize,
+    pub iceberg_compaction_min_size_per_partition_mb: u32,
+    pub iceberg_compaction_max_file_count_per_partition: u32,
 }
 
 impl Default for StorageOpts {
@@ -264,6 +279,30 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             time_travel_version_cache_capacity: c.storage.time_travel_version_cache_capacity,
             compactor_max_overlap_sst_count: c.storage.compactor_max_overlap_sst_count,
             compactor_max_preload_meta_file_count: c.storage.compactor_max_preload_meta_file_count,
+
+            iceberg_compaction_target_file_size_mb: c
+                .storage
+                .iceberg_compaction_target_file_size_mb,
+            iceberg_compaction_enable_validate: c.storage.iceberg_compaction_enable_validate,
+            iceberg_compaction_max_record_batch_rows: c
+                .storage
+                .iceberg_compaction_max_record_batch_rows,
+            iceberg_compaction_write_parquet_max_row_group_rows: c
+                .storage
+                .iceberg_compaction_write_parquet_max_row_group_rows,
+            iceberg_compaction_min_size_per_partition_mb: c
+                .storage
+                .iceberg_compaction_min_size_per_partition_mb,
+            iceberg_compaction_max_file_count_per_partition: c
+                .storage
+                .iceberg_compaction_max_file_count_per_partition,
+            vector_file_block_size_kb: c.storage.vector_file_block_size_kb,
+            vector_block_cache_capacity_mb: s.vector_block_cache_capacity_mb,
+            vector_block_cache_shard_num: s.vector_block_cache_shard_num,
+            vector_block_cache_eviction_config: s.vector_block_cache_eviction_config.clone(),
+            vector_meta_cache_capacity_mb: s.vector_meta_cache_capacity_mb,
+            vector_meta_cache_shard_num: s.vector_meta_cache_shard_num,
+            vector_meta_cache_eviction_config: s.vector_meta_cache_eviction_config.clone(),
         }
     }
 }

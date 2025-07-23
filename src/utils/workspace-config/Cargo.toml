@@ -6,7 +6,6 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 # Ideally we should just skip checking workspace-config for cargo-machete,
 # but it's not supported yet. So we just manually ignore all dependencies.
@@ -55,7 +54,7 @@ dynamic-zstd-sys = { package = "zstd-sys", version = "2", optional = true, defau
 ] }
 
 # FIPS
-aws-lc-rs ={ version = "1.13", optional = true, default-features = false, features = [
+aws-lc-rs = { version = "1.13", optional = true, default-features = false, features = [
     "fips",
 ] }
 # workspace-hack = { path = "../../workspace-hack" }

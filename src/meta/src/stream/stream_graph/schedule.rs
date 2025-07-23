@@ -25,7 +25,9 @@ use anyhow::Context;
 use either::Either;
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
-use risingwave_common::hash::{ActorMapping, VnodeCountCompat, WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::hash::{
+    ActorAlignmentId, ActorAlignmentMapping, ActorMapping, VnodeCountCompat,
+};
 use risingwave_common::util::stream_graph_visitor::visit_fragment;
 use risingwave_common::{bail, hash};
 use risingwave_meta_model::WorkerId;
@@ -37,7 +39,7 @@ use risingwave_pb::stream_plan::DispatcherType::{self, *};
 
 use crate::MetaResult;
 use crate::model::{ActorId, Fragment};
-use crate::stream::schedule_units_for_slots;
+use crate::stream::AssignerBuilder;
 use crate::stream::stream_graph::fragment::CompleteStreamFragmentGraph;
 use crate::stream::stream_graph::id::GlobalFragmentId as Id;
 
@@ -46,8 +48,8 @@ type HashMappingId = usize;
 /// The internal structure for processing scheduling requirements in the scheduler.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Req {
-    /// The fragment must be singleton and is scheduled to the given worker slot.
-    Singleton(WorkerSlotId),
+    /// The fragment must be singleton and is scheduled to the given worker id.
+    Singleton(WorkerId),
     /// The fragment must be hash-distributed and is scheduled by the given hash mapping.
     Hash(HashMappingId),
     /// The fragment must have the given vnode count, but can be scheduled anywhere.
@@ -118,22 +120,24 @@ crepe::crepe! {
 #[derive(Debug, Clone, EnumAsInner)]
 pub(super) enum Distribution {
     /// The fragment is singleton and is scheduled to the given worker slot.
-    Singleton(WorkerSlotId),
+    Singleton(WorkerId),
 
     /// The fragment is hash-distributed and is scheduled by the given hash mapping.
-    Hash(WorkerSlotMapping),
+    Hash(ActorAlignmentMapping),
 }
 
 impl Distribution {
     /// The parallelism required by the distribution.
     pub fn parallelism(&self) -> usize {
-        self.worker_slots().count()
+        self.actors().count()
     }
 
     /// All worker slots required by the distribution.
-    pub fn worker_slots(&self) -> impl Iterator<Item = WorkerSlotId> + '_ {
+    pub fn actors(&self) -> impl Iterator<Item = ActorAlignmentId> + '_ {
         match self {
-            Distribution::Singleton(p) => Either::Left(std::iter::once(*p)),
+            Distribution::Singleton(p) => {
+                Either::Left(std::iter::once(ActorAlignmentId::new(*p as _, 0)))
+            }
             Distribution::Hash(mapping) => Either::Right(mapping.iter_unique()),
         }
     }
@@ -153,8 +157,7 @@ impl Distribution {
             FragmentDistributionType::Single => {
                 let actor_id = fragment.actors.iter().exactly_one().unwrap().actor_id;
                 let location = actor_location.get(&actor_id).unwrap();
-                let worker_slot_id = WorkerSlotId::new(*location as _, 0);
-                Distribution::Singleton(worker_slot_id)
+                Distribution::Singleton(*location)
             }
             FragmentDistributionType::Hash => {
                 let actor_bitmaps: HashMap<_, _> = fragment
@@ -173,7 +176,7 @@ impl Distribution {
                     .iter()
                     .map(|(&k, &v)| (k, v as u32))
                     .collect();
-                let mapping = actor_mapping.to_worker_slot(&actor_location);
+                let mapping = actor_mapping.to_actor_alignment(&actor_location);
 
                 Distribution::Hash(mapping)
             }
@@ -191,22 +194,22 @@ impl Distribution {
 
 /// [`Scheduler`] schedules the distribution of fragments in a stream graph.
 pub(super) struct Scheduler {
-    /// Worker slots to schedule. Use to generate mapping if a vnode count other than the default is required.
-    scheduled_worker_slots: Vec<WorkerSlotId>,
-
     /// The default hash mapping for hash-distributed fragments, if there's no requirement derived.
-    default_hash_mapping: WorkerSlotMapping,
+    default_hash_mapping: ActorAlignmentMapping,
 
-    /// The default worker slot for singleton fragments, if there's no requirement derived.
-    default_singleton_worker_slot: WorkerSlotId,
+    /// The default worker for singleton fragments, if there's no requirement derived.
+    default_singleton_worker: WorkerId,
+
+    /// Use to generate mapping if a vnode count other than the default is required.
+    dynamic_mapping_fn: Box<dyn Fn(usize) -> anyhow::Result<ActorAlignmentMapping>>,
 }
 
 impl Scheduler {
-    /// Create a new [`Scheduler`] with the given worker slots and the default parallelism.
+    /// Create a new [`Scheduler`] with the given workers and the default parallelism.
     ///
     /// Each hash-distributed fragment will be scheduled to at most `default_parallelism` parallel
     /// units, in a round-robin fashion on all compute nodes. If the `default_parallelism` is
-    /// `None`, all worker slots will be used.
+    /// `None`, all workers will be used.
     ///
     /// For different streaming jobs, we even out possible scheduling skew by using the streaming job id as the salt for the scheduling algorithm.
     pub fn new(
@@ -215,42 +218,56 @@ impl Scheduler {
         default_parallelism: NonZeroUsize,
         expected_vnode_count: usize,
     ) -> MetaResult<Self> {
-        // Group worker slots with worker node.
-
-        let slots = workers
-            .iter()
-            .map(|(worker_id, worker)| (*worker_id as WorkerId, worker.compute_node_parallelism()))
-            .collect();
-
         let parallelism = default_parallelism.get();
         assert!(
             parallelism <= expected_vnode_count,
             "parallelism should be limited by vnode count in previous steps"
         );
 
-        let scheduled = schedule_units_for_slots(&slots, parallelism, streaming_job_id)?;
+        let assigner = AssignerBuilder::new(streaming_job_id).build();
 
-        let scheduled_worker_slots = scheduled
-            .into_iter()
-            .flat_map(|(worker_id, size)| {
-                (0..size).map(move |slot| WorkerSlotId::new(worker_id as _, slot))
+        let worker_weights = workers
+            .iter()
+            .map(|(worker_id, worker)| {
+                (
+                    *worker_id,
+                    NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
+                )
             })
-            .collect_vec();
+            .collect();
 
-        assert_eq!(scheduled_worker_slots.len(), parallelism);
+        let actor_idxes = (0..parallelism).collect_vec();
+        let vnodes = (0..expected_vnode_count).collect_vec();
 
-        // Build the default hash mapping uniformly.
+        let assignment = assigner.assign_hierarchical(&worker_weights, &actor_idxes, &vnodes)?;
+
         let default_hash_mapping =
-            WorkerSlotMapping::build_from_ids(&scheduled_worker_slots, expected_vnode_count);
+            ActorAlignmentMapping::from_assignment(assignment, expected_vnode_count);
 
-        let single_scheduled = schedule_units_for_slots(&slots, 1, streaming_job_id)?;
-        let default_single_worker_id = single_scheduled.keys().exactly_one().cloned().unwrap();
-        let default_singleton_worker_slot = WorkerSlotId::new(default_single_worker_id as _, 0);
+        let single_actor_idxes = std::iter::once(0).collect_vec();
 
+        let single_assignment =
+            assigner.assign_hierarchical(&worker_weights, &single_actor_idxes, &vnodes)?;
+
+        let default_singleton_worker =
+            single_assignment.keys().exactly_one().cloned().unwrap() as _;
+
+        let dynamic_mapping_fn = Box::new(move |limited_count: usize| {
+            let parallelism = parallelism.min(limited_count);
+
+            let assignment = assigner.assign_hierarchical(
+                &worker_weights,
+                &(0..parallelism).collect_vec(),
+                &(0..limited_count).collect_vec(),
+            )?;
+
+            let mapping = ActorAlignmentMapping::from_assignment(assignment, limited_count);
+            Ok(mapping)
+        });
         Ok(Self {
-            scheduled_worker_slots,
             default_hash_mapping,
-            default_singleton_worker_slot,
+            default_singleton_worker,
+            dynamic_mapping_fn,
         })
     }
 
@@ -320,7 +337,7 @@ impl Scheduler {
         // Distributions of existing fragments.
         for (id, dist) in existing_distribution {
             let req = match dist {
-                Distribution::Singleton(worker_slot_id) => Req::Singleton(worker_slot_id),
+                Distribution::Singleton(worker_id) => Req::Singleton(worker_id),
                 Distribution::Hash(mapping) => Req::Hash(hash_mapping_id[&mapping]),
             };
             facts.push(Fact::Req { id, req });
@@ -358,19 +375,19 @@ impl Scheduler {
 
                     // Derive distribution from the merged requirement.
                     match req {
-                        Req::Singleton(worker_slot) => Distribution::Singleton(worker_slot),
+                        Req::Singleton(worker_id) => Distribution::Singleton(worker_id),
                         Req::Hash(mapping) => {
                             Distribution::Hash(all_hash_mappings[mapping].clone())
                         }
-                        Req::AnySingleton => {
-                            Distribution::Singleton(self.default_singleton_worker_slot)
-                        }
+                        Req::AnySingleton => Distribution::Singleton(self.default_singleton_worker),
                         Req::AnyVnodeCount(vnode_count) => {
-                            let len = self.scheduled_worker_slots.len().min(vnode_count);
-                            let mapping = WorkerSlotMapping::build_from_ids(
-                                &self.scheduled_worker_slots[..len],
-                                vnode_count,
-                            );
+                            let mapping = (self.dynamic_mapping_fn)(vnode_count)
+                                .with_context(|| {
+                                    format!(
+                                        "failed to build dynamic mapping for fragment {id:?} with vnode count {vnode_count}"
+                                    )
+                                })?;
+
                             Distribution::Hash(mapping)
                         }
                     }
@@ -388,11 +405,11 @@ impl Scheduler {
     }
 }
 
-/// [`Locations`] represents the worker slot and worker locations of the actors.
+/// [`Locations`] represents the locations of the actors.
 #[cfg_attr(test, derive(Default))]
 pub struct Locations {
     /// actor location map.
-    pub actor_locations: BTreeMap<ActorId, WorkerSlotId>,
+    pub actor_locations: BTreeMap<ActorId, ActorAlignmentId>,
     /// worker location map.
     pub worker_locations: HashMap<WorkerId, WorkerNode>,
 }
@@ -402,7 +419,7 @@ impl Locations {
     pub fn worker_actors(&self) -> HashMap<WorkerId, Vec<ActorId>> {
         self.actor_locations
             .iter()
-            .map(|(actor_id, worker_slot_id)| (worker_slot_id.worker_id() as WorkerId, *actor_id))
+            .map(|(actor_id, alignment_id)| (alignment_id.worker_id() as WorkerId, *actor_id))
             .into_group_map()
     }
 
@@ -410,9 +427,9 @@ impl Locations {
     pub fn actor_infos(&self) -> impl Iterator<Item = ActorInfo> + '_ {
         self.actor_locations
             .iter()
-            .map(|(actor_id, worker_slot_id)| ActorInfo {
+            .map(|(actor_id, alignment_id)| ActorInfo {
                 actor_id: *actor_id,
-                host: self.worker_locations[&(worker_slot_id.worker_id() as WorkerId)]
+                host: self.worker_locations[&(alignment_id.worker_id() as WorkerId)]
                     .host
                     .clone(),
             })
@@ -523,7 +540,7 @@ mod tests {
         #[rustfmt::skip]
         let facts = [
             Fact::Req { id: 1.into(), req: Req::Hash(1) },
-            Fact::Req { id: 2.into(), req: Req::Singleton(WorkerSlotId::new(0, 2)) },
+            Fact::Req { id: 2.into(), req: Req::Singleton(0) },
             Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle },
             Fact::Edge { from: 2.into(), to: 102.into(), dt: NoShuffle },
             Fact::Edge { from: 101.into(), to: 103.into(), dt: Hash },
@@ -533,7 +550,7 @@ mod tests {
 
         let expected = maplit::hashmap! {
             101.into() => Result::Required(Req::Hash(1)),
-            102.into() => Result::Required(Req::Singleton(WorkerSlotId::new(0, 2))),
+            102.into() => Result::Required(Req::Singleton(0)),
             103.into() => Result::DefaultHash,
             104.into() => Result::DefaultSingleton,
         };
@@ -666,13 +683,13 @@ mod tests {
     fn test_backfill_singleton_vnode_count() {
         #[rustfmt::skip]
         let facts = [
-            Fact::Req { id: 1.into(), req: Req::Singleton(WorkerSlotId::new(0, 2)) },
+            Fact::Req { id: 1.into(), req: Req::Singleton(0) },
             Fact::Req { id: 101.into(), req: Req::AnySingleton },
             Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle }, // or `Simple`
         ];
 
         let expected = maplit::hashmap! {
-            101.into() => Result::Required(Req::Singleton(WorkerSlotId::new(0, 2))),
+            101.into() => Result::Required(Req::Singleton(0)),
         };
 
         test_success(facts, expected);

@@ -42,7 +42,7 @@ impl Access for BytesAccess<'_> {
             }
             return Err(AccessError::Undefined {
                 name: path[0].to_owned(),
-                path: self.column_name.as_ref().unwrap().to_string(),
+                path: self.column_name.as_ref().unwrap().clone(),
             });
         }
         Err(AccessError::TypeError {

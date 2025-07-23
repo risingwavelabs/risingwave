@@ -39,7 +39,7 @@ use super::{
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::encoder::{JsonEncoder, RowEncoder};
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
-use crate::sink::{DummySinkCommitCoordinator, Sink, SinkParam, SinkWriter, SinkWriterParam};
+use crate::sink::{Sink, SinkParam, SinkWriter, SinkWriterParam};
 
 pub const DORIS_SINK: &str = "doris";
 
@@ -165,7 +165,7 @@ impl DorisSink {
                     i.name
                 ))
             })?;
-            if !Self::check_and_correct_column_type(&i.data_type, value.to_string())? {
+            if !Self::check_and_correct_column_type(&i.data_type, value.clone())? {
                 return Err(SinkError::Doris(format!(
                     "Column type don't match, column name is {:?}. doris type is {:?} risingwave type is {:?} ",
                     i.name, value, i.data_type
@@ -216,12 +216,12 @@ impl DorisSink {
             risingwave_common::types::DataType::Map(_) => {
                 Err(SinkError::Doris("doris can not support Map".to_owned()))
             }
+            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
         }
     }
 }
 
 impl Sink for DorisSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = LogSinkerOf<DorisSinkWriter>;
 
     const SINK_NAME: &'static str = DORIS_SINK;

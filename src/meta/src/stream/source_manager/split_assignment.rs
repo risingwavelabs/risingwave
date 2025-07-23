@@ -97,6 +97,7 @@ impl SourceManager {
     }
 
     /// Allocates splits to actors for a newly created source executor.
+    #[await_tree::instrument]
     pub async fn allocate_splits(
         &self,
         table_fragments: &StreamJobFragments,
@@ -236,6 +237,7 @@ impl SourceManager {
     ///
     /// Unlike [`Self::allocate_splits`], which creates a new assignment,
     /// this method aligns the splits for backfill fragments with its upstream source fragment ([`align_splits`]).
+    #[await_tree::instrument]
     pub async fn allocate_splits_for_backfill(
         &self,
         table_fragments: &StreamJobFragments,
@@ -244,7 +246,7 @@ impl SourceManager {
     ) -> MetaResult<SplitAssignment> {
         let core = self.core.lock().await;
 
-        let source_backfill_fragments = table_fragments.source_backfill_fragments()?;
+        let source_backfill_fragments = table_fragments.source_backfill_fragments();
 
         let mut assigned = HashMap::new();
 

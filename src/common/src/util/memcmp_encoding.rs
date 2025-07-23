@@ -154,6 +154,7 @@ fn calculate_encoded_size_inner(
             // these types are var-length and should only be determine at runtime.
             // TODO: need some test for this case (e.g. e2e test)
             DataType::List { .. } | DataType::Map(_) => deserializer.skip_bytes()?,
+            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
             DataType::Struct(t) => t
                 .types()
                 .map(|field| {

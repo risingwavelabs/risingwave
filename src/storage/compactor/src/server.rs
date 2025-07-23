@@ -17,8 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_common::config::{
-    AsyncStackTraceOption, CompactorMode, MetricLevel, RwConfig, extract_storage_memory_config,
-    load_config,
+    AsyncStackTraceOption, MetricLevel, RwConfig, extract_storage_memory_config, load_config,
 };
 use risingwave_common::monitor::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
@@ -31,6 +30,7 @@ use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::{MetricsManager, ObserverManager};
+use risingwave_jni_core::jvm_runtime::register_jvm_builder;
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
 use risingwave_pb::common::WorkerType;
@@ -55,9 +55,9 @@ use tokio::sync::mpsc;
 use tracing::info;
 
 use super::compactor_observer::observer_manager::CompactorObserverNode;
-use crate::CompactorOpts;
 use crate::rpc::{CompactorServiceImpl, MonitorServiceImpl};
 use crate::telemetry::CompactorTelemetryCreator;
+use crate::{CompactorMode, CompactorOpts};
 
 pub async fn prepare_start_parameters(
     compactor_opts: &CompactorOpts,
@@ -87,16 +87,15 @@ pub async fn prepare_start_parameters(
         * config.storage.compactor_memory_available_proportion)
         as usize;
     let meta_cache_capacity_bytes = compactor_opts.compactor_meta_cache_memory_bytes;
-    let compactor_memory_limit_bytes = match config.storage.compactor_memory_limit_mb {
+    let mut compactor_memory_limit_bytes = match config.storage.compactor_memory_limit_mb {
         Some(compactor_memory_limit_mb) => compactor_memory_limit_mb * (1 << 20),
-        None => {
-            non_reserved_memory_bytes
-        }
-    }
-    .checked_sub(compactor_opts.compactor_meta_cache_memory_bytes).unwrap_or_else(|| {
+        None => non_reserved_memory_bytes,
+    };
+
+    compactor_memory_limit_bytes = compactor_memory_limit_bytes.checked_sub(compactor_opts.compactor_meta_cache_memory_bytes).unwrap_or_else(|| {
         panic!(
-            "compactor_total_memory_bytes {} is too small to hold compactor_meta_cache_memory_bytes {}",
-            meta_cache_capacity_bytes,
+            "compactor_memory_limit_bytes{} is too small to hold compactor_meta_cache_memory_bytes {}",
+            compactor_memory_limit_bytes,
             meta_cache_capacity_bytes
         );
     });
@@ -280,7 +279,9 @@ pub async fn compactor_serve(
             ),
             CompactorMode::Shared => unreachable!(),
             CompactorMode::DedicatedIceberg => {
-                risingwave_storage::hummock::compactor::start_compactor_iceberg(
+                register_jvm_builder();
+
+                risingwave_storage::hummock::compactor::start_iceberg_compactor(
                     compactor_context.clone(),
                     hummock_meta_client.clone(),
                 )

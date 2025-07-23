@@ -587,14 +587,13 @@ impl LogicalAggBuilder {
 
     /// check if the expression is a group by key, and try to return the group key
     pub fn try_as_group_expr(&self, expr: &ExprImpl) -> Option<usize> {
-        if let Some(input_index) = self.input_proj_builder.expr_index(expr) {
-            if let Some(index) = self
+        if let Some(input_index) = self.input_proj_builder.expr_index(expr)
+            && let Some(index) = self
                 .group_key
                 .indices()
                 .position(|group_key| group_key == input_index)
-            {
-                return Some(index);
-            }
+        {
+            return Some(index);
         }
         None
     }
@@ -622,7 +621,7 @@ impl LogicalAggBuilder {
                     agg_call.filter.clone(),
                     agg_call.direct_args.clone(),
                 )?)?)
-                .cast_explicit(agg_call.return_type())?;
+                .cast_explicit(&agg_call.return_type())?;
 
                 let count = ExprImpl::from(push_agg_call(AggCall::new(
                     PbAggKind::Count.into(),
@@ -663,7 +662,7 @@ impl LogicalAggBuilder {
                     agg_call.filter.clone(),
                     agg_call.direct_args.clone(),
                 )?)?)
-                .cast_explicit(agg_call.return_type())?;
+                .cast_explicit(&agg_call.return_type())?;
 
                 let sum = ExprImpl::from(push_agg_call(AggCall::new(
                     PbAggKind::Sum.into(),
@@ -673,7 +672,7 @@ impl LogicalAggBuilder {
                     agg_call.filter.clone(),
                     agg_call.direct_args.clone(),
                 )?)?)
-                .cast_explicit(agg_call.return_type())?;
+                .cast_explicit(&agg_call.return_type())?;
 
                 let count = ExprImpl::from(push_agg_call(AggCall::new(
                     PbAggKind::Count.into(),
@@ -707,7 +706,7 @@ impl LogicalAggBuilder {
                 let numerator_type = raw_numerator.return_type();
                 let numerator = ExprImpl::from(FunctionCall::new(
                     ExprType::Greatest,
-                    vec![raw_numerator, zero.clone().cast_explicit(numerator_type)?],
+                    vec![raw_numerator, zero.clone().cast_explicit(&numerator_type)?],
                 )?);
 
                 let denominator = match kind {

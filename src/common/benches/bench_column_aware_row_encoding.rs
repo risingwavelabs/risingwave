@@ -76,14 +76,30 @@ fn bench_column_aware_encoding_16_columns(c: &mut Criterion) {
         });
     });
 
-    let serializer = Serializer::new(&column_ids[..], data_types.iter().cloned());
-    let encoded = serializer.serialize(&row);
+    c.bench_function("value_encoding_16_columns_encode", |b| {
+        let serializer = BasicSerializer;
+        b.iter(|| {
+            black_box(serializer.serialize(&row));
+        });
+    });
 
     c.bench_function("column_aware_row_encoding_16_columns_decode", |b| {
+        let serializer = Serializer::new(&column_ids[..], data_types.iter().cloned());
+        let encoded = serializer.serialize(&row);
         let deserializer =
             Deserializer::new(&column_ids[..], data_types.clone(), std::iter::empty());
         b.iter(|| {
             let result = deserializer.deserialize(&encoded).unwrap();
+            black_box(result);
+        });
+    });
+
+    c.bench_function("value_encoding_16_columns_decode", |b| {
+        let serializer = BasicSerializer;
+        let encoded = serializer.serialize(&row);
+        let deserializer = BasicDeserializer::new(data_types.as_slice());
+        b.iter(|| {
+            let result = deserializer.deserialize(encoded.as_slice()).unwrap();
             black_box(result);
         });
     });

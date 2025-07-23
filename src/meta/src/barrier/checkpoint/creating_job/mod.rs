@@ -24,7 +24,7 @@ use barrier_control::CreatingStreamingJobBarrierControl;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_meta_model::WorkerId;
+use risingwave_meta_model::{CreateType, WorkerId};
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::AddMutation;
@@ -35,12 +35,15 @@ use status::CreatingStreamingJobStatus;
 use tracing::{debug, info};
 
 use crate::MetaResult;
+use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::checkpoint::creating_job::status::CreateMviewLogStoreProgressTracker;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
-use crate::barrier::{BarrierKind, Command, CreateStreamingJobCommandInfo, TracedEpoch};
+use crate::barrier::{
+    BackfillOrderState, BarrierKind, Command, CreateStreamingJobCommandInfo, TracedEpoch,
+};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::{StreamJobActorsToCreate, StreamJobFragments};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
@@ -51,6 +54,7 @@ pub(crate) struct CreatingStreamingJobControl {
     database_id: DatabaseId,
     pub(super) job_id: TableId,
     definition: String,
+    create_type: CreateType,
     pub(super) snapshot_backfill_upstream_tables: HashSet<TableId>,
     backfill_epoch: u64,
 
@@ -79,11 +83,22 @@ impl CreatingStreamingJobControl {
             "new creating job"
         );
         let snapshot_backfill_actors = info.stream_job_fragments.snapshot_backfill_actor_ids();
-        // FIXME(kwannoel): support backfill order control for snapshot backfill
+        let backfill_nodes_to_pause =
+            get_nodes_with_backfill_dependencies(&info.fragment_backfill_ordering)
+                .into_iter()
+                .collect();
+        let backfill_order_state = BackfillOrderState::new(
+            info.fragment_backfill_ordering.clone(),
+            &info.stream_job_fragments,
+        );
         let create_mview_tracker = CreateMviewProgressTracker::recover(
             [(
                 job_id,
-                (info.definition.clone(), &*info.stream_job_fragments),
+                (
+                    info.definition.clone(),
+                    &*info.stream_job_fragments,
+                    backfill_order_state,
+                ),
             )],
             version_stat,
         );
@@ -124,7 +139,7 @@ impl CreatingStreamingJobControl {
             // we assume that when handling snapshot backfill, the cluster must not be paused
             pause: false,
             subscriptions_to_add: Default::default(),
-            backfill_nodes_to_pause: Default::default(),
+            backfill_nodes_to_pause,
         });
 
         control_stream_manager.add_partial_graph(database_id, Some(job_id));
@@ -145,6 +160,7 @@ impl CreatingStreamingJobControl {
         Ok(Self {
             database_id,
             definition: info.definition.clone(),
+            create_type: info.create_type.into(),
             job_id,
             snapshot_backfill_upstream_tables,
             barrier_control,
@@ -228,7 +244,14 @@ impl CreatingStreamingJobControl {
         let mut prev_epoch_fake_physical_time = Epoch(committed_epoch).physical_time();
         let mut pending_non_checkpoint_barriers = vec![];
         let create_mview_tracker = CreateMviewProgressTracker::recover(
-            [(job_id, (definition.clone(), &stream_job_fragments))],
+            [(
+                job_id,
+                (
+                    definition.clone(),
+                    &stream_job_fragments,
+                    Default::default(),
+                ),
+            )],
             version_stat,
         );
         let barrier_info = CreatingStreamingJobStatus::new_fake_barrier(
@@ -349,6 +372,7 @@ impl CreatingStreamingJobControl {
             database_id,
             job_id,
             definition,
+            create_type: CreateType::Background,
             snapshot_backfill_upstream_tables,
             backfill_epoch,
             graph_info,
@@ -408,6 +432,7 @@ impl CreatingStreamingJobControl {
         DdlProgress {
             id: self.job_id.table_id as u64,
             statement: self.definition.clone(),
+            create_type: self.create_type.as_str().to_owned(),
             progress,
         }
     }
@@ -504,7 +529,7 @@ impl CreatingStreamingJobControl {
                 None,
             )?;
         } else {
-            for barrier_to_inject in self.status.on_new_upstream_epoch(barrier_info) {
+            for (barrier_to_inject, mutation) in self.status.on_new_upstream_epoch(barrier_info) {
                 Self::inject_barrier(
                     self.database_id,
                     self.job_id,
@@ -514,7 +539,7 @@ impl CreatingStreamingJobControl {
                     Some(&self.graph_info),
                     barrier_to_inject,
                     None,
-                    None,
+                    mutation,
                 )?;
             }
         }

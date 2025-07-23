@@ -30,7 +30,7 @@ mod utils;
 dylint_linting::dylint_library!();
 
 #[allow(clippy::no_mangle_with_rust_abi)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub fn register_lints(_sess: &rustc_session::Session, lint_store: &mut rustc_lint::LintStore) {
     // -- Begin lint registration --
 

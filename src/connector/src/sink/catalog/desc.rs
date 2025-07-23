@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ConnectionId, CreateType, DatabaseId, SchemaId, TableId, UserId,
+    ColumnCatalog, ConnectionId, CreateType, DatabaseId, SchemaId, StreamJobStatus, TableId, UserId,
 };
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::secret::PbSecretRef;
@@ -84,6 +84,8 @@ pub struct SinkDesc {
     pub create_type: CreateType,
 
     pub is_exactly_once: bool,
+
+    pub auto_refresh_schema_from_table: Option<TableId>,
 }
 
 impl SinkDesc {
@@ -114,11 +116,13 @@ impl SinkDesc {
             initialized_at_epoch: None,
             db_name: self.db_name,
             sink_from_name: self.sink_from_name,
+            auto_refresh_schema_from_table: self.auto_refresh_schema_from_table,
             target_table: self.target_table,
             created_at_cluster_version: None,
             initialized_at_cluster_version: None,
             create_type: self.create_type,
             original_target_columns: vec![],
+            stream_job_status: StreamJobStatus::Creating,
         }
     }
 

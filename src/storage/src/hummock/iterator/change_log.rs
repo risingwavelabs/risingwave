@@ -704,6 +704,7 @@ mod tests {
                 table_option: Default::default(),
                 is_replicated: false,
                 vnodes: Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into(),
+                upload_on_flush: true,
             })
             .await;
         let logs = gen_test_data(epoch_count, 10000, 0.05, 0.2);

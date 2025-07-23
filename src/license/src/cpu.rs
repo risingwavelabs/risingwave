@@ -19,7 +19,7 @@ mod tests {
     use expect_test::expect;
     use thiserror_ext::AsReport as _;
 
-    use crate::{Feature, LicenseKey, LicenseManager, TEST_PAID_LICENSE_KEY_CONTENT};
+    use crate::{Feature, LicenseKey, LicenseManager, TEST_ALL_LICENSE_KEY_CONTENT};
 
     fn do_test(key: &str, cpu_core_count: usize, expect: expect_test::Expect) {
         let manager = LicenseManager::new();
@@ -34,7 +34,7 @@ mod tests {
 
     #[test]
     fn test_no_limit() {
-        do_test(TEST_PAID_LICENSE_KEY_CONTENT, 114514, expect!["ok"]);
+        do_test(TEST_ALL_LICENSE_KEY_CONTENT, 114514, expect!["ok"]);
     }
 
     #[test]

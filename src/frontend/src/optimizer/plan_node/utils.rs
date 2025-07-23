@@ -178,7 +178,6 @@ impl TableCatalogBuilder {
             database_id: 0,
             associated_source_id: None,
             name: String::new(),
-            dependent_relations: vec![],
             columns: self.columns.clone(),
             pk: self.pk,
             stream_key: vec![],
@@ -541,7 +540,7 @@ pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
         AsOf::ProcessTimeWithInterval((value, leading_field)) => {
             let interval = Interval::parse_with_fields(
                 value,
-                Some(crate::Binder::bind_date_time_field(leading_field.clone())),
+                Some(crate::Binder::bind_date_time_field(*leading_field)),
             )
             .map_err(|_| anyhow!("fail to parse interval"))?;
             let interval_sec = (interval.epoch_in_micros() / 1_000_000) as i64;

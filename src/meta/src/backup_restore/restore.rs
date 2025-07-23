@@ -57,6 +57,10 @@ pub struct RestoreOpts {
     /// Database of sql backend, required when meta backend set to MySQL or PostgreSQL.
     #[clap(long, default_value = "")]
     pub sql_database: String,
+    /// Params for the URL connection, such as `sslmode=disable`.
+    /// Example: `param1=value1&param2=value2`
+    #[clap(long, required = false)]
+    pub sql_url_params: Option<String>,
     /// Url of storage to fetch meta snapshot from.
     #[clap(long)]
     pub backup_storage_url: String,

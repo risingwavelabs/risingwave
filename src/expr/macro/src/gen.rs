@@ -115,6 +115,12 @@ impl FunctionAttr {
                 // infer as the type of "anymap" argument
                 return Ok(quote! { |args| Ok(args[#i].clone()) });
             }
+        } else if self.ret == "vector" {
+            if let Some(i) = self.args.iter().position(|t| t == "vector") {
+                // infer as the type of "vector" argument
+                // Example usage: `last_value(*) -> auto`
+                return Ok(quote! { |args| Ok(args[#i].clone()) });
+            }
         } else {
             // the return type is fixed
             let ty = data_type(&self.ret);
@@ -1308,6 +1314,7 @@ fn sig_data_type(ty: &str) -> TokenStream2 {
         "any" => quote! { SigDataType::Any },
         "anyarray" => quote! { SigDataType::AnyArray },
         "anymap" => quote! { SigDataType::AnyMap },
+        "vector" => quote! { SigDataType::Vector },
         "struct" => quote! { SigDataType::AnyStruct },
         _ if ty.starts_with("struct") && ty.contains("any") => quote! { SigDataType::AnyStruct },
         _ => {

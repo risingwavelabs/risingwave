@@ -21,6 +21,7 @@ use risingwave_common::telemetry::{
     report_event_common, telemetry_cluster_type_from_env_var,
 };
 use risingwave_common::{GIT_SHA, RW_VERSION};
+use risingwave_license::LicenseManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::telemetry::{
     PbTelemetryClusterType, PbTelemetryDatabaseObject, PbTelemetryEventStage,
@@ -93,6 +94,7 @@ pub struct MetaTelemetryReport {
     cluster_type: PbTelemetryClusterType,
     object_store_media_type: &'static str,
     connector_usage_json_str: String,
+    license_info_json_str: String,
 }
 
 impl From<MetaTelemetryJobDesc> for risingwave_pb::telemetry::StreamJobDesc {
@@ -140,6 +142,7 @@ impl TelemetryToProtobuf for MetaTelemetryReport {
             cluster_type: self.cluster_type as i32,
             object_store_media_type: self.object_store_media_type.to_owned(),
             connector_usage_json_str: self.connector_usage_json_str,
+            license_info_json_str: self.license_info_json_str,
         };
         pb_report.encode_to_vec()
     }
@@ -213,6 +216,14 @@ impl TelemetryReportCreator for MetaReportCreator {
             .map_err(|err| err.as_report().to_string())?
             .to_string();
 
+        let license_info_json_str = match LicenseManager::get().license() {
+            Ok(license) => serde_json::to_string(&license).unwrap(),
+            Err(err) => serde_json::json!({
+                "error": err.to_report_string(),
+            })
+            .to_string(),
+        };
+
         Ok(MetaTelemetryReport {
             rw_version: RwVersion {
                 version: RW_VERSION.to_owned(),
@@ -240,6 +251,7 @@ impl TelemetryReportCreator for MetaReportCreator {
             cluster_type: telemetry_cluster_type_from_env_var()?,
             object_store_media_type: self.object_store_media_type,
             connector_usage_json_str: connector_usage,
+            license_info_json_str,
         })
     }
 

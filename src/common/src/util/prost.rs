@@ -86,6 +86,14 @@ impl Display for StackTraceResponseOutput<'_> {
             }
         }
 
+        if !self.meta_traces.is_empty() {
+            writeln!(s, "\n\n--- Meta Traces ---")?;
+            for (key, value) in &self.meta_traces {
+                writeln!(s, ">> {key}")?;
+                writeln!(s, "{value}\n")?;
+            }
+        }
+
         Ok(())
     }
 }
@@ -124,6 +132,7 @@ impl StackTraceResponse {
                 }
             }
         }
+        self.meta_traces.extend(b.meta_traces);
     }
 
     pub fn output(&self) -> StackTraceResponseOutput<'_> {

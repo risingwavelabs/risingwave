@@ -65,7 +65,7 @@ use super::{
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::connector_common::AwsAuthProps;
 use crate::enforce_secret::EnforceSecret;
-use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam};
+use crate::sink::{Result, Sink, SinkParam, SinkWriterParam};
 
 pub const BIGQUERY_SINK: &str = "bigquery";
 pub const CHANGE_TYPE: &str = "_CHANGE_TYPE";
@@ -386,6 +386,7 @@ impl BigQuerySink {
             DataType::Map(_) => Err(SinkError::BigQuery(anyhow::anyhow!(
                 "Bigquery cannot support Map"
             ))),
+            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
         }
     }
 
@@ -441,6 +442,7 @@ impl BigQuerySink {
                     "Bigquery cannot support Map"
                 )));
             }
+            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
         };
         Ok(tfs)
     }
@@ -470,7 +472,6 @@ impl BigQuerySink {
 }
 
 impl Sink for BigQuerySink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = BigQueryLogSinker;
 
     const SINK_NAME: &'static str = BIGQUERY_SINK;
@@ -951,6 +952,7 @@ fn build_protobuf_field(
             )));
         }
         DataType::Map(_) => todo!(),
+        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
     }
     Ok((field, None))
 }

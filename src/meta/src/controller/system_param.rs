@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use risingwave_common::system_param::common::CommonHandler;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::system_param::{
-    check_missing_params, derive_missing_fields, set_system_param,
+    check_missing_params, derive_missing_fields, set_system_param, validate_init_system_params,
 };
 use risingwave_common::{for_all_params, key_of};
 use risingwave_meta_model::prelude::SystemParameter;
@@ -143,6 +143,7 @@ impl SystemParamsController {
         let params = merge_params(system_params_from_db(params)?, init_params);
         tracing::info!(initial_params = ?SystemParamsReader::new(&params), "initialize system parameters");
         check_missing_params(&params).map_err(|e| anyhow!(e))?;
+        validate_init_system_params(&params).map_err(|e| anyhow!(e))?;
         let ctl = Self {
             db,
             notification_manager,
@@ -207,8 +208,7 @@ impl SystemParamsController {
 
         // Sync params to other managers on the meta node only once, since it's infallible.
         self.notification_manager
-            .notify_local_subscribers(LocalNotification::SystemParamsChange(params.clone().into()))
-            .await;
+            .notify_local_subscribers(LocalNotification::SystemParamsChange(params.clone().into()));
 
         // Sync params to worker nodes.
         self.notify_workers(&params);

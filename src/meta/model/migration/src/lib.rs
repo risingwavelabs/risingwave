@@ -42,6 +42,8 @@ mod m20250514_114514_dispatcher_type_mapping;
 mod m20250522_074525_iceberg_tables;
 mod m20250522_074947_iceberg_namespace_properties;
 mod m20250528_064717_barrier_interval_per_database;
+mod m20250603_084830_default_privilege;
+mod m20250710_065220_sink_auto_refresh_schema;
 mod utils;
 
 pub struct Migrator;
@@ -122,6 +124,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20250522_074525_iceberg_tables::Migration),
             Box::new(m20250522_074947_iceberg_namespace_properties::Migration),
             Box::new(m20250528_064717_barrier_interval_per_database::Migration),
+            Box::new(m20250603_084830_default_privilege::Migration),
+            Box::new(m20250710_065220_sink_auto_refresh_schema::Migration),
         ]
     }
 }

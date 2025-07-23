@@ -26,7 +26,7 @@
 #![feature(assert_matches)]
 #![feature(btree_extract_if)]
 #![feature(exact_size_is_empty)]
-#![cfg_attr(coverage, feature(coverage_attribute))]
+#![feature(coverage_attribute)]
 #![recursion_limit = "256"]
 #![feature(error_generic_member_access)]
 #![feature(let_chains)]
@@ -34,6 +34,8 @@
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(iter_from_coroutine)]
 #![feature(get_mut_unchecked)]
+#![feature(portable_simd)]
+#![feature(map_try_insert)]
 
 pub mod hummock;
 pub mod memory;

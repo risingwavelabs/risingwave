@@ -5,6 +5,7 @@
 set -euo pipefail
 
 source ci/scripts/common.sh
+unset RUSTC_WORKSPACE_WRAPPER
 
 while getopts 'p:' opt; do
     case ${opt} in

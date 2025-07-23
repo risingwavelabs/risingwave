@@ -23,10 +23,11 @@ use rand::Rng;
 use rand::prelude::{IndexedRandom, SliceRandom};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    Cte, Distinct, Expr, Ident, Query, Select, SelectItem, SetExpr, TableWithJoins, Value, With,
+    Corresponding, Cte, Distinct, Expr, Ident, ObjectName, Query, Select, SelectItem, SetExpr,
+    SetOperator, TableWithJoins, Value, With,
 };
 
-use crate::config::Feature;
+use crate::config::{Feature, Syntax};
 use crate::sql_gen::utils::create_table_with_joins_from_table;
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext, Table};
 
@@ -151,14 +152,47 @@ impl<R: Rng> SqlGenerator<'_, R> {
         with_tables: Vec<Table>,
         num_select_items: usize,
     ) -> (SetExpr, Vec<Column>) {
-        match self.rng.random_range(0..=9) {
-            // TODO: Generate other `SetExpr`
-            0..=9 => {
-                let (select, schema) = self.gen_select_stmt(with_tables, num_select_items);
-                (SetExpr::Select(Box::new(select)), schema)
+        if self.should_generate(Feature::Except) {
+            let left_ctxt = self.new_local_context();
+            let (left_expr, left_schema) = self.gen_set_expr(with_tables.clone(), num_select_items);
+            self.restore_context(left_ctxt);
+
+            let right_ctxt = self.new_local_context();
+            let (right_expr, right_schema) =
+                self.gen_set_expr(with_tables.clone(), num_select_items);
+            self.restore_context(right_ctxt);
+
+            if !self.schemas_compatible(&left_schema, &right_schema) {
+                return self.gen_set_expr(with_tables, num_select_items);
             }
-            _ => unreachable!(),
+
+            let all = matches!(self.rng.random_range(0..=1), 1);
+            (
+                SetExpr::SetOperation {
+                    op: SetOperator::Except,
+                    all,
+                    corresponding: Corresponding {
+                        corresponding: false,
+                        column_list: None,
+                    },
+                    left: Box::new(left_expr),
+                    right: Box::new(right_expr),
+                },
+                left_schema,
+            )
+        } else {
+            let (select, schema) = self.gen_select_stmt(with_tables, num_select_items);
+            (SetExpr::Select(Box::new(select)), schema)
         }
+    }
+
+    fn schemas_compatible(&self, left: &[Column], right: &[Column]) -> bool {
+        if left.len() != right.len() {
+            return false;
+        }
+        left.iter()
+            .zip(right.iter())
+            .all(|(l, r)| l.data_type == r.data_type)
     }
 
     fn gen_limit(&mut self, has_order_by: bool) -> Option<Expr> {
@@ -197,8 +231,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn gen_select_list(&mut self, num_select_items: usize) -> (Vec<SelectItem>, Vec<Column>) {
-        let can_agg = self.should_generate(Feature::Agg);
-        let context = SqlGeneratorContext::new_with_can_agg(can_agg);
+        let context = SqlGeneratorContext::new(self.should_generate(Syntax::Agg), false);
         (0..num_select_items)
             .map(|i| self.gen_select_item(i, context))
             .unzip()
@@ -214,7 +247,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
                 alias: Ident::new_unchecked(alias.clone()),
             },
             Column {
-                name: alias,
+                name: ObjectName::from_test_str(&alias),
                 data_type: ret_type,
             },
         )
@@ -251,8 +284,8 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn gen_where(&mut self) -> Option<Expr> {
-        if self.should_generate(Feature::Where) {
-            let context = SqlGeneratorContext::new_with_can_agg(false);
+        if self.should_generate(Syntax::Where) {
+            let context = SqlGeneratorContext::new(false, false);
             Some(self.gen_expr(&DataType::Boolean, context))
         } else {
             None
@@ -269,7 +302,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
                 self.bound_columns.clone_from(&group_by_cols);
                 group_by_cols
                     .into_iter()
-                    .map(|c| Expr::Identifier(Ident::new_unchecked(c.name)))
+                    .map(|c| c.name_expr())
                     .collect_vec()
             }
             9 => self.gen_grouping_sets(),
@@ -285,12 +318,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         let mut new_bound_columns = vec![];
         for _i in 0..grouping_num {
             let group_by_cols = self.gen_random_bound_columns();
-            grouping_sets.push(
-                group_by_cols
-                    .iter()
-                    .map(|c| Expr::Identifier(Ident::new_unchecked(c.name.clone())))
-                    .collect_vec(),
-            );
+            grouping_sets.push(group_by_cols.iter().map(|c| c.name_expr()).collect_vec());
             new_bound_columns.extend(group_by_cols);
         }
         if grouping_sets.is_empty() {
@@ -300,8 +328,8 @@ impl<R: Rng> SqlGenerator<'_, R> {
             let grouping_sets = Expr::GroupingSets(grouping_sets);
             self.bound_columns = new_bound_columns
                 .into_iter()
-                .sorted_by(|a, b| Ord::cmp(&a.name, &b.name))
-                .dedup_by(|a, b| a.name == b.name)
+                .unique_by(|c| c.name.real_value())
+                .sorted_by_key(|c| c.name.real_value())
                 .collect();
 
             // Currently, grouping sets only support one set.
@@ -310,7 +338,11 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     fn gen_random_bound_columns(&mut self) -> Vec<Column> {
-        let mut available = self.bound_columns.clone();
+        let mut available = if self.should_generate(Feature::Eowc) {
+            self.get_columns_with_watermark(&self.bound_columns.clone())
+        } else {
+            self.bound_columns.clone()
+        };
         if !available.is_empty() {
             available.shuffle(self.rng);
             let upper_bound = available.len().div_ceil(2);
@@ -323,7 +355,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
 
     fn gen_having(&mut self, have_group_by: bool) -> Option<Expr> {
         if have_group_by & self.flip_coin() {
-            let context = SqlGeneratorContext::new();
+            let context = SqlGeneratorContext::new(self.should_generate(Syntax::Agg), false);
             Some(self.gen_expr(&DataType::Boolean, context))
         } else {
             None

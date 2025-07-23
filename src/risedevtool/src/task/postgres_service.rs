@@ -63,6 +63,10 @@ impl DockerServiceConfig for PostgresConfig {
         self.persist_data
             .then(|| "/var/lib/postgresql/data".to_owned())
     }
+
+    fn latency_ms(&self) -> u32 {
+        self.latency_ms
+    }
 }
 
 /// Docker-backed PostgreSQL service.

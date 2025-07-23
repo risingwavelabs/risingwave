@@ -968,6 +968,7 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
                 table_option: Default::default(),
                 is_replicated: false,
                 vnodes: Arc::new(Bitmap::from_bool_slice(&[true])),
+                upload_on_flush: true,
             },
         )
     }

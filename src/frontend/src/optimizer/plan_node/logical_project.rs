@@ -47,6 +47,7 @@ impl LogicalProject {
         Self::new(input, exprs).into()
     }
 
+    // TODO(kwannoel): We only need create/new don't keep both.
     pub fn new(input: PlanRef, exprs: Vec<ExprImpl>) -> Self {
         let core = generic::Project::new(exprs, input);
         Self::with_core(core)
@@ -266,18 +267,19 @@ impl ToStream for LogicalProject {
             .streaming_enable_materialized_expressions();
 
         let stream_plan = if enable_materialized_exprs {
-            // Extract UDFs to `MaterializedExprs` operator
-            let mut udf_field_names = BTreeMap::new();
-            let mut udf_expr_indices = HashSet::new();
-            let udf_exprs: Vec<_> = self
+            // Extract impure functions to `MaterializedExprs` operator
+            let mut impure_field_names = BTreeMap::new();
+            let mut impure_expr_indices = HashSet::new();
+            let impure_exprs: Vec<_> = self
                 .exprs()
                 .iter()
                 .enumerate()
                 .filter_map(|(idx, expr)| {
-                    if expr.has_user_defined_function() {
-                        udf_expr_indices.insert(idx);
+                    // Extract impure expressions
+                    if expr.is_impure() {
+                        impure_expr_indices.insert(idx);
                         if let Some(name) = self.core.field_names.get(&idx) {
-                            udf_field_names.insert(idx, name.clone());
+                            impure_field_names.insert(idx, name.clone());
                         }
                         Some(expr.clone())
                     } else {
@@ -286,24 +288,27 @@ impl ToStream for LogicalProject {
                 })
                 .collect();
 
-            if !udf_exprs.is_empty() {
-                // Create `MaterializedExprs` for UDFs
-                let mat_exprs_plan: PlanRef =
-                    StreamMaterializedExprs::new(new_input.clone(), udf_exprs, udf_field_names)
-                        .into();
+            if !impure_exprs.is_empty() {
+                // Create `MaterializedExprs` for impure expressions
+                let mat_exprs_plan: PlanRef = StreamMaterializedExprs::new(
+                    new_input.clone(),
+                    impure_exprs,
+                    impure_field_names,
+                )
+                .into();
 
                 let input_len = new_input.schema().len();
-                let mut udf_pos = 0;
+                let mut materialized_pos = 0;
 
-                // Create final expressions list with UDFs replaced by `InputRef`s
+                // Create final expressions list with impure expressions replaced by `InputRef`s
                 let final_exprs = self
                     .exprs()
                     .iter()
                     .enumerate()
                     .map(|(idx, expr)| {
-                        if udf_expr_indices.contains(&idx) {
-                            let output_idx = input_len + udf_pos;
-                            udf_pos += 1;
+                        if impure_expr_indices.contains(&idx) {
+                            let output_idx = input_len + materialized_pos;
+                            materialized_pos += 1;
                             InputRef::new(output_idx, expr.return_type()).into()
                         } else {
                             expr.clone()
@@ -314,7 +319,7 @@ impl ToStream for LogicalProject {
                 let core = generic::Project::new(final_exprs, mat_exprs_plan);
                 StreamProject::new(core).into()
             } else {
-                // No UDFs, create a regular `StreamProject`
+                // No impure expressions, create a regular `StreamProject`
                 let core = generic::Project::new(self.exprs().clone(), new_input);
                 StreamProject::new(core).into()
             }

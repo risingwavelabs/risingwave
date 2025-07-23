@@ -82,6 +82,7 @@ pub(crate) mod dummy {
         }
     }
 
+    #[allow(dead_code)]
     pub struct FeatureNotEnabledSink<S: FeatureNotEnabledSinkMarker>(PhantomData<S>);
 
     impl<S: FeatureNotEnabledSinkMarker> Debug for FeatureNotEnabledSink<S> {
@@ -116,7 +117,6 @@ pub(crate) mod dummy {
         type Coordinator = FeatureNotEnabledCoordinator<S>;
         type LogSinker = FeatureNotEnabledLogSinker<S>;
 
-        const SINK_ALTER_CONFIG_LIST: &'static [&'static str] = &[];
         const SINK_NAME: &'static str = S::SINK_NAME;
 
         async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {

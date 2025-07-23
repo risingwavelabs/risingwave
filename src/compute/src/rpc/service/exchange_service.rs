@@ -48,7 +48,6 @@ impl ExchangeService for ExchangeServiceImpl {
     type GetDataStream = BatchDataStream;
     type GetStreamStream = StreamDataStream;
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn get_data(
         &self,
         request: Request<GetDataRequest>,
@@ -74,6 +73,7 @@ impl ExchangeService for ExchangeServiceImpl {
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 
+    #[define_opaque(StreamDataStream)]
     async fn get_stream(
         &self,
         request: Request<Streaming<GetStreamRequest>>,

@@ -145,10 +145,10 @@ impl Sender {
             Message::Watermark(_) => None,
         };
 
-        if let Some(permits) = &permits {
-            if self.permits.acquire_permits(permits).await.is_err() {
-                return Err(mpsc::error::SendError(message));
-            }
+        if let Some(permits) = &permits
+            && self.permits.acquire_permits(permits).await.is_err()
+        {
+            return Err(mpsc::error::SendError(message));
         }
 
         self.tx
