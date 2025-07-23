@@ -30,6 +30,7 @@ pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
 use risingwave_common::bail;
+pub mod jdbc_jni_client;
 pub mod log_store;
 pub mod mock_coordination_client;
 pub mod mongodb;
@@ -38,6 +39,7 @@ pub mod nats;
 pub mod postgres;
 pub mod pulsar;
 pub mod redis;
+pub mod redshift;
 pub mod remote;
 pub mod snowflake;
 pub mod sqlserver;
@@ -140,6 +142,7 @@ macro_rules! for_all_sinks {
 
                 { Fs, $crate::sink::file_sink::opendal_sink::FileSink<FsSink>, $crate::sink::file_sink::fs::FsConfig },
                 { Snowflake, $crate::sink::snowflake::SnowflakeSink, $crate::sink::snowflake::SnowflakeConfig },
+                { RedShift, $crate::sink::redshift::RedshiftSink, $crate::sink::redshift::RedShiftConfig },
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink, $crate::sink::deltalake::DeltaLakeConfig },
                 { BigQuery, $crate::sink::big_query::BigQuerySink, $crate::sink::big_query::BigQueryConfig },
                 { DynamoDb, $crate::sink::dynamodb::DynamoDbSink, $crate::sink::dynamodb::DynamoDbConfig },

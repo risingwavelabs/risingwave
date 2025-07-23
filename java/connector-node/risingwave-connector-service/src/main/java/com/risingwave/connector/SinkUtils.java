@@ -36,6 +36,7 @@ public class SinkUtils {
             case "file":
                 return new FileSinkFactory();
             case "jdbc":
+            case "redshift":
                 return new JDBCSinkFactory();
             case "elasticsearch_v1":
             case "opensearch_v1":
