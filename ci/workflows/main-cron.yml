@@ -67,7 +67,7 @@ steps:
           <<: *docker-compose
           environment:
           - GITHUB_TOKEN
-    timeout_in_minutes: 12
+    timeout_in_minutes: 15
     retry: *auto-retry
 
   - label: "build simulation test"

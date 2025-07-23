@@ -93,7 +93,7 @@ impl Binder {
             within_group,
             filter,
             over,
-        }: Function,
+        }: &Function,
     ) -> Result<ExprImpl> {
         let (schema_name, func_name) = match name.0.as_slice() {
             [name] => (None, name.real_value()),
@@ -142,24 +142,24 @@ impl Binder {
         if func_name == "array_transform" || func_name == "map_filter" {
             return self.validate_and_bind_special_function_params(
                 &func_name,
-                scalar_as_agg,
+                *scalar_as_agg,
                 arg_list,
-                &within_group,
-                &filter,
-                &over,
+                within_group.as_deref(),
+                filter.as_deref(),
+                over.as_ref(),
             );
         }
 
         let mut args: Vec<_> = arg_list
             .args
             .iter()
-            .map(|arg| self.bind_function_arg(arg.clone()))
+            .map(|arg| self.bind_function_arg(arg))
             .flatten_ok()
             .try_collect()?;
 
         let mut referred_udfs = HashSet::new();
 
-        let wrapped_agg_type = if scalar_as_agg {
+        let wrapped_agg_type = if *scalar_as_agg {
             // Let's firstly try to apply the `AGGREGATE:` prefix.
             // We will reject functions that are not able to be wrapped as aggregate function.
             let mut array_args = args
@@ -274,7 +274,13 @@ impl Binder {
             } else {
                 bail_not_implemented!(issue = 8961, "Unrecognized window function: {}", func_name);
             };
-            return self.bind_window_function(kind, args, arg_list.ignore_nulls, filter, over);
+            return self.bind_window_function(
+                kind,
+                args,
+                arg_list.ignore_nulls,
+                filter.as_deref(),
+                over,
+            );
         }
 
         // now it's an aggregate/scalar/table function call
@@ -293,9 +299,9 @@ impl Binder {
                 agg_type,
                 arg_list.distinct,
                 args,
-                arg_list.order_by,
-                within_group,
-                filter,
+                &arg_list.order_by,
+                within_group.as_deref(),
+                filter.as_deref(),
             );
         }
 
@@ -423,10 +429,10 @@ impl Binder {
         &mut self,
         func_name: &str,
         scalar_as_agg: bool,
-        arg_list: FunctionArgList,
-        within_group: &Option<Box<OrderByExpr>>,
-        filter: &Option<Box<risingwave_sqlparser::ast::Expr>>,
-        over: &Option<Window>,
+        arg_list: &FunctionArgList,
+        within_group: Option<&OrderByExpr>,
+        filter: Option<&risingwave_sqlparser::ast::Expr>,
+        over: Option<&Window>,
     ) -> Result<ExprImpl> {
         assert!(["array_transform", "map_filter"].contains(&func_name));
 
@@ -456,20 +462,20 @@ impl Binder {
             func_name
         );
         if func_name == "array_transform" {
-            self.bind_array_transform(arg_list.args)
+            self.bind_array_transform(&arg_list.args)
         } else {
-            self.bind_map_filter(arg_list.args)
+            self.bind_map_filter(&arg_list.args)
         }
     }
 
-    fn bind_array_transform(&mut self, args: Vec<FunctionArg>) -> Result<ExprImpl> {
-        let [array, lambda] = <[FunctionArg; 2]>::try_from(args).map_err(|args| -> RwError {
-            ErrorCode::BindError(format!(
+    fn bind_array_transform(&mut self, args: &[FunctionArg]) -> Result<ExprImpl> {
+        let [array, lambda] = args else {
+            return Err(ErrorCode::BindError(format!(
                 "`array_transform` expect two inputs `array` and `lambda`, but {} were given",
                 args.len()
             ))
-            .into()
-        })?;
+            .into());
+        };
 
         let bound_array = self.bind_function_arg(array)?;
         let [bound_array] = <[ExprImpl; 1]>::try_from(bound_array).map_err(|bound_array| -> RwError {
@@ -529,19 +535,20 @@ impl Binder {
     ) -> Result<ExprImpl> {
         let lambda_args = HashMap::from([(arg.real_value(), (0usize, input_ty))]);
         let orig_lambda_args = self.context.lambda_args.replace(lambda_args);
-        let body = self.bind_expr_inner(body)?;
+        let body = self.bind_expr_inner(&body)?;
         self.context.lambda_args = orig_lambda_args;
 
         Ok(body)
     }
 
-    fn bind_map_filter(&mut self, args: Vec<FunctionArg>) -> Result<ExprImpl> {
-        let [input, lambda] = <[FunctionArg; 2]>::try_from(args).map_err(|args| {
-            ErrorCode::BindError(format!(
+    fn bind_map_filter(&mut self, args: &[FunctionArg]) -> Result<ExprImpl> {
+        let [input, lambda] = args else {
+            return Err(ErrorCode::BindError(format!(
                 "`map_filter` requires two arguments (input_map and lambda), got {}",
                 args.len()
             ))
-        })?;
+            .into());
+        };
 
         let bound_input = self.bind_function_arg(input)?;
         let [bound_input] = <[ExprImpl; 1]>::try_from(bound_input).map_err(|e| {
@@ -622,7 +629,7 @@ impl Binder {
         ]);
 
         let orig_ctx = self.context.lambda_args.replace(lambda_args);
-        let bound_body = self.bind_expr_inner(body)?;
+        let bound_body = self.bind_expr_inner(&body)?;
         self.context.lambda_args = orig_ctx;
 
         Ok(bound_body)
@@ -710,7 +717,7 @@ impl Binder {
         }
 
         if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
-            let bind_result = self.bind_expr(expr);
+            let bind_result = self.bind_expr(&expr);
 
             // We should properly decrement global count after a successful binding
             // Since the subsequent probe operation in `bind_column` or
@@ -733,7 +740,7 @@ impl Binder {
 
     pub(in crate::binder) fn bind_function_expr_arg(
         &mut self,
-        arg_expr: FunctionArgExpr,
+        arg_expr: &FunctionArgExpr,
     ) -> Result<Vec<ExprImpl>> {
         match arg_expr {
             FunctionArgExpr::Expr(expr) => Ok(vec![self.bind_expr_inner(expr)?]),
@@ -749,7 +756,7 @@ impl Binder {
 
     pub(in crate::binder) fn bind_function_arg(
         &mut self,
-        arg: FunctionArg,
+        arg: &FunctionArg,
     ) -> Result<Vec<ExprImpl>> {
         match arg {
             FunctionArg::Unnamed(expr) => self.bind_function_expr_arg(expr),

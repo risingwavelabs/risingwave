@@ -344,7 +344,9 @@ impl LogicalOverWindow {
                         ))
                         .into());
                     }
-                    let const_offset = offset_expr.cast_implicit(DataType::Int64)?.try_fold_const();
+                    let const_offset = offset_expr
+                        .cast_implicit(&DataType::Int64)?
+                        .try_fold_const();
                     if const_offset.is_none() {
                         // should already be checked in `WindowFunction::infer_return_type`,
                         // but just in case
