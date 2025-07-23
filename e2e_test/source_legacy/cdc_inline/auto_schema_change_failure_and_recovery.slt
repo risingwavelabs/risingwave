@@ -161,8 +161,7 @@ SELECT * from rw_t4 order by id;
 
 # Alter source to set schema change failure policy to skip
 statement ok
-alter source pg_source set schema.change.failure.policy = 'skip';
-
+alter source pg_source connector with(schema.change.failure.policy = 'skip');
 sleep 10s
 
 # Verify that new rows after schema change are now visible in CDC tables
