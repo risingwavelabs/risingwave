@@ -414,7 +414,7 @@ impl IcebergCompactorRunner {
                 "DEBUG-COW Iceberg compaction task rewriting files to main branch",
             );
 
-            let new_table = rewrite_commit_manager
+            let _new_table = rewrite_commit_manager
                 .rewrite_files(resp.data_files, input_files)
                 .await
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
