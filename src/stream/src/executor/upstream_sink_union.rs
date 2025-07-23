@@ -25,7 +25,6 @@ use crate::executor::project::apply_project_exprs;
 use crate::executor::{BarrierMutationType, BoxedMessageInput, DynamicReceivers, MergeExecutor};
 use crate::task::{FragmentId, LocalBarrierManager};
 
-type MergeStream = impl Stream<Item = MessageStreamItem>;
 type ProcessedMessageStream = impl Stream<Item = MessageStreamItem>;
 
 #[pin_project]
@@ -44,33 +43,29 @@ impl SinkHandlerInput {
         merge: Box<MergeExecutor>,
         project_exprs: Vec<NonStrictExpression>,
     ) -> Self {
-        let merge_stream = Self::generate_stream_from_merge(merge);
-        let processed_stream = Self::apply_project_exprs_stream(merge_stream, project_exprs);
+        let processed_stream = Self::apply_project_exprs_stream(merge, project_exprs);
         Self {
             upstream_fragment_id,
             processed_stream,
         }
     }
 
-    #[define_opaque(MergeStream)]
-    fn generate_stream_from_merge(merge: Box<MergeExecutor>) -> MergeStream {
-        merge.execute_inner()
-    }
-
     #[define_opaque(ProcessedMessageStream)]
     fn apply_project_exprs_stream(
-        merge_stream: MergeStream,
+        merge: Box<MergeExecutor>,
         project_exprs: Vec<NonStrictExpression>,
     ) -> ProcessedMessageStream {
-        Self::apply_project_exprs_stream_impl(merge_stream, project_exprs)
+        // Apply the projection expressions to the output of the merge executor.
+        Self::apply_project_exprs_stream_impl(merge, project_exprs)
     }
 
     /// Applies a projection to the output of a merge executor.
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn apply_project_exprs_stream_impl(
-        merge_stream: MergeStream,
+        merge: Box<MergeExecutor>,
         project_exprs: Vec<NonStrictExpression>,
     ) {
+        let merge_stream = merge.execute_inner();
         pin_mut!(merge_stream);
         while let Some(msg) = merge_stream.next().await {
             let msg = msg?;
