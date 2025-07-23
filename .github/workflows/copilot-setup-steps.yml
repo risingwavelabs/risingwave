@@ -23,8 +23,8 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          apt-get update -yy && \
-          DEBIAN_FRONTEND=noninteractive apt-get -y install sudo make build-essential cmake protobuf-compiler curl parallel python3 python3-pip python3-venv software-properties-common psmisc jq \
+          sudo apt-get update -yy && \
+          DEBIAN_FRONTEND=noninteractive sudo apt-get -y install sudo make build-essential cmake protobuf-compiler curl parallel python3 python3-pip python3-venv software-properties-common psmisc jq \
           openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config bash openjdk-17-jdk wget unzip git tmux lld postgresql-client kcat netcat-openbsd mysql-client sqlite3 \
           maven zstd libzstd-dev locales \
           python3.12 python3.12-dev \
