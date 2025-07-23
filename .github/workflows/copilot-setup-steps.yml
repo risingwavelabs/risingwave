@@ -12,7 +12,7 @@ on:
       - .github/workflows/copilot-setup-steps.yml
 
 jobs:
-  setup:
+  copilot-setup-steps:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
