@@ -15,7 +15,6 @@
 use std::cmp::{Ordering, max, min};
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use futures::future::try_join_all;
@@ -23,9 +22,10 @@ use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_pb::plan_common::ExprContext;
 use thiserror_ext::AsReport;
 use tracing::{info, warn};
-use risingwave_pb::plan_common::ExprContext;
+
 use super::BarrierWorkerRuntimeInfoSnapshot;
 
 use crate::barrier::context::GlobalBarrierWorkerContextImpl;
@@ -643,7 +643,7 @@ impl GlobalBarrierWorkerContextImpl {
                             actor_id: *actor_id as _,
                             fragment_id: *fragment_id as _,
                             vnode_bitmap: vnode_bitmap.clone(),
-                            mview_definition: "".to_string(),
+                            mview_definition: "".to_owned(),
                             expr_context: Some(ExprContext::default()),
                         },
                     );
@@ -862,11 +862,6 @@ impl GlobalBarrierWorkerContextImpl {
             _ => assigned_parallelism,
         }
     }
-
-    // /// Update all actors in compute nodes.
-    // async fn load_all_actors(&self) -> MetaResult<HashMap<ActorId, StreamActor>> {
-    //     self.metadata_manager.all_active_actors().await
-    // }
 }
 
 #[cfg(test)]
