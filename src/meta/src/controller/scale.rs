@@ -24,7 +24,7 @@ use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::prelude::{
-    Actor, Fragment, FragmentRelation, Object, Sink, Source, StreamingJob, Table,
+    Actor, Fragment, FragmentRelation, Sink, Source, StreamingJob, Table,
 };
 use risingwave_meta_model::{
     ConnectorSplits, DatabaseId, DispatcherType, FragmentId, ObjectId, StreamingParallelism,
@@ -43,7 +43,7 @@ use sea_orm::{
 
 use crate::controller::catalog::{ActorInfo, CatalogController};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
-use crate::controller::utils::{get_existing_job_resource_group, get_fragment_actor_dispatchers};
+use crate::controller::utils::get_existing_job_resource_group;
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor};
 use crate::stream::AssignerBuilder;
@@ -455,15 +455,15 @@ impl CatalogController {
             })
             .collect();
 
-        let fragment_actor_dispatchers = get_fragment_actor_dispatchers(
-            txn,
-            actor_cache,
-            fragments
-                .keys()
-                .map(|fragment_id| *fragment_id as _)
-                .collect(),
-        )
-        .await?;
+        let fragment_actor_dispatchers = self
+            .get_fragment_actor_dispatchers_txn(
+                txn,
+                fragments
+                    .keys()
+                    .map(|fragment_id| *fragment_id as _)
+                    .collect(),
+            )
+            .await?;
 
         Ok(RescheduleWorkingSet {
             fragments,

@@ -37,9 +37,7 @@ use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, WorkerExtraInfo};
 use crate::controller::fragment::{FragmentParallelismInfo, InflightFragmentInfo};
 use crate::manager::{LocalNotification, NotificationVersion};
-use crate::model::{
-    ActorId, ClusterId, FragmentId, StreamActor, StreamJobFragments, SubscriptionId,
-};
+use crate::model::{ActorId, ClusterId, FragmentId, StreamJobFragments, SubscriptionId};
 use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
 use crate::telemetry::MetaTelemetryJobDesc;
 
@@ -619,7 +617,7 @@ impl MetadataManager {
         }
         Ok(table_fragments)
     }
-    //
+
     // pub async fn all_active_actors(&self) -> MetaResult<HashMap<ActorId, StreamActor>> {
     //     let table_fragments = self.catalog_controller.table_fragments().await?;
     //     let mut actor_maps = HashMap::new();

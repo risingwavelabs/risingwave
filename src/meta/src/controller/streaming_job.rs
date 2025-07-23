@@ -76,8 +76,8 @@ use crate::controller::utils::{
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
 use crate::model::{
-    FragmentDownstreamRelation, FragmentReplaceUpstream, StreamActor, StreamContext,
-    StreamJobFragmentsToCreate, TableParallelism,
+    FragmentDownstreamRelation, FragmentReplaceUpstream, StreamContext, StreamJobFragmentsToCreate,
+    TableParallelism,
 };
 use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
 use crate::{MetaError, MetaResult};
@@ -2218,7 +2218,7 @@ impl CatalogController {
             })
             .collect();
 
-        let mut inner = self.inner.write().await;
+        let inner = self.inner.write().await;
 
         let txn = inner.db.begin().await?;
 

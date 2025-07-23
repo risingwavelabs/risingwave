@@ -530,7 +530,7 @@ impl CatalogController {
         &self,
         database_id: Option<DatabaseId>,
     ) -> MetaResult<()> {
-        let mut inner = self.inner.write().await;
+        let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let filter_condition = object::Column::ObjType.eq(ObjectType::Subscription).and(
             object::Column::Oid.not_in_subquery(
@@ -577,7 +577,7 @@ impl CatalogController {
         &self,
         database_id: Option<DatabaseId>,
     ) -> MetaResult<Vec<SourceId>> {
-        let mut inner = self.inner.write().await;
+        let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         let filter_condition = streaming_job::Column::JobStatus.eq(JobStatus::Initial).or(
