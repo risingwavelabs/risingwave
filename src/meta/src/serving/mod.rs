@@ -167,7 +167,7 @@ async fn fetch_serving_infos(
     )
 }
 
-pub async fn start_serving_vnode_mapping_worker(
+pub fn start_serving_vnode_mapping_worker(
     notification_manager: NotificationManagerRef,
     metadata_manager: MetadataManager,
     serving_vnode_mapping: ServingVnodeMappingRef,
@@ -175,9 +175,7 @@ pub async fn start_serving_vnode_mapping_worker(
 ) -> (JoinHandle<()>, Sender<()>) {
     let (local_notification_tx, mut local_notification_rx) = tokio::sync::mpsc::unbounded_channel();
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-    notification_manager
-        .insert_local_sender(local_notification_tx)
-        .await;
+    notification_manager.insert_local_sender(local_notification_tx);
     let join_handle = tokio::spawn(async move {
         let reset = || async {
             let (workers, streaming_parallelisms) = fetch_serving_infos(&metadata_manager).await;

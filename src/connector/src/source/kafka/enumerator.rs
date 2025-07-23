@@ -506,11 +506,12 @@ impl KafkaSplitEnumerator {
         high_watermark_metrics.set(offset);
     }
 
-    pub async fn check_reachability(&self) -> bool {
-        self.client
+    pub async fn check_reachability(&self) -> ConnectorResult<()> {
+        let _ = self
+            .client
             .fetch_metadata(Some(self.topic.as_str()), self.sync_call_timeout)
-            .await
-            .is_ok()
+            .await?;
+        Ok(())
     }
 
     async fn fetch_topic_partition(&self) -> ConnectorResult<Vec<i32>> {

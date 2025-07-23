@@ -208,8 +208,7 @@ impl SystemParamsController {
 
         // Sync params to other managers on the meta node only once, since it's infallible.
         self.notification_manager
-            .notify_local_subscribers(LocalNotification::SystemParamsChange(params.clone().into()))
-            .await;
+            .notify_local_subscribers(LocalNotification::SystemParamsChange(params.clone().into()));
 
         // Sync params to worker nodes.
         self.notify_workers(&params);

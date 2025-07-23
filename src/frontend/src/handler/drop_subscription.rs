@@ -29,7 +29,7 @@ pub async fn handle_drop_subscription(
     let session = handler_args.session;
     let db_name = &session.database();
     let (schema_name, subscription_name) =
-        Binder::resolve_schema_qualified_name(db_name, subscription_name)?;
+        Binder::resolve_schema_qualified_name(db_name, &subscription_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);

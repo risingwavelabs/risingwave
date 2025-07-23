@@ -773,11 +773,9 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn compact_table(&self, table_id: TableId) -> Result<u64> {
-        let request = CompactTableRequest {
-            table_id: table_id.table_id(),
-        };
-        let resp = self.inner.compact_table(request).await?;
+    pub async fn compact_iceberg_table(&self, sink_id: u32) -> Result<u64> {
+        let request = CompactIcebergTableRequest { sink_id };
+        let resp = self.inner.compact_iceberg_table(request).await?;
         Ok(resp.task_id)
     }
 
@@ -2359,7 +2357,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, auto_schema_change, AutoSchemaChangeRequest, AutoSchemaChangeResponse }
             ,{ ddl_client, alter_swap_rename, AlterSwapRenameRequest, AlterSwapRenameResponse }
             ,{ ddl_client, alter_secret, AlterSecretRequest, AlterSecretResponse }
-            ,{ ddl_client, compact_table, CompactTableRequest, CompactTableResponse }
+            ,{ ddl_client, compact_iceberg_table, CompactIcebergTableRequest, CompactIcebergTableResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }
