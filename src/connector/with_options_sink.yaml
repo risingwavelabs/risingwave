@@ -1337,6 +1337,13 @@ SnowflakeConfig:
     required: false
     default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
     allow_alter_on_fly: true
+  - name: auto_schema_change
+    field_type: bool
+    comments: |-
+      Enable auto schema change for upsert sink.
+      If enabled, the sink will automatically alter the target table to add new columns.
+    required: false
+    default: Default::default
 SqlServerConfig:
   fields:
   - name: sqlserver.host
