@@ -27,6 +27,8 @@ use crate::task::{FragmentId, LocalBarrierManager};
 
 type ProcessedMessageStream = impl Stream<Item = MessageStreamItem>;
 
+/// A wrapper that merges data from a single upstream fragment and applies projection expressions.
+/// Each `SinkHandlerInput` represents one upstream fragment with its own merge executor and projection logic.
 #[pin_project]
 pub struct SinkHandlerInput {
     /// The ID of the upstream fragment that this input is associated with.
@@ -97,6 +99,7 @@ impl Stream for SinkHandlerInput {
     }
 }
 
+/// Information about an upstream fragment including its schema and projection expressions.
 #[derive(Debug)]
 pub struct UpstreamInfo {
     pub upstream_fragment_id: FragmentId,
@@ -106,6 +109,17 @@ pub struct UpstreamInfo {
 
 type BoxedSinkInput = BoxedMessageInput<FragmentId, BarrierMutationType>;
 
+/// `UpstreamSinkUnionExecutor` merges data from multiple upstream fragments, where each fragment
+/// has its own merge logic and projection expressions. This executor is specifically designed for
+/// sink operations that need to union data from different upstream sources.
+///
+/// Unlike a simple union that just merges streams, this executor:
+/// 1. Creates a separate `MergeExecutor` for each upstream fragment
+/// 2. Applies fragment-specific projection expressions to each stream
+/// 3. Unions all the processed streams into a single output stream
+///
+/// This is useful for sink operators that need to collect data from multiple upstream fragments
+/// with potentially different schemas or processing requirements.
 pub struct UpstreamSinkUnionExecutor {
     /// The context of the actor.
     actor_context: ActorContextRef,
