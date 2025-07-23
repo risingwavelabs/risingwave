@@ -355,17 +355,6 @@ impl CatalogController {
             }
         };
 
-        let fragment_mappings = removed_fragments
-            .iter()
-            .map(|fragment_id| PbFragmentWorkerSlotMapping {
-                fragment_id: *fragment_id as _,
-                mapping: None,
-            })
-            .collect();
-
-        self.notify_fragment_mapping(NotificationOperation::Delete, fragment_mappings)
-            .await;
-
         Ok((
             ReleaseContext {
                 database_id,

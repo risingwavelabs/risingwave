@@ -76,7 +76,7 @@ fn resolve_regclass_inner(
     // '"my schema".foo' must all work as values passed pg_table_size.
     let obj = Parser::parse_object_name_str(class_name)?;
 
-    let (schema_name, class_name) = Binder::resolve_schema_qualified_name(db_name, obj)?;
+    let (schema_name, class_name) = Binder::resolve_schema_qualified_name(db_name, &obj)?;
     let schema_path = SchemaPath::new(schema_name.as_deref(), search_path, &auth_context.user_name);
     Ok(catalog
         .read_guard()

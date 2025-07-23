@@ -214,8 +214,16 @@ def _(outer_panels: Panels):
                     "",
                     [
                         panels.target(
+                            f"sum(rate({table_metric('stream_materialize_data_exist_count')}[$__rate_interval])) by (table_id, fragment_id)",
+                            "data exist count - table {{table_id}} fragment {{fragment_id}}",
+                        ),
+                        panels.target(
                             f"sum(rate({table_metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, fragment_id)",
                             "cache hit count - table {{table_id}} fragment {{fragment_id}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({table_metric('stream_materialize_cache_total_count')}[$__rate_interval]) - rate({table_metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, fragment_id)",
+                            "cache miss count - table {{table_id}} fragment {{fragment_id}}",
                         ),
                         panels.target(
                             f"sum(rate({table_metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, fragment_id)",

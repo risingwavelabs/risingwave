@@ -35,7 +35,7 @@ use super::{
 };
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
-use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam};
+use crate::sink::{Result, Sink, SinkParam, SinkWriterParam};
 
 pub const SQLSERVER_SINK: &str = "sqlserver";
 
@@ -165,7 +165,6 @@ impl TryFrom<SinkParam> for SqlServerSink {
 }
 
 impl Sink for SqlServerSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = LogSinkerOf<SqlServerSinkWriter>;
 
     const SINK_NAME: &'static str = SQLSERVER_SINK;

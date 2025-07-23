@@ -840,9 +840,8 @@ impl Condition {
         // analyze exprs in the group. scan_range is not updated
         for expr in group {
             if let Some((input_ref, const_expr)) = expr.as_eq_const() {
-                let new_expr = if let Ok(expr) = const_expr
-                    .clone()
-                    .cast_implicit(input_ref.data_type.clone())
+                let new_expr = if let Ok(expr) =
+                    const_expr.clone().cast_implicit(&input_ref.data_type)
                 {
                     expr
                 } else {
@@ -876,9 +875,7 @@ impl Condition {
                 for const_expr in in_const_list {
                     // The cast should succeed, because otherwise the input_ref is casted
                     // and thus `as_in_const_list` returns None.
-                    let const_expr = const_expr
-                        .cast_implicit(input_ref.data_type.clone())
-                        .unwrap();
+                    let const_expr = const_expr.cast_implicit(&input_ref.data_type).unwrap();
                     let value = const_expr.fold_const()?;
                     let Some(value) = value else {
                         continue;
@@ -904,24 +901,22 @@ impl Condition {
                     .sorted_by(DefaultOrd::default_cmp)
                     .collect();
             } else if let Some((input_ref, op, const_expr)) = expr.as_comparison_const() {
-                let new_expr = if let Ok(expr) = const_expr
-                    .clone()
-                    .cast_implicit(input_ref.data_type.clone())
-                {
-                    expr
-                } else {
-                    match self::cast_compare::cast_compare_for_cmp(
-                        const_expr,
-                        input_ref.data_type,
-                        op,
-                    ) {
-                        Ok(ResultForCmp::Success(expr)) => expr,
-                        _ => {
-                            other_conds.push(expr);
-                            continue;
+                let new_expr =
+                    if let Ok(expr) = const_expr.clone().cast_implicit(&input_ref.data_type) {
+                        expr
+                    } else {
+                        match self::cast_compare::cast_compare_for_cmp(
+                            const_expr,
+                            input_ref.data_type,
+                            op,
+                        ) {
+                            Ok(ResultForCmp::Success(expr)) => expr,
+                            _ => {
+                                other_conds.push(expr);
+                                continue;
+                            }
                         }
-                    }
-                };
+                    };
                 let Some(value) = new_expr.fold_const()? else {
                     // column compare with NULL, the result is always  NULL.
                     return Ok(None);
@@ -1301,12 +1296,12 @@ mod cast_compare {
                     Ok(ShrinkResult::OutLowerBound)
                 } else {
                     Ok(ShrinkResult::InRange(
-                        const_expr.cast_explicit(target).unwrap(),
+                        const_expr.cast_explicit(&target).unwrap(),
                     ))
                 }
             }
             None => Ok(ShrinkResult::InRange(
-                const_expr.cast_explicit(target).unwrap(),
+                const_expr.cast_explicit(&target).unwrap(),
             )),
         }
     }

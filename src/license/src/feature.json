@@ -87,6 +87,11 @@
             "description": "Auto iceberg compaction.",
             "type": "string",
             "const": "IcebergCompaction"
+        },
+        {
+            "description": "Sink auto schema change.",
+            "type": "string",
+            "const": "SinkAutoSchemaChange"
         }
     ]
 }

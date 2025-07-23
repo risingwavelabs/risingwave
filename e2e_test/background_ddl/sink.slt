@@ -2,6 +2,9 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
+SET sink_decouple TO true;
+
+statement ok
 create table t(v1 int);
 
 statement ok

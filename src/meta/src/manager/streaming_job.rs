@@ -315,7 +315,10 @@ impl StreamingJob {
                 // No version check for materialized view, since `ALTER MATERIALIZED VIEW AS QUERY`
                 // is a full rewrite.
             }
-            StreamingJob::Sink(_, _) | StreamingJob::Index(_, _) => {
+            StreamingJob::Sink(_, _) => {
+                // No version check for sink, since sink fragment altering is triggered along with Table
+            }
+            StreamingJob::Index(_, _) => {
                 bail_not_implemented!("schema change for {}", self.job_type_str())
             }
         }

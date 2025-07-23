@@ -308,7 +308,7 @@ impl TableFunction {
             INLINE_ARG_LEN => {
                 let mut cast_args = Vec::with_capacity(INLINE_ARG_LEN);
                 for arg in args {
-                    let arg = arg.cast_implicit(DataType::Varchar)?;
+                    let arg = arg.cast_implicit(&DataType::Varchar)?;
                     cast_args.push(arg);
                 }
                 cast_args
@@ -338,7 +338,7 @@ impl TableFunction {
                     args.get(1)
                         .unwrap()
                         .clone()
-                        .cast_implicit(DataType::Varchar)?,
+                        .cast_implicit(&DataType::Varchar)?,
                 ]
             }
             _ => {

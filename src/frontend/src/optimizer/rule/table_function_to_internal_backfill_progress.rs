@@ -137,7 +137,7 @@ impl TableFunctionToInternalBackfillProgressRule {
             index: 0,
             data_type: DataType::Decimal,
         }))
-        .cast_explicit(DataType::Int64)?;
+        .cast_explicit(&DataType::Int64)?;
         let min_epoch = ExprImpl::InputRef(Box::new(InputRef {
             index: 1,
             data_type: DataType::Int64,
