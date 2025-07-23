@@ -1241,6 +1241,20 @@ PulsarConfig:
     field_type: usize
     required: false
     default: 1 << 20
+RedShiftConfig:
+  fields:
+  - name: jdbc.url
+    field_type: String
+    required: true
+  - name: user
+    field_type: String
+    required: false
+  - name: password
+    field_type: String
+    required: false
+  - name: table.name
+    field_type: String
+    required: true
 RedisConfig:
   fields:
   - name: redis.url
