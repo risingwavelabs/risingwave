@@ -20,7 +20,6 @@ import com.risingwave.connector.api.sink.SinkWriter;
 import com.risingwave.connector.jdbc.JdbcDialect;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.Data;
-import com.risingwave.proto.Data.DataType;
 import io.grpc.Status;
 import java.sql.*;
 import java.util.*;
@@ -422,5 +421,4 @@ public class JDBCSink implements SinkWriter {
     public Connection getConn() {
         return conn;
     }
-
 }
