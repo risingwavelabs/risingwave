@@ -303,7 +303,7 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         type = 'append-only',
         force_append_only='true',
         refresh.interval.sec = 1,
-    ) FORMAT PLAIN ENCODE JSON(force_append_only='true');''')
+    );''')
 
     print('Sink into s3 in json encode...')
     # Execute a SELECT statement

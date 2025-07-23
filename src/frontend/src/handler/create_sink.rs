@@ -243,6 +243,7 @@ pub async fn gen_sink_plan(
         } else {
             None
         };
+
         let bound = binder.bind_query(&query)?;
 
         (
