@@ -46,6 +46,7 @@ use prost_types::{
 };
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::error::NotImplemented;
 use risingwave_common::types::DataType;
 use serde_derive::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
@@ -353,9 +354,12 @@ impl BigQuerySink {
             DataType::Int16 => Ok("INT64".to_owned()),
             DataType::Int32 => Ok("INT64".to_owned()),
             DataType::Int64 => Ok("INT64".to_owned()),
-            DataType::Float32 => Err(SinkError::BigQuery(anyhow::anyhow!(
-                "Bigquery cannot support real"
-            ))),
+            DataType::Float32 => Err(SinkError::Internal(
+                NotImplemented {
+                    feature: "Float32 (real) type for BigQuery sink".to_string(),
+                    issue: None.into(),
+                }.into(),
+            )),
             DataType::Float64 => Ok("FLOAT64".to_owned()),
             DataType::Decimal => Ok("NUMERIC".to_owned()),
             DataType::Date => Ok("DATE".to_owned()),
@@ -380,12 +384,18 @@ impl BigQuerySink {
             DataType::Bytea => Ok("BYTES".to_owned()),
             DataType::Jsonb => Ok("JSON".to_owned()),
             DataType::Serial => Ok("INT64".to_owned()),
-            DataType::Int256 => Err(SinkError::BigQuery(anyhow::anyhow!(
-                "Bigquery cannot support Int256"
-            ))),
-            DataType::Map(_) => Err(SinkError::BigQuery(anyhow::anyhow!(
-                "Bigquery cannot support Map"
-            ))),
+            DataType::Int256 => Err(SinkError::Internal(
+                NotImplemented {
+                    feature: "Int256 type for BigQuery sink".to_string(),
+                    issue: None.into(),
+                }.into(),
+            )),
+            DataType::Map(_) => Err(SinkError::Internal(
+                NotImplemented {
+                    feature: "Map type for BigQuery sink".to_string(),
+                    issue: None.into(),
+                }.into(),
+            )),
             DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
         }
     }
@@ -397,9 +407,12 @@ impl BigQuerySink {
                 TableFieldSchema::integer(&rw_field.name)
             }
             DataType::Float32 => {
-                return Err(SinkError::BigQuery(anyhow::anyhow!(
-                    "Bigquery cannot support real"
-                )));
+                return Err(SinkError::Internal(
+                    NotImplemented {
+                        feature: "Float32 (real) type for BigQuery sink".to_string(),
+                        issue: None.into(),
+                    }.into(),
+                ));
             }
             DataType::Float64 => TableFieldSchema::float(&rw_field.name),
             DataType::Decimal => TableFieldSchema::numeric(&rw_field.name),
@@ -409,9 +422,12 @@ impl BigQuerySink {
             DataType::Timestamp => TableFieldSchema::date_time(&rw_field.name),
             DataType::Timestamptz => TableFieldSchema::timestamp(&rw_field.name),
             DataType::Interval => {
-                return Err(SinkError::BigQuery(anyhow::anyhow!(
-                    "Bigquery cannot support Interval"
-                )));
+                return Err(SinkError::Internal(
+                    NotImplemented {
+                        feature: "Interval type for BigQuery sink".to_string(),
+                        issue: None.into(),
+                    }.into(),
+                ));
             }
             DataType::Struct(st) => {
                 let mut sub_fields = Vec::with_capacity(st.len());
@@ -433,14 +449,20 @@ impl BigQuerySink {
             DataType::Bytea => TableFieldSchema::bytes(&rw_field.name),
             DataType::Jsonb => TableFieldSchema::json(&rw_field.name),
             DataType::Int256 => {
-                return Err(SinkError::BigQuery(anyhow::anyhow!(
-                    "Bigquery cannot support Int256"
-                )));
+                return Err(SinkError::Internal(
+                    NotImplemented {
+                        feature: "Int256 type for BigQuery sink".to_string(),
+                        issue: None.into(),
+                    }.into(),
+                ));
             }
             DataType::Map(_) => {
-                return Err(SinkError::BigQuery(anyhow::anyhow!(
-                    "Bigquery cannot support Map"
-                )));
+                return Err(SinkError::Internal(
+                    NotImplemented {
+                        feature: "Map type for BigQuery sink".to_string(),
+                        issue: None.into(),
+                    }.into(),
+                ));
             }
             DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
         };

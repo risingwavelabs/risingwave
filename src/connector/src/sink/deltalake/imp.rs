@@ -32,6 +32,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::array::arrow::DeltaLakeConvert;
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::NotImplemented;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::connector_service::SinkMetadata;
@@ -315,10 +316,12 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
             }
         }
         _ => {
-            return Err(SinkError::DeltaLake(anyhow!(
-                "deltalake cannot support type {:?}",
-                rw_data_type.to_owned()
-            )));
+            return Err(SinkError::Internal(
+                NotImplemented {
+                    feature: format!("{:?} type for DeltaLake sink", rw_data_type),
+                    issue: None.into(),
+                }.into(),
+            ));
         }
     };
     Ok(result)

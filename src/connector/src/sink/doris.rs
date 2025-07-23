@@ -21,6 +21,7 @@ use base64::engine::general_purpose;
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::NotImplemented;
 use risingwave_common::types::DataType;
 use serde::Deserialize;
 use serde_derive::Serialize;
@@ -192,7 +193,12 @@ impl DorisSink {
                 Ok(doris_data_type.contains("STRING") | doris_data_type.contains("VARCHAR"))
             }
             risingwave_common::types::DataType::Time => {
-                Err(SinkError::Doris("doris can not support Time".to_owned()))
+                Err(SinkError::Internal(
+                    NotImplemented {
+                        feature: "Time type for Doris sink".to_string(),
+                        issue: None.into(),
+                    }.into(),
+                ))
             }
             risingwave_common::types::DataType::Timestamp => {
                 Ok(doris_data_type.contains("DATETIME"))
@@ -200,21 +206,39 @@ impl DorisSink {
             risingwave_common::types::DataType::Timestamptz => Err(SinkError::Doris(
                 "TIMESTAMP WITH TIMEZONE is not supported for Doris sink as Doris doesn't store time values with timezone information. Please convert to TIMESTAMP first.".to_owned(),
             )),
-            risingwave_common::types::DataType::Interval => Err(SinkError::Doris(
-                "doris can not support Interval".to_owned(),
+            risingwave_common::types::DataType::Interval => Err(SinkError::Internal(
+                NotImplemented {
+                    feature: "Interval type for Doris sink".to_string(),
+                    issue: None.into(),
+                }.into(),
             )),
             risingwave_common::types::DataType::Struct(_) => Ok(doris_data_type.contains("STRUCT")),
             risingwave_common::types::DataType::List(_) => Ok(doris_data_type.contains("ARRAY")),
             risingwave_common::types::DataType::Bytea => {
-                Err(SinkError::Doris("doris can not support Bytea".to_owned()))
+                Err(SinkError::Internal(
+                    NotImplemented {
+                        feature: "Bytea type for Doris sink".to_string(),
+                        issue: None.into(),
+                    }.into(),
+                ))
             }
             risingwave_common::types::DataType::Jsonb => Ok(doris_data_type.contains("JSON")),
             risingwave_common::types::DataType::Serial => Ok(doris_data_type.contains("BIGINT")),
             risingwave_common::types::DataType::Int256 => {
-                Err(SinkError::Doris("doris can not support Int256".to_owned()))
+                Err(SinkError::Internal(
+                    NotImplemented {
+                        feature: "Int256 type for Doris sink".to_string(),
+                        issue: None.into(),
+                    }.into(),
+                ))
             }
             risingwave_common::types::DataType::Map(_) => {
-                Err(SinkError::Doris("doris can not support Map".to_owned()))
+                Err(SinkError::Internal(
+                    NotImplemented {
+                        feature: "Map type for Doris sink".to_string(),
+                        issue: None.into(),
+                    }.into(),
+                ))
             }
             DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
         }
