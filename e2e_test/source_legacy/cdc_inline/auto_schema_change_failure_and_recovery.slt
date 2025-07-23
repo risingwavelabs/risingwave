@@ -1,0 +1,184 @@
+control substitution on
+
+system ok
+psql -c "
+    DROP TABLE IF EXISTS t1;
+    DROP TABLE IF EXISTS t2;
+    
+    -- Create t1 table, will be used as CDC table
+    CREATE TABLE t1 (
+        id INT PRIMARY KEY,
+        name VARCHAR(255) NOT NULL
+    );
+    
+    -- Create t2 table, contains unsupported TEXT type, will not be used as CDC table
+    CREATE TABLE t2 (
+        id INT PRIMARY KEY,
+        description TEXT NOT NULL
+    );
+    
+    -- Insert initial data
+    INSERT INTO t1 (id, name) VALUES (1, 'first t1 data'), (2, 'second t1 data');
+    INSERT INTO t2 (id, description) VALUES (1, 'first t2 text data'), (2, 'second t2 text data');
+"
+
+statement ok
+create source pg_source with (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ slot.name = 'pg_slot',
+ auto.schema.change = 'true',
+);
+
+statement ok
+create table rw_t1 (
+  id int primary key,
+  name varchar(255)
+) from pg_source table 'public.t1';
+
+sleep 2s
+
+# Verify initial data
+query TT
+SELECT * from rw_t1 order by id;
+----
+1 first t1 data
+2 second t1 data
+
+sleep 3s
+
+# Perform schema change on non-CDC table t2, add a column
+system ok
+psql -c "
+    ALTER TABLE t2 ADD COLUMN new_column INT DEFAULT 100;
+    INSERT INTO t2 (id, description, new_column) VALUES (3, 'third t2 text data', 300);
+"
+
+sleep 3s
+
+# Insert new data into CDC table t1, verify CDC table still works normally
+system ok
+psql -c "
+    INSERT INTO t1 (id, name) VALUES (3, 'third t1 data'), (4, 'fourth t1 data');
+"
+
+sleep 3s
+
+# Verify CDC table t1 can see the newly inserted data
+query TT
+SELECT * from rw_t1 order by id;
+----
+1 first t1 data
+2 second t1 data
+3 third t1 data
+4 fourth t1 data
+
+# Create additional tables t3 and t4 in upstream PostgreSQL
+system ok
+psql -c "
+    DROP TABLE IF EXISTS t3;
+    DROP TABLE IF EXISTS t4;
+    
+    -- Create t3 table, similar to t2 with TEXT type
+    CREATE TABLE t3 (
+        id INT PRIMARY KEY,
+        description TEXT NOT NULL
+    );
+    
+    -- Create t4 table with three columns including an INT column
+    CREATE TABLE t4 (
+        id INT PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        value INT NOT NULL
+    );
+    
+    -- Insert initial data
+    INSERT INTO t3 (id, description) VALUES (1, 'first t3 text data'), (2, 'second t3 text data');
+    INSERT INTO t4 (id, name, value) VALUES (1, 'first t4 data', 100), (2, 'second t4 data', 200);
+"
+
+# Create CDC tables for t3 and t4
+statement ok
+create table rw_t3 (
+  id int primary key,
+  description varchar
+) from pg_source table 'public.t3';
+
+statement ok
+create table rw_t4 (
+  id int primary key,
+  name varchar(255),
+  value int
+) from pg_source table 'public.t4';
+
+sleep 2s
+
+# Verify initial data for t3 and t4
+query TT
+SELECT * from rw_t3 order by id;
+----
+1 first t3 text data
+2 second t3 text data
+
+query TTT
+SELECT * from rw_t4 order by id;
+----
+1 first t4 data 100
+2 second t4 data 200
+
+sleep 3s
+
+# Perform schema changes on t3 and t4
+system ok
+psql -c "
+    -- Add column to t3
+    ALTER TABLE t3 ADD COLUMN new_column INT DEFAULT 500;
+    INSERT INTO t3 (id, description, new_column) VALUES (3, 'third t3 text data', 600);
+    
+    -- Alter column type in t4
+    ALTER TABLE t4 ALTER COLUMN value TYPE FLOAT;
+    INSERT INTO t4 (id, name, value) VALUES (3, 'third t4 data', 300.5);
+"
+
+sleep 10s
+
+# Verify that new rows after schema change are not visible in CDC tables
+query TT
+SELECT * from rw_t3 order by id;
+----
+1 first t3 text data
+2 second t3 text data
+
+query TTT
+SELECT * from rw_t4 order by id;
+----
+1 first t4 data 100
+2 second t4 data 200
+
+# Alter source to set schema change failure policy to skip
+statement ok
+alter source pg_source set schema.change.failure.policy = 'skip';
+
+sleep 10s
+
+# Verify that new rows after schema change are now visible in CDC tables
+query TT
+SELECT * from rw_t3 order by id;
+----
+1 first t3 text data
+2 second t3 text data
+3 third t3 text data
+
+query TTT
+SELECT * from rw_t4 order by id;
+----
+1 first t4 data 100
+2 second t4 data 200
+3 third t4 data 300.5
+
+statement ok
+drop source pg_source cascade; 
