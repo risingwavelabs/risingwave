@@ -350,6 +350,10 @@ impl From<ObjectModel<sink::Model>> for PbSink {
                 .original_target_columns
                 .map(|cols| cols.to_protobuf())
                 .unwrap_or_default(),
+            auto_refresh_schema_from_table: value
+                .0
+                .auto_refresh_schema_from_table
+                .map(|id| id as _),
         }
     }
 }

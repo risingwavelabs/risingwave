@@ -19,7 +19,7 @@ use std::future::{Future, pending, poll_fn};
 use std::mem::replace;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use futures::FutureExt;
@@ -33,13 +33,13 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
-use super::progress::BackfillState;
 use crate::error::{StreamError, StreamResult};
 use crate::executor::Barrier;
 use crate::executor::monitor::StreamingMetrics;
+use crate::task::progress::BackfillState;
 use crate::task::{
-    ActorId, LocalBarrierManager, NewOutputRequest, PartialGraphId, StreamActorManager,
-    UpDownActorIds,
+    ActorId, LocalBarrierEvent, LocalBarrierManager, NewOutputRequest, PartialGraphId,
+    StreamActorManager, UpDownActorIds,
 };
 
 struct IssuedState {
@@ -85,8 +85,8 @@ use risingwave_pb::stream_service::streaming_control_stream_request::{
 
 use crate::executor::exchange::permit;
 use crate::executor::exchange::permit::channel_from_config;
-use crate::task::barrier_manager::await_epoch_completed_future::AwaitEpochCompletedFuture;
-use crate::task::barrier_manager::{LocalBarrierEvent, ScoredStreamError};
+use crate::task::barrier_worker::ScoredStreamError;
+use crate::task::barrier_worker::await_epoch_completed_future::AwaitEpochCompletedFuture;
 
 pub(super) struct ManagedBarrierStateDebugInfo<'a> {
     running_actors: BTreeSet<ActorId>,
@@ -193,7 +193,7 @@ pub(crate) struct InflightActorState {
     actor_id: ActorId,
     barrier_senders: Vec<mpsc::UnboundedSender<Barrier>>,
     /// `prev_epoch` -> partial graph id
-    pub(super) inflight_barriers: BTreeMap<u64, PartialGraphId>,
+    pub(crate) inflight_barriers: BTreeMap<u64, PartialGraphId>,
     status: InflightActorStatus,
     /// Whether the actor has been issued a stop barrier
     is_stopping: bool,
@@ -290,7 +290,8 @@ impl InflightActorState {
     }
 }
 
-pub(super) struct PartialGraphManagedBarrierState {
+/// Part of [`DatabaseManagedBarrierState`]
+pub(crate) struct PartialGraphManagedBarrierState {
     /// Record barrier state for each epoch of concurrent checkpoints.
     ///
     /// The key is `prev_epoch`, and the first value is `curr_epoch`
@@ -302,9 +303,9 @@ pub(super) struct PartialGraphManagedBarrierState {
 
     /// Record the progress updates of creating mviews for each epoch of concurrent checkpoints.
     ///
-    /// This is updated by [`super::CreateMviewProgressReporter::update`] and will be reported to meta
-    /// in [`crate::task::barrier_manager::BarrierCompleteResult`].
-    pub(super) create_mview_progress: HashMap<u64, HashMap<ActorId, BackfillState>>,
+    /// This is updated by [`crate::task::barrier_manager::CreateMviewProgressReporter::update`] and will be reported to meta
+    /// in [`crate::task::barrier_worker::BarrierCompleteResult`].
+    pub(crate) create_mview_progress: HashMap<u64, HashMap<ActorId, BackfillState>>,
 
     state_store: StateStoreImpl,
 
@@ -575,13 +576,17 @@ impl ManagedBarrierState {
     }
 }
 
+/// Per-database barrier state manager. Handles barriers for one specific database.
+/// Part of [`ManagedBarrierState`] in [`super::LocalBarrierWorker`].
+///
+/// See [`crate::task`] for architecture overview.
 pub(crate) struct DatabaseManagedBarrierState {
     database_id: DatabaseId,
-    pub(super) actor_states: HashMap<ActorId, InflightActorState>,
+    pub(crate) actor_states: HashMap<ActorId, InflightActorState>,
     pub(super) actor_pending_new_output_requests:
         HashMap<ActorId, Vec<(ActorId, NewOutputRequest)>>,
 
-    pub(super) graph_states: HashMap<PartialGraphId, PartialGraphManagedBarrierState>,
+    pub(crate) graph_states: HashMap<PartialGraphId, PartialGraphManagedBarrierState>,
 
     table_ids: HashSet<TableId>,
 
@@ -900,6 +905,7 @@ impl DatabaseManagedBarrierState {
         }
     }
 
+    /// Handles [`LocalBarrierEvent`] from [`crate::task::barrier_manager::LocalBarrierManager`].
     pub(super) fn poll_next_event(
         &mut self,
         cx: &mut Context<'_>,
@@ -1006,6 +1012,37 @@ impl DatabaseManagedBarrierState {
             .get_mut(&partial_graph_id)
             .expect("should exist")
             .pop_barrier_to_complete(prev_epoch)
+    }
+
+    /// Collect actor errors for a while and find the one that might be the root cause.
+    ///
+    /// Returns `None` if there's no actor error received.
+    async fn try_find_root_actor_failure(
+        &mut self,
+        first_failure: Option<(Option<ActorId>, StreamError)>,
+    ) -> Option<ScoredStreamError> {
+        let mut later_errs = vec![];
+        // fetch more actor errors within a timeout
+        let _ = tokio::time::timeout(Duration::from_secs(3), async {
+            let mut uncollected_actors: HashSet<_> = self.actor_states.keys().cloned().collect();
+            if let Some((Some(failed_actor), _)) = &first_failure {
+                uncollected_actors.remove(failed_actor);
+            }
+            while !uncollected_actors.is_empty()
+                && let Some((actor_id, error)) = self.actor_failure_rx.recv().await
+            {
+                uncollected_actors.remove(&actor_id);
+                later_errs.push(error);
+            }
+        })
+        .await;
+
+        first_failure
+            .into_iter()
+            .map(|(_, err)| err)
+            .chain(later_errs.into_iter())
+            .map(|e| e.with_score())
+            .max_by_key(|e| e.score)
     }
 }
 
@@ -1222,7 +1259,7 @@ mod tests {
     use risingwave_common::util::epoch::test_epoch;
 
     use crate::executor::Barrier;
-    use crate::task::barrier_manager::managed_state::PartialGraphManagedBarrierState;
+    use crate::task::barrier_worker::managed_state::PartialGraphManagedBarrierState;
 
     #[tokio::test]
     async fn test_managed_state_add_actor() {

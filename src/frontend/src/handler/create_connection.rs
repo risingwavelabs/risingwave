@@ -98,7 +98,7 @@ pub async fn handle_create_connection(
     let session = handler_args.session.clone();
     let db_name = &session.database();
     let (schema_name, connection_name) =
-        Binder::resolve_schema_qualified_name(db_name, stmt.connection_name.clone())?;
+        Binder::resolve_schema_qualified_name(db_name, &stmt.connection_name)?;
 
     if let Err(e) = session.check_connection_name_duplicated(stmt.connection_name) {
         return if stmt.if_not_exists {

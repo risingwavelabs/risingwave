@@ -288,12 +288,16 @@ impl ParameterTypes {
         self.0.write().entry(index).or_insert(None);
     }
 
-    pub fn record_infer_type(&mut self, index: u64, data_type: DataType) {
+    pub fn record_infer_type(&mut self, index: u64, data_type: &DataType) {
         assert!(
             !self.has_infer(index),
             "The parameter has been inferred, should not be inferred again."
         );
-        self.0.write().get_mut(&index).unwrap().replace(data_type);
+        self.0
+            .write()
+            .get_mut(&index)
+            .unwrap()
+            .replace(data_type.clone());
     }
 
     pub fn export(&self) -> Result<Vec<DataType>> {

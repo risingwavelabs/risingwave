@@ -1,0 +1,55 @@
+name: "Copilot Setup Steps"
+
+# Automatically run the setup steps when they are changed to allow for easy validation, and
+# allow manual testing through the repository's "Actions" tab
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+
+jobs:
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+          cache: true
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            libssl-dev \
+            libsasl2-dev \
+            libcurl4-openssl-dev \
+            postgresql-client \
+            cmake \
+            protobuf-compiler
+
+      - name: Setup RiseDev environment
+        run: |
+          chmod +x ./risedev
+          mkdir -p .risingwave/log
+          mkdir -p .risingwave/config
+
+      - name: Validate setup
+        run: |
+          # Verify key files exist
+          test -f Cargo.toml
+          test -f risedev.yml
+          test -f .github/copilot-instructions.md
+          # Test basic risedev functionality
+          ./risedev --help
+          echo "Setup validation completed successfully"

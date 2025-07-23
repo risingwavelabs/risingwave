@@ -380,9 +380,9 @@ impl Parser<'_> {
     }
 
     pub fn parse_vacuum(&mut self) -> ModalResult<Statement> {
-        let table_name = self.parse_object_name()?;
+        let object_name = self.parse_object_name()?;
 
-        Ok(Statement::Vacuum { table_name })
+        Ok(Statement::Vacuum { object_name })
     }
 
     /// Tries to parse a wildcard expression. If it is not a wildcard, parses an expression.

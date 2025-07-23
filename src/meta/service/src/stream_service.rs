@@ -601,7 +601,7 @@ impl StreamManagerService for StreamServiceImpl {
                             visited = true
                         }
                     });
-                    visited
+                    Ok(visited)
                 },
                 "no fragments found with synced log store",
             )

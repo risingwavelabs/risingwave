@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::Result;
-use risingwave_common::config::default;
+use risingwave_common::config::meta::default;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
