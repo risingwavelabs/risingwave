@@ -20,7 +20,6 @@ import com.risingwave.connector.api.sink.SinkWriter;
 import com.risingwave.connector.jdbc.JdbcDialect;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.Data;
-import com.risingwave.proto.Data.DataType;
 import io.grpc.Status;
 import java.sql.*;
 import java.util.*;
@@ -248,10 +247,7 @@ public class JDBCSink implements SinkWriter {
 
             if (config.isUpsertSink()) {
                 var upsertSql =
-                        jdbcDialect.getUpsertStatement(
-                                schemaTableName,
-                                List.of(tableSchema.getColumnNames()),
-                                pkColumnNames);
+                        jdbcDialect.getUpsertStatement(schemaTableName, tableSchema, pkColumnNames);
                 // MySQL and Postgres have upsert SQL
                 if (upsertSql.isEmpty()) {
                     throw Status.FAILED_PRECONDITION
@@ -424,46 +420,5 @@ public class JDBCSink implements SinkWriter {
 
     public Connection getConn() {
         return conn;
-    }
-
-    /** Convert RisingWave DataType to SQL Types for PostgreSQL */
-    private static int convertRisingWaveTypeToSqlType(DataType dataType) {
-        switch (dataType.getTypeName()) {
-            case BOOLEAN:
-                return Types.BOOLEAN;
-            case INT16:
-                return Types.SMALLINT;
-            case INT32:
-                return Types.INTEGER;
-            case INT64:
-                return Types.BIGINT;
-            case FLOAT:
-                return Types.REAL;
-            case DOUBLE:
-                return Types.DOUBLE;
-            case DECIMAL:
-                return Types.DECIMAL;
-            case VARCHAR:
-                return Types.VARCHAR;
-            case DATE:
-                return Types.DATE;
-            case TIME:
-                return Types.TIME;
-            case TIMESTAMP:
-                return Types.TIMESTAMP;
-            case TIMESTAMPTZ:
-                return Types.TIMESTAMP_WITH_TIMEZONE;
-            case BYTEA:
-                return Types.VARBINARY;
-            case JSONB:
-                return Types.OTHER;
-            case INTERVAL:
-                return Types.OTHER;
-            case LIST:
-            case STRUCT:
-                return Types.OTHER;
-            default:
-                return Types.OTHER;
-        }
     }
 }

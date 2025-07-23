@@ -14,6 +14,10 @@
 
 package com.risingwave.connector.jdbc;
 
+import com.risingwave.connector.api.TableSchema;
+import com.risingwave.connector.api.sink.SinkRow;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -31,24 +35,25 @@ public class RedShiftDialect extends PostgresDialect {
     @Override
     public Optional<String> getUpsertStatement(
             SchemaTableName schemaTableName,
-            List<String> fieldNames,
+            TableSchema tableSchema,
             List<String> primaryKeyFields) {
+        List<String> fieldNames = List.of(tableSchema.getColumnNames());
+        var columnDescs = tableSchema.getColumnDescs();
         var tableName = getNormalizedTableName(schemaTableName);
         // Build the VALUES placeholders for the source data
         String valuesPlaceholders =
-                fieldNames.stream()
+                columnDescs.stream()
                         .map(
-                                f -> {
-                                    int index = fieldNames.indexOf(f);
-                                    int sqlType = columnSqlTypes.get(index);
-                                    if (sqlType == java.sql.Types.VARCHAR
-                                            || sqlType == java.sql.Types.CHAR
-                                            || sqlType == java.sql.Types.LONGVARCHAR
-                                            || sqlType == java.sql.Types.NVARCHAR) {
-                                        return "CAST(? AS VARCHAR) AS " + quoteIdentifier(f);
-                                    } else {
-                                        return "? AS " + quoteIdentifier(f);
-                                    }
+                                column -> {
+                                    System.out.println(
+                                            "column = " + column.getDataType().getTypeName());
+                                    String jdbcName =
+                                            RW_TYPE_TO_JDBC_TYPE_NAME.get(
+                                                    column.getDataType().getTypeName());
+                                    return "CAST(? AS "
+                                            + jdbcName
+                                            + ") AS "
+                                            + quoteIdentifier(column.getName());
                                 })
                         .collect(Collectors.joining(", "));
         // Build the ON condition for primary key matching
@@ -92,5 +97,11 @@ public class RedShiftDialect extends PostgresDialect {
                         + ") VALUES ("
                         + insertValues
                         + ")");
+    }
+
+    @Override
+    public void set_jsonb(int placeholderIdx, int columnIdx, PreparedStatement stmt, SinkRow row)
+            throws SQLException {
+        stmt.setString(placeholderIdx, (String) row.get(columnIdx));
     }
 }
