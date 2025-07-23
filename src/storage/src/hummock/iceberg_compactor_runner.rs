@@ -375,7 +375,8 @@ impl IcebergCompactorRunner {
                         .await
                         .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
-                    for manifest_file in manifest_list.entries() {
+                    for manifest_file in manifest_list.entries().iter()
+                        .filter(|entry| entry.has_added_files() || entry.has_existing_files()) {
                         let manifest = manifest_file
                             .load_manifest(table.file_io())
                             .await
