@@ -940,7 +940,7 @@ impl ClickHouseFieldWithNull {
         if data.is_none() {
             if !clickhouse_schema_feature.can_null {
                 return Err(SinkError::ClickHouse(
-                    "clickhouse column can not insert null".to_owned(),
+                    "ClickHouse column cannot insert null".to_owned(),
                 ));
             } else {
                 return Ok(vec![ClickHouseFieldWithNull::None]);
