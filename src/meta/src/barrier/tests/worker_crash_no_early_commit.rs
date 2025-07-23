@@ -135,8 +135,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
     .await;
     let (_request_tx, request_rx) = mpsc::unbounded_channel();
     let sink_manager = SinkCoordinatorManager::for_test();
-    let mut worker =
-        GlobalBarrierWorker::new_inner(env.clone(), sink_manager, request_rx, context).await;
+    let mut worker = GlobalBarrierWorker::new_inner(env, sink_manager, request_rx, context).await;
     let (_shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
 
     let _join_handle = tokio::spawn(async move {
@@ -181,35 +180,6 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
     let table2 = TableId::new(2);
     let actor1 = new_actor(1);
     let actor2 = new_actor(2);
-    let fragment1 = InflightFragmentInfo {
-        fragment_id: actor1.fragment_id,
-        distribution_type: DistributionType::Single,
-        nodes: Default::default(),
-        actors: HashMap::from_iter([(
-            actor1.actor_id as _,
-            InflightActorInfo {
-                worker_id: worker1.id as _,
-                vnode_bitmap: None,
-            },
-        )]),
-        state_table_ids: HashSet::from_iter([table1]),
-    };
-    let fragment2 = InflightFragmentInfo {
-        fragment_id: actor2.fragment_id,
-        distribution_type: DistributionType::Single,
-        nodes: Default::default(),
-        actors: HashMap::from_iter([(
-            actor2.actor_id as _,
-            InflightActorInfo {
-                worker_id: worker2.id as _,
-                vnode_bitmap: None,
-            },
-        )]),
-        state_table_ids: HashSet::from_iter([table2]),
-    };
-    env.shared_actor_infos()
-        .upsert(database_id, [&fragment1, &fragment2]);
-
     let initial_epoch = test_epoch(100);
 
     tx.send(BarrierWorkerRuntimeInfoSnapshot {
@@ -224,8 +194,38 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                 InflightStreamingJobInfo {
                     job_id,
                     fragment_infos: HashMap::from_iter([
-                        (actor1.fragment_id, fragment1),
-                        (actor2.fragment_id, fragment2),
+                        (
+                            actor1.fragment_id,
+                            InflightFragmentInfo {
+                                fragment_id: actor1.fragment_id,
+                                distribution_type: DistributionType::Single,
+                                nodes: Default::default(),
+                                actors: HashMap::from_iter([(
+                                    actor1.actor_id as _,
+                                    InflightActorInfo {
+                                        worker_id: worker1.id as _,
+                                        vnode_bitmap: None,
+                                    },
+                                )]),
+                                state_table_ids: HashSet::from_iter([table1]),
+                            },
+                        ),
+                        (
+                            actor2.fragment_id,
+                            InflightFragmentInfo {
+                                fragment_id: actor2.fragment_id,
+                                distribution_type: DistributionType::Single,
+                                nodes: Default::default(),
+                                actors: HashMap::from_iter([(
+                                    actor2.actor_id as _,
+                                    InflightActorInfo {
+                                        worker_id: worker2.id as _,
+                                        vnode_bitmap: None,
+                                    },
+                                )]),
+                                state_table_ids: HashSet::from_iter([table2]),
+                            },
+                        ),
                     ]),
                 },
             )]),

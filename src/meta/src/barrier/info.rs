@@ -131,22 +131,13 @@ impl SharedActorInfos {
                 .get_or_insert_default()
                 .push(rebuild_fragment_mapping(&fragment));
         }
-        if !remaining_fragments.is_empty() {
-            if cfg!(debug_assertions) {
-                panic!(
-                    "recovered database should not have fragments not exist previously. remaining: {:?}",
-                    remaining_fragments
-                );
-            } else {
-                for (fragment_id, fragment) in remaining_fragments {
-                    let info = fragment.into();
-                    writer
-                        .added_fragment_mapping
-                        .get_or_insert_default()
-                        .push(rebuild_fragment_mapping(&info));
-                    database.insert(fragment_id, info);
-                }
-            }
+        for (fragment_id, fragment) in remaining_fragments {
+            let info = fragment.into();
+            writer
+                .added_fragment_mapping
+                .get_or_insert_default()
+                .push(rebuild_fragment_mapping(&info));
+            database.insert(fragment_id, info);
         }
         writer.finish();
     }

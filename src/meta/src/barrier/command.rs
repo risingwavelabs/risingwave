@@ -152,10 +152,11 @@ impl ReplaceStreamJobPlan {
         }
         if let Some(sinks) = &self.auto_refresh_schema_sinks {
             for sink in sinks {
-                let fragment_change = CommandFragmentChanges::NewFragment(
-                    TableId::new(sink.original_sink.id as _),
-                    sink.new_fragment_info(),
-                );
+                let fragment_change = CommandFragmentChanges::NewFragment {
+                    job_id: TableId::new(sink.original_sink.id as _),
+                    info: sink.new_fragment_info(),
+                    is_existing: false,
+                };
                 fragment_changes
                     .try_insert(sink.new_fragment.fragment_id, fragment_change)
                     .expect("non-duplicate");
