@@ -349,6 +349,10 @@ impl StreamActorManager {
             merge_projects.push((project_input, union_input));
         }
 
+        if merge_projects.is_empty() {
+            return None;
+        }
+
         let mut remaining_nodes = rev_iter.collect_vec();
 
         merge_projects.reverse();
