@@ -1,0 +1,201 @@
+# Additional e2e test for sink with actual external connectors (Kafka)
+# Testing combinations where "with connector" means actual external systems like Kafka
+
+control substitution on
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# ===== Test: Sink (without connector) into Kafka table =====
+# Regular source table -> Table with Kafka connector
+
+system ok
+rpk topic create test_sink_to_kafka_table --partitions 1
+
+statement ok
+create table source_for_kafka (id int primary key, name varchar, value int);
+
+statement ok
+insert into source_for_kafka values (1, 'test1', 100), (2, 'test2', 200);
+
+# Create Kafka table that acts as a sink target
+statement ok
+create table kafka_target_table (id int, name varchar, value int)
+include key as kafka_key
+with (
+    connector = 'kafka',
+    properties.bootstrap.server = 'message_queue:29092',
+    topic = 'test_sink_to_kafka_table'
+) format plain encode json;
+
+statement ok
+create sink sink_to_kafka_table into kafka_target_table as select id, name, value from source_for_kafka;
+
+statement ok
+flush;
+
+sleep 2s
+
+query III rowsort
+select id, name, value from kafka_target_table;
+----
+1	test1	100
+2	test2	200
+
+statement ok
+insert into source_for_kafka values (3, 'test3', 300);
+
+sleep 2s
+
+query III rowsort
+select id, name, value from kafka_target_table;
+----
+1	test1	100
+2	test2	200
+3	test3	300
+
+statement ok
+drop sink sink_to_kafka_table;
+
+statement ok
+drop table kafka_target_table;
+
+statement ok
+drop table source_for_kafka;
+
+system ok
+rpk topic delete test_sink_to_kafka_table
+
+
+# ===== Test: Kafka source table -> Sink (without connector) into regular table =====
+
+system ok
+rpk topic create test_kafka_source_to_table --partitions 1
+
+# Produce some test data to Kafka
+system ok
+cat <<EOF | rpk topic produce test_kafka_source_to_table
+{"id": 10, "product": "widget", "price": 25.50}
+{"id": 20, "product": "gadget", "price": 45.00}
+EOF
+
+statement ok
+create table kafka_source_table (id int, product varchar, price decimal)
+with (
+    connector = 'kafka',
+    properties.bootstrap.server = 'message_queue:29092',
+    topic = 'test_kafka_source_to_table'
+) format plain encode json;
+
+statement ok
+create table regular_target (id int primary key, product varchar, price decimal);
+
+statement ok
+create sink sink_from_kafka into regular_target as select id, product, price from kafka_source_table;
+
+sleep 3s
+
+statement ok
+flush;
+
+query I?? rowsort
+select * from regular_target;
+----
+10	widget	25.50
+20	gadget	45.00
+
+# Add more data to Kafka
+system ok
+cat <<EOF | rpk topic produce test_kafka_source_to_table
+{"id": 30, "product": "tool", "price": 15.75}
+EOF
+
+sleep 2s
+
+query I?? rowsort
+select * from regular_target;
+----
+10	widget	25.50
+20	gadget	45.00
+30	tool	15.75
+
+statement ok
+drop sink sink_from_kafka;
+
+statement ok
+drop table regular_target;
+
+statement ok
+drop table kafka_source_table;
+
+system ok
+rpk topic delete test_kafka_source_to_table
+
+
+# ===== Test: Kafka source -> Kafka target (both with connectors) =====
+
+system ok
+rpk topic create test_kafka_to_kafka_source --partitions 1
+
+system ok
+rpk topic create test_kafka_to_kafka_target --partitions 1
+
+# Produce test data to source topic
+system ok
+cat <<EOF | rpk topic produce test_kafka_to_kafka_source
+{"order_id": 1001, "customer": "alice", "total": 150.00}
+{"order_id": 1002, "customer": "bob", "total": 200.00}
+EOF
+
+statement ok
+create table kafka_orders_source (order_id int, customer varchar, total decimal)
+with (
+    connector = 'kafka',
+    properties.bootstrap.server = 'message_queue:29092',
+    topic = 'test_kafka_to_kafka_source'
+) format plain encode json;
+
+statement ok
+create table kafka_orders_target (order_id int, customer varchar, total decimal)
+include key as order_key
+with (
+    connector = 'kafka',
+    properties.bootstrap.server = 'message_queue:29092',
+    topic = 'test_kafka_to_kafka_target'
+) format plain encode json;
+
+statement ok
+create sink sink_kafka_to_kafka into kafka_orders_target as 
+select order_id, customer, total from kafka_orders_source;
+
+sleep 3s
+
+statement ok
+flush;
+
+query I?? rowsort
+select order_id, customer, total from kafka_orders_target;
+----
+1001	alice	150.00
+1002	bob	200.00
+
+# Verify data reached target topic by consuming directly
+system ok
+rpk topic consume test_kafka_to_kafka_target --num 2 --format json | jq -r '.value' | jq -s 'length' | grep -q '2'
+
+statement ok
+drop sink sink_kafka_to_kafka;
+
+statement ok
+drop table kafka_orders_target;
+
+statement ok
+drop table kafka_orders_source;
+
+system ok
+rpk topic delete test_kafka_to_kafka_source
+
+system ok
+rpk topic delete test_kafka_to_kafka_target
+
+# Test completed - external connector combinations verified
