@@ -314,8 +314,6 @@ impl UpstreamSinkUnionExecutor {
         let upstreams = DynamicReceivers::new(inputs, Some(barrier_align), None);
         pin_mut!(upstreams);
 
-        // let mut start_time = Instant::now();
-
         while let Some(msg) = upstreams.next().await {
             yield msg?;
         }

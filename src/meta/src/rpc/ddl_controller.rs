@@ -1025,7 +1025,7 @@ impl DdlController {
                                             upstream_actor_id: vec![],
                                             upstream_fragment_id,
                                             upstream_dispatcher_type: PbDispatcherType::Hash as _,
-                                            fields: sink_fields.to_vec(),
+                                            fields: vec![],
                                         }
                                     };
 

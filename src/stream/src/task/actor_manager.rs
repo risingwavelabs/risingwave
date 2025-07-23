@@ -310,52 +310,46 @@ impl StreamActorManager {
         };
 
         let mut merge_projects = Vec::new();
+        let mut remaining_nodes = Vec::new();
 
         let mut rev_iter = node.get_input().iter().rev();
         for union_input in rev_iter.by_ref() {
-            let NodeBody::Project(project) = union_input.get_node_body().unwrap() else {
-                break;
-            };
-
-            let project_input = union_input.get_input().first().unwrap();
-
-            // Check project conditions
-            let project_check = project.get_watermark_input_cols().is_empty()
-                && project.get_watermark_output_cols().is_empty()
-                && project.get_nondecreasing_exprs().is_empty()
-                && !project.noop_update_hint;
-
-            if !project_check {
+            let mut is_sink_into = false;
+            if let NodeBody::Project(project) = union_input.get_node_body().unwrap() {
+                let project_input = union_input.get_input().first().unwrap();
+                // Check project conditions
+                let project_check = project.get_watermark_input_cols().is_empty()
+                    && project.get_watermark_output_cols().is_empty()
+                    && project.get_nondecreasing_exprs().is_empty()
+                    && !project.noop_update_hint;
+                if project_check
+                    && let NodeBody::Merge(merge) = project_input.get_node_body().unwrap()
+                {
+                    let merge_check = merge.upstream_dispatcher_type()
+                        == risingwave_pb::stream_plan::DispatcherType::Hash
+                        && merge.get_fields().is_empty();
+                    if merge_check {
+                        is_sink_into = true;
+                        tracing::debug!(
+                            "replace sink into table union, merge: {:?}, project: {:?}",
+                            merge,
+                            project
+                        );
+                        merge_projects.push((project_input, union_input));
+                    }
+                }
+            }
+            if !is_sink_into {
+                remaining_nodes.push(union_input);
                 break;
             }
-
-            let NodeBody::Merge(merge) = project_input.get_node_body().unwrap() else {
-                break;
-            };
-
-            #[allow(deprecated)]
-            let merge_check = merge.get_upstream_actor_id().is_empty()
-                && merge.upstream_dispatcher_type()
-                    == risingwave_pb::stream_plan::DispatcherType::Hash
-                && merge.get_fields().is_empty();
-
-            if !merge_check {
-                break;
-            }
-
-            tracing::debug!(
-                "replace sink into table union, merge: {:?}, project: {:?}",
-                merge,
-                project
-            );
-            merge_projects.push((project_input, union_input));
         }
 
         if merge_projects.is_empty() {
             return None;
         }
 
-        let mut remaining_nodes = rev_iter.collect_vec();
+        remaining_nodes.extend(rev_iter);
 
         merge_projects.reverse();
         remaining_nodes.reverse();
