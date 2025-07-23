@@ -78,7 +78,7 @@ use crate::model::{
     StreamActor, StreamContext, StreamJobFragments, TableParallelism,
 };
 use crate::stream::{SplitAssignment, build_actor_split_impls};
-use crate::{MetaError, MetaResult, model};
+use crate::{MetaError, MetaResult};
 
 /// Some information of running (inflight) actors.
 #[derive(Clone, Debug)]
@@ -185,23 +185,24 @@ impl NotificationManager {
 
 impl CatalogController {
     pub fn extract_fragment_and_actors_from_fragments(
-        stream_job_fragments: &StreamJobFragments,
+        job_id: ObjectId,
+        fragments: impl Iterator<Item = &Fragment>,
+        actor_status: &BTreeMap<crate::model::ActorId, PbActorStatus>,
+        actor_splits: &HashMap<crate::model::ActorId, Vec<SplitImpl>>,
     ) -> MetaResult<Vec<(fragment::Model, Vec<actor::Model>)>> {
-        stream_job_fragments
-            .fragments
-            .values()
+        fragments
             .map(|fragment| {
                 Self::extract_fragment_and_actors_for_new_job(
-                    stream_job_fragments.stream_job_id.table_id as _,
+                    job_id,
                     fragment,
-                    &stream_job_fragments.actor_status,
-                    &stream_job_fragments.actor_splits,
+                    actor_status,
+                    actor_splits,
                 )
             })
             .try_collect()
     }
 
-    fn extract_fragment_and_actors_for_new_job(
+    pub fn extract_fragment_and_actors_for_new_job(
         job_id: ObjectId,
         fragment: &Fragment,
         actor_status: &BTreeMap<crate::model::ActorId, PbActorStatus>,
@@ -657,7 +658,7 @@ impl CatalogController {
     pub async fn get_job_fragment_backfill_scan_type(
         &self,
         job_id: ObjectId,
-    ) -> MetaResult<HashMap<model::FragmentId, PbStreamScanType>> {
+    ) -> MetaResult<HashMap<crate::model::FragmentId, PbStreamScanType>> {
         let inner = self.inner.read().await;
         let fragments: Vec<_> = FragmentModel::find()
             .filter(fragment::Column::JobId.eq(job_id))
@@ -678,7 +679,7 @@ impl CatalogController {
                     match node.stream_scan_type() {
                         StreamScanType::Unspecified => {}
                         scan_type => {
-                            result.insert(fragment_id as model::FragmentId, scan_type);
+                            result.insert(fragment_id as crate::model::FragmentId, scan_type);
                         }
                     }
                 }
