@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use futures::{StreamExt, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
-use risingwave_common::hash::{VnodeCount, VnodeCountCompat, WorkerSlotId};
+use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
 use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node_body, visit_stream_node_mut,
 };
@@ -37,7 +39,6 @@ use risingwave_meta_model::{
     VnodeBitmap, WorkerId, actor, database, fragment, fragment_relation, object, sink, source,
     streaming_job, table,
 };
-use risingwave_meta_model_migration::{Alias, SelectStatement};
 use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
@@ -59,8 +60,7 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DbErr, EntityTrait, FromQueryResult, JoinType, ModelTrait,
-    PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, SelectGetableTuple, Selector,
-    TransactionTrait, Value,
+    PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use tracing::debug;
@@ -69,7 +69,7 @@ use crate::barrier::SnapshotBackfillInfo;
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::scale::{load_fragments, resolve_streaming_job_definition};
 use crate::controller::utils::{
-    FragmentDesc, PartialActorLocation, PartialFragmentStateTables, get_fragment_actor_dispatchers,
+    FragmentDesc, PartialActorLocation, PartialFragmentStateTables, compose_dispatchers,
     get_fragment_mappings_txn, resolve_no_shuffle_actor_dispatcher,
 };
 use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, NotificationManager};
@@ -454,10 +454,10 @@ impl CatalogController {
         let fragments = info.values().flatten();
         let mut result = HashMap::new();
         for (fragment_id, fragment) in fragments {
-            if let Some(id_filter) = &id_filter {
-                if !id_filter.contains(&(*fragment_id as _)) {
-                    continue; // Skip fragments not in the filter
-                }
+            if let Some(id_filter) = &id_filter
+                && !id_filter.contains(&(*fragment_id as _))
+            {
+                continue; // Skip fragments not in the filter
             }
 
             result.insert(
@@ -707,7 +707,127 @@ impl CatalogController {
         fragment_ids: Vec<FragmentId>,
     ) -> MetaResult<FragmentActorDispatchers> {
         let inner = self.inner.read().await;
-        get_fragment_actor_dispatchers(&inner.db, &inner.actors, fragment_ids).await
+
+        self.get_fragment_actor_dispatchers_txn(&inner.db, fragment_ids)
+            .await
+    }
+
+    pub async fn get_fragment_actor_dispatchers_txn(
+        &self,
+        c: &impl ConnectionTrait,
+        fragment_ids: Vec<FragmentId>,
+    ) -> MetaResult<FragmentActorDispatchers> {
+        println!("enter get_fragment_actor_dispatchers");
+
+        println!("read lock acquired");
+        let fragment_relations = FragmentRelation::find()
+            .filter(fragment_relation::Column::SourceFragmentId.is_in(fragment_ids))
+            .all(c)
+            .await?;
+
+        println!("all relations");
+
+        type FragmentActorInfo = (
+            DistributionType,
+            Arc<HashMap<crate::model::ActorId, Option<Bitmap>>>,
+        );
+
+        println!("xxx");
+        let shared_info = self.env.shared_actor_infos();
+        let mut fragment_actor_cache: HashMap<FragmentId, FragmentActorInfo> = HashMap::new();
+        println!("yyyy");
+        let get_fragment_actors = |fragment_id: FragmentId| async move {
+            let result: MetaResult<FragmentActorInfo> = try {
+                println!("try get");
+                let read_guard = shared_info.read_guard();
+                println!("try get read lock");
+                let fragment = read_guard
+                    .values()
+                    .flat_map(|fragments| fragments.get(&(fragment_id as _)))
+                    .exactly_one()
+                    .map_err(|_| anyhow!("failed to find fragment: {}", fragment_id))?;
+
+                (
+                    fragment.distribution_type,
+                    Arc::new(
+                        fragment
+                            .actors
+                            .iter()
+                            .map(|(actor_id, actor_info)| {
+                                (
+                                    *actor_id,
+                                    actor_info
+                                        .vnode_bitmap
+                                        .as_ref()
+                                        .map(|bitmap| Bitmap::from(bitmap.to_protobuf())),
+                                )
+                            })
+                            .collect(),
+                    ),
+                )
+            };
+            result
+        };
+        println!("zzz");
+
+        println!("before iterating over fragment relations");
+        let mut actor_dispatchers_map: HashMap<_, HashMap<_, Vec<_>>> = HashMap::new();
+        for fragment_relation::Model {
+            source_fragment_id,
+            target_fragment_id,
+            dispatcher_type,
+            dist_key_indices,
+            output_indices,
+            output_type_mapping,
+        } in fragment_relations
+        {
+            let (source_fragment_distribution, source_fragment_actors) = {
+                let (distribution, actors) = {
+                    match fragment_actor_cache.entry(source_fragment_id) {
+                        Entry::Occupied(entry) => entry.into_mut(),
+                        Entry::Vacant(entry) => {
+                            entry.insert(get_fragment_actors(source_fragment_id).await?)
+                        }
+                    }
+                };
+                (*distribution, actors.clone())
+            };
+            let (target_fragment_distribution, target_fragment_actors) = {
+                let (distribution, actors) = {
+                    match fragment_actor_cache.entry(target_fragment_id) {
+                        Entry::Occupied(entry) => entry.into_mut(),
+                        Entry::Vacant(entry) => {
+                            entry.insert(get_fragment_actors(target_fragment_id).await?)
+                        }
+                    }
+                };
+                (*distribution, actors.clone())
+            };
+            let output_mapping = PbDispatchOutputMapping {
+                indices: output_indices.into_u32_array(),
+                types: output_type_mapping.unwrap_or_default().to_protobuf(),
+            };
+            let dispatchers = compose_dispatchers(
+                source_fragment_distribution,
+                &source_fragment_actors,
+                target_fragment_id as _,
+                target_fragment_distribution,
+                &target_fragment_actors,
+                dispatcher_type,
+                dist_key_indices.into_u32_array(),
+                output_mapping,
+            );
+            let actor_dispatchers_map = actor_dispatchers_map
+                .entry(source_fragment_id as _)
+                .or_default();
+            for (actor_id, dispatchers) in dispatchers {
+                actor_dispatchers_map
+                    .entry(actor_id as _)
+                    .or_default()
+                    .push(dispatchers);
+            }
+        }
+        Ok(actor_dispatchers_map)
     }
 
     pub async fn get_fragment_downstream_relations(
@@ -913,34 +1033,22 @@ impl CatalogController {
     }
 
     pub async fn worker_actor_count(&self) -> MetaResult<HashMap<WorkerId, usize>> {
-        let inner = self.inner.read().await;
-
-        let actor_cnt: HashSet<_> = inner
-            .actors
-            .actors_by_worker_id
-            .iter()
-            .map(|(worker_id, actor_id)| (*worker_id, actor_id.len() as i64))
+        let read_guard = self.env.shared_actor_infos().read_guard();
+        let actor_cnt: HashMap<WorkerId, _> = read_guard
+            .values()
+            .flatten()
+            .flat_map(|(_, fragment)| {
+                fragment
+                    .actors
+                    .iter()
+                    .map(|(actor_id, actor)| (actor.worker_id, *actor_id))
+            })
+            .into_group_map()
+            .into_iter()
+            .map(|(k, v)| (k, v.len()))
             .collect();
 
-        {
-            let actor_cnt_from_db: Vec<(WorkerId, i64)> = Actor::find()
-                .select_only()
-                .column(actor::Column::WorkerId)
-                .column_as(actor::Column::ActorId.count(), "count")
-                .group_by(actor::Column::WorkerId)
-                .into_tuple()
-                .all(&inner.db)
-                .await?;
-
-            let actor_cnt_from_db: HashSet<_> = actor_cnt_from_db.into_iter().collect();
-
-            debug_assert_eq!(actor_cnt, actor_cnt_from_db);
-        }
-
-        Ok(actor_cnt
-            .into_iter()
-            .map(|(worker_id, count)| (worker_id, count as usize))
-            .collect())
+        Ok(actor_cnt)
     }
 
     // TODO: This function is too heavy, we should avoid using it and implement others on demand.
