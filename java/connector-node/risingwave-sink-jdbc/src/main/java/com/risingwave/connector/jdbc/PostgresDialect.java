@@ -82,8 +82,9 @@ public class PostgresDialect implements JdbcDialect {
     @Override
     public Optional<String> getUpsertStatement(
             SchemaTableName schemaTableName,
-            List<String> fieldNames,
+            TableSchema tableSchema,
             List<String> primaryKeyFields) {
+        List<String> fieldNames = List.of(tableSchema.getColumnNames());
         String pkColumns =
                 primaryKeyFields.stream()
                         .map(this::quoteIdentifier)
@@ -125,10 +126,7 @@ public class PostgresDialect implements JdbcDialect {
                     break;
                 case JSONB:
                     // reference: https://github.com/pgjdbc/pgjdbc/issues/265
-                    var pgObj = new PGobject();
-                    pgObj.setType("jsonb");
-                    pgObj.setValue((String) row.get(columnIdx));
-                    stmt.setObject(placeholderIdx++, pgObj);
+                    this.set_jsonb(placeholderIdx++, columnIdx, stmt, row);
                     break;
                 case BYTEA:
                     stmt.setBytes(placeholderIdx++, (byte[]) row.get(columnIdx));
@@ -155,6 +153,14 @@ public class PostgresDialect implements JdbcDialect {
                     break;
             }
         }
+    }
+
+    public void set_jsonb(int placeholderIdx, int columnIdx, PreparedStatement stmt, SinkRow row)
+            throws SQLException {
+        var pgObj = new PGobject();
+        pgObj.setType("jsonb");
+        pgObj.setValue((String) row.get(columnIdx));
+        stmt.setObject(placeholderIdx, pgObj);
     }
 
     @Override
