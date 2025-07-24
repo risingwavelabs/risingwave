@@ -97,15 +97,15 @@ use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_s
 
 pub const ICEBERG_SINK: &str = "iceberg";
 pub const ICEBERG_COW_BRANCH: &str = "ingestion";
-pub const ICEBERG_WRITE_MODE_MORE: &str = "more";
-pub const ICEBERG_WRITE_MODE_COW: &str = "cow";
+pub const ICEBERG_WRITE_MODE_MERGE_ON_READ: &str = "merge-on-read";
+pub const ICEBERG_WRITE_MODE_COPY_ON_WRITE: &str = "copy-on-write";
 
 fn default_commit_retry_num() -> u32 {
     8
 }
 
 fn default_iceberg_write_mode() -> String {
-    ICEBERG_WRITE_MODE_MORE.to_owned()
+    ICEBERG_WRITE_MODE_MERGE_ON_READ.to_owned()
 }
 
 #[serde_as]
@@ -2086,7 +2086,7 @@ pub fn commit_branch(sink_type: &str, write_mode: &str) -> String {
 }
 
 pub fn should_enable_iceberg_cow(sink_type: &str, write_mode: &str) -> bool {
-    sink_type == SINK_TYPE_UPSERT && write_mode == ICEBERG_WRITE_MODE_COW
+    sink_type == SINK_TYPE_UPSERT && write_mode == ICEBERG_WRITE_MODE_COPY_ON_WRITE
 }
 
 #[cfg(test)]
@@ -2099,7 +2099,7 @@ mod test {
 
     use crate::connector_common::IcebergCommon;
     use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
-    use crate::sink::iceberg::{ICEBERG_WRITE_MODE_MORE, IcebergConfig};
+    use crate::sink::iceberg::{ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergConfig};
 
     pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
 
@@ -2343,7 +2343,7 @@ mod test {
             enable_compaction: true,
             compaction_interval_sec: Some(DEFAULT_ICEBERG_COMPACTION_INTERVAL / 2),
             enable_snapshot_expiration: true,
-            write_mode: ICEBERG_WRITE_MODE_MORE.to_owned(),
+            write_mode: ICEBERG_WRITE_MODE_MERGE_ON_READ.to_owned(),
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);

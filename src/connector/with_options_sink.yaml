@@ -592,7 +592,7 @@ IcebergConfig:
     field_type: String
     comments: The iceberg write mode, can be `more` or `cow`.
     required: false
-    default: ICEBERG_WRITE_MODE_MORE . to_owned ()
+    default: ICEBERG_WRITE_MODE_MERGE_ON_READ . to_owned ()
 KafkaConfig:
   fields:
   - name: topic
