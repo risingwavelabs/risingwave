@@ -731,7 +731,7 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT)?;
 
         #[cfg(debug_assertions)]
-        InputRefValidator.validate(plan.clone());
+        InputRefValidator.validate::<Logical>(plan.clone());
 
         if ctx.is_explain_logical() {
             match ctx.explain_format() {
@@ -856,7 +856,7 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&DAG_TO_TREE)?;
 
         #[cfg(debug_assertions)]
-        InputRefValidator.validate(plan.clone());
+        InputRefValidator.validate::<Logical>(plan.clone());
 
         if ctx.is_explain_logical() {
             match ctx.explain_format() {

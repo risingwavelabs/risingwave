@@ -1324,18 +1324,46 @@ macro_rules! for_all_plan_nodes {
     };
 }
 
-/// `for_logical_plan_nodes` includes all plan nodes with logical convention.
 #[macro_export]
-macro_rules! for_logical_plan_nodes {
-    ($macro:ident) => {
+macro_rules! for_each_convention_all_plan_nodes {
+    ($macro:path $(,$rest:tt)*) => {
         $crate::for_all_plan_nodes! {
-              $crate::for_logical_plan_nodes, $macro
+            $crate::for_each_convention_all_plan_nodes
+            , $macro
+            $(,$rest)*
         }
     };
     (
         $( { Logical, $logical_name:ident } ),*
         , $( { Batch, $batch_name:ident } ),*
         , $( { Stream, $stream_name:ident } ),*
+        , $macro:path $(,$rest:tt)*
+    ) => {
+        $macro! {
+            {
+                Logical, { $( $logical_name ),* },
+                Batch, { $( $batch_name ),* },
+                Stream, { $( $stream_name ),* }
+            }
+            $(,$rest)*
+        }
+    }
+}
+
+/// `for_logical_plan_nodes` includes all plan nodes with logical convention.
+#[macro_export]
+macro_rules! for_logical_plan_nodes {
+    ($macro:ident) => {
+        $crate::for_each_convention_all_plan_nodes! {
+              $crate::for_logical_plan_nodes, $macro
+        }
+    };
+    (
+        {
+            Logical, { $( $logical_name:ident ),* },
+            Batch, { $( $batch_name:ident ),* },
+            Stream, { $( $stream_name:ident ),* }
+        }
         , $macro:ident
     ) => {
         $macro! {
@@ -1348,14 +1376,16 @@ macro_rules! for_logical_plan_nodes {
 #[macro_export]
 macro_rules! for_batch_plan_nodes {
     ($macro:ident) => {
-        $crate::for_all_plan_nodes! {
+        $crate::for_each_convention_all_plan_nodes! {
               $crate::for_batch_plan_nodes, $macro
         }
     };
     (
-        $( { Logical, $logical_name:ident } ),*
-        , $( { Batch, $batch_name:ident } ),*
-        , $( { Stream, $stream_name:ident } ),*
+        {
+            Logical, { $( $logical_name:ident ),* },
+            Batch, { $( $batch_name:ident ),* },
+            Stream, { $( $stream_name:ident ),* }
+        }
         , $macro:ident
     ) => {
         $macro! {
@@ -1368,14 +1398,16 @@ macro_rules! for_batch_plan_nodes {
 #[macro_export]
 macro_rules! for_stream_plan_nodes {
     ($macro:ident) => {
-        $crate::for_all_plan_nodes! {
+        $crate::for_each_convention_all_plan_nodes! {
               $crate::for_stream_plan_nodes, $macro
         }
     };
     (
-        $( { Logical, $logical_name:ident } ),*
-        , $( { Batch, $batch_name:ident } ),*
-        , $( { Stream, $stream_name:ident } ),*
+        {
+            Logical, { $( $logical_name:ident ),* },
+            Batch, { $( $batch_name:ident ),* },
+            Stream, { $( $stream_name:ident ),* }
+        }
         , $macro:ident
     ) => {
         $macro! {
