@@ -326,8 +326,7 @@ impl StreamActorManager {
                     && let NodeBody::Merge(merge) = project_input.get_node_body().unwrap()
                 {
                     let merge_check = merge.upstream_dispatcher_type()
-                        == risingwave_pb::stream_plan::DispatcherType::Hash
-                        && merge.get_fields().is_empty();
+                        == risingwave_pb::stream_plan::DispatcherType::Hash;
                     if merge_check {
                         is_sink_into = true;
                         tracing::debug!(
