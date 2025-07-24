@@ -24,6 +24,7 @@ use phf::{Set, phf_set};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row;
+use risingwave_common::types::DataType;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::{SinkMetadata, sink_metadata};
 use sea_orm::DatabaseConnection;
@@ -102,6 +103,12 @@ pub struct SnowflakeConfig {
     #[serde(rename = "auto.schema.change")]
     #[serde_as(as = "DisplayFromStr")]
     pub auto_schema_change: bool,
+
+
+    #[serde(default)]
+    #[serde(rename = "create_table_if_not_exists")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub create_table_if_not_exists: bool,
 }
 
 impl SnowflakeConfig {
@@ -128,7 +135,7 @@ impl SnowflakeConfig {
         schema: &Schema,
         pk_indices: &Vec<usize>,
     ) -> Result<Option<(SnowflakeTaskContext, JdbcJniClient)>> {
-        if !self.auto_schema_change && is_append_only {
+        if !self.auto_schema_change && is_append_only && !self.create_table_if_not_exists {
             // append-only + no auto schema change is not need to create a client
             return Ok(None);
         }
@@ -151,7 +158,8 @@ impl SnowflakeConfig {
         let mut snowflake_task_ctx = SnowflakeTaskContext {
             target_table_name: target_table_name.clone(),
             database,
-            schema: schema_name,
+            schema_name,
+            schema: schema.clone(),
             ..Default::default()
         };
 
@@ -267,11 +275,17 @@ impl Sink for SnowflakeSink {
         risingwave_common::license::Feature::SnowflakeSink
             .check_available()
             .map_err(|e| anyhow::anyhow!(e))?;
-        self.config.build_snowflake_task_ctx_jdbc_client(
-            self.is_append_only,
-            &self.schema,
-            &self.pk_indices,
-        )?;
+        if let Some((snowflake_task_ctx, client)) =
+                self.config.build_snowflake_task_ctx_jdbc_client(
+                self.is_append_only,
+                &self.schema,
+                &self.pk_indices,
+            )?
+        {
+            let client = SnowflakeJniClient::new(client, snowflake_task_ctx);
+            client.execute_create_table()?;
+        }
+        
         Ok(())
     }
 
@@ -479,7 +493,8 @@ pub struct SnowflakeTaskContext {
     // required for task creation
     pub target_table_name: String,
     pub database: String,
-    pub schema: String,
+    pub schema_name: String,
+    pub schema: Schema,
 
     // only upsert
     pub task_name: Option<String>,
@@ -573,7 +588,7 @@ impl SnowflakeJniClient {
             let alter_add_column_cdc_table_sql = build_alter_add_column_sql(
                 cdc_table_name,
                 &self.snowflake_task_context.database,
-                &self.snowflake_task_context.schema,
+                &self.snowflake_task_context.schema_name,
                 columns,
             );
             self.jdbc_client
@@ -583,7 +598,7 @@ impl SnowflakeJniClient {
         let alter_add_column_target_table_sql = build_alter_add_column_sql(
             &self.snowflake_task_context.target_table_name,
             &self.snowflake_task_context.database,
-            &self.snowflake_task_context.schema,
+            &self.snowflake_task_context.schema_name,
             columns,
         );
         self.jdbc_client
@@ -621,6 +636,78 @@ impl SnowflakeJniClient {
         }
         Ok(())
     }
+
+    pub fn execute_create_table(
+        &self,
+    ) -> Result<()> {
+        // create target table
+        let create_target_table_sql = build_create_table_sql(
+            &self.snowflake_task_context.target_table_name,
+            &self.snowflake_task_context.database,
+            &self.snowflake_task_context.schema_name,
+            &self.snowflake_task_context.schema,
+            false,
+        )?;
+        self.jdbc_client.execute_sql_sync(&create_target_table_sql)?;
+        if let Some(cdc_table_name) = &self.snowflake_task_context.cdc_table_name {
+            let create_cdc_table_sql = build_create_table_sql(
+                cdc_table_name,
+                &self.snowflake_task_context.database,
+                &self.snowflake_task_context.schema_name,
+                &self.snowflake_task_context.schema,
+                true,
+            )?;
+            self.jdbc_client.execute_sql_sync(&create_cdc_table_sql)?;
+        }
+        Ok(())
+    }
+}
+
+fn build_create_table_sql(table_name: &str,
+    database: &str,
+    schema_name: &str,
+    schema: &Schema,
+    need_op_and_row_id: bool,
+) -> Result<String> {
+    let full_table_name = format!("{}.{}.{}", database, schema_name, table_name);
+    let mut columns: Vec<String> = schema
+        .fields
+        .iter()
+        .map(|field| {
+            let data_type = convert_snowflake_data_type(&field.data_type)?;
+            Ok(format!("{} {}", field.name, data_type))
+        })
+        .collect::<Result<Vec<String>>>()?;
+    if need_op_and_row_id {
+        columns.push(format!("{} STRING", SNOWFLAKE_SINK_ROW_ID));
+        columns.push(format!("{} INT", SNOWFLAKE_SINK_OP));
+    }
+    let columns_str = columns.join(", ");
+    Ok(format!("CREATE TABLE IF NOT EXISTS {} ({}) ENABLE_SCHEMA_EVOLUTION  = true", full_table_name, columns_str))
+}
+
+fn convert_snowflake_data_type(data_type: &DataType) -> Result<String> {
+    let data_type = match data_type {
+        DataType::Int16 => "SMALLINT".to_string(),
+        DataType::Int32 => "INTEGER".to_string(),
+        DataType::Int64 => "BIGINT".to_string(),
+        DataType::Float32 => "FLOAT4".to_string(),
+        DataType::Float64 => "FLOAT8".to_string(),
+        DataType::Boolean => "BOOLEAN".to_string(),
+        DataType::Varchar => "STRING".to_string(),
+        DataType::Date => "DATE".to_string(),
+        DataType::Timestamp => "TIMESTAMP".to_string(),
+        DataType::Timestamptz => "TIMESTAMP_TZ".to_string(),
+        DataType::Jsonb => "VARIANT".to_string(),
+        DataType::Decimal => "DECIMAL".to_string(),
+        DataType::Bytea => "BINARY".to_string(),
+        DataType::Time => "TIME".to_string(),
+        _ => return Err(SinkError::Config(anyhow!(
+            "Dont support auto create table for datatype: {}",
+            data_type
+        ))),
+    };
+    Ok(data_type)
 }
 
 fn build_alter_add_column_sql(
@@ -637,7 +724,7 @@ fn build_start_task_sql(snowflake_task_context: &SnowflakeTaskContext) -> String
     let SnowflakeTaskContext {
         task_name,
         database,
-        schema,
+        schema_name: schema,
         ..
     } = snowflake_task_context;
     let full_task_name = format!("{}.{}.{}", database, schema, task_name.as_ref().unwrap());
@@ -648,7 +735,7 @@ fn build_drop_task_sql(snowflake_task_context: &SnowflakeTaskContext) -> String 
     let SnowflakeTaskContext {
         task_name,
         database,
-        schema,
+        schema_name: schema,
         ..
     } = snowflake_task_context;
     let full_task_name = format!("{}.{}.{}", database, schema, task_name.as_ref().unwrap());
@@ -665,16 +752,17 @@ fn build_create_merge_into_task_sql(snowflake_task_context: &SnowflakeTaskContex
         pk_column_names,
         all_column_names,
         database,
-        schema,
+        schema_name,
+        ..
     } = snowflake_task_context;
-    let full_task_name = format!("{}.{}.{}", database, schema, task_name.as_ref().unwrap());
+    let full_task_name = format!("{}.{}.{}", database, schema_name, task_name.as_ref().unwrap());
     let full_cdc_table_name = format!(
         "{}.{}.{}",
         database,
-        schema,
+        schema_name,
         cdc_table_name.as_ref().unwrap()
     );
-    let full_target_table_name = format!("{}.{}.{}", database, schema, target_table_name);
+    let full_target_table_name = format!("{}.{}.{}", database, schema_name, target_table_name);
 
     let pk_names_str = pk_column_names.as_ref().unwrap().join(", ");
     let pk_names_eq_str = pk_column_names
@@ -760,7 +848,11 @@ mod tests {
             pk_column_names: Some(vec!["v1".to_owned()]),
             all_column_names: Some(vec!["v1".to_owned(), "v2".to_owned()]),
             database: "test_db".to_owned(),
-            schema: "test_schema".to_owned(),
+            schema_name: "test_schema".to_owned(),
+            schema: Schema {
+                fields: vec![
+                ],
+            },
         };
         let task_sql = build_create_merge_into_task_sql(&snowflake_task_context);
         let expected = r#"CREATE OR REPLACE TASK test_db.test_schema.test_task
@@ -805,7 +897,11 @@ END;"#;
             pk_column_names: Some(vec!["id1".to_owned(), "id2".to_owned()]),
             all_column_names: Some(vec!["id1".to_owned(), "id2".to_owned(), "val".to_owned()]),
             database: "test_db".to_owned(),
-            schema: "test_schema".to_owned(),
+            schema_name: "test_schema".to_owned(),
+            schema: Schema {
+                fields: vec![
+                ],
+            },
         };
         let task_sql = build_create_merge_into_task_sql(&snowflake_task_context);
         let expected = r#"CREATE OR REPLACE TASK test_db.test_schema.test_task_multi_pk
