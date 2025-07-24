@@ -27,7 +27,8 @@ use num_traits::{
 };
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::ArrayType;
-use serde::{Deserialize, Serialize, ser::Serializer as _};
+use serde::ser::Serializer as _;
+use serde::{Deserialize, Serialize};
 use to_text::ToText;
 
 use crate::array::ArrayResult;
@@ -318,6 +319,7 @@ impl_convert_from_unsigned!(u16, u32, u64);
 // Support converting signed integers to unsigned 256-bit, checking for negative values
 impl TryFrom<i16> for UInt256 {
     type Error = ();
+
     fn try_from(value: i16) -> Result<Self, Self::Error> {
         if value < 0 {
             Err(())
@@ -329,6 +331,7 @@ impl TryFrom<i16> for UInt256 {
 
 impl TryFrom<i32> for UInt256 {
     type Error = ();
+
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         if value < 0 {
             Err(())
@@ -340,6 +343,7 @@ impl TryFrom<i32> for UInt256 {
 
 impl TryFrom<i64> for UInt256 {
     type Error = ();
+
     fn try_from(value: i64) -> Result<Self, Self::Error> {
         if value < 0 {
             Err(())

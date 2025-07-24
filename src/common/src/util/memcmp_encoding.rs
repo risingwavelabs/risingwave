@@ -23,8 +23,8 @@ use super::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::array::{ArrayImpl, DataChunk};
 use crate::row::{OwnedRow, Row};
 use crate::types::{
-    DataType, Date, Datum, F32, F64, Int256, UInt256, ScalarImpl, Serial, Time, Timestamp, Timestamptz,
-    ToDatumRef,
+    DataType, Date, Datum, F32, F64, Int256, ScalarImpl, Serial, Time, Timestamp, Timestamptz,
+    ToDatumRef, UInt256,
 };
 use crate::util::sort_util::{ColumnOrder, OrderType};
 

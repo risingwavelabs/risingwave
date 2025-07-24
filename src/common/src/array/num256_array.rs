@@ -22,7 +22,7 @@ use risingwave_pb::data::PbArray;
 
 use crate::array::{Array, ArrayBuilder, ArrayImpl, ArrayResult};
 use crate::bitmap::{Bitmap, BitmapBuilder};
-use crate::types::{DataType, Int256, Int256Ref, UInt256, UInt256Ref, Scalar};
+use crate::types::{DataType, Int256, Int256Ref, Scalar, UInt256, UInt256Ref};
 
 #[derive(Debug, Clone, EstimateSize)]
 pub struct Int256ArrayBuilder {
