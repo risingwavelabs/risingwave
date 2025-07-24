@@ -31,6 +31,11 @@ use iceberg_compaction_core::executor::RewriteFilesStat;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
+use risingwave_common::config::storage::default::storage::{
+    iceberg_compaction_enable_dynamic_size_estimation,
+    iceberg_compaction_enable_heuristic_output_parallelism,
+    iceberg_compaction_max_concurrent_closes, iceberg_compaction_size_estimation_smoothing_factor,
+};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_connector::sink::iceberg::{
     IcebergConfig, commit_branch, should_enable_iceberg_cow,
@@ -70,7 +75,7 @@ pub fn default_writer_properties() -> WriterProperties {
 pub struct IcebergCompactorRunnerConfig {
     #[builder(default = "4")]
     pub max_parallelism: u32,
-    #[builder(default = "1024 * 1024 * 1024")] // 1GB")]
+    #[builder(default = "1024 * 1024 * 1024")] // 1GB"
     pub min_size_per_partition: u64,
     #[builder(default = "32")]
     pub max_file_count_per_partition: u32,
@@ -82,6 +87,14 @@ pub struct IcebergCompactorRunnerConfig {
     pub max_record_batch_rows: usize,
     #[builder(default = "default_writer_properties()")]
     pub write_parquet_properties: WriterProperties,
+    #[builder(default = "iceberg_compaction_enable_heuristic_output_parallelism()")]
+    pub enable_heuristic_output_parallelism: bool,
+    #[builder(default = "iceberg_compaction_max_concurrent_closes()")]
+    pub max_concurrent_closes: usize,
+    #[builder(default = "iceberg_compaction_enable_dynamic_size_estimation()")]
+    pub enable_dynamic_size_estimation: bool,
+    #[builder(default = "iceberg_compaction_size_estimation_smoothing_factor()")]
+    pub size_estimation_smoothing_factor: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -157,6 +170,9 @@ impl IcebergCompactorRunner {
                 .base(CompactionBaseConfig {
                     target_file_size: self.config.target_file_size_bytes,
                 })
+                .enable_heuristic_output_parallelism(
+                    self.config.enable_heuristic_output_parallelism,
+                )
                 .build()
                 .unwrap_or_else(|e| {
                     panic!(
@@ -204,6 +220,9 @@ impl IcebergCompactorRunner {
                 .base(CompactionBaseConfig {
                     target_file_size: self.config.target_file_size_bytes,
                 })
+                .max_concurrent_closes(self.config.max_concurrent_closes)
+                .enable_dynamic_size_estimation(self.config.enable_dynamic_size_estimation)
+                .size_estimation_smoothing_factor(self.config.size_estimation_smoothing_factor)
                 .build()
                 .unwrap_or_else(|e| {
                     panic!(

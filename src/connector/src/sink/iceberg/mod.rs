@@ -169,9 +169,9 @@ pub struct IcebergConfig {
     #[with_option(allow_alter_on_fly)]
     pub enable_snapshot_expiration: bool,
 
-    /// The iceberg write mode, can be `more` or `cow`.
+    /// The iceberg write mode, can be `merge-on-read` or `copy-on-write`.
     #[serde(default = "default_iceberg_write_mode")]
-    pub write_mode: String, // accept "COW" or "MORE"
+    pub write_mode: String,
 }
 
 impl EnforceSecret for IcebergConfig {
