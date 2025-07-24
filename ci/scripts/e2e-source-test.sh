@@ -47,18 +47,9 @@ echo "--- Setup HashiCorp Vault for testing"
 export VAULT_ADDR="http://vault-server:8200"
 export VAULT_TOKEN="root-token"
 ./ci/scripts/setup-vault.sh
-# Get role ID and secret ID for testing
-ROLE_ID=$(curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
-               "$VAULT_ADDR/v1/auth/approle/role/test-role/role-id" | \
-               grep -o '"role_id":"[^"]*"' | cut -d'"' -f4)
-
-SECRET_ID=$(curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
-                 -X POST \
-                 "$VAULT_ADDR/v1/auth/approle/role/test-role/secret-id" | \
-                 grep -o '"secret_id":"[^"]*"' | cut -d'"' -f4)
 
 echo "Setup complete!"
-echo "Root token: root-token"
+echo "Vault Root token: root-token"
 echo "Test AppRole - Role ID: $ROLE_ID"
 echo "Test AppRole - Secret ID: $SECRET_ID"
 

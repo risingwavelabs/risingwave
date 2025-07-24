@@ -99,43 +99,4 @@ else
     echo "AppRole authentication already enabled"
 fi
 
-# Create a policy for test access
-curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
-     -H "Content-Type: application/json" \
-     -X PUT \
-     -d '{
-       "policy": "path \"secret/data/*\" {\n  capabilities = [\"read\"]\n}"
-     }' \
-     "$VAULT_ADDR/v1/sys/policies/acl/test-policy"
-
-# Create an approle
-curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
-     -H "Content-Type: application/json" \
-     -X POST \
-     -d '{
-       "token_policies": ["test-policy"],
-       "token_ttl": "1h",
-       "token_max_ttl": "4h"
-     }' \
-     "$VAULT_ADDR/v1/auth/approle/role/test-role"
-
-# Get role ID and secret ID for testing
-ROLE_ID=$(curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
-               "$VAULT_ADDR/v1/auth/approle/role/test-role/role-id" | \
-               grep -o '"role_id":"[^"]*"' | cut -d'"' -f4)
-
-SECRET_ID=$(curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
-                 -X POST \
-                 "$VAULT_ADDR/v1/auth/approle/role/test-role/secret-id" | \
-                 grep -o '"secret_id":"[^"]*"' | cut -d'"' -f4)
-
-echo "Setup complete!"
-echo "Root token: root-token"
-echo "Test AppRole - Role ID: $ROLE_ID"
-echo "Test AppRole - Secret ID: $SECRET_ID"
-
-# Store these values in environment variables for tests to use
-export VAULT_TEST_ROLE_ID="$ROLE_ID"
-export VAULT_TEST_SECRET_ID="$SECRET_ID"
-
 echo "Vault setup completed successfully"
