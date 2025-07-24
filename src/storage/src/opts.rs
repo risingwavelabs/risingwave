@@ -164,7 +164,7 @@ pub struct StorageOpts {
     pub iceberg_compaction_max_file_count_per_partition: u32,
 
     /// The ratio of iceberg compaction max parallelism to the number of CPU cores
-    pub iceberg_compaction_max_parallelism_ratio: f32,
+    pub iceberg_compaction_task_parallelism_ratio: f32,
     /// Whether to enable heuristic output parallelism in iceberg compaction.
     pub iceberg_compaction_enable_heuristic_output_parallelism: bool,
     /// Maximum number of concurrent file close operations
@@ -307,9 +307,9 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             iceberg_compaction_max_file_count_per_partition: c
                 .storage
                 .iceberg_compaction_max_file_count_per_partition,
-            iceberg_compaction_max_parallelism_ratio: c
+            iceberg_compaction_task_parallelism_ratio: c
                 .storage
-                .iceberg_compaction_max_parallelism_ratio,
+                .iceberg_compaction_task_parallelism_ratio,
             iceberg_compaction_enable_heuristic_output_parallelism: c
                 .storage
                 .iceberg_compaction_enable_heuristic_output_parallelism,

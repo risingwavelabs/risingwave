@@ -442,7 +442,7 @@ pub fn start_iceberg_compactor(
                                         .build();
 
                                 let compactor_runner_config = match IcebergCompactorRunnerConfigBuilder::default()
-                                    .max_parallelism((worker_num as f32 * compactor_context.storage_opts.iceberg_compaction_max_parallelism_ratio) as u32)
+                                    .max_parallelism((worker_num as f32 * compactor_context.storage_opts.iceberg_compaction_task_parallelism_ratio) as u32)
                                     .min_size_per_partition(compactor_context.storage_opts.iceberg_compaction_min_size_per_partition_mb as u64 * 1024 * 1024)
                                     .max_file_count_per_partition(compactor_context.storage_opts.iceberg_compaction_max_file_count_per_partition)
                                     .target_file_size_bytes(compactor_context.storage_opts.iceberg_compaction_target_file_size_mb as u64 * 1024 * 1024)
