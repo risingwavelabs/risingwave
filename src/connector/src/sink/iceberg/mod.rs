@@ -96,7 +96,7 @@ use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
 
 pub const ICEBERG_SINK: &str = "iceberg";
-pub const ICEBERG_COW_BRANCH: &str = "cow_ingestion";
+pub const ICEBERG_COW_BRANCH: &str = "ingestion";
 pub const ICEBERG_WRITE_MODE_MORE: &str = "more";
 pub const ICEBERG_WRITE_MODE_COW: &str = "cow";
 
