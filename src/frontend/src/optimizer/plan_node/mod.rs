@@ -286,15 +286,12 @@ impl Layer for PlanRef {
         F: FnMut(Self::Sub) -> Self::Sub,
     {
         match self.convention() {
-            Convention::Logical => {
-                self.clone_with_inputs::<Logical>(&self.inputs().into_iter().map(f).collect_vec())
-            }
-            Convention::Batch => {
-                self.clone_with_inputs::<Batch>(&self.inputs().into_iter().map(f).collect_vec())
-            }
-            Convention::Stream => {
-                self.clone_with_inputs::<Stream>(&self.inputs().into_iter().map(f).collect_vec())
-            }
+            Convention::Logical => self
+                .clone_root_with_inputs::<Logical>(&self.inputs().into_iter().map(f).collect_vec()),
+            Convention::Batch => self
+                .clone_root_with_inputs::<Batch>(&self.inputs().into_iter().map(f).collect_vec()),
+            Convention::Stream => self
+                .clone_root_with_inputs::<Stream>(&self.inputs().into_iter().map(f).collect_vec()),
         }
     }
 
@@ -374,7 +371,7 @@ impl PlanRef {
             .iter()
             .map(|plan_ref| plan_ref.rewrite_exprs_recursive::<C>(r))
             .collect();
-        new.clone_with_inputs::<C>(&inputs[..])
+        new.clone_root_with_inputs::<C>(&inputs[..])
     }
 }
 
@@ -602,7 +599,7 @@ impl PlanRef {
         dyn_t.inputs()
     }
 
-    pub fn clone_with_inputs<C: ConventionMarker>(&self, inputs: &[PlanRef]) -> PlanRef {
+    pub fn clone_root_with_inputs<C: ConventionMarker>(&self, inputs: &[PlanRef]) -> PlanRef {
         self.expect_convention::<C>();
         if let Some(share) = self.as_share_node::<C>() {
             assert_eq!(inputs.len(), 1);

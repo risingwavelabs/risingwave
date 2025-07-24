@@ -30,7 +30,7 @@ impl Rule for DagToTreeRule {
         }
 
         if has_share {
-            Some(plan.clone_with_inputs::<Logical>(&inputs))
+            Some(plan.clone_root_with_inputs::<Logical>(&inputs))
         } else {
             None
         }

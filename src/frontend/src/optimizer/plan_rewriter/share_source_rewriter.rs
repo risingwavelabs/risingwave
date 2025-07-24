@@ -80,7 +80,7 @@ impl PlanRewriter<Logical> for ShareSourceRewriter {
         if let Some(source) = plan.as_logical_source() {
             self.rewrite_logical_source(source)
         } else {
-            plan.clone_with_inputs::<Logical>(&inputs)
+            plan.clone_root_with_inputs::<Logical>(&inputs)
         }
     }
 }

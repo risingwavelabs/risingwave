@@ -79,8 +79,8 @@ impl PlanTreeNodeUnary for LogicalShare {
         self.core.input.borrow().clone()
     }
 
-    fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input)
+    fn clone_with_input(&self, _input: PlanRef) -> Self {
+        unreachable!("shared node should be handled specially in PlanRef::clone_with_input")
     }
 
     fn rewrite_with_input(
@@ -160,7 +160,7 @@ impl ToStream for LogicalShare {
         match ctx.get_rewrite_result(self.id()) {
             None => {
                 let (new_input, col_change) = self.input().logical_rewrite_for_stream(ctx)?;
-                let new_share: PlanRef = self.clone_with_input(new_input).into();
+                let new_share: PlanRef = Self::new(new_input).into();
                 ctx.add_rewrite_result(self.id(), new_share.clone(), col_change.clone());
                 Ok((new_share, col_change))
             }

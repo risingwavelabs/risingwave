@@ -74,10 +74,8 @@ impl PlanTreeNodeUnary for StreamShare {
         self.core.input.borrow().clone()
     }
 
-    fn clone_with_input(&self, input: PlanRef) -> Self {
-        let core = self.core.clone();
-        core.replace_input(input);
-        Self::new(core)
+    fn clone_with_input(&self, _input: PlanRef) -> Self {
+        unreachable!("shared node should be handled specially in PlanRef::clone_with_input")
     }
 }
 

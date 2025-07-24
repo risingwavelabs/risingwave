@@ -79,7 +79,7 @@ impl<'a, C: ConventionMarker> HeuristicOptimizer<'a, C> {
             .try_collect()?;
 
         Ok(if pre_applied != self.stats.total_applied() {
-            plan.clone_with_inputs::<C>(&inputs)
+            plan.clone_root_with_inputs::<C>(&inputs)
         } else {
             plan
         })

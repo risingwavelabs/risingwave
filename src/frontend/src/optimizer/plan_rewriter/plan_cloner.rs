@@ -30,6 +30,6 @@ impl<C: ConventionMarker> PlanCloner<C> {
 
 impl<C: ConventionMarker> PlanRewriter<C> for PlanCloner<C> {
     fn rewrite_with_inputs(&mut self, plan: &PlanRef, inputs: Vec<PlanRef>) -> PlanRef {
-        plan.clone_with_inputs::<C>(&inputs)
+        plan.clone_root_with_inputs::<C>(&inputs)
     }
 }
