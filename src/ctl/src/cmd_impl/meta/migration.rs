@@ -115,27 +115,6 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         .await
         .expect("failed to init sql backend");
 
-    // cluster Id.
-    let cluster_id: Uuid = ClusterId::from_meta_store(&meta_store)
-        .await?
-        .expect("cluster id not found")
-        .parse()?;
-
-    let generated_cluster_id: Uuid = Cluster::find()
-        .select_only()
-        .column(cluster::Column::ClusterId)
-        .into_tuple()
-        .one(&meta_store_sql.conn)
-        .await?
-        .expect("cluster id not found");
-
-    Cluster::update_many()
-        .col_expr(cluster::Column::ClusterId, cluster_id.into())
-        .filter(cluster::Column::ClusterId.eq(generated_cluster_id))
-        .exec(&meta_store_sql.conn)
-        .await?;
-    tracing::info!("cluster id updated to {}", cluster_id);
-
     // system parameters.
     let system_parameters = PbSystemParams::get(&meta_store)
         .await?
@@ -1062,6 +1041,28 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         DbBackend::Sqlite => {}
     }
 
+    // cluster Id.
+    let cluster_id: Uuid = ClusterId::from_meta_store(&meta_store)
+        .await?
+        .expect("cluster id not found")
+        .parse()?;
+
+    let generated_cluster_id: Uuid = Cluster::find()
+        .select_only()
+        .column(cluster::Column::ClusterId)
+        .into_tuple()
+        .one(&meta_store_sql.conn)
+        .await?
+        .expect("cluster id not found");
+
+    Cluster::update_many()
+        .col_expr(cluster::Column::ClusterId, cluster_id.into())
+        .filter(cluster::Column::ClusterId.eq(generated_cluster_id))
+        .exec(&meta_store_sql.conn)
+        .await?;
+    tracing::info!("cluster id updated to {}", cluster_id);
+
+    tracing::info!("meta migration completed!");
     Ok(())
 }
 
