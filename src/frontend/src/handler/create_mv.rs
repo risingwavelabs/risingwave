@@ -91,7 +91,7 @@ pub fn gen_create_mv_plan(
     emit_mode: Option<EmitMode>,
 ) -> Result<(PlanRef, TableCatalog)> {
     let mut binder = Binder::new_for_stream(session);
-    let bound = binder.bind_query(query)?;
+    let bound = binder.bind_query(&query)?;
     gen_create_mv_plan_bound(session, context, bound, name, columns, emit_mode)
 }
 
@@ -109,7 +109,7 @@ pub fn gen_create_mv_plan_bound(
     }
 
     let db_name = &session.database();
-    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, &name)?;
 
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
@@ -162,7 +162,7 @@ pub async fn handle_create_mv(
 ) -> Result<RwPgResponse> {
     let (dependent_relations, dependent_udfs, bound_query) = {
         let mut binder = Binder::new_for_stream(handler_args.session.as_ref());
-        let bound_query = binder.bind_query(query)?;
+        let bound_query = binder.bind_query(&query)?;
         (
             binder.included_relations().clone(),
             binder.included_udfs().clone(),

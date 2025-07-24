@@ -5332,7 +5332,7 @@ dependencies = [
 [[package]]
 name = "faiss"
 version = "0.12.2-alpha.0"
-source = "git+https://github.com/risingwavelabs/faiss-rs.git?rev=793d612e8f660fcb29c06b689177c588a9c2dd81#793d612e8f660fcb29c06b689177c588a9c2dd81"
+source = "git+https://github.com/risingwavelabs/faiss-rs.git?rev=f6f0acb#f6f0acbd60e43bf1025f3fc958a2c2b0697c4d0f"
 dependencies = [
  "faiss-sys",
 ]
@@ -5340,7 +5340,7 @@ dependencies = [
 [[package]]
 name = "faiss-sys"
 version = "0.6.3-alpha.0"
-source = "git+https://github.com/risingwavelabs/faiss-rs.git?rev=793d612e8f660fcb29c06b689177c588a9c2dd81#793d612e8f660fcb29c06b689177c588a9c2dd81"
+source = "git+https://github.com/risingwavelabs/faiss-rs.git?rev=f6f0acb#f6f0acbd60e43bf1025f3fc958a2c2b0697c4d0f"
 dependencies = [
  "cmake",
 ]
@@ -15079,9 +15079,9 @@ dependencies = [
 
 [[package]]
 name = "sysinfo"
-version = "0.35.0"
+version = "0.35.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b897c8ea620e181c7955369a31be5f48d9a9121cb59fd33ecef9ff2a34323422"
+checksum = "3c3ffa3e4ff2b324a57f7aeb3c349656c7b127c3c189520251a648102a92496e"
 dependencies = [
  "libc",
  "memchr",
