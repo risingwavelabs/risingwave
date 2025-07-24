@@ -64,8 +64,8 @@ impl SplitReader for MqttSplitReader {
             .subscribe_many(
                 splits
                     .iter()
-                    .cloned()
-                    .map(|split| Filter::new(split.topic, qos)),
+                    .flat_map(|split| split.topic.split(","))
+                    .map(|topic| Filter::new(topic.to_owned(), qos)),
             )
             .await?;
 

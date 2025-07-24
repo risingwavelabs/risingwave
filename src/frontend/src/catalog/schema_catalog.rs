@@ -28,7 +28,7 @@ use risingwave_pb::catalog::{
 use risingwave_pb::user::grant_privilege::Object;
 
 use super::subscription_catalog::SubscriptionCatalog;
-use super::{OwnedByUserCatalog, SubscriptionId};
+use super::{OwnedByUserCatalog, OwnedGrantObject, SubscriptionId};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::catalog::index_catalog::IndexCatalog;
@@ -293,16 +293,22 @@ impl SchemaCatalog {
     }
 
     pub fn drop_sink(&mut self, id: SinkId) {
-        let sink_ref = self.sink_by_id.remove(&id).unwrap();
-        self.sink_by_name.remove(&sink_ref.name).unwrap();
-        if let Some(connection_id) = sink_ref.connection_id
-            && let Occupied(mut e) = self.connection_sink_ref.entry(connection_id.0)
-        {
-            let sink_ids = e.get_mut();
-            sink_ids.retain_mut(|sid| *sid != id);
-            if sink_ids.is_empty() {
-                e.remove_entry();
+        if let Some(sink_ref) = self.sink_by_id.remove(&id) {
+            self.sink_by_name.remove(&sink_ref.name).unwrap();
+            if let Some(connection_id) = sink_ref.connection_id
+                && let Occupied(mut e) = self.connection_sink_ref.entry(connection_id.0)
+            {
+                let sink_ids = e.get_mut();
+                sink_ids.retain_mut(|sid| *sid != id);
+                if sink_ids.is_empty() {
+                    e.remove_entry();
+                }
             }
+        } else {
+            tracing::warn!(
+                id,
+                "sink not found when dropping, frontend might not be notified yet"
+            );
         }
     }
 
@@ -776,8 +782,22 @@ impl SchemaCatalog {
         self.source_by_id.get(source_id)
     }
 
-    pub fn get_sink_by_name(&self, sink_name: &str) -> Option<&Arc<SinkCatalog>> {
-        self.sink_by_name.get(sink_name)
+    pub fn get_sink_by_name(
+        &self,
+        sink_name: &str,
+        bind_creating: bool,
+    ) -> Option<&Arc<SinkCatalog>> {
+        self.sink_by_name
+            .get(sink_name)
+            .filter(|s| bind_creating || s.is_created())
+    }
+
+    pub fn get_any_sink_by_name(&self, sink_name: &str) -> Option<&Arc<SinkCatalog>> {
+        self.get_sink_by_name(sink_name, true)
+    }
+
+    pub fn get_created_sink_by_name(&self, sink_name: &str) -> Option<&Arc<SinkCatalog>> {
+        self.get_sink_by_name(sink_name, false)
     }
 
     pub fn get_sink_by_id(&self, sink_id: &SinkId) -> Option<&Arc<SinkCatalog>> {
@@ -914,18 +934,53 @@ impl SchemaCatalog {
             .map(|s| s.to_owned())
     }
 
-    pub fn get_grant_object_by_oid(&self, oid: u32) -> Option<Object> {
+    pub fn get_grant_object_by_oid(&self, oid: u32) -> Option<OwnedGrantObject> {
         #[allow(clippy::manual_map)]
-        if self.get_created_table_by_id(&TableId::new(oid)).is_some()
-            || self.get_index_by_id(&IndexId::new(oid)).is_some()
-        {
-            Some(Object::TableId(oid))
-        } else if self.get_source_by_id(&oid).is_some() {
-            Some(Object::SourceId(oid))
-        } else if self.get_sink_by_id(&oid).is_some() {
-            Some(Object::SinkId(oid))
-        } else if self.get_view_by_id(&oid).is_some() {
-            Some(Object::ViewId(oid))
+        if let Some(table) = self.get_created_table_by_id(&TableId::new(oid)) {
+            Some(OwnedGrantObject {
+                owner: table.owner,
+                object: Object::TableId(oid),
+            })
+        } else if let Some(index) = self.get_index_by_id(&IndexId::new(oid)) {
+            Some(OwnedGrantObject {
+                owner: index.owner(),
+                object: Object::TableId(oid),
+            })
+        } else if let Some(source) = self.get_source_by_id(&oid) {
+            Some(OwnedGrantObject {
+                owner: source.owner,
+                object: Object::SourceId(oid),
+            })
+        } else if let Some(sink) = self.get_sink_by_id(&oid) {
+            Some(OwnedGrantObject {
+                owner: sink.owner.user_id,
+                object: Object::SinkId(oid),
+            })
+        } else if let Some(view) = self.get_view_by_id(&oid) {
+            Some(OwnedGrantObject {
+                owner: view.owner,
+                object: Object::ViewId(oid),
+            })
+        } else if let Some(function) = self.get_function_by_id(FunctionId::new(oid)) {
+            Some(OwnedGrantObject {
+                owner: function.owner(),
+                object: Object::FunctionId(oid),
+            })
+        } else if let Some(subscription) = self.get_subscription_by_id(&oid) {
+            Some(OwnedGrantObject {
+                owner: subscription.owner.user_id,
+                object: Object::SubscriptionId(oid),
+            })
+        } else if let Some(connection) = self.get_connection_by_id(&oid) {
+            Some(OwnedGrantObject {
+                owner: connection.owner,
+                object: Object::ConnectionId(oid),
+            })
+        } else if let Some(secret) = self.get_secret_by_id(&SecretId::new(oid)) {
+            Some(OwnedGrantObject {
+                owner: secret.owner,
+                object: Object::SecretId(oid),
+            })
         } else {
             None
         }

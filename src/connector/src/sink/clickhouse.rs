@@ -38,7 +38,7 @@ use super::decouple_checkpoint_log_sink::{
     DecoupleCheckpointLogSinkerOf, default_commit_checkpoint_interval,
 };
 use super::writer::SinkWriter;
-use super::{DummySinkCommitCoordinator, SinkWriterMetrics, SinkWriterParam};
+use super::{SinkWriterMetrics, SinkWriterParam};
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::sink::{
@@ -526,7 +526,6 @@ impl ClickHouseSink {
 }
 
 impl Sink for ClickHouseSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = DecoupleCheckpointLogSinkerOf<ClickHouseSinkWriter>;
 
     const SINK_NAME: &'static str = CLICKHOUSE_SINK;

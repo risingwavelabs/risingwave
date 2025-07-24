@@ -944,7 +944,7 @@ impl SessionImpl {
         let catalog_reader = self.env().catalog_reader().read_guard();
         let (schema_name, relation_name) = {
             let (schema_name, relation_name) =
-                Binder::resolve_schema_qualified_name(db_name, name)?;
+                Binder::resolve_schema_qualified_name(db_name, &name)?;
             let search_path = self.config().search_path();
             let user_name = &self.user_name();
             let schema_name = match schema_name {
@@ -991,7 +991,7 @@ impl SessionImpl {
         let db_name = &self.database();
         let catalog_reader = self.env().catalog_reader().read_guard();
         let (schema_name, secret_name) = {
-            let (schema_name, secret_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+            let (schema_name, secret_name) = Binder::resolve_schema_qualified_name(db_name, &name)?;
             let search_path = self.config().search_path();
             let user_name = &self.user_name();
             let schema_name = match schema_name {
@@ -1012,7 +1012,7 @@ impl SessionImpl {
         let catalog_reader = self.env().catalog_reader().read_guard();
         let (schema_name, connection_name) = {
             let (schema_name, connection_name) =
-                Binder::resolve_schema_qualified_name(db_name, name)?;
+                Binder::resolve_schema_qualified_name(db_name, &name)?;
             let search_path = self.config().search_path();
             let user_name = &self.user_name();
             let schema_name = match schema_name {
@@ -1036,7 +1036,7 @@ impl SessionImpl {
         if_not_exists: bool,
     ) -> Result<Either<(), RwPgResponse>> {
         let db_name = &self.database();
-        let (schema_name, function_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+        let (schema_name, function_name) = Binder::resolve_schema_qualified_name(db_name, &name)?;
         let (database_id, schema_id) = self.get_database_and_schema_id_for_create(schema_name)?;
 
         let catalog_reader = self.env().catalog_reader().read_guard();
@@ -1504,15 +1504,15 @@ impl SessionManagerImpl {
     ) -> std::result::Result<Arc<SessionImpl>, BoxedError> {
         let catalog_reader = self.env.catalog_reader();
         let reader = catalog_reader.read_guard();
-        let database_name = reader
-            .get_database_by_id(&database_id)
-            .map_err(|_| {
+        let (database_name, database_owner) = {
+            let db = reader.get_database_by_id(&database_id).map_err(|_| {
                 Box::new(Error::new(
                     ErrorKind::InvalidInput,
                     format!("database \"{}\" does not exist", database_id),
                 ))
-            })?
-            .name();
+            })?;
+            (db.name(), db.owner())
+        };
 
         let user_reader = self.env.user_info_reader();
         let reader = user_reader.read_guard();
@@ -1525,7 +1525,7 @@ impl SessionManagerImpl {
             }
             let has_privilege =
                 user.has_privilege(&Object::DatabaseId(database_id), AclMode::Connect);
-            if !user.is_super && !has_privilege {
+            if !user.is_super && database_owner != user.id && !has_privilege {
                 return Err(Box::new(Error::new(
                     ErrorKind::PermissionDenied,
                     "User does not have CONNECT privilege.",
