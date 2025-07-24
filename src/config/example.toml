@@ -194,6 +194,7 @@ stream_enable_explain_analyze_stats = true
 stream_iceberg_list_interval_sec = 1
 stream_iceberg_fetch_batch_size = 1024
 stream_iceberg_sink_positional_delete_cache_size = 1024
+stream_iceberg_sink_write_parquet_max_row_group_rows = 100000
 
 [streaming.developer.stream_compute_client_config]
 connect_timeout_secs = 5
