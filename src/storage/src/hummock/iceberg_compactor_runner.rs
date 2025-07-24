@@ -386,7 +386,8 @@ impl IcebergCompactorRunner {
 
                 let input_files = {
                     let mut input_files = vec![];
-                    if let Some(snapshot) = committed_table.metadata().snapshot_for_ref("main") {
+                    if let Some(snapshot) = committed_table.metadata().snapshot_for_ref(MAIN_BRANCH)
+                    {
                         let manifest_list = snapshot
                             .load_manifest_list(
                                 committed_table.file_io(),
