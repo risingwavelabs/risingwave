@@ -12,65 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
-use itertools::Itertools;
+use std::marker::PhantomData;
 
 use crate::PlanRef;
-use crate::optimizer::PlanRewriter;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{LogicalShare, PlanNodeId, PlanTreeNode, StreamShare};
+use crate::optimizer::plan_node::ConventionMarker;
+use crate::optimizer::plan_rewriter::PlanRewriter;
 
-#[derive(Debug, Clone, Default)]
-pub struct PlanCloner {
-    /// Original share node plan id to new share node.
-    /// Rewriter will rewrite all nodes, but we need to keep the shape of the DAG.
-    share_map: HashMap<PlanNodeId, PlanRef>,
-}
+#[derive(Debug, Clone)]
+pub struct PlanCloner<C: ConventionMarker>(PhantomData<C>);
 
-impl PlanCloner {
+impl<C: ConventionMarker> PlanCloner<C> {
     pub fn clone_whole_plan(plan: PlanRef) -> PlanRef {
-        let mut plan_cloner = PlanCloner {
-            share_map: Default::default(),
-        };
-        plan_cloner.rewrite(plan)
+        let mut plan_cloner = Self(PhantomData);
+        plan.rewrite_with(&mut plan_cloner)
     }
 }
 
-impl PlanRewriter for PlanCloner {
-    fn rewrite_logical_share(&mut self, share: &LogicalShare) -> PlanRef {
-        // When we use the plan rewriter, we need to take care of the share operator,
-        // because our plan is a DAG rather than a tree.
-        match self.share_map.get(&share.id()) {
-            None => {
-                let new_inputs = share
-                    .inputs()
-                    .into_iter()
-                    .map(|input| self.rewrite(input))
-                    .collect_vec();
-                let new_share = share.clone_with_inputs(&new_inputs);
-                self.share_map.insert(share.id(), new_share.clone());
-                new_share
-            }
-            Some(new_share) => new_share.clone(),
-        }
-    }
-
-    fn rewrite_stream_share(&mut self, share: &StreamShare) -> PlanRef {
-        // When we use the plan rewriter, we need to take care of the share operator,
-        // because our plan is a DAG rather than a tree.
-        match self.share_map.get(&share.id()) {
-            None => {
-                let new_inputs = share
-                    .inputs()
-                    .into_iter()
-                    .map(|input| self.rewrite(input))
-                    .collect_vec();
-                let new_share = share.clone_with_inputs(&new_inputs);
-                self.share_map.insert(share.id(), new_share.clone());
-                new_share
-            }
-            Some(new_share) => new_share.clone(),
-        }
+impl<C: ConventionMarker> PlanRewriter<C> for PlanCloner<C> {
+    fn rewrite_with_inputs(&mut self, plan: &PlanRef, inputs: Vec<PlanRef>) -> PlanRef {
+        plan.clone_with_inputs::<C>(&inputs)
     }
 }

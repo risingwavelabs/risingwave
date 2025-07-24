@@ -20,7 +20,7 @@ use risingwave_common::bail_not_implemented;
 use super::utils::{Distill, childless_record};
 use super::{
     ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
-    ToBatch, ToStream, generic,
+    ShareNode, ToBatch, ToStream, generic,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -94,8 +94,13 @@ impl PlanTreeNodeUnary for LogicalShare {
 
 impl_plan_tree_node_for_unary! {LogicalShare}
 
-impl LogicalShare {
-    pub fn replace_input(&self, plan: PlanRef) {
+impl ShareNode for LogicalShare {
+    fn new_share(core: generic::Share<PlanRef>) -> PlanRef {
+        let base = PlanBase::new_logical_with_core(&core);
+        LogicalShare { base, core }.into()
+    }
+
+    fn replace_input(&self, plan: PlanRef) {
         *self.core.input.borrow_mut() = plan;
     }
 }
@@ -139,9 +144,7 @@ impl ToStream for LogicalShare {
         match ctx.get_to_stream_result(self.id()) {
             None => {
                 let new_input = self.input().to_stream(ctx)?;
-                let core = generic::Share {
-                    input: RefCell::new(new_input),
-                };
+                let core = generic::Share::new(new_input);
                 let stream_share_ref: PlanRef = StreamShare::new(core).into();
                 ctx.add_to_stream_result(self.id(), stream_share_ref.clone());
                 Ok(stream_share_ref)

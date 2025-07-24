@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::fmt;
+use std::marker::PhantomData;
 
 use itertools::Itertools;
 
@@ -23,7 +24,7 @@ use super::ApplyResult;
 use crate::Explain;
 use crate::error::Result;
 use crate::optimizer::PlanRef;
-use crate::optimizer::plan_node::PlanTreeNode;
+use crate::optimizer::plan_node::ConventionMarker;
 use crate::optimizer::rule::BoxedRule;
 
 /// Traverse order of [`HeuristicOptimizer`]
@@ -35,18 +36,20 @@ pub enum ApplyOrder {
 // TODO: we should have a builder of HeuristicOptimizer here
 /// A rule-based heuristic optimizer, which traverses every plan nodes and tries to
 /// apply each rule on them.
-pub struct HeuristicOptimizer<'a> {
+pub struct HeuristicOptimizer<'a, C: ConventionMarker> {
     apply_order: &'a ApplyOrder,
     rules: &'a [BoxedRule],
     stats: Stats,
+    _phantom: PhantomData<C>,
 }
 
-impl<'a> HeuristicOptimizer<'a> {
+impl<'a, C: ConventionMarker> HeuristicOptimizer<'a, C> {
     pub fn new(apply_order: &'a ApplyOrder, rules: &'a [BoxedRule]) -> Self {
         Self {
             apply_order,
             rules,
             stats: Stats::new(),
+            _phantom: PhantomData,
         }
     }
 
@@ -76,7 +79,7 @@ impl<'a> HeuristicOptimizer<'a> {
             .try_collect()?;
 
         Ok(if pre_applied != self.stats.total_applied() {
-            plan.clone_with_inputs(&inputs)
+            plan.clone_with_inputs::<C>(&inputs)
         } else {
             plan
         })
