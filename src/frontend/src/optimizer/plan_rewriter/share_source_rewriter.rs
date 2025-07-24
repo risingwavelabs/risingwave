@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::catalog::SourceId;
 use crate::optimizer::plan_node::{Logical, LogicalShare, LogicalSource, PlanRef};
-use crate::optimizer::plan_visitor::{DefaultBehavior, DefaultValue};
+use crate::optimizer::plan_visitor::{DefaultBehavior, DefaultValue, LogicalPlanVisitor};
 use crate::optimizer::{PlanRewriter, PlanVisitor};
 
 #[derive(Debug, Clone, Default)]
@@ -85,7 +85,7 @@ impl PlanRewriter<Logical> for ShareSourceRewriter {
     }
 }
 
-impl PlanVisitor for SourceCounter {
+impl LogicalPlanVisitor for SourceCounter {
     type Result = ();
 
     type DefaultBehavior = impl DefaultBehavior<Self::Result>;

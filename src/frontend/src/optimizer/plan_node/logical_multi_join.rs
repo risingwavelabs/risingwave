@@ -133,10 +133,10 @@ impl LogicalMultiJoinBuilder {
         let left = join.left();
         let right = join.right();
 
-        if TemporalJoinValidator::exist_dangling_temporal_scan(left.clone()) {
+        if TemporalJoinValidator::exist_dangling_temporal_scan::<Logical>(left.clone()) {
             return Self::with_input(plan);
         }
-        if TemporalJoinValidator::exist_dangling_temporal_scan(right.clone()) {
+        if TemporalJoinValidator::exist_dangling_temporal_scan::<Logical>(right.clone()) {
             return Self::with_input(plan);
         }
 
