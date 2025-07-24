@@ -97,9 +97,15 @@ use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_s
 
 pub const ICEBERG_SINK: &str = "iceberg";
 pub const ICEBERG_COW_BRANCH: &str = "cow_ingestion";
+pub const ICEBERG_WRITE_MODE_MORE: &str = "more";
+pub const ICEBERG_WRITE_MODE_COW: &str = "cow";
 
 fn default_commit_retry_num() -> u32 {
     8
+}
+
+fn default_iceberg_write_mode() -> String {
+    ICEBERG_WRITE_MODE_MORE.to_owned()
 }
 
 #[serde_as]
@@ -162,6 +168,10 @@ pub struct IcebergConfig {
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     #[with_option(allow_alter_on_fly)]
     pub enable_snapshot_expiration: bool,
+
+    /// The iceberg write mode, can be `more` or `cow`.
+    #[serde(default = "default_iceberg_write_mode")]
+    pub write_mode: String, // accept "COW" or "MORE"
 }
 
 impl EnforceSecret for IcebergConfig {
@@ -1834,7 +1844,10 @@ impl IcebergSinkCommitter {
             let mut append_action = txn
                 .fast_append(Some(snapshot_id), None, vec![])
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?
-                .with_to_branch(self.get_branch());
+                .with_to_branch(commit_branch(
+                    self.config.r#type.as_str(),
+                    self.config.write_mode.as_str(),
+                ));
             append_action
                 .add_data_files(data_files.clone())
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
@@ -1893,22 +1906,6 @@ impl IcebergSinkCommitter {
             Ok(true)
         } else {
             Ok(false)
-        }
-    }
-
-    fn get_branch(&self) -> String {
-        match self.config.r#type.as_str() {
-            SINK_TYPE_APPEND_ONLY => ICEBERG_COW_BRANCH.to_owned(),
-
-            SINK_TYPE_UPSERT => {
-                if self.config.common.write_mode == "COW" {
-                    ICEBERG_COW_BRANCH.to_owned()
-                } else {
-                    MAIN_BRANCH.to_owned()
-                }
-            }
-
-            _ => unreachable!("Unsupported iceberg sink type: {}", self.config.r#type),
         }
     }
 }
@@ -2080,6 +2077,18 @@ pub fn parse_partition_by_exprs(
     Ok(partition_columns)
 }
 
+pub fn commit_branch(sink_type: &str, write_mode: &str) -> String {
+    if should_enable_iceberg_cow(sink_type, write_mode) {
+        ICEBERG_COW_BRANCH.to_owned()
+    } else {
+        MAIN_BRANCH.to_owned()
+    }
+}
+
+pub fn should_enable_iceberg_cow(sink_type: &str, write_mode: &str) -> bool {
+    sink_type == SINK_TYPE_UPSERT && write_mode == ICEBERG_WRITE_MODE_COW
+}
+
 #[cfg(test)]
 mod test {
     use std::collections::BTreeMap;
@@ -2090,7 +2099,7 @@ mod test {
 
     use crate::connector_common::IcebergCommon;
     use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
-    use crate::sink::iceberg::IcebergConfig;
+    use crate::sink::iceberg::{ICEBERG_WRITE_MODE_MORE, IcebergConfig};
 
     pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
 
@@ -2334,6 +2343,7 @@ mod test {
             enable_compaction: true,
             compaction_interval_sec: Some(DEFAULT_ICEBERG_COMPACTION_INTERVAL / 2),
             enable_snapshot_expiration: true,
+            write_mode: ICEBERG_WRITE_MODE_MORE.to_owned(),
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);

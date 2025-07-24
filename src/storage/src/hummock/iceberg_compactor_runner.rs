@@ -29,7 +29,9 @@ use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
-use risingwave_connector::sink::iceberg::IcebergConfig;
+use risingwave_connector::sink::iceberg::{
+    IcebergConfig, commit_branch, should_enable_iceberg_cow,
+};
 use risingwave_pb::iceberg_compaction::IcebergCompactionTask;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
@@ -77,9 +79,6 @@ pub struct IcebergCompactorRunnerConfig {
     pub max_record_batch_rows: usize,
     #[builder(default = "default_writer_properties()")]
     pub write_parquet_properties: WriterProperties,
-
-    #[builder(default = "MAIN_BRANCH.to_owned()")]
-    pub to_branch: String,
 }
 
 #[derive(Debug, Clone)]
@@ -326,7 +325,10 @@ impl IcebergCompactorRunner {
                 .with_executor_type(iceberg_compaction_core::executor::ExecutorType::DataFusion)
                 .with_registry(BERGLOOM_METRICS_REGISTRY.clone())
                 .with_retry_config(retry_config)
-                .with_to_branch(self.config.to_branch.clone())
+                .with_to_branch(commit_branch(
+                    self.iceberg_config.r#type.as_str(),
+                    self.iceberg_config.write_mode.as_str(),
+                ))
                 .build()
                 .await
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
@@ -357,15 +359,23 @@ impl IcebergCompactorRunner {
 
             let committed_table = table.unwrap();
 
-            if self.config.to_branch.as_str() != MAIN_BRANCH {
+            if should_enable_iceberg_cow(
+                self.iceberg_config.r#type.as_str(),
+                self.iceberg_config.write_mode.as_str(),
+            ) {
+                let ingestion_branch = commit_branch(
+                    self.iceberg_config.r#type.as_str(),
+                    self.iceberg_config.write_mode.as_str(),
+                );
+
                 // Overwrite Main branch
                 let consistency_params = CommitConsistencyParams {
                     starting_snapshot_id: committed_table
                         .metadata()
-                        .snapshot_for_ref(self.config.to_branch.as_str())
+                        .snapshot_for_ref(ingestion_branch.as_str())
                         .ok_or(HummockError::compaction_executor(anyhow::anyhow!(
-                            "Don't find current_snapshot for branch {}",
-                            self.config.to_branch
+                            "Don't find current_snapshot for ingestion_branch {}",
+                            ingestion_branch
                         )))?
                         .snapshot_id(),
                     use_starting_sequence_number: true,
@@ -467,7 +477,10 @@ impl IcebergCompactorRunner {
 
         let manifest_list = table
             .metadata()
-            .snapshot_for_ref(&self.config.to_branch)
+            .snapshot_for_ref(&commit_branch(
+                self.iceberg_config.r#type.as_str(),
+                self.iceberg_config.write_mode.as_str(),
+            ))
             .ok_or_else(|| HummockError::compaction_executor("Don't find current_snapshot"))?
             .load_manifest_list(table.file_io(), table.metadata())
             .await

@@ -43,10 +43,6 @@ use crate::deserialize_optional_bool_from_string;
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 
-fn default_iceberg_write_mode() -> String {
-    "MORE".to_string()
-}
-
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, WithOptions)]
 pub struct IcebergCommon {
@@ -141,9 +137,6 @@ pub struct IcebergCommon {
         deserialize_with = "deserialize_optional_bool_from_string"
     )]
     pub hosted_catalog: Option<bool>,
-
-    #[serde(rename = "write_mode", default = "default_iceberg_write_mode")]
-    pub write_mode: String, // accept "COW" or "MORE"
 }
 
 impl EnforceSecret for IcebergCommon {
