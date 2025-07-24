@@ -27,6 +27,7 @@ use risingwave_common::util::stream_graph_visitor::{
 };
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::allow_alter_on_fly_fields::check_sink_allow_alter_on_fly_fields;
+use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
@@ -40,7 +41,7 @@ use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::*;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::PbOptionalAssociatedSourceId;
-use risingwave_pb::catalog::{PbCreateType, PbSink, PbTable};
+use risingwave_pb::catalog::{PbConnection, PbCreateType, PbSink, PbTable};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{
@@ -2215,7 +2216,7 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let (connection, _obj) = Connection::find_by_id(connection_id)
+        let (connection_catalog, _obj) = Connection::find_by_id(connection_id)
             .find_also_related(Object)
             .one(&txn)
             .await?
@@ -2231,7 +2232,7 @@ impl CatalogController {
             .collect();
 
         // Map the connection type enum to the string name expected by the validation function
-        let connection_type_str = match connection.params.to_protobuf().connection_type() {
+        let connection_type_str = match connection_catalog.params.to_protobuf().connection_type() {
             risingwave_pb::catalog::connection_params::PbConnectionType::Kafka => "kafka",
             risingwave_pb::catalog::connection_params::PbConnectionType::Iceberg => "iceberg",
             risingwave_pb::catalog::connection_params::PbConnectionType::SchemaRegistry => {
@@ -2249,7 +2250,7 @@ impl CatalogController {
             connection_type_str, &prop_keys,
         )?;
 
-        let connection_pb = connection.params.to_protobuf();
+        let connection_pb = connection_catalog.params.to_protobuf();
         let mut options_with_secret = WithOptionsSecResolved::new(
             connection_pb.properties.into_iter().collect(),
             connection_pb.secret_refs.into_iter().collect(),
@@ -2271,15 +2272,37 @@ impl CatalogController {
         // Validate that dependent sources/sinks don't have conflicting properties
         self.validate_connection_property_conflicts(
             connection_id,
+            &connection_catalog,
             &alter_props_clone,
             &alter_secret_refs_clone,
             &txn,
         )
         .await?;
 
-        // Validate the new connection properties actually work
-        self.validate_connection_properties_work(connection_id, &options_with_secret, &txn)
-            .await?;
+        {
+            // emsamble connection and validate it
+            let conn_params_pb = risingwave_pb::catalog::ConnectionParams {
+                connection_type: connection_pb.connection_type,
+                properties: options_with_secret
+                    .as_plaintext()
+                    .clone()
+                    .into_iter()
+                    .collect(),
+                secret_refs: options_with_secret
+                    .as_secret()
+                    .clone()
+                    .into_iter()
+                    .collect(),
+            };
+            let connection = PbConnection {
+                id: connection_id as _,
+                info: Some(risingwave_pb::catalog::connection::Info::ConnectionParams(
+                    conn_params_pb,
+                )),
+                ..Default::default()
+            };
+            validate_connection(&connection).await?;
+        }
 
         // Update secret dependencies
         if !to_add_secret_dep.is_empty() {
@@ -2387,10 +2410,23 @@ impl CatalogController {
     async fn validate_connection_property_conflicts(
         &self,
         connection_id: ConnectionId,
+        connection_catalog: &connection::Model,
         alter_props: &BTreeMap<String, String>,
         alter_secret_refs: &BTreeMap<String, PbSecretRef>,
         txn: &DatabaseTransaction,
     ) -> MetaResult<()> {
+        // we have checked create source/sink creation on no collision in connection properties
+        // so we assume:
+        // if a property is set in connection, it will not be set by dependent objects
+        let connection_defined_keys = connection_catalog
+            .params
+            .to_protobuf()
+            .properties
+            .keys()
+            .chain(connection_catalog.params.to_protobuf().secret_refs.keys())
+            .cloned()
+            .collect::<HashSet<_>>();
+
         let property_keys: HashSet<String> = alter_props
             .keys()
             .chain(alter_secret_refs.keys())
@@ -2405,7 +2441,9 @@ impl CatalogController {
             .into_iter()
             .filter_map(|source| {
                 for prop_key in &property_keys {
-                    if source.with_properties.0.contains_key(prop_key) {
+                    if source.with_properties.0.contains_key(prop_key)
+                        && !connection_defined_keys.contains(prop_key)
+                    {
                         return Some((source.source_id, prop_key.clone()));
                     }
                 }
@@ -2432,7 +2470,9 @@ impl CatalogController {
             .into_iter()
             .filter_map(|sink| {
                 for prop_key in &property_keys {
-                    if sink.properties.0.contains_key(prop_key) {
+                    if sink.properties.0.contains_key(prop_key)
+                        && !connection_defined_keys.contains(prop_key)
+                    {
                         return Some((sink.sink_id, prop_key.clone()));
                     }
                 }
@@ -2450,54 +2490,6 @@ impl CatalogController {
                 conflicts.join(", ")
             )));
         }
-
-        Ok(())
-    }
-
-    /// Validate the new connection properties work by testing with a dependent source
-    async fn validate_connection_properties_work(
-        &self,
-        connection_id: ConnectionId,
-        options_with_secret: &WithOptionsSecResolved,
-        txn: &DatabaseTransaction,
-    ) -> MetaResult<()> {
-        // Find a dependent source to test with
-        let test_source = Source::find()
-            .filter(source::Column::ConnectionId.eq(connection_id))
-            .one(txn)
-            .await?;
-
-        if let Some(source) = test_source {
-            // Create a merged properties map for validation
-            let connection_props = options_with_secret.as_plaintext().clone();
-            let mut merged_props = source.with_properties.0.clone();
-
-            // Connection properties override source properties
-            merged_props.extend(connection_props);
-
-            // Add the connector type for validation
-            if let Some(_connector) = merged_props.get("connector") {
-                let merged_options = WithOptionsSecResolved::without_secrets(merged_props);
-
-                // Try to extract and validate connector properties
-                match ConnectorProperties::extract(merged_options, true) {
-                    Ok(_) => {
-                        tracing::debug!(
-                            "Connection property validation successful using source {}",
-                            source.source_id
-                        );
-                    }
-                    Err(e) => {
-                        return Err(MetaError::invalid_parameter(format!(
-                            "Invalid connection properties: {}",
-                            e
-                        )));
-                    }
-                }
-            }
-        }
-        // If no dependent sources found, we can't validate but that's okay
-        // The connection itself was already validated when created
 
         Ok(())
     }
