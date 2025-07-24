@@ -14,6 +14,7 @@
 
 mod sort;
 mod sort_buffer;
+mod gap_fill_ewoc;
 
 pub use sort::{SortExecutor, SortExecutorArgs};
 pub use sort_buffer::SortBuffer;
