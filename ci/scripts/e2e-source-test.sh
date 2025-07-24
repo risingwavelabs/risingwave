@@ -48,14 +48,8 @@ export VAULT_ADDR="http://vault-server:8200"
 export VAULT_TOKEN="root-token"
 ./ci/scripts/setup-vault.sh
 
-echo "Setup complete!"
-echo "Vault Root token: root-token"
-echo "Test AppRole - Role ID: $ROLE_ID"
-echo "Test AppRole - Secret ID: $SECRET_ID"
-
-# Store these values in environment variables for tests to use
-export VAULT_TEST_ROLE_ID="$ROLE_ID"
-export VAULT_TEST_SECRET_ID="$SECRET_ID"
+echo "--- Run Vault secret tests"
+risedev slt './e2e_test/ddl/vault_secret.slt'
 
 echo "--- e2e, inline test"
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_meta=info" \
@@ -73,9 +67,6 @@ echo "--- Run kafka sasl test done"
 
 risedev slt './e2e_test/source_inline/**/*.slt' -j4
 risedev slt './e2e_test/source_inline/**/*.slt.serial'
-
-echo "--- Run Vault secret tests"
-risedev slt './e2e_test/ddl/vault_secret.slt'
 
 if [ "$profile" == "ci-release" ]; then
     # NOTE(kwannoel): This test has an execution time in main-cron of about ~1 minute.
