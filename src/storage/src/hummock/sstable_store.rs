@@ -551,7 +551,14 @@ impl SstableStore {
             let range = sstable_info_ref.meta_offset as usize..;
             async move {
                 let now = Instant::now();
-                let buf = store.read(&meta_path, range).await?;
+                let buf = store.read(&meta_path, range.clone()).await?;
+                if buf.len() == 0 {
+                    tracing::error!(object_id, meta_path, range=?range.clone(), "Dad sst object.");
+                    return Err(anyhow::anyhow!(format!(
+                        "bad sst object {} {} {:?}",
+                        object_id, meta_path, range
+                    )));
+                }
                 let meta = SstableMeta::decode(&buf[..])?;
 
                 let sst = Sstable::new(object_id, meta);
