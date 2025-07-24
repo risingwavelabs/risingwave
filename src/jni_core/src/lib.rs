@@ -19,6 +19,7 @@
 
 pub mod jvm_runtime;
 mod macros;
+pub mod opendal_schema_history;
 mod tracing_slf4j;
 
 use std::backtrace::Backtrace;
