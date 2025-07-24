@@ -585,7 +585,7 @@ fn on_field<D: MaybeData>(
         },
         DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
         // Group D: unsupported
-        DataType::Int256 => {
+        DataType::Int256 | DataType::UInt256 => {
             return no_match_err();
         }
     };
