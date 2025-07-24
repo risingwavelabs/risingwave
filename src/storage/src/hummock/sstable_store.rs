@@ -544,7 +544,7 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
     ) -> impl Future<Output = HummockResult<TableHolder>> + Send + 'static + use<> {
         let object_id = sstable_info_ref.object_id;
-
+        let prefix = self.store.get_object_prefix(object_id.inner(), true);
         let entry = self.meta_cache.fetch(object_id, || {
             let store = self.store.clone();
             let meta_path = self.get_sst_data_path(object_id);
@@ -552,7 +552,15 @@ impl SstableStore {
             let range = sstable_info_ref.meta_offset as usize..;
             async move {
                 let now = Instant::now();
-                let buf = store.read(&meta_path, range).await?;
+                let buf = store.read(&meta_path, range.clone()).await?;
+                if buf.len() == 0 {
+                    let object_id = object_id.inner();
+                    tracing::error!(meta_path, prefix, object_id, range=?range.clone(), "Bad sst object.");
+                    return Err(anyhow::anyhow!(format!(
+                        "bad sst object {} {} {} {:?}",
+                        meta_path, prefix, object_id, range
+                    )));
+                }
                 let meta = SstableMeta::decode(&buf[..])?;
 
                 let sst = Sstable::new(object_id, meta);
