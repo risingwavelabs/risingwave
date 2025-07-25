@@ -48,11 +48,12 @@ use super::HummockResult;
 use crate::hummock::HummockError;
 use crate::monitor::CompactorMetrics;
 
-static BERGLOOM_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> = LazyLock::new(|| {
-    Box::new(PrometheusMetricsRegistry::new(
-        GLOBAL_METRICS_REGISTRY.clone(),
-    ))
-});
+static ICEBERG_COMPACTION_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> =
+    LazyLock::new(|| {
+        Box::new(PrometheusMetricsRegistry::new(
+            GLOBAL_METRICS_REGISTRY.clone(),
+        ))
+    });
 
 pub struct IcebergCompactorRunner {
     pub task_id: u64,
@@ -254,7 +255,7 @@ impl IcebergCompactorRunner {
             )
             .with_catalog_name(self.iceberg_config.catalog_name())
             .with_executor_type(iceberg_compaction_core::executor::ExecutorType::DataFusion)
-            .with_registry(BERGLOOM_METRICS_REGISTRY.clone())
+            .with_registry(ICEBERG_COMPACTION_METRICS_REGISTRY.clone())
             .with_retry_config(retry_config)
             .with_to_branch(branch)
             .build();
