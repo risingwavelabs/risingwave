@@ -152,16 +152,22 @@ pub(crate) fn hijack_merger_for_target_table(
     }
 
     let mut exprs = Vec::with_capacity(target_columns.len());
-    let sink_col_idx_by_name = sink_columns
+    let sink_idx_by_col_id = sink_columns
         .iter()
         .enumerate()
-        .map(|(idx, col)| (col.name(), idx))
+        .map(|(idx, col)| (col.column_id(), idx))
         .collect::<HashMap<_, _>>();
     let default_column_exprs = TableCatalog::default_column_exprs(target_columns);
     for (target_idx, target_col) in target_columns.iter().enumerate() {
-        if let Some(idx) = sink_col_idx_by_name.get(target_col.name())
-            && target_col.data_type() == sink_columns[*idx].data_type()
-        {
+        if let Some(idx) = sink_idx_by_col_id.get(&target_col.column_id()) {
+            assert_eq!(
+                target_col.data_type(),
+                sink_columns[*idx].data_type(),
+                "data type mismatch for column {}: {} vs {}",
+                target_col.name(),
+                target_col.data_type(),
+                sink_columns[*idx].data_type()
+            );
             // If the sink has the corresponding column name, use the sink's data.
             exprs.push(ExprImpl::InputRef(Box::new(InputRef {
                 data_type: target_col.data_type().clone(),
