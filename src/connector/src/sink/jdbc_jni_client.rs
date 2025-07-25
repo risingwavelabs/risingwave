@@ -63,7 +63,7 @@ pub fn build_alter_add_column_sql(
 ) -> String {
     let column_definitions: Vec<String> = columns
         .iter()
-        .map(|(name, typ)| format!("{} {}", name, typ))
+        .map(|(name, typ)| format!(r#""{}" {}"#, name, typ))
         .collect();
     let column_definitions_str = column_definitions.join(", ");
     format!(
