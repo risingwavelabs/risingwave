@@ -847,6 +847,24 @@ impl CatalogController {
         Ok(table_fragments)
     }
 
+    /// Returns pairs of (job id, actor ids), where actors belong to CDC table backfill fragment of the job.
+    pub async fn cdc_table_backfill_actor_ids(&self) -> MetaResult<HashMap<u32, HashSet<u32>>> {
+        let inner = self.inner.read().await;
+        let mut job_id_actor_ids = HashMap::default();
+        let stream_cdc_scan_flag = FragmentTypeFlag::StreamCdcScan as i32;
+        let fragment_type_mask = stream_cdc_scan_flag;
+        let fragment_actors: Vec<(fragment::Model, Vec<actor::Model>)> = FragmentModel::find()
+            .find_with_related(Actor)
+            .filter(fragment::Column::FragmentTypeMask.eq(fragment_type_mask))
+            .all(&inner.db)
+            .await?;
+        for (fragment, actors) in fragment_actors {
+            let e: &mut HashSet<u32> = job_id_actor_ids.entry(fragment.job_id as _).or_default();
+            e.extend(actors.iter().map(|a| a.actor_id as u32));
+        }
+        Ok(job_id_actor_ids)
+    }
+
     pub async fn upstream_fragments(
         &self,
         fragment_ids: impl Iterator<Item = crate::model::FragmentId>,
