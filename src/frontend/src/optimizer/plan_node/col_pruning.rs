@@ -15,8 +15,8 @@
 use std::collections::{HashMap, HashSet};
 
 use super::*;
-use crate::optimizer::PlanVisitor;
 use crate::optimizer::plan_visitor::ShareParentCounter;
+use crate::optimizer::{LogicalPlanRef as PlanRef, PlanVisitor};
 
 /// The trait for column pruning, only logical plan node will use it, though all plan node impl it.
 pub trait ColPrunable {
@@ -31,7 +31,7 @@ pub trait ColPrunable {
     /// When implementing this method for a node, it may require its children to produce additional
     /// columns besides `required_cols`. In this case, it may need to insert a
     /// [`LogicalProject`](super::LogicalProject) above to have a correct schema.
-    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> LogicalPlanRef;
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef;
 }
 
 #[derive(Debug, Clone)]
@@ -49,7 +49,7 @@ pub struct ColumnPruningContext {
     /// `share_cache` maps original share operator plan id to the new share operator and the column
     /// changed mapping which is actually the merged required columns calculated at the first
     /// round.
-    share_cache: HashMap<PlanNodeId, (LogicalPlanRef, Vec<usize>)>,
+    share_cache: HashMap<PlanNodeId, (PlanRef, Vec<usize>)>,
     /// `share_visited` is used to track whether the share operator is visited, because we need to
     /// recursively call the `prune_col` of the new share operator to trigger the replacement.
     /// It is only used at the second round of the column pruning.
@@ -57,7 +57,7 @@ pub struct ColumnPruningContext {
 }
 
 impl ColumnPruningContext {
-    pub fn new(root: LogicalPlanRef) -> Self {
+    pub fn new(root: PlanRef) -> Self {
         let mut share_parent_counter = ShareParentCounter::default();
         share_parent_counter.visit(root);
         Self {
@@ -91,7 +91,7 @@ impl ColumnPruningContext {
     pub fn add_share_cache(
         &mut self,
         plan_node_id: PlanNodeId,
-        new_share: LogicalPlanRef,
+        new_share: PlanRef,
         merged_required_columns: Vec<usize>,
     ) {
         self.share_cache
@@ -99,10 +99,7 @@ impl ColumnPruningContext {
             .unwrap();
     }
 
-    pub fn get_share_cache(
-        &self,
-        plan_node_id: PlanNodeId,
-    ) -> Option<(LogicalPlanRef, Vec<usize>)> {
+    pub fn get_share_cache(&self, plan_node_id: PlanNodeId) -> Option<(PlanRef, Vec<usize>)> {
         self.share_cache.get(&plan_node_id).cloned()
     }
 

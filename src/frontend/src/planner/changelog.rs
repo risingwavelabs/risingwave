@@ -14,10 +14,10 @@
 use crate::Planner;
 use crate::binder::Relation;
 use crate::error::Result;
-use crate::optimizer::plan_node::{LogicalChangeLog, LogicalPlanRef};
+use crate::optimizer::plan_node::{LogicalChangeLog, LogicalPlanRef as PlanRef};
 
 impl Planner {
-    pub(super) fn plan_changelog(&mut self, relation: Relation) -> Result<LogicalPlanRef> {
+    pub(super) fn plan_changelog(&mut self, relation: Relation) -> Result<PlanRef> {
         let root = self.plan_relation(relation)?;
         let plan = LogicalChangeLog::create(root);
         Ok(plan)

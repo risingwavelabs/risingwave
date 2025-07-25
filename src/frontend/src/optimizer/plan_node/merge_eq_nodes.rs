@@ -16,7 +16,9 @@ use std::collections::HashMap;
 use std::hash::Hash;
 
 use super::generic::GenericPlanRef;
-use super::{EndoPlan, LogicalPlanRef, LogicalShare, PlanNodeId, PlanTreeNodeUnary, VisitPlan};
+use super::{
+    EndoPlan, LogicalPlanRef as PlanRef, LogicalShare, PlanNodeId, PlanTreeNodeUnary, VisitPlan,
+};
 use crate::optimizer::plan_visitor;
 use crate::utils::{Endo, Visit};
 
@@ -24,16 +26,16 @@ pub trait Semantics<V: Hash + Eq> {
     fn semantics(&self) -> V;
 }
 
-impl Semantics<LogicalPlanRef> for LogicalPlanRef {
-    fn semantics(&self) -> LogicalPlanRef {
+impl Semantics<PlanRef> for PlanRef {
+    fn semantics(&self) -> PlanRef {
         self.clone()
     }
 }
 
-impl LogicalPlanRef {
-    pub fn common_subplan_sharing<V: Hash + Eq>(self) -> LogicalPlanRef
+impl PlanRef {
+    pub fn common_subplan_sharing<V: Hash + Eq>(self) -> PlanRef
     where
-        LogicalPlanRef: Semantics<V>,
+        PlanRef: Semantics<V>,
     {
         Merger::default().apply(self)
     }
@@ -51,11 +53,11 @@ impl<V: Hash + Eq> Default for Merger<V> {
     }
 }
 
-impl<V: Hash + Eq> Endo<LogicalPlanRef> for Merger<V>
+impl<V: Hash + Eq> Endo<PlanRef> for Merger<V>
 where
-    LogicalPlanRef: Semantics<V>,
+    PlanRef: Semantics<V>,
 {
-    fn apply(&mut self, t: LogicalPlanRef) -> LogicalPlanRef {
+    fn apply(&mut self, t: PlanRef) -> PlanRef {
         let semantics = t.semantics();
         let share = self.cache.get(&semantics).cloned().unwrap_or_else(|| {
             let share = LogicalShare::new(self.tree_apply(t));
@@ -65,8 +67,8 @@ where
     }
 }
 
-impl LogicalPlanRef {
-    pub fn prune_share(&self) -> LogicalPlanRef {
+impl PlanRef {
+    pub fn prune_share(&self) -> PlanRef {
         let mut counter = Counter::default();
         counter.visit(self);
         counter.to_pruner().apply(self.clone())
@@ -88,7 +90,7 @@ impl Counter {
 }
 
 impl VisitPlan for Counter {
-    fn visited<F>(&mut self, plan: &LogicalPlanRef, mut f: F)
+    fn visited<F>(&mut self, plan: &PlanRef, mut f: F)
     where
         F: FnMut(&mut Self),
     {
@@ -98,8 +100,8 @@ impl VisitPlan for Counter {
     }
 }
 
-impl Visit<LogicalPlanRef> for Counter {
-    fn visit(&mut self, t: &LogicalPlanRef) {
+impl Visit<PlanRef> for Counter {
+    fn visit(&mut self, t: &PlanRef) {
         if let Some(s) = t.as_logical_share() {
             self.counts
                 .entry(s.id())
@@ -112,13 +114,13 @@ impl Visit<LogicalPlanRef> for Counter {
 
 struct Pruner<'a> {
     counts: &'a HashMap<PlanNodeId, u64>,
-    cache: HashMap<PlanNodeId, LogicalPlanRef>,
+    cache: HashMap<PlanNodeId, PlanRef>,
 }
 
 impl EndoPlan for Pruner<'_> {
-    fn cached<F>(&mut self, plan: LogicalPlanRef, mut f: F) -> LogicalPlanRef
+    fn cached<F>(&mut self, plan: PlanRef, mut f: F) -> PlanRef
     where
-        F: FnMut(&mut Self) -> LogicalPlanRef,
+        F: FnMut(&mut Self) -> PlanRef,
     {
         self.cache.get(&plan.id()).cloned().unwrap_or_else(|| {
             let res = f(self);
@@ -127,8 +129,8 @@ impl EndoPlan for Pruner<'_> {
     }
 }
 
-impl Endo<LogicalPlanRef> for Pruner<'_> {
-    fn pre(&mut self, t: LogicalPlanRef) -> LogicalPlanRef {
+impl Endo<PlanRef> for Pruner<'_> {
+    fn pre(&mut self, t: PlanRef) -> PlanRef {
         let prunable = |s: &&LogicalShare| {
             // Prune if share node has only one parent
             // or it just shares a scan
@@ -143,7 +145,7 @@ impl Endo<LogicalPlanRef> for Pruner<'_> {
             .map_or(t.clone(), |s| self.pre(s.input()))
     }
 
-    fn apply(&mut self, t: LogicalPlanRef) -> LogicalPlanRef {
+    fn apply(&mut self, t: PlanRef) -> PlanRef {
         self.dag_apply(t)
     }
 }

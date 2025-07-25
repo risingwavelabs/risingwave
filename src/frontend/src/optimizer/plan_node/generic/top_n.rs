@@ -19,9 +19,10 @@ use risingwave_common::catalog::{FieldDisplay, Schema};
 use risingwave_common::util::sort_util::OrderType;
 
 use super::super::utils::TableCatalogBuilder;
-use super::{DistillUnit, GenericPlanNode, GenericPlanRef, stream};
+use super::{DistillUnit, GenericPlanNode, GenericPlanRef, PhysicalPlanRef};
 use crate::TableCatalog;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::StreamPlanRef;
 use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::{FunctionalDependencySet, Order, OrderDisplay};
 
@@ -35,7 +36,7 @@ pub struct TopN<PlanRef> {
     pub group_key: Vec<usize>,
 }
 
-impl<PlanRef: stream::StreamPlanExt> TopN<PlanRef> {
+impl TopN<StreamPlanRef> {
     /// Infers the state table catalog for [`super::super::StreamTopN`] and
     /// [`super::super::StreamGroupTopN`].
     pub fn infer_internal_table_catalog(

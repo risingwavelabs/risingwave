@@ -22,7 +22,7 @@ use super::{EqJoinPredicate, GenericPlanNode, GenericPlanRef};
 use crate::TableCatalog;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::plan_node::stream;
+use crate::optimizer::plan_node::StreamPlanRef;
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
@@ -95,10 +95,10 @@ impl<PlanRef: GenericPlanRef, RightPlanRef: GenericPlanRef> Join<PlanRef, RightP
     }
 }
 
-impl<I: stream::StreamPlanExt> Join<I> {
+impl Join<StreamPlanRef> {
     /// Return stream hash join internal table catalog and degree table catalog.
     pub fn infer_internal_and_degree_table_catalog(
-        input: I,
+        input: StreamPlanRef,
         join_key_indices: Vec<usize>,
         dk_indices_in_jk: Vec<usize>,
     ) -> (TableCatalog, TableCatalog, Vec<usize>) {

@@ -21,7 +21,9 @@ use crate::binder::{BoundUpdate, UpdateProject};
 use crate::error::Result;
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{LogicalPlanRef, LogicalProject, LogicalUpdate, generic};
+use crate::optimizer::plan_node::{
+    LogicalPlanRef as PlanRef, LogicalProject, LogicalUpdate, generic,
+};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{LogicalPlanRoot, PlanRoot};
 
@@ -38,7 +40,7 @@ impl Planner {
         let old_schema_len = input.schema().len();
 
         // Extend table scan with updated columns.
-        let with_new: LogicalPlanRef = {
+        let with_new: PlanRef = {
             let mut plan = input;
 
             let mut exprs: Vec<ExprImpl> = plan
@@ -103,7 +105,7 @@ impl Planner {
             news.push(new);
         }
 
-        let mut plan = LogicalUpdate::from(generic::Update::new(
+        let mut plan: PlanRef = LogicalUpdate::from(generic::Update::new(
             with_new,
             update.table_name.clone(),
             update.table_id,

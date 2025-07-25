@@ -19,6 +19,7 @@ use risingwave_common::types::DataType;
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
 use crate::expr::{Expr, ExprDisplay, ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::BatchPlanRef;
 use crate::optimizer::plan_node::batch::BatchPlanExt;
 use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::{FunctionalDependencySet, Order};
@@ -142,7 +143,7 @@ impl<PlanRef: GenericPlanRef> ProjectSet<PlanRef> {
     }
 }
 
-impl<PlanRef: BatchPlanExt> ProjectSet<PlanRef> {
+impl ProjectSet<BatchPlanRef> {
     /// Map the order of the input to use the updated indices
     pub fn get_out_column_index_order(&self) -> Order {
         self.i2o_col_mapping()

@@ -28,12 +28,13 @@ use risingwave_pb::expr::{PbAggCall, PbConstant};
 use risingwave_pb::stream_plan::{AggCallState as PbAggCallState, agg_call_state};
 
 use super::super::utils::TableCatalogBuilder;
-use super::{GenericPlanNode, GenericPlanRef, impl_distill_unit_from_fields, stream};
+use super::{GenericPlanNode, GenericPlanRef, PhysicalPlanRef, impl_distill_unit_from_fields};
 use crate::TableCatalog;
 use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprRewriter, ExprVisitor, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::batch::BatchPlanExt;
+use crate::optimizer::plan_node::{BatchPlanRef, StreamPlanExt, StreamPlanRef};
 use crate::optimizer::property::{
     Distribution, FunctionalDependencySet, RequiredDist, WatermarkColumns,
 };
@@ -211,7 +212,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     }
 }
 
-impl<PlanRef: BatchPlanExt> Agg<PlanRef> {
+impl Agg<BatchPlanRef> {
     // Check if the input is already sorted on group keys.
     pub(crate) fn input_provides_order_on_group_keys(&self) -> bool {
         let mut input_order_prefix = IndexSet::empty();
@@ -317,10 +318,10 @@ pub struct MaterializedInputState {
     pub order_columns: Vec<ColumnOrder>,
 }
 
-impl<PlanRef: stream::StreamPlanExt> Agg<PlanRef> {
+impl Agg<StreamPlanRef> {
     pub fn infer_tables(
         &self,
-        me: impl stream::StreamPlanExt,
+        me: impl StreamPlanExt,
         vnode_col_idx: Option<usize>,
         window_col_idx: Option<usize>,
     ) -> (
@@ -392,7 +393,7 @@ impl<PlanRef: stream::StreamPlanExt> Agg<PlanRef> {
     /// Infer `AggCallState`s for streaming agg.
     pub fn infer_stream_agg_state(
         &self,
-        me: impl stream::StreamPlanExt,
+        me: impl StreamPlanExt,
         vnode_col_idx: Option<usize>,
         window_col_idx: Option<usize>,
     ) -> Vec<AggCallState> {

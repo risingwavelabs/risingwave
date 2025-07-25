@@ -14,11 +14,11 @@
 
 use crate::binder::BoundValues;
 use crate::error::Result;
-use crate::optimizer::plan_node::{LogicalPlanRef, LogicalValues};
+use crate::optimizer::plan_node::{LogicalPlanRef as PlanRef, LogicalValues};
 use crate::planner::Planner;
 
 impl Planner {
-    pub(super) fn plan_values(&mut self, values: BoundValues) -> Result<LogicalPlanRef> {
+    pub(super) fn plan_values(&mut self, values: BoundValues) -> Result<PlanRef> {
         Ok(LogicalValues::create(
             values.rows,
             values.schema,

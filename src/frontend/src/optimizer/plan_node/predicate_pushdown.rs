@@ -15,8 +15,8 @@
 use std::collections::HashMap;
 
 use super::*;
-use crate::optimizer::PlanVisitor;
 use crate::optimizer::plan_visitor::ShareParentCounter;
+use crate::optimizer::{LogicalPlanRef as PlanRef, PlanVisitor};
 
 /// The trait for predicate pushdown, only logical plan node will use it, though all plan node impl
 /// it.
@@ -40,7 +40,7 @@ pub trait PredicatePushdown {
         &self,
         predicate: Condition,
         ctx: &mut PredicatePushdownContext,
-    ) -> LogicalPlanRef;
+    ) -> PlanRef;
 }
 
 #[inline]
@@ -49,7 +49,7 @@ pub fn gen_filter_and_pushdown<T: PlanTreeNodeUnary<Logical> + LogicalPlanNode>(
     filter_predicate: Condition,
     pushed_predicate: Condition,
     ctx: &mut PredicatePushdownContext,
-) -> LogicalPlanRef {
+) -> PlanRef {
     let new_input = node.input().predicate_pushdown(pushed_predicate, ctx);
     let new_node = node.clone_with_input(new_input);
     LogicalFilter::create(new_node.into(), filter_predicate)
@@ -62,7 +62,7 @@ pub struct PredicatePushdownContext {
 }
 
 impl PredicatePushdownContext {
-    pub fn new(root: LogicalPlanRef) -> Self {
+    pub fn new(root: PlanRef) -> Self {
         let mut share_parent_counter = ShareParentCounter::default();
         share_parent_counter.visit(root);
         Self {

@@ -50,13 +50,13 @@ impl<PlanRef> CteRef<PlanRef> {
     }
 }
 
-impl<PlanRef: GenericPlanRef> CteRef<PlanRef> {
+impl CteRef<LogicalPlanRef> {
     pub fn get_cte_ref(&self) -> Option<LogicalPlanRef> {
         self.ctx().get_rcte_cache_plan(&self.share_id)
     }
 }
 
-impl<PlanRef: GenericPlanRef> GenericPlanNode for CteRef<PlanRef> {
+impl GenericPlanNode for CteRef<LogicalPlanRef> {
     fn schema(&self) -> Schema {
         if let Some(plan_ref) = self.get_cte_ref() {
             plan_ref.schema().clone()

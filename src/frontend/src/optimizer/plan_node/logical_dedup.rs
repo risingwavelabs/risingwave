@@ -20,13 +20,12 @@ use super::generic::{GenericPlanRef, TopNLimit};
 use super::utils::impl_distill_by_unit;
 use super::{
     BatchGroupTopN, BatchPlanRef, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
-    LogicalPlanRef, LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
+    LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
     PredicatePushdownContext, RewriteStreamContext, StreamDedup, StreamGroupTopN, ToBatch,
     ToStream, ToStreamContext, gen_filter_and_pushdown, generic,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::plan_node_meta::AnyPlanNodeMeta;
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::utils::Condition;
 
@@ -35,11 +34,11 @@ use crate::utils::Condition;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalDedup {
     pub base: PlanBase<Logical>,
-    core: generic::Dedup<LogicalPlanRef>,
+    core: generic::Dedup<PlanRef>,
 }
 
 impl LogicalDedup {
-    pub fn new(input: LogicalPlanRef, dedup_cols: Vec<usize>) -> Self {
+    pub fn new(input: PlanRef, dedup_cols: Vec<usize>) -> Self {
         let core = generic::Dedup::new(input, dedup_cols);
         let base = PlanBase::new_logical_with_core(&core);
         LogicalDedup { base, core }
@@ -51,17 +50,17 @@ impl LogicalDedup {
 }
 
 impl PlanTreeNodeUnary<Logical> for LogicalDedup {
-    fn input(&self) -> LogicalPlanRef {
+    fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
 
-    fn clone_with_input(&self, input: LogicalPlanRef) -> Self {
+    fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(input, self.dedup_cols().to_vec())
     }
 
     fn rewrite_with_input(
         &self,
-        input: LogicalPlanRef,
+        input: PlanRef,
         input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
         (
@@ -84,7 +83,7 @@ impl PredicatePushdown for LogicalDedup {
         &self,
         predicate: Condition,
         ctx: &mut PredicatePushdownContext,
-    ) -> LogicalPlanRef {
+    ) -> PlanRef {
         gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx)
     }
 }
@@ -93,7 +92,7 @@ impl ToStream for LogicalDedup {
     fn logical_rewrite_for_stream(
         &self,
         ctx: &mut RewriteStreamContext,
-    ) -> Result<(LogicalPlanRef, ColIndexMapping)> {
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (logical, out_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((logical.into(), out_col_change))
@@ -145,11 +144,10 @@ impl ExprRewritable<Logical> for LogicalDedup {}
 impl ExprVisitable for LogicalDedup {}
 
 impl ColPrunable for LogicalDedup {
-    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> LogicalPlanRef {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let input_required_bitset = FixedBitSet::from_iter(required_cols.iter().copied());
         let dedup_required_bitset = {
-            let mut dedup_required_bitset =
-                FixedBitSet::with_capacity(self.input().plan_base().schema().len());
+            let mut dedup_required_bitset = FixedBitSet::with_capacity(self.input().schema().len());
             self.dedup_cols()
                 .iter()
                 .for_each(|idx| dedup_required_bitset.insert(*idx));
@@ -162,7 +160,7 @@ impl ColPrunable for LogicalDedup {
         };
         let mapping = ColIndexMapping::with_remaining_columns(
             &input_required_cols,
-            self.input().plan_base().schema().len(),
+            self.input().schema().len(),
         );
 
         let new_input = self.input().prune_col(&input_required_cols, ctx);
@@ -180,7 +178,7 @@ impl ColPrunable for LogicalDedup {
                 .iter()
                 .map(|&idx| mapping.map(idx))
                 .collect_vec();
-            let src_size = logical_dedup.plan_base().schema().len();
+            let src_size = logical_dedup.schema().len();
             LogicalProject::with_mapping(
                 logical_dedup,
                 ColIndexMapping::with_remaining_columns(&output_required_cols, src_size),

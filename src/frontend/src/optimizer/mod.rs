@@ -18,7 +18,7 @@ use std::sync::Arc;
 pub mod plan_node;
 
 use plan_node::StreamFilter;
-pub use plan_node::{Explain, PlanRef};
+pub use plan_node::{Explain, LogicalPlanRef, PlanRef};
 
 pub mod property;
 
@@ -78,9 +78,8 @@ use crate::expr::TimestamptzExprFinder;
 use crate::handler::create_table::{CreateTableInfo, CreateTableProps};
 use crate::optimizer::plan_node::generic::{GenericPlanRef, SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
-    Batch, BatchExchange, BatchPlanRef, ConventionMarker, LogicalPlanRef, PlanNodeType,
-    PlanTreeNode, Stream, StreamExchange, StreamPlanRef, StreamUnion, ToStream,
-    VisitExprsRecursive,
+    Batch, BatchExchange, BatchPlanRef, ConventionMarker, PlanNodeType, PlanTreeNode, Stream,
+    StreamExchange, StreamPlanRef, StreamUnion, ToStream, VisitExprsRecursive,
 };
 use crate::optimizer::plan_visitor::{RwTimestampValidator, TemporalJoinValidator};
 use crate::optimizer::property::Distribution;

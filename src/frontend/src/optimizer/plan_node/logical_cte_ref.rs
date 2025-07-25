@@ -18,9 +18,10 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use super::expr_visitable::ExprVisitable;
 use super::utils::impl_distill_by_unit;
 use super::{
-    BatchPlanRef, ColPrunable, ColumnPruningContext, ExprRewritable, Logical, LogicalPlanRef,
-    LogicalProject, PlanBase, PredicatePushdown, PredicatePushdownContext, RewriteStreamContext,
-    StreamPlanRef, ToBatch, ToStream, ToStreamContext, generic,
+    BatchPlanRef, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
+    LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PredicatePushdown,
+    PredicatePushdownContext, RewriteStreamContext, StreamPlanRef, ToBatch, ToStream,
+    ToStreamContext, generic,
 };
 use crate::binder::ShareId;
 use crate::error::Result;
@@ -29,17 +30,17 @@ use crate::utils::Condition;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalCteRef {
     pub base: PlanBase<Logical>,
-    core: generic::CteRef<LogicalPlanRef>,
+    core: generic::CteRef<PlanRef>,
 }
 
 impl LogicalCteRef {
-    pub fn new(share_id: ShareId, base_plan: LogicalPlanRef) -> Self {
+    pub fn new(share_id: ShareId, base_plan: PlanRef) -> Self {
         let core = generic::CteRef::new(share_id, base_plan);
         let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
     }
 
-    pub fn create(share_id: ShareId, base_plan: LogicalPlanRef) -> LogicalPlanRef {
+    pub fn create(share_id: ShareId, base_plan: PlanRef) -> PlanRef {
         Self::new(share_id, base_plan).into()
     }
 }
@@ -53,11 +54,7 @@ impl ExprRewritable<Logical> for LogicalCteRef {}
 impl ExprVisitable for LogicalCteRef {}
 
 impl ColPrunable for LogicalCteRef {
-    fn prune_col(
-        &self,
-        required_cols: &[usize],
-        _ctx: &mut ColumnPruningContext,
-    ) -> LogicalPlanRef {
+    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         LogicalProject::with_out_col_idx(self.clone().into(), required_cols.iter().copied()).into()
     }
 }
@@ -67,7 +64,7 @@ impl PredicatePushdown for LogicalCteRef {
         &self,
         _predicate: Condition,
         _ctx: &mut PredicatePushdownContext,
-    ) -> LogicalPlanRef {
+    ) -> PlanRef {
         self.clone().into()
     }
 }
@@ -92,7 +89,7 @@ impl ToStream for LogicalCteRef {
     fn logical_rewrite_for_stream(
         &self,
         _ctx: &mut RewriteStreamContext,
-    ) -> Result<(LogicalPlanRef, ColIndexMapping)> {
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         bail_not_implemented!(
             issue = 15135,
             "recursive CTE not supported for logical_rewrite_for_stream of LogicalCteRef"
