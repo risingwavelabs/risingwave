@@ -128,8 +128,11 @@ impl ReplaceStreamJobPlan {
     fn fragment_changes(&self) -> HashMap<FragmentId, CommandFragmentChanges> {
         let mut fragment_changes = HashMap::new();
         for (fragment_id, new_fragment) in self.new_fragments.new_fragment_info() {
-            let fragment_change =
-                CommandFragmentChanges::NewFragment(self.streaming_job.id().into(), new_fragment);
+            let fragment_change = CommandFragmentChanges::NewFragment {
+                job_id: self.streaming_job.id().into(),
+                info: new_fragment,
+                is_existing: false,
+            };
             fragment_changes
                 .try_insert(fragment_id, fragment_change)
                 .expect("non-duplicate");
@@ -149,10 +152,11 @@ impl ReplaceStreamJobPlan {
         }
         if let Some(sinks) = &self.auto_refresh_schema_sinks {
             for sink in sinks {
-                let fragment_change = CommandFragmentChanges::NewFragment(
-                    TableId::new(sink.original_sink.id as _),
-                    sink.new_fragment_info(),
-                );
+                let fragment_change = CommandFragmentChanges::NewFragment {
+                    job_id: TableId::new(sink.original_sink.id as _),
+                    info: sink.new_fragment_info(),
+                    is_existing: false,
+                };
                 fragment_changes
                     .try_insert(sink.new_fragment.fragment_id, fragment_change)
                     .expect("non-duplicate");
@@ -448,10 +452,11 @@ impl Command {
                     .map(|(fragment_id, fragment_info)| {
                         (
                             fragment_id,
-                            CommandFragmentChanges::NewFragment(
-                                info.streaming_job.id().into(),
-                                fragment_info,
-                            ),
+                            CommandFragmentChanges::NewFragment {
+                                job_id: info.streaming_job.id().into(),
+                                info: fragment_info,
+                                is_existing: false,
+                            },
                         )
                     })
                     .collect();

@@ -586,11 +586,6 @@ pub fn rewrite_refresh_schema_sink_fragment(
         })
         .collect();
     merge.upstream_fragment_id = upstream_table_fragment_id;
-    merge.fields.extend(
-        newly_added_columns.iter().map(|col| {
-            Field::new(col.column_desc.name.clone(), col.data_type().clone()).to_prost()
-        }),
-    );
     Ok((new_sink_fragment, new_sink_columns, new_log_store_table))
 }
 

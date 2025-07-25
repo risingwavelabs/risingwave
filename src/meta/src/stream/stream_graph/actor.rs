@@ -106,12 +106,10 @@ impl FragmentActorBuilder {
 
                 Ok(StreamNode {
                     node_body: Some(NodeBody::Merge(Box::new({
-                        #[expect(deprecated)]
                         MergeNode {
-                            upstream_actor_id: vec![],
                             upstream_fragment_id,
                             upstream_dispatcher_type: exchange.get_strategy()?.r#type,
-                            fields: stream_node.get_fields().clone(),
+                            ..Default::default()
                         }
                     }))),
                     identity: "MergeExecutor".to_owned(),
@@ -163,12 +161,10 @@ impl FragmentActorBuilder {
                     // Fill the merge node body with correct upstream info.
                     StreamNode {
                         node_body: Some(NodeBody::Merge(Box::new({
-                            #[expect(deprecated)]
                             MergeNode {
-                                upstream_actor_id: vec![],
                                 upstream_fragment_id,
                                 upstream_dispatcher_type,
-                                fields: merge_node.fields.clone(),
+                                ..Default::default()
                             }
                         }))),
                         ..merge_node.clone()
@@ -219,12 +215,10 @@ impl FragmentActorBuilder {
                     // Fill the merge node body with correct upstream info.
                     StreamNode {
                         node_body: Some(NodeBody::Merge(Box::new({
-                            #[expect(deprecated)]
                             MergeNode {
-                                upstream_actor_id: vec![],
                                 upstream_fragment_id,
                                 upstream_dispatcher_type: DispatcherType::NoShuffle as _,
-                                fields: merge_node.fields.clone(),
+                                ..Default::default()
                             }
                         }))),
                         ..merge_node.clone()
