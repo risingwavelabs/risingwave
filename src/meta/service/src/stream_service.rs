@@ -26,7 +26,9 @@ use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::{SourceManagerRunningInfo, ThrottleConfig};
 use risingwave_meta::{MetaError, model};
-use risingwave_meta_model::{FragmentId, ObjectId, SinkId, SourceId, StreamingParallelism};
+use risingwave_meta_model::{
+    ConnectionId, FragmentId, ObjectId, SinkId, SourceId, StreamingParallelism,
+};
 use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
@@ -565,18 +567,76 @@ impl StreamManagerService for StreamServiceImpl {
                     .collect()
             }
             AlterConnectorPropsObject::Connection => {
-                todo!()
+                // Find all sources and sinks that depend on this connection
+                let dependent_sources = self
+                    .metadata_manager
+                    .catalog_controller
+                    .find_sources_by_connection_id(request.object_id as ConnectionId)
+                    .await?;
+
+                let dependent_sinks = self
+                    .metadata_manager
+                    .catalog_controller
+                    .find_sinks_by_connection_id(request.object_id as ConnectionId)
+                    .await?;
+
+                let options_with_secret = self
+                    .metadata_manager
+                    .catalog_controller
+                    .update_connection_props_by_connection_id(
+                        request.object_id as ConnectionId,
+                        request.changed_props.clone().into_iter().collect(),
+                        request.changed_secret_refs.clone().into_iter().collect(),
+                    )
+                    .await?;
+
+                let (options, secret_refs) = options_with_secret.into_parts();
+                let new_props_plaintext = secret_manager
+                    .fill_secrets(options, secret_refs)
+                    .map_err(MetaError::from)?
+                    .into_iter()
+                    .collect::<HashMap<String, String>>();
+
+                // Prepare mutation for all dependent sources and sinks
+                let mut dependent_mutation = HashMap::default();
+                for source_id in dependent_sources {
+                    dependent_mutation.insert(source_id as u32, new_props_plaintext.clone());
+                }
+                for sink_id in dependent_sinks {
+                    dependent_mutation.insert(sink_id as u32, new_props_plaintext.clone());
+                }
+
+                // Broadcast changes to dependent sources and sinks if any exist
+                if !dependent_mutation.is_empty() {
+                    tracing::info!(
+                        "broadcasting connection {} property changes to {} dependent sources/sinks",
+                        request.object_id,
+                        dependent_mutation.len()
+                    );
+                    let _dependent_version = self
+                        .barrier_scheduler
+                        .run_command(
+                            database_id,
+                            Command::ConnectorPropsChange(dependent_mutation),
+                        )
+                        .await?;
+                }
+
+                new_props_plaintext
             }
             AlterConnectorPropsObject::Unspecified => unreachable!(),
         };
 
-        let mut mutation = HashMap::default();
-        mutation.insert(request.object_id, new_props_plaintext);
+        // For sources and sinks, broadcast the change to the object itself
+        if request.object_type() != AlterConnectorPropsObject::Connection {
+            let mut mutation = HashMap::default();
+            mutation.insert(request.object_id, new_props_plaintext);
 
-        let _i = self
-            .barrier_scheduler
-            .run_command(database_id, Command::ConnectorPropsChange(mutation))
-            .await?;
+            let _i = self
+                .barrier_scheduler
+                .run_command(database_id, Command::ConnectorPropsChange(mutation))
+                .await?;
+        }
 
         Ok(Response::new(AlterConnectorPropsResponse {}))
     }
