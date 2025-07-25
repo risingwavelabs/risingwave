@@ -19,7 +19,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
 use bytes::BytesMut;
-use chrono::format;
 use opendal::Operator;
 use phf::{Set, phf_set};
 use risingwave_common::array::{Op, StreamChunk};
@@ -410,16 +409,19 @@ pub struct SnowflakeSinkWriter {
     augmented_row: AugmentedRow,
     opendal_writer: Option<opendal::Writer>,
     executor_id: u64,
+    is_append_only: bool,
 }
 async fn build_opendal_writer(
     config: &SnowflakeConfig,
     executor_id: u64,
     operator: &Operator,
+    table_name: &str,
 ) -> Result<opendal::Writer> {
     let mut base_path = config.s3_inner.common.path.clone().unwrap_or("".to_owned());
     if !base_path.ends_with('/') {
         base_path.push('/');
     }
+    base_path.push_str(&format!("{}/", table_name));
     let create_time = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("Time went backwards");
@@ -447,6 +449,7 @@ impl SnowflakeSinkWriter {
             opendal_writer: None,
             executor_id,
             augmented_row: AugmentedRow::new(0, is_append_only, schema),
+            is_append_only,
         })
     }
 }
@@ -462,8 +465,24 @@ impl SinkWriter for SnowflakeSinkWriter {
 
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         if self.opendal_writer.is_none() {
-            let opendal_writer =
-                build_opendal_writer(&self.config, self.executor_id, &self.s3_operator).await?;
+            let table_name = if self.is_append_only {
+                self.config
+                    .snowflake_target_table_name
+                    .clone()
+                    .unwrap_or_default()
+            } else {
+                self.config
+                    .snowflake_cdc_table_name
+                    .clone()
+                    .unwrap_or_default()
+            };
+            let opendal_writer = build_opendal_writer(
+                &self.config,
+                self.executor_id,
+                &self.s3_operator,
+                &table_name,
+            )
+            .await?;
             self.opendal_writer = Some(opendal_writer);
         }
         let mut chunk_buf = BytesMut::new();
@@ -554,7 +573,7 @@ impl SinkCommitCoordinator for SnowflakeSinkCommitter {
         _metadata: Vec<SinkMetadata>,
         add_columns: Option<Vec<Field>>,
     ) -> Result<()> {
-        let mut client = self.client.as_mut().ok_or_else(|| {
+        let client = self.client.as_mut().ok_or_else(|| {
             SinkError::Config(anyhow!("Snowflake sink committer is not initialized."))
         })?;
         client.execute_flush_pipe()?;
@@ -605,7 +624,7 @@ impl SnowflakeJniClient {
                 columns,
             );
             self.jdbc_client
-                .execute_sql_sync(&alter_add_column_cdc_table_sql)?;
+                .execute_sql_sync(&vec![alter_add_column_cdc_table_sql])?;
         }
 
         let alter_add_column_target_table_sql = build_alter_add_column_sql(
@@ -615,7 +634,7 @@ impl SnowflakeJniClient {
             columns,
         );
         self.jdbc_client
-            .execute_sql_sync(&alter_add_column_target_table_sql)?;
+            .execute_sql_sync(&vec![alter_add_column_target_table_sql])?;
 
         self.execute_create_merge_into_task()?;
         Ok(())
@@ -625,8 +644,8 @@ impl SnowflakeJniClient {
         if self.snowflake_task_context.task_name.is_some() {
             let create_task_sql = build_create_merge_into_task_sql(&self.snowflake_task_context);
             let start_task_sql = build_start_task_sql(&self.snowflake_task_context);
-            self.jdbc_client.execute_sql_sync(&create_task_sql)?;
-            self.jdbc_client.execute_sql_sync(&start_task_sql)?;
+            self.jdbc_client.execute_sql_sync(&vec![create_task_sql])?;
+            self.jdbc_client.execute_sql_sync(&vec![start_task_sql])?;
         }
         Ok(())
     }
@@ -634,7 +653,7 @@ impl SnowflakeJniClient {
     pub fn execute_drop_task(&self) -> Result<()> {
         if self.snowflake_task_context.task_name.is_some() {
             let sql = build_drop_task_sql(&self.snowflake_task_context);
-            if let Err(e) = self.jdbc_client.execute_sql_sync(&sql) {
+            if let Err(e) = self.jdbc_client.execute_sql_sync(&vec![sql]) {
                 tracing::error!(
                     "Failed to drop Snowflake sink task {:?}: {:?}",
                     self.snowflake_task_context.task_name,
@@ -660,7 +679,7 @@ impl SnowflakeJniClient {
             false,
         )?;
         self.jdbc_client
-            .execute_sql_sync(&create_target_table_sql)?;
+            .execute_sql_sync(&vec![create_target_table_sql])?;
         if let Some(cdc_table_name) = &self.snowflake_task_context.cdc_table_name {
             let create_cdc_table_sql = build_create_table_sql(
                 cdc_table_name,
@@ -669,7 +688,8 @@ impl SnowflakeJniClient {
                 &self.snowflake_task_context.schema,
                 true,
             )?;
-            self.jdbc_client.execute_sql_sync(&create_cdc_table_sql)?;
+            self.jdbc_client
+                .execute_sql_sync(&vec![create_cdc_table_sql])?;
         }
         Ok(())
     }
@@ -688,7 +708,7 @@ impl SnowflakeJniClient {
             &self.snowflake_task_context.stage,
             &self.snowflake_task_context.pipe_name,
         );
-        self.jdbc_client.execute_sql_sync(&create_pipe_sql)?;
+        self.jdbc_client.execute_sql_sync(&vec![create_pipe_sql])?;
         Ok(())
     }
 
@@ -698,7 +718,11 @@ impl SnowflakeJniClient {
             &self.snowflake_task_context.schema_name,
             &self.snowflake_task_context.pipe_name,
         );
-        if self.jdbc_client.execute_sql_sync(&drop_pipe_sql).is_err() {
+        if self
+            .jdbc_client
+            .execute_sql_sync(&vec![drop_pipe_sql])
+            .is_err()
+        {
             tracing::warn!(
                 "Failed to drop Snowflake sink pipe {:?}",
                 self.snowflake_task_context.pipe_name
@@ -718,7 +742,7 @@ impl SnowflakeJniClient {
             &self.snowflake_task_context.schema_name,
             &self.snowflake_task_context.pipe_name,
         );
-        self.jdbc_client.execute_sql_sync(&flush_pipe_sql)?;
+        self.jdbc_client.execute_sql_sync(&vec![flush_pipe_sql])?;
         Ok(())
     }
 }
@@ -752,20 +776,20 @@ fn build_create_table_sql(
 
 fn convert_snowflake_data_type(data_type: &DataType) -> Result<String> {
     let data_type = match data_type {
-        DataType::Int16 => "SMALLINT".to_string(),
-        DataType::Int32 => "INTEGER".to_string(),
-        DataType::Int64 => "BIGINT".to_string(),
-        DataType::Float32 => "FLOAT4".to_string(),
-        DataType::Float64 => "FLOAT8".to_string(),
-        DataType::Boolean => "BOOLEAN".to_string(),
-        DataType::Varchar => "STRING".to_string(),
-        DataType::Date => "DATE".to_string(),
-        DataType::Timestamp => "TIMESTAMP".to_string(),
-        DataType::Timestamptz => "TIMESTAMP_TZ".to_string(),
-        DataType::Jsonb => "VARIANT".to_string(),
-        DataType::Decimal => "DECIMAL".to_string(),
-        DataType::Bytea => "BINARY".to_string(),
-        DataType::Time => "TIME".to_string(),
+        DataType::Int16 => "SMALLINT".to_owned(),
+        DataType::Int32 => "INTEGER".to_owned(),
+        DataType::Int64 => "BIGINT".to_owned(),
+        DataType::Float32 => "FLOAT4".to_owned(),
+        DataType::Float64 => "FLOAT8".to_owned(),
+        DataType::Boolean => "BOOLEAN".to_owned(),
+        DataType::Varchar => "STRING".to_owned(),
+        DataType::Date => "DATE".to_owned(),
+        DataType::Timestamp => "TIMESTAMP".to_owned(),
+        DataType::Timestamptz => "TIMESTAMP_TZ".to_owned(),
+        DataType::Jsonb => "VARIANT".to_owned(),
+        DataType::Decimal => "DECIMAL".to_owned(),
+        DataType::Bytea => "BINARY".to_owned(),
+        DataType::Time => "TIME".to_owned(),
         _ => {
             return Err(SinkError::Config(anyhow!(
                 "Dont support auto create table for datatype: {}",
@@ -783,9 +807,9 @@ fn build_create_pipe_sql(
     stage: &str,
     pipe_name: &str,
 ) -> String {
+    let stage = format!("{}.{}.{}/{}", database, schema, stage, table_name);
     let pipe_name = format!("{}.{}.{}", database, schema, pipe_name);
     let table_name = format!("{}.{}.{}", database, schema, table_name);
-    let stage = format!("{}.{}.{}", database, schema, stage);
     format!(
         "CREATE OR REPLACE PIPE {} AUTO_INGEST = FALSE AS COPY INTO {} FROM @{} MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE FILE_FORMAT = (type = 'JSON');",
         pipe_name, table_name, stage

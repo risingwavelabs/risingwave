@@ -14,9 +14,13 @@
 
 package com.risingwave.connector.jdbc;
 
+import com.risingwave.connector.api.TableSchema;
+import com.risingwave.connector.api.sink.SinkRow;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 public class RedShiftDialect extends PostgresDialect {
     private final List<Integer> columnSqlTypes;
@@ -33,64 +37,22 @@ public class RedShiftDialect extends PostgresDialect {
             SchemaTableName schemaTableName,
             List<String> fieldNames,
             List<String> primaryKeyFields) {
-        var tableName = getNormalizedTableName(schemaTableName);
-        // Build the VALUES placeholders for the source data
-        String valuesPlaceholders =
-                fieldNames.stream()
-                        .map(
-                                f -> {
-                                    int index = fieldNames.indexOf(f);
-                                    int sqlType = columnSqlTypes.get(index);
-                                    if (sqlType == java.sql.Types.VARCHAR
-                                            || sqlType == java.sql.Types.CHAR
-                                            || sqlType == java.sql.Types.LONGVARCHAR
-                                            || sqlType == java.sql.Types.NVARCHAR) {
-                                        return "CAST(? AS VARCHAR) AS " + quoteIdentifier(f);
-                                    } else {
-                                        return "? AS " + quoteIdentifier(f);
-                                    }
-                                })
-                        .collect(Collectors.joining(", "));
-        // Build the ON condition for primary key matching
-        String onCondition =
-                primaryKeyFields.stream()
-                        .map(
-                                pk ->
-                                        tableName
-                                                + "."
-                                                + quoteIdentifier(pk)
-                                                + " = source."
-                                                + quoteIdentifier(pk))
-                        .collect(Collectors.joining(" AND "));
+        throw new UnsupportedOperationException(
+                "RedShiftDialect does not support upsert statements");
+    }
 
-        // Build the UPDATE SET clause
-        String updateClause =
-                fieldNames.stream()
-                        .map(f -> quoteIdentifier(f) + " = source." + quoteIdentifier(f))
-                        .collect(Collectors.joining(", "));
+    @Override
+    public void bindUpsertStatement(
+            PreparedStatement stmt, Connection conn, TableSchema tableSchema, SinkRow row)
+            throws SQLException {
+        throw new UnsupportedOperationException(
+                "RedShiftDialect does not support upsert statements");
+    }
 
-        // Build the INSERT columns and values
-        String insertColumns =
-                fieldNames.stream().map(this::quoteIdentifier).collect(Collectors.joining(", "));
-        String insertValues =
-                fieldNames.stream()
-                        .map(f -> "source." + quoteIdentifier(f))
-                        .collect(Collectors.joining(", "));
-
-        return Optional.of(
-                "MERGE INTO "
-                        + tableName
-                        + " USING (SELECT "
-                        + valuesPlaceholders
-                        + ") AS source"
-                        + " ON "
-                        + onCondition
-                        + " WHEN MATCHED THEN UPDATE SET "
-                        + updateClause
-                        + " WHEN NOT MATCHED THEN INSERT ("
-                        + insertColumns
-                        + ") VALUES ("
-                        + insertValues
-                        + ")");
+    @Override
+    public void bindDeleteStatement(PreparedStatement stmt, TableSchema tableSchema, SinkRow row)
+            throws SQLException {
+        throw new UnsupportedOperationException(
+                "RedShiftDialect does not support DELETE statements");
     }
 }

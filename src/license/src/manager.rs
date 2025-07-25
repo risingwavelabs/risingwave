@@ -241,14 +241,14 @@ impl LicenseManager {
 
         // Check the CPU core limit.
         let actual_cpu_core = inner.cached_cpu_core_count;
-        // if let Some(limit) = license.cpu_core_limit
-        //     && actual_cpu_core > limit.get()
-        // {
-        //     return Err(LicenseError::CpuCoreLimitExceeded {
-        //         limit,
-        //         actual: actual_cpu_core,
-        //     });
-        // }
+        if let Some(limit) = license.cpu_core_limit
+            && actual_cpu_core > limit.get()
+        {
+            return Err(LicenseError::CpuCoreLimitExceeded {
+                limit,
+                actual: actual_cpu_core,
+            });
+        }
 
         Ok(license)
     }
