@@ -34,7 +34,7 @@ use crate::source::{
 };
 
 /// Batch Posix fs source for refreshable tables. (For testing only)
-/// Unlike regular posix_fs, this connector only lists files on demand (during refresh),
+/// Unlike regular `posix_fs`, this connector only lists files on demand (during refresh),
 /// not continuously. This makes it suitable for refreshable table functionality.
 ///
 /// Split representing a single file to be read once

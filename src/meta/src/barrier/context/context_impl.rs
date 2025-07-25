@@ -108,6 +108,8 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         let metadata_manager = self.metadata_manager.clone();
         let barrier_scheduler = self.barrier_scheduler.clone();
 
+        // handle_load_finished_source_ids is called when collecting barrier,
+        // so we need to spawn a new task to yield a LoadFinish barrier to avoid deadlock.
         tokio::spawn(async move {
             use risingwave_common::catalog::TableId;
 
