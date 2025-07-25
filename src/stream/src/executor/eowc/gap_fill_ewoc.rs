@@ -1,4 +1,16 @@
-use std::ops::{Add, Div};
+// Copyright 2025 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 use risingwave_common::array::Op;
 use risingwave_common::types::{CheckedAdd, Decimal, Interval, ToOwnedDatum};
@@ -26,9 +38,8 @@ pub struct GapFillExecutorArgs<S: StateStore> {
     pub buffer_table: StateTable<S>,
     pub chunk_size: usize,
     pub time_column_index: usize,
-    pub fill_column_index: usize,
+    pub fill_columns: Vec<(usize, FillStrategy)>,
     pub gap_interval: Interval,
-    pub fill_strategy: FillStrategy,
 }
 
 struct ExecutorInner<S: StateStore> {
@@ -38,132 +49,133 @@ struct ExecutorInner<S: StateStore> {
     buffer_table: StateTable<S>,
     chunk_size: usize,
     time_column_index: usize,
-    fill_column_index: usize,
+    fill_columns: Vec<(usize, FillStrategy)>,
     gap_interval: Interval,
-    fill_strategy: FillStrategy,
 }
 
 struct ExecutionVars<S: StateStore> {
     buffer: SortBuffer<S>,
 }
 
-fn calculate_step(d1: DatumRef<'_>, d2: DatumRef<'_>, steps: usize) -> Datum {
-    let (Some(s1), Some(s2)) = (d1, d2) else {
-        return None;
-    };
-    if steps == 0 {
-        return None;
-    }
-    match (s1, s2) {
-        (ScalarRefImpl::Int16(v1), ScalarRefImpl::Int16(v2)) => {
-            Some(ScalarImpl::Int16((v2 - v1) / steps as i16))
+impl<S: StateStore> ExecutorInner<S> {
+    fn calculate_step(d1: DatumRef<'_>, d2: DatumRef<'_>, steps: usize) -> Datum {
+        let (Some(s1), Some(s2)) = (d1, d2) else {
+            return None;
+        };
+        if steps == 0 {
+            return None;
         }
-        (ScalarRefImpl::Int32(v1), ScalarRefImpl::Int32(v2)) => {
-            Some(ScalarImpl::Int32((v2 - v1) / steps as i32))
-        }
-        (ScalarRefImpl::Int64(v1), ScalarRefImpl::Int64(v2)) => {
-            Some(ScalarImpl::Int64((v2 - v1) / steps as i64))
-        }
-        (ScalarRefImpl::Float32(v1), ScalarRefImpl::Float32(v2)) => {
-            Some(ScalarImpl::Float32((v2 - v1) / steps as f32))
-        }
-        (ScalarRefImpl::Float64(v1), ScalarRefImpl::Float64(v2)) => {
-            Some(ScalarImpl::Float64((v2 - v1) / steps as f64))
-        }
-        (ScalarRefImpl::Decimal(v1), ScalarRefImpl::Decimal(v2)) => {
-            Some(ScalarImpl::Decimal((v2 - v1) / Decimal::from(steps)))
-        }
-        _ => None,
-    }
-}
-
-fn apply_step(current: &mut Datum, step: &ScalarImpl) {
-    if let Some(curr) = current.as_mut() {
-        match (curr, step) {
-            (ScalarImpl::Int16(v1), &ScalarImpl::Int16(v2)) => *v1 += v2,
-            (ScalarImpl::Int32(v1), &ScalarImpl::Int32(v2)) => *v1 += v2,
-            (ScalarImpl::Int64(v1), &ScalarImpl::Int64(v2)) => *v1 += v2,
-            (ScalarImpl::Float32(v1), &ScalarImpl::Float32(v2)) => *v1 += v2,
-            (ScalarImpl::Float64(v1), &ScalarImpl::Float64(v2)) => *v1 += v2,
-            (ScalarImpl::Decimal(v1), &ScalarImpl::Decimal(v2)) => *v1 = *v1 + v2,
-            _ => return
-        }
-    };
-}
-
-fn generate_filled_rows(
-    prev_row: &OwnedRow,
-    curr_row: &OwnedRow,
-    time_column_index: usize,
-    fill_column_index: usize,
-    interval: Interval,
-    fill_strategy: &FillStrategy,
-) -> Vec<OwnedRow> {
-    let mut filled_rows = Vec::new();
-    let (Some(prev_time_scalar), Some(curr_time_scalar)) = (
-        prev_row.datum_at(time_column_index),
-        curr_row.datum_at(time_column_index),
-    ) else {
-        return filled_rows;
-    };
-    let prev_time = prev_time_scalar.into_timestamp();
-    let curr_time = curr_time_scalar.into_timestamp();
-    if prev_time >= curr_time {
-        return filled_rows;
-    }
-
-    let fill_value = match fill_strategy {
-        FillStrategy::Locf | FillStrategy::Interpolate => {
-            prev_row.datum_at(fill_column_index).to_owned_datum()
-        }
-        FillStrategy::Null => None,
-    };
-
-    let mut row_template: Vec<Datum> = Vec::with_capacity(prev_row.len());
-    for i in 0..prev_row.len() {
-        if i == time_column_index {
-            row_template.push(None);
-        } else if i == fill_column_index {
-            row_template.push(fill_value.clone());
-        } else {
-            row_template.push(prev_row.datum_at(i).to_owned_datum());
+        match (s1, s2) {
+            (ScalarRefImpl::Int16(v1), ScalarRefImpl::Int16(v2)) => {
+                Some(ScalarImpl::Int16((v2 - v1) / steps as i16))
+            }
+            (ScalarRefImpl::Int32(v1), ScalarRefImpl::Int32(v2)) => {
+                Some(ScalarImpl::Int32((v2 - v1) / steps as i32))
+            }
+            (ScalarRefImpl::Int64(v1), ScalarRefImpl::Int64(v2)) => {
+                Some(ScalarImpl::Int64((v2 - v1) / steps as i64))
+            }
+            (ScalarRefImpl::Float32(v1), ScalarRefImpl::Float32(v2)) => {
+                Some(ScalarImpl::Float32((v2 - v1) / steps as f32))
+            }
+            (ScalarRefImpl::Float64(v1), ScalarRefImpl::Float64(v2)) => {
+                Some(ScalarImpl::Float64((v2 - v1) / steps as f64))
+            }
+            (ScalarRefImpl::Decimal(v1), ScalarRefImpl::Decimal(v2)) => {
+                Some(ScalarImpl::Decimal((v2 - v1) / Decimal::from(steps)))
+            }
+            _ => None,
         }
     }
-    let mut fill_time = match prev_time.checked_add(interval) {
-        Some(t) => t,
-        None => return filled_rows,
-    };
 
-    let mut data = Vec::new();
-    while fill_time < curr_time {
-        let mut new_row_data = row_template.clone();
-        new_row_data[time_column_index] = Some(fill_time.into());
-        data.push(new_row_data);
-        fill_time = match fill_time.checked_add(interval) {
+    fn apply_step(current: &mut Datum, step: &ScalarImpl) {
+        if let Some(curr) = current.as_mut() {
+            match (curr, step) {
+                (ScalarImpl::Int16(v1), &ScalarImpl::Int16(v2)) => *v1 += v2,
+                (ScalarImpl::Int32(v1), &ScalarImpl::Int32(v2)) => *v1 += v2,
+                (ScalarImpl::Int64(v1), &ScalarImpl::Int64(v2)) => *v1 += v2,
+                (ScalarImpl::Float32(v1), &ScalarImpl::Float32(v2)) => *v1 += v2,
+                (ScalarImpl::Float64(v1), &ScalarImpl::Float64(v2)) => *v1 += v2,
+                (ScalarImpl::Decimal(v1), &ScalarImpl::Decimal(v2)) => *v1 = *v1 + v2,
+                _ => return
+            }
+        };
+    }
+
+    fn generate_filled_rows(
+        prev_row: &OwnedRow,
+        curr_row: &OwnedRow,
+        time_column_index: usize,
+        fill_columns: &[(usize, FillStrategy)],
+        interval: Interval,
+    ) -> Vec<OwnedRow> {
+        let mut filled_rows = Vec::new();
+        let (Some(prev_time_scalar), Some(curr_time_scalar)) = (
+            prev_row.datum_at(time_column_index),
+            curr_row.datum_at(time_column_index),
+        ) else {
+            return filled_rows;
+        };
+        let prev_time = prev_time_scalar.into_timestamp();
+        let curr_time = curr_time_scalar.into_timestamp();
+        if prev_time >= curr_time {
+            return filled_rows;
+        }
+
+        // generate fill value for every column
+        let mut fill_values: Vec<Datum> = Vec::with_capacity(prev_row.len());
+        for i in 0..prev_row.len() {
+            if i == time_column_index {
+                fill_values.push(None);
+            } else if let Some((_, strategy)) = fill_columns.iter().find(|(col, _)| *col == i) {
+                match strategy {
+                    FillStrategy::Locf | FillStrategy::Interpolate => {
+                        fill_values.push(prev_row.datum_at(i).to_owned_datum())
+                    }
+                    FillStrategy::Null => fill_values.push(None),
+                }
+            } else {
+                fill_values.push(prev_row.datum_at(i).to_owned_datum());
+            }
+        }
+        let row_template: Vec<Datum> = fill_values;
+        let mut fill_time = match prev_time.checked_add(interval) {
             Some(t) => t,
             None => return filled_rows,
         };
-    }
-    if matches!(fill_strategy, FillStrategy::Interpolate) {
-        let steps = data.len();
-        let step = calculate_step(
-            prev_row.datum_at(fill_column_index),
-            curr_row.datum_at(fill_column_index),
-            steps + 1,
-        );
-        if let Some(step) = step {
-            for (i, row) in data.iter_mut().enumerate() {
-                for _ in 0..=i {
-                    apply_step(&mut row[fill_column_index], &step);
+
+        let mut data = Vec::new();
+        while fill_time < curr_time {
+            let mut new_row_data = row_template.clone();
+            new_row_data[time_column_index] = Some(fill_time.into());
+            data.push(new_row_data);
+            fill_time = match fill_time.checked_add(interval) {
+                Some(t) => t,
+                None => return filled_rows,
+            };
+        }
+        for (col_idx, strategy) in fill_columns.iter() {
+            if matches!(strategy, FillStrategy::Interpolate) {
+                let steps = data.len();
+                let step = Self::calculate_step(
+                    prev_row.datum_at(*col_idx),
+                    curr_row.datum_at(*col_idx),
+                    steps + 1,
+                );
+                if let Some(step) = step {
+                    for (i, row) in data.iter_mut().enumerate() {
+                        for _ in 0..=i {
+                            Self::apply_step(&mut row[*col_idx], &step);
+                        }
+                    }
                 }
             }
         }
+        for row in data {
+            filled_rows.push(OwnedRow::new(row));
+        }
+        filled_rows
     }
-    for row in data {
-        filled_rows.push(OwnedRow::new(row));
-    }
-
-    filled_rows
 }
 
 impl<S: StateStore> Execute for GapFillExecutor<S> {
@@ -183,9 +195,8 @@ impl<S: StateStore> GapFillExecutor<S> {
                 buffer_table: args.buffer_table,
                 chunk_size: args.chunk_size,
                 time_column_index: args.time_column_index,
-                fill_column_index: args.fill_column_index,
+                fill_columns: args.fill_columns,
                 gap_interval: args.gap_interval,
-                fill_strategy: args.fill_strategy,
             },
         }
     }
@@ -227,17 +238,14 @@ impl<S: StateStore> GapFillExecutor<S> {
                     {
                         let current_row = row?;
                         if let Some(p_row) = &prev_row {
-                            // 调用一个新函数来处理填充逻辑
-                            let filled_rows = generate_filled_rows(
+                            let filled_rows = ExecutorInner::<S>::generate_filled_rows(
                                 p_row,
                                 &current_row,
                                 this.time_column_index,
-                                this.fill_column_index,
+                                &this.fill_columns,
                                 this.gap_interval,
-                                &this.fill_strategy,
                             );
                             for filled_row in filled_rows {
-                                // 将填充的行加入 chunk
                                 if let Some(chunk) =
                                     chunk_builder.append_row(Op::Insert, &filled_row)
                                 {
@@ -273,7 +281,6 @@ impl<S: StateStore> GapFillExecutor<S> {
                     if let Some((_, cache_may_stale)) =
                         post_commit.post_yield_barrier(update_vnode_bitmap).await?
                     {
-                        // Manipulate the cache if necessary.
                         if cache_may_stale {
                             vars.buffer.refill_cache(None, &this.buffer_table).await?;
                         }
@@ -288,7 +295,6 @@ impl<S: StateStore> GapFillExecutor<S> {
 mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
-    use risingwave_common::types::DataType::Timestamp;
     use risingwave_common::types::test_utils::IntervalTestExt;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
@@ -300,24 +306,28 @@ mod tests {
 
     async fn create_executor<S: StateStore>(
         time_column_index: usize,
-        fill_column_index: usize,
+        fill_columns: Vec<(usize, FillStrategy)>,
         gap_interval: Interval,
-        fill_strategy: FillStrategy,
         store: S,
     ) -> (MessageSender, BoxedMessageStream) {
         let input_schema = Schema::new(vec![
             Field::unnamed(DataType::Timestamp), // pk
+            Field::unnamed(DataType::Int32),
             Field::unnamed(DataType::Int64),
+            Field::unnamed(DataType::Float32),
+            Field::unnamed(DataType::Float64),
         ]);
         let input_pk_indices = vec![time_column_index];
 
         // state table schema = input schema
         let table_columns = vec![
             ColumnDesc::unnamed(ColumnId::new(0), DataType::Timestamp),
-            ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Int32),
+            ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64),
+            ColumnDesc::unnamed(ColumnId::new(3), DataType::Float32),
+            ColumnDesc::unnamed(ColumnId::new(4), DataType::Float64),
         ];
 
-        // note that the sort column is the first table pk column to ensure ordering
         let table_pk_indices = vec![time_column_index, 0];
         let table_order_types = vec![OrderType::ascending(), OrderType::ascending()];
         let buffer_table = StateTable::from_table_catalog(
@@ -342,9 +352,8 @@ mod tests {
             buffer_table,
             chunk_size: 1024,
             time_column_index,
-            fill_column_index,
+            fill_columns,
             gap_interval,
-            fill_strategy,
         });
         (tx, gap_fill_executor.boxed().execute())
     }
@@ -352,342 +361,256 @@ mod tests {
     #[tokio::test]
     async fn test_gap_fill_interpolate() {
         let time_column_index = 0;
-        let fill_column_index = 1;
         let gap_interval = Interval::from_days(1);
-        let fill_strategy = FillStrategy::Interpolate;
-
+        let fill_columns = vec![
+            (1, FillStrategy::Interpolate),
+            (2, FillStrategy::Interpolate),
+            (3, FillStrategy::Interpolate),
+            (4, FillStrategy::Interpolate),
+        ];
         let store = MemoryStateStore::new();
         let (mut tx, mut gap_fill_executor) = create_executor(
             time_column_index,
-            fill_column_index,
+            fill_columns,
             gap_interval,
-            fill_strategy,
             store.clone(),
         )
         .await;
 
-        // Init barrier
         tx.push_barrier(test_epoch(1), false);
-
-        // Consume the barrier
         gap_fill_executor.expect_barrier().await;
 
-        // Init watermark
-        tx.push_int64_watermark(1, 0_i64); // expected to be ignored
+        tx.push_int64_watermark(1, 0_i64);
         tx.push_watermark(
             0,
-            Timestamp,
+            DataType::Timestamp,
             "2023-03-06 18:27:03"
                 .parse::<risingwave_common::types::Timestamp>()
                 .unwrap()
                 .into(),
         );
-
-        // Consume the watermark
         gap_fill_executor.expect_watermark().await;
 
-        // Push data chunk1
         tx.push_chunk(StreamChunk::from_pretty(
-            " TS               I
-            + 2023-04-01T10:00:00 10
-            + 2023-04-05T10:00:00 50",
+            " TS               i   I    f     F
+            + 2023-04-01T10:00:00 10 100 1.0 100.0
+            + 2023-04-05T10:00:00 50 200 5.0 200.0",
         ));
 
-        tx.push_int64_watermark(1, 0_i64); // expected to be ignored
+        tx.push_int64_watermark(1, 0_i64);
         tx.push_watermark(
             0,
-            Timestamp,
+            DataType::Timestamp,
             "2023-04-05 18:27:03"
                 .parse::<risingwave_common::types::Timestamp>()
                 .unwrap()
                 .into(),
         );
 
-        // Consume the data chunk
         let chunk = gap_fill_executor.expect_chunk().await;
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                " TS               I
-                + 2023-04-01T10:00:00 10
-                + 2023-04-02T10:00:00 20
-                + 2023-04-03T10:00:00 30
-                + 2023-04-04T10:00:00 40
-                + 2023-04-05T10:00:00 50",
+                " TS               i   I    f     F
+                + 2023-04-01T10:00:00 10 100 1.0 100.0
+                + 2023-04-02T10:00:00 20 125 2.0 125.0
+                + 2023-04-03T10:00:00 30 150 3.0 150.0
+                + 2023-04-04T10:00:00 40 175 4.0 175.0
+                + 2023-04-05T10:00:00 50 200 5.0 200.0",
             )
         );
-
-        // Consume the watermark
-        gap_fill_executor.expect_watermark().await;
-
-        // Push data chunk2
-        tx.push_chunk(StreamChunk::from_pretty(
-            " TS               I
-            + 2023-04-07T10:00:00 70
-            + 2023-04-09T10:00:00 90",
-        ));
-
-        // Push barrier
-        tx.push_barrier(test_epoch(2), false);
-
-        // Consume the barrier
-        gap_fill_executor.expect_barrier().await;
-
-        // Push watermark2 on an irrelevant column
-        tx.push_int64_watermark(1, 7_i64); // expected to be ignored
-
-        // Push watermark2 on sorted column
-        tx.push_watermark(
-            0,
-            Timestamp,
-            "2023-04-10 18:27:03"
-                .parse::<risingwave_common::types::Timestamp>()
-                .unwrap()
-                .into(),
-        );
-
-        // Consume the data chunk
-        let chunk = gap_fill_executor.expect_chunk().await;
-        assert_eq!(
-            chunk,
-            StreamChunk::from_pretty(
-                " TS               I
-                + 2023-04-06T10:00:00 60
-                + 2023-04-07T10:00:00 70
-                + 2023-04-08T10:00:00 80
-                + 2023-04-09T10:00:00 90",
-            )
-        );
-
-        // Consume the watermark
         gap_fill_executor.expect_watermark().await;
     }
 
     #[tokio::test]
     async fn test_gap_fill_locf() {
         let time_column_index = 0;
-        let fill_column_index = 1;
         let gap_interval = Interval::from_days(1);
-        let fill_strategy = FillStrategy::Locf;
-
+        let fill_columns = vec![
+            (1, FillStrategy::Locf),
+            (2, FillStrategy::Locf),
+            (3, FillStrategy::Locf),
+            (4, FillStrategy::Locf),
+        ];
         let store = MemoryStateStore::new();
         let (mut tx, mut gap_fill_executor) = create_executor(
             time_column_index,
-            fill_column_index,
+            fill_columns,
             gap_interval,
-            fill_strategy,
             store.clone(),
         )
-            .await;
+        .await;
 
-        // Init barrier
         tx.push_barrier(test_epoch(1), false);
-
-        // Consume the barrier
         gap_fill_executor.expect_barrier().await;
 
-        // Init watermark
-        tx.push_int64_watermark(1, 0_i64); // expected to be ignored
+        tx.push_int64_watermark(1, 0_i64);
         tx.push_watermark(
             0,
-            Timestamp,
+            DataType::Timestamp,
             "2023-03-06 18:27:03"
                 .parse::<risingwave_common::types::Timestamp>()
                 .unwrap()
                 .into(),
         );
-
-        // Consume the watermark
         gap_fill_executor.expect_watermark().await;
 
-        // Push data chunk1
         tx.push_chunk(StreamChunk::from_pretty(
-            " TS               I
-            + 2023-04-01T10:00:00 10
-            + 2023-04-05T10:00:00 50",
+            " TS               i   I    f     F
+            + 2023-04-01T10:00:00 10 100 1.0 100.0
+            + 2023-04-05T10:00:00 50 200 5.0 200.0",
         ));
 
-        tx.push_int64_watermark(1, 0_i64); // expected to be ignored
+        tx.push_int64_watermark(1, 0_i64);
         tx.push_watermark(
             0,
-            Timestamp,
+            DataType::Timestamp,
             "2023-04-05 18:27:03"
                 .parse::<risingwave_common::types::Timestamp>()
                 .unwrap()
                 .into(),
         );
 
-        // Consume the data chunk
         let chunk = gap_fill_executor.expect_chunk().await;
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                " TS               I
-                + 2023-04-01T10:00:00 10
-                + 2023-04-02T10:00:00 10
-                + 2023-04-03T10:00:00 10
-                + 2023-04-04T10:00:00 10
-                + 2023-04-05T10:00:00 50",
+                " TS               i   I    f     F
+                + 2023-04-01T10:00:00 10 100 1.0 100.0
+                + 2023-04-02T10:00:00 10 100 1.0 100.0
+                + 2023-04-03T10:00:00 10 100 1.0 100.0
+                + 2023-04-04T10:00:00 10 100 1.0 100.0
+                + 2023-04-05T10:00:00 50 200 5.0 200.0",
             )
         );
-
-        // Consume the watermark
-        gap_fill_executor.expect_watermark().await;
-
-        // Push data chunk2
-        tx.push_chunk(StreamChunk::from_pretty(
-            " TS               I
-            + 2023-04-07T10:00:00 70
-            + 2023-04-09T10:00:00 90",
-        ));
-
-        // Push barrier
-        tx.push_barrier(test_epoch(2), false);
-
-        // Consume the barrier
-        gap_fill_executor.expect_barrier().await;
-
-        // Push watermark2 on an irrelevant column
-        tx.push_int64_watermark(1, 7_i64); // expected to be ignored
-
-        // Push watermark2 on sorted column
-        tx.push_watermark(
-            0,
-            Timestamp,
-            "2023-04-10 18:27:03"
-                .parse::<risingwave_common::types::Timestamp>()
-                .unwrap()
-                .into(),
-        );
-
-        // Consume the data chunk
-        let chunk = gap_fill_executor.expect_chunk().await;
-        assert_eq!(
-            chunk,
-            StreamChunk::from_pretty(
-                " TS               I
-                + 2023-04-06T10:00:00 50
-                + 2023-04-07T10:00:00 70
-                + 2023-04-08T10:00:00 70
-                + 2023-04-09T10:00:00 90",
-            )
-        );
-
-        // Consume the watermark
         gap_fill_executor.expect_watermark().await;
     }
 
     #[tokio::test]
     async fn test_gap_fill_null() {
         let time_column_index = 0;
-        let fill_column_index = 1;
         let gap_interval = Interval::from_days(1);
-        let fill_strategy = FillStrategy::Null;
-
+        let fill_columns = vec![
+            (1, FillStrategy::Null),
+            (2, FillStrategy::Null),
+            (3, FillStrategy::Null),
+            (4, FillStrategy::Null),
+        ];
         let store = MemoryStateStore::new();
         let (mut tx, mut gap_fill_executor) = create_executor(
             time_column_index,
-            fill_column_index,
+            fill_columns,
             gap_interval,
-            fill_strategy,
             store.clone(),
         )
-            .await;
+        .await;
 
-        // Init barrier
         tx.push_barrier(test_epoch(1), false);
-
-        // Consume the barrier
         gap_fill_executor.expect_barrier().await;
 
-        // Init watermark
-        tx.push_int64_watermark(1, 0_i64); // expected to be ignored
+        tx.push_int64_watermark(1, 0_i64);
         tx.push_watermark(
             0,
-            Timestamp,
+            DataType::Timestamp,
             "2023-03-06 18:27:03"
                 .parse::<risingwave_common::types::Timestamp>()
                 .unwrap()
                 .into(),
         );
-
-        // Consume the watermark
         gap_fill_executor.expect_watermark().await;
 
-        // Push data chunk1
         tx.push_chunk(StreamChunk::from_pretty(
-            " TS               I
-            + 2023-04-01T10:00:00 10
-            + 2023-04-05T10:00:00 50",
+            " TS               i   I    f     F
+            + 2023-04-01T10:00:00 10 100 1.0 100.0
+            + 2023-04-05T10:00:00 50 200 5.0 200.0",
         ));
 
-        tx.push_int64_watermark(1, 0_i64); // expected to be ignored
+        tx.push_int64_watermark(1, 0_i64);
         tx.push_watermark(
             0,
-            Timestamp,
+            DataType::Timestamp,
             "2023-04-05 18:27:03"
                 .parse::<risingwave_common::types::Timestamp>()
                 .unwrap()
                 .into(),
         );
 
-        // Consume the data chunk
         let chunk = gap_fill_executor.expect_chunk().await;
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                " TS               I
-                + 2023-04-01T10:00:00 10
-                + 2023-04-02T10:00:00 .
-                + 2023-04-03T10:00:00 .
-                + 2023-04-04T10:00:00 .
-                + 2023-04-05T10:00:00 50",
+                " TS               i   I    f     F
+                + 2023-04-01T10:00:00 10 100 1.0 100.0
+                + 2023-04-02T10:00:00 .  .    .    .
+                + 2023-04-03T10:00:00 .  .    .    .
+                + 2023-04-04T10:00:00 .  .    .    .
+                + 2023-04-05T10:00:00 50 200 5.0 200.0",
             )
         );
-
-        // Consume the watermark
         gap_fill_executor.expect_watermark().await;
+    }
 
-        // Push data chunk2
-        tx.push_chunk(StreamChunk::from_pretty(
-            " TS               I
-            + 2023-04-07T10:00:00 70
-            + 2023-04-09T10:00:00 90",
-        ));
+    #[tokio::test]
+    async fn test_gap_fill_mixed_strategy() {
+        let time_column_index = 0;
+        let gap_interval = Interval::from_days(1);
+        let fill_columns = vec![
+            (1, FillStrategy::Interpolate),
+            (2, FillStrategy::Locf),
+            (3, FillStrategy::Null),
+            (4, FillStrategy::Interpolate),
+        ];
+        let store = MemoryStateStore::new();
+        let (mut tx, mut gap_fill_executor) = create_executor(
+            time_column_index,
+            fill_columns,
+            gap_interval,
+            store.clone(),
+        )
+        .await;
 
-        // Push barrier
-        tx.push_barrier(test_epoch(2), false);
-
-        // Consume the barrier
+        tx.push_barrier(test_epoch(1), false);
         gap_fill_executor.expect_barrier().await;
 
-        // Push watermark2 on an irrelevant column
-        tx.push_int64_watermark(1, 7_i64); // expected to be ignored
-
-        // Push watermark2 on sorted column
+        tx.push_int64_watermark(1, 0_i64);
         tx.push_watermark(
             0,
-            Timestamp,
-            "2023-04-10 18:27:03"
+            DataType::Timestamp,
+            "2023-03-06 18:27:03"
+                .parse::<risingwave_common::types::Timestamp>()
+                .unwrap()
+                .into(),
+        );
+        gap_fill_executor.expect_watermark().await;
+
+        tx.push_chunk(StreamChunk::from_pretty(
+            " TS               i   I    f     F
+            + 2023-04-01T10:00:00 10 100 1.0 100.0
+            + 2023-04-05T10:00:00 50 200 5.0 200.0",
+        ));
+
+        tx.push_int64_watermark(1, 0_i64);
+        tx.push_watermark(
+            0,
+            DataType::Timestamp,
+            "2023-04-05 18:27:03"
                 .parse::<risingwave_common::types::Timestamp>()
                 .unwrap()
                 .into(),
         );
 
-        // Consume the data chunk
         let chunk = gap_fill_executor.expect_chunk().await;
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                " TS               I
-                + 2023-04-06T10:00:00 .
-                + 2023-04-07T10:00:00 70
-                + 2023-04-08T10:00:00 .
-                + 2023-04-09T10:00:00 90",
+                " TS               i   I    f     F
+                + 2023-04-01T10:00:00 10 100 1.0 100.0
+                + 2023-04-02T10:00:00 20 100 .    125.0
+                + 2023-04-03T10:00:00 30 100 .    150.0
+                + 2023-04-04T10:00:00 40 100 .    175.0
+                + 2023-04-05T10:00:00 50 200 5.0 200.0",
             )
         );
-
-        // Consume the watermark
         gap_fill_executor.expect_watermark().await;
     }
 }
