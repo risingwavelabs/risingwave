@@ -1,0 +1,230 @@
+# Simple e2e test for sink (with/without connector) into table (with/without connector)
+# This test focuses on the core concepts without requiring external system setup
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# ===== Basic Test 1: Regular table -> Regular table =====
+# This is the simplest case: sink without connector into table without connector
+
+statement ok
+create table regular_source (id int primary key, data varchar);
+
+statement ok
+insert into regular_source values (1, 'hello'), (2, 'world');
+
+statement ok
+create table regular_target (id int primary key, data varchar);
+
+statement ok
+create sink sink_regular into regular_target as select id, data from regular_source;
+
+statement ok
+flush;
+
+query II rowsort
+select * from regular_target;
+----
+1	hello
+2	world
+
+statement ok
+drop sink sink_regular;
+
+statement ok
+drop table regular_target;
+
+statement ok
+drop table regular_source;
+
+
+# ===== Basic Test 2: Datagen source -> Regular table =====
+# This tests: sink with connector into table without connector
+
+statement ok
+create table datagen_source (
+    id int primary key,
+    name varchar
+) with (
+    connector = 'datagen',
+    fields.id.kind = 'sequence',
+    fields.id.start = '1',
+    fields.id.end = '3',
+    fields.name.kind = 'random',
+    fields.name.length = '8',
+    datagen.rows.per.second = '10',
+    datagen.split.num = '1'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+create table target_from_datagen (id int primary key, name varchar);
+
+statement ok
+create sink sink_from_datagen into target_from_datagen as select id, name from datagen_source;
+
+sleep 2s
+
+statement ok
+flush;
+
+query I
+select count(*) from target_from_datagen;
+----
+3
+
+statement ok
+drop sink sink_from_datagen;
+
+statement ok
+drop table target_from_datagen;
+
+statement ok
+drop table datagen_source;
+
+
+# ===== Basic Test 3: Regular source -> Target with metadata =====
+# This simulates: sink without connector into table with connector capability
+# The target table has additional metadata columns that could support external consumption
+
+statement ok
+create table simple_source (product_id int primary key, product_name varchar, price decimal);
+
+statement ok
+insert into simple_source values (100, 'laptop', 999.99), (200, 'mouse', 29.99);
+
+statement ok
+create table enriched_target (
+    product_id int primary key, 
+    product_name varchar, 
+    price decimal,
+    ingested_at timestamp default now(),
+    export_ready boolean default true
+);
+
+statement ok
+create sink sink_to_enriched into enriched_target as 
+select product_id, product_name, price from simple_source;
+
+statement ok
+flush;
+
+query I??TT rowsort
+select product_id, product_name, price, ingested_at is not null, export_ready from enriched_target;
+----
+100	laptop	999.99	t	t
+200	mouse	29.99	t	t
+
+statement ok
+drop sink sink_to_enriched;
+
+statement ok
+drop table enriched_target;
+
+statement ok
+drop table simple_source;
+
+
+# ===== Basic Test 4: Datagen source -> Target with metadata =====
+# This simulates: sink with connector into table with connector capability
+# Both source and target have connector-like characteristics
+
+statement ok
+create table event_source (
+    event_id int primary key,
+    event_data varchar
+) with (
+    connector = 'datagen',
+    fields.event_id.kind = 'sequence',
+    fields.event_id.start = '10',
+    fields.event_id.end = '12',
+    fields.event_data.kind = 'random',
+    fields.event_data.length = '10',
+    datagen.rows.per.second = '5',
+    datagen.split.num = '1'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+create table processed_target (
+    event_id int primary key,
+    event_data varchar,
+    processed_timestamp timestamp default now(),
+    external_id varchar default 'ext_' || event_id::varchar
+);
+
+statement ok
+create sink sink_event_processing into processed_target as 
+select event_id, event_data from event_source;
+
+sleep 3s
+
+statement ok
+flush;
+
+query I
+select count(*) from processed_target where event_id between 10 and 12;
+----
+3
+
+# Verify metadata was properly populated
+query T
+select count(*) > 0 from processed_target 
+where processed_timestamp is not null and external_id like 'ext_%';
+----
+t
+
+statement ok
+drop sink sink_event_processing;
+
+statement ok
+drop table processed_target;
+
+statement ok
+drop table event_source;
+
+
+# ===== Test 5: Append-only scenarios =====
+# Testing different sink types with different table configurations
+
+statement ok
+create table append_source (log_id int, message varchar, level varchar) APPEND ONLY;
+
+statement ok
+insert into append_source values (1, 'starting up', 'INFO'), (2, 'error occurred', 'ERROR');
+
+statement ok
+create table log_target (log_id int primary key, message varchar, level varchar);
+
+statement ok
+create sink sink_logs into log_target as 
+select log_id, message, level from append_source 
+with (type = 'append-only', force_append_only = 'true');
+
+statement ok
+flush;
+
+query I?? rowsort
+select * from log_target;
+----
+1	starting up	INFO
+2	error occurred	ERROR
+
+statement ok
+insert into append_source values (3, 'shutting down', 'INFO');
+
+query I?? rowsort
+select * from log_target;
+----
+1	starting up	INFO
+2	error occurred	ERROR
+3	shutting down	INFO
+
+statement ok
+drop sink sink_logs;
+
+statement ok
+drop table log_target;
+
+statement ok
+drop table append_source;
+
+# All basic sink/table combinations tested successfully
