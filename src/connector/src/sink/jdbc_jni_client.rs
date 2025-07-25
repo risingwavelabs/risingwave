@@ -14,6 +14,7 @@
 
 use anyhow::Context;
 use jni::JavaVM;
+use jni::objects::JObject;
 use risingwave_common::global_jvm::JVM;
 use risingwave_jni_core::call_static_method;
 use risingwave_jni_core::jvm_runtime::execute_with_jni_env;
@@ -26,13 +27,22 @@ pub struct JdbcJniClient {
     jdbc_url: String,
 }
 
+impl Clone for JdbcJniClient {
+    fn clone(&self) -> Self {
+        Self {
+            jvm: self.jvm,
+            jdbc_url: self.jdbc_url.clone(),
+        }
+    }
+}
+
 impl JdbcJniClient {
     pub fn new(jdbc_url: String) -> Result<Self> {
         let jvm = JVM.get_or_init()?;
         Ok(Self { jvm, jdbc_url })
     }
 
-    pub fn execute_sql_sync(&self, sql: &str) -> Result<()> {
+    pub fn execute_sql_sync(&self, sql: &Vec<String>) -> Result<()> {
         execute_with_jni_env(self.jvm, |env| {
             // get source handler by source id
             let full_url = env.new_string(&self.jdbc_url).with_context(|| {
@@ -41,15 +51,21 @@ impl JdbcJniClient {
                     self.jdbc_url
                 )
             })?;
-            let sql = env.new_string(normalize_sql(sql)).with_context(|| {
-                format!("Failed to create jni string from source offset: {}.", sql)
-            })?;
+
+            let props =
+                env.new_object_array((sql.len()) as i32, "java/lang/String", JObject::null())?;
+
+            for (i, sql) in sql.iter().enumerate() {
+                let sql_j_str = env.new_string(sql)?;
+                env.set_object_array_element(&props, i as i32, sql_j_str)?;
+            }
+
             call_static_method!(
                 env,
-                {com.risingwave.runner.SnowflakeJDBCRunner},
-                {void executeSql(String, String)},
+                { com.risingwave.runner.SnowflakeJDBCRunner },
+                { void executeSql(String, String[]) },
                 &full_url,
-                &sql
+                &props
             )?;
             Ok(())
         })?;

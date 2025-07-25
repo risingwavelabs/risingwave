@@ -601,7 +601,7 @@ impl SnowflakeJniClient {
                 columns,
             );
             self.jdbc_client
-                .execute_sql_sync(&alter_add_column_cdc_table_sql)?;
+                .execute_sql_sync(&vec![alter_add_column_cdc_table_sql])?;
         }
 
         let alter_add_column_target_table_sql = build_alter_add_column_sql(
@@ -611,7 +611,7 @@ impl SnowflakeJniClient {
             columns,
         );
         self.jdbc_client
-            .execute_sql_sync(&alter_add_column_target_table_sql)?;
+            .execute_sql_sync(&vec![alter_add_column_target_table_sql])?;
 
         self.execute_create_merge_into_task()?;
         Ok(())
@@ -621,8 +621,8 @@ impl SnowflakeJniClient {
         if self.snowflake_task_context.task_name.is_some() {
             let create_task_sql = build_create_merge_into_task_sql(&self.snowflake_task_context);
             let start_task_sql = build_start_task_sql(&self.snowflake_task_context);
-            self.jdbc_client.execute_sql_sync(&create_task_sql)?;
-            self.jdbc_client.execute_sql_sync(&start_task_sql)?;
+            self.jdbc_client.execute_sql_sync(&vec![create_task_sql])?;
+            self.jdbc_client.execute_sql_sync(&vec![start_task_sql])?;
         }
         Ok(())
     }
@@ -630,7 +630,7 @@ impl SnowflakeJniClient {
     pub fn execute_drop_task(&self) -> Result<()> {
         if self.snowflake_task_context.task_name.is_some() {
             let sql = build_drop_task_sql(&self.snowflake_task_context);
-            if let Err(e) = self.jdbc_client.execute_sql_sync(&sql) {
+            if let Err(e) = self.jdbc_client.execute_sql_sync(&vec![sql]) {
                 tracing::error!(
                     "Failed to drop Snowflake sink task {:?}: {:?}",
                     self.snowflake_task_context.task_name,
@@ -656,7 +656,7 @@ impl SnowflakeJniClient {
             false,
         )?;
         self.jdbc_client
-            .execute_sql_sync(&create_target_table_sql)?;
+            .execute_sql_sync(&vec![create_target_table_sql])?;
         if let Some(cdc_table_name) = &self.snowflake_task_context.cdc_table_name {
             let create_cdc_table_sql = build_create_table_sql(
                 cdc_table_name,
@@ -665,7 +665,8 @@ impl SnowflakeJniClient {
                 &self.snowflake_task_context.schema,
                 true,
             )?;
-            self.jdbc_client.execute_sql_sync(&create_cdc_table_sql)?;
+            self.jdbc_client
+                .execute_sql_sync(&vec![create_cdc_table_sql])?;
         }
         Ok(())
     }
