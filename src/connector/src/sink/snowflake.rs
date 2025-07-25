@@ -19,6 +19,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
 use bytes::BytesMut;
+use chrono::format;
 use opendal::Operator;
 use phf::{Set, phf_set};
 use risingwave_common::array::{Op, StreamChunk};
@@ -91,6 +92,9 @@ pub struct SnowflakeConfig {
     #[serde(rename = "snowflake.password")]
     pub password: Option<String>,
 
+    #[serde(rename = "snowflake.stage")]
+    pub stage: Option<String>,
+
     /// Commit every n(>0) checkpoints, default is 10.
     #[serde(default = "default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
@@ -103,7 +107,6 @@ pub struct SnowflakeConfig {
     #[serde(rename = "auto.schema.change")]
     #[serde_as(as = "DisplayFromStr")]
     pub auto_schema_change: bool,
-
 
     #[serde(default)]
     #[serde(rename = "create_table_if_not_exists")]
@@ -150,6 +153,11 @@ impl SnowflakeConfig {
             .clone()
             .ok_or(SinkError::Config(anyhow!("snowflake.database is required")))?
             .to_owned();
+        let stage = self
+            .stage
+            .clone()
+            .ok_or(SinkError::Config(anyhow!("snowflake.stage is required")))?
+            .to_owned();
         let schema_name = self
             .snowflake_schema
             .clone()
@@ -160,6 +168,8 @@ impl SnowflakeConfig {
             database,
             schema_name,
             schema: schema.clone(),
+            stage,
+            pipe_name: format!("{}_pipe", target_table_name),
             ..Default::default()
         };
 
@@ -276,7 +286,7 @@ impl Sink for SnowflakeSink {
             .check_available()
             .map_err(|e| anyhow::anyhow!(e))?;
         if let Some((snowflake_task_ctx, client)) =
-                self.config.build_snowflake_task_ctx_jdbc_client(
+            self.config.build_snowflake_task_ctx_jdbc_client(
                 self.is_append_only,
                 &self.schema,
                 &self.pk_indices,
@@ -284,8 +294,9 @@ impl Sink for SnowflakeSink {
         {
             let client = SnowflakeJniClient::new(client, snowflake_task_ctx);
             client.execute_create_table()?;
+            client.execute_create_pipe()?;
         }
-        
+
         Ok(())
     }
 
@@ -495,6 +506,8 @@ pub struct SnowflakeTaskContext {
     pub database: String,
     pub schema_name: String,
     pub schema: Schema,
+    pub stage: String,
+    pub pipe_name: String,
 
     // only upsert
     pub task_name: Option<String>,
@@ -541,18 +554,17 @@ impl SinkCommitCoordinator for SnowflakeSinkCommitter {
         _metadata: Vec<SinkMetadata>,
         add_columns: Option<Vec<Field>>,
     ) -> Result<()> {
+        let mut client = self.client.as_mut().ok_or_else(|| {
+            SinkError::Config(anyhow!("Snowflake sink committer is not initialized."))
+        })?;
+        client.execute_flush_pipe()?;
         if let Some(add_columns) = add_columns {
-            self.client
-                .as_mut()
-                .ok_or_else(|| {
-                    SinkError::Config(anyhow!("Snowflake sink committer is not initialized."))
-                })?
-                .execute_alter_add_columns(
-                    &add_columns
-                        .iter()
-                        .map(|f| (f.name.clone(), f.data_type.to_string()))
-                        .collect::<Vec<_>>(),
-                )?;
+            client.execute_alter_add_columns(
+                &add_columns
+                    .iter()
+                    .map(|f| (f.name.clone(), f.data_type.to_string()))
+                    .collect::<Vec<_>>(),
+            )?;
         }
         Ok(())
     }
@@ -562,6 +574,7 @@ impl Drop for SnowflakeSinkCommitter {
     fn drop(&mut self) {
         if let Some(client) = &self.client {
             client.execute_drop_task().ok();
+            client.execute_drop_pipe().ok();
         }
     }
 }
@@ -637,9 +650,7 @@ impl SnowflakeJniClient {
         Ok(())
     }
 
-    pub fn execute_create_table(
-        &self,
-    ) -> Result<()> {
+    pub fn execute_create_table(&self) -> Result<()> {
         // create target table
         let create_target_table_sql = build_create_table_sql(
             &self.snowflake_task_context.target_table_name,
@@ -648,7 +659,8 @@ impl SnowflakeJniClient {
             &self.snowflake_task_context.schema,
             false,
         )?;
-        self.jdbc_client.execute_sql_sync(&create_target_table_sql)?;
+        self.jdbc_client
+            .execute_sql_sync(&create_target_table_sql)?;
         if let Some(cdc_table_name) = &self.snowflake_task_context.cdc_table_name {
             let create_cdc_table_sql = build_create_table_sql(
                 cdc_table_name,
@@ -661,9 +673,58 @@ impl SnowflakeJniClient {
         }
         Ok(())
     }
+
+    pub fn execute_create_pipe(&self) -> Result<()> {
+        let table_name =
+            if let Some(table_name) = self.snowflake_task_context.cdc_table_name.as_ref() {
+                table_name
+            } else {
+                &self.snowflake_task_context.target_table_name
+            };
+        let create_pipe_sql = build_create_pipe_sql(
+            table_name,
+            &self.snowflake_task_context.database,
+            &self.snowflake_task_context.schema_name,
+            &self.snowflake_task_context.stage,
+            &self.snowflake_task_context.pipe_name,
+        );
+        self.jdbc_client.execute_sql_sync(&create_pipe_sql)?;
+        Ok(())
+    }
+
+    pub fn execute_drop_pipe(&self) -> Result<()> {
+        let drop_pipe_sql = build_drop_pipe_sql(
+            &self.snowflake_task_context.database,
+            &self.snowflake_task_context.schema_name,
+            &self.snowflake_task_context.pipe_name,
+        );
+        if self.jdbc_client.execute_sql_sync(&drop_pipe_sql).is_err() {
+            tracing::warn!(
+                "Failed to drop Snowflake sink pipe {:?}",
+                self.snowflake_task_context.pipe_name
+            );
+        } else {
+            tracing::info!(
+                "Snowflake sink pipe {:?} dropped",
+                self.snowflake_task_context.pipe_name
+            );
+        }
+        Ok(())
+    }
+
+    pub fn execute_flush_pipe(&self) -> Result<()> {
+        let flush_pipe_sql = build_flush_pipe_sql(
+            &self.snowflake_task_context.database,
+            &self.snowflake_task_context.schema_name,
+            &self.snowflake_task_context.pipe_name,
+        );
+        self.jdbc_client.execute_sql_sync(&flush_pipe_sql)?;
+        Ok(())
+    }
 }
 
-fn build_create_table_sql(table_name: &str,
+fn build_create_table_sql(
+    table_name: &str,
     database: &str,
     schema_name: &str,
     schema: &Schema,
@@ -683,7 +744,10 @@ fn build_create_table_sql(table_name: &str,
         columns.push(format!("{} INT", SNOWFLAKE_SINK_OP));
     }
     let columns_str = columns.join(", ");
-    Ok(format!("CREATE TABLE IF NOT EXISTS {} ({}) ENABLE_SCHEMA_EVOLUTION  = true", full_table_name, columns_str))
+    Ok(format!(
+        "CREATE TABLE IF NOT EXISTS {} ({}) ENABLE_SCHEMA_EVOLUTION  = true",
+        full_table_name, columns_str
+    ))
 }
 
 fn convert_snowflake_data_type(data_type: &DataType) -> Result<String> {
@@ -702,12 +766,40 @@ fn convert_snowflake_data_type(data_type: &DataType) -> Result<String> {
         DataType::Decimal => "DECIMAL".to_string(),
         DataType::Bytea => "BINARY".to_string(),
         DataType::Time => "TIME".to_string(),
-        _ => return Err(SinkError::Config(anyhow!(
-            "Dont support auto create table for datatype: {}",
-            data_type
-        ))),
+        _ => {
+            return Err(SinkError::Config(anyhow!(
+                "Dont support auto create table for datatype: {}",
+                data_type
+            )));
+        }
     };
     Ok(data_type)
+}
+
+fn build_create_pipe_sql(
+    table_name: &str,
+    database: &str,
+    schema: &str,
+    stage: &str,
+    pipe_name: &str,
+) -> String {
+    let pipe_name = format!("{}.{}.{}", database, schema, pipe_name);
+    let table_name = format!("{}.{}.{}", database, schema, table_name);
+    let stage = format!("{}.{}.{}", database, schema, stage);
+    format!(
+        "CREATE OR REPLACE PIPE {} AUTO_INGEST = FALSE AS COPY INTO {} FROM @{} MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE FILE_FORMAT = (type = 'JSON');",
+        pipe_name, table_name, stage
+    )
+}
+
+fn build_flush_pipe_sql(database: &str, schema: &str, pipe_name: &str) -> String {
+    let pipe_name = format!("{}.{}.{}", database, schema, pipe_name);
+    format!("ALTER PIPE {} REFRESH;", pipe_name,)
+}
+
+fn build_drop_pipe_sql(database: &str, schema: &str, pipe_name: &str) -> String {
+    let pipe_name = format!("{}.{}.{}", database, schema, pipe_name);
+    format!("DROP PIPE IF EXISTS {};", pipe_name)
 }
 
 fn build_alter_add_column_sql(
@@ -755,7 +847,12 @@ fn build_create_merge_into_task_sql(snowflake_task_context: &SnowflakeTaskContex
         schema_name,
         ..
     } = snowflake_task_context;
-    let full_task_name = format!("{}.{}.{}", database, schema_name, task_name.as_ref().unwrap());
+    let full_task_name = format!(
+        "{}.{}.{}",
+        database,
+        schema_name,
+        task_name.as_ref().unwrap()
+    );
     let full_cdc_table_name = format!(
         "{}.{}.{}",
         database,
@@ -843,16 +940,15 @@ mod tests {
             task_name: Some("test_task".to_owned()),
             cdc_table_name: Some("test_cdc_table".to_owned()),
             target_table_name: "test_target_table".to_owned(),
+            stage: "test_stage".to_owned(),
+            pipe_name: "test_pipe".to_owned(),
             schedule: Some("1 HOUR".to_owned()),
             warehouse: Some("test_warehouse".to_owned()),
             pk_column_names: Some(vec!["v1".to_owned()]),
             all_column_names: Some(vec!["v1".to_owned(), "v2".to_owned()]),
             database: "test_db".to_owned(),
             schema_name: "test_schema".to_owned(),
-            schema: Schema {
-                fields: vec![
-                ],
-            },
+            schema: Schema { fields: vec![] },
         };
         let task_sql = build_create_merge_into_task_sql(&snowflake_task_context);
         let expected = r#"CREATE OR REPLACE TASK test_db.test_schema.test_task
@@ -892,16 +988,15 @@ END;"#;
             task_name: Some("test_task_multi_pk".to_owned()),
             cdc_table_name: Some("cdc_multi_pk".to_owned()),
             target_table_name: "target_multi_pk".to_owned(),
+            stage: "test_stage_multi_pk".to_owned(),
+            pipe_name: "test_pipe_multi_pk".to_owned(),
             schedule: Some("5 MINUTE".to_owned()),
             warehouse: Some("multi_pk_warehouse".to_owned()),
             pk_column_names: Some(vec!["id1".to_owned(), "id2".to_owned()]),
             all_column_names: Some(vec!["id1".to_owned(), "id2".to_owned(), "val".to_owned()]),
             database: "test_db".to_owned(),
             schema_name: "test_schema".to_owned(),
-            schema: Schema {
-                fields: vec![
-                ],
-            },
+            schema: Schema { fields: vec![] },
         };
         let task_sql = build_create_merge_into_task_sql(&snowflake_task_context);
         let expected = r#"CREATE OR REPLACE TASK test_db.test_schema.test_task_multi_pk

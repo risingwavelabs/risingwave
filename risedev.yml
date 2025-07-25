@@ -24,7 +24,7 @@ profile:
     #   ENABLE_PRETTY_LOG: "true"
     steps:
       # If you want to use the local s3 storage, enable the following line
-      # - use: minio
+      - use: minio
 
       # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
       # - use: aws-s3
@@ -40,9 +40,9 @@ profile:
       #   database: metadata
 
       # If you want to enable metrics or tracing, uncomment the following lines.
-      # - use: prometheus  # metrics
+      - use: prometheus  # metrics
       # - use: tempo       # tracing
-      # - use: grafana     # visualization
+      - use: grafana     # visualization
 
       - use: meta-node
         # meta-backend: postgres
@@ -50,7 +50,7 @@ profile:
       - use: frontend
 
       # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
-      # - use: compactor
+      - use: compactor
 
       # If you want to create source from Kafka, uncomment the following lines
       # - use: kafka
