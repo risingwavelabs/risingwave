@@ -9,7 +9,7 @@ repository = { workspace = true }
 
 [dependencies]
 enum-as-inner = "0.6"
-pbjson = "0.7"
+pbjson = "0.8"
 prost = { workspace = true }
 prost-helpers = { path = "helpers" }
 risingwave_error = { workspace = true }
