@@ -21,7 +21,7 @@ use derive_builder::Builder;
 use iceberg::spec::MAIN_BRANCH;
 use iceberg::{Catalog, TableIdent};
 use iceberg_compaction_core::compaction::{
-    CommitConsistencyParams, CommitManagerRetryConfig, Compaction, CompactionPlan,
+    CommitConsistencyParams, CommitManagerRetryConfig, CompactionBuilder, CompactionPlan,
     CompactionPlanner, CompactionResult, CompactionType,
 };
 use iceberg_compaction_core::config::{
@@ -181,6 +181,11 @@ impl IcebergCompactorRunner {
                     );
                 });
 
+            let branch = commit_branch(
+                self.iceberg_config.r#type.as_str(),
+                self.iceberg_config.write_mode.as_str(),
+            );
+
             let planner = CompactionPlanner::new(planning_config.clone());
 
             let table = self
@@ -190,7 +195,7 @@ impl IcebergCompactorRunner {
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
             let compaction_plan = planner
-                .plan_compaction(&table, CompactionType::Full)
+                .plan_compaction_with_branch(&table, CompactionType::Full, &branch)
                 .await
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
@@ -242,21 +247,17 @@ impl IcebergCompactorRunner {
             );
 
             let retry_config = CommitManagerRetryConfig::default();
-            let compaction = Compaction::builder()
-                .with_catalog(self.catalog.clone())
-                .with_catalog_name(self.iceberg_config.catalog_name())
-                .with_compaction_type(CompactionType::Full)
-                .with_table_ident(self.table_ident.clone())
-                .with_executor_type(iceberg_compaction_core::executor::ExecutorType::DataFusion)
-                .with_registry(BERGLOOM_METRICS_REGISTRY.clone())
-                .with_retry_config(retry_config)
-                .with_to_branch(commit_branch(
-                    self.iceberg_config.r#type.as_str(),
-                    self.iceberg_config.write_mode.as_str(),
-                ))
-                .build()
-                .await
-                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+            let compaction = CompactionBuilder::new(
+                self.catalog.clone(),
+                self.table_ident.clone(),
+                CompactionType::Full,
+            )
+            .with_catalog_name(self.iceberg_config.catalog_name())
+            .with_executor_type(iceberg_compaction_core::executor::ExecutorType::DataFusion)
+            .with_registry(BERGLOOM_METRICS_REGISTRY.clone())
+            .with_retry_config(retry_config)
+            .with_to_branch(branch)
+            .build();
 
             context.incr_running_task_parallelism(input_parallelism);
             self.metrics.compact_task_pending_num.inc();
@@ -282,12 +283,12 @@ impl IcebergCompactorRunner {
                 .await
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
-            let committed_table = table.unwrap();
-
-            if should_enable_iceberg_cow(
-                self.iceberg_config.r#type.as_str(),
-                self.iceberg_config.write_mode.as_str(),
-            ) {
+            if let Some(committed_table) = table
+                && should_enable_iceberg_cow(
+                    self.iceberg_config.r#type.as_str(),
+                    self.iceberg_config.write_mode.as_str(),
+                )
+            {
                 let ingestion_branch = commit_branch(
                     self.iceberg_config.r#type.as_str(),
                     self.iceberg_config.write_mode.as_str(),

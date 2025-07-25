@@ -6943,7 +6943,7 @@ dependencies = [
 [[package]]
 name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=4de74e78745e3a16d75c0ec67912fd6d22071cb8#4de74e78745e3a16d75c0ec67912fd6d22071cb8"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=9ca607830884971271d53f203a4d92a429dc22e9#9ca607830884971271d53f203a4d92a429dc22e9"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -15358,7 +15358,7 @@ dependencies = [
 [[package]]
 name = "tikv-jemalloc-ctl"
 version = "0.5.4"
-source = "git+https://github.com/risingwavelabs/jemallocator.git?rev=64a2d9#64a2d988d687a94cd859855e19241cd8b0705466"
+source = "git+https://github.com/risingwavelabs/jemallocator.git?rev=64a2d988d687a94cd859855e19241cd8b0705466#64a2d988d687a94cd859855e19241cd8b0705466"
 dependencies = [
  "libc",
  "paste",
@@ -15368,7 +15368,7 @@ dependencies = [
 [[package]]
 name = "tikv-jemalloc-sys"
 version = "0.5.4+5.3.0-patched"
-source = "git+https://github.com/risingwavelabs/jemallocator.git?rev=64a2d9#64a2d988d687a94cd859855e19241cd8b0705466"
+source = "git+https://github.com/risingwavelabs/jemallocator.git?rev=64a2d988d687a94cd859855e19241cd8b0705466#64a2d988d687a94cd859855e19241cd8b0705466"
 dependencies = [
  "cc",
  "libc",
@@ -15377,7 +15377,7 @@ dependencies = [
 [[package]]
 name = "tikv-jemallocator"
 version = "0.5.4"
-source = "git+https://github.com/risingwavelabs/jemallocator.git?rev=64a2d9#64a2d988d687a94cd859855e19241cd8b0705466"
+source = "git+https://github.com/risingwavelabs/jemallocator.git?rev=64a2d988d687a94cd859855e19241cd8b0705466#64a2d988d687a94cd859855e19241cd8b0705466"
 dependencies = [
  "libc",
  "tikv-jemalloc-sys",

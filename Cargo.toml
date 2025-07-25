@@ -274,11 +274,11 @@ sqlx = { version = "0.8.2", default-features = false, features = [
 ] }
 thiserror = { git = "https://github.com/BugenZhao/thiserror.git", tag = "bz-provide-3" }
 thiserror-ext = { version = "0.3", features = ["backtrace"] }
-tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
+tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d988d687a94cd859855e19241cd8b0705466" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
     "profiling",
     "stats",
-], rev = "64a2d9" }
+], rev = "64a2d988d687a94cd859855e19241cd8b0705466" }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055", features = [
     "net",
     "fs",
