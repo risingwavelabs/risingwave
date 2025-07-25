@@ -329,8 +329,4 @@ impl StreamingJob {
     pub fn should_notify_creating(&self) -> bool {
         self.is_materialized_view() || matches!(self.create_type(), CreateType::Background)
     }
-
-    pub fn is_sink_into_table(&self) -> bool {
-        matches!(self, Self::Sink(_, Some(_)))
-    }
 }

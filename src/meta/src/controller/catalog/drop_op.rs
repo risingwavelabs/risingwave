@@ -198,9 +198,13 @@ impl CatalogController {
                 .count(&txn)
                 .await?;
             if creating != 0 {
-                return Err(MetaError::permission_denied(format!(
-                    "can not drop {creating} creating streaming job, please cancel them firstly"
-                )));
+                if creating == 1 && object_type == ObjectType::Sink {
+                    info!("dropping creating sink job, it will be cancelled");
+                } else {
+                    return Err(MetaError::permission_denied(format!(
+                        "can not drop {creating} creating streaming job, please cancel them firstly"
+                    )));
+                }
             }
         }
 
