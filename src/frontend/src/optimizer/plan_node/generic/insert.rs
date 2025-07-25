@@ -71,6 +71,23 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Insert<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> Insert<PlanRef> {
+    pub fn clone_with_input<OtherPlanRef: Eq + Hash>(
+        &self,
+        input: OtherPlanRef,
+    ) -> Insert<OtherPlanRef> {
+        Insert {
+            table_name: self.table_name.clone(),
+            table_id: self.table_id,
+            table_version_id: self.table_version_id,
+            table_visible_columns: self.table_visible_columns.clone(),
+            input,
+            column_indices: self.column_indices.clone(),
+            default_columns: self.default_columns.clone(),
+            row_id_index: self.row_id_index,
+            returning: self.returning,
+        }
+    }
+
     pub fn output_len(&self) -> usize {
         if self.returning {
             self.table_visible_columns.len()

@@ -19,7 +19,8 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use super::batch::prelude::*;
 use super::utils::{Distill, childless_record};
 use super::{
-    ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchPb, ToDistributedBatch, generic,
+    BatchPlanRef as PlanRef, ExprRewritable, PlanBase, PlanTreeNodeBinary, ToBatchPb,
+    ToDistributedBatch, generic,
 };
 use crate::error::Result;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
@@ -76,7 +77,7 @@ impl Distill for BatchNestedLoopJoin {
     }
 }
 
-impl PlanTreeNodeBinary for BatchNestedLoopJoin {
+impl PlanTreeNodeBinary<Batch> for BatchNestedLoopJoin {
     fn left(&self) -> PlanRef {
         self.core.left.clone()
     }
@@ -93,7 +94,7 @@ impl PlanTreeNodeBinary for BatchNestedLoopJoin {
     }
 }
 
-impl_plan_tree_node_for_binary! { BatchNestedLoopJoin }
+impl_plan_tree_node_for_binary! { Batch, BatchNestedLoopJoin }
 
 impl ToDistributedBatch for BatchNestedLoopJoin {
     fn to_distributed(&self) -> Result<PlanRef> {
@@ -121,16 +122,16 @@ impl ToBatchPb for BatchNestedLoopJoin {
 impl ToLocalBatch for BatchNestedLoopJoin {
     fn to_local(&self) -> Result<PlanRef> {
         let left = RequiredDist::single()
-            .enforce_if_not_satisfies(self.left().to_local()?, &Order::any())?;
+            .batch_enforce_if_not_satisfies(self.left().to_local()?, &Order::any())?;
 
         let right = RequiredDist::single()
-            .enforce_if_not_satisfies(self.right().to_local()?, &Order::any())?;
+            .batch_enforce_if_not_satisfies(self.right().to_local()?, &Order::any())?;
 
         Ok(self.clone_with_left_right(left, right).into())
     }
 }
 
-impl ExprRewritable for BatchNestedLoopJoin {
+impl ExprRewritable<Batch> for BatchNestedLoopJoin {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

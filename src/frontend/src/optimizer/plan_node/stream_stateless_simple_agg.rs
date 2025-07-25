@@ -18,7 +18,10 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use super::generic::{self, PlanAggCall};
 use super::stream::prelude::*;
 use super::utils::impl_distill_by_unit;
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef,
+    StreamPlanRef,
+};
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{MonotonicityMap, RequiredDist, WatermarkColumns};
@@ -37,7 +40,7 @@ pub struct StreamStatelessSimpleAgg {
 }
 
 impl StreamStatelessSimpleAgg {
-    pub fn new(core: generic::Agg<PlanRef>) -> Self {
+    pub fn new(core: generic::Agg<StreamPlanRef>) -> Self {
         let input = core.input.clone();
         let input_dist = input.distribution();
         debug_assert!(input_dist.satisfies(&RequiredDist::AnyShard));
@@ -67,7 +70,7 @@ impl StreamStatelessSimpleAgg {
 }
 impl_distill_by_unit!(StreamStatelessSimpleAgg, core, "StreamStatelessSimpleAgg");
 
-impl PlanTreeNodeUnary for StreamStatelessSimpleAgg {
+impl PlanTreeNodeUnary<Stream> for StreamStatelessSimpleAgg {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -78,7 +81,7 @@ impl PlanTreeNodeUnary for StreamStatelessSimpleAgg {
         Self::new(core)
     }
 }
-impl_plan_tree_node_for_unary! { StreamStatelessSimpleAgg }
+impl_plan_tree_node_for_unary! { Stream, StreamStatelessSimpleAgg }
 
 impl StreamNode for StreamStatelessSimpleAgg {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -106,7 +109,7 @@ impl StreamNode for StreamStatelessSimpleAgg {
     }
 }
 
-impl ExprRewritable for StreamStatelessSimpleAgg {
+impl ExprRewritable<Stream> for StreamStatelessSimpleAgg {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

@@ -18,7 +18,8 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use super::batch::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{
-    ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, generic,
+    BatchPlanRef as PlanRef, ExprRewritable, PlanBase, PlanTreeNodeUnary, ToBatchPb,
+    ToDistributedBatch, generic,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -41,7 +42,7 @@ impl BatchDelete {
     }
 }
 
-impl PlanTreeNodeUnary for BatchDelete {
+impl PlanTreeNodeUnary<Batch> for BatchDelete {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -53,7 +54,7 @@ impl PlanTreeNodeUnary for BatchDelete {
     }
 }
 
-impl_plan_tree_node_for_unary! { BatchDelete }
+impl_plan_tree_node_for_unary! { Batch, BatchDelete }
 impl_distill_by_unit!(BatchDelete, core, "BatchDelete");
 
 impl ToDistributedBatch for BatchDelete {
@@ -63,7 +64,7 @@ impl ToDistributedBatch for BatchDelete {
             let new_input = RequiredDist::PhysicalDist(Distribution::HashShard(
                 (0..self.input().schema().len()).collect(),
             ))
-            .enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
+            .batch_enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
             let new_delete: PlanRef = self.clone_with_input(new_input).into();
             if self.core.returning {
                 Ok(new_delete)
@@ -72,7 +73,7 @@ impl ToDistributedBatch for BatchDelete {
             }
         } else {
             let new_input = RequiredDist::single()
-                .enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
+                .batch_enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
             Ok(self.clone_with_input(new_input).into())
         }
     }
@@ -92,11 +93,11 @@ impl ToBatchPb for BatchDelete {
 impl ToLocalBatch for BatchDelete {
     fn to_local(&self) -> Result<PlanRef> {
         let new_input = RequiredDist::single()
-            .enforce_if_not_satisfies(self.input().to_local()?, &Order::any())?;
+            .batch_enforce_if_not_satisfies(self.input().to_local()?, &Order::any())?;
         Ok(self.clone_with_input(new_input).into())
     }
 }
 
-impl ExprRewritable for BatchDelete {}
+impl ExprRewritable<Batch> for BatchDelete {}
 
 impl ExprVisitable for BatchDelete {}

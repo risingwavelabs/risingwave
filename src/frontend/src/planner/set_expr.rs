@@ -17,7 +17,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use crate::binder::BoundSetExpr;
 use crate::error::Result;
 use crate::expr::ExprImpl;
-use crate::optimizer::plan_node::PlanRef;
+use crate::optimizer::plan_node::LogicalPlanRef as PlanRef;
 use crate::planner::Planner;
 
 impl Planner {

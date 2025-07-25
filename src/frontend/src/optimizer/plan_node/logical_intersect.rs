@@ -17,7 +17,8 @@ use risingwave_common::catalog::Schema;
 
 use super::utils::impl_distill_by_unit;
 use super::{
-    ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream,
+    ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, PlanBase, PredicatePushdown,
+    ToBatch, ToStream,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -52,12 +53,12 @@ impl LogicalIntersect {
     }
 }
 
-impl PlanTreeNode for LogicalIntersect {
-    fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
+impl PlanTreeNode<Logical> for LogicalIntersect {
+    fn inputs(&self) -> smallvec::SmallVec<[PlanRef; 2]> {
         self.core.inputs.clone().into_iter().collect()
     }
 
-    fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> PlanRef {
+    fn clone_with_inputs(&self, inputs: &[PlanRef]) -> PlanRef {
         Self::new(self.all(), inputs.to_vec()).into()
     }
 }
@@ -75,7 +76,7 @@ impl ColPrunable for LogicalIntersect {
     }
 }
 
-impl ExprRewritable for LogicalIntersect {}
+impl ExprRewritable<Logical> for LogicalIntersect {}
 
 impl ExprVisitable for LogicalIntersect {}
 
@@ -95,13 +96,16 @@ impl PredicatePushdown for LogicalIntersect {
 }
 
 impl ToBatch for LogicalIntersect {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         unimplemented!()
     }
 }
 
 impl ToStream for LogicalIntersect {
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(
+        &self,
+        _ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         unimplemented!()
     }
 

@@ -18,7 +18,8 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use super::batch::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{
-    ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, generic,
+    BatchPlanRef as PlanRef, ExprRewritable, PlanBase, PlanTreeNodeUnary, ToBatchPb,
+    ToDistributedBatch, generic,
 };
 use crate::error::Result;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
@@ -58,7 +59,7 @@ impl BatchHopWindow {
 }
 impl_distill_by_unit!(BatchHopWindow, core, "BatchHopWindow");
 
-impl PlanTreeNodeUnary for BatchHopWindow {
+impl PlanTreeNodeUnary<Batch> for BatchHopWindow {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -74,7 +75,7 @@ impl PlanTreeNodeUnary for BatchHopWindow {
     }
 }
 
-impl_plan_tree_node_for_unary! { BatchHopWindow }
+impl_plan_tree_node_for_unary! { Batch, BatchHopWindow }
 
 impl ToDistributedBatch for BatchHopWindow {
     fn to_distributed(&self) -> Result<PlanRef> {
@@ -105,7 +106,7 @@ impl ToDistributedBatch for BatchHopWindow {
             self.window_end_exprs.clone(),
         );
         let batch_plan = required_order.enforce_if_not_satisfies(batch_plan.into())?;
-        required_dist.enforce_if_not_satisfies(batch_plan, required_order)
+        required_dist.batch_enforce_if_not_satisfies(batch_plan, required_order)
     }
 }
 
@@ -139,7 +140,7 @@ impl ToLocalBatch for BatchHopWindow {
     }
 }
 
-impl ExprRewritable for BatchHopWindow {
+impl ExprRewritable<Batch> for BatchHopWindow {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

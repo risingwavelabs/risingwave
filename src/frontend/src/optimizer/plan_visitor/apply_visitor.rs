@@ -13,9 +13,8 @@
 // limitations under the License.
 
 use super::{DefaultBehavior, LogicalPlanVisitor, Merge};
-use crate::PlanRef;
 use crate::error::{ErrorCode, RwError};
-use crate::optimizer::plan_node::{LogicalApply, PlanTreeNodeBinary};
+use crate::optimizer::plan_node::{LogicalApply, LogicalPlanRef, PlanTreeNodeBinary};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
 pub struct HasMaxOneRowApply();
@@ -80,7 +79,7 @@ impl LogicalPlanVisitor for CheckApplyElimination {
 }
 
 #[easy_ext::ext(PlanCheckApplyEliminationExt)]
-impl PlanRef {
+impl LogicalPlanRef {
     /// Checks if all `LogicalApply` nodes in the plan have been eliminated, that is,
     /// subqueries are successfully unnested.
     pub fn check_apply_elimination(&self) -> Result<(), RwError> {

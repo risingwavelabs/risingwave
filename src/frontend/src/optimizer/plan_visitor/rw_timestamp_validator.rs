@@ -15,15 +15,14 @@
 use risingwave_common::catalog::{RW_TIMESTAMP_COLUMN_ID, RW_TIMESTAMP_COLUMN_NAME};
 
 use super::{DefaultBehavior, Merge, StreamPlanVisitor};
-use crate::PlanRef;
-use crate::optimizer::plan_node::StreamTableScan;
+use crate::optimizer::plan_node::{StreamPlanRef, StreamTableScan};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
 #[derive(Debug, Clone, Default)]
 pub struct RwTimestampValidator {}
 
 impl RwTimestampValidator {
-    pub fn select_rw_timestamp_in_stream_query(plan: PlanRef) -> bool {
+    pub fn select_rw_timestamp_in_stream_query(plan: StreamPlanRef) -> bool {
         RwTimestampValidator::default().visit(plan)
     }
 }

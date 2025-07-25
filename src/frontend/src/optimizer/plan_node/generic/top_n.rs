@@ -19,9 +19,10 @@ use risingwave_common::catalog::{FieldDisplay, Schema};
 use risingwave_common::util::sort_util::OrderType;
 
 use super::super::utils::TableCatalogBuilder;
-use super::{DistillUnit, GenericPlanNode, GenericPlanRef, stream};
+use super::{DistillUnit, GenericPlanNode, GenericPlanRef, PhysicalPlanRef};
 use crate::TableCatalog;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::StreamPlanRef;
 use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::{FunctionalDependencySet, Order, OrderDisplay};
 
@@ -35,7 +36,7 @@ pub struct TopN<PlanRef> {
     pub group_key: Vec<usize>,
 }
 
-impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
+impl TopN<StreamPlanRef> {
     /// Infers the state table catalog for [`super::super::StreamTopN`] and
     /// [`super::super::StreamGroupTopN`].
     pub fn infer_internal_table_catalog(
@@ -83,7 +84,9 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
             read_prefix_len_hint,
         )
     }
+}
 
+impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
     /// decompose -> (input, limit, offset, `with_ties`, order, `group_key`)
     pub fn decompose(self) -> (PlanRef, u64, u64, bool, Order, Vec<usize>) {
         let (limit, with_ties) = match self.limit_attr {
@@ -102,6 +105,16 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
+    pub fn clone_with_input<OtherPlanRef>(&self, input: OtherPlanRef) -> TopN<OtherPlanRef> {
+        TopN {
+            input,
+            limit_attr: self.limit_attr,
+            offset: self.offset,
+            order: self.order.clone(),
+            group_key: self.group_key.clone(),
+        }
+    }
+
     pub fn with_group(
         input: PlanRef,
         limit_attr: TopNLimit,

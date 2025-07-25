@@ -19,9 +19,10 @@ use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::Schema;
 
 use super::{GenericPlanNode, GenericPlanRef, impl_distill_unit_from_fields};
+use crate::OptimizerContextRef;
 use crate::binder::ShareId;
+use crate::optimizer::plan_node::LogicalPlanRef;
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::{OptimizerContextRef, optimizer};
 
 #[derive(Clone, Debug)]
 pub struct CteRef<PlanRef> {
@@ -49,13 +50,13 @@ impl<PlanRef> CteRef<PlanRef> {
     }
 }
 
-impl<PlanRef: GenericPlanRef> CteRef<PlanRef> {
-    pub fn get_cte_ref(&self) -> Option<optimizer::plan_node::PlanRef> {
+impl CteRef<LogicalPlanRef> {
+    pub fn get_cte_ref(&self) -> Option<LogicalPlanRef> {
         self.ctx().get_rcte_cache_plan(&self.share_id)
     }
 }
 
-impl<PlanRef: GenericPlanRef> GenericPlanNode for CteRef<PlanRef> {
+impl GenericPlanNode for CteRef<LogicalPlanRef> {
     fn schema(&self) -> Schema {
         if let Some(plan_ref) = self.get_cte_ref() {
             plan_ref.schema().clone()

@@ -16,8 +16,9 @@ use risingwave_common::catalog::TableVersionId;
 
 use super::utils::impl_distill_by_unit;
 use super::{
-    BatchDelete, ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream, gen_filter_and_pushdown, generic,
+    BatchDelete, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, LogicalProject,
+    PlanBase, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream, gen_filter_and_pushdown,
+    generic,
 };
 use crate::catalog::TableId;
 use crate::error::Result;
@@ -58,7 +59,7 @@ impl LogicalDelete {
     }
 }
 
-impl PlanTreeNodeUnary for LogicalDelete {
+impl PlanTreeNodeUnary<Logical> for LogicalDelete {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -70,7 +71,7 @@ impl PlanTreeNodeUnary for LogicalDelete {
     }
 }
 
-impl_plan_tree_node_for_unary! { LogicalDelete }
+impl_plan_tree_node_for_unary! { Logical, LogicalDelete }
 impl_distill_by_unit!(LogicalDelete, core, "LogicalDelete");
 
 impl ColPrunable for LogicalDelete {
@@ -90,7 +91,7 @@ impl ColPrunable for LogicalDelete {
     }
 }
 
-impl ExprRewritable for LogicalDelete {}
+impl ExprRewritable<Logical> for LogicalDelete {}
 
 impl ExprVisitable for LogicalDelete {}
 
@@ -105,16 +106,18 @@ impl PredicatePushdown for LogicalDelete {
 }
 
 impl ToBatch for LogicalDelete {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         let new_input = self.input().to_batch()?;
-        let mut core = self.core.clone();
-        core.input = new_input;
+        let core = self.core.clone_with_input(new_input);
         Ok(BatchDelete::new(core).into())
     }
 }
 
 impl ToStream for LogicalDelete {
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(
+        &self,
+        _ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         unreachable!("delete should always be converted to batch plan");
     }
 

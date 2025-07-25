@@ -20,7 +20,8 @@ use risingwave_pb::batch_plan::{AzblobFileScanNode, FileScanNode, GcsFileScanNod
 use super::batch::prelude::*;
 use super::utils::{Distill, childless_record, column_names_pretty};
 use super::{
-    ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, ToLocalBatch, generic,
+    BatchPlanRef as PlanRef, ExprRewritable, PlanBase, ToBatchPb, ToDistributedBatch, ToLocalBatch,
+    generic,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -54,7 +55,7 @@ impl BatchFileScan {
     }
 }
 
-impl_plan_tree_node_for_leaf! { BatchFileScan }
+impl_plan_tree_node_for_leaf! { Batch, BatchFileScan }
 
 impl Distill for BatchFileScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -130,6 +131,6 @@ impl ToBatchPb for BatchFileScan {
     }
 }
 
-impl ExprRewritable for BatchFileScan {}
+impl ExprRewritable<Batch> for BatchFileScan {}
 
 impl ExprVisitable for BatchFileScan {}

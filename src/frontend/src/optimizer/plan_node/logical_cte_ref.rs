@@ -18,11 +18,11 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use super::expr_visitable::ExprVisitable;
 use super::utils::impl_distill_by_unit;
 use super::{
-    ColPrunable, ColumnPruningContext, ExprRewritable, Logical, LogicalProject, PlanBase,
-    PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, ToBatch, ToStream,
+    BatchPlanRef, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
+    LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PredicatePushdown,
+    PredicatePushdownContext, RewriteStreamContext, StreamPlanRef, ToBatch, ToStream,
     ToStreamContext, generic,
 };
-use crate::PlanRef;
 use crate::binder::ShareId;
 use crate::error::Result;
 use crate::utils::Condition;
@@ -45,11 +45,11 @@ impl LogicalCteRef {
     }
 }
 
-impl_plan_tree_node_for_leaf! {LogicalCteRef}
+impl_plan_tree_node_for_leaf! { Logical, LogicalCteRef}
 
 impl_distill_by_unit! {LogicalCteRef, core, "LogicalCteRef"}
 
-impl ExprRewritable for LogicalCteRef {}
+impl ExprRewritable<Logical> for LogicalCteRef {}
 
 impl ExprVisitable for LogicalCteRef {}
 
@@ -70,7 +70,7 @@ impl PredicatePushdown for LogicalCteRef {
 }
 
 impl ToBatch for LogicalCteRef {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<BatchPlanRef> {
         bail_not_implemented!(
             issue = 15135,
             "recursive CTE not supported for to_batch of LogicalCteRef"
@@ -79,7 +79,7 @@ impl ToBatch for LogicalCteRef {
 }
 
 impl ToStream for LogicalCteRef {
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
         bail_not_implemented!(
             issue = 15135,
             "recursive CTE not supported for to_stream of LogicalCteRef"

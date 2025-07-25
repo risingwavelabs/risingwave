@@ -33,8 +33,9 @@ use crate::expr::{
 pub use crate::optimizer::plan_node::LogicalFilter;
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef, Project, ProjectBuilder};
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalApply, LogicalDedup, LogicalJoin, LogicalOverWindow, LogicalProject,
-    LogicalProjectSet, LogicalTopN, LogicalValues, PlanAggCall, PlanRef,
+    LogicalAgg, LogicalApply, LogicalDedup, LogicalJoin, LogicalOverWindow,
+    LogicalPlanRef as PlanRef, LogicalProject, LogicalProjectSet, LogicalTopN, LogicalValues,
+    PlanAggCall,
 };
 use crate::optimizer::property::Order;
 use crate::planner::Planner;

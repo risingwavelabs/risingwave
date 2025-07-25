@@ -12,19 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
-
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::bail_not_implemented;
 
 use super::utils::{Distill, childless_record};
 use super::{
-    ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
-    ShareNode, ToBatch, ToStream, generic,
+    ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, PlanBase, PlanTreeNodeUnary,
+    PredicatePushdown, ShareNode, StreamPlanRef, ToBatch, ToStream, generic,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::generic::{GenericPlanRef, Share};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamShare,
     ToStreamContext,
@@ -58,9 +56,7 @@ impl LogicalShare {
     pub fn new(input: PlanRef) -> Self {
         let _ctx = input.ctx();
         let _functional_dependency = input.functional_dependency().clone();
-        let core = generic::Share {
-            input: RefCell::new(input),
-        };
+        let core = generic::Share::new(input);
         let base = PlanBase::new_logical_with_core(&core);
         LogicalShare { base, core }
     }
@@ -74,7 +70,7 @@ impl LogicalShare {
     }
 }
 
-impl PlanTreeNodeUnary for LogicalShare {
+impl PlanTreeNodeUnary<Logical> for LogicalShare {
     fn input(&self) -> PlanRef {
         self.core.input.borrow().clone()
     }
@@ -92,10 +88,10 @@ impl PlanTreeNodeUnary for LogicalShare {
     }
 }
 
-impl_plan_tree_node_for_unary! {LogicalShare}
+impl_plan_tree_node_for_unary! { Logical, LogicalShare}
 
-impl ShareNode for LogicalShare {
-    fn new_share(core: generic::Share<PlanRef>) -> PlanRef {
+impl ShareNode<Logical> for LogicalShare {
+    fn new_share(core: Share<PlanRef>) -> PlanRef {
         let base = PlanBase::new_logical_with_core(&core);
         LogicalShare { base, core }.into()
     }
@@ -117,7 +113,7 @@ impl ColPrunable for LogicalShare {
     }
 }
 
-impl ExprRewritable for LogicalShare {}
+impl ExprRewritable<Logical> for LogicalShare {}
 
 impl ExprVisitable for LogicalShare {}
 
@@ -134,18 +130,21 @@ impl PredicatePushdown for LogicalShare {
 }
 
 impl ToBatch for LogicalShare {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         bail_not_implemented!("batch query doesn't support share operator for now");
     }
 }
 
 impl ToStream for LogicalShare {
-    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(
+        &self,
+        ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         match ctx.get_to_stream_result(self.id()) {
             None => {
                 let new_input = self.input().to_stream(ctx)?;
                 let core = generic::Share::new(new_input);
-                let stream_share_ref: PlanRef = StreamShare::new(core).into();
+                let stream_share_ref: StreamPlanRef = StreamShare::new(core).into();
                 ctx.add_to_stream_result(self.id(), stream_share_ref.clone());
                 Ok(stream_share_ref)
             }

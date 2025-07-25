@@ -18,8 +18,9 @@ use risingwave_common::catalog::TableVersionId;
 use super::generic::GenericPlanRef;
 use super::utils::{Distill, childless_record};
 use super::{
-    BatchInsert, ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream, gen_filter_and_pushdown, generic,
+    BatchInsert, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, LogicalProject,
+    PlanBase, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream, gen_filter_and_pushdown,
+    generic,
 };
 use crate::catalog::TableId;
 use crate::error::Result;
@@ -76,7 +77,7 @@ impl LogicalInsert {
     }
 }
 
-impl PlanTreeNodeUnary for LogicalInsert {
+impl PlanTreeNodeUnary<Logical> for LogicalInsert {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -88,7 +89,7 @@ impl PlanTreeNodeUnary for LogicalInsert {
     }
 }
 
-impl_plan_tree_node_for_unary! {LogicalInsert}
+impl_plan_tree_node_for_unary! { Logical, LogicalInsert}
 
 impl Distill for LogicalInsert {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -116,7 +117,7 @@ impl ColPrunable for LogicalInsert {
     }
 }
 
-impl ExprRewritable for LogicalInsert {
+impl ExprRewritable<Logical> for LogicalInsert {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
@@ -153,16 +154,18 @@ impl PredicatePushdown for LogicalInsert {
 }
 
 impl ToBatch for LogicalInsert {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         let new_input = self.input().to_batch()?;
-        let mut core = self.core.clone();
-        core.input = new_input;
+        let core = self.core.clone_with_input(new_input);
         Ok(BatchInsert::new(core).into())
     }
 }
 
 impl ToStream for LogicalInsert {
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(
+        &self,
+        _ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         unreachable!("insert should always be converted to batch plan");
     }
 

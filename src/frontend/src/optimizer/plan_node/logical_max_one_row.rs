@@ -17,8 +17,8 @@ use pretty_xmlish::XmlNode;
 use super::generic::DistillUnit;
 use super::utils::Distill;
 use super::{
-    BatchMaxOneRow, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, ToBatch, ToStream, gen_filter_and_pushdown, generic,
+    BatchMaxOneRow, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, PlanBase,
+    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream, gen_filter_and_pushdown, generic,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -47,7 +47,7 @@ impl LogicalMaxOneRow {
     }
 }
 
-impl PlanTreeNodeUnary for LogicalMaxOneRow {
+impl PlanTreeNodeUnary<Logical> for LogicalMaxOneRow {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -65,7 +65,7 @@ impl PlanTreeNodeUnary for LogicalMaxOneRow {
         (self.clone_with_input(input), input_col_change)
     }
 }
-impl_plan_tree_node_for_unary! {LogicalMaxOneRow}
+impl_plan_tree_node_for_unary! { Logical, LogicalMaxOneRow}
 
 impl Distill for LogicalMaxOneRow {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -80,7 +80,7 @@ impl ColPrunable for LogicalMaxOneRow {
     }
 }
 
-impl ExprRewritable for LogicalMaxOneRow {}
+impl ExprRewritable<Logical> for LogicalMaxOneRow {}
 
 impl ExprVisitable for LogicalMaxOneRow {}
 
@@ -96,7 +96,7 @@ impl PredicatePushdown for LogicalMaxOneRow {
 }
 
 impl ToBatch for LogicalMaxOneRow {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         let input = self.input().to_batch()?;
         let core = generic::MaxOneRow { input };
         Ok(BatchMaxOneRow::new(core).into())
@@ -104,7 +104,10 @@ impl ToBatch for LogicalMaxOneRow {
 }
 
 impl ToStream for LogicalMaxOneRow {
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(
+        &self,
+        _ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         // Check `LogicalOptimizer::gen_optimized_logical_plan_for_stream`.
         unreachable!("should already bail out after subquery unnesting")
     }

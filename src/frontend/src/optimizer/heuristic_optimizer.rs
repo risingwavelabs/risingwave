@@ -23,9 +23,10 @@ use super::ApplyResult;
 #[cfg(debug_assertions)]
 use crate::Explain;
 use crate::error::Result;
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::ConventionMarker;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::rule::BoxedRule;
+use crate::optimizer::{PlanRef, PlanTreeNode};
 
 /// Traverse order of [`HeuristicOptimizer`]
 pub enum ApplyOrder {
@@ -38,13 +39,13 @@ pub enum ApplyOrder {
 /// apply each rule on them.
 pub struct HeuristicOptimizer<'a, C: ConventionMarker> {
     apply_order: &'a ApplyOrder,
-    rules: &'a [BoxedRule],
+    rules: &'a [BoxedRule<C>],
     stats: Stats,
     _phantom: PhantomData<C>,
 }
 
 impl<'a, C: ConventionMarker> HeuristicOptimizer<'a, C> {
-    pub fn new(apply_order: &'a ApplyOrder, rules: &'a [BoxedRule]) -> Self {
+    pub fn new(apply_order: &'a ApplyOrder, rules: &'a [BoxedRule<C>]) -> Self {
         Self {
             apply_order,
             rules,
@@ -53,7 +54,7 @@ impl<'a, C: ConventionMarker> HeuristicOptimizer<'a, C> {
         }
     }
 
-    fn optimize_node(&mut self, mut plan: PlanRef) -> Result<PlanRef> {
+    fn optimize_node(&mut self, mut plan: PlanRef<C>) -> Result<PlanRef<C>> {
         for rule in self.rules {
             match rule.apply(plan.clone()) {
                 ApplyResult::Ok(applied) => {
@@ -70,7 +71,7 @@ impl<'a, C: ConventionMarker> HeuristicOptimizer<'a, C> {
         Ok(plan)
     }
 
-    fn optimize_inputs(&mut self, plan: PlanRef) -> Result<PlanRef> {
+    fn optimize_inputs(&mut self, plan: PlanRef<C>) -> Result<PlanRef<C>> {
         let pre_applied = self.stats.total_applied();
         let inputs: Vec<_> = plan
             .inputs()
@@ -79,13 +80,13 @@ impl<'a, C: ConventionMarker> HeuristicOptimizer<'a, C> {
             .try_collect()?;
 
         Ok(if pre_applied != self.stats.total_applied() {
-            plan.clone_root_with_inputs::<C>(&inputs)
+            plan.clone_root_with_inputs(&inputs)
         } else {
             plan
         })
     }
 
-    pub fn optimize(&mut self, mut plan: PlanRef) -> Result<PlanRef> {
+    pub fn optimize(&mut self, mut plan: PlanRef<C>) -> Result<PlanRef<C>> {
         match self.apply_order {
             ApplyOrder::TopDown => {
                 plan = self.optimize_node(plan)?;
@@ -103,7 +104,11 @@ impl<'a, C: ConventionMarker> HeuristicOptimizer<'a, C> {
     }
 
     #[cfg(debug_assertions)]
-    pub fn check_equivalent_plan(rule_desc: &str, input_plan: &PlanRef, output_plan: &PlanRef) {
+    pub fn check_equivalent_plan(
+        rule_desc: &str,
+        input_plan: &PlanRef<C>,
+        output_plan: &PlanRef<C>,
+    ) {
         if !input_plan.schema().type_eq(output_plan.schema()) {
             panic!(
                 "{} fails to generate equivalent plan.\nInput schema: {:?}\nInput plan: \n{}\nOutput schema: {:?}\nOutput plan: \n{}\nSQL: {}",
@@ -131,7 +136,7 @@ impl Stats {
         }
     }
 
-    pub fn count_rule(&mut self, rule: &BoxedRule) {
+    pub fn count_rule(&mut self, rule: &BoxedRule<impl ConventionMarker>) {
         self.total_applied += 1;
         match self.rule_counter.entry(rule.description().to_owned()) {
             Entry::Occupied(mut entry) => {

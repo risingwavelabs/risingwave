@@ -22,7 +22,7 @@ use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 use super::generic::GenericPlanNode;
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, generic};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeBinary, StreamPlanRef as PlanRef, generic};
 use crate::expr::{Expr, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
@@ -127,7 +127,7 @@ impl Distill for StreamDeltaJoin {
     }
 }
 
-impl PlanTreeNodeBinary for StreamDeltaJoin {
+impl PlanTreeNodeBinary<Stream> for StreamDeltaJoin {
     fn left(&self) -> PlanRef {
         self.core.left.clone()
     }
@@ -144,7 +144,7 @@ impl PlanTreeNodeBinary for StreamDeltaJoin {
     }
 }
 
-impl_plan_tree_node_for_binary! { StreamDeltaJoin }
+impl_plan_tree_node_for_binary! { Stream, StreamDeltaJoin }
 
 impl TryToStreamPb for StreamDeltaJoin {
     fn try_to_stream_prost_body(
@@ -225,7 +225,7 @@ impl TryToStreamPb for StreamDeltaJoin {
     }
 }
 
-impl ExprRewritable for StreamDeltaJoin {
+impl ExprRewritable<Stream> for StreamDeltaJoin {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

@@ -12,7 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::optimizer::plan_node::{Batch, BatchPlanRef};
+
 pub mod batch_iceberg_count_star;
 pub mod batch_iceberg_predicate_pushdown;
 pub(crate) mod batch_project_merge_rule;
 pub mod batch_push_limit_to_scan_rule;
+
+use super::InfallibleRule as Rule;
+type Convention = Batch;
+type BoxedRule = super::BoxedRule<Batch>;
+type PlanRef = BatchPlanRef;

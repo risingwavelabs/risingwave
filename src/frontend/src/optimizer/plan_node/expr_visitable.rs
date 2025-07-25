@@ -20,7 +20,7 @@ pub trait ExprVisitable {
     fn visit_exprs(&self, _v: &mut dyn ExprVisitor) {}
 }
 
-impl ExprVisitable for PlanRef {
+impl<C: ConventionMarker> ExprVisitable for PlanRef<C> {
     fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
         self.deref().visit_exprs(v);
     }

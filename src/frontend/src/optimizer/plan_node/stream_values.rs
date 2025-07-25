@@ -19,7 +19,7 @@ use risingwave_pb::stream_plan::values_node::ExprTuple;
 
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record};
-use super::{ExprRewritable, LogicalValues, PlanBase, StreamNode};
+use super::{ExprRewritable, LogicalValues, PlanBase, StreamNode, StreamPlanRef as PlanRef};
 use crate::expr::{Expr, ExprImpl, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
@@ -32,7 +32,7 @@ pub struct StreamValues {
     logical: LogicalValues,
 }
 
-impl_plan_tree_node_for_leaf! { StreamValues }
+impl_plan_tree_node_for_leaf! { Stream, StreamValues }
 
 impl StreamValues {
     /// `StreamValues` should enforce `Distribution::Single`
@@ -89,12 +89,12 @@ impl StreamNode for StreamValues {
     }
 }
 
-impl ExprRewritable for StreamValues {
+impl ExprRewritable<Stream> for StreamValues {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
 
-    fn rewrite_exprs(&self, r: &mut dyn crate::expr::ExprRewriter) -> crate::PlanRef {
+    fn rewrite_exprs(&self, r: &mut dyn crate::expr::ExprRewriter) -> PlanRef {
         Self::new(
             self.logical
                 .rewrite_exprs(r)

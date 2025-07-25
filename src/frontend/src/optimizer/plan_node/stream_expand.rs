@@ -18,7 +18,9 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
 use super::utils::impl_distill_by_unit;
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode, generic};
+use super::{
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, generic,
+};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, MonotonicityMap};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -58,7 +60,7 @@ impl StreamExpand {
     }
 }
 
-impl PlanTreeNodeUnary for StreamExpand {
+impl PlanTreeNodeUnary<Stream> for StreamExpand {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -70,7 +72,7 @@ impl PlanTreeNodeUnary for StreamExpand {
     }
 }
 
-impl_plan_tree_node_for_unary! { StreamExpand }
+impl_plan_tree_node_for_unary! { Stream, StreamExpand }
 impl_distill_by_unit!(StreamExpand, core, "StreamExpand");
 
 impl StreamNode for StreamExpand {
@@ -90,6 +92,6 @@ fn subset_to_protobuf(subset: &[usize]) -> Subset {
     Subset { column_indices }
 }
 
-impl ExprRewritable for StreamExpand {}
+impl ExprRewritable<Stream> for StreamExpand {}
 
 impl ExprVisitable for StreamExpand {}

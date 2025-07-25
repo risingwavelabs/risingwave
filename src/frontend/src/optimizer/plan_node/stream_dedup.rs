@@ -22,7 +22,7 @@ use super::stream::prelude::*;
 use super::utils::{TableCatalogBuilder, impl_distill_by_unit};
 use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, generic};
 use crate::TableCatalog;
-use crate::optimizer::plan_node::PlanRef;
+use crate::optimizer::plan_node::StreamPlanRef as PlanRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -73,7 +73,7 @@ impl StreamDedup {
 // assert!(self.base.append_only());
 impl_distill_by_unit!(StreamDedup, core, "StreamAppendOnlyDedup");
 
-impl PlanTreeNodeUnary for StreamDedup {
+impl PlanTreeNodeUnary<Stream> for StreamDedup {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -85,7 +85,7 @@ impl PlanTreeNodeUnary for StreamDedup {
     }
 }
 
-impl_plan_tree_node_for_unary! { StreamDedup }
+impl_plan_tree_node_for_unary! { Stream, StreamDedup }
 
 impl StreamNode for StreamDedup {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -104,6 +104,6 @@ impl StreamNode for StreamDedup {
     }
 }
 
-impl ExprRewritable for StreamDedup {}
+impl ExprRewritable<Stream> for StreamDedup {}
 
 impl ExprVisitable for StreamDedup {}

@@ -58,6 +58,15 @@ pub struct Project<PlanRef> {
 }
 
 impl<PlanRef> Project<PlanRef> {
+    pub fn clone_with_input<OtherPlanRef>(&self, input: OtherPlanRef) -> Project<OtherPlanRef> {
+        Project {
+            exprs: self.exprs.clone(),
+            field_names: self.field_names.clone(),
+            input,
+            _private: (),
+        }
+    }
+
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.exprs = self
             .exprs

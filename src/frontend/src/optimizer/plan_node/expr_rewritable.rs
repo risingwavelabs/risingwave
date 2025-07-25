@@ -18,23 +18,23 @@ use super::*;
 /// the `ExprRewriter` needs to be idempotent i.e., applying it more than once
 /// to the same `ExprImpl` will be a noop on subsequent applications.
 /// `rewrite_exprs` should only return a plan with the given node modified.
-/// To rewrite recursively, call `rewrite_exprs_recursive`.
-pub trait ExprRewritable {
+/// To rewrite recursively, call `rewrite_exprs_recursive` on [`RewriteExprsRecursive`].
+pub trait ExprRewritable<C: ConventionMarker> {
     fn has_rewritable_expr(&self) -> bool {
         false
     }
 
-    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
+    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef<C> {
         unimplemented!()
     }
 }
 
-impl ExprRewritable for PlanRef {
+impl<C: ConventionMarker> ExprRewritable<C> for PlanRef<C> {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
 
-    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef<C> {
         if self.deref().has_rewritable_expr() {
             self.deref().rewrite_exprs(r)
         } else {

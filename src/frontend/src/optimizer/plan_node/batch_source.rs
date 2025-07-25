@@ -22,7 +22,8 @@ use risingwave_sqlparser::ast::AsOf;
 use super::batch::prelude::*;
 use super::utils::{Distill, childless_record, column_names_pretty};
 use super::{
-    ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, ToLocalBatch, generic,
+    BatchPlanRef as PlanRef, ExprRewritable, PlanBase, ToBatchPb, ToDistributedBatch, ToLocalBatch,
+    generic,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::Result;
@@ -73,7 +74,7 @@ impl BatchSource {
     }
 }
 
-impl_plan_tree_node_for_leaf! { BatchSource }
+impl_plan_tree_node_for_leaf! { Batch, BatchSource }
 
 impl Distill for BatchSource {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -121,6 +122,6 @@ impl ToBatchPb for BatchSource {
     }
 }
 
-impl ExprRewritable for BatchSource {}
+impl ExprRewritable<Batch> for BatchSource {}
 
 impl ExprVisitable for BatchSource {}
