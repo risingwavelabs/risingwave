@@ -21,6 +21,10 @@ psrser = "parser"
 extreact = "extract"
 buidler = "builder"
 epoches = "epochs"
+# HashiCorp company name and related terms
+Hashi = "Hashi"
+HashiCorp = "HashiCorp"
+hashicorp = "hashicorp"
 
 
 [default.extend-identifiers]
