@@ -226,11 +226,13 @@ impl FunctionCall {
                 let return_type = infer_some_all(func_types, &mut inputs)?;
                 Ok(FunctionCall::new_unchecked(expr_type, inputs, return_type).into())
             }
-            ExprType::Not | ExprType::IsNotNull | ExprType::IsNull => Ok(FunctionCall::new(
-                expr_type,
-                vec![Self::new_binary_op_func(func_types, inputs)?],
-            )?
-            .into()),
+            ExprType::Not | ExprType::IsNotNull | ExprType::IsNull | ExprType::Neg => {
+                Ok(FunctionCall::new(
+                    expr_type,
+                    vec![Self::new_binary_op_func(func_types, inputs)?],
+                )?
+                .into())
+            }
             _ => Ok(FunctionCall::new(expr_type, inputs)?.into()),
         }
     }
