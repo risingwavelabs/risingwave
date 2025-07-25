@@ -19,13 +19,25 @@ use crate::source::{SplitImpl, SplitMetaData};
 ///
 /// A batch refreshable source can be refreshed - reload all data from the source, e.g., re-run a `SELECT *` query from the source.
 /// The reloaded data will be handled by `RefreshableMaterialize` to calculate a diff to send to downstream.
+///
+/// See <https://github.com/risingwavelabs/risingwave/issues/22690> for the whole picture of the user journey.
+///
+/// ## Failover
+///
+/// Batch source is considered stateless. i.e., it's consumption progress is not recorded, and cannot be resumed.
+/// The split metadata just represent "how to load the data".
+///
+/// - On startup, `SourceExecutor` will load data.
+/// - On `RefreshStart` barrier (from `REFRESH TABLE t` SQL command), it will re-load data.
+/// - On recovery, it will *do nothing*, regardless of whether it's in the middle of loading data or not before crash.
 pub trait BatchSourceSplit: SplitMetaData {
     fn finished(&self) -> bool;
     /// Mark the source as finished. Called after the source is exhausted.
-    /// A `LoadFinish` signal will be sent by `SourceExecutor`, and the `RefreshableMaterialize` will begin to calculate the diff.
+    /// Then `SourceExecutor` will report to meta to send a `LoadFinish` barrier,
+    /// and the `RefreshableMaterialize` will begin to calculate the diff.
     fn finish(&mut self);
     /// Refresh the source to make it ready for re-run.
-    /// A `Refresh` signal will be sent, and the `RefreshableMaterialize` will begin to write the new data into a temporary staging table.
+    /// Called when receiving `RefreshStart` barrier.
     fn refresh(&mut self);
 }
 

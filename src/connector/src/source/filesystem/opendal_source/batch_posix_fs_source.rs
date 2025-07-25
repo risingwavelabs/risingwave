@@ -33,13 +33,10 @@ use crate::source::{
     SourceMeta, SplitEnumerator, SplitId, SplitMetaData, SplitReader,
 };
 
-// Batch Posix fs source for refreshable tables.
-// Unlike regular posix_fs, this connector only lists files on demand (during refresh),
-// not continuously. This makes it suitable for refreshable table functionality.
-//
-// For a single-CN cluster, the behavior is well-defined. It will read from the local file system.
-// For a multi-CN cluster, each CN will read from its own local file system under the given directory.
-
+/// Batch Posix fs source for refreshable tables. (For testing only)
+/// Unlike regular posix_fs, this connector only lists files on demand (during refresh),
+/// not continuously. This makes it suitable for refreshable table functionality.
+///
 /// Split representing a single file to be read once
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct BatchPosixFsSplit {
@@ -49,7 +46,8 @@ pub struct BatchPosixFsSplit {
     /// A unique identifier for the split, typically including a timestamp to force refresh.
     pub split_id: SplitId,
     /// Whether this split has finished reading all data (used for batch sources)
-    #[serde(default)]
+    /// See [`BatchSourceSplit`] for details about recovery.
+    #[serde(skip)]
     pub finished: bool,
 }
 
