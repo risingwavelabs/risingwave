@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{DefaultBehavior, Merge};
+use super::{BatchPlanVisitor, DefaultBehavior, Merge};
 use crate::optimizer::BatchPlanRoot;
-use crate::optimizer::plan_node::{BatchSysSeqScan, LogicalSysScan, StreamTableScan};
+use crate::optimizer::plan_node::BatchSysSeqScan;
 use crate::optimizer::plan_visitor::PlanVisitor;
 
 #[derive(Debug, Clone, Default)]
@@ -27,7 +27,7 @@ impl SysTableVisitor {
     }
 }
 
-impl PlanVisitor for SysTableVisitor {
+impl BatchPlanVisitor for SysTableVisitor {
     type Result = bool;
 
     type DefaultBehavior = impl DefaultBehavior<Self::Result>;
@@ -38,14 +38,5 @@ impl PlanVisitor for SysTableVisitor {
 
     fn visit_batch_sys_seq_scan(&mut self, _batch_seq_scan: &BatchSysSeqScan) -> bool {
         true
-    }
-
-    fn visit_logical_sys_scan(&mut self, _logical_scan: &LogicalSysScan) -> bool {
-        true
-    }
-
-    // Sys scan not allowed for streaming.
-    fn visit_stream_table_scan(&mut self, _stream_table_scan: &StreamTableScan) -> bool {
-        false
     }
 }

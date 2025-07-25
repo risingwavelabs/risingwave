@@ -17,7 +17,7 @@ use std::ops::{Mul, Sub};
 
 use risingwave_pb::plan_common::JoinType;
 
-use super::{DefaultBehavior, DefaultValue, PlanVisitor};
+use super::{DefaultBehavior, DefaultValue, LogicalPlanVisitor, PlanVisitor};
 use crate::optimizer::plan_node::generic::TopNLimit;
 use crate::optimizer::plan_node::{
     self, PlanNode, PlanTreeNode, PlanTreeNodeBinary, PlanTreeNodeUnary,
@@ -53,7 +53,7 @@ impl CardinalityVisitor {
     }
 }
 
-impl PlanVisitor for CardinalityVisitor {
+impl LogicalPlanVisitor for CardinalityVisitor {
     type Result = Cardinality;
 
     type DefaultBehavior = impl DefaultBehavior<Self::Result>;

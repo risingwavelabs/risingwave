@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{DefaultBehavior, Merge};
+use super::{DefaultBehavior, LogicalPlanVisitor, Merge};
 use crate::PlanRef;
 use crate::error::{ErrorCode, RwError};
 use crate::optimizer::plan_node::{LogicalApply, PlanTreeNodeBinary};
@@ -20,7 +20,7 @@ use crate::optimizer::plan_visitor::PlanVisitor;
 
 pub struct HasMaxOneRowApply();
 
-impl PlanVisitor for HasMaxOneRowApply {
+impl LogicalPlanVisitor for HasMaxOneRowApply {
     type Result = bool;
 
     type DefaultBehavior = impl DefaultBehavior<Self::Result>;
@@ -59,7 +59,7 @@ pub struct CheckApplyElimination {
     result: CheckResult,
 }
 
-impl PlanVisitor for CheckApplyElimination {
+impl LogicalPlanVisitor for CheckApplyElimination {
     type Result = ();
 
     type DefaultBehavior = impl DefaultBehavior<Self::Result>;

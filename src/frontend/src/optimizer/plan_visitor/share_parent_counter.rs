@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use super::{DefaultBehavior, DefaultValue};
+use super::{DefaultBehavior, DefaultValue, LogicalPlanVisitor};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalShare, PlanNodeId, PlanTreeNodeUnary};
 use crate::optimizer::plan_visitor::PlanVisitor;
@@ -34,7 +34,7 @@ impl ShareParentCounter {
     }
 }
 
-impl PlanVisitor for ShareParentCounter {
+impl LogicalPlanVisitor for ShareParentCounter {
     type Result = ();
 
     type DefaultBehavior = impl DefaultBehavior<Self::Result>;
