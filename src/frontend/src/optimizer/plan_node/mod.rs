@@ -45,7 +45,6 @@ use risingwave_common::util::recursive::{self, Recurse};
 use risingwave_pb::batch_plan::PlanNode as PbBatchPlan;
 use risingwave_pb::stream_plan::StreamNode as PbStreamPlan;
 use serde::Serialize;
-use smallvec::SmallVec;
 
 use self::batch::BatchPlanRef;
 use self::generic::{GenericPlanRef, PhysicalPlanRef};
@@ -593,12 +592,6 @@ impl PredicatePushdown for PlanRef {
 }
 
 impl PlanRef {
-    pub fn inputs(&self) -> SmallVec<[PlanRef; 2]> {
-        // Dispatch to dyn PlanNode instead of PlanRef.
-        let dyn_t = self.deref();
-        dyn_t.inputs()
-    }
-
     pub fn clone_root_with_inputs<C: ConventionMarker>(&self, inputs: &[PlanRef]) -> PlanRef {
         self.expect_convention::<C>();
         if let Some(share) = self.as_share_node::<C>() {
