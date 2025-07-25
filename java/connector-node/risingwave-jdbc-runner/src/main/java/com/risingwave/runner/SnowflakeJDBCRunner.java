@@ -23,17 +23,34 @@ import org.slf4j.LoggerFactory;
 public class SnowflakeJDBCRunner {
     private static final Logger LOG = LoggerFactory.getLogger(SnowflakeJDBCRunner.class);
 
-    public static void executeSql(String fullUrl, String sql) throws Exception {
+    public static void executeSql(String fullUrl, String[] sqls) throws Exception {
         Connection connection = null;
         try {
             Class.forName("net.snowflake.client.jdbc.SnowflakeDriver");
             connection = DriverManager.getConnection(fullUrl);
+            connection.setAutoCommit(false);
+            LOG.info("[JDBCRunner] Transaction started, auto-commit disabled");
             Statement stmt = connection.createStatement();
-            int result = stmt.executeUpdate(sql);
-            LOG.info("[JDBCRunner] Executing SQL");
+            for (int i = 0; i < sqls.length; i++) {
+                String sql = sqls[i];
+                int result = stmt.executeUpdate(sql);
+            }
+            connection.commit();
+            LOG.info("[JDBCRunner] Transaction committed successfully, SQL statements executed");
             stmt.close();
         } catch (Exception e) {
-            LOG.error("[JDBCRunner] SQLException: {}", e.getMessage(), e);
+            LOG.error("[JDBCRunner] Exception occurred: {}", e.getMessage(), e);
+            if (connection != null) {
+                try {
+                    connection.rollback();
+                    LOG.info("[JDBCRunner] Transaction rolled back due to error");
+                } catch (SQLException rollbackEx) {
+                    LOG.error(
+                            "[JDBCRunner] Failed to rollback transaction: {}",
+                            rollbackEx.getMessage(),
+                            rollbackEx);
+                }
+            }
             throw e;
         } finally {
             if (connection != null) {
