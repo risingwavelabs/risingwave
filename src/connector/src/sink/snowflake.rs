@@ -14,21 +14,17 @@
 
 use core::num::NonZeroU64;
 use std::collections::BTreeMap;
-use std::fmt::Write;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
 
 use anyhow::anyhow;
-use bytes::BytesMut;
-use opendal::Operator;
 use phf::{Set, phf_set};
-use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::row::Row;
+use risingwave_common::array::{ArrayImpl, DataChunk, Op, PrimitiveArray, StreamChunk, Utf8Array};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
+use risingwave_common::types::DataType;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::{SinkMetadata, sink_metadata};
 use sea_orm::DatabaseConnection;
 use serde::Deserialize;
-use serde_json::{Map, Value};
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedSender;
@@ -39,17 +35,12 @@ use crate::connector_common::IcebergSinkCompactionUpdate;
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::decouple_checkpoint_log_sink::default_commit_checkpoint_interval;
-use crate::sink::encoder::{
-    JsonEncoder, JsonbHandlingMode, RowEncoder, TimeHandlingMode, TimestampHandlingMode,
-    TimestamptzHandlingMode,
-};
-use crate::sink::file_sink::opendal_sink::FileSink;
-use crate::sink::file_sink::s3::{S3Config, S3Sink};
 use crate::sink::jdbc_jni_client::{self, JdbcJniClient};
+use crate::sink::remote::CoordinatedRemoteSinkWriter;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
     Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink, SinkCommitCoordinator,
-    SinkCommittedEpochSubscriber, SinkError, SinkParam,
+    SinkCommittedEpochSubscriber, SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam,
 };
 
 pub const SNOWFLAKE_SINK: &str = "snowflake";
@@ -60,8 +51,8 @@ pub const DEFAULT_SCHEDULE: &str = "1 HOUR";
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct SnowflakeConfig {
-    #[serde(flatten)]
-    pub s3_inner: S3Config,
+    #[serde(rename = "type")]
+    pub r#type: String,
 
     #[serde(rename = "snowflake.cdc_table_name")]
     pub snowflake_cdc_table_name: Option<String>,
@@ -102,6 +93,11 @@ pub struct SnowflakeConfig {
     #[serde(rename = "auto.schema.change")]
     #[serde_as(as = "DisplayFromStr")]
     pub auto_schema_change: bool,
+
+    #[serde(default)]
+    #[serde(rename = "create_table_if_not_exists")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub create_table_if_not_exists: bool,
 }
 
 impl SnowflakeConfig {
@@ -109,9 +105,7 @@ impl SnowflakeConfig {
         let config =
             serde_json::from_value::<SnowflakeConfig>(serde_json::to_value(properties).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
-        if config.s3_inner.r#type != SINK_TYPE_APPEND_ONLY
-            && config.s3_inner.r#type != SINK_TYPE_UPSERT
-        {
+        if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
             return Err(SinkError::Config(anyhow!(
                 "`{}` must be {}, or {}",
                 SINK_TYPE_OPTION,
@@ -128,7 +122,7 @@ impl SnowflakeConfig {
         schema: &Schema,
         pk_indices: &Vec<usize>,
     ) -> Result<Option<(SnowflakeTaskContext, JdbcJniClient)>> {
-        if !self.auto_schema_change && is_append_only {
+        if !self.auto_schema_change && is_append_only && !self.create_table_if_not_exists {
             // append-only + no auto schema change is not need to create a client
             return Ok(None);
         }
@@ -151,7 +145,8 @@ impl SnowflakeConfig {
         let mut snowflake_task_ctx = SnowflakeTaskContext {
             target_table_name: target_table_name.clone(),
             database,
-            schema: schema_name,
+            schema_name,
+            schema: schema.clone(),
             ..Default::default()
         };
 
@@ -267,11 +262,17 @@ impl Sink for SnowflakeSink {
         risingwave_common::license::Feature::SnowflakeSink
             .check_available()
             .map_err(|e| anyhow::anyhow!(e))?;
-        self.config.build_snowflake_task_ctx_jdbc_client(
-            self.is_append_only,
-            &self.schema,
-            &self.pk_indices,
-        )?;
+        if let Some((snowflake_task_ctx, client)) =
+            self.config.build_snowflake_task_ctx_jdbc_client(
+                self.is_append_only,
+                &self.schema,
+                &self.pk_indices,
+            )?
+        {
+            let client = SnowflakeJniClient::new(client, snowflake_task_ctx);
+            client.execute_create_table()?;
+        }
+
         Ok(())
     }
 
@@ -290,10 +291,11 @@ impl Sink for SnowflakeSink {
     ) -> Result<Self::LogSinker> {
         let writer = SnowflakeSinkWriter::new(
             self.config.clone(),
-            self.schema.clone(),
             self.is_append_only,
-            writer_param.executor_id,
-        )?;
+            writer_param.clone(),
+            self.param.clone(),
+        )
+        .await?;
 
         let commit_checkpoint_interval =
             NonZeroU64::new(self.config.commit_checkpoint_interval).expect(
@@ -328,26 +330,15 @@ impl Sink for SnowflakeSink {
     }
 }
 
-struct AugmentedRow {
-    row_encoder: JsonEncoder,
+struct AugmentedChunk {
     current_epoch: u64,
     current_row_count: usize,
     is_append_only: bool,
 }
 
-impl AugmentedRow {
-    fn new(current_epoch: u64, is_append_only: bool, schema: Schema) -> Self {
-        let row_encoder = JsonEncoder::new(
-            schema,
-            None,
-            crate::sink::encoder::DateHandlingMode::String,
-            TimestampHandlingMode::String,
-            TimestamptzHandlingMode::UtcString,
-            TimeHandlingMode::String,
-            JsonbHandlingMode::String,
-        );
+impl AugmentedChunk {
+    fn new(current_epoch: u64, is_append_only: bool) -> Self {
         Self {
-            row_encoder,
             current_epoch,
             current_row_count: 0,
             is_append_only,
@@ -362,66 +353,112 @@ impl AugmentedRow {
         self.current_row_count = 0;
     }
 
-    fn augmented_row(&mut self, row: impl Row, op: Op) -> Result<Map<String, Value>> {
-        let mut row = self.row_encoder.encode(row)?;
+    fn augmented_chunk(&mut self, chunk: StreamChunk) -> Result<StreamChunk> {
         if self.is_append_only {
-            return Ok(row);
+            return Ok(chunk);
         }
-        self.current_row_count += 1;
-        row.insert(
-            SNOWFLAKE_SINK_ROW_ID.to_owned(),
-            Value::String(format!("{}_{}", self.current_epoch, self.current_row_count)),
-        );
-        row.insert(
-            SNOWFLAKE_SINK_OP.to_owned(),
-            Value::Number(serde_json::Number::from(op.to_i16())),
-        );
-        Ok(row)
+        let (data_chunk, ops) = chunk.into_parts();
+        let chunk_row_count = data_chunk.capacity();
+        let (columns, visibility) = data_chunk.into_parts();
+
+        let op_column = ops.iter().map(|op| op.to_i16() as i32).collect::<Vec<_>>();
+        let row_column_strings: Vec<String> = (0..chunk_row_count)
+            .map(|i| format!("{}_{}", self.current_epoch, self.current_row_count + i))
+            .collect();
+
+        let row_column_refs: Vec<&str> = row_column_strings.iter().map(|s| s.as_str()).collect();
+        self.current_row_count += chunk_row_count;
+
+        let mut arrays: Vec<Arc<ArrayImpl>> = columns;
+        arrays.push(Arc::new(ArrayImpl::Utf8(Utf8Array::from_iter(
+            row_column_refs,
+        ))));
+        arrays.push(Arc::new(ArrayImpl::Int32(
+            PrimitiveArray::<i32>::from_iter(op_column),
+        )));
+
+        let chunk = DataChunk::new(arrays, visibility);
+        let ops = vec![Op::Insert; chunk_row_count];
+        let chunk = StreamChunk::from_parts(ops, chunk);
+        Ok(chunk)
     }
 }
 pub struct SnowflakeSinkWriter {
-    config: SnowflakeConfig,
-    s3_operator: Operator,
-    augmented_row: AugmentedRow,
-    opendal_writer: Option<opendal::Writer>,
-    executor_id: u64,
-}
-async fn build_opendal_writer(
-    config: &SnowflakeConfig,
-    executor_id: u64,
-    operator: &Operator,
-) -> Result<opendal::Writer> {
-    let mut base_path = config.s3_inner.common.path.clone().unwrap_or("".to_owned());
-    if !base_path.ends_with('/') {
-        base_path.push('/');
-    }
-    let create_time = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards");
-    let object_name = format!(
-        "{}{}_{}.{}",
-        base_path,
-        executor_id,
-        create_time.as_secs(),
-        "json",
-    );
-    Ok(operator.writer_with(&object_name).concurrent(8).await?)
+    augmented_row: AugmentedChunk,
+    jdbc_sink_writer: CoordinatedRemoteSinkWriter,
 }
 
 impl SnowflakeSinkWriter {
-    pub fn new(
+    pub async fn new(
         config: SnowflakeConfig,
-        schema: Schema,
         is_append_only: bool,
-        executor_id: u64,
+        writer_param: SinkWriterParam,
+        mut param: SinkParam,
     ) -> Result<Self> {
-        let s3_operator = FileSink::<S3Sink>::new_s3_sink(&config.s3_inner)?;
+        let metrics = SinkWriterMetrics::new(&writer_param);
+        let properties = &param.properties;
+        let column_descs = &mut param.columns;
+        let full_table_name = if is_append_only {
+            format!(
+                r#""{}"."{}"."{}""#,
+                config.snowflake_database.clone().unwrap_or_default(),
+                config.snowflake_schema.clone().unwrap_or_default(),
+                config
+                    .snowflake_target_table_name
+                    .clone()
+                    .unwrap_or_default()
+            )
+        } else {
+            let max_column_id = column_descs
+                .iter()
+                .map(|column| column.column_id.get_id())
+                .max()
+                .unwrap_or(0);
+            (*column_descs).push(ColumnDesc::named(
+                SNOWFLAKE_SINK_ROW_ID,
+                ColumnId::new(max_column_id + 1),
+                DataType::Varchar,
+            ));
+            (*column_descs).push(ColumnDesc::named(
+                SNOWFLAKE_SINK_OP,
+                ColumnId::new(max_column_id + 2),
+                DataType::Int32,
+            ));
+            format!(
+                r#""{}"."{}"."{}""#,
+                config.snowflake_database.clone().unwrap_or_default(),
+                config.snowflake_schema.clone().unwrap_or_default(),
+                config.snowflake_cdc_table_name.clone().unwrap_or_default()
+            )
+        };
+        let new_properties = BTreeMap::from([
+            ("table.name".to_owned(), full_table_name),
+            ("connector".to_owned(), "snowflake".to_owned()),
+            (
+                "jdbc.url".to_owned(),
+                config.jdbc_url.clone().unwrap_or_default(),
+            ),
+            ("type".to_owned(), "append-only".to_owned()),
+            (
+                "user".to_owned(),
+                config.username.clone().unwrap_or_default(),
+            ),
+            (
+                "password".to_owned(),
+                config.password.clone().unwrap_or_default(),
+            ),
+            (
+                "primary_key".to_owned(),
+                properties.get("primary_key").cloned().unwrap_or_default(),
+            ),
+        ]);
+        param.properties = new_properties;
+
+        let jdbc_sink_writer =
+            CoordinatedRemoteSinkWriter::new(param.clone(), metrics.clone()).await?;
         Ok(Self {
-            config,
-            s3_operator,
-            opendal_writer: None,
-            executor_id,
-            augmented_row: AugmentedRow::new(0, is_append_only, schema),
+            augmented_row: AugmentedChunk::new(0, is_append_only),
+            jdbc_sink_writer,
         })
     }
 }
@@ -432,35 +469,18 @@ impl SinkWriter for SnowflakeSinkWriter {
 
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         self.augmented_row.reset_epoch(epoch);
+        self.jdbc_sink_writer.begin_epoch(epoch).await?;
         Ok(())
     }
 
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        if self.opendal_writer.is_none() {
-            let opendal_writer =
-                build_opendal_writer(&self.config, self.executor_id, &self.s3_operator).await?;
-            self.opendal_writer = Some(opendal_writer);
-        }
-        let mut chunk_buf = BytesMut::new();
-        for (op, row) in chunk.rows() {
-            let encoded_row = self.augmented_row.augmented_row(row, op)?;
-            writeln!(chunk_buf, "{}", Value::Object(encoded_row)).unwrap(); // write to a `BytesMut` should never fail
-        }
-        self.opendal_writer
-            .as_mut()
-            .ok_or_else(|| SinkError::File("Sink writer is not created.".to_owned()))?
-            .write(chunk_buf.freeze())
-            .await?;
+        let chunk = self.augmented_row.augmented_chunk(chunk)?;
+        self.jdbc_sink_writer.write_batch(chunk).await?;
         Ok(())
     }
 
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<Option<SinkMetadata>> {
-        if is_checkpoint && let Some(mut writer) = self.opendal_writer.take() {
-            writer
-                .close()
-                .await
-                .map_err(|e| SinkError::File(e.to_report_string()))?;
-        }
+        self.jdbc_sink_writer.barrier(is_checkpoint).await?;
         Ok(Some(SinkMetadata {
             metadata: Some(sink_metadata::Metadata::Serialized(SerializedMetadata {
                 metadata: vec![],
@@ -470,6 +490,7 @@ impl SinkWriter for SnowflakeSinkWriter {
 
     async fn abort(&mut self) -> Result<()> {
         // TODO: abort should clean up all the data written in this epoch.
+        self.jdbc_sink_writer.abort().await?;
         Ok(())
     }
 }
@@ -479,7 +500,8 @@ pub struct SnowflakeTaskContext {
     // required for task creation
     pub target_table_name: String,
     pub database: String,
-    pub schema: String,
+    pub schema_name: String,
+    pub schema: Schema,
 
     // only upsert
     pub task_name: Option<String>,
@@ -573,7 +595,7 @@ impl SnowflakeJniClient {
             let alter_add_column_cdc_table_sql = build_alter_add_column_sql(
                 cdc_table_name,
                 &self.snowflake_task_context.database,
-                &self.snowflake_task_context.schema,
+                &self.snowflake_task_context.schema_name,
                 columns,
             );
             self.jdbc_client
@@ -583,7 +605,7 @@ impl SnowflakeJniClient {
         let alter_add_column_target_table_sql = build_alter_add_column_sql(
             &self.snowflake_task_context.target_table_name,
             &self.snowflake_task_context.database,
-            &self.snowflake_task_context.schema,
+            &self.snowflake_task_context.schema_name,
             columns,
         );
         self.jdbc_client
@@ -621,6 +643,83 @@ impl SnowflakeJniClient {
         }
         Ok(())
     }
+
+    pub fn execute_create_table(&self) -> Result<()> {
+        // create target table
+        let create_target_table_sql = build_create_table_sql(
+            &self.snowflake_task_context.target_table_name,
+            &self.snowflake_task_context.database,
+            &self.snowflake_task_context.schema_name,
+            &self.snowflake_task_context.schema,
+            false,
+        )?;
+        self.jdbc_client
+            .execute_sql_sync(&create_target_table_sql)?;
+        if let Some(cdc_table_name) = &self.snowflake_task_context.cdc_table_name {
+            let create_cdc_table_sql = build_create_table_sql(
+                cdc_table_name,
+                &self.snowflake_task_context.database,
+                &self.snowflake_task_context.schema_name,
+                &self.snowflake_task_context.schema,
+                true,
+            )?;
+            self.jdbc_client.execute_sql_sync(&create_cdc_table_sql)?;
+        }
+        Ok(())
+    }
+}
+
+fn build_create_table_sql(
+    table_name: &str,
+    database: &str,
+    schema_name: &str,
+    schema: &Schema,
+    need_op_and_row_id: bool,
+) -> Result<String> {
+    let full_table_name = format!(r#""{}"."{}"."{}""#, database, schema_name, table_name);
+    let mut columns: Vec<String> = schema
+        .fields
+        .iter()
+        .map(|field| {
+            let data_type = convert_snowflake_data_type(&field.data_type)?;
+            Ok(format!(r#""{}" {}"#, field.name, data_type))
+        })
+        .collect::<Result<Vec<String>>>()?;
+    if need_op_and_row_id {
+        columns.push(format!(r#""{}" STRING"#, SNOWFLAKE_SINK_ROW_ID));
+        columns.push(format!(r#""{}" INT"#, SNOWFLAKE_SINK_OP));
+    }
+    let columns_str = columns.join(", ");
+    Ok(format!(
+        "CREATE TABLE IF NOT EXISTS {} ({}) ENABLE_SCHEMA_EVOLUTION  = true",
+        full_table_name, columns_str
+    ))
+}
+
+fn convert_snowflake_data_type(data_type: &DataType) -> Result<String> {
+    let data_type = match data_type {
+        DataType::Int16 => "SMALLINT".to_owned(),
+        DataType::Int32 => "INTEGER".to_owned(),
+        DataType::Int64 => "BIGINT".to_owned(),
+        DataType::Float32 => "FLOAT4".to_owned(),
+        DataType::Float64 => "FLOAT8".to_owned(),
+        DataType::Boolean => "BOOLEAN".to_owned(),
+        DataType::Varchar => "STRING".to_owned(),
+        DataType::Date => "DATE".to_owned(),
+        DataType::Timestamp => "TIMESTAMP".to_owned(),
+        DataType::Timestamptz => "TIMESTAMP_TZ".to_owned(),
+        DataType::Jsonb => "STRING".to_owned(),
+        DataType::Decimal => "DECIMAL".to_owned(),
+        DataType::Bytea => "BINARY".to_owned(),
+        DataType::Time => "TIME".to_owned(),
+        _ => {
+            return Err(SinkError::Config(anyhow!(
+                "Dont support auto create table for datatype: {}",
+                data_type
+            )));
+        }
+    };
+    Ok(data_type)
 }
 
 fn build_alter_add_column_sql(
@@ -629,7 +728,7 @@ fn build_alter_add_column_sql(
     schema: &str,
     columns: &Vec<(String, String)>,
 ) -> String {
-    let full_table_name = format!("{}.{}.{}", database, schema, table_name);
+    let full_table_name = format!(r#""{}"."{}"."{}""#, database, schema, table_name);
     jdbc_jni_client::build_alter_add_column_sql(&full_table_name, columns)
 }
 
@@ -637,10 +736,15 @@ fn build_start_task_sql(snowflake_task_context: &SnowflakeTaskContext) -> String
     let SnowflakeTaskContext {
         task_name,
         database,
-        schema,
+        schema_name: schema,
         ..
     } = snowflake_task_context;
-    let full_task_name = format!("{}.{}.{}", database, schema, task_name.as_ref().unwrap());
+    let full_task_name = format!(
+        r#""{}"."{}"."{}""#,
+        database,
+        schema,
+        task_name.as_ref().unwrap()
+    );
     format!("ALTER TASK {} RESUME", full_task_name)
 }
 
@@ -648,10 +752,15 @@ fn build_drop_task_sql(snowflake_task_context: &SnowflakeTaskContext) -> String 
     let SnowflakeTaskContext {
         task_name,
         database,
-        schema,
+        schema_name: schema,
         ..
     } = snowflake_task_context;
-    let full_task_name = format!("{}.{}.{}", database, schema, task_name.as_ref().unwrap());
+    let full_task_name = format!(
+        r#""{}"."{}"."{}""#,
+        database,
+        schema,
+        task_name.as_ref().unwrap()
+    );
     format!("DROP TASK IF EXISTS {}", full_task_name)
 }
 
@@ -665,38 +774,59 @@ fn build_create_merge_into_task_sql(snowflake_task_context: &SnowflakeTaskContex
         pk_column_names,
         all_column_names,
         database,
-        schema,
+        schema_name,
+        ..
     } = snowflake_task_context;
-    let full_task_name = format!("{}.{}.{}", database, schema, task_name.as_ref().unwrap());
-    let full_cdc_table_name = format!(
-        "{}.{}.{}",
+    let full_task_name = format!(
+        r#""{}"."{}"."{}""#,
         database,
-        schema,
+        schema_name,
+        task_name.as_ref().unwrap()
+    );
+    let full_cdc_table_name = format!(
+        r#""{}"."{}"."{}""#,
+        database,
+        schema_name,
         cdc_table_name.as_ref().unwrap()
     );
-    let full_target_table_name = format!("{}.{}.{}", database, schema, target_table_name);
+    let full_target_table_name = format!(
+        r#""{}"."{}"."{}""#,
+        database, schema_name, target_table_name
+    );
 
-    let pk_names_str = pk_column_names.as_ref().unwrap().join(", ");
+    let pk_names_str = pk_column_names
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|name| format!(r#""{}""#, name))
+        .collect::<Vec<String>>()
+        .join(", ");
     let pk_names_eq_str = pk_column_names
         .as_ref()
         .unwrap()
         .iter()
-        .map(|name| format!("target.{name} = source.{name}", name = name))
+        .map(|name| format!(r#"target."{}" = source."{}""#, name, name))
         .collect::<Vec<String>>()
         .join(" AND ");
     let all_column_names_set_str = all_column_names
         .as_ref()
         .unwrap()
         .iter()
-        .map(|name| format!("target.{name} = source.{name}", name = name))
+        .map(|name| format!(r#"target."{}" = source."{}""#, name, name))
         .collect::<Vec<String>>()
         .join(", ");
-    let all_column_names_str = all_column_names.as_ref().unwrap().join(", ");
+    let all_column_names_str = all_column_names
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|name| format!(r#""{}""#, name))
+        .collect::<Vec<String>>()
+        .join(", ");
     let all_column_names_insert_str = all_column_names
         .as_ref()
         .unwrap()
         .iter()
-        .map(|name| format!("source.{name}", name = name))
+        .map(|name| format!(r#"source."{}""#, name))
         .collect::<Vec<String>>()
         .join(", ");
 
@@ -708,26 +838,26 @@ AS
 BEGIN
     LET max_row_id STRING;
 
-    SELECT COALESCE(MAX({snowflake_sink_row_id}), '0') INTO :max_row_id
+    SELECT COALESCE(MAX("{snowflake_sink_row_id}"), '0') INTO :max_row_id
     FROM {cdc_table_name};
 
     MERGE INTO {target_table_name} AS target
     USING (
         SELECT *
         FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_names_str} ORDER BY {snowflake_sink_row_id} DESC) AS dedupe_id
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_names_str} ORDER BY "{snowflake_sink_row_id}" DESC) AS dedupe_id
             FROM {cdc_table_name}
-            WHERE {snowflake_sink_row_id} <= :max_row_id
+            WHERE "{snowflake_sink_row_id}" <= :max_row_id
         ) AS subquery
         WHERE dedupe_id = 1
     ) AS source
     ON {pk_names_eq_str}
-    WHEN MATCHED AND source.{snowflake_sink_op} IN (2, 4) THEN DELETE
-    WHEN MATCHED AND source.{snowflake_sink_op} IN (1, 3) THEN UPDATE SET {all_column_names_set_str}
-    WHEN NOT MATCHED AND source.{snowflake_sink_op} IN (1, 3) THEN INSERT ({all_column_names_str}) VALUES ({all_column_names_insert_str});
+    WHEN MATCHED AND source."{snowflake_sink_op}" IN (2, 4) THEN DELETE
+    WHEN MATCHED AND source."{snowflake_sink_op}" IN (1, 3) THEN UPDATE SET {all_column_names_set_str}
+    WHEN NOT MATCHED AND source."{snowflake_sink_op}" IN (1, 3) THEN INSERT ({all_column_names_str}) VALUES ({all_column_names_insert_str});
 
     DELETE FROM {cdc_table_name}
-    WHERE {snowflake_sink_row_id} <= :max_row_id;
+    WHERE "{snowflake_sink_row_id}" <= :max_row_id;
 END;"#,
         task_name = full_task_name,
         warehouse = warehouse.as_ref().unwrap(),
@@ -760,36 +890,37 @@ mod tests {
             pk_column_names: Some(vec!["v1".to_owned()]),
             all_column_names: Some(vec!["v1".to_owned(), "v2".to_owned()]),
             database: "test_db".to_owned(),
-            schema: "test_schema".to_owned(),
+            schema_name: "test_schema".to_owned(),
+            schema: Schema { fields: vec![] },
         };
         let task_sql = build_create_merge_into_task_sql(&snowflake_task_context);
-        let expected = r#"CREATE OR REPLACE TASK test_db.test_schema.test_task
+        let expected = r#"CREATE OR REPLACE TASK "test_db"."test_schema"."test_task"
 WAREHOUSE = test_warehouse
 SCHEDULE = '1 HOUR'
 AS
 BEGIN
     LET max_row_id STRING;
 
-    SELECT COALESCE(MAX(__row_id), '0') INTO :max_row_id
-    FROM test_db.test_schema.test_cdc_table;
+    SELECT COALESCE(MAX("__row_id"), '0') INTO :max_row_id
+    FROM "test_db"."test_schema"."test_cdc_table";
 
-    MERGE INTO test_db.test_schema.test_target_table AS target
+    MERGE INTO "test_db"."test_schema"."test_target_table" AS target
     USING (
         SELECT *
         FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY v1 ORDER BY __row_id DESC) AS dedupe_id
-            FROM test_db.test_schema.test_cdc_table
-            WHERE __row_id <= :max_row_id
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY "v1" ORDER BY "__row_id" DESC) AS dedupe_id
+            FROM "test_db"."test_schema"."test_cdc_table"
+            WHERE "__row_id" <= :max_row_id
         ) AS subquery
         WHERE dedupe_id = 1
     ) AS source
-    ON target.v1 = source.v1
-    WHEN MATCHED AND source.__op IN (2, 4) THEN DELETE
-    WHEN MATCHED AND source.__op IN (1, 3) THEN UPDATE SET target.v1 = source.v1, target.v2 = source.v2
-    WHEN NOT MATCHED AND source.__op IN (1, 3) THEN INSERT (v1, v2) VALUES (source.v1, source.v2);
+    ON target."v1" = source."v1"
+    WHEN MATCHED AND source."__op" IN (2, 4) THEN DELETE
+    WHEN MATCHED AND source."__op" IN (1, 3) THEN UPDATE SET target."v1" = source."v1", target."v2" = source."v2"
+    WHEN NOT MATCHED AND source."__op" IN (1, 3) THEN INSERT ("v1", "v2") VALUES (source."v1", source."v2");
 
-    DELETE FROM test_db.test_schema.test_cdc_table
-    WHERE __row_id <= :max_row_id;
+    DELETE FROM "test_db"."test_schema"."test_cdc_table"
+    WHERE "__row_id" <= :max_row_id;
 END;"#;
         assert_eq!(normalize_sql(&task_sql), normalize_sql(expected));
     }
@@ -805,36 +936,37 @@ END;"#;
             pk_column_names: Some(vec!["id1".to_owned(), "id2".to_owned()]),
             all_column_names: Some(vec!["id1".to_owned(), "id2".to_owned(), "val".to_owned()]),
             database: "test_db".to_owned(),
-            schema: "test_schema".to_owned(),
+            schema_name: "test_schema".to_owned(),
+            schema: Schema { fields: vec![] },
         };
         let task_sql = build_create_merge_into_task_sql(&snowflake_task_context);
-        let expected = r#"CREATE OR REPLACE TASK test_db.test_schema.test_task_multi_pk
+        let expected = r#"CREATE OR REPLACE TASK "test_db"."test_schema"."test_task_multi_pk"
 WAREHOUSE = multi_pk_warehouse
 SCHEDULE = '5 MINUTE'
 AS
 BEGIN
     LET max_row_id STRING;
 
-    SELECT COALESCE(MAX(__row_id), '0') INTO :max_row_id
-    FROM test_db.test_schema.cdc_multi_pk;
+    SELECT COALESCE(MAX("__row_id"), '0') INTO :max_row_id
+    FROM "test_db"."test_schema"."cdc_multi_pk";
 
-    MERGE INTO test_db.test_schema.target_multi_pk AS target
+    MERGE INTO "test_db"."test_schema"."target_multi_pk" AS target
     USING (
         SELECT *
         FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY id1, id2 ORDER BY __row_id DESC) AS dedupe_id
-            FROM test_db.test_schema.cdc_multi_pk
-            WHERE __row_id <= :max_row_id
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY "id1", "id2" ORDER BY "__row_id" DESC) AS dedupe_id
+            FROM "test_db"."test_schema"."cdc_multi_pk"
+            WHERE "__row_id" <= :max_row_id
         ) AS subquery
         WHERE dedupe_id = 1
     ) AS source
-    ON target.id1 = source.id1 AND target.id2 = source.id2
-    WHEN MATCHED AND source.__op IN (2, 4) THEN DELETE
-    WHEN MATCHED AND source.__op IN (1, 3) THEN UPDATE SET target.id1 = source.id1, target.id2 = source.id2, target.val = source.val
-    WHEN NOT MATCHED AND source.__op IN (1, 3) THEN INSERT (id1, id2, val) VALUES (source.id1, source.id2, source.val);
+    ON target."id1" = source."id1" AND target."id2" = source."id2"
+    WHEN MATCHED AND source."__op" IN (2, 4) THEN DELETE
+    WHEN MATCHED AND source."__op" IN (1, 3) THEN UPDATE SET target."id1" = source."id1", target."id2" = source."id2", target."val" = source."val"
+    WHEN NOT MATCHED AND source."__op" IN (1, 3) THEN INSERT ("id1", "id2", "val") VALUES (source."id1", source."id2", source."val");
 
-    DELETE FROM test_db.test_schema.cdc_multi_pk
-    WHERE __row_id <= :max_row_id;
+    DELETE FROM "test_db"."test_schema"."cdc_multi_pk"
+    WHERE "__row_id" <= :max_row_id;
 END;"#;
         assert_eq!(normalize_sql(&task_sql), normalize_sql(expected));
     }
