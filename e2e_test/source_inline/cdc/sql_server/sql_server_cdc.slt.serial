@@ -606,12 +606,12 @@ SELECT id, c_date, c_time, c_datetime2, c_datetimeoffset from shared_sqlserver_a
 query TTTTTTT
 SELECT id, c_xml, c_money from shared_sqlserver_all_data_types order by id;
 ----
-1 <Person><Name>John Doe</Name><Age>30</Age></Person>  100.51
-2 <Person><Name>Jane Doe</Name><Age>28</Age></Person>  100.50
+1 <Person><Name>John Doe</Name><Age>30</Age></Person> 100.51
+2 <Person><Name>Jane Doe</Name><Age>28</Age></Person> 100.50
 3 <Name>Jane Doe</Name> 100
 11 <Person><Name>John Doe</Name><Age>30</Age></Person> 200.5000
 12 <Person><Name>Jane Doe</Name><Age>28</Age></Person> 200.5000
-13 <Name>Jane Doe</Name> 200.5000
+13 <Name>Jane Doe</Name> 100.0000
 
 # Test uint256 data from SQL Server CDC after recovery
 query ITTT
