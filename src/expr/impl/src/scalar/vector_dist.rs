@@ -31,6 +31,35 @@ fn check_dims(name: &'static str, lhs: &[f32], rhs: &[f32]) -> Result<()> {
     Ok(())
 }
 
+/// ```slt
+/// query R
+/// SELECT l2_distance('[0,0]'::vector(2), '[3,4]');
+/// ----
+/// 5
+///
+/// query R
+/// SELECT l2_distance('[0,0]'::vector(2), '[0,1]');
+/// ----
+/// 1
+///
+/// query error dimensions
+/// SELECT l2_distance('[1,2]'::vector(2), '[3]');
+///
+/// query R
+/// SELECT l2_distance('[3e38]'::vector(1), '[-3e38]');
+/// ----
+/// Infinity
+///
+/// query R
+/// SELECT l2_distance('[1,1,1,1,1,1,1,1,1]'::vector(9), '[1,1,1,1,1,1,1,4,5]');
+/// ----
+/// 5
+///
+/// query R
+/// SELECT '[0,0]'::vector(2) <-> '[3,4]';
+/// ----
+/// 5
+/// ```
 #[function("l2_distance(vector, vector) -> float8"/*, type_infer = "unreachable"*/)]
 fn l2_distance(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
     let lhs = lhs.into_slice();
@@ -45,6 +74,65 @@ fn l2_distance(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
     Ok((sum as f64).sqrt().into())
 }
 
+/// ```slt
+/// query R
+/// SELECT cosine_distance('[1,2]'::vector(2), '[2,4]');
+/// ----
+/// 0
+///
+/// query R
+/// SELECT cosine_distance('[1,2]'::vector(2), '[0,0]');
+/// ----
+/// NaN
+///
+/// query R
+/// SELECT cosine_distance('[1,1]'::vector(2), '[1,1]');
+/// ----
+/// 0
+///
+/// query R
+/// SELECT cosine_distance('[1,0]'::vector(2), '[0,2]');
+/// ----
+/// 1
+///
+/// query R
+/// SELECT cosine_distance('[1,1]'::vector(2), '[-1,-1]');
+/// ----
+/// 2
+///
+/// query error dimensions
+/// SELECT cosine_distance('[1,2]'::vector(2), '[3]');
+///
+/// query R
+/// SELECT cosine_distance('[1,1]'::vector(2), '[1.1,1.1]');
+/// ----
+/// 0
+///
+/// query R
+/// SELECT cosine_distance('[1,1]'::vector(2), '[-1.1,-1.1]');
+/// ----
+/// 2
+///
+/// query R
+/// SELECT cosine_distance('[3e38]'::vector(1), '[3e38]');
+/// ----
+/// NaN
+///
+/// query R
+/// SELECT cosine_distance('[1,2,3,4,5,6,7,8,9]'::vector(9), '[1,2,3,4,5,6,7,8,9]');
+/// ----
+/// 0
+///
+/// query R
+/// SELECT cosine_distance('[1,2,3,4,5,6,7,8,9]'::vector(9), '[-1,-2,-3,-4,-5,-6,-7,-8,-9]');
+/// ----
+/// 2
+///
+/// query R
+/// SELECT '[1,2]'::vector(2) <=> '[2,4]';
+/// ----
+/// 0
+/// ```
 #[function("cosine_distance(vector, vector) -> float8")]
 fn cosine_distance(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
     let lhs = lhs.into_slice();
@@ -64,6 +152,40 @@ fn cosine_distance(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
     Ok((1.0 - similarity.clamp(-1.0, 1.0)).into())
 }
 
+/// ```slt
+/// query R
+/// SELECT l1_distance('[0,0]'::vector(2), '[3,4]');
+/// ----
+/// 7
+///
+/// query R
+/// SELECT l1_distance('[0,0]'::vector(2), '[0,1]');
+/// ----
+/// 1
+///
+/// query error dimensions
+/// SELECT l1_distance('[1,2]'::vector(2), '[3]');
+///
+/// query R
+/// SELECT l1_distance('[3e38]'::vector(1), '[-3e38]');
+/// ----
+/// Infinity
+///
+/// query R
+/// SELECT l1_distance('[1,2,3,4,5,6,7,8,9]'::vector(9), '[1,2,3,4,5,6,7,8,9]');
+/// ----
+/// 0
+///
+/// query R
+/// SELECT l1_distance('[1,2,3,4,5,6,7,8,9]'::vector(9), '[0,3,2,5,4,7,6,9,8]');
+/// ----
+/// 9
+///
+/// query R
+/// SELECT '[0,0]'::vector(2) <+> '[3,4]';
+/// ----
+/// 7
+/// ```
 #[function("l1_distance(vector, vector) -> float8")]
 fn l1_distance(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
     let lhs = lhs.into_slice();
@@ -77,6 +199,30 @@ fn l1_distance(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
     Ok((sum as f64).into())
 }
 
+/// ```slt
+/// query R
+/// SELECT inner_product('[1,2]'::vector(2), '[3,4]');
+/// ----
+/// 11
+///
+/// query error dimensions
+/// SELECT inner_product('[1,2]'::vector(2), '[3]');
+///
+/// query R
+/// SELECT inner_product('[3e38]'::vector(1), '[3e38]');
+/// ----
+/// Infinity
+///
+/// query R
+/// SELECT inner_product('[1,1,1,1,1,1,1,1,1]'::vector(9), '[1,2,3,4,5,6,7,8,9]');
+/// ----
+/// 45
+///
+/// query R
+/// SELECT '[1,2]'::vector(2) <#> '[3,4]';
+/// ----
+/// -11
+/// ```
 #[function("inner_product(vector, vector) -> float8")]
 fn inner_product(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
     let lhs = lhs.into_slice();
