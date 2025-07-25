@@ -168,7 +168,7 @@ pub(crate) fn hijack_merger_for_target_table(
                 target_col.data_type(),
                 sink_columns[*idx].data_type()
             );
-            // If the sink has the corresponding column name, use the sink's data.
+            // If the sink has the corresponding column id, use the sink's data.
             exprs.push(ExprImpl::InputRef(Box::new(InputRef {
                 data_type: target_col.data_type().clone(),
                 index: *idx,
