@@ -32,12 +32,15 @@ impl SourceManager {
     ) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
         let core = self.core.lock().await;
 
-        let prev_splits = prev_actor_ids
-            .iter()
-            .flat_map(|actor_id| {
-                // Note: File Source / Iceberg Source doesn't have splits assigned by meta.
-                core.actor_splits.get(actor_id).cloned().unwrap_or_default()
-            })
+        let splits = core
+            .metadata_manager
+            .catalog_controller
+            .list_actor_splits(prev_actor_ids)
+            .await?;
+
+        let prev_splits = splits
+            .into_iter()
+            .flat_map(|(_, split)| split.into_iter())
             .map(|split| (split.id(), split))
             .collect();
 
@@ -224,9 +227,17 @@ impl SourceManager {
             .flatten()
             .map(|(upstream_actor_id, actor_id)| (*upstream_actor_id, *actor_id))
             .collect();
+
+        let upstream_actor_ids = aligned_actors.values().copied().collect_vec();
+        let actor_splits = core
+            .metadata_manager
+            .catalog_controller
+            .list_actor_splits(&upstream_actor_ids)
+            .await?;
+
         let assignment = align_splits(
             aligned_actors.into_iter(),
-            &core.actor_splits,
+            &actor_splits,
             fragment_id,
             prev_fragment_id,
         )?;
@@ -288,11 +299,23 @@ impl SourceManager {
                     };
                     backfill_actors.push((*no_shuffle_backfill_actor, *upstream_actor));
                 }
+
+                let actor_ids = backfill_actors
+                    .iter()
+                    .map(|(_, upstream_actor_id)| *upstream_actor_id)
+                    .collect_vec();
+
+                let upstream_split_assignments = core
+                    .metadata_manager
+                    .catalog_controller
+                    .list_actor_splits(&actor_ids)
+                    .await?;
+
                 assigned.insert(
                     fragment_id,
                     align_splits(
                         backfill_actors,
-                        &core.actor_splits,
+                        &upstream_split_assignments,
                         fragment_id,
                         upstream_source_fragment_id,
                     )?,
@@ -347,18 +370,12 @@ impl SourceManagerCore {
                     continue 'loop_source;
                 }
 
-                let prev_actor_splits: HashMap<_, _> = actors
-                    .into_iter()
-                    .map(|actor_id| {
-                        (
-                            actor_id,
-                            self.actor_splits
-                                .get(&actor_id)
-                                .cloned()
-                                .unwrap_or_default(),
-                        )
-                    })
-                    .collect();
+                let actors_vec: Vec<_> = actors.iter().copied().collect();
+                let prev_actor_splits: HashMap<_, _> = self
+                    .metadata_manager
+                    .catalog_controller
+                    .list_actor_splits(&actors_vec)
+                    .await?;
 
                 if let Some(new_assignment) = reassign_splits(
                     fragment_id,
@@ -398,6 +415,7 @@ impl SourceManagerCore {
                             continue;
                         }
                     };
+
                     split_assignment.insert(
                         *fragment_id,
                         align_splits(

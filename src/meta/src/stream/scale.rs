@@ -87,7 +87,6 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_meta_model::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
-use super::SourceChange;
 use crate::controller::id::IdCategory;
 use crate::controller::utils::filter_workers_by_resource_group;
 
@@ -1624,27 +1623,6 @@ impl ScaleController {
                         }),
                     );
             }
-        }
-
-        let mut stream_source_actor_splits = HashMap::new();
-        let mut stream_source_dropped_actors = HashSet::new();
-
-        // todo: handle adaptive splits
-        for (fragment_id, reschedule) in reschedules {
-            if !reschedule.actor_splits.is_empty() {
-                stream_source_actor_splits
-                    .insert(*fragment_id as FragmentId, reschedule.actor_splits.clone());
-                stream_source_dropped_actors.extend(reschedule.removed_actors.clone());
-            }
-        }
-
-        if !stream_source_actor_splits.is_empty() {
-            self.source_manager
-                .apply_source_change(SourceChange::Reschedule {
-                    split_assignment: stream_source_actor_splits,
-                    dropped_actors: stream_source_dropped_actors,
-                })
-                .await;
         }
 
         Ok(())
