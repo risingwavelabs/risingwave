@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use thiserror_ext::AsReport as _;
 
-use super::plan_node::RewriteExprsRecursive;
+use super::plan_node::{Batch, Convention, ConventionMarker, Logical, Stream};
 use super::plan_visitor::has_logical_max_one_row;
 use crate::error::Result;
 use crate::expr::NowProcTimeFinder;
@@ -38,7 +38,7 @@ use crate::{Explain, OptimizerContextRef};
 impl PlanRef {
     fn optimize_by_rules_inner(
         self,
-        heuristic_optimizer: &mut HeuristicOptimizer<'_>,
+        heuristic_optimizer: &mut HeuristicOptimizer<'_, impl ConventionMarker>,
         stage_name: &str,
     ) -> Result<PlanRef> {
         let ctx = self.ctx();
@@ -67,7 +67,20 @@ impl PlanRef {
             apply_order,
         }: &OptimizationStage,
     ) -> Result<PlanRef> {
-        self.optimize_by_rules_inner(&mut HeuristicOptimizer::new(apply_order, rules), stage_name)
+        match self.convention() {
+            Convention::Logical => self.optimize_by_rules_inner(
+                &mut HeuristicOptimizer::<Logical>::new(apply_order, rules),
+                stage_name,
+            ),
+            Convention::Batch => self.optimize_by_rules_inner(
+                &mut HeuristicOptimizer::<Batch>::new(apply_order, rules),
+                stage_name,
+            ),
+            Convention::Stream => self.optimize_by_rules_inner(
+                &mut HeuristicOptimizer::<Stream>::new(apply_order, rules),
+                stage_name,
+            ),
+        }
     }
 
     pub(crate) fn optimize_by_rules_until_fix_point(
@@ -78,8 +91,9 @@ impl PlanRef {
             apply_order,
         }: &OptimizationStage,
     ) -> Result<PlanRef> {
+        self.expect_convention::<Logical>();
         loop {
-            let mut heuristic_optimizer = HeuristicOptimizer::new(apply_order, rules);
+            let mut heuristic_optimizer = HeuristicOptimizer::<Logical>::new(apply_order, rules);
             self = self.optimize_by_rules_inner(&mut heuristic_optimizer, stage_name)?;
             if !heuristic_optimizer.get_stats().has_applied_rule() {
                 return Ok(self);
@@ -586,7 +600,7 @@ impl LogicalOptimizer {
 
         let mut v = ctx.session_ctx().pinned_snapshot().inline_now_proc_time();
 
-        let plan = plan.rewrite_exprs_recursive(&mut v);
+        let plan = plan.rewrite_exprs_recursive::<Logical>(&mut v);
 
         if ctx.is_explain_trace() {
             ctx.trace("Inline Now and ProcTime:");

@@ -33,6 +33,12 @@ impl<P: Hash> Hash for Share<P> {
 }
 
 impl<PlanRef: GenericPlanRef> Share<PlanRef> {
+    pub fn new(input: PlanRef) -> Self {
+        Self {
+            input: RefCell::new(input),
+        }
+    }
+
     pub fn replace_input(&self, plan: PlanRef) {
         *self.input.borrow_mut() = plan;
     }

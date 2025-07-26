@@ -14,7 +14,7 @@
 
 use super::{BoxedRule, Rule};
 use crate::optimizer::PlanRef;
-use crate::optimizer::plan_node::{LogicalShare, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{Logical, LogicalShare, PlanTreeNodeUnary};
 
 pub struct DagToTreeRule {}
 impl Rule for DagToTreeRule {
@@ -30,7 +30,7 @@ impl Rule for DagToTreeRule {
         }
 
         if has_share {
-            Some(plan.clone_with_inputs(&inputs))
+            Some(plan.clone_root_with_inputs::<Logical>(&inputs))
         } else {
             None
         }
