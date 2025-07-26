@@ -90,7 +90,7 @@ pub use to_jsonb::*;
 mod encrypt;
 mod external;
 mod inet;
-mod test_license;
+mod license;
 mod to_timestamp;
 mod translate;
 mod trigonometric;
