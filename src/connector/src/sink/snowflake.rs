@@ -451,6 +451,8 @@ impl SnowflakeSinkWriter {
                 "primary_key".to_owned(),
                 properties.get("primary_key").cloned().unwrap_or_default(),
             ),
+            ("schema.name".to_owned(), config.snowflake_schema.clone().unwrap_or_default()),
+            ("database.name".to_owned(), config.snowflake_database.clone().unwrap_or_default()),
         ]);
         param.properties = new_properties;
 

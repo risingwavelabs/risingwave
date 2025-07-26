@@ -241,6 +241,10 @@ public class JDBCSink implements SinkWriter {
         public JdbcStatements(Connection conn, int queryTimeoutSecs) throws SQLException {
             this.queryTimeoutSecs = queryTimeoutSecs;
             this.conn = conn;
+            // Set database and schema for Snowflake connections
+            if (config.getJdbcUrl().toLowerCase().startsWith("jdbc:snowflake")) {
+                setSnowflakeDatabaseAndSchema();
+            }
             var schemaTableName =
                     jdbcDialect.createSchemaTableName(
                             config.getSchemaName(), config.getTableName());
@@ -381,6 +385,40 @@ public class JDBCSink implements SinkWriter {
             } catch (SQLException e) {
                 LOG.error("unable to close the prepared stmt", e);
             }
+        }
+
+        private void setSnowflakeDatabaseAndSchema() throws SQLException {
+            if (config.getDatabaseName() == null
+                    || config.getDatabaseName().isEmpty()
+                    || config.getSchemaName() == null
+                    || config.getSchemaName().isEmpty()) {
+                LOG.warn(
+                        "Snowflake database or schema is not set, will not run USE DATABASE and USE SCHEMA");
+                return;
+            }
+
+            String database =
+                    config.getDatabaseName() != null && !config.getDatabaseName().isEmpty()
+                            ? config.getDatabaseName()
+                            : "DEMO";
+            String schema =
+                    config.getSchemaName() != null && !config.getSchemaName().isEmpty()
+                            ? config.getSchemaName()
+                            : "PUBLIC";
+            // Set database if available
+            try (Statement stmt = conn.createStatement()) {
+                stmt.execute("USE DATABASE " + quoteIdentifier(database));
+                LOG.info("Set Snowflake database to: {}", database);
+            }
+            // Set schema if available
+            try (Statement stmt = conn.createStatement()) {
+                stmt.execute("USE SCHEMA " + quoteIdentifier(schema));
+                LOG.info("Set Snowflake schema to: {}", schema);
+            }
+        }
+
+        private String quoteIdentifier(String identifier) {
+            return "\"" + identifier + "\"";
         }
     }
 

@@ -42,15 +42,20 @@ public class JDBCSinkConfig extends CommonSinkConfig {
     @JsonProperty(value = "jdbc.auto.commit")
     private boolean autoCommit = false;
 
+    @JsonProperty(value = "database.name")
+    private String databaseName;
+
     @JsonCreator
     public JDBCSinkConfig(
             @JsonProperty(value = "jdbc.url") String jdbcUrl,
             @JsonProperty(value = "table.name") String tableName,
-            @JsonProperty(value = "type") String sinkType) {
+            @JsonProperty(value = "type") String sinkType,
+            @JsonProperty(value = "database.name") String databaseName) {
         this.jdbcUrl = jdbcUrl;
         this.tableName = tableName;
         this.sinkType = sinkType;
         this.isUpsertSink = "upsert".equalsIgnoreCase(sinkType);
+        this.databaseName = databaseName;
     }
 
     public String getSchemaName() {
@@ -87,5 +92,9 @@ public class JDBCSinkConfig extends CommonSinkConfig {
 
     public boolean isAutoCommit() {
         return autoCommit;
+    }
+
+    public String getDatabaseName() {
+        return databaseName;
     }
 }
