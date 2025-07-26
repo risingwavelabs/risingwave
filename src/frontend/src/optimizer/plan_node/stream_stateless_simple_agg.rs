@@ -102,6 +102,13 @@ impl StreamNode for StreamStatelessSimpleAgg {
             distinct_dedup_tables: Default::default(),
             version: AggNodeVersion::Issue13465 as _,
             must_output_per_barrier: false, // this is not used
+            extreme_cache_size: Some(
+                self // this is not used
+                    .ctx()
+                    .session_ctx()
+                    .config()
+                    .stream_unsafe_extreme_cache_size(),
+            ),
         }))
     }
 }
