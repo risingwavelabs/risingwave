@@ -19,9 +19,9 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::common::PbDistanceType;
 
 use crate::PlanRef;
-use crate::expr::{Expr, ExprImpl, ExprType};
+use crate::expr::{Expr, ExprImpl, ExprType, InputRef};
 use crate::optimizer::plan_node::generic::{TopNLimit, VectorSearch};
-use crate::optimizer::plan_node::{LogicalVectorSearch, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{LogicalProject, LogicalVectorSearch, PlanTreeNodeUnary};
 use crate::optimizer::rule::{BoxedRule, Rule};
 
 pub struct TopNToVectorSearchRule;
@@ -57,8 +57,9 @@ impl Rule for TopNToVectorSearchRule {
 
         let input = top_n.input();
         let projection = input.as_logical_project()?;
+        let exprs = projection.exprs();
 
-        let order_expr = &projection.exprs()[order.column_index];
+        let order_expr = &exprs[order.column_index];
         let ExprImpl::FunctionCall(call) = order_expr else {
             return None;
         };
@@ -82,12 +83,53 @@ impl Rule for TopNToVectorSearchRule {
             top_n: limit,
             left: left.clone(),
             right: right.clone(),
-            cols_before_vector_distance: projection.exprs()[0..order.column_index].to_vec(),
-            cols_after_vector_distance: projection.exprs()[order.column_index + 1..].to_vec(),
+            non_distance_columns: exprs[0..order.column_index]
+                .iter()
+                .chain(&exprs[order.column_index + 1..])
+                .cloned()
+                .collect(),
             input: projection.input(),
             distance_type,
+            include_distance: true,
         };
 
-        Some(LogicalVectorSearch::with_core(core).into())
+        let mut plan = LogicalVectorSearch::with_core(core).into();
+
+        // reorder columns when distance is not at the end
+        if order.column_index < projection.exprs().len() - 1 {
+            plan = LogicalProject::new(
+                plan,
+                (0..order.column_index)
+                    .map(|i| {
+                        ExprImpl::InputRef(
+                            InputRef {
+                                index: i,
+                                data_type: exprs[i].return_type(),
+                            }
+                            .into(),
+                        )
+                    })
+                    .chain([ExprImpl::InputRef(
+                        InputRef {
+                            index: exprs.len() - 1,
+                            data_type: DataType::Float64,
+                        }
+                        .into(),
+                    )])
+                    .chain((order.column_index + 1..exprs.len()).map(|i| {
+                        ExprImpl::InputRef(
+                            InputRef {
+                                index: i - 1,
+                                data_type: exprs[i].return_type(),
+                            }
+                            .into(),
+                        )
+                    }))
+                    .collect(),
+            )
+            .into()
+        }
+
+        Some(plan)
     }
 }

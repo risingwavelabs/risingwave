@@ -128,8 +128,8 @@
     select * from (select unnest(x) as unnest from t) where unnest > 1;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [Unnest($0)] }
-      └─BatchFilter { predicate: (Unnest($0) > 1:Int32) }
+    └─BatchFilter { predicate: (Unnest($0) > 1:Int32) }
+      └─BatchProject { exprs: [Unnest($0)] }
         └─BatchProjectSet { select_list: [Unnest($0)] }
           └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
   stream_plan: |-

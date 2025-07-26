@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
-
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -28,39 +26,34 @@ use crate::utils::ColIndexMappingRewriteExt;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct VectorSearch<PlanRef> {
     pub top_n: u64,
+    pub distance_type: PbDistanceType,
     pub left: ExprImpl,
     pub right: ExprImpl,
 
-    pub cols_before_vector_distance: Vec<ExprImpl>,
-    pub cols_after_vector_distance: Vec<ExprImpl>,
+    pub non_distance_columns: Vec<ExprImpl>,
+    pub include_distance: bool,
 
     pub input: PlanRef,
-    pub distance_type: PbDistanceType,
 }
 
 impl<PlanRef: GenericPlanRef> VectorSearch<PlanRef> {
     pub(crate) fn clone_with_input(&self, input: PlanRef) -> Self {
         Self {
             top_n: self.top_n,
+            distance_type: self.distance_type,
             left: self.left.clone(),
             right: self.right.clone(),
-            cols_before_vector_distance: self.cols_before_vector_distance.clone(),
-            cols_after_vector_distance: self.cols_after_vector_distance.clone(),
+            non_distance_columns: self.non_distance_columns.clone(),
+            include_distance: self.include_distance,
             input,
-            distance_type: self.distance_type,
         }
     }
 
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.left = r.rewrite_expr(self.left.clone());
         self.right = r.rewrite_expr(self.right.clone());
-        self.cols_before_vector_distance = self
-            .cols_before_vector_distance
-            .iter()
-            .map(|expr| r.rewrite_expr(expr.clone()))
-            .collect();
-        self.cols_after_vector_distance = self
-            .cols_after_vector_distance
+        self.non_distance_columns = self
+            .non_distance_columns
             .iter()
             .map(|expr| r.rewrite_expr(expr.clone()))
             .collect();
@@ -69,26 +62,20 @@ impl<PlanRef: GenericPlanRef> VectorSearch<PlanRef> {
     pub(crate) fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
         [&self.left, &self.right]
             .into_iter()
-            .chain(&self.cols_before_vector_distance)
-            .chain(&self.cols_after_vector_distance)
+            .chain(&self.non_distance_columns)
             .for_each(|expr| {
                 v.visit_expr(expr);
             });
     }
 
+    fn output_len(&self) -> usize {
+        self.non_distance_columns.len() + if self.include_distance { 1 } else { 0 }
+    }
+
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
         let input_len = self.input.schema().len();
-        let mut map = vec![
-            None;
-            self.cols_before_vector_distance.len()
-                + self.cols_after_vector_distance.len()
-        ];
-        for (i, expr) in self.cols_before_vector_distance.iter().enumerate().chain(
-            self.cols_after_vector_distance
-                .iter()
-                .enumerate()
-                .map(|(idx, expr)| (idx + 1, expr)),
-        ) {
+        let mut map = vec![None; self.output_len()];
+        for (i, expr) in self.non_distance_columns.iter().enumerate() {
             if let ExprImpl::InputRef(input) = expr {
                 map[i] = Some(input.index())
             }
@@ -101,30 +88,12 @@ impl<PlanRef: GenericPlanRef> VectorSearch<PlanRef> {
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
         let input_len = self.input.schema().len();
         let mut map = vec![None; input_len];
-        for (i, expr) in self.cols_before_vector_distance.iter().enumerate().chain(
-            self.cols_after_vector_distance
-                .iter()
-                .enumerate()
-                .map(|(idx, expr)| (idx + 1, expr)),
-        ) {
+        for (i, expr) in self.non_distance_columns.iter().enumerate() {
             if let ExprImpl::InputRef(input) = expr {
                 map[input.index()] = Some(i)
             }
         }
-        ColIndexMapping::new(
-            map,
-            self.cols_before_vector_distance.len() + self.cols_after_vector_distance.len() + 1,
-        )
-    }
-
-    pub fn non_distance_col(&self, idx: usize) -> Option<&ExprImpl> {
-        match idx.cmp(&self.cols_before_vector_distance.len()) {
-            Ordering::Less => Some(&self.cols_before_vector_distance[idx]),
-            Ordering::Equal => None,
-            Ordering::Greater => Some(
-                &self.cols_after_vector_distance[idx - 1 - self.cols_after_vector_distance.len()],
-            ),
-        }
+        ColIndexMapping::new(map, self.output_len())
     }
 }
 
@@ -154,16 +123,13 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for VectorSearch<PlanRef> {
             Field::with_name(expr.return_type(), name)
         };
         let fields = self
-            .cols_before_vector_distance
+            .non_distance_columns
             .iter()
             .enumerate()
             .map(to_field)
-            .chain([Field::new("vector_distance", DataType::Float64)])
             .chain(
-                self.cols_after_vector_distance
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, expr)| to_field((idx + 1, expr))),
+                self.include_distance
+                    .then(|| Field::new("vector_distance", DataType::Float64)),
             )
             .collect();
         Schema { fields }
