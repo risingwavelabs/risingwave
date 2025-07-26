@@ -41,8 +41,8 @@ public class SnowflakeDialect implements JdbcDialect {
     @Override
     public Optional<String> getUpsertStatement(
             SchemaTableName schemaTableName,
-            List<String> fieldNames,
-            List<String> primaryKeyFields) {
+            TableSchema tableSchema,
+            List<String> uniqueKeyFields) {
         throw new UnsupportedOperationException(
                 "SnowflakeDialect does not support upsert statements");
     }
@@ -110,6 +110,6 @@ public class SnowflakeDialect implements JdbcDialect {
     public void bindDeleteStatement(PreparedStatement stmt, TableSchema tableSchema, SinkRow row)
             throws SQLException {
         throw new UnsupportedOperationException(
-                "PostgresDialect does not support DELETE statements");
+                "SnowflakeDialect does not support DELETE statements");
     }
 }
