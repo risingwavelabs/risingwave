@@ -193,7 +193,7 @@ impl Sink for RedshiftSink {
         _db: DatabaseConnection,
         _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
     ) -> Result<Self::Coordinator> {
-        let pk_column_names = self
+        let pk_column_names: Vec<_> = self
             .schema
             .fields
             .iter()
@@ -201,6 +201,11 @@ impl Sink for RedshiftSink {
             .filter(|(index, _)| self.pk_indices.contains(index))
             .map(|(_, field)| field.name.clone())
             .collect();
+        if pk_column_names.is_empty() && !self.is_append_only {
+            return Err(SinkError::Config(anyhow!(
+                "Primary key columns not found. Please set the `primary_key` column in the sink properties, or ensure that the sink contains the primary key columns from the upstream."
+            )));
+        }
         let all_column_names = self
             .schema
             .fields

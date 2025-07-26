@@ -182,15 +182,19 @@ impl SnowflakeConfig {
             snowflake_task_ctx.warehouse = Some(self.snowflake_warehouse.clone().ok_or(
                 SinkError::Config(anyhow!("snowflake.warehouse is required")),
             )?);
-            snowflake_task_ctx.pk_column_names = Some(
-                schema
-                    .fields
-                    .iter()
-                    .enumerate()
-                    .filter(|(index, _)| pk_indices.contains(index))
-                    .map(|(_, field)| field.name.clone())
-                    .collect(),
-            );
+            let pk_column_names: Vec<_> = schema
+                .fields
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| pk_indices.contains(index))
+                .map(|(_, field)| field.name.clone())
+                .collect();
+            if pk_column_names.is_empty() {
+                return Err(SinkError::Config(anyhow!(
+                    "Primary key columns not found. Please set the `primary_key` column in the sink properties, or ensure that the sink contains the primary key columns from the upstream."
+                )));
+            }
+            snowflake_task_ctx.pk_column_names = Some(pk_column_names);
             snowflake_task_ctx.all_column_names = Some(
                 schema
                     .fields
