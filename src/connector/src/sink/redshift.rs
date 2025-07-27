@@ -72,10 +72,19 @@ pub struct RedShiftConfig {
     #[serde(rename = "schedule_seconds")]
     #[serde_as(as = "DisplayFromStr")]
     pub schedule: u64,
+
+    #[serde(default = "default_batch_insert_rows")]
+    #[serde(rename = "batch.insert.rows")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub batch_insert_rows: u32,
 }
 
 fn default_schedule() -> u64 {
     3600 // Default to 1 hour
+}
+
+fn default_batch_insert_rows() -> u32 {
+    4096 // Default batch size
 }
 
 impl RedShiftConfig {

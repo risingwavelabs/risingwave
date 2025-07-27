@@ -46,7 +46,8 @@ public abstract class JdbcUtils {
 
     /** The connection returned by this method is *not* autoCommit */
     public static Connection getConnection(
-            String jdbcUrl, String user, String password, boolean autoCommit) throws SQLException {
+            String jdbcUrl, String user, String password, boolean autoCommit, int batchInsertRows)
+            throws SQLException {
         var props = new Properties();
         // enable TCP keep alive to avoid connection closed by server
         // both MySQL and PG support this property
@@ -68,9 +69,9 @@ public abstract class JdbcUtils {
         if (password != null) {
             props.put("password", password);
         }
-        if (jdbcUrl.startsWith("jdbc:redshift")) {
+        if (jdbcUrl.startsWith("jdbc:redshift") && batchInsertRows > 0) {
             props.setProperty("reWriteBatchedInserts", "true");
-            props.setProperty("reWriteBatchedInsertsSize", "4096");
+            props.setProperty("reWriteBatchedInsertsSize", String.valueOf(batchInsertRows));
         }
 
         var conn = DriverManager.getConnection(jdbcUrl, props);
