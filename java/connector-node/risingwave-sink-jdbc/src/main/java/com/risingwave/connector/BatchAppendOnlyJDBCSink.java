@@ -148,6 +148,16 @@ public class BatchAppendOnlyJDBCSink implements SinkWriter {
             }
             jdbcStatements.prepareInsert(row);
         }
+        try {
+            jdbcStatements.tryExecute();
+        } catch (SQLException e) {
+            LOG.error("Error executing JDBC statements in write: {}", e.getMessage());
+            throw Status.INTERNAL
+                    .withDescription(
+                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                    .withCause(e)
+                    .asRuntimeException();
+        }
         return true;
     }
 
@@ -158,12 +168,14 @@ public class BatchAppendOnlyJDBCSink implements SinkWriter {
     class JdbcStatements implements AutoCloseable {
         private final int queryTimeoutSecs;
         private PreparedStatement insertStatement;
+        private int cnt;
 
         private final Connection conn;
 
         public JdbcStatements(Connection conn, int queryTimeoutSecs) throws SQLException {
             this.queryTimeoutSecs = queryTimeoutSecs;
             this.conn = conn;
+            this.cnt = 0;
             // Set database and schema for Snowflake connections
             if (config.getJdbcUrl().toLowerCase().startsWith("jdbc:snowflake")) {
                 setSnowflakeDatabaseAndSchema();
@@ -187,6 +199,7 @@ public class BatchAppendOnlyJDBCSink implements SinkWriter {
             try {
                 jdbcDialect.bindInsertIntoStatement(insertStatement, conn, tableSchema, row);
                 insertStatement.addBatch();
+                this.cnt++;
             } catch (SQLException e) {
                 throw io.grpc.Status.INTERNAL
                         .withDescription(
@@ -197,13 +210,20 @@ public class BatchAppendOnlyJDBCSink implements SinkWriter {
             }
         }
 
+        public void tryExecute() throws SQLException {
+            if (this.cnt >= 4096) {
+                this.execute();
+            }
+        }
+
         public void execute() throws SQLException {
-            // We execute DELETE statement before to avoid accidentally deletion.
             executeStatement(this.insertStatement);
 
             if (!conn.getAutoCommit()) {
                 this.conn.commit();
             }
+
+            this.cnt = 0;
         }
 
         @Override
