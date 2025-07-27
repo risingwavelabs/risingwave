@@ -55,7 +55,8 @@ public class BatchAppendOnlyJDBCSink implements SinkWriter {
                             config.getJdbcUrl(),
                             config.getUser(),
                             config.getPassword(),
-                            config.isAutoCommit());
+                            config.isAutoCommit(),
+                            config.getBatchInsertRows());
             // column name -> java.sql.Types
             Map<String, Integer> columnTypeMapping =
                     getColumnTypeMapping(conn, config.getTableName(), config.getSchemaName());
@@ -72,14 +73,14 @@ public class BatchAppendOnlyJDBCSink implements SinkWriter {
                             .collect(Collectors.toList());
 
             LOG.info(
-                    "schema = {}, table = {}, tableSchema = {}, columnSqlTypes = {}, pkIndices = {}, queryTimeout = {}",
+                    "schema = {}, table = {}, tableSchema = {}, columnSqlTypes = {}, pkIndices = {}, queryTimeout = {}, batchInsertRows = {}",
                     config.getSchemaName(),
                     config.getTableName(),
                     tableSchema,
                     columnSqlTypes,
                     pkIndices,
-                    config.getQueryTimeout());
-
+                    config.getQueryTimeout(),
+                    config.getBatchInsertRows());
             if (factory.isPresent()) {
                 this.jdbcDialect = factory.get().create(columnSqlTypes, pkIndices);
             } else {
@@ -96,7 +97,8 @@ public class BatchAppendOnlyJDBCSink implements SinkWriter {
                 conn.commit();
             }
 
-            jdbcStatements = new JdbcStatements(conn, config.getQueryTimeout());
+            jdbcStatements =
+                    new JdbcStatements(conn, config.getQueryTimeout(), config.getBatchInsertRows());
         } catch (SQLException e) {
             throw Status.INTERNAL
                     .withDescription(
@@ -167,13 +169,16 @@ public class BatchAppendOnlyJDBCSink implements SinkWriter {
      */
     class JdbcStatements implements AutoCloseable {
         private final int queryTimeoutSecs;
+        private final int batchInsertRows;
         private PreparedStatement insertStatement;
         private int cnt;
 
         private final Connection conn;
 
-        public JdbcStatements(Connection conn, int queryTimeoutSecs) throws SQLException {
+        public JdbcStatements(Connection conn, int queryTimeoutSecs, int batchInsertRows)
+                throws SQLException {
             this.queryTimeoutSecs = queryTimeoutSecs;
+            this.batchInsertRows = batchInsertRows;
             this.conn = conn;
             this.cnt = 0;
             // Set database and schema for Snowflake connections
@@ -211,7 +216,7 @@ public class BatchAppendOnlyJDBCSink implements SinkWriter {
         }
 
         public void tryExecute() throws SQLException {
-            if (this.cnt >= 4096) {
+            if (this.cnt >= this.batchInsertRows) {
                 this.execute();
             }
         }

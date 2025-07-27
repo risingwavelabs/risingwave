@@ -42,6 +42,9 @@ public class JDBCSink implements SinkWriter {
     public static final String JDBC_DATA_TYPE_KEY = "DATA_TYPE";
     public static final String JDBC_TYPE_NAME_KEY = "TYPE_NAME";
 
+    // batchInsertRows is only applicable to BatchAppendOnlyJDBCSink
+    private static final int DUMMY_BATCH_INSERT_ROWS = 0;
+
     private boolean updateFlag = false;
 
     private static final Logger LOG = LoggerFactory.getLogger(JDBCSink.class);
@@ -52,13 +55,15 @@ public class JDBCSink implements SinkWriter {
         var jdbcUrl = config.getJdbcUrl().toLowerCase();
         var factory = JdbcUtils.getDialectFactory(jdbcUrl);
         this.config = config;
+
         try {
             conn =
                     JdbcUtils.getConnection(
                             config.getJdbcUrl(),
                             config.getUser(),
                             config.getPassword(),
-                            config.isAutoCommit());
+                            config.isAutoCommit(),
+                            DUMMY_BATCH_INSERT_ROWS);
             // Table schema has been validated before, so we get the PK from it directly
             this.pkColumnNames = tableSchema.getPrimaryKeys();
             // column name -> java.sql.Types
@@ -195,7 +200,8 @@ public class JDBCSink implements SinkWriter {
                                         config.getJdbcUrl(),
                                         config.getUser(),
                                         config.getPassword(),
-                                        config.isAutoCommit());
+                                        config.isAutoCommit(),
+                                        DUMMY_BATCH_INSERT_ROWS);
                         // reset the flag since we will retry to prepare the batch again
                         updateFlag = false;
                         jdbcStatements = new JdbcStatements(conn, config.getQueryTimeout());
