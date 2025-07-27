@@ -32,10 +32,10 @@ use tokio::time::{Instant, sleep};
 use tracing::warn;
 
 use crate::MetaResult;
-use crate::barrier::Reschedule;
+use crate::barrier::{Reschedule, SharedFragmentInfo};
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, WorkerExtraInfo};
-use crate::controller::fragment::{FragmentParallelismInfo, InflightFragmentInfo};
+use crate::controller::fragment::FragmentParallelismInfo;
 use crate::manager::{LocalNotification, NotificationVersion};
 use crate::model::{ActorId, ClusterId, FragmentId, StreamJobFragments, SubscriptionId};
 use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
@@ -422,7 +422,7 @@ impl MetadataManager {
         &self,
         upstream_table_ids: &HashSet<TableId>,
     ) -> MetaResult<(
-        HashMap<TableId, InflightFragmentInfo>,
+        HashMap<TableId, SharedFragmentInfo>,
         HashMap<ActorId, WorkerId>,
     )> {
         let (upstream_root_fragments, actors) = self
@@ -520,7 +520,7 @@ impl MetadataManager {
         &self,
         job_id: u32,
     ) -> MetaResult<(
-        Vec<(PbDispatcherType, InflightFragmentInfo)>,
+        Vec<(PbDispatcherType, SharedFragmentInfo)>,
         HashMap<ActorId, WorkerId>,
     )> {
         let (fragments, actors) = self

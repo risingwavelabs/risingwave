@@ -65,7 +65,7 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
-use crate::barrier::SnapshotBackfillInfo;
+use crate::barrier::{SharedFragmentInfo, SnapshotBackfillInfo};
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::scale::{load_fragments, resolve_streaming_job_definition};
 use crate::controller::utils::{
@@ -514,7 +514,7 @@ impl CatalogController {
         let fragment_opt_from_cache = fragment_model_opt.map(|fragment| {
             let info = self.env.shared_actor_infos().read_guard();
 
-            let (_, InflightFragmentInfo { actors, .. }) = info
+            let (_, SharedFragmentInfo { actors, .. }) = info
                 .values()
                 .flatten()
                 .find(|&(fragment_id, _)| *fragment_id == fragment.fragment_id as u32)
@@ -1201,7 +1201,7 @@ impl CatalogController {
                         let fragments = info
                             .get(&catalog::DatabaseId::new(database_id as _))
                             .unwrap();
-                        let InflightFragmentInfo { actors, .. } =
+                        let SharedFragmentInfo { actors, .. } =
                             fragments.get(&(fragment_id as _)).unwrap();
                         actors.keys().map(move |actor_id| {
                             (
@@ -1956,7 +1956,7 @@ impl CatalogController {
     ) -> MetaResult<Vec<ActorId>> {
         let info = self.env.shared_actor_infos().read_guard();
 
-        let (_, InflightFragmentInfo { actors, .. }) = info
+        let (_, SharedFragmentInfo { actors, .. }) = info
             .values()
             .flatten()
             .find(|&(f, _)| *f == fragment_id as u32)
@@ -2115,7 +2115,7 @@ impl CatalogController {
         &self,
         job_ids: Vec<ObjectId>,
     ) -> MetaResult<(
-        HashMap<ObjectId, InflightFragmentInfo>,
+        HashMap<ObjectId, SharedFragmentInfo>,
         Vec<(ActorId, WorkerId)>,
     )> {
         let inner = self.inner.read().await;
@@ -2157,7 +2157,7 @@ impl CatalogController {
 
         let mut all_actor_locations = vec![];
 
-        for (_, InflightFragmentInfo { actors, .. }) in info.values().flatten() {
+        for (_, SharedFragmentInfo { actors, .. }) in info.values().flatten() {
             for (actor_id, actor_info) in actors {
                 all_actor_locations.push((*actor_id as ActorId, actor_info.worker_id));
             }
@@ -2171,7 +2171,7 @@ impl CatalogController {
     pub async fn get_root_fragment(
         &self,
         job_id: ObjectId,
-    ) -> MetaResult<(InflightFragmentInfo, HashMap<u32, WorkerId>)> {
+    ) -> MetaResult<(SharedFragmentInfo, HashMap<u32, WorkerId>)> {
         let (mut root_fragments, actors) = self.get_root_fragments(vec![job_id]).await?;
         let root_fragment = root_fragments
             .remove(&job_id)
@@ -2188,7 +2188,7 @@ impl CatalogController {
         &self,
         job_id: ObjectId,
     ) -> MetaResult<(
-        Vec<(stream_plan::DispatcherType, InflightFragmentInfo)>,
+        Vec<(stream_plan::DispatcherType, SharedFragmentInfo)>,
         HashMap<u32, WorkerId>,
     )> {
         let (root_fragment, actor_locations) = self.get_root_fragment(job_id).await?;
@@ -2211,7 +2211,7 @@ impl CatalogController {
             .map(|model| (model.target_fragment_id as u32, model.dispatcher_type))
             .collect();
 
-        for (fragment_id, fragment_info @ InflightFragmentInfo { actors, .. }) in info
+        for (fragment_id, fragment_info @ SharedFragmentInfo { actors, .. }) in info
             .values()
             .flatten()
             .filter(|&(fragment_id, _)| fragment_map.contains_key(fragment_id))

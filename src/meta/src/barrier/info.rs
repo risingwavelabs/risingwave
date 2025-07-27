@@ -17,15 +17,17 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
+use parking_lot::RawRwLock;
+use parking_lot::lock_api::RwLockReadGuard;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::{DatabaseId, FragmentTypeMask, TableId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
-use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
+use risingwave_meta_model::{ObjectId, WorkerId};
 use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
 use risingwave_pb::meta::subscribe_response::Operation;
-use risingwave_pb::stream_plan::PbSubscriptionUpstreamInfo;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::{PbStreamNode, PbSubscriptionUpstreamInfo};
 use tracing::warn;
 
 use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder};
@@ -39,16 +41,36 @@ use crate::model::{ActorId, FragmentId, SubscriptionId};
 #[derive(Debug, Clone)]
 pub struct SharedFragmentInfo {
     pub fragment_id: FragmentId,
+    pub job_id: ObjectId,
     pub distribution_type: DistributionType,
     pub actors: HashMap<ActorId, InflightActorInfo>,
+    pub fragment_type_mask: FragmentTypeMask,
+    pub vnode_count: usize,
+    pub nodes: PbStreamNode,
 }
 
 impl From<&InflightFragmentInfo> for SharedFragmentInfo {
     fn from(info: &InflightFragmentInfo) -> Self {
+        let InflightFragmentInfo {
+            fragment_id,
+            job_id,
+            distribution_type,
+            fragment_type_mask,
+            vnode_count,
+            nodes,
+            actors,
+            // state_table_ids,
+            ..
+        } = info;
+
         Self {
-            fragment_id: info.fragment_id,
-            distribution_type: info.distribution_type,
-            actors: info.actors.clone(),
+            fragment_id: *fragment_id,
+            job_id: *job_id,
+            distribution_type: *distribution_type,
+            fragment_type_mask: *fragment_type_mask,
+            vnode_count: *vnode_count,
+            nodes: nodes.clone(),
+            actors: actors.clone(),
         }
     }
 }
@@ -64,12 +86,7 @@ pub(crate) struct SharedActorInfos {
 }
 
 impl SharedActorInfos {
-    pub fn read_guard(
-        &self,
-    ) -> parking_lot::RwLockReadGuard<
-        '_,
-        HashMap<DatabaseId, HashMap<FragmentId, InflightFragmentInfo>>,
-    > {
+    pub fn read_guard(&self) -> RwLockReadGuard<'_, RawRwLock, SharedActorInfosInner> {
         self.inner.read()
     }
 }
@@ -436,7 +453,7 @@ impl InflightDatabaseInfo {
                         for (actor_id, new_vnodes) in actor_update_vnode_bitmap {
                             actors
                                 .get_mut(&actor_id)
-                                .expect("should exist")
+                                .expect(&format!("actor {actor_id} should exist"))
                                 .vnode_bitmap = Some(new_vnodes);
                         }
                         for (actor_id, actor) in new_actors {
