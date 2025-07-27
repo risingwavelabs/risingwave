@@ -314,9 +314,9 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        inner
-            .actors
-            .drop_actors_by_fragments(&removed_fragments.iter().copied().collect_vec());
+        // inner
+        //     .actors
+        //     .drop_actors_by_fragments(&removed_fragments.iter().copied().collect_vec());
 
         // notify about them.
         self.notify_users_update(user_infos).await;

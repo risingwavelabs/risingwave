@@ -79,8 +79,8 @@ use crate::controller::utils::{
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
 use crate::model::{
-    FragmentDownstreamRelation, FragmentReplaceUpstream, StreamContext,
-    StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
+    FragmentDownstreamRelation, FragmentReplaceUpstream, StreamContext, StreamJobFragments,
+    StreamJobFragmentsToCreate, TableParallelism,
 };
 use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
 use crate::{MetaError, MetaResult};
@@ -717,7 +717,7 @@ impl CatalogController {
         split_assignment: &SplitAssignment,
         replace_plan: Option<&ReplaceStreamJobPlan>,
     ) -> MetaResult<()> {
-        let mut inner = self.inner.write().await;
+        let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         let actor_ids = actor_ids
@@ -801,21 +801,21 @@ impl CatalogController {
             .await;
         }
 
-        for actor_id in &actor_ids {
-            inner.actors.mutate_actor(*actor_id as ActorId, |actor| {
-                actor.status = ActorStatus::Running;
-            });
-        }
-
-        for splits in split_assignment.values() {
-            for (&actor_id, splits) in splits {
-                let _ = inner.actors.mutate_actor(actor_id as ActorId, |actor| {
-                    let splits = splits.iter().map(PbConnectorSplit::from).collect_vec();
-                    let connector_splits = &PbConnectorSplits { splits };
-                    actor.splits = Some(connector_splits.into());
-                });
-            }
-        }
+        // for actor_id in &actor_ids {
+        //     inner.actors.mutate_actor(*actor_id as ActorId, |actor| {
+        //         actor.status = ActorStatus::Running;
+        //     });
+        // }
+        //
+        // for splits in split_assignment.values() {
+        //     for (&actor_id, splits) in splits {
+        //         let _ = inner.actors.mutate_actor(actor_id as ActorId, |actor| {
+        //             let splits = splits.iter().map(PbConnectorSplit::from).collect_vec();
+        //             let connector_splits = &PbConnectorSplits { splits };
+        //             actor.splits = Some(connector_splits.into());
+        //         });
+        //     }
+        // }
 
         Ok(())
     }

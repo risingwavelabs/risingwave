@@ -1877,7 +1877,7 @@ impl CatalogController {
 
     pub async fn update_actor_splits(&self, split_assignment: &SplitAssignment) -> MetaResult<()> {
         // qq: why read() here?
-        let mut inner = self.inner.write().await;
+        let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         for assignments in split_assignment.values() {
             for (actor_id, splits) in assignments {
@@ -1902,15 +1902,15 @@ impl CatalogController {
         }
         txn.commit().await?;
 
-        for assignments in split_assignment.values() {
-            for (&actor_id, splits) in assignments {
-                inner.actors.mutate_actor(actor_id as ActorId, |actor| {
-                    actor.splits = Some(ConnectorSplits::from(&PbConnectorSplits {
-                        splits: splits.iter().map(Into::into).collect_vec(),
-                    }));
-                });
-            }
-        }
+        // for assignments in split_assignment.values() {
+        //     for (&actor_id, splits) in assignments {
+        //         inner.actors.mutate_actor(actor_id as ActorId, |actor| {
+        //             actor.splits = Some(ConnectorSplits::from(&PbConnectorSplits {
+        //                 splits: splits.iter().map(Into::into).collect_vec(),
+        //             }));
+        //         });
+        //     }
+        // }
 
         Ok(())
     }
