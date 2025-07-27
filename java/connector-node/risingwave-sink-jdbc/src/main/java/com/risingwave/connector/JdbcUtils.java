@@ -68,6 +68,10 @@ public abstract class JdbcUtils {
         if (password != null) {
             props.put("password", password);
         }
+        if (jdbcUrl.startsWith("jdbc:redshift")) {
+            props.setProperty("reWriteBatchedInserts", "true");
+            props.setProperty("reWriteBatchedInsertsSize", "4096");
+        }
 
         var conn = DriverManager.getConnection(jdbcUrl, props);
         // disable auto commit can improve performance
