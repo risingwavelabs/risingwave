@@ -67,25 +67,20 @@ use sea_orm::{
 use thiserror_ext::AsReport;
 
 use super::rename::IndexItemRewriter;
-use crate::barrier::{ReplaceStreamJobPlan, Reschedule};
+use crate::barrier::{ReplaceStreamJobPlan, Reschedule, SharedFragmentInfo};
 use crate::controller::ObjectModel;
 use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
-use crate::controller::fragment::InflightFragmentInfo;
 use crate::controller::utils::{
     PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
-
-    check_sink_into_table_cycle, ensure_object_id, ensure_user_id,
-    get_internal_tables_by_id, get_table_columns, grant_default_privileges_automatically,
-    insert_fragment_relations, list_user_info_by_ids,
-
-
+    check_sink_into_table_cycle, ensure_object_id, ensure_user_id, get_internal_tables_by_id,
+    get_table_columns, grant_default_privileges_automatically, insert_fragment_relations,
+    list_user_info_by_ids,
 };
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
 use crate::model::{
-    FragmentDownstreamRelation, FragmentReplaceUpstream, StreamActor, StreamContext,
+    FragmentDownstreamRelation, FragmentReplaceUpstream, StreamContext,
     StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
-
 };
 use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
 use crate::{MetaError, MetaResult};
@@ -1678,7 +1673,7 @@ impl CatalogController {
 
         let info = self.env.shared_actor_infos().read_guard();
 
-        for (fragment_id, InflightFragmentInfo { actors, .. }) in info
+        for (fragment_id, SharedFragmentInfo { actors, .. }) in info
             .values()
             .flatten()
             .filter(|&(fragment_id, _)| fragment_ids.contains(fragment_id))

@@ -2320,8 +2320,8 @@ impl DdlController {
                     sink.original_fragment.fragment_id == downstream_fragment.fragment_id
                 }) {
                     assert!(remaining_fragment.remove(&downstream_fragment.fragment_id));
-                    for actor in &downstream_fragment.actors {
-                        downstream_actor_location.remove(&actor.actor_id);
+                    for actor_id in downstream_fragment.actors.keys() {
+                        downstream_actor_location.remove(actor_id);
                     }
                     for (actor_id, status) in &sink.actor_status {
                         downstream_actor_location.insert(
@@ -2329,7 +2329,11 @@ impl DdlController {
                             status.location.as_ref().unwrap().worker_node_id as WorkerId,
                         );
                     }
-                    *downstream_fragment = sink.new_fragment.clone();
+
+                    todo!()
+                    // *downstream_fragment = SharedFragmentInfo {
+                    //
+                    // };
                 }
             }
             assert!(remaining_fragment.is_empty());
