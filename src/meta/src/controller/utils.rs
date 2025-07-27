@@ -66,7 +66,6 @@ use thiserror_ext::AsReport;
 use crate::barrier::SharedFragmentInfo;
 use crate::controller::ObjectModel;
 use crate::controller::catalog::ActorInfo;
-use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::{FragmentActorDispatchers, FragmentDownstreamRelation};
 use crate::{MetaError, MetaResult};
 
