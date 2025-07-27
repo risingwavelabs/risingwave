@@ -90,7 +90,7 @@ impl Expression for SomeAllExpression {
     async fn eval(&self, data_chunk: &DataChunk) -> Result<ArrayRef> {
         let arr_left = self.left_expr.eval(data_chunk).await?;
         let arr_right = self.right_expr.eval(data_chunk).await?;
-        let mut num_array = Vec::with_capacity(data_chunk.capacity());
+        let mut num_array = vec![None; data_chunk.capacity()];
 
         let arr_right_inner = arr_right.as_list();
         let DataType::List(datatype) = arr_right_inner.data_type() else {
@@ -102,39 +102,31 @@ impl Expression for SomeAllExpression {
         let mut unfolded_arr_right_builder = datatype.create_array_builder(capacity);
 
         let mut unfolded_left_right =
-            |left: Option<ScalarRefImpl<'_>>,
-             right: Option<ScalarRefImpl<'_>>,
-             num_array: &mut Vec<Option<usize>>| {
+            |left: Option<ScalarRefImpl<'_>>, right: Option<ScalarRefImpl<'_>>, index: usize| {
                 if right.is_none() {
-                    num_array.push(None);
                     return;
                 }
 
                 let array = right.unwrap().into_list();
                 let flattened = array.flatten();
                 let len = flattened.len();
-                num_array.push(Some(len));
+
+                num_array[index] = Some(len);
                 unfolded_arr_left_builder.append_n(len, left);
                 for item in flattened.iter() {
-                    unfolded_arr_right_builder.append(item);
+                    unfolded_arr_right_builder.append(item)
                 }
             };
 
         if data_chunk.is_compacted() {
-            for (left, right) in arr_left.iter().zip_eq_fast(arr_right.iter()) {
-                unfolded_left_right(left, right, &mut num_array);
+            for (idx, (left, right)) in arr_left.iter().zip_eq_fast(arr_right.iter()).enumerate() {
+                unfolded_left_right(left, right, idx);
             }
         } else {
-            for ((left, right), visible) in arr_left
-                .iter()
-                .zip_eq_fast(arr_right.iter())
-                .zip_eq_fast(data_chunk.visibility().iter())
-            {
-                if !visible {
-                    num_array.push(None);
-                    continue;
-                }
-                unfolded_left_right(left, right, &mut num_array);
+            for idx in data_chunk.visibility().iter_ones() {
+                let left = arr_left.value_at(idx);
+                let right = arr_right.value_at(idx);
+                unfolded_left_right(left, right, idx);
             }
         }
 
