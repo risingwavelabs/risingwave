@@ -236,6 +236,18 @@ fn inner_product(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
     Ok((sum as f64).into())
 }
 
+/// ```slt
+/// query R
+/// SELECT '[1,2,3]'::vector(3) + '[4,5,6]';
+/// ----
+/// [5,7,9]
+///
+/// query error value out of range: overflow
+/// SELECT '[3e38]'::vector(1) + '[3e38]';
+///
+/// query error dimensions
+/// SELECT '[1,2]'::vector(2) + '[3]';
+/// ```
 #[function("add(vector, vector) -> vector", type_infer = "unreachable")]
 fn vector_add(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
     let lhs = lhs.into_slice();
@@ -246,6 +258,61 @@ fn vector_add(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
         .iter()
         .zip_eq_fast(rhs.iter())
         .map(|(l, r)| l + r)
+        .collect();
+    Ok(result)
+}
+
+/// ```slt
+/// query R
+/// SELECT '[1,2,3]'::vector(3) - '[4,5,6]';
+/// ----
+/// [-3,-3,-3]
+///
+/// query error value out of range: overflow
+/// SELECT '[-3e38]'::vector(1) - '[3e38]';
+///
+/// query error dimensions
+/// SELECT '[1,2]'::vector(2) - '[3]';
+/// ```
+#[function("subtract(vector, vector) -> vector", type_infer = "unreachable")]
+fn vector_subtract(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
+    let lhs = lhs.into_slice();
+    let rhs = rhs.into_slice();
+    check_dims("vector_subtract", lhs, rhs)?;
+
+    let result = lhs
+        .iter()
+        .zip_eq_fast(rhs.iter())
+        .map(|(l, r)| l - r)
+        .collect();
+    Ok(result)
+}
+
+/// ```slt
+/// query R
+/// SELECT '[1,2,3]'::vector(3) * '[4,5,6]';
+/// ----
+/// [4,10,18]
+///
+/// query error value out of range: overflow
+/// SELECT '[1e37]'::vector(1) * '[1e37]';
+///
+/// query error value out of range: underflow
+/// SELECT '[1e-37]'::vector(1) * '[1e-37]';
+///
+/// query error dimensions
+/// SELECT '[1,2]'::vector(2) * '[3]';
+/// ```
+#[function("multiply(vector, vector) -> vector", type_infer = "unreachable")]
+fn vector_multiply(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
+    let lhs = lhs.into_slice();
+    let rhs = rhs.into_slice();
+    check_dims("vector_multiply", lhs, rhs)?;
+
+    let result = lhs
+        .iter()
+        .zip_eq_fast(rhs.iter())
+        .map(|(l, r)| l * r)
         .collect();
     Ok(result)
 }
