@@ -12,20 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Functions for testing whether license and paid tier features are working.
+//! Functions for testing whether license-gated features are working.
 
 use anyhow::Context;
 use risingwave_common::license::{Feature, LicenseManager};
 use risingwave_common::types::JsonbVal;
 use risingwave_expr::{ExprError, Result, function};
 
-/// Checks if the `TestPaid` feature is available.
-#[function("test_paid_tier() -> boolean")]
-pub fn test_paid_tier() -> Result<bool> {
-    Feature::TestPaid
+fn test_feature_inner(feature: Feature) -> Result<bool> {
+    feature
         .check_available()
         .map_err(|e| ExprError::Internal(anyhow::Error::from(e)))?;
     Ok(true)
+}
+
+/// Checks if the given feature is available.
+#[function("test_feature(varchar) -> boolean")]
+pub fn test_feature(name: &str) -> Result<bool> {
+    let feature: Feature = name
+        .parse()
+        .with_context(|| format!("no feature named {name}"))?;
+    test_feature_inner(feature)
+}
+
+/// Backward compatibility for `rw_test_paid_tier`.
+#[function("test_feature() -> boolean")]
+pub fn test_paid_tier() -> Result<bool> {
+    test_feature_inner(Feature::TestDummy)
 }
 
 /// Dump the license information.
