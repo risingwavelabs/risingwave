@@ -2115,7 +2115,7 @@ impl CatalogController {
         &self,
         job_ids: Vec<ObjectId>,
     ) -> MetaResult<(
-        HashMap<ObjectId, SharedFragmentInfo>,
+        HashMap<ObjectId, (SharedFragmentInfo, PbStreamNode)>,
         Vec<(ActorId, WorkerId)>,
     )> {
         let inner = self.inner.read().await;
@@ -2152,7 +2152,14 @@ impl CatalogController {
             .filter(|&(fragment_id, _)| root_fragment_to_jobs.contains_key(fragment_id))
         {
             let job_id = root_fragment_to_jobs[fragment_id];
-            root_fragments_pb.insert(job_id, fragment_info.clone());
+            let fragment = root_fragments
+                .get(&job_id)
+                .context(format!("root fragment for job {} not found", job_id))?;
+
+            root_fragments_pb.insert(
+                job_id,
+                (fragment_info.clone(), fragment.stream_node.to_protobuf()),
+            );
         }
 
         let mut all_actor_locations = vec![];
@@ -2173,7 +2180,7 @@ impl CatalogController {
         job_id: ObjectId,
     ) -> MetaResult<(SharedFragmentInfo, HashMap<u32, WorkerId>)> {
         let (mut root_fragments, actors) = self.get_root_fragments(vec![job_id]).await?;
-        let root_fragment = root_fragments
+        let (root_fragment, _) = root_fragments
             .remove(&job_id)
             .context(format!("root fragment for job {} not found", job_id))?;
 
@@ -2188,19 +2195,43 @@ impl CatalogController {
         &self,
         job_id: ObjectId,
     ) -> MetaResult<(
-        Vec<(stream_plan::DispatcherType, SharedFragmentInfo)>,
+        Vec<(
+            stream_plan::DispatcherType,
+            SharedFragmentInfo,
+            PbStreamNode,
+        )>,
         HashMap<u32, WorkerId>,
     )> {
         let (root_fragment, actor_locations) = self.get_root_fragment(job_id).await?;
 
         let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
         let downstream_fragment_relations: Vec<fragment_relation::Model> = FragmentRelation::find()
             .filter(
                 fragment_relation::Column::SourceFragmentId
                     .eq(root_fragment.fragment_id as FragmentId),
             )
-            .all(&inner.db)
+            .all(&txn)
             .await?;
+
+        // todo, optimize
+        let downstream_fragment_ids = downstream_fragment_relations
+            .iter()
+            .map(|model| model.target_fragment_id as FragmentId)
+            .collect::<HashSet<_>>();
+
+        let downstream_fragment_nodes: Vec<(FragmentId, StreamNode)> = FragmentModel::find()
+            .select_only()
+            .columns([fragment::Column::FragmentId, fragment::Column::StreamNode])
+            .filter(fragment::Column::FragmentId.is_in(downstream_fragment_ids))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        let downstream_fragment_nodes: HashMap<_, _> = downstream_fragment_nodes
+            .into_iter()
+            .map(|(id, node)| (id as u32, node))
+            .collect();
 
         let mut downstream_fragments = vec![];
 
@@ -2223,7 +2254,16 @@ impl CatalogController {
             }
 
             let dispatch_type = PbDispatcherType::from(dispatcher_type);
-            downstream_fragments.push((dispatch_type, fragment_info.clone()));
+
+            let nodes = downstream_fragment_nodes
+                .get(fragment_id)
+                .context(format!(
+                    "downstream fragment node for id {} not found",
+                    fragment_id
+                ))?
+                .to_protobuf();
+
+            downstream_fragments.push((dispatch_type, fragment_info.clone(), nodes));
         }
         Ok((downstream_fragments, actor_locations))
     }
