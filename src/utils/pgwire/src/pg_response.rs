@@ -102,6 +102,7 @@ pub enum StatementType {
     UPDATE_USER,
     ABORT,
     FLUSH,
+    REFRESH_TABLE,
     OTHER,
     // EMPTY is used when query statement is empty (e.g. ";").
     EMPTY,
