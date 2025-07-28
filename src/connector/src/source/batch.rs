@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::source::filesystem::opendal_source::BatchPosixFsSplit;
 use crate::source::{SplitImpl, SplitMetaData};
 
 /// # Refreshable Batch Source/Table
@@ -44,27 +45,37 @@ pub trait BatchSourceSplit: SplitMetaData {
     fn refresh(&mut self);
 }
 
-pub enum BatchSourceSplitImpl {}
+pub enum BatchSourceSplitImpl {
+    BatchPosixFs(BatchPosixFsSplit),
+}
 
 /// See [`BatchSourceSplit`] for more details.
 impl BatchSourceSplitImpl {
     pub fn finished(&self) -> bool {
-        unreachable!()
+        match self {
+            BatchSourceSplitImpl::BatchPosixFs(split) => split.finished(),
+        }
     }
 
     pub fn finish(&mut self) {
         tracing::info!("finishing batch source split");
-        unreachable!()
+        match self {
+            BatchSourceSplitImpl::BatchPosixFs(split) => split.finish(),
+        }
     }
 
     pub fn refresh(&mut self) {
         tracing::info!("refreshing batch source split");
-        unreachable!()
+        match self {
+            BatchSourceSplitImpl::BatchPosixFs(split) => split.refresh(),
+        }
     }
 }
 
 impl From<BatchSourceSplitImpl> for SplitImpl {
     fn from(batch_split: BatchSourceSplitImpl) -> Self {
-        match batch_split {}
+        match batch_split {
+            BatchSourceSplitImpl::BatchPosixFs(split) => SplitImpl::BatchPosixFs(split),
+        }
     }
 }

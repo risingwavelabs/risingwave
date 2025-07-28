@@ -209,9 +209,7 @@ impl<S: StateStore> SourceExecutor<S> {
     fn refresh_batch_splits(&mut self) -> StreamExecutorResult<Vec<SplitImpl>> {
         debug_assert!(self.is_batch_source());
         let core = &self.stream_source_core;
-        #[expect(unused_variables, unused_mut)]
         let mut split = core.get_batch_split();
-        #[expect(unreachable_code)]
         split.refresh();
         Ok(vec![split.into()])
     }
@@ -610,9 +608,7 @@ impl<S: StateStore> SourceExecutor<S> {
                     // NOTE: We rely on CompleteBarrierTask, which is only for checkpoint barrier,
                     // so we wait for a checkpoint barrier here.
                     if barrier.is_checkpoint() && self.is_batch_source() && is_refreshing {
-                        #[expect(unused_variables)]
                         let batch_split = self.stream_source_core.get_batch_split();
-                        #[expect(unreachable_code)]
                         if batch_split.finished() {
                             tracing::info!(?epoch, "emitting load finish");
                             self.barrier_manager.report_source_load_finished(
