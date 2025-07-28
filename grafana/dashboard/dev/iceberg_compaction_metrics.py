@@ -78,9 +78,9 @@ def _(outer_panels: Panels):
                     ],
                 ),
 
-                panels.timeseries_latency(
+                panels.timeseries_latency_ms(
                     "Iceberg Compaction Duration",
-                    "iceberg compaction duration in seconds",
+                    "iceberg compaction duration in milliseconds",
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
