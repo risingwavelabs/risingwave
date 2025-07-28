@@ -1,8 +1,3 @@
-control substitution on
-
-statement ok
-drop database if exists mydb;
-
 statement ok
 create database mydb;
 
@@ -29,9 +24,13 @@ select * from myschema.mytable;
 ----
 1
 
+control substitution on
+
 # Switch back to original database.
 statement ok
 set database to $__DATABASE__;
+
+control substitution off
 
 # Test cross DB query.
 query I
