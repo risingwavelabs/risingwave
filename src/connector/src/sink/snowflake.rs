@@ -46,7 +46,6 @@ use crate::sink::{
 pub const SNOWFLAKE_SINK: &str = "snowflake";
 pub const SNOWFLAKE_SINK_ROW_ID: &str = "__row_id";
 pub const SNOWFLAKE_SINK_OP: &str = "__op";
-pub const DEFAULT_SCHEDULE: &str = "1 HOUR";
 
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions)]
@@ -54,31 +53,33 @@ pub struct SnowflakeConfig {
     #[serde(rename = "type")]
     pub r#type: String,
 
-    #[serde(rename = "snowflake.cdc_table_name")]
+    #[serde(rename = "intermediate.table.name")]
     pub snowflake_cdc_table_name: Option<String>,
 
-    #[serde(rename = "snowflake.target_table_name")]
+    #[serde(rename = "target.table.name")]
     pub snowflake_target_table_name: Option<String>,
 
-    #[serde(rename = "snowflake.database")]
+    #[serde(rename = "database")]
     pub snowflake_database: Option<String>,
 
-    #[serde(rename = "snowflake.schema")]
+    #[serde(rename = "schema")]
     pub snowflake_schema: Option<String>,
 
-    #[serde(rename = "snowflake.schedule")]
-    pub snowflake_schedule: Option<String>,
+    #[serde(default = "default_schedule")]
+    #[serde(rename = "schedule_seconds")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub snowflake_schedule_seconds: u64,
 
-    #[serde(rename = "snowflake.warehouse")]
+    #[serde(rename = "warehouse")]
     pub snowflake_warehouse: Option<String>,
 
-    #[serde(rename = "snowflake.jdbc.url")]
+    #[serde(rename = "jdbc.url")]
     pub jdbc_url: Option<String>,
 
-    #[serde(rename = "snowflake.username")]
+    #[serde(rename = "username")]
     pub username: Option<String>,
 
-    #[serde(rename = "snowflake.password")]
+    #[serde(rename = "password")]
     pub password: Option<String>,
 
     /// Commit every n(>0) checkpoints, default is 10.
@@ -98,6 +99,10 @@ pub struct SnowflakeConfig {
     #[serde(rename = "create_table_if_not_exists")]
     #[serde_as(as = "DisplayFromStr")]
     pub create_table_if_not_exists: bool,
+}
+
+fn default_schedule() -> u64 {
+    3600 // Default to 1 hour
 }
 
 impl SnowflakeConfig {
@@ -126,21 +131,19 @@ impl SnowflakeConfig {
             // append-only + no auto schema change is not need to create a client
             return Ok(None);
         }
-        let target_table_name =
-            self.snowflake_target_table_name
-                .clone()
-                .ok_or(SinkError::Config(anyhow!(
-                    "snowflake.target_table_name is required"
-                )))?;
+        let target_table_name = self
+            .snowflake_target_table_name
+            .clone()
+            .ok_or(SinkError::Config(anyhow!("target.table.name is required")))?;
         let database = self
             .snowflake_database
             .clone()
-            .ok_or(SinkError::Config(anyhow!("snowflake.database is required")))?
+            .ok_or(SinkError::Config(anyhow!("database is required")))?
             .to_owned();
         let schema_name = self
             .snowflake_schema
             .clone()
-            .ok_or(SinkError::Config(anyhow!("snowflake.schema is required")))?
+            .ok_or(SinkError::Config(anyhow!("schema is required")))?
             .to_owned();
         let mut snowflake_task_ctx = SnowflakeTaskContext {
             target_table_name: target_table_name.clone(),
@@ -153,16 +156,16 @@ impl SnowflakeConfig {
         let jdbc_url = self
             .jdbc_url
             .clone()
-            .ok_or(SinkError::Config(anyhow!("snowflake.jdbc.url is required")))?
+            .ok_or(SinkError::Config(anyhow!("jdbc.url is required")))?
             .to_owned();
         let username = self
             .username
             .clone()
-            .ok_or(SinkError::Config(anyhow!("snowflake.username is required")))?;
+            .ok_or(SinkError::Config(anyhow!("username is required")))?;
         let password = self
             .password
             .clone()
-            .ok_or(SinkError::Config(anyhow!("snowflake.password is required")))?;
+            .ok_or(SinkError::Config(anyhow!("password is required")))?;
         let jdbc_url = format!("{}?user={}&password={}", jdbc_url, username, password);
         let client = JdbcJniClient::new(jdbc_url)?;
 
@@ -171,17 +174,15 @@ impl SnowflakeConfig {
                 .snowflake_cdc_table_name
                 .clone()
                 .ok_or(SinkError::Config(anyhow!(
-                    "snowflake.cdc_table_name is required"
+                    "intermediate.table.name is required"
                 )))?;
             snowflake_task_ctx.cdc_table_name = Some(cdc_table_name.clone());
-            snowflake_task_ctx.schedule = Some(
-                self.snowflake_schedule
+            snowflake_task_ctx.schedule_seconds = self.snowflake_schedule_seconds;
+            snowflake_task_ctx.warehouse = Some(
+                self.snowflake_warehouse
                     .clone()
-                    .unwrap_or(DEFAULT_SCHEDULE.to_owned()),
+                    .ok_or(SinkError::Config(anyhow!("warehouse is required")))?,
             );
-            snowflake_task_ctx.warehouse = Some(self.snowflake_warehouse.clone().ok_or(
-                SinkError::Config(anyhow!("snowflake.warehouse is required")),
-            )?);
             let pk_column_names: Vec<_> = schema
                 .fields
                 .iter()
@@ -212,9 +213,9 @@ impl SnowflakeConfig {
 
 impl EnforceSecret for SnowflakeConfig {
     const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
-        "snowflake.username",
-        "snowflake.password",
-        "snowflake.jdbc.url",
+        "username",
+        "password",
+        "jdbc.url",
     };
 }
 
@@ -455,8 +456,14 @@ impl SnowflakeSinkWriter {
                 "primary_key".to_owned(),
                 properties.get("primary_key").cloned().unwrap_or_default(),
             ),
-            ("schema.name".to_owned(), config.snowflake_schema.clone().unwrap_or_default()),
-            ("database.name".to_owned(), config.snowflake_database.clone().unwrap_or_default()),
+            (
+                "schema.name".to_owned(),
+                config.snowflake_schema.clone().unwrap_or_default(),
+            ),
+            (
+                "database.name".to_owned(),
+                config.snowflake_database.clone().unwrap_or_default(),
+            ),
         ]);
         param.properties = new_properties;
 
@@ -512,7 +519,7 @@ pub struct SnowflakeTaskContext {
     // only upsert
     pub task_name: Option<String>,
     pub cdc_table_name: Option<String>,
-    pub schedule: Option<String>,
+    pub schedule_seconds: u64,
     pub warehouse: Option<String>,
     pub pk_column_names: Option<Vec<String>>,
     pub all_column_names: Option<Vec<String>>,
@@ -776,7 +783,7 @@ fn build_create_merge_into_task_sql(snowflake_task_context: &SnowflakeTaskContex
         task_name,
         cdc_table_name,
         target_table_name,
-        schedule,
+        schedule_seconds,
         warehouse,
         pk_column_names,
         all_column_names,
@@ -840,7 +847,7 @@ fn build_create_merge_into_task_sql(snowflake_task_context: &SnowflakeTaskContex
     format!(
         r#"CREATE OR REPLACE TASK {task_name}
 WAREHOUSE = {warehouse}
-SCHEDULE = '{schedule}'
+SCHEDULE = '{schedule_seconds} SECONDS'
 AS
 BEGIN
     LET max_row_id STRING;
@@ -868,7 +875,7 @@ BEGIN
 END;"#,
         task_name = full_task_name,
         warehouse = warehouse.as_ref().unwrap(),
-        schedule = schedule.as_ref().unwrap(),
+        schedule_seconds = schedule_seconds,
         cdc_table_name = full_cdc_table_name,
         target_table_name = full_target_table_name,
         pk_names_str = pk_names_str,
@@ -892,7 +899,7 @@ mod tests {
             task_name: Some("test_task".to_owned()),
             cdc_table_name: Some("test_cdc_table".to_owned()),
             target_table_name: "test_target_table".to_owned(),
-            schedule: Some("1 HOUR".to_owned()),
+            schedule_seconds: 3600,
             warehouse: Some("test_warehouse".to_owned()),
             pk_column_names: Some(vec!["v1".to_owned()]),
             all_column_names: Some(vec!["v1".to_owned(), "v2".to_owned()]),
@@ -903,7 +910,7 @@ mod tests {
         let task_sql = build_create_merge_into_task_sql(&snowflake_task_context);
         let expected = r#"CREATE OR REPLACE TASK "test_db"."test_schema"."test_task"
 WAREHOUSE = test_warehouse
-SCHEDULE = '1 HOUR'
+SCHEDULE = '3600 SECONDS'
 AS
 BEGIN
     LET max_row_id STRING;
@@ -938,7 +945,7 @@ END;"#;
             task_name: Some("test_task_multi_pk".to_owned()),
             cdc_table_name: Some("cdc_multi_pk".to_owned()),
             target_table_name: "target_multi_pk".to_owned(),
-            schedule: Some("5 MINUTE".to_owned()),
+            schedule_seconds: 300,
             warehouse: Some("multi_pk_warehouse".to_owned()),
             pk_column_names: Some(vec!["id1".to_owned(), "id2".to_owned()]),
             all_column_names: Some(vec!["id1".to_owned(), "id2".to_owned(), "val".to_owned()]),
@@ -949,7 +956,7 @@ END;"#;
         let task_sql = build_create_merge_into_task_sql(&snowflake_task_context);
         let expected = r#"CREATE OR REPLACE TASK "test_db"."test_schema"."test_task_multi_pk"
 WAREHOUSE = multi_pk_warehouse
-SCHEDULE = '5 MINUTE'
+SCHEDULE = '300 SECONDS'
 AS
 BEGIN
     LET max_row_id STRING;
