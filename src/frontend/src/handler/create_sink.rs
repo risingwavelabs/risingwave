@@ -66,7 +66,7 @@ use crate::handler::create_mv::parse_column_names;
 use crate::handler::create_table::{ColumnIdGenerator, generate_stream_graph_for_replace_table};
 use crate::handler::util::{check_connector_match_connection_type, ensure_connection_type_allowed};
 use crate::optimizer::plan_node::{
-    IcebergPartitionInfo, LogicalSource, PartitionComputeInfo, StreamProject, generic,
+    IcebergPartitionInfo, LogicalSource, PartitionComputeInfo, Stream, StreamProject, generic,
 };
 use crate::optimizer::{OptimizerContext, PlanRef, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
@@ -389,7 +389,7 @@ pub async fn gen_sink_plan(
     // TODO(rc): To be consistent with UDF dependency check, we should collect relation dependencies
     // during binding instead of visiting the optimized plan.
     let dependencies =
-        RelationCollectorVisitor::collect_with(dependent_relations, sink_plan.clone())
+        RelationCollectorVisitor::collect_with::<Stream>(dependent_relations, sink_plan.clone())
             .into_iter()
             .map(|id| id.table_id() as ObjectId)
             .chain(

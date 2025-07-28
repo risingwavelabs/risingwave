@@ -63,8 +63,8 @@ use sea_orm::{
 };
 use thiserror_ext::AsReport;
 
+use crate::barrier::SharedFragmentInfo;
 use crate::controller::ObjectModel;
-use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::{FragmentActorDispatchers, FragmentDownstreamRelation};
 use crate::{MetaError, MetaResult};
 
@@ -1533,7 +1533,7 @@ where
     Ok(rebuild_fragment_mapping_from_actors(job_actors))
 }
 
-pub fn rebuild_fragment_mapping(fragment: &InflightFragmentInfo) -> PbFragmentWorkerSlotMapping {
+pub fn rebuild_fragment_mapping(fragment: &SharedFragmentInfo) -> PbFragmentWorkerSlotMapping {
     let fragment_worker_slot_mapping = match fragment.distribution_type {
         DistributionType::Single => {
             let actor = fragment.actors.values().exactly_one().unwrap();
