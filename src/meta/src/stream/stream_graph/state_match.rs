@@ -73,6 +73,9 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 /// Fragment id.
 type Id = u32;
 
+/// State table id.
+type TableId = u32;
+
 /// Node for a fragment in the [`Graph`].
 struct Fragment {
     /// The fragment id.
@@ -182,8 +185,8 @@ impl Graph {
 struct Match {
     /// The target fragment id.
     target: Id,
-    /// The mapping from source table id to target table id within the fragment.
-    table_matches: HashMap<u32, u32>,
+    /// The mapping from source table id to target table within the fragment.
+    table_matches: HashMap<TableId, PbTable>,
 }
 
 /// The successful matching result of two [`Graph`]s.
@@ -332,7 +335,7 @@ impl Matches {
                     );
                 }
 
-                table_matches.try_insert(ut.id, vt.id).unwrap_or_else(|_| {
+                table_matches.try_insert(ut.id, vt).unwrap_or_else(|_| {
                     panic!("duplicated table id {} in fragment {}", ut.id, u.id)
                 });
             }
@@ -361,7 +364,7 @@ impl Matches {
     }
 
     /// Converts the match result into a table mapping.
-    fn into_table_mapping(self) -> HashMap<u32, u32> {
+    fn into_table_mapping(self) -> HashMap<TableId, PbTable> {
         self.inner
             .into_iter()
             .flat_map(|(_, m)| m.table_matches.into_iter())
@@ -488,7 +491,10 @@ fn match_graph(g1: &Graph, g2: &Graph) -> Result<Matches> {
 }
 
 /// Matches two [`Graph`]s, and returns the internal table mapping from `g1` to `g2`.
-pub(crate) fn match_graph_internal_tables(g1: &Graph, g2: &Graph) -> Result<HashMap<u32, u32>> {
+pub(crate) fn match_graph_internal_tables(
+    g1: &Graph,
+    g2: &Graph,
+) -> Result<HashMap<TableId, PbTable>> {
     match_graph(g1, g2).map(|matches| matches.into_table_mapping())
 }
 
@@ -544,7 +550,7 @@ impl Graph {
     /// Creates a [`Graph`] from a [`StreamJobFragments`] that's existing.
     pub(crate) fn from_existing(
         fragments: &StreamJobFragments,
-        fragment_upstreams: &HashMap<u32, HashSet<u32>>,
+        fragment_upstreams: &HashMap<Id, HashSet<Id>>,
     ) -> Self {
         let nodes: HashMap<_, _> = fragments
             .fragments
