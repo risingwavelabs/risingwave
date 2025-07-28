@@ -16,13 +16,13 @@ use itertools::Itertools;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::StreamScanType;
 
-use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use crate::optimizer::plan_node::{PlanRef, Stream, *};
+use crate::optimizer::rule::{BoxedRule, Rule};
 
 /// Use index scan and delta joins for supported queries.
 pub struct IndexDeltaJoinRule {}
 
-impl Rule for IndexDeltaJoinRule {
+impl Rule<Stream> for IndexDeltaJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let join = plan.as_stream_hash_join()?;
         if join.eq_join_predicate().has_non_eq() || join.join_type() != JoinType::Inner {
@@ -161,7 +161,7 @@ impl Rule for IndexDeltaJoinRule {
 }
 
 impl IndexDeltaJoinRule {
-    pub fn create() -> BoxedRule {
+    pub fn create() -> BoxedRule<Stream> {
         Box::new(Self {})
     }
 }

@@ -16,9 +16,9 @@ use risingwave_common::types::DataType;
 use risingwave_expr::aggregate::{AggType, PbAggKind};
 use risingwave_pb::plan_common::JoinType;
 
-use super::{ApplyOffsetRewriter, BoxedRule, Rule};
+use super::ApplyOffsetRewriter;
+use super::prelude::*;
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{LogicalAgg, LogicalApply, LogicalFilter, LogicalProject};
 use crate::utils::{Condition, IndexSet};
@@ -45,7 +45,7 @@ use crate::utils::{Condition, IndexSet};
 ///  Domain        Input
 /// ```
 pub struct ApplyAggTransposeRule {}
-impl Rule for ApplyAggTransposeRule {
+impl Rule<Logical> for ApplyAggTransposeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =

@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::fmt;
-use std::marker::PhantomData;
 
 use itertools::Itertools;
 
@@ -38,18 +37,16 @@ pub enum ApplyOrder {
 /// apply each rule on them.
 pub struct HeuristicOptimizer<'a, C: ConventionMarker> {
     apply_order: &'a ApplyOrder,
-    rules: &'a [BoxedRule],
+    rules: &'a [BoxedRule<C>],
     stats: Stats,
-    _phantom: PhantomData<C>,
 }
 
 impl<'a, C: ConventionMarker> HeuristicOptimizer<'a, C> {
-    pub fn new(apply_order: &'a ApplyOrder, rules: &'a [BoxedRule]) -> Self {
+    pub fn new(apply_order: &'a ApplyOrder, rules: &'a [BoxedRule<C>]) -> Self {
         Self {
             apply_order,
             rules,
             stats: Stats::new(),
-            _phantom: PhantomData,
         }
     }
 
@@ -131,7 +128,7 @@ impl Stats {
         }
     }
 
-    pub fn count_rule(&mut self, rule: &BoxedRule) {
+    pub fn count_rule(&mut self, rule: &BoxedRule<impl ConventionMarker>) {
         self.total_applied += 1;
         match self.rule_counter.entry(rule.description().to_owned()) {
             Entry::Occupied(mut entry) => {

@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use thiserror_ext::AsReport as _;
 
-use super::plan_node::{Batch, Convention, ConventionMarker, Logical, Stream};
+use super::plan_node::{ConventionMarker, Logical};
 use super::plan_visitor::has_logical_max_one_row;
 use crate::error::Result;
 use crate::expr::NowProcTimeFinder;
@@ -36,11 +36,12 @@ use crate::utils::Condition;
 use crate::{Explain, OptimizerContextRef};
 
 impl PlanRef {
-    fn optimize_by_rules_inner(
+    fn optimize_by_rules_inner<C: ConventionMarker>(
         self,
-        heuristic_optimizer: &mut HeuristicOptimizer<'_, impl ConventionMarker>,
+        heuristic_optimizer: &mut HeuristicOptimizer<'_, C>,
         stage_name: &str,
     ) -> Result<PlanRef> {
+        self.expect_convention::<C>();
         let ctx = self.ctx();
 
         let result = heuristic_optimizer.optimize(self);
@@ -59,28 +60,18 @@ impl PlanRef {
         result
     }
 
-    pub(crate) fn optimize_by_rules(
+    pub(crate) fn optimize_by_rules<C: ConventionMarker>(
         self,
         OptimizationStage {
             stage_name,
             rules,
             apply_order,
-        }: &OptimizationStage,
+        }: &OptimizationStage<C>,
     ) -> Result<PlanRef> {
-        match self.convention() {
-            Convention::Logical => self.optimize_by_rules_inner(
-                &mut HeuristicOptimizer::<Logical>::new(apply_order, rules),
-                stage_name,
-            ),
-            Convention::Batch => self.optimize_by_rules_inner(
-                &mut HeuristicOptimizer::<Batch>::new(apply_order, rules),
-                stage_name,
-            ),
-            Convention::Stream => self.optimize_by_rules_inner(
-                &mut HeuristicOptimizer::<Stream>::new(apply_order, rules),
-                stage_name,
-            ),
-        }
+        self.optimize_by_rules_inner(
+            &mut HeuristicOptimizer::<C>::new(apply_order, rules),
+            stage_name,
+        )
     }
 
     pub(crate) fn optimize_by_rules_until_fix_point(
@@ -91,9 +82,8 @@ impl PlanRef {
             apply_order,
         }: &OptimizationStage,
     ) -> Result<PlanRef> {
-        self.expect_convention::<Logical>();
         loop {
-            let mut heuristic_optimizer = HeuristicOptimizer::<Logical>::new(apply_order, rules);
+            let mut heuristic_optimizer = HeuristicOptimizer::new(apply_order, rules);
             self = self.optimize_by_rules_inner(&mut heuristic_optimizer, stage_name)?;
             if !heuristic_optimizer.get_stats().has_applied_rule() {
                 return Ok(self);
@@ -102,14 +92,14 @@ impl PlanRef {
     }
 }
 
-pub struct OptimizationStage {
+pub struct OptimizationStage<C: ConventionMarker = Logical> {
     stage_name: String,
-    rules: Vec<BoxedRule>,
+    rules: Vec<BoxedRule<C>>,
     apply_order: ApplyOrder,
 }
 
-impl OptimizationStage {
-    pub fn new<S>(name: S, rules: Vec<BoxedRule>, apply_order: ApplyOrder) -> Self
+impl<C: ConventionMarker> OptimizationStage<C> {
+    pub fn new<S>(name: S, rules: Vec<BoxedRule<C>>, apply_order: ApplyOrder) -> Self
     where
         S: Into<String>,
     {
