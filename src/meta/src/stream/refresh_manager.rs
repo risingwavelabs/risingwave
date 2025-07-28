@@ -14,6 +14,7 @@
 
 use anyhow::anyhow;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::meta::{RefreshRequest, RefreshResponse};
 use thiserror_ext::AsReport;
 
@@ -49,7 +50,8 @@ impl RefreshManager {
         tracing::info!("Starting refresh operation for table {}", table_id);
 
         // Validate that the table exists and is refreshable
-        self.validate_refreshable_table(table_id).await?;
+        self.validate_refreshable_table(table_id, associated_source_id)
+            .await?;
 
         // Get database_id for the table
         let database_id = DatabaseId::new(
@@ -96,7 +98,11 @@ impl RefreshManager {
     }
 
     /// Validate that the specified table exists and supports refresh operations
-    async fn validate_refreshable_table(&self, table_id: TableId) -> MetaResult<()> {
+    async fn validate_refreshable_table(
+        &self,
+        table_id: TableId,
+        associated_source_id: TableId,
+    ) -> MetaResult<()> {
         // Check if table exists in catalog
         let table = self
             .metadata_manager
@@ -109,6 +115,17 @@ impl RefreshManager {
             return Err(MetaError::invalid_parameter(format!(
                 "Table '{}' is not refreshable. Only tables created with REFRESHABLE flag support manual refresh.",
                 table.name
+            )));
+        }
+
+        if table.optional_associated_source_id
+            != Some(OptionalAssociatedSourceId::AssociatedSourceId(
+                associated_source_id.table_id(),
+            ))
+        {
+            return Err(MetaError::invalid_parameter(format!(
+                "Table '{}' is not associated with source '{}'. table.optional_associated_source_id: {:?}",
+                table.name, associated_source_id, table.optional_associated_source_id
             )));
         }
 

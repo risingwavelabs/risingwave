@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_pb::meta::RefreshRequest;
 use risingwave_sqlparser::ast::ObjectName;
@@ -65,7 +66,10 @@ pub async fn handle_refresh(
     // Create refresh request
     let refresh_request = RefreshRequest {
         table_id: table_id.table_id(),
-        associated_source_id: table_catalog.associated_source_id().unwrap().table_id(),
+        associated_source_id: table_catalog
+            .associated_source_id()
+            .context("Table is not associated with a refreshable source")?
+            .table_id(),
     };
 
     // Send refresh command to meta service via stream manager
@@ -80,7 +84,7 @@ pub async fn handle_refresh(
             );
 
             // Return success response
-            Ok(PgResponse::builder(StatementType::OTHER)
+            Ok(PgResponse::builder(StatementType::REFRESH_TABLE)
                 .notice(format!(
                     "REFRESH initiated for table '{}.{}'",
                     schema_name, table_name

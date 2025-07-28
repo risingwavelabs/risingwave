@@ -1805,7 +1805,7 @@ impl Statement {
                 Ok(())
             }
             Statement::Refresh { table_name } => {
-                write!(f, "REFRESH {}", table_name)?;
+                write!(f, "REFRESH TABLE {}", table_name)?;
                 Ok(())
             }
             Statement::Analyze { table_name } => {
