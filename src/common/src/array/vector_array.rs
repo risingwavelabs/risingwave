@@ -18,8 +18,9 @@ use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::PbArray;
 
 use super::{Array, ArrayBuilder, ListArray, ListArrayBuilder, ListRef, ListValue};
+use crate::array::ArrayError;
 use crate::bitmap::Bitmap;
-use crate::types::{DataType, Scalar, ScalarRef, ToText};
+use crate::types::{DataType, Scalar, ScalarRef, ScalarRefImpl, ToText};
 
 #[derive(Debug, Clone, EstimateSize)]
 pub struct VectorArrayBuilder {
@@ -214,24 +215,41 @@ impl VectorVal {
     /// Create a new vector from inner [`ListValue`].
     ///
     /// This is leak of implementation. Prefer [`VectorVal::from_iter`] below.
-    pub fn from_inner(inner: ListValue) -> Self {
-        Self { inner }
+    pub fn from_inner(inner: ListValue) -> Result<Self, ArrayError> {
+        for element in inner.iter() {
+            let Some(scalar) = element else { continue };
+            let ScalarRefImpl::Float32(val) = scalar else {
+                return Err(ArrayError::internal(format!(
+                    "vector element must be f32 but found {scalar:?}"
+                )));
+            };
+            if !val.0.is_finite() {
+                return Err(ArrayError::internal(format!("{val} not allowed in vector")));
+            }
+        }
+        Ok(Self { inner })
     }
 }
 
-// The `F32` wrapping is unnecessary given nan/inf/-inf are not allowed in vector.
-// There is not going to be `F16` for `halfvec` later; just `f16`.
-// We keep it for now because the inner `List` type contains `PrimitiveArray<F32>`.
-impl FromIterator<crate::types::F32> for VectorVal {
-    fn from_iter<I: IntoIterator<Item = crate::types::F32>>(iter: I) -> Self {
-        let inner = ListValue::from_iter(iter);
-        Self { inner }
+/// A `f32` without nan/inf/-inf. Added as intermediate type to `try_collect` `f32` values into a `VectorVal`.
+#[derive(Clone, Copy, Debug)]
+pub struct Finite32(f32);
+
+impl TryFrom<f32> for Finite32 {
+    type Error = String;
+
+    fn try_from(value: f32) -> Result<Self, Self::Error> {
+        if value.is_finite() {
+            Ok(Self(value))
+        } else {
+            Err(format!("{value} not allowed in vector"))
+        }
     }
 }
 
-impl FromIterator<f32> for VectorVal {
-    fn from_iter<I: IntoIterator<Item = f32>>(iter: I) -> Self {
-        let inner = ListValue::from_iter(iter.into_iter().map(crate::types::F32::from));
+impl FromIterator<Finite32> for VectorVal {
+    fn from_iter<I: IntoIterator<Item = Finite32>>(iter: I) -> Self {
+        let inner = ListValue::from_iter(iter.into_iter().map(|v| crate::types::F32::from(v.0)));
         Self { inner }
     }
 }

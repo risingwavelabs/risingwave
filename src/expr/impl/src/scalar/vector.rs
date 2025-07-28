@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::array::Finite32;
 use risingwave_common::types::{F64, VectorRef, VectorVal};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::{ExprError, Result, function};
@@ -242,7 +243,7 @@ fn inner_product(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
 /// ----
 /// [5,7,9]
 ///
-/// query error value out of range: overflow
+/// query error out of range: overflow
 /// SELECT '[3e38]'::vector(1) + '[3e38]';
 ///
 /// query error dimensions
@@ -257,8 +258,9 @@ fn vector_add(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
     let result = lhs
         .iter()
         .zip_eq_fast(rhs.iter())
-        .map(|(l, r)| l + r)
-        .collect();
+        .map(|(l, r)| Finite32::try_from(l + r))
+        .try_collect()
+        .map_err(|_| ExprError::NumericOverflow)?;
     Ok(result)
 }
 
@@ -268,7 +270,7 @@ fn vector_add(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
 /// ----
 /// [-3,-3,-3]
 ///
-/// query error value out of range: overflow
+/// query error out of range: overflow
 /// SELECT '[-3e38]'::vector(1) - '[3e38]';
 ///
 /// query error dimensions
@@ -283,8 +285,9 @@ fn vector_subtract(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> 
     let result = lhs
         .iter()
         .zip_eq_fast(rhs.iter())
-        .map(|(l, r)| l - r)
-        .collect();
+        .map(|(l, r)| Finite32::try_from(l - r))
+        .try_collect()
+        .map_err(|_| ExprError::NumericOverflow)?;
     Ok(result)
 }
 
@@ -294,10 +297,10 @@ fn vector_subtract(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> 
 /// ----
 /// [4,10,18]
 ///
-/// query error value out of range: overflow
+/// query error out of range: overflow
 /// SELECT '[1e37]'::vector(1) * '[1e37]';
 ///
-/// query error value out of range: underflow
+/// query error out of range: underflow
 /// SELECT '[1e-37]'::vector(1) * '[1e-37]';
 ///
 /// query error dimensions
@@ -312,7 +315,13 @@ fn vector_multiply(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> 
     let result = lhs
         .iter()
         .zip_eq_fast(rhs.iter())
-        .map(|(l, r)| l * r)
-        .collect();
+        .map(|(l, r)| {
+            let v = l * r;
+            match v == 0. && !(*l == 0. || *r == 0.) {
+                true => Err(ExprError::NumericUnderflow),
+                false => Finite32::try_from(v).map_err(|_| ExprError::NumericOverflow),
+            }
+        })
+        .try_collect()?;
     Ok(result)
 }
