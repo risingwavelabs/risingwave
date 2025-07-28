@@ -327,7 +327,7 @@ impl BatchOptimizedLogicalPlanRoot {
 
         let mut plan = self.plan;
 
-        if TemporalJoinValidator::exist_dangling_temporal_scan(plan.clone()) {
+        if TemporalJoinValidator::exist_dangling_temporal_scan::<Logical>(plan.clone()) {
             return Err(ErrorCode::NotSupported(
                 "do not support temporal join for batch queries".to_owned(),
                 "please use temporal join in streaming queries".to_owned(),
@@ -369,7 +369,7 @@ impl BatchOptimizedLogicalPlanRoot {
         }
 
         #[cfg(debug_assertions)]
-        InputRefValidator.validate(plan.clone());
+        InputRefValidator.validate::<Batch>(plan.clone());
         assert!(
             *plan.distribution() == Distribution::Single,
             "{}",
@@ -578,9 +578,9 @@ impl LogicalPlanRoot {
         }
 
         #[cfg(debug_assertions)]
-        InputRefValidator.validate(plan.clone());
+        InputRefValidator.validate::<Stream>(plan.clone());
 
-        if TemporalJoinValidator::exist_dangling_temporal_scan(plan.clone()) {
+        if TemporalJoinValidator::exist_dangling_temporal_scan::<Stream>(plan.clone()) {
             return Err(ErrorCode::NotSupported(
                 "exist dangling temporal scan".to_owned(),
                 "please check your temporal join syntax e.g. consider removing the right outer join if it is being used.".to_owned(),
