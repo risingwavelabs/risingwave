@@ -26,7 +26,6 @@ import org.slf4j.LoggerFactory;
 
 public class PostgresValidator extends DatabaseValidator implements AutoCloseable {
     static final Logger LOG = LoggerFactory.getLogger(PostgresValidator.class);
-
     private final Map<String, String> userProps;
 
     private final TableSchema tableSchema;
@@ -215,19 +214,29 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             class ColumnInfo {
                 String dataType;
                 Long charMaxLength;
+                String udtName;
 
-                ColumnInfo(String dataType, Long charMaxLength) {
+                ColumnInfo(String dataType, Long charMaxLength, String udtName) {
                     this.dataType = dataType;
                     this.charMaxLength = charMaxLength;
+                    this.udtName = udtName;
                 }
             }
+
             Map<String, ColumnInfo> schema = new HashMap<>();
             while (res.next()) {
                 var field = res.getString(1);
                 var dataType = res.getString(2);
                 Long charMaxLength =
                         res.getObject(3) == null ? null : ((Number) res.getObject(3)).longValue();
-                schema.put(field.toLowerCase(), new ColumnInfo(dataType, charMaxLength));
+                var udtName = res.getString(4);
+                LOG.info(
+                        "Field: {}, DataType: {}, CharMaxLength: {}, UdtName: {}",
+                        field,
+                        dataType,
+                        charMaxLength,
+                        udtName);
+                schema.put(field.toLowerCase(), new ColumnInfo(dataType, charMaxLength, udtName));
             }
 
             for (var e : tableSchema.getColumnTypes().entrySet()) {
@@ -240,7 +249,8 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                     throw ValidatorUtils.invalidArgument(
                             "Column '" + e.getKey() + "' not found in the upstream database");
                 }
-                if (!isDataTypeCompatible(colInfo.dataType, e.getValue(), colInfo.charMaxLength)) {
+                if (!isDataTypeCompatible(
+                        colInfo.dataType, e.getValue(), colInfo.charMaxLength, colInfo.udtName)) {
                     throw ValidatorUtils.invalidArgument(
                             "Incompatible data type of column " + e.getKey());
                 }
@@ -663,14 +673,11 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     }
 
     private boolean isDataTypeCompatible(
-            String pgDataType, Data.DataType.TypeName typeName, Long charMaxLength) {
-        System.out.println(
-                "PostgresValidator: pgDataType = "
-                        + pgDataType
-                        + ", typeName = "
-                        + typeName
-                        + ", charMaxLength = "
-                        + charMaxLength);
+            String pgDataType,
+            Data.DataType.TypeName typeName,
+            Long charMaxLength,
+            String udtName) {
+
         int val = typeName.getNumber();
         switch (pgDataType) {
             case "boolean":
@@ -679,22 +686,19 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             case "bit":
                 // The bit type needs to be judged together with character_maximum_length
                 if (charMaxLength == null || charMaxLength == 1) {
-                    // bit(1) can match BOOLEAN or BYTEA
-                    return val == Data.DataType.TypeName.BOOLEAN_VALUE
-                            || val == Data.DataType.TypeName.BYTEA_VALUE;
+                    // bit(1) -> BOOLEAN
+                    return val == Data.DataType.TypeName.BOOLEAN_VALUE;
                 } else {
-                    // bit(n>1) can only match BYTEA
+                    // bit(n>1) -> BYTEA
                     return val == Data.DataType.TypeName.BYTEA_VALUE;
                 }
-            case "bit(1)":
-                // For compatibility with historical usage, bit(1) can match BOOLEAN or BYTEA
-                return val == Data.DataType.TypeName.BOOLEAN_VALUE
-                        || val == Data.DataType.TypeName.BYTEA_VALUE;
             case "smallint":
             case "smallserial":
                 // SMALLINT, SMALLSERIAL -> SMALLINT
-                // BOOLEAN, BIT(1) -> BOOLEAN
-                return val == Data.DataType.TypeName.BOOLEAN_VALUE;
+                return val == Data.DataType.TypeName.INT16_VALUE;
+            case "integer":
+            case "serial":
+                // INTEGER, SERIAL -> INTEGER
                 return val == Data.DataType.TypeName.INT32_VALUE;
             case "bigint":
             case "bigserial":
@@ -781,7 +785,26 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 // MONEY -> NUMERIC
                 return val == Data.DataType.TypeName.DECIMAL_VALUE;
             case "point":
-                // POINT -> STRUCT (not supported, return false)
+                // POINT -> STRUCT<x REAL, y REAL>
+                return val == Data.DataType.TypeName.STRUCT_VALUE;
+            case "ARRAY":
+                // ARRAY -> LIST
+
+                return val == Data.DataType.TypeName.LIST_VALUE;
+            case "USER-DEFINED":
+                // Handle user-defined types like enum, citext, etc.
+                if (udtName != null) {
+                    switch (udtName.toLowerCase()) {
+                        case "citext":
+                            // CITEXT -> CHARACTER VARYING
+                            return val == Data.DataType.TypeName.VARCHAR_VALUE;
+
+                        default:
+                            // For other user-defined types, assume they are enum types and pass
+                            // validation
+                            return true;
+                    }
+                }
                 return false;
             default:
                 return false; // false for other uncovered types
