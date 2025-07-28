@@ -45,7 +45,6 @@ use risingwave_common::util::recursive::{self, Recurse};
 use risingwave_pb::batch_plan::PlanNode as PbBatchPlan;
 use risingwave_pb::stream_plan::StreamNode as PbStreamPlan;
 use serde::Serialize;
-use smallvec::SmallVec;
 
 use self::batch::BatchPlanRef;
 use self::generic::{GenericPlanRef, PhysicalPlanRef};
@@ -65,18 +64,67 @@ use crate::utils::{PrettySerde, build_graph_from_pretty};
 pub trait ConventionMarker: 'static + Sized {
     /// The extra fields in the [`PlanBase`] of this convention.
     type Extra: 'static + Eq + Hash + Clone + Debug;
+    type ShareNode: ShareNode;
 
     /// Get the [`Convention`] enum value.
     fn value() -> Convention;
+
+    fn as_share(plan: &dyn PlanNode) -> Option<&Self::ShareNode>;
+}
+
+pub trait ShareNode: AnyPlanNodeMeta + PlanTreeNodeUnary + 'static {
+    fn new_share(share: generic::Share<PlanRef>) -> PlanRef;
+    fn replace_input(&self, plan: PlanRef);
+}
+
+pub struct NoShareNode(!);
+
+impl ShareNode for NoShareNode {
+    fn new_share(_plan: generic::Share<PlanRef>) -> PlanRef {
+        unreachable!()
+    }
+
+    fn replace_input(&self, _plan: PlanRef) {
+        unreachable!()
+    }
+}
+
+impl PlanTreeNodeUnary for NoShareNode {
+    fn input(&self) -> PlanRef {
+        unreachable!()
+    }
+
+    fn clone_with_input(&self, _input: PlanRef) -> Self {
+        unreachable!()
+    }
+}
+
+impl AnyPlanNodeMeta for NoShareNode {
+    fn node_type(&self) -> PlanNodeType {
+        unreachable!()
+    }
+
+    fn plan_base(&self) -> PlanBaseRef<'_> {
+        unreachable!()
+    }
+
+    fn convention(&self) -> Convention {
+        unreachable!()
+    }
 }
 
 /// The marker for logical convention.
 pub struct Logical;
 impl ConventionMarker for Logical {
     type Extra = plan_base::NoExtra;
+    type ShareNode = LogicalShare;
 
     fn value() -> Convention {
         Convention::Logical
+    }
+
+    fn as_share(plan: &dyn PlanNode) -> Option<&Self::ShareNode> {
+        plan.as_logical_share()
     }
 }
 
@@ -84,9 +132,14 @@ impl ConventionMarker for Logical {
 pub struct Batch;
 impl ConventionMarker for Batch {
     type Extra = plan_base::BatchExtra;
+    type ShareNode = NoShareNode;
 
     fn value() -> Convention {
         Convention::Batch
+    }
+
+    fn as_share(_plan: &dyn PlanNode) -> Option<&Self::ShareNode> {
+        None
     }
 }
 
@@ -94,9 +147,14 @@ impl ConventionMarker for Batch {
 pub struct Stream;
 impl ConventionMarker for Stream {
     type Extra = plan_base::StreamExtra;
+    type ShareNode = StreamShare;
 
     fn value() -> Convention {
         Convention::Stream
+    }
+
+    fn as_share(plan: &dyn PlanNode) -> Option<&Self::ShareNode> {
+        plan.as_stream_share()
     }
 }
 
@@ -226,7 +284,14 @@ impl Layer for PlanRef {
     where
         F: FnMut(Self::Sub) -> Self::Sub,
     {
-        self.clone_with_inputs(&self.inputs().into_iter().map(f).collect_vec())
+        match self.convention() {
+            Convention::Logical => self
+                .clone_root_with_inputs::<Logical>(&self.inputs().into_iter().map(f).collect_vec()),
+            Convention::Batch => self
+                .clone_root_with_inputs::<Batch>(&self.inputs().into_iter().map(f).collect_vec()),
+            Convention::Stream => self
+                .clone_root_with_inputs::<Stream>(&self.inputs().into_iter().map(f).collect_vec()),
+        }
     }
 
     fn descent<F>(&self, f: F)
@@ -294,19 +359,18 @@ pub enum Convention {
     Stream,
 }
 
-pub(crate) trait RewriteExprsRecursive {
-    fn rewrite_exprs_recursive(&self, r: &mut impl ExprRewriter) -> PlanRef;
-}
-
-impl RewriteExprsRecursive for PlanRef {
-    fn rewrite_exprs_recursive(&self, r: &mut impl ExprRewriter) -> PlanRef {
+impl PlanRef {
+    pub fn rewrite_exprs_recursive<C: ConventionMarker>(
+        &self,
+        r: &mut impl ExprRewriter,
+    ) -> PlanRef {
         let new = self.rewrite_exprs(r);
         let inputs: Vec<PlanRef> = new
             .inputs()
             .iter()
-            .map(|plan_ref| plan_ref.rewrite_exprs_recursive(r))
+            .map(|plan_ref| plan_ref.rewrite_exprs_recursive::<C>(r))
             .collect();
-        new.clone_with_inputs(&inputs[..])
+        new.clone_root_with_inputs::<C>(&inputs[..])
     }
 }
 
@@ -495,7 +559,7 @@ impl ColPrunable for PlanRef {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let res = self.prune_col_inner(required_cols, ctx);
         #[cfg(debug_assertions)]
-        super::heuristic_optimizer::HeuristicOptimizer::check_equivalent_plan(
+        super::heuristic_optimizer::HeuristicOptimizer::<'_, Logical>::check_equivalent_plan(
             "column pruning",
             &LogicalProject::with_out_col_idx(self.clone(), required_cols.iter().cloned()).into(),
             &res,
@@ -517,7 +581,7 @@ impl PredicatePushdown for PlanRef {
         let res = self.predicate_pushdown_inner(predicate, ctx);
 
         #[cfg(debug_assertions)]
-        super::heuristic_optimizer::HeuristicOptimizer::check_equivalent_plan(
+        super::heuristic_optimizer::HeuristicOptimizer::<'_, Logical>::check_equivalent_plan(
             "predicate push down",
             &LogicalFilter::new(self.clone(), predicate_clone).into(),
             &res,
@@ -527,23 +591,13 @@ impl PredicatePushdown for PlanRef {
     }
 }
 
-impl PlanTreeNode for PlanRef {
-    fn inputs(&self) -> SmallVec<[PlanRef; 2]> {
-        // Dispatch to dyn PlanNode instead of PlanRef.
-        let dyn_t = self.deref();
-        dyn_t.inputs()
-    }
-
-    fn clone_with_inputs(&self, inputs: &[PlanRef]) -> PlanRef {
-        if let Some(logical_share) = self.clone().as_logical_share() {
+impl PlanRef {
+    pub fn clone_root_with_inputs<C: ConventionMarker>(&self, inputs: &[PlanRef]) -> PlanRef {
+        self.expect_convention::<C>();
+        if let Some(share) = self.as_share_node::<C>() {
             assert_eq!(inputs.len(), 1);
             // We can't clone `LogicalShare`, but only can replace input instead.
-            logical_share.replace_input(inputs[0].clone());
-            self.clone()
-        } else if let Some(stream_share) = self.clone().as_stream_share() {
-            assert_eq!(inputs.len(), 1);
-            // We can't clone `StreamShare`, but only can replace input instead.
-            stream_share.replace_input(inputs[0].clone());
+            share.replace_input(inputs[0].clone());
             self.clone()
         } else {
             // Dispatch to dyn PlanNode instead of PlanRef.
@@ -634,7 +688,11 @@ impl BatchPlanRef for PlanRef {
 pub fn reorganize_elements_id(plan: PlanRef) -> PlanRef {
     let backup = plan.ctx().backup_elem_ids();
     plan.ctx().reset_elem_ids();
-    let plan = PlanCloner::clone_whole_plan(plan);
+    let plan = match plan.convention() {
+        Convention::Logical => PlanCloner::<Logical>::clone_whole_plan(plan),
+        Convention::Batch => PlanCloner::<Batch>::clone_whole_plan(plan),
+        Convention::Stream => PlanCloner::<Stream>::clone_whole_plan(plan),
+    };
     plan.ctx().restore_elem_ids(backup);
     plan
 }
@@ -731,6 +789,16 @@ impl Explain for PlanRef {
         build_graph_from_pretty(&explain_ir, &mut graph, &mut nodes, None);
         let dot = Dot::with_config(&graph, &[Config::EdgeNoLabel]);
         dot.to_string()
+    }
+}
+
+impl PlanRef {
+    pub fn as_share_node<C: ConventionMarker>(&self) -> Option<&C::ShareNode> {
+        C::as_share(self.deref())
+    }
+
+    pub fn expect_convention<C: ConventionMarker>(&self) {
+        assert_eq!(self.convention(), C::value());
     }
 }
 
@@ -1256,18 +1324,46 @@ macro_rules! for_all_plan_nodes {
     };
 }
 
-/// `for_logical_plan_nodes` includes all plan nodes with logical convention.
 #[macro_export]
-macro_rules! for_logical_plan_nodes {
-    ($macro:ident) => {
+macro_rules! for_each_convention_all_plan_nodes {
+    ($macro:path $(,$rest:tt)*) => {
         $crate::for_all_plan_nodes! {
-              $crate::for_logical_plan_nodes, $macro
+            $crate::for_each_convention_all_plan_nodes
+            , $macro
+            $(,$rest)*
         }
     };
     (
         $( { Logical, $logical_name:ident } ),*
         , $( { Batch, $batch_name:ident } ),*
         , $( { Stream, $stream_name:ident } ),*
+        , $macro:path $(,$rest:tt)*
+    ) => {
+        $macro! {
+            {
+                Logical, { $( $logical_name ),* },
+                Batch, { $( $batch_name ),* },
+                Stream, { $( $stream_name ),* }
+            }
+            $(,$rest)*
+        }
+    }
+}
+
+/// `for_logical_plan_nodes` includes all plan nodes with logical convention.
+#[macro_export]
+macro_rules! for_logical_plan_nodes {
+    ($macro:ident) => {
+        $crate::for_each_convention_all_plan_nodes! {
+              $crate::for_logical_plan_nodes, $macro
+        }
+    };
+    (
+        {
+            Logical, { $( $logical_name:ident ),* },
+            Batch, { $( $batch_name:ident ),* },
+            Stream, { $( $stream_name:ident ),* }
+        }
         , $macro:ident
     ) => {
         $macro! {
@@ -1280,14 +1376,16 @@ macro_rules! for_logical_plan_nodes {
 #[macro_export]
 macro_rules! for_batch_plan_nodes {
     ($macro:ident) => {
-        $crate::for_all_plan_nodes! {
+        $crate::for_each_convention_all_plan_nodes! {
               $crate::for_batch_plan_nodes, $macro
         }
     };
     (
-        $( { Logical, $logical_name:ident } ),*
-        , $( { Batch, $batch_name:ident } ),*
-        , $( { Stream, $stream_name:ident } ),*
+        {
+            Logical, { $( $logical_name:ident ),* },
+            Batch, { $( $batch_name:ident ),* },
+            Stream, { $( $stream_name:ident ),* }
+        }
         , $macro:ident
     ) => {
         $macro! {
@@ -1300,14 +1398,16 @@ macro_rules! for_batch_plan_nodes {
 #[macro_export]
 macro_rules! for_stream_plan_nodes {
     ($macro:ident) => {
-        $crate::for_all_plan_nodes! {
+        $crate::for_each_convention_all_plan_nodes! {
               $crate::for_stream_plan_nodes, $macro
         }
     };
     (
-        $( { Logical, $logical_name:ident } ),*
-        , $( { Batch, $batch_name:ident } ),*
-        , $( { Stream, $stream_name:ident } ),*
+        {
+            Logical, { $( $logical_name:ident ),* },
+            Batch, { $( $batch_name:ident ),* },
+            Stream, { $( $stream_name:ident ),* }
+        }
         , $macro:ident
     ) => {
         $macro! {

@@ -194,6 +194,7 @@ stream_enable_explain_analyze_stats = true
 stream_iceberg_list_interval_sec = 1
 stream_iceberg_fetch_batch_size = 1024
 stream_iceberg_sink_positional_delete_cache_size = 1024
+stream_iceberg_sink_write_parquet_max_row_group_rows = 100000
 
 [streaming.developer.stream_compute_client_config]
 connect_timeout_secs = 5
@@ -238,6 +239,11 @@ iceberg_compaction_max_record_batch_rows = 1024
 iceberg_compaction_min_size_per_partition_mb = 1024
 iceberg_compaction_max_file_count_per_partition = 32
 iceberg_compaction_write_parquet_max_row_group_rows = 102400
+iceberg_compaction_task_parallelism_ratio = 4.0
+iceberg_compaction_enable_heuristic_output_parallelism = false
+iceberg_compaction_max_concurrent_closes = 8
+iceberg_compaction_enable_dynamic_size_estimation = true
+iceberg_compaction_size_estimation_smoothing_factor = 0.3
 iceberg_compaction_small_file_threshold_mb = 32
 iceberg_compaction_max_task_total_size_mb = 51200
 

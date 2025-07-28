@@ -727,14 +727,25 @@ impl ControlStreamManager {
             );
         }
 
+        self.env.shared_actor_infos().recover_database(
+            database_id,
+            database_jobs.values().flatten().chain(
+                creating_streaming_job_controls
+                    .values()
+                    .flat_map(|job| job.graph_info().fragment_infos()),
+            ),
+        );
+
         let committed_epoch = barrier_info.prev_epoch();
         let new_epoch = barrier_info.curr_epoch;
-        let mut database = InflightDatabaseInfo::empty();
-        database_jobs
-            .into_values()
-            .for_each(|job| database.extend(job));
-        let database_state =
-            BarrierWorkerState::recovery(new_epoch, database, subscription_info, is_paused);
+        let database_state = BarrierWorkerState::recovery(
+            database_id,
+            self.env.shared_actor_infos().clone(),
+            new_epoch,
+            database_jobs.into_values(),
+            subscription_info,
+            is_paused,
+        );
         Ok(DatabaseInitialBarrierCollector {
             database_id,
             node_to_collect,

@@ -597,8 +597,8 @@ message MergeNode {
   // Type of the upstream dispatcher. If there's always one upstream according to this
   // type, the compute node may use the `ReceiverExecutor` as an optimization.
   DispatcherType upstream_dispatcher_type = 3;
-  // The schema of input columns. TODO: remove this field.
-  repeated plan_common.Field fields = 4;
+  // The schema of input columns. Already deprecated.
+  repeated plan_common.Field fields = 4 [deprecated = true];
 }
 
 // passed from frontend to meta, used by fragmenter to generate `MergeNode`

@@ -112,6 +112,7 @@ pub mod show;
 mod transaction;
 mod use_db;
 pub mod util;
+pub mod vacuum;
 pub mod variable;
 mod wait;
 
@@ -505,11 +506,9 @@ pub async fn handle(
                     | ObjectType::Subscription
                     | ObjectType::Index
                     | ObjectType::Table
-                    | ObjectType::Schema => true,
-                    ObjectType::Database
-                    | ObjectType::User
-                    | ObjectType::Connection
-                    | ObjectType::Secret => {
+                    | ObjectType::Schema
+                    | ObjectType::Connection => true,
+                    ObjectType::Database | ObjectType::User | ObjectType::Secret => {
                         bail_not_implemented!("DROP CASCADE");
                     }
                 }
@@ -558,8 +557,13 @@ pub async fn handle(
                     drop_view::handle_drop_view(handler_args, object_name, if_exists, cascade).await
                 }
                 ObjectType::Connection => {
-                    drop_connection::handle_drop_connection(handler_args, object_name, if_exists)
-                        .await
+                    drop_connection::handle_drop_connection(
+                        handler_args,
+                        object_name,
+                        if_exists,
+                        cascade,
+                    )
+                    .await
                 }
                 ObjectType::Secret => {
                     drop_secret::handle_drop_secret(handler_args, object_name, if_exists).await
@@ -1281,6 +1285,7 @@ pub async fn handle(
         Statement::Deallocate { name, prepare } => {
             prepared_statement::handle_deallocate(name, prepare).await
         }
+        Statement::Vacuum { object_name } => vacuum::handle_vacuum(handler_args, object_name).await,
         _ => bail_not_implemented!("Unhandled statement: {}", stmt),
     }
 }

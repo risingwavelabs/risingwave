@@ -2,6 +2,9 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
+SET sink_decouple TO true;
+
+statement ok
 create table t(v1 int);
 
 statement ok
@@ -35,7 +38,7 @@ show jobs;
 statement ok
 alter sink sink1 set SINK_RATE_LIMIT to 10000;
 
-statement count 0 retry 3 backoff 2s
+statement count 0 retry 5 backoff 2s
 show jobs;
 
 statement ok

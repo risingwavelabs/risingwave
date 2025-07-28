@@ -18,19 +18,28 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock};
 
 use derive_builder::Builder;
+use iceberg::spec::MAIN_BRANCH;
 use iceberg::{Catalog, TableIdent};
-use iceberg_compaction_core::FileStrategyFactory;
 use iceberg_compaction_core::compaction::{
-    Compaction, CompactionType, RewriteDataFilesCommitManagerRetryConfig,
+    CommitConsistencyParams, CommitManagerRetryConfig, CompactionBuilder, CompactionPlan,
+    CompactionPlanner, CompactionResult, CompactionType,
 };
-use iceberg_compaction_core::config::CompactionConfigBuilder;
+use iceberg_compaction_core::config::{
+    CompactionBaseConfig, CompactionExecutionConfigBuilder, CompactionPlanningConfigBuilder,
+};
 use iceberg_compaction_core::executor::RewriteFilesStat;
-use iceberg_compaction_core::file_selection::FileSelector;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
+use risingwave_common::config::storage::default::storage::{
+    iceberg_compaction_enable_dynamic_size_estimation,
+    iceberg_compaction_enable_heuristic_output_parallelism,
+    iceberg_compaction_max_concurrent_closes, iceberg_compaction_size_estimation_smoothing_factor,
+};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
-use risingwave_connector::sink::iceberg::IcebergConfig;
+use risingwave_connector::sink::iceberg::{
+    IcebergConfig, commit_branch, should_enable_iceberg_cow,
+};
 use risingwave_pb::iceberg_compaction::IcebergCompactionTask;
 use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
 use thiserror_ext::AsReport;
@@ -40,11 +49,12 @@ use super::HummockResult;
 use crate::hummock::HummockError;
 use crate::monitor::CompactorMetrics;
 
-static BERGLOOM_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> = LazyLock::new(|| {
-    Box::new(PrometheusMetricsRegistry::new(
-        GLOBAL_METRICS_REGISTRY.clone(),
-    ))
-});
+static ICEBERG_COMPACTION_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> =
+    LazyLock::new(|| {
+        Box::new(PrometheusMetricsRegistry::new(
+            GLOBAL_METRICS_REGISTRY.clone(),
+        ))
+    });
 
 pub struct IcebergCompactorRunner {
     pub task_id: u64,
@@ -68,7 +78,7 @@ pub fn default_writer_properties() -> WriterProperties {
 pub struct IcebergCompactorRunnerConfig {
     #[builder(default = "4")]
     pub max_parallelism: u32,
-    #[builder(default = "1024 * 1024 * 1024")] // 1GB")]
+    #[builder(default = "1024 * 1024 * 1024")] // 1GB"
     pub min_size_per_partition: u64,
     #[builder(default = "32")]
     pub max_file_count_per_partition: u32,
@@ -84,6 +94,14 @@ pub struct IcebergCompactorRunnerConfig {
     pub small_file_threshold: u64,
     #[builder(default = "50 * 1024 * 1024 * 1024")] // 50GB
     pub max_task_total_size: u64,
+    #[builder(default = "iceberg_compaction_enable_heuristic_output_parallelism()")]
+    pub enable_heuristic_output_parallelism: bool,
+    #[builder(default = "iceberg_compaction_max_concurrent_closes()")]
+    pub max_concurrent_closes: usize,
+    #[builder(default = "iceberg_compaction_enable_dynamic_size_estimation()")]
+    pub enable_dynamic_size_estimation: bool,
+    #[builder(default = "iceberg_compaction_size_estimation_smoothing_factor()")]
+    pub size_estimation_smoothing_factor: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -150,121 +168,6 @@ impl IcebergCompactorRunner {
         })
     }
 
-    pub fn calculate_task_parallelism_impl(
-        task_id_for_logging: u64,
-        table_ident_for_logging: &TableIdent,
-        task_statistics: &IcebergCompactionTaskStatistics,
-        max_parallelism: u32,
-        min_size_per_partition: u64,
-        max_file_count_per_partition: u32,
-        target_file_size_bytes: u64,
-    ) -> HummockResult<(u32, u32)> {
-        if max_parallelism == 0 {
-            return Err(HummockError::compaction_executor(
-                "Max parallelism cannot be 0".to_owned(),
-            ));
-        }
-
-        let total_file_size_for_partitioning = task_statistics.total_data_file_size
-            + task_statistics.total_pos_del_file_size
-            + task_statistics.total_eq_del_file_size;
-        if total_file_size_for_partitioning == 0 {
-            // If the total data file size is 0, we cannot partition by size.
-            // This means there are no data files to compact.
-            tracing::warn!(
-                task_id = task_id_for_logging,
-                table = ?table_ident_for_logging,
-                "Total data file size is 0, setting partition_by_size to 0."
-            );
-
-            return Err(HummockError::compaction_executor(
-                "No files to calculate_task_parallelism".to_owned(),
-            )); // No files, so no partitions.
-        }
-
-        let partition_by_size = total_file_size_for_partitioning
-            .div_ceil(min_size_per_partition)
-            .max(1) as u32; // Ensure at least one partition.
-
-        let total_files_count_for_partitioning = task_statistics.total_data_file_count
-            + task_statistics.total_pos_del_file_count
-            + task_statistics.total_eq_del_file_count;
-
-        let partition_by_count = total_files_count_for_partitioning
-            .div_ceil(max_file_count_per_partition)
-            .max(1); // Ensure at least one partition.
-
-        let input_parallelism = partition_by_size
-            .max(partition_by_count)
-            .min(max_parallelism);
-
-        // `output_parallelism` should not exceed `input_parallelism`
-        // and should also not exceed max_parallelism.
-        // It's primarily driven by size to avoid small output files.
-        let mut output_parallelism = partition_by_size
-            .min(input_parallelism)
-            .min(max_parallelism);
-
-        // Heuristic: If the total task data size is very small (less than target_file_size_bytes),
-        // force output_parallelism to 1 to encourage merging into a single, larger output file.
-        if task_statistics.total_data_file_size > 0 // Only apply if there's data
-            && task_statistics.total_data_file_size < target_file_size_bytes
-            && output_parallelism > 1
-        {
-            tracing::debug!(
-                task_id = task_id_for_logging,
-                table = ?table_ident_for_logging,
-                total_data_file_size = task_statistics.total_data_file_size,
-                target_file_size_bytes = target_file_size_bytes,
-                original_output_parallelism = output_parallelism,
-                "Total data size is less than target file size, forcing output_parallelism to 1."
-            );
-            output_parallelism = 1;
-        }
-
-        tracing::debug!(
-            task_id = task_id_for_logging,
-            table = ?table_ident_for_logging,
-            stats = ?task_statistics,
-            config_max_parallelism = max_parallelism,
-            config_min_size_per_partition = min_size_per_partition,
-            config_max_file_count_per_partition = max_file_count_per_partition,
-            config_target_file_size_bytes = target_file_size_bytes,
-            calculated_partition_by_size = partition_by_size,
-            calculated_partition_by_count = partition_by_count,
-            final_input_parallelism = input_parallelism,
-            final_output_parallelism = output_parallelism,
-            "Calculated task parallelism"
-        );
-
-        Ok((input_parallelism, output_parallelism))
-    }
-
-    fn calculate_task_parallelism(
-        &self,
-        task_statistics: &IcebergCompactionTaskStatistics,
-        max_parallelism: u32,
-        min_size_per_partition: u64,
-        max_file_count_per_partition: u32,
-        target_file_size_bytes: u64,
-    ) -> HummockResult<(u32, u32)> {
-        if max_parallelism == 0 {
-            return Err(HummockError::compaction_executor(
-                "Max parallelism cannot be 0".to_owned(),
-            ));
-        }
-
-        Self::calculate_task_parallelism_impl(
-            self.task_id,
-            &self.table_ident,
-            task_statistics,
-            max_parallelism,
-            min_size_per_partition,
-            max_file_count_per_partition,
-            target_file_size_bytes,
-        )
-    }
-
     pub async fn compact(
         self,
         context: RunnerContext,
@@ -274,8 +177,6 @@ impl IcebergCompactorRunner {
         let now = std::time::Instant::now();
 
         let compact = async move {
-            let retry_config = RewriteDataFilesCommitManagerRetryConfig::default();
-
             let compaction_type = match self.task_type {
                 TaskType::SmallDataFileCompaction => CompactionType::MergeSmallDataFiles,
                 TaskType::FullCompaction => CompactionType::Full,
@@ -287,74 +188,104 @@ impl IcebergCompactorRunner {
                 }
             };
 
-            let statistics = self
-                .analyze_task_input(compaction_type)
+            let planning_config = CompactionPlanningConfigBuilder::default()
+                .max_parallelism(self.config.max_parallelism as usize)
+                .min_size_per_partition(self.config.min_size_per_partition)
+                .max_file_count_per_partition(self.config.max_file_count_per_partition as _)
+                .base(CompactionBaseConfig {
+                    target_file_size: self.config.target_file_size_bytes,
+                })
+                .enable_heuristic_output_parallelism(
+                    self.config.enable_heuristic_output_parallelism,
+                )
+                .small_file_threshold(self.config.small_file_threshold)
+                .max_task_total_size(self.config.max_task_total_size)
+                .build()
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "Failed to build iceberg compaction planning config: {:?}",
+                        e.as_report()
+                    );
+                });
+
+            let branch = commit_branch(
+                self.iceberg_config.r#type.as_str(),
+                self.iceberg_config.write_mode.as_str(),
+            );
+
+            let planner = CompactionPlanner::new(planning_config.clone());
+
+            let table = self
+                .catalog
+                .load_table(&self.table_ident)
                 .await
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
-            let (input_parallelism, output_parallelism) = self
-                .calculate_task_parallelism(
-                    &statistics,
-                    self.config.max_parallelism,
-                    self.config.min_size_per_partition,
-                    self.config.max_file_count_per_partition,
-                    self.config.target_file_size_bytes,
-                )
+            let compaction_plan = planner
+                .plan_compaction_with_branch(&table, compaction_type, &branch)
+                .await
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
-            if !context.is_available_parallelism_sufficient(input_parallelism) {
+            let statistics = self.analyze_task_statistics(&compaction_plan);
+
+            let input_parallelism = compaction_plan.recommended_executor_parallelism() as u32;
+            let output_parallelism = compaction_plan.recommended_output_parallelism() as u32;
+
+            if !context.is_available_parallelism_sufficient(
+                compaction_plan.recommended_executor_parallelism() as _,
+            ) {
                 tracing::warn!(
-                    "Available parallelism is less than input parallelism {} task {} will not run",
-                    input_parallelism,
-                    task_id
+                    task_id = task_id,
+                    table = ?self.table_ident,
+                    input_parallelism = input_parallelism,
+                    "Available parallelism is less than input parallelism task will not run",
                 );
                 return Err(HummockError::compaction_executor(
                     "Available parallelism is less than input parallelism",
                 ));
             }
 
-            let compaction_config = Arc::new(
-                CompactionConfigBuilder::default()
-                    .output_parallelism(output_parallelism as usize)
-                    .executor_parallelism(input_parallelism as usize)
-                    .target_file_size(self.config.target_file_size_bytes)
-                    .enable_validate_compaction(self.config.enable_validate_compaction)
-                    .max_record_batch_rows(self.config.max_record_batch_rows)
-                    .write_parquet_properties(self.config.write_parquet_properties.clone())
-                    .small_file_threshold(self.config.small_file_threshold)
-                    .max_task_total_size(self.config.max_task_total_size)
-                    .build()
-                    .unwrap_or_else(|e| {
-                        panic!(
-                            "Failed to build iceberg compaction write props: {:?}",
-                            e.as_report()
-                        );
-                    }),
-            );
+            let compaction_execution_config = CompactionExecutionConfigBuilder::default()
+                .enable_validate_compaction(self.config.enable_validate_compaction)
+                .max_record_batch_rows(self.config.max_record_batch_rows)
+                .write_parquet_properties(self.config.write_parquet_properties.clone())
+                .base(CompactionBaseConfig {
+                    target_file_size: self.config.target_file_size_bytes,
+                })
+                .max_concurrent_closes(self.config.max_concurrent_closes)
+                .enable_dynamic_size_estimation(self.config.enable_dynamic_size_estimation)
+                .size_estimation_smoothing_factor(self.config.size_estimation_smoothing_factor)
+                .build()
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "Failed to build iceberg compaction write props: {:?}",
+                        e.as_report()
+                    );
+                });
 
             tracing::info!(
                 task_id = task_id,
                 task_type = ?self.task_type,
                 table = ?self.table_ident,
-                input_parallelism,
-                output_parallelism,
+                input_parallelism = input_parallelism,
+                output_parallelism = output_parallelism,
                 statistics = ?statistics,
-                compaction_config = ?compaction_config,
+                planning_config = ?planning_config,
                 "Iceberg compaction task started",
             );
 
-            let compaction = Compaction::builder()
-                .with_catalog(self.catalog.clone())
-                .with_catalog_name(self.iceberg_config.catalog_name())
-                .with_compaction_type(compaction_type)
-                .with_config(compaction_config)
-                .with_table_ident(self.table_ident.clone())
-                .with_executor_type(iceberg_compaction_core::executor::ExecutorType::DataFusion)
-                .with_registry(BERGLOOM_METRICS_REGISTRY.clone())
-                .with_retry_config(retry_config)
-                .build()
-                .await
-                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+            let retry_config = CommitManagerRetryConfig::default();
+            let compaction = CompactionBuilder::new(
+                self.catalog.clone(),
+                self.table_ident.clone(),
+                CompactionType::Full,
+            )
+            .with_catalog_name(self.iceberg_config.catalog_name())
+            .with_executor_type(iceberg_compaction_core::executor::ExecutorType::DataFusion)
+            .with_registry(ICEBERG_COMPACTION_METRICS_REGISTRY.clone())
+            .with_retry_config(retry_config)
+            .with_to_branch(branch)
+            .build();
 
             context.incr_running_task_parallelism(input_parallelism);
             self.metrics.compact_task_pending_num.inc();
@@ -371,11 +302,96 @@ impl IcebergCompactorRunner {
                 },
             );
 
-            let stat = compaction
-                .compact()
+            let CompactionResult {
+                data_files,
+                stats,
+                table,
+            } = compaction
+                .compact_with_plan(compaction_plan, &compaction_execution_config)
                 .await
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-            Ok::<RewriteFilesStat, HummockError>(stat)
+
+            if let Some(committed_table) = table
+                && should_enable_iceberg_cow(
+                    self.iceberg_config.r#type.as_str(),
+                    self.iceberg_config.write_mode.as_str(),
+                )
+            {
+                let ingestion_branch = commit_branch(
+                    self.iceberg_config.r#type.as_str(),
+                    self.iceberg_config.write_mode.as_str(),
+                );
+
+                // Overwrite Main branch
+                let consistency_params = CommitConsistencyParams {
+                    starting_snapshot_id: committed_table
+                        .metadata()
+                        .snapshot_for_ref(ingestion_branch.as_str())
+                        .ok_or(HummockError::compaction_executor(anyhow::anyhow!(
+                            "Don't find current_snapshot for ingestion_branch {}",
+                            ingestion_branch
+                        )))?
+                        .snapshot_id(),
+                    use_starting_sequence_number: true,
+                    basic_schema_id: committed_table.metadata().current_schema().schema_id(),
+                };
+
+                let commit_manager = compaction.build_commit_manager(consistency_params);
+
+                let input_files = {
+                    let mut input_files = vec![];
+                    if let Some(snapshot) = committed_table.metadata().snapshot_for_ref(MAIN_BRANCH)
+                    {
+                        let manifest_list = snapshot
+                            .load_manifest_list(
+                                committed_table.file_io(),
+                                committed_table.metadata(),
+                            )
+                            .await
+                            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+
+                        for manifest_file in manifest_list
+                            .entries()
+                            .iter()
+                            .filter(|entry| entry.has_added_files() || entry.has_existing_files())
+                        {
+                            let manifest = manifest_file
+                                .load_manifest(committed_table.file_io())
+                                .await
+                                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+                            let (entry, _) = manifest.into_parts();
+                            for i in entry {
+                                match i.content_type() {
+                                    iceberg::spec::DataContentType::Data => {
+                                        input_files.push(i.data_file().clone());
+                                    }
+                                    iceberg::spec::DataContentType::EqualityDeletes => {
+                                        unreachable!(
+                                            "Equality deletes are not supported in main branch"
+                                        );
+                                    }
+                                    iceberg::spec::DataContentType::PositionDeletes => {
+                                        unreachable!(
+                                            "Position deletes are not supported in main branch"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+
+                        input_files
+                    } else {
+                        vec![]
+                    }
+                };
+
+                let _new_table = commit_manager
+                    .overwrite_files(data_files, input_files, MAIN_BRANCH)
+                    .await
+                    .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+            }
+
+            Ok::<RewriteFilesStat, HummockError>(stats)
         };
 
         tokio::select! {
@@ -407,70 +423,37 @@ impl IcebergCompactorRunner {
         Ok(())
     }
 
-    // This function analyzes the input files for the compaction task is a workaround
-    // Refactor it after selecting input files in meta node
-    async fn analyze_task_input(
-        &self,
-        compaction_type: CompactionType,
-    ) -> HummockResult<IcebergCompactionTaskStatistics> {
-        let table = self
-            .catalog
-            .load_table(&self.table_ident)
-            .await
-            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+    fn analyze_task_statistics(&self, plan: &CompactionPlan) -> IcebergCompactionTaskStatistics {
+        let mut total_data_file_size: u64 = 0;
+        let mut total_data_file_count = 0;
+        let mut total_pos_del_file_size: u64 = 0;
+        let mut total_pos_del_file_count = 0;
+        let mut total_eq_del_file_size: u64 = 0;
+        let mut total_eq_del_file_count = 0;
 
-        let current_snapshot = table.metadata().current_snapshot().ok_or_else(|| {
-            HummockError::compaction_executor("Don't find current_snapshot".to_owned())
-        })?;
+        for data_file in &plan.files_to_compact.data_files {
+            total_data_file_size += data_file.file_size_in_bytes;
+            total_data_file_count += 1;
+        }
 
-        let snapshot_id = current_snapshot.snapshot_id();
+        for pos_del_file in &plan.files_to_compact.position_delete_files {
+            total_pos_del_file_size += pos_del_file.file_size_in_bytes;
+            total_pos_del_file_count += 1;
+        }
 
-        let compaction_config = CompactionConfigBuilder::default()
-            .target_file_size(self.config.target_file_size_bytes)
-            .enable_validate_compaction(self.config.enable_validate_compaction)
-            .max_record_batch_rows(self.config.max_record_batch_rows)
-            .write_parquet_properties(self.config.write_parquet_properties.clone())
-            .build()
-            .unwrap_or_else(|e| {
-                panic!(
-                    "Failed to build iceberg compaction write props: {:?}",
-                    e.as_report()
-                );
-            });
+        for eq_del_file in &plan.files_to_compact.equality_delete_files {
+            total_eq_del_file_size += eq_del_file.file_size_in_bytes;
+            total_eq_del_file_count += 1;
+        }
 
-        let strategy =
-            FileStrategyFactory::create_files_strategy(compaction_type, &compaction_config);
-        let input_files = FileSelector::get_scan_tasks_with_strategy(&table, snapshot_id, strategy)
-            .await
-            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-
-        let total_data_file_size: u64 = input_files
-            .data_files
-            .iter()
-            .map(|f| f.file_size_in_bytes)
-            .sum();
-        let total_data_file_count = input_files.data_files.len() as u32;
-        let total_pos_del_file_size: u64 = input_files
-            .position_delete_files
-            .iter()
-            .map(|f| f.file_size_in_bytes)
-            .sum();
-        let total_pos_del_file_count = input_files.position_delete_files.len() as u32;
-        let total_eq_del_file_size: u64 = input_files
-            .equality_delete_files
-            .iter()
-            .map(|f| f.file_size_in_bytes)
-            .sum();
-        let total_eq_del_file_count = input_files.equality_delete_files.len() as u32;
-
-        Ok(IcebergCompactionTaskStatistics {
+        IcebergCompactionTaskStatistics {
             total_data_file_size,
             total_data_file_count,
             total_pos_del_file_size,
             total_pos_del_file_count,
             total_eq_del_file_size,
             total_eq_del_file_count,
-        })
+        }
     }
 }
 
@@ -493,317 +476,5 @@ impl Debug for IcebergCompactionTaskStatistics {
             .field("total_eq_del_file_size", &self.total_eq_del_file_size)
             .field("total_eq_del_file_count", &self.total_eq_del_file_count)
             .finish()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use iceberg::TableIdent;
-
-    use super::*;
-
-    fn default_test_config_params() -> IcebergCompactorRunnerConfig {
-        IcebergCompactorRunnerConfigBuilder::default()
-            .max_parallelism(4)
-            .min_size_per_partition(1024 * 1024 * 100) // 100MB
-            .max_file_count_per_partition(10)
-            .target_file_size_bytes(1024 * 1024 * 128) // 128MB
-            .build()
-            .unwrap()
-    }
-
-    #[test]
-    fn test_calculate_parallelism_no_files() {
-        let config = default_test_config_params();
-        let dummy_table_ident = TableIdent::from_strs(["db", "schema", "table"]).unwrap();
-        let stats = IcebergCompactionTaskStatistics {
-            total_data_file_size: 0,
-            total_data_file_count: 0,
-            total_pos_del_file_size: 0,
-            total_pos_del_file_count: 0,
-            total_eq_del_file_size: 0,
-            total_eq_del_file_count: 0,
-        };
-        let result = IcebergCompactorRunner::calculate_task_parallelism_impl(
-            1,
-            &dummy_table_ident,
-            &stats,
-            config.max_parallelism,
-            config.min_size_per_partition,
-            config.max_file_count_per_partition,
-            config.target_file_size_bytes,
-        );
-
-        assert!(result.is_err());
-        if let Err(e) = result {
-            assert!(
-                e.to_string()
-                    .contains("No files to calculate_task_parallelism")
-            );
-        }
-    }
-
-    #[test]
-    fn test_calculate_parallelism_size_dominant() {
-        let config = default_test_config_params();
-        let dummy_table_ident = TableIdent::from_strs(["db", "schema", "table"]).unwrap();
-        let stats = IcebergCompactionTaskStatistics {
-            total_data_file_size: 1024 * 1024 * 500, // 500MB
-            total_data_file_count: 5,                // Low count
-            total_pos_del_file_size: 0,
-            total_pos_del_file_count: 0,
-            total_eq_del_file_size: 0,
-            total_eq_del_file_count: 0,
-        };
-        // partition_by_size = 500MB / 100MB = 5
-        // partition_by_count = 5 / 10 = 1 (div_ceil)
-        // initial_input = max(5,1) = 5
-        // input = min(5, 4_max_p) = 4
-        // output = min(partition_by_size=5, input=4, max_p=4) = 4
-        let (input_p, output_p) = IcebergCompactorRunner::calculate_task_parallelism_impl(
-            1,
-            &dummy_table_ident,
-            &stats,
-            config.max_parallelism,
-            config.min_size_per_partition,
-            config.max_file_count_per_partition,
-            config.target_file_size_bytes,
-        )
-        .unwrap();
-        assert_eq!(input_p, 4);
-        assert_eq!(output_p, 4);
-    }
-
-    #[test]
-    fn test_calculate_parallelism_count_dominant() {
-        let config = default_test_config_params();
-        let dummy_table_ident = TableIdent::from_strs(["db", "schema", "table"]).unwrap();
-        let stats = IcebergCompactionTaskStatistics {
-            total_data_file_size: 1024 * 1024 * 50, // 50MB (low size)
-            total_data_file_count: 35,              // High count
-            total_pos_del_file_size: 0,
-            total_pos_del_file_count: 0,
-            total_eq_del_file_size: 0,
-            total_eq_del_file_count: 0,
-        };
-        // partition_by_size = 50MB / 100MB = 1 (div_ceil)
-        // partition_by_count = 35 / 10 = 4 (div_ceil)
-        // initial_input = max(1,4) = 4
-        // input = min(4, 4_max_p) = 4
-        // output = min(partition_by_size=1, input=4, max_p=4) = 1
-        let (input_p, output_p) = IcebergCompactorRunner::calculate_task_parallelism_impl(
-            1,
-            &dummy_table_ident,
-            &stats,
-            config.max_parallelism,
-            config.min_size_per_partition,
-            config.max_file_count_per_partition,
-            config.target_file_size_bytes,
-        )
-        .unwrap();
-        assert_eq!(input_p, 4);
-        assert_eq!(output_p, 1);
-    }
-
-    #[test]
-    fn test_calculate_parallelism_max_parallelism_cap() {
-        let mut config = default_test_config_params();
-        config.max_parallelism = 2; // Lower max_parallelism
-        let dummy_table_ident = TableIdent::from_strs(["db", "schema", "table"]).unwrap();
-        let stats = IcebergCompactionTaskStatistics {
-            total_data_file_size: 1024 * 1024 * 500, // 500MB
-            total_data_file_count: 35,               // High count
-            total_pos_del_file_size: 0,
-            total_pos_del_file_count: 0,
-            total_eq_del_file_size: 0,
-            total_eq_del_file_count: 0,
-        };
-        // partition_by_size = 500MB / 100MB = 5
-        // partition_by_count = 35 / 10 = 4
-        // initial_input = max(5,4) = 5
-        // input = min(5, 2_max_p) = 2
-        // output = min(partition_by_size=5, input=2, max_p=2) = 2
-        let (input_p, output_p) = IcebergCompactorRunner::calculate_task_parallelism_impl(
-            1,
-            &dummy_table_ident,
-            &stats,
-            config.max_parallelism,
-            config.min_size_per_partition,
-            config.max_file_count_per_partition,
-            config.target_file_size_bytes,
-        )
-        .unwrap();
-        assert_eq!(input_p, 2);
-        assert_eq!(output_p, 2);
-    }
-
-    #[test]
-    fn test_calculate_parallelism_small_data_heuristic() {
-        let config = default_test_config_params(); // target_file_size_bytes = 128MB
-        let dummy_table_ident = TableIdent::from_strs(["db", "schema", "table"]).unwrap();
-        // partition_by_size = 60MB / 100MB = 1
-        // partition_by_count = 15 / 10 = 2
-        // initial_input = max(1,2) = 2
-        // input = min(2, 4_max_p) = 2
-        // initial_output = min(partition_by_size=1, input=2, max_p=4) = 1
-        // Heuristic: total_data_file_size (60MB) < target_file_size_bytes (128MB)
-        // Since initial_output was 1, it remains 1.
-        // Let's make partition_by_size larger to test heuristic properly
-        let stats_for_heuristic = IcebergCompactionTaskStatistics {
-            total_data_file_size: 1024 * 1024 * 60,     // 60MB
-            total_data_file_count: 5,                   // Low count, so size dominates for input
-            total_pos_del_file_size: 1024 * 1024 * 250, // Makes total size 310MB
-            total_pos_del_file_count: 2,
-            total_eq_del_file_size: 0,
-            total_eq_del_file_count: 0,
-        };
-        // total_file_size_for_partitioning = 310MB
-        // partition_by_size = 310MB / 100MB = 4 (div_ceil)
-        // total_files_count_for_partitioning = 5 + 2 = 7
-        // partition_by_count = 7 / 10 = 1
-        // initial_input = max(4,1) = 4
-        // input = min(4, 4_max_p) = 4
-        // initial_output = min(partition_by_size=4, input=4, max_p=4) = 4
-        // Heuristic: total_data_file_size (60MB) < target_file_size_bytes (128MB)
-        // AND initial_output (4) > 1. So output becomes 1.
-        let (input_p, output_p) = IcebergCompactorRunner::calculate_task_parallelism_impl(
-            1,
-            &dummy_table_ident,
-            &stats_for_heuristic,
-            config.max_parallelism,
-            config.min_size_per_partition,
-            config.max_file_count_per_partition,
-            config.target_file_size_bytes,
-        )
-        .unwrap();
-        assert_eq!(input_p, 4);
-        assert_eq!(output_p, 1);
-    }
-
-    #[test]
-    fn test_calculate_parallelism_all_empty_files() {
-        let config = default_test_config_params();
-        let dummy_table_ident = TableIdent::from_strs(["db", "schema", "table"]).unwrap();
-        let stats = IcebergCompactionTaskStatistics {
-            total_data_file_size: 0,
-            total_data_file_count: 5, // 5 empty data files
-            total_pos_del_file_size: 0,
-            total_pos_del_file_count: 0,
-            total_eq_del_file_size: 0,
-            total_eq_del_file_count: 0,
-        };
-        // total_file_size_for_partitioning = 0, should return Err.
-        let result = IcebergCompactorRunner::calculate_task_parallelism_impl(
-            1,
-            &dummy_table_ident,
-            &stats,
-            config.max_parallelism,
-            config.min_size_per_partition,
-            config.max_file_count_per_partition,
-            config.target_file_size_bytes,
-        );
-        assert!(result.is_err());
-        if let Err(e) = result {
-            assert!(
-                e.to_string()
-                    .contains("No files to calculate_task_parallelism")
-            );
-        }
-    }
-
-    #[test]
-    fn test_calculate_parallelism_max_parallelism_zero() {
-        let mut config = default_test_config_params();
-        config.max_parallelism = 0; // max_parallelism is 0
-        let dummy_table_ident = TableIdent::from_strs(["db", "schema", "table"]).unwrap();
-        let stats = IcebergCompactionTaskStatistics {
-            total_data_file_size: 1024 * 1024 * 50, // 50MB
-            total_data_file_count: 5,
-            total_pos_del_file_size: 0,
-            total_pos_del_file_count: 0,
-            total_eq_del_file_size: 0,
-            total_eq_del_file_count: 0,
-        };
-        // max_parallelism = 0, should return Err.
-        let result = IcebergCompactorRunner::calculate_task_parallelism_impl(
-            1,
-            &dummy_table_ident,
-            &stats,
-            config.max_parallelism,
-            config.min_size_per_partition,
-            config.max_file_count_per_partition,
-            config.target_file_size_bytes,
-        );
-        assert!(result.is_err());
-        if let Err(e) = result {
-            assert!(e.to_string().contains("Max parallelism cannot be 0"));
-        }
-    }
-
-    #[test]
-    fn test_calculate_parallelism_only_delete_files() {
-        let config = default_test_config_params();
-        let dummy_table_ident = TableIdent::from_strs(["db", "schema", "table"]).unwrap();
-        let stats = IcebergCompactionTaskStatistics {
-            total_data_file_size: 0,
-            total_data_file_count: 0,
-            total_pos_del_file_size: 1024 * 1024 * 20, // 20MB of pos-delete files
-            total_pos_del_file_count: 2,
-            total_eq_del_file_size: 0,
-            total_eq_del_file_count: 0,
-        };
-        // total_files_count_for_partitioning = 2
-        // total_file_size_for_partitioning = 20MB
-        // partition_by_size = 20MB / 100MB = 1
-        // partition_by_count = 2 / 10 = 1
-        // initial_input = max(1,1) = 1
-        // input = min(1, 4_max_p) = 1
-        // initial_output = min(partition_by_size=1, input=1, max_p=4) = 1
-        // Heuristic: total_data_file_size (0) is not > 0.
-        let (input_p, output_p) = IcebergCompactorRunner::calculate_task_parallelism_impl(
-            1,
-            &dummy_table_ident,
-            &stats,
-            config.max_parallelism,
-            config.min_size_per_partition,
-            config.max_file_count_per_partition,
-            config.target_file_size_bytes,
-        )
-        .unwrap();
-        assert_eq!(input_p, 1);
-        assert_eq!(output_p, 1);
-    }
-
-    #[test]
-    fn test_calculate_parallelism_zero_file_count_non_zero_size() {
-        let config = default_test_config_params();
-        let dummy_table_ident = TableIdent::from_strs(["db", "schema", "table"]).unwrap();
-        let stats = IcebergCompactionTaskStatistics {
-            total_data_file_size: 1024 * 1024 * 200, // 200MB
-            total_data_file_count: 0,                // No data files by count
-            total_pos_del_file_size: 0,
-            total_pos_del_file_count: 0,
-            total_eq_del_file_size: 0,
-            total_eq_del_file_count: 0,
-        };
-        // total_file_size_for_partitioning = 200MB
-        // partition_by_size = (200MB / 100MB).ceil().max(1) = 2
-        // total_files_count_for_partitioning = 0
-        // partition_by_count = (0 / 10).ceil().max(1) = 1
-        // input_parallelism = max(2, 1).min(4) = 2
-        // output_parallelism = partition_by_size.min(input_parallelism).min(max_parallelism) = 2.min(2).min(4) = 2
-        // Heuristic: total_data_file_size (200MB) not < target_file_size_bytes (128MB)
-        let (input_p, output_p) = IcebergCompactorRunner::calculate_task_parallelism_impl(
-            1,
-            &dummy_table_ident,
-            &stats,
-            config.max_parallelism,
-            config.min_size_per_partition,
-            config.max_file_count_per_partition,
-            config.target_file_size_bytes,
-        )
-        .unwrap();
-        assert_eq!(input_p, 2);
-        assert_eq!(output_p, 2);
     }
 }

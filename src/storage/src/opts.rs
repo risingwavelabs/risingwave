@@ -164,6 +164,17 @@ pub struct StorageOpts {
     pub iceberg_compaction_max_file_count_per_partition: u32,
     pub iceberg_compaction_small_file_threshold_mb: u32,
     pub iceberg_compaction_max_task_total_size_mb: u32,
+
+    /// The ratio of iceberg compaction max parallelism to the number of CPU cores
+    pub iceberg_compaction_task_parallelism_ratio: f32,
+    /// Whether to enable heuristic output parallelism in iceberg compaction.
+    pub iceberg_compaction_enable_heuristic_output_parallelism: bool,
+    /// Maximum number of concurrent file close operations
+    pub iceberg_compaction_max_concurrent_closes: usize,
+    /// Whether to enable dynamic size estimation for iceberg compaction.
+    pub iceberg_compaction_enable_dynamic_size_estimation: bool,
+    /// The smoothing factor for size estimation in iceberg compaction.(default: 0.3)
+    pub iceberg_compaction_size_estimation_smoothing_factor: f64,
 }
 
 impl Default for StorageOpts {
@@ -304,6 +315,21 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             iceberg_compaction_max_task_total_size_mb: c
                 .storage
                 .iceberg_compaction_max_task_total_size_mb,
+            iceberg_compaction_task_parallelism_ratio: c
+                .storage
+                .iceberg_compaction_task_parallelism_ratio,
+            iceberg_compaction_enable_heuristic_output_parallelism: c
+                .storage
+                .iceberg_compaction_enable_heuristic_output_parallelism,
+            iceberg_compaction_max_concurrent_closes: c
+                .storage
+                .iceberg_compaction_max_concurrent_closes,
+            iceberg_compaction_enable_dynamic_size_estimation: c
+                .storage
+                .iceberg_compaction_enable_dynamic_size_estimation,
+            iceberg_compaction_size_estimation_smoothing_factor: c
+                .storage
+                .iceberg_compaction_size_estimation_smoothing_factor,
             vector_file_block_size_kb: c.storage.vector_file_block_size_kb,
             vector_block_cache_capacity_mb: s.vector_block_cache_capacity_mb,
             vector_block_cache_shard_num: s.vector_block_cache_shard_num,

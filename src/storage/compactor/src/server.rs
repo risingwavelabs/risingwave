@@ -17,8 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_common::config::{
-    AsyncStackTraceOption, CompactorMode, MetricLevel, RwConfig, extract_storage_memory_config,
-    load_config,
+    AsyncStackTraceOption, MetricLevel, RwConfig, extract_storage_memory_config, load_config,
 };
 use risingwave_common::monitor::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
@@ -56,9 +55,9 @@ use tokio::sync::mpsc;
 use tracing::info;
 
 use super::compactor_observer::observer_manager::CompactorObserverNode;
-use crate::CompactorOpts;
 use crate::rpc::{CompactorServiceImpl, MonitorServiceImpl};
 use crate::telemetry::CompactorTelemetryCreator;
+use crate::{CompactorMode, CompactorOpts};
 
 pub async fn prepare_start_parameters(
     compactor_opts: &CompactorOpts,

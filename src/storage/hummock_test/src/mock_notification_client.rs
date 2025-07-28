@@ -57,8 +57,7 @@ impl NotificationClient for MockNotificationClient {
 
         let worker_key = WorkerKey(self.addr.to_protobuf());
         self.notification_manager
-            .insert_sender(subscribe_type, worker_key.clone(), tx.clone())
-            .await;
+            .insert_sender(subscribe_type, worker_key.clone(), tx.clone());
 
         let hummock_version = self.hummock_manager.get_current_version().await;
         let meta_snapshot = MetaSnapshot {

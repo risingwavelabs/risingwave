@@ -20,7 +20,9 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
 use super::utils::Distill;
-use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamExchange, StreamNode, generic};
+use super::{
+    ExprRewritable, PlanRef, PlanTreeNodeUnary, ShareNode, StreamExchange, StreamNode, generic,
+};
 use crate::Explain;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{LogicalShare, PlanBase, PlanTreeNode};
@@ -72,15 +74,17 @@ impl PlanTreeNodeUnary for StreamShare {
         self.core.input.borrow().clone()
     }
 
-    fn clone_with_input(&self, input: PlanRef) -> Self {
-        let core = self.core.clone();
-        core.replace_input(input);
-        Self::new(core)
+    fn clone_with_input(&self, _input: PlanRef) -> Self {
+        unreachable!("shared node should be handled specially in PlanRef::clone_with_input")
     }
 }
 
-impl StreamShare {
-    pub fn replace_input(&self, plan: PlanRef) {
+impl ShareNode for StreamShare {
+    fn new_share(core: generic::Share<PlanRef>) -> PlanRef {
+        Self::new(core).into()
+    }
+
+    fn replace_input(&self, plan: PlanRef) {
         self.core.replace_input(plan);
     }
 }
