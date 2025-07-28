@@ -26,8 +26,8 @@ use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::{ObjectId, WorkerId};
 use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
 use risingwave_pb::meta::subscribe_response::Operation;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::PbSubscriptionUpstreamInfo;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use tracing::warn;
 
 use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder};
@@ -75,7 +75,35 @@ impl From<&InflightFragmentInfo> for SharedFragmentInfo {
     }
 }
 
-type SharedActorInfosInner = HashMap<DatabaseId, HashMap<FragmentId, SharedFragmentInfo>>;
+#[derive(Default, Debug)]
+pub struct SharedActorInfosInner {
+    info: HashMap<DatabaseId, HashMap<FragmentId, SharedFragmentInfo>>,
+}
+
+impl SharedActorInfosInner {
+    pub fn get_fragment(&self, fragment_id: FragmentId) -> Option<&SharedFragmentInfo> {
+        self.info
+            .values()
+            .find_map(|database| database.get(&fragment_id))
+    }
+
+    pub fn get_database(
+        &self,
+        database_id: DatabaseId,
+    ) -> Option<&HashMap<FragmentId, SharedFragmentInfo>> {
+        self.info.get(&database_id)
+    }
+
+    pub fn iter(
+        &self,
+    ) -> impl Iterator<Item = (&DatabaseId, &HashMap<FragmentId, SharedFragmentInfo>)> {
+        self.info.iter()
+    }
+
+    pub fn iter_over_fragments(&self) -> impl Iterator<Item = (&FragmentId, &SharedFragmentInfo)> {
+        self.info.values().flatten()
+    }
+}
 
 #[derive(Clone, educe::Educe)]
 #[educe(Debug)]
@@ -100,7 +128,7 @@ impl SharedActorInfos {
     }
 
     pub(super) fn remove_database(&self, database_id: DatabaseId) {
-        if let Some(database) = self.inner.write().remove(&database_id) {
+        if let Some(database) = self.inner.write().info.remove(&database_id) {
             let mapping = database
                 .into_values()
                 .map(|fragment| rebuild_fragment_mapping(&fragment))
@@ -119,6 +147,7 @@ impl SharedActorInfos {
         for fragment in self
             .inner
             .write()
+            .info
             .extract_if(|database_id, _| !database_ids.contains(database_id))
             .flat_map(|(_, fragments)| fragments.into_values())
         {
@@ -140,7 +169,7 @@ impl SharedActorInfos {
             .collect();
         // delete the fragments that exist previously, but not included in the recovered fragments
         let mut writer = self.start_writer(database_id);
-        let database = writer.write_guard.entry(database_id).or_default();
+        let database = writer.write_guard.info.entry(database_id).or_default();
         for (_, fragment) in database.extract_if(|fragment_id, fragment_info| {
             if let Some(info) = remaining_fragments.remove(fragment_id) {
                 let info = info.into();
@@ -203,7 +232,7 @@ pub(super) struct SharedActorInfoWriter<'a> {
 
 impl SharedActorInfoWriter<'_> {
     pub(super) fn upsert(&mut self, infos: impl IntoIterator<Item = &InflightFragmentInfo>) {
-        let database = self.write_guard.entry(self.database_id).or_default();
+        let database = self.write_guard.info.entry(self.database_id).or_default();
         for info in infos {
             match database.entry(info.fragment_id) {
                 Entry::Occupied(mut entry) => {
@@ -225,7 +254,7 @@ impl SharedActorInfoWriter<'_> {
     }
 
     pub(super) fn remove(&mut self, info: &InflightFragmentInfo) {
-        if let Some(database) = self.write_guard.get_mut(&self.database_id)
+        if let Some(database) = self.write_guard.info.get_mut(&self.database_id)
             && let Some(fragment) = database.remove(&info.fragment_id)
         {
             self.deleted_fragment_mapping

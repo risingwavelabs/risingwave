@@ -1673,16 +1673,14 @@ impl CatalogController {
 
         let info = self.env.shared_actor_infos().read_guard();
 
-        for (fragment_id, SharedFragmentInfo { actors, .. }) in info
-            .values()
-            .flatten()
-            .filter(|&(fragment_id, _)| fragment_ids.contains(fragment_id))
-        {
+        for &fragment_id in fragment_ids {
+            let SharedFragmentInfo { actors, .. } = info.get_fragment(fragment_id as _).unwrap();
             fragment_actors
-                .entry(*fragment_id as _)
+                .entry(fragment_id as _)
                 .or_default()
                 .extend(actors.keys().map(|actor| *actor as i32));
         }
+
         fragment_actors
     }
 
