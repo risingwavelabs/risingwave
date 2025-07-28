@@ -1318,31 +1318,31 @@ SnowflakeConfig:
   - name: r#type
     field_type: String
     required: true
-  - name: snowflake.cdc_table_name
+  - name: intermediate.table.name
     field_type: String
     required: false
-  - name: snowflake.target_table_name
+  - name: target.table.name
     field_type: String
     required: false
-  - name: snowflake.database
+  - name: database
     field_type: String
     required: false
-  - name: snowflake.schema
+  - name: schema
     field_type: String
     required: false
-  - name: snowflake.schedule
+  - name: schedule
     field_type: String
     required: false
-  - name: snowflake.warehouse
+  - name: warehouse
     field_type: String
     required: false
-  - name: snowflake.jdbc.url
+  - name: jdbc.url
     field_type: String
     required: false
-  - name: snowflake.username
+  - name: username
     field_type: String
     required: false
-  - name: snowflake.password
+  - name: password
     field_type: String
     required: false
   - name: commit_checkpoint_interval

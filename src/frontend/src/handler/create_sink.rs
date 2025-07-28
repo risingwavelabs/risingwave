@@ -38,7 +38,10 @@ use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_SNAPSHOT_OPTION, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
     enforce_secret_sink,
 };
-use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithPropertiesExt};
+use risingwave_connector::{
+    AUTO_SCHEMA_CHANGE_KEY, SINK_CREATE_TABLE_IF_NOT_EXISTS_KEY, SINK_INTERMEDIATE_TABLE_NAME,
+    SINK_TARGET_TABLE_NAME, WithPropertiesExt,
+};
 use risingwave_pb::catalog::PbSink;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::ddl_service::{ReplaceJobPlan, TableJobType, replace_job_plan};
@@ -189,6 +192,33 @@ pub async fn gen_sink_plan(
                 return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                     "auto schema change not supported for sink-into-table".to_owned(),
                 )));
+            }
+            if resolved_with_options
+                .value_eq_ignore_case(SINK_CREATE_TABLE_IF_NOT_EXISTS_KEY, "true")
+            {
+                if let Some(table_name) = resolved_with_options.get(SINK_TARGET_TABLE_NAME) {
+                    // auto fill intermediate table name if target table name is specified
+                    if resolved_with_options
+                        .get(SINK_INTERMEDIATE_TABLE_NAME)
+                        .is_none()
+                    {
+                        // generate the intermediate table name with random value appended to the target table name
+                        let intermediate_table_name = format!(
+                            "rw_{}_{}_{}",
+                            sink_table_name,
+                            table_name,
+                            uuid::Uuid::new_v4()
+                        );
+                        resolved_with_options.insert(
+                            SINK_INTERMEDIATE_TABLE_NAME.to_owned(),
+                            intermediate_table_name,
+                        );
+                    }
+                } else {
+                    return Err(RwError::from(ErrorCode::BindError(
+                        "'target.table.name' option must be specified.".to_owned(),
+                    )));
+                }
             }
             Box::new(gen_query_from_table_name(from_name))
         }
