@@ -2414,7 +2414,7 @@ impl CatalogController {
         alter_props: &BTreeMap<String, String>,
         alter_secret_refs: &BTreeMap<String, PbSecretRef>,
         txn: &DatabaseTransaction,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<Vec<()>> {
         // we have checked create source/sink creation on no collision in connection properties
         // so we assume:
         // if a property is set in connection, it will not be set by dependent objects
@@ -2433,6 +2433,8 @@ impl CatalogController {
             .cloned()
             .collect();
 
+        let mut merged_props = vec![];
+
         // Check sources for conflicts
         let conflicting_sources: Vec<(SourceId, String)> = Source::find()
             .filter(source::Column::ConnectionId.eq(connection_id))
@@ -2441,12 +2443,15 @@ impl CatalogController {
             .into_iter()
             .filter_map(|source| {
                 for prop_key in &property_keys {
-                    if source.with_properties.0.contains_key(prop_key)
-                        && !connection_defined_keys.contains(prop_key)
+                    if !connection_defined_keys.contains(prop_key)
+                        && source.with_properties.0.contains_key(prop_key)
+                        && let Some(secret_ref) = &source.secret_ref
+                        && secret_ref.to_protobuf().contains_key(prop_key)
                     {
                         return Some((source.source_id, prop_key.clone()));
                     }
                 }
+
                 None
             })
             .collect();
@@ -2470,8 +2475,10 @@ impl CatalogController {
             .into_iter()
             .filter_map(|sink| {
                 for prop_key in &property_keys {
-                    if sink.properties.0.contains_key(prop_key)
-                        && !connection_defined_keys.contains(prop_key)
+                    if !connection_defined_keys.contains(prop_key)
+                        && sink.properties.0.contains_key(prop_key)
+                        && let Some(secret_ref) = &sink.secret_ref
+                        && secret_ref.to_protobuf().contains_key(prop_key)
                     {
                         return Some((sink.sink_id, prop_key.clone()));
                     }
@@ -2491,7 +2498,7 @@ impl CatalogController {
             )));
         }
 
-        Ok(())
+        Ok(merged_props)
     }
 
     pub async fn update_fragment_rate_limit_by_fragment_id(
