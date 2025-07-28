@@ -46,7 +46,7 @@ pub const GCS_CONNECTOR: &str = "gcs";
 /// If user inputs `connector='s3_v2'`, it will be rejected.
 pub const OPENDAL_S3_CONNECTOR: &str = "s3_v2";
 pub const POSIX_FS_CONNECTOR: &str = "posix_fs";
-pub const BATCH_POSIX_FS_CONNECTOR: &str = "batch_posix_fs";
+pub const BATCH_POSIX_FS_CONNECTOR: &str = "__for_testing_only_batch_posix_fs";
 
 pub const DEFAULT_REFRESH_INTERVAL_SEC: u64 = 60;
 
