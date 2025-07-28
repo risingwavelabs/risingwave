@@ -90,9 +90,10 @@ use crate::stream::cdc::{
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
-    GlobalStreamManagerRef, JobRescheduleTarget, ReplaceStreamJobContext, SourceChange,
-    SourceManagerRef, StreamFragmentGraph, check_sink_fragments_support_refresh_schema,
-    create_source_worker, rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
+    FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
+    JobRescheduleTarget, ReplaceStreamJobContext, SourceChange, SourceManagerRef,
+    StreamFragmentGraph, check_sink_fragments_support_refresh_schema, create_source_worker,
+    rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
@@ -2058,7 +2059,7 @@ impl DdlController {
 
         let upstream_actors = upstream_root_fragments
             .values()
-            .map(|fragment| {
+            .map(|(fragment, _)| {
                 (
                     fragment.fragment_id,
                     fragment.actors.keys().copied().collect(),
@@ -2068,8 +2069,10 @@ impl DdlController {
 
         let complete_graph = CompleteStreamFragmentGraph::with_upstreams(
             fragment_graph,
-            upstream_root_fragments,
-            existing_actor_location,
+            FragmentGraphUpstreamContext {
+                upstream_root_fragments,
+                upstream_actor_location: existing_actor_location,
+            },
             (&stream_job).into(),
         )?;
 
@@ -2315,7 +2318,7 @@ impl DdlController {
                 .iter()
                 .map(|sink| sink.original_fragment.fragment_id)
                 .collect();
-            for (_, downstream_fragment) in &mut downstream_fragments {
+            for (_, downstream_fragment, node) in &mut downstream_fragments {
                 if let Some(sink) = auto_refresh_schema_sinks.iter().find(|sink| {
                     sink.original_fragment.fragment_id == downstream_fragment.fragment_id
                 }) {
@@ -2344,9 +2347,11 @@ impl DdlController {
             StreamingJobType::Table(TableJobType::General) | StreamingJobType::Source => {
                 CompleteStreamFragmentGraph::with_downstreams(
                     fragment_graph,
-                    original_root_fragment.fragment_id,
-                    downstream_fragments,
-                    downstream_actor_location,
+                    FragmentGraphDownstreamContext {
+                        original_root_fragment_id: original_root_fragment.fragment_id,
+                        downstream_fragments,
+                        downstream_actor_location,
+                    },
                     job_type,
                 )?
             }
@@ -2360,11 +2365,15 @@ impl DdlController {
 
                 CompleteStreamFragmentGraph::with_upstreams_and_downstreams(
                     fragment_graph,
-                    upstream_root_fragments,
-                    upstream_actor_location,
-                    original_root_fragment.fragment_id,
-                    downstream_fragments,
-                    downstream_actor_location,
+                    FragmentGraphUpstreamContext {
+                        upstream_root_fragments,
+                        upstream_actor_location,
+                    },
+                    FragmentGraphDownstreamContext {
+                        original_root_fragment_id: original_root_fragment.fragment_id,
+                        downstream_fragments,
+                        downstream_actor_location,
+                    },
                     job_type,
                 )?
             }
