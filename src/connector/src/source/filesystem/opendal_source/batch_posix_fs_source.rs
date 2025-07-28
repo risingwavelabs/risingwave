@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::io::BufRead;
 use std::path::Path;
 
 use anyhow::{Context, anyhow};
@@ -184,28 +185,31 @@ impl BatchPosixFsReader {
                     continue;
                 }
 
-                // Create a single message with the entire file content
-                let message = SourceMessage {
-                    key: None,
-                    payload: Some(content),
-                    offset: "0".to_owned(), // Single read, no offset needed
-                    split_id: split.id(),
-                    meta: SourceMeta::Empty,
-                };
+                // This is test-only, so we just be simple here...
+                for line in content.lines() {
+                    let line = line?;
+                    // Create a message for each line
+                    let message = SourceMessage {
+                        key: None,
+                        payload: Some(line.as_bytes().to_vec()),
+                        offset: "0".to_owned(), // Single read, no offset needed
+                        split_id: split.id(),
+                        meta: SourceMeta::Empty,
+                    };
 
-                // Parse the content
-                let parser = ByteStreamSourceParserImpl::create(
-                    self.parser_config.clone(),
-                    self.source_ctx.clone(),
-                )
-                .await?;
+                    // Parse the content
+                    let parser = ByteStreamSourceParserImpl::create(
+                        self.parser_config.clone(),
+                        self.source_ctx.clone(),
+                    )
+                    .await?;
+                    let chunk_stream = parser
+                        .parse_stream(Box::pin(futures::stream::once(async { Ok(vec![message]) })));
 
-                let chunk_stream = parser
-                    .parse_stream(Box::pin(futures::stream::once(async { Ok(vec![message]) })));
-
-                #[for_await]
-                for chunk in chunk_stream {
-                    yield chunk?;
+                    #[for_await]
+                    for chunk in chunk_stream {
+                        yield chunk?;
+                    }
                 }
             }
         }
