@@ -29,7 +29,7 @@ use super::{
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
-    OrderBy, WindowFunction,
+    OrderBy, OrderByExpr, WindowFunction,
 };
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
@@ -770,6 +770,37 @@ impl LogicalAggBuilder {
                     };
                     Ok(push_agg_call(new_agg_call)?.into())
                 }
+            }
+            AggType::Builtin(PbAggKind::ArgMin | PbAggKind::ArgMax) => {
+                let mut agg_call = agg_call;
+                let not_null_exprs: Vec<ExprImpl> = agg_call
+                    .args
+                    .iter()
+                    .map(|arg| -> Result<ExprImpl> {
+                        Ok(FunctionCall::new(ExprType::IsNotNull, vec![arg.clone()])?.into())
+                    })
+                    .try_collect()?;
+
+                let order_by = OrderBy::new(vec![OrderByExpr {
+                    expr: agg_call.args.pop().unwrap(),
+                    order_type: if agg_call.agg_type == AggType::Builtin(PbAggKind::ArgMin) {
+                        OrderType::ascending_nulls_last()
+                    } else {
+                        OrderType::descending_nulls_last()
+                    },
+                }]);
+
+                let filter = agg_call.filter.clone().and(Condition {
+                    conjunctions: not_null_exprs,
+                });
+
+                let new_agg_call = AggCall {
+                    agg_type: AggType::Builtin(PbAggKind::FirstValue),
+                    order_by,
+                    filter,
+                    ..agg_call
+                };
+                Ok(push_agg_call(new_agg_call)?.into())
             }
             _ => Ok(push_agg_call(agg_call)?.into()),
         }

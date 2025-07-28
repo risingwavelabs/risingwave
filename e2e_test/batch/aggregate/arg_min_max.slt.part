@@ -1,0 +1,21 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (v1 int, v2 smallint, v3 varchar);
+
+statement ok
+insert into t values (1, 10, 'a'), (2, 20, 'b'), (3, 10, 'c'), (4, 30, NULL), (5, 1, NULL), (4, NULL, 'd'), (5, NULL, 'e');
+
+query I
+select arg_min(v3, v2) from t;
+----
+a
+
+query I
+select arg_max(v3, v2) from t;
+----
+b
+
+statement ok
+drop table t;
