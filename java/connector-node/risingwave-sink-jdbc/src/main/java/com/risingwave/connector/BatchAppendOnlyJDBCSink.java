@@ -216,7 +216,7 @@ public class BatchAppendOnlyJDBCSink implements SinkWriter {
         }
 
         public void tryExecute() throws SQLException {
-            if (this.cnt >= this.batchInsertRows) {
+            if (this.batchInsertRows > 0 && this.cnt >= this.batchInsertRows) {
                 this.execute();
             }
         }
