@@ -177,17 +177,7 @@ impl IcebergCompactorRunner {
         let now = std::time::Instant::now();
 
         let compact = async move {
-            let compaction_type = match self.task_type {
-                TaskType::SmallDataFileCompaction => CompactionType::MergeSmallDataFiles,
-                TaskType::FullCompaction => CompactionType::Full,
-                _ => {
-                    unreachable!(
-                        "Unexpected task type for Iceberg compaction: {:?}",
-                        self.task_type
-                    )
-                }
-            };
-
+            let compaction_type = Self::get_compaction_type(self.task_type);
             let planning_config = CompactionPlanningConfigBuilder::default()
                 .max_parallelism(self.config.max_parallelism as usize)
                 .min_size_per_partition(self.config.min_size_per_partition)
@@ -453,6 +443,19 @@ impl IcebergCompactorRunner {
             total_pos_del_file_count,
             total_eq_del_file_size,
             total_eq_del_file_count,
+        }
+    }
+
+    fn get_compaction_type(task_type: TaskType) -> CompactionType {
+        match task_type {
+            TaskType::SmallDataFileCompaction => CompactionType::MergeSmallDataFiles,
+            TaskType::FullCompaction => CompactionType::Full,
+            _ => {
+                unreachable!(
+                    "Unexpected task type for Iceberg compaction: {:?}",
+                    task_type
+                )
+            }
         }
     }
 }
