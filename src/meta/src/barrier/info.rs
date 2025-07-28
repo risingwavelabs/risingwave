@@ -27,7 +27,7 @@ use risingwave_meta_model::{ObjectId, WorkerId};
 use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
 use risingwave_pb::meta::subscribe_response::Operation;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{PbStreamNode, PbSubscriptionUpstreamInfo};
+use risingwave_pb::stream_plan::PbSubscriptionUpstreamInfo;
 use tracing::warn;
 
 use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder};
@@ -46,7 +46,7 @@ pub struct SharedFragmentInfo {
     pub actors: HashMap<ActorId, InflightActorInfo>,
     pub fragment_type_mask: FragmentTypeMask,
     pub vnode_count: usize,
-    pub nodes: PbStreamNode,
+    //    pub nodes: PbStreamNode,
 }
 
 impl From<&InflightFragmentInfo> for SharedFragmentInfo {
@@ -57,7 +57,7 @@ impl From<&InflightFragmentInfo> for SharedFragmentInfo {
             distribution_type,
             fragment_type_mask,
             vnode_count,
-            nodes,
+            // nodes,
             actors,
             // state_table_ids,
             ..
@@ -69,7 +69,7 @@ impl From<&InflightFragmentInfo> for SharedFragmentInfo {
             distribution_type: *distribution_type,
             fragment_type_mask: *fragment_type_mask,
             vnode_count: *vnode_count,
-            nodes: nodes.clone(),
+            // nodes: nodes.clone(),
             actors: actors.clone(),
         }
     }
