@@ -28,8 +28,10 @@ use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, FragmentTypeMask,
 use risingwave_common::hash::ActorMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::{bail, hash};
-use risingwave_meta_model::{ObjectId, WorkerId, actor, fragment, streaming_job};
-use risingwave_pb::common::{WorkerNode, WorkerType};
+use risingwave_meta_model::{
+    ObjectId, StreamingParallelism, WorkerId, actor, fragment, streaming_job,
+};
+use risingwave_pb::common::{PbWorkerNode, WorkerNode, WorkerType};
 use risingwave_pb::meta::FragmentWorkerSlotMappings;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::fragment::{
@@ -44,7 +46,9 @@ use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 
 use crate::barrier::{Command, Reschedule};
-use crate::controller::scale::RescheduleWorkingSet;
+use crate::controller::scale::{
+    RescheduleWorkingSet, TargetResourcePolicy, WorkerInfo, render_jobs,
+};
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager};
 use crate::model::{
     ActorId, DispatcherId, FragmentId, StreamActor, StreamActorWithDispatchers, TableParallelism,
@@ -88,7 +92,7 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_meta_model::DispatcherType;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use sea_orm::TransactionTrait;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryTrait, TransactionTrait};
 
 use super::SourceChange;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
@@ -2246,6 +2250,59 @@ impl ScaleController {
         })
     }
 
+    pub async fn generate_job_reschedule_plan_dynamic(
+        &self,
+        policy: JobReschedulePolicy,
+        workers: HashMap<WorkerId, PbWorkerNode>,
+    ) -> MetaResult<Command> {
+        println!("aaaaaaaa");
+        // jobs: HashMap<ObjectId, TargetResourcePolicy>,
+        // workers: BTreeMap<WorkerId, Worker>,
+        // ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, crate::controller::fragment::InflightFragmentInfo >>>>
+
+        let inner = self.metadata_manager.catalog_controller.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let jobs = policy
+            .targets
+            .into_iter()
+            .map(|(job_id, target)| {
+                (
+                    job_id as ObjectId,
+                    TargetResourcePolicy {
+                        resource_group: None,
+                        parallelism: StreamingParallelism::Adaptive,
+                    },
+                )
+            })
+            .collect();
+
+        let workers = workers
+            .into_iter()
+            .map(|(id, worker)| {
+                (
+                    id,
+                    WorkerInfo {
+                        weight: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
+                        resource_group: worker.resource_group(),
+                    },
+                )
+            })
+            .collect();
+
+        let result = render_jobs(&txn, jobs, workers).await?;
+
+        println!("result {:#?}", result);
+
+        //        self.diff_fragment()
+
+        todo!()
+
+        // let jobs = policy.targets.into_iter().map(|target| {
+        //
+        // })
+    }
+
     fn diff_worker_slot_changes(
         fragment_worker_slots: &BTreeMap<WorkerId, usize>,
         target_worker_slots: &BTreeMap<WorkerId, usize>,
@@ -2523,6 +2580,12 @@ pub struct JobReschedulePostUpdates {
 
 #[derive(Debug)]
 pub struct JobReschedulePlan {
+    pub reschedules: HashMap<FragmentId, WorkerReschedule>,
+    pub post_updates: JobReschedulePostUpdates,
+}
+
+#[derive(Debug)]
+pub struct JobReschedulePlanDynamic {
     pub reschedules: HashMap<FragmentId, WorkerReschedule>,
     pub post_updates: JobReschedulePostUpdates,
 }
