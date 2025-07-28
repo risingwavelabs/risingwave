@@ -67,7 +67,7 @@ use tracing::debug;
 
 use crate::barrier::{SharedFragmentInfo, SnapshotBackfillInfo};
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
-use crate::controller::scale::{load_fragments, resolve_streaming_job_definition};
+use crate::controller::scale::{load_fragment_info, resolve_streaming_job_definition};
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, compose_dispatchers,
     get_fragment_mappings_txn, resolve_no_shuffle_actor_dispatcher,
@@ -451,9 +451,9 @@ impl CatalogController {
         id_filter: Option<HashSet<FragmentId>>,
     ) -> MetaResult<HashMap<FragmentId, FragmentParallelismInfo>> {
         let info = self.env.shared_actor_infos().read_guard();
-        let fragments = info.values().flatten();
+
         let mut result = HashMap::new();
-        for (fragment_id, fragment) in fragments {
+        for (fragment_id, fragment) in info.iter_over_fragments() {
             if let Some(id_filter) = &id_filter
                 && !id_filter.contains(&(*fragment_id as _))
             {
@@ -514,11 +514,8 @@ impl CatalogController {
         let fragment_opt_from_cache = fragment_model_opt.map(|fragment| {
             let info = self.env.shared_actor_infos().read_guard();
 
-            let (_, SharedFragmentInfo { actors, .. }) = info
-                .values()
-                .flatten()
-                .find(|&(fragment_id, _)| *fragment_id == fragment.fragment_id as u32)
-                .unwrap();
+            let SharedFragmentInfo { actors, .. } =
+                info.get_fragment(fragment.fragment_id as _).unwrap();
 
             FragmentDesc {
                 fragment_id: fragment.fragment_id,
@@ -741,11 +738,8 @@ impl CatalogController {
                 println!("try get");
                 let read_guard = shared_info.read_guard();
                 println!("try get read lock");
-                let fragment = read_guard
-                    .values()
-                    .flat_map(|fragments| fragments.get(&(fragment_id as _)))
-                    .exactly_one()
-                    .map_err(|_| anyhow!("failed to find fragment: {}", fragment_id))?;
+
+                let fragment = read_guard.get_fragment(fragment_id as _).unwrap();
 
                 (
                     fragment.distribution_type,
@@ -1035,8 +1029,7 @@ impl CatalogController {
     pub async fn worker_actor_count(&self) -> MetaResult<HashMap<WorkerId, usize>> {
         let read_guard = self.env.shared_actor_infos().read_guard();
         let actor_cnt: HashMap<WorkerId, _> = read_guard
-            .values()
-            .flatten()
+            .iter_over_fragments()
             .flat_map(|(_, fragment)| {
                 fragment
                     .actors
@@ -1155,8 +1148,7 @@ impl CatalogController {
         let info = self.env.shared_actor_infos().read_guard();
 
         let actor_locations = info
-            .values()
-            .flatten()
+            .iter_over_fragments()
             .flat_map(|(fragment_id, fragment)| {
                 fragment
                     .actors
@@ -1199,7 +1191,7 @@ impl CatalogController {
                 .flat_map(
                     |(fragment_id, object_id, schema_id, object_type, database_id)| {
                         let fragments = info
-                            .get(&catalog::DatabaseId::new(database_id as _))
+                            .get_database(catalog::DatabaseId::new(database_id as _))
                             .unwrap();
                         let SharedFragmentInfo { actors, .. } =
                             fragments.get(&(fragment_id as _)).unwrap();
@@ -1491,8 +1483,8 @@ impl CatalogController {
         let actor_with_type_from_cache: Vec<(ActorId, ObjectId, FragmentTypeMask)> = {
             let info = self.env.shared_actor_infos().read_guard();
 
-            info.values()
-                .flatten()
+            // todo
+            info.iter_over_fragments()
                 .filter(|(fragment_id, fragment)| sink_ids.contains(&fragment.job_id))
                 .flat_map(|(fragment_id, fragment)| {
                     fragment.actors.keys().map(move |actor_id| {
@@ -1547,7 +1539,7 @@ impl CatalogController {
         let txn = inner.db.begin().await?;
 
         println!("111");
-        let database_fragment_infos = load_fragments(&txn, database_id, worker_nodes).await?;
+        let database_fragment_infos = load_fragment_info(&txn, database_id, worker_nodes).await?;
 
         debug!(?database_fragment_infos, "reload all actors");
 
@@ -1955,12 +1947,7 @@ impl CatalogController {
         fragment_id: FragmentId,
     ) -> MetaResult<Vec<ActorId>> {
         let info = self.env.shared_actor_infos().read_guard();
-
-        let (_, SharedFragmentInfo { actors, .. }) = info
-            .values()
-            .flatten()
-            .find(|&(f, _)| *f == fragment_id as u32)
-            .unwrap();
+        let SharedFragmentInfo { actors, .. } = info.get_fragment(fragment_id as _).unwrap();
 
         let actors = actors.keys().map(|id| *id as _).collect();
 
@@ -2146,12 +2133,18 @@ impl CatalogController {
             .map(|(k, v)| (v.fragment_id as u32, *k))
             .collect();
 
-        for (fragment_id, fragment_info) in info
-            .values()
-            .flatten()
-            .filter(|&(fragment_id, _)| root_fragment_to_jobs.contains_key(fragment_id))
-        {
-            let job_id = root_fragment_to_jobs[fragment_id];
+        // for (fragment_id, fragment_info) in info
+        //     .values()
+        //     .flatten()
+        //     .filter(|&(fragment_id, _)| root_fragment_to_jobs.contains_key(fragment_id))
+        // {
+
+        // }
+
+        for fragment in root_fragment_to_jobs.keys() {
+            let fragment_info = info.get_fragment(*fragment).unwrap();
+
+            let job_id = root_fragment_to_jobs[&fragment_info.fragment_id];
             let fragment = root_fragments
                 .get(&job_id)
                 .context(format!("root fragment for job {} not found", job_id))?;
@@ -2164,7 +2157,7 @@ impl CatalogController {
 
         let mut all_actor_locations = vec![];
 
-        for (_, SharedFragmentInfo { actors, .. }) in info.values().flatten() {
+        for (_, SharedFragmentInfo { actors, .. }) in info.iter_over_fragments() {
             for (actor_id, actor_info) in actors {
                 all_actor_locations.push((*actor_id as ActorId, actor_info.worker_id));
             }
@@ -2242,11 +2235,10 @@ impl CatalogController {
             .map(|model| (model.target_fragment_id as u32, model.dispatcher_type))
             .collect();
 
-        for (fragment_id, fragment_info @ SharedFragmentInfo { actors, .. }) in info
-            .values()
-            .flatten()
-            .filter(|&(fragment_id, _)| fragment_map.contains_key(fragment_id))
-        {
+        for fragment_id in fragment_map.keys() {
+            let fragment_info @ SharedFragmentInfo { actors, .. } =
+                info.get_fragment(*fragment_id).unwrap();
+
             let dispatcher_type = fragment_map[fragment_id];
 
             if actors.is_empty() {

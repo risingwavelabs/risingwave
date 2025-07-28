@@ -27,20 +27,17 @@ use thiserror_ext::AsReport;
 use tracing::{info, warn};
 
 use super::BarrierWorkerRuntimeInfoSnapshot;
-
 use crate::barrier::context::GlobalBarrierWorkerContextImpl;
 use crate::barrier::info::InflightStreamingJobInfo;
 use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
 use crate::controller::fragment::InflightActorInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor, StreamJobFragments, TableParallelism};
-
 use crate::stream::cdc::assign_cdc_table_snapshot_splits_pairs;
 use crate::stream::{
-    JobParallelismTarget, JobReschedulePolicy, JobRescheduleTarget, JobResourceGroupTarget,
-    RescheduleOptions, SourceChange, StreamFragmentGraph,
+    SourceChange, StreamFragmentGraph,
 };
-use crate::{MetaResult, model};
+use crate::MetaResult;
 
 impl GlobalBarrierWorkerContextImpl {
     /// Clean catalogs for creating streaming jobs that are in foreground mode or table fragments not persisted.
@@ -659,165 +656,162 @@ impl GlobalBarrierWorkerContextImpl {
         let Ok(_guard) = self.scale_controller.reschedule_lock.try_write() else {
             return Err(anyhow!("scale_actors failed to acquire reschedule_lock").into());
         };
-
-<<<<<<< HEAD
-        match self.scale_controller.integrity_check().await {
-            Ok(_) => {
-                info!("integrity check passed");
-            }
-            Err(e) => {
-                return Err(anyhow!(e).context("integrity check failed").into());
-            }
-        }
-
-        let mgr = &self.metadata_manager;
-
-        debug!("start resetting actors distribution");
-
-        let available_workers: HashMap<_, _> = active_nodes
-            .current()
-            .values()
-            .filter(|worker| worker.is_streaming_schedulable())
-            .map(|worker| (worker.id, worker.clone()))
-            .collect();
-
-        info!(
-            "target worker ids for offline scaling: {:?}",
-            available_workers
-        );
-
-        let available_parallelism = active_nodes
-            .current()
-            .values()
-            .map(|worker_node| worker_node.compute_node_parallelism())
-            .sum();
-
-        let mut table_parallelisms = HashMap::new();
-
-        let reschedule_targets: HashMap<_, _> = {
-            let streaming_parallelisms = mgr
-                .catalog_controller
-                .get_all_streaming_parallelisms()
-                .await?;
-
-            let mut result = HashMap::new();
-
-            for (object_id, streaming_parallelism) in streaming_parallelisms {
-                let actual_fragment_parallelism = mgr
-                    .catalog_controller
-                    .get_actual_job_fragment_parallelism(object_id)
-                    .await?;
-
-                let table_parallelism = match streaming_parallelism {
-                    StreamingParallelism::Adaptive => model::TableParallelism::Adaptive,
-                    StreamingParallelism::Custom => model::TableParallelism::Custom,
-                    StreamingParallelism::Fixed(n) => model::TableParallelism::Fixed(n as _),
-                };
-
-                let target_parallelism = Self::derive_target_parallelism(
-                    available_parallelism,
-                    table_parallelism,
-                    actual_fragment_parallelism,
-                    self.env.opts.default_parallelism,
-                );
-
-                if target_parallelism != table_parallelism {
-                    tracing::info!(
-                        "resetting table {} parallelism from {:?} to {:?}",
-                        object_id,
-                        table_parallelism,
-                        target_parallelism
-                    );
-                }
-
-                table_parallelisms.insert(TableId::new(object_id as u32), target_parallelism);
-
-                let parallelism_change = JobParallelismTarget::Update(target_parallelism);
-
-                result.insert(
-                    object_id as u32,
-                    JobRescheduleTarget {
-                        parallelism: parallelism_change,
-                        resource_group: JobResourceGroupTarget::Keep,
-                    },
-                );
-            }
-
-            result
-        };
-
-        info!(
-            "target table parallelisms for offline scaling: {:?}",
-            reschedule_targets
-        );
-
-        let reschedule_targets = reschedule_targets.into_iter().collect_vec();
-
-        for chunk in reschedule_targets
-            .chunks(self.env.opts.parallelism_control_batch_size.max(1))
-            .map(|c| c.to_vec())
-        {
-            let local_reschedule_targets: HashMap<u32, _> = chunk.into_iter().collect();
-
-            let reschedule_ids = local_reschedule_targets.keys().copied().collect_vec();
-
-            info!(jobs=?reschedule_ids,"generating reschedule plan for jobs in offline scaling");
-
-            let plan = self
-                .scale_controller
-                .generate_job_reschedule_plan(
-                    JobReschedulePolicy {
-                        targets: local_reschedule_targets,
-                    },
-                    false,
-                )
-                .await?;
-
-            // no need to update
-            if plan.reschedules.is_empty() && plan.post_updates.parallelism_updates.is_empty() {
-                info!(jobs=?reschedule_ids,"no plan generated for jobs in offline scaling");
-                continue;
-            };
-
-            let mut compared_table_parallelisms = table_parallelisms.clone();
-
-            // skip reschedule if no reschedule is generated.
-            let reschedule_fragment = if plan.reschedules.is_empty() {
-                HashMap::new()
-            } else {
-                self.scale_controller
-                    .analyze_reschedule_plan(
-                        plan.reschedules,
-                        RescheduleOptions {
-                            resolve_no_shuffle_upstream: true,
-                            skip_create_new_actors: true,
-                        },
-                        &mut compared_table_parallelisms,
-                    )
-                    .await?
-            };
-
-            // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
-            debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
-
-            info!(jobs=?reschedule_ids,"post applying reschedule for jobs in offline scaling");
-
-            if let Err(e) = self
-                .scale_controller
-                .post_apply_reschedule(&reschedule_fragment, &plan.post_updates)
-                .await
-            {
-                tracing::error!(
-                    error = %e.as_report(),
-                    "failed to apply reschedule for offline scaling in recovery",
-                );
-
-                return Err(e);
-            }
-
-            info!(jobs=?reschedule_ids,"post applied reschedule for jobs in offline scaling");
-        }
-
+        // match self.scale_controller.integrity_check().await {
+        //     Ok(_) => {
+        //         info!("integrity check passed");
+        //     }
+        //     Err(e) => {
+        //         return Err(anyhow!(e).context("integrity check failed").into());
+        //     }
+        // }
+        //
+        // let mgr = &self.metadata_manager;
+        //
+        // debug!("start resetting actors distribution");
+        //
+        // let available_workers: HashMap<_, _> = active_nodes
+        //     .current()
+        //     .values()
+        //     .filter(|worker| worker.is_streaming_schedulable())
+        //     .map(|worker| (worker.id, worker.clone()))
+        //     .collect();
+        //
+        // info!(
+        //     "target worker ids for offline scaling: {:?}",
+        //     available_workers
+        // );
+        //
+        // let available_parallelism = active_nodes
+        //     .current()
+        //     .values()
+        //     .map(|worker_node| worker_node.compute_node_parallelism())
+        //     .sum();
+        //
+        // let mut table_parallelisms = HashMap::new();
+        //
+        // let reschedule_targets: HashMap<_, _> = {
+        //     let streaming_parallelisms = mgr
+        //         .catalog_controller
+        //         .get_all_streaming_parallelisms()
+        //         .await?;
+        //
+        //     let mut result = HashMap::new();
+        //
+        //     for (object_id, streaming_parallelism) in streaming_parallelisms {
+        //         let actual_fragment_parallelism = mgr
+        //             .catalog_controller
+        //             .get_actual_job_fragment_parallelism(object_id)
+        //             .await?;
+        //
+        //         let table_parallelism = match streaming_parallelism {
+        //             StreamingParallelism::Adaptive => model::TableParallelism::Adaptive,
+        //             StreamingParallelism::Custom => model::TableParallelism::Custom,
+        //             StreamingParallelism::Fixed(n) => model::TableParallelism::Fixed(n as _),
+        //         };
+        //
+        //         let target_parallelism = Self::derive_target_parallelism(
+        //             available_parallelism,
+        //             table_parallelism,
+        //             actual_fragment_parallelism,
+        //             self.env.opts.default_parallelism,
+        //         );
+        //
+        //         if target_parallelism != table_parallelism {
+        //             tracing::info!(
+        //                 "resetting table {} parallelism from {:?} to {:?}",
+        //                 object_id,
+        //                 table_parallelism,
+        //                 target_parallelism
+        //             );
+        //         }
+        //
+        //         table_parallelisms.insert(TableId::new(object_id as u32), target_parallelism);
+        //
+        //         let parallelism_change = JobParallelismTarget::Update(target_parallelism);
+        //
+        //         result.insert(
+        //             object_id as u32,
+        //             JobRescheduleTarget {
+        //                 parallelism: parallelism_change,
+        //                 resource_group: JobResourceGroupTarget::Keep,
+        //             },
+        //         );
+        //     }
+        //
+        //     result
+        // };
+        //
+        // info!(
+        //     "target table parallelisms for offline scaling: {:?}",
+        //     reschedule_targets
+        // );
+        //
+        // let reschedule_targets = reschedule_targets.into_iter().collect_vec();
+        //
+        // for chunk in reschedule_targets
+        //     .chunks(self.env.opts.parallelism_control_batch_size.max(1))
+        //     .map(|c| c.to_vec())
+        // {
+        //     let local_reschedule_targets: HashMap<u32, _> = chunk.into_iter().collect();
+        //
+        //     let reschedule_ids = local_reschedule_targets.keys().copied().collect_vec();
+        //
+        //     info!(jobs=?reschedule_ids,"generating reschedule plan for jobs in offline scaling");
+        //
+        //     let plan = self
+        //         .scale_controller
+        //         .generate_job_reschedule_plan(
+        //             JobReschedulePolicy {
+        //                 targets: local_reschedule_targets,
+        //             },
+        //             false,
+        //         )
+        //         .await?;
+        //
+        //     // no need to update
+        //     if plan.reschedules.is_empty() && plan.post_updates.parallelism_updates.is_empty() {
+        //         info!(jobs=?reschedule_ids,"no plan generated for jobs in offline scaling");
+        //         continue;
+        //     };
+        //
+        //     let mut compared_table_parallelisms = table_parallelisms.clone();
+        //
+        //     // skip reschedule if no reschedule is generated.
+        //     let reschedule_fragment = if plan.reschedules.is_empty() {
+        //         HashMap::new()
+        //     } else {
+        //         self.scale_controller
+        //             .analyze_reschedule_plan(
+        //                 plan.reschedules,
+        //                 RescheduleOptions {
+        //                     resolve_no_shuffle_upstream: true,
+        //                     skip_create_new_actors: true,
+        //                 },
+        //                 &mut compared_table_parallelisms,
+        //             )
+        //             .await?
+        //     };
+        //
+        //     // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
+        //     debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
+        //
+        //     info!(jobs=?reschedule_ids,"post applying reschedule for jobs in offline scaling");
+        //
+        //     if let Err(e) = self
+        //         .scale_controller
+        //         .post_apply_reschedule(&reschedule_fragment, &plan.post_updates)
+        //         .await
+        //     {
+        //         tracing::error!(
+        //             error = %e.as_report(),
+        //             "failed to apply reschedule for offline scaling in recovery",
+        //         );
+        //
+        //         return Err(e);
+        //     }
+        //
+        //     info!(jobs=?reschedule_ids,"post applied reschedule for jobs in offline scaling");
+        // }
 
         info!("scaling actors succeed.");
 
