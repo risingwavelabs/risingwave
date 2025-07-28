@@ -22,24 +22,25 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::aggregate::AggType;
 pub use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 
-use super::{ApplyResult, BoxedRule, FallibleRule};
+use super::prelude::{PlanRef, *};
 use crate::TableCatalog;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::expr::{AggCall, ExprImpl, InputRef, Literal, OrderBy, TableFunctionType};
+use crate::optimizer::OptimizerContext;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalProject, LogicalScan, LogicalTableFunction, LogicalUnion, LogicalValues,
-    StreamTableScan,
+    Logical, LogicalAgg, LogicalProject, LogicalScan, LogicalTableFunction, LogicalUnion,
+    LogicalValues, StreamTableScan,
 };
-use crate::optimizer::{OptimizerContext, PlanRef};
+use crate::optimizer::rule::{ApplyResult, FallibleRule};
 use crate::utils::{Condition, GroupBy};
 
 /// Transform the `internal_backfill_progress()` table function
 /// into a plan graph which will scan the state tables of backfill nodes.
 /// It will return the progress of the backfills, partitioned by the backfill node's fragment id.
 pub struct TableFunctionToInternalBackfillProgressRule {}
-impl FallibleRule for TableFunctionToInternalBackfillProgressRule {
-    fn apply(&self, plan: PlanRef) -> ApplyResult {
+impl FallibleRule<Logical> for TableFunctionToInternalBackfillProgressRule {
+    fn apply(&self, plan: PlanRef) -> ApplyResult<PlanRef> {
         let logical_table_function: &LogicalTableFunction = plan.as_logical_table_function()?;
         if logical_table_function.table_function.function_type
             != TableFunctionType::InternalBackfillProgress

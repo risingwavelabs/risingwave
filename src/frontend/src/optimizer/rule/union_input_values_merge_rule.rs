@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
+use crate::optimizer::PlanTreeNode;
 use crate::optimizer::plan_node::LogicalValues;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::{PlanRef, PlanTreeNode};
 
 pub struct UnionInputValuesMergeRule {}
-impl Rule for UnionInputValuesMergeRule {
+impl Rule<Logical> for UnionInputValuesMergeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let union = plan.as_logical_union()?;
         // !union.all() is already handled by [`UnionToDistinctRule`]

@@ -16,14 +16,13 @@ use risingwave_common::types::DataType::Boolean;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{LogicalIntersect, LogicalJoin, PlanTreeNode};
 
 pub struct IntersectToSemiJoinRule {}
-impl Rule for IntersectToSemiJoinRule {
+impl Rule<Logical> for IntersectToSemiJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let logical_intersect: &LogicalIntersect = plan.as_logical_intersect()?;
         let all = logical_intersect.all();

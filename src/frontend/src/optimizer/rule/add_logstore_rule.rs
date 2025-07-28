@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::PlanRef;
-use crate::optimizer::plan_node::StreamSyncLogStore;
+use crate::optimizer::plan_node::{PlanRef, Stream, StreamSyncLogStore};
 use crate::optimizer::rule::{BoxedRule, Rule};
 
 pub struct AddLogstoreRule {}
 
-impl Rule for AddLogstoreRule {
+impl Rule<Stream> for AddLogstoreRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         plan.as_stream_hash_join()?;
         let log_store_plan = StreamSyncLogStore::new(plan);
@@ -27,7 +26,7 @@ impl Rule for AddLogstoreRule {
 }
 
 impl AddLogstoreRule {
-    pub fn create() -> BoxedRule {
+    pub fn create() -> BoxedRule<Stream> {
         Box::new(Self {})
     }
 }

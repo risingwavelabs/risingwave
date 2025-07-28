@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
+use crate::optimizer::PlanVisitor;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
 use crate::optimizer::plan_visitor::{LogicalCardinalityExt, SideEffectVisitor};
-use crate::optimizer::{PlanRef, PlanVisitor};
 
 pub struct TrivialProjectToValuesRule {}
-impl Rule for TrivialProjectToValuesRule {
+impl Rule<Logical> for TrivialProjectToValuesRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let project = plan.as_logical_project()?;
 

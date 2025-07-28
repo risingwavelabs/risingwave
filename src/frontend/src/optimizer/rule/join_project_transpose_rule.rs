@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::expr::{ExprRewriter, InputRef};
 use crate::optimizer::plan_node::{LogicalJoin, LogicalProject};
 use crate::utils::IndexRewriter;
@@ -31,8 +31,8 @@ use crate::utils::IndexRewriter;
 /// columns that are output in the original `join`.
 pub struct JoinProjectTransposeRule {}
 
-impl Rule for JoinProjectTransposeRule {
-    fn apply(&self, plan: crate::PlanRef) -> Option<crate::PlanRef> {
+impl Rule<Logical> for JoinProjectTransposeRule {
+    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let join = plan.as_logical_join()?;
 
         let (left, right, on, join_type, _) = join.clone().decompose();
