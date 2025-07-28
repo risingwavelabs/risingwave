@@ -67,7 +67,7 @@ use tracing::debug;
 
 use crate::barrier::{SharedFragmentInfo, SnapshotBackfillInfo};
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
-use crate::controller::scale::{load_fragments, resolve_streaming_job_definition};
+use crate::controller::scale::{load_fragment_info, resolve_streaming_job_definition};
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, compose_dispatchers,
     get_fragment_mappings_txn, resolve_no_shuffle_actor_dispatcher,
@@ -1547,7 +1547,7 @@ impl CatalogController {
         let txn = inner.db.begin().await?;
 
         println!("111");
-        let database_fragment_infos = load_fragments(&txn, database_id, worker_nodes).await?;
+        let database_fragment_infos = load_fragment_info(&txn, database_id, worker_nodes).await?;
 
         debug!(?database_fragment_infos, "reload all actors");
 
