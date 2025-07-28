@@ -26,8 +26,8 @@ use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::{ObjectId, WorkerId};
 use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
 use risingwave_pb::meta::subscribe_response::Operation;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::PbSubscriptionUpstreamInfo;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use tracing::warn;
 
 use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder};

@@ -38,7 +38,7 @@ use tracing::Instrument;
 
 use super::{
     FragmentBackfillOrder, JobParallelismTarget, JobReschedulePolicy, JobReschedulePostUpdates,
-    JobRescheduleTarget, JobResourceGroupTarget, Locations, RescheduleOptions, ScaleControllerRef,
+    JobRescheduleTarget, JobResourceGroupTarget, Locations, ScaleControllerRef,
 };
 use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
@@ -884,9 +884,10 @@ impl GlobalStreamManager {
                 )
                 .await?;
         } else {
-            let reschedule_plan = self
+            let workers = worker_nodes.into_iter().map(|x| (x.id as i32, x)).collect();
+            let _ = self
                 .scale_controller
-                .generate_job_reschedule_plan(
+                .generate_job_reschedule_plan_dynamic(
                     JobReschedulePolicy {
                         targets: HashMap::from([(
                             job_id.table_id,
@@ -917,9 +918,43 @@ impl GlobalStreamManager {
                         resolve_no_shuffle_upstream: false,
                         skip_create_new_actors: false,
                     },
+                    workers,
                 )
                 .await?;
-            }
+
+            // let reschedule_plan = self
+            //     .scale_controller
+            //     .generate_job_reschedule_plan(JobReschedulePolicy {
+            //         targets: HashMap::from([(
+            //             job_id.table_id,
+            //             JobRescheduleTarget {
+            //                 parallelism: parallelism_change,
+            //                 resource_group: resource_group_change,
+            //             },
+            //         )]),
+            //     })
+            //     .await?;
+            //
+            // if reschedule_plan.reschedules.is_empty() {
+            //     tracing::debug!(
+            //         "empty reschedule plan generated for job {}, set the parallelism directly to {:?}",
+            //         job_id,
+            //         reschedule_plan.post_updates
+            //     );
+            //     self.scale_controller
+            //         .post_apply_reschedule(&HashMap::new(), &reschedule_plan.post_updates)
+            //         .await?;
+            // } else {
+            //     self.reschedule_actors(
+            //         database_id,
+            //         reschedule_plan,
+            //         RescheduleOptions {
+            //             resolve_no_shuffle_upstream: false,
+            //             skip_create_new_actors: false,
+            //         },
+            //     )
+            //     .await?;
+            // }
         };
 
         Ok(())
