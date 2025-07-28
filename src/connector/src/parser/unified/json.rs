@@ -624,11 +624,14 @@ impl JsonParseOptions {
 pub struct JsonAccess<'a> {
     value: BorrowedValue<'a>,
     options: &'a JsonParseOptions,
+    field_cache: JsonFieldCache,
 }
 
 impl<'a> JsonAccess<'a> {
     pub fn new_with_options(value: BorrowedValue<'a>, options: &'a JsonParseOptions) -> Self {
-        Self { value, options }
+        let mut field_cache = JsonFieldCache::new(options.ignoring_keycase);
+        field_cache.build_from_object(&value);
+        Self { value, options, field_cache }
     }
 
     pub fn new(value: BorrowedValue<'a>) -> Self {
@@ -641,11 +644,20 @@ impl Access for JsonAccess<'_> {
         let mut value = &self.value;
 
         for (idx, &key) in path.iter().enumerate() {
-            if let Some(sub_value) = if self.options.ignoring_keycase {
-                json_object_get_case_insensitive(value, key)
+            let obj = value.as_object().ok_or_else(|| AccessError::TypeError {
+                expected: "object".to_string(),
+                got: value.value_type().to_string(),
+                value: value.to_string(),
+            })?;
+
+            let actual_key = if self.options.ignoring_keycase {
+                self.field_cache.get_field_name(key)
+                    .unwrap_or(key)
             } else {
-                value.get(key)
-            } {
+                key
+            };
+
+            if let Some(sub_value) = obj.get(actual_key) {
                 value = sub_value;
             } else {
                 Err(AccessError::Undefined {
@@ -656,6 +668,47 @@ impl Access for JsonAccess<'_> {
         }
 
         self.options.parse(value, type_expected)
+    }
+}
+
+/// Cache for case-insensitive field lookups
+#[derive(Debug, Clone)]
+pub struct JsonFieldCache {
+    /// Maps lowercase field names to original field names
+    field_map: std::collections::HashMap<String, String>,
+    /// Whether this cache is for case-insensitive lookups
+    case_insensitive: bool,
+}
+
+impl JsonFieldCache {
+    pub fn new(case_insensitive: bool) -> Self {
+        Self {
+            field_map: std::collections::HashMap::new(),
+            case_insensitive,
+        }
+    }
+
+    /// Build cache from JSON object keys
+    pub fn build_from_object(&mut self, v: &simd_json::BorrowedValue<'_>) {
+        if let Some(obj) = v.as_object() {
+            self.field_map.clear();
+            for (k, _) in obj {
+                if self.case_insensitive {
+                    self.field_map.insert(k.to_lowercase(), k.to_string());
+                } else {
+                    self.field_map.insert(k.to_string(), k.to_string());
+                }
+            }
+        }
+    }
+
+    /// Get the actual field name from the cache
+    pub fn get_field_name(&self, key: &str) -> Option<&str> {
+        if self.case_insensitive {
+            self.field_map.get(&key.to_lowercase()).map(|s| s.as_str())
+        } else {
+            self.field_map.get(key).map(|s| s.as_str())
+        }
     }
 }
 
