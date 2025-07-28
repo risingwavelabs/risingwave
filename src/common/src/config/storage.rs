@@ -206,9 +206,24 @@ pub struct StorageConfig {
     pub iceberg_compaction_min_size_per_partition_mb: u32,
     #[serde(default = "default::storage::iceberg_compaction_max_file_count_per_partition")]
     pub iceberg_compaction_max_file_count_per_partition: u32,
-
     #[serde(default = "default::storage::iceberg_compaction_write_parquet_max_row_group_rows")]
     pub iceberg_compaction_write_parquet_max_row_group_rows: usize,
+
+    /// The ratio of iceberg compaction max parallelism to the number of CPU cores
+    #[serde(default = "default::storage::iceberg_compaction_task_parallelism_ratio")]
+    pub iceberg_compaction_task_parallelism_ratio: f32,
+    /// Whether to enable heuristic output parallelism in iceberg compaction.
+    #[serde(default = "default::storage::iceberg_compaction_enable_heuristic_output_parallelism")]
+    pub iceberg_compaction_enable_heuristic_output_parallelism: bool,
+    /// Maximum number of concurrent file close operations
+    #[serde(default = "default::storage::iceberg_compaction_max_concurrent_closes")]
+    pub iceberg_compaction_max_concurrent_closes: usize,
+    /// Whether to enable dynamic size estimation for iceberg compaction.
+    #[serde(default = "default::storage::iceberg_compaction_enable_dynamic_size_estimation")]
+    pub iceberg_compaction_enable_dynamic_size_estimation: bool,
+    /// The smoothing factor for size estimation in iceberg compaction.(default: 0.3)
+    #[serde(default = "default::storage::iceberg_compaction_size_estimation_smoothing_factor")]
+    pub iceberg_compaction_size_estimation_smoothing_factor: f64,
 }
 
 /// the section `[storage.cache]` in `risingwave.toml`.
@@ -845,7 +860,13 @@ pub mod default {
         }
 
         pub fn compactor_max_task_multiplier() -> f32 {
-            3.0000
+            match std::env::var("RW_COMPACTOR_MODE")
+                .unwrap_or_default()
+                .as_str()
+            {
+                mode if mode.contains("iceberg") => 12.0000,
+                _ => 3.0000,
+            }
         }
 
         pub fn compactor_memory_available_proportion() -> f64 {
@@ -992,6 +1013,26 @@ pub mod default {
 
         pub fn iceberg_compaction_max_file_count_per_partition() -> u32 {
             32
+        }
+
+        pub fn iceberg_compaction_task_parallelism_ratio() -> f32 {
+            4.0
+        }
+
+        pub fn iceberg_compaction_enable_heuristic_output_parallelism() -> bool {
+            false
+        }
+
+        pub fn iceberg_compaction_max_concurrent_closes() -> usize {
+            8
+        }
+
+        pub fn iceberg_compaction_enable_dynamic_size_estimation() -> bool {
+            true
+        }
+
+        pub fn iceberg_compaction_size_estimation_smoothing_factor() -> f64 {
+            0.3
         }
     }
 

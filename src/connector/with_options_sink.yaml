@@ -598,6 +598,11 @@ IcebergConfig:
     required: false
     default: Default::default
     allow_alter_on_fly: true
+  - name: write_mode
+    field_type: String
+    comments: The iceberg write mode, can be `merge-on-read` or `copy-on-write`.
+    required: false
+    default: ICEBERG_WRITE_MODE_MERGE_ON_READ . to_owned ()
 KafkaConfig:
   fields:
   - name: topic

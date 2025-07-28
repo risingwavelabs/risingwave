@@ -15,7 +15,7 @@
 use risingwave_common::catalog::{Field, FieldDisplay};
 use risingwave_common::types::DataType;
 
-use super::{DefaultBehavior, Merge};
+use super::{DefaultBehavior, LogicalPlanVisitor, Merge};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::*;
 use crate::optimizer::plan_visitor::PlanVisitor;
@@ -38,7 +38,7 @@ impl StreamKeyChecker {
     }
 }
 
-impl PlanVisitor for StreamKeyChecker {
+impl LogicalPlanVisitor for StreamKeyChecker {
     type Result = Option<String>;
 
     type DefaultBehavior = impl DefaultBehavior<Self::Result>;
