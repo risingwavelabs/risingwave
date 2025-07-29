@@ -111,7 +111,7 @@ create table t (
 system ok
 psql -c "
     INSERT INTO t (v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v46) VALUES (
-        '{"test": "abc"}',
+        {\"test\": \"abc\"}',
         'source1',
         42,
         NOW(),
@@ -128,7 +128,7 @@ psql -c "
         '12:34:56.789'::time,
         '1 day 2 hours 3 minutes',
         E'\\x48656c6c6f',
-        '{"json": "test"}',
+        '{\"json\": \"test\"}',
         '<xml>test</xml>',
         point(1.0, 2.0),
         'citext_test',
@@ -167,7 +167,7 @@ system ok
 psql -c "
     ALTER TABLE t ADD COLUMN foo JSONB;
     INSERT INTO t (v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v46, foo) VALUES (
-        '{"test": "def"}',
+        {\"test\": \"abc\"}',
         'source2',
         43,
         NOW(),
@@ -184,7 +184,7 @@ psql -c "
         '23:45:12.123'::time,
         '2 days 3 hours 4 minutes',
         E'\\x576f726c64',
-        '{"json2": "test2"}',
+        '{\"json2\": \"test2\"}',
         '<xml2>test2</xml2>',
         point(3.0, 4.0),
         'citext_test2',
