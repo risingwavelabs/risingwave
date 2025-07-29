@@ -194,7 +194,7 @@ impl LogSinker for BigQueryLogSinker {
 }
 
 impl BigQueryCommon {
-    async fn build_client(&self, aws_auth_props: &AwsAuthProps) -> Result<Client> {
+    pub async fn build_client(&self, aws_auth_props: &AwsAuthProps) -> Result<Client> {
         let auth_json = self.get_auth_json_from_path(aws_auth_props).await?;
 
         let service_account = serde_json::from_str::<ServiceAccountKey>(&auth_json)
@@ -217,7 +217,7 @@ impl BigQueryCommon {
         StorageWriterClient::new(credentials_file).await
     }
 
-    async fn get_auth_json_from_path(&self, aws_auth_props: &AwsAuthProps) -> Result<String> {
+    pub async fn get_auth_json_from_path(&self, aws_auth_props: &AwsAuthProps) -> Result<String> {
         if let Some(credentials) = &self.credentials {
             Ok(credentials.clone())
         } else if let Some(local_path) = &self.local_path {
@@ -232,7 +232,7 @@ impl BigQueryCommon {
             Ok(String::from_utf8(auth_vec).map_err(|e| SinkError::BigQuery(e.into()))?)
         } else {
             Err(SinkError::BigQuery(anyhow::anyhow!(
-                "`bigquery.local.path` and `bigquery.s3.path` set at least one, configure as needed."
+                "`bigquery.local.path`, `bigquery.s3.path`, or `bigquery.credentials` must be specified"
             )))
         }
     }
