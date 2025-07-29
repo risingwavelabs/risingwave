@@ -77,7 +77,7 @@ impl PlainParser {
         ));
 
         let schema_change_builder = Some(AccessBuilderImpl::DebeziumJson(
-            DebeziumJsonAccessBuilder::new_for_schema_event()?
+            DebeziumJsonAccessBuilder::new_for_schema_event()?,
         ));
 
         // Initialize batch JSON builder for JSON encoding
@@ -167,44 +167,53 @@ impl PlainParser {
         let meta = writer.source_meta();
 
         // Process new payload with batch processing for JSON
-        if let Some(ref data) = payload {
-            if let Some(ref mut batch_builder) = self.batch_json_builder {
-                // Use batch processing for JSON arrays
-                let accesses = batch_builder.parse_to_batch(data.clone())?;
-                
-                if accesses.is_empty() {
-                    return Ok(ParseResult::Rows);
-                }
-                
-                // Process all accesses in the batch
-                for access in accesses {
-                    let mut row_op: KvEvent<AccessImpl<'_>, AccessImpl<'_>> = KvEvent::default();
+        if let Some(ref data) = payload
+            && let Some(ref mut batch_builder) = self.batch_json_builder
+        {
+            // Use batch processing for JSON arrays
+            let accesses = batch_builder.parse_to_batch(data.clone())?;
 
-                    if let Some(ref key_data) = key {
-                        if let Some(ref mut key_builder) = self.key_builder {
-                            row_op.with_key(key_builder.generate_accessor(key_data.clone(), meta).await?);
-                        }
-                    }
-                    
-                    row_op.with_value(access);
-                    writer.do_insert(|column: &SourceColumnDesc| row_op.access_field::<false>(column))?;
-                }
+            if accesses.is_empty() {
                 return Ok(ParseResult::Rows);
             }
+
+            // Process all accesses in the batch
+            for access in accesses {
+                let mut row_op: KvEvent<AccessImpl<'_>, AccessImpl<'_>> = KvEvent::default();
+
+                if let Some(ref key_data) = key {
+                    if let Some(ref mut key_builder) = self.key_builder {
+                        row_op.with_key(
+                            key_builder
+                                .generate_accessor(key_data.clone(), meta)
+                                .await?,
+                        );
+                    }
+                }
+
+                row_op.with_value(access);
+                writer
+                    .do_insert(|column: &SourceColumnDesc| row_op.access_field::<false>(column))?;
+            }
+            return Ok(ParseResult::Rows);
         }
 
         // Fallback to individual processing for non-JSON or when batch processing is disabled
         let mut row_op: KvEvent<AccessImpl<'_>, AccessImpl<'_>> = KvEvent::default();
 
-        if let Some(ref data) = key {
-            if let Some(ref mut key_builder) = self.key_builder {
-                // key is optional in format plain
-                row_op.with_key(key_builder.generate_accessor(data.clone(), meta).await?);
-            }
+        if let Some(ref data) = key
+            && let Some(ref mut key_builder) = self.key_builder
+        {
+            // key is optional in format plain
+            row_op.with_key(key_builder.generate_accessor(data.clone(), meta).await?);
         }
         if let Some(ref data) = payload {
             // the data part also can be an empty vec
-            row_op.with_value(self.payload_builder.generate_accessor(data.clone(), meta).await?);
+            row_op.with_value(
+                self.payload_builder
+                    .generate_accessor(data.clone(), meta)
+                    .await?,
+            );
         }
 
         writer.do_insert(|column: &SourceColumnDesc| row_op.access_field::<false>(column))?;

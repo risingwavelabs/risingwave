@@ -52,10 +52,10 @@ use crate::source::{
     SourceContextRef, SourceCtrlOpts, SourceMeta,
 };
 
-mod access_builder;
+pub mod access_builder;
 pub mod additional_columns;
 mod avro;
-mod batch_json_parser;
+pub mod batch_json_parser;
 mod bytes_parser;
 mod canal;
 mod chunk_builder;
@@ -71,7 +71,7 @@ mod postgres;
 mod protobuf;
 pub mod scalar_adapter;
 mod sql_server;
-mod unified;
+pub mod unified;
 mod upsert_parser;
 mod utils;
 

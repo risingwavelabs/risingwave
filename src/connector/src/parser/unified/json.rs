@@ -631,7 +631,11 @@ impl<'a> JsonAccess<'a> {
     pub fn new_with_options(value: BorrowedValue<'a>, options: &'a JsonParseOptions) -> Self {
         let mut field_cache = JsonFieldCache::new(options.ignoring_keycase);
         field_cache.build_from_object(&value);
-        Self { value, options, field_cache }
+        Self {
+            value,
+            options,
+            field_cache,
+        }
     }
 
     pub fn new(value: BorrowedValue<'a>) -> Self {
@@ -645,14 +649,13 @@ impl Access for JsonAccess<'_> {
 
         for (idx, &key) in path.iter().enumerate() {
             let obj = value.as_object().ok_or_else(|| AccessError::TypeError {
-                expected: "object".to_string(),
+                expected: "object".to_owned(),
                 got: value.value_type().to_string(),
                 value: value.to_string(),
             })?;
 
             let actual_key = if self.options.ignoring_keycase {
-                self.field_cache.get_field_name(key)
-                    .unwrap_or(key)
+                self.field_cache.get_field_name(key).unwrap_or(key)
             } else {
                 key
             };

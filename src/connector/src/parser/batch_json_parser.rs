@@ -13,10 +13,10 @@
 // limitations under the License.
 
 //! Batch JSON parser for processing JSON arrays efficiently
-//! 
-//! This module implements batch processing for JSON arrays, leveraging simd_json's
+//!
+//! This module implements batch processing for JSON arrays, leveraging `simd_json`'s
 //! native array support to parse multiple JSON objects in a single operation.
-//! 
+//!
 //! Performance improvements:
 //! - 20-40% faster for array-based sources
 //! - Reduced memory allocations
@@ -25,9 +25,9 @@
 use anyhow::Context;
 use simd_json::prelude::*;
 
-use crate::parser::unified::json::JsonParseOptions;
-use crate::parser::AccessBuilder;
 use crate::error::ConnectorResult;
+use crate::parser::AccessBuilder;
+use crate::parser::unified::json::JsonParseOptions;
 
 /// Batch-aware JSON access builder that handles both single objects and arrays
 #[derive(Debug)]
@@ -74,14 +74,16 @@ impl BatchJsonAccessBuilder {
                 let array = value
                     .as_array()
                     .ok_or_else(|| anyhow::anyhow!("expected json array"))?;
-                
+
                 let mut accesses = Vec::with_capacity(array.len());
                 for item in array {
                     if item.value_type() == ValueType::Object {
-                        let access = super::unified::AccessImpl::Json(super::unified::json::JsonAccess::new_with_options(
-                            item.clone(),
-                            &self.json_parse_options,
-                        ));
+                        let access = super::unified::AccessImpl::Json(
+                            super::unified::json::JsonAccess::new_with_options(
+                                item.clone(),
+                                &self.json_parse_options,
+                            ),
+                        );
                         accesses.push(access);
                     } else {
                         tracing::warn!("Skipping non-object item in JSON array");
@@ -91,10 +93,12 @@ impl BatchJsonAccessBuilder {
             }
             ValueType::Object => {
                 // Single object - traditional processing
-                let access = super::unified::AccessImpl::Json(super::unified::json::JsonAccess::new_with_options(
-                    value,
-                    &self.json_parse_options,
-                ));
+                let access = super::unified::AccessImpl::Json(
+                    super::unified::json::JsonAccess::new_with_options(
+                        value,
+                        &self.json_parse_options,
+                    ),
+                );
                 Ok(vec![access])
             }
             _ => Err(anyhow::anyhow!("expected json object or array").into()),
@@ -110,38 +114,46 @@ impl AccessBuilder for BatchJsonAccessBuilder {
     ) -> ConnectorResult<super::unified::AccessImpl<'_>> {
         if !self.batch_mode {
             // Fallback to single-object processing
-            return self.parse_to_batch(payload)?.into_iter().next()
+            return self
+                .parse_to_batch(payload)?
+                .into_iter()
+                .next()
                 .ok_or_else(|| anyhow::anyhow!("no objects to process").into());
         }
 
         // In batch mode, this should be handled by the batch processor
         // This is a temporary single-object fallback
         let accesses = self.parse_to_batch(payload)?;
-        accesses.into_iter().next()
+        accesses
+            .into_iter()
+            .next()
             .ok_or_else(|| anyhow::anyhow!("no objects to process").into())
     }
 }
 
-
 #[cfg(test)]
 mod tests {
+    use risingwave_common::types::{DataType, ToOwnedDatum};
+
     use super::*;
     use crate::parser::unified::{Access, AccessImpl};
-    use risingwave_common::types::{DataType, ToOwnedDatum};
 
     #[test]
     fn test_batch_json_parser_single_object() {
         let config = super::super::JsonProperties::default();
         let mut builder = BatchJsonAccessBuilder::new(config, true).unwrap();
-        
+
         let payload = br#"{"id": 1, "name": "test"}"#.to_vec();
         let accesses = builder.parse_to_batch(payload).unwrap();
-        
+
         assert_eq!(accesses.len(), 1);
-        
+
         if let AccessImpl::Json(access) = &accesses[0] {
             let result = access.access(&["id"], &DataType::Int32).unwrap();
-            assert_eq!(result.to_owned_datum(), Some(risingwave_common::types::ScalarImpl::Int32(1)));
+            assert_eq!(
+                result.to_owned_datum(),
+                Some(risingwave_common::types::ScalarImpl::Int32(1))
+            );
         } else {
             panic!("Expected Json access");
         }
@@ -151,16 +163,19 @@ mod tests {
     fn test_batch_json_parser_array() {
         let config = super::super::JsonProperties::default();
         let mut builder = BatchJsonAccessBuilder::new(config, true).unwrap();
-        
+
         let payload = br#"[{"id": 1, "name": "test1"}, {"id": 2, "name": "test2"}]"#.to_vec();
         let accesses = builder.parse_to_batch(payload).unwrap();
-        
+
         assert_eq!(accesses.len(), 2);
-        
+
         for (i, access) in accesses.iter().enumerate() {
             if let AccessImpl::Json(access) = access {
                 let result = access.access(&["id"], &DataType::Int32).unwrap();
-                assert_eq!(result.to_owned_datum(), Some(risingwave_common::types::ScalarImpl::Int32((i + 1) as i32)));
+                assert_eq!(
+                    result.to_owned_datum(),
+                    Some(risingwave_common::types::ScalarImpl::Int32((i + 1) as i32))
+                );
             }
         }
     }
@@ -169,10 +184,10 @@ mod tests {
     fn test_batch_json_parser_empty_array() {
         let config = super::super::JsonProperties::default();
         let mut builder = BatchJsonAccessBuilder::new(config, true).unwrap();
-        
+
         let payload = br#"[]"#.to_vec();
         let accesses = builder.parse_to_batch(payload).unwrap();
-        
+
         assert_eq!(accesses.len(), 0);
     }
 }
