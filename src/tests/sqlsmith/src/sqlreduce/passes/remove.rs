@@ -254,6 +254,7 @@ impl Transform for HavingRemove {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::parse_sql;

@@ -296,6 +296,7 @@ impl Transform for SetOperationPullup {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::parse_sql;
