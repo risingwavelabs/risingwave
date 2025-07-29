@@ -22,17 +22,18 @@ use crate::PlanRef;
 use crate::expr::{Expr, ExprImpl, ExprType, InputRef};
 use crate::optimizer::plan_node::generic::{TopNLimit, VectorSearch};
 use crate::optimizer::plan_node::{LogicalProject, LogicalVectorSearch, PlanTreeNodeUnary};
+use crate::optimizer::rule::prelude::*;
 use crate::optimizer::rule::{BoxedRule, Rule};
 
 pub struct TopNToVectorSearchRule;
 
 impl TopNToVectorSearchRule {
-    pub fn create() -> BoxedRule {
+    pub fn create() -> BoxedRule<Logical> {
         Box::new(TopNToVectorSearchRule)
     }
 }
 
-impl Rule for TopNToVectorSearchRule {
+impl Rule<Logical> for TopNToVectorSearchRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let top_n = plan.as_logical_top_n()?;
         if !top_n.group_key().is_empty() {
@@ -63,8 +64,23 @@ impl Rule for TopNToVectorSearchRule {
         let ExprImpl::FunctionCall(call) = order_expr else {
             return None;
         };
-        let distance_type = match call.func_type() {
-            ExprType::L2Distance => PbDistanceType::L2,
+        let (call, distance_type) = match call.func_type() {
+            ExprType::L1Distance => (call, PbDistanceType::L1),
+            ExprType::L2Distance => (call, PbDistanceType::L2),
+            ExprType::CosineDistance => (call, PbDistanceType::Cosine),
+            ExprType::Neg => {
+                let [neg_input] = call.inputs() else {
+                    return None;
+                };
+                let ExprImpl::FunctionCall(call) = neg_input else {
+                    return None;
+                };
+                if let ExprType::InnerProduct = call.func_type() {
+                    (call, PbDistanceType::InnerProduct)
+                } else {
+                    return None;
+                }
+            }
             _ => {
                 return None;
             }

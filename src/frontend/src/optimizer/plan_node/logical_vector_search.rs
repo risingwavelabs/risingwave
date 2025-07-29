@@ -177,19 +177,23 @@ impl ToBatch for LogicalVectorSearch {
     fn to_batch(&self) -> crate::error::Result<PlanRef> {
         let input = self.input().to_batch()?;
         let mut exprs = self.core.non_distance_columns.clone();
-        let expr_type = match self.core.distance_type {
+        let (neg, expr_type) = match self.core.distance_type {
             PbDistanceType::Unspecified => {
                 unreachable!()
             }
-            PbDistanceType::L2 => ExprType::L2Distance,
-            PbDistanceType::L1 | PbDistanceType::Cosine | PbDistanceType::InnerProduct => {
-                todo!("VECTOR_PLACEHOLDER")
-            }
+            PbDistanceType::L1 => (false, ExprType::L1Distance),
+            PbDistanceType::L2 => (false, ExprType::L2Distance),
+            PbDistanceType::Cosine => (false, ExprType::CosineDistance),
+            PbDistanceType::InnerProduct => (true, ExprType::InnerProduct),
         };
-        exprs.push(ExprImpl::FunctionCall(Box::new(FunctionCall::new(
+        let mut expr = ExprImpl::FunctionCall(Box::new(FunctionCall::new(
             expr_type,
             vec![self.core.left.clone(), self.core.right.clone()],
-        )?)));
+        )?));
+        if neg {
+            expr = ExprImpl::FunctionCall(Box::new(FunctionCall::new(ExprType::Neg, vec![expr])?));
+        }
+        exprs.push(expr);
 
         let project = generic::Project::new(exprs, input);
         let input = BatchProject::new(project).into();
