@@ -182,14 +182,14 @@ impl SinkWriter for WebhookSinkWriter {
     }
 }
 
-pub fn string_to_map(s: &str, pair_delimeter: char) -> Option<HashMap<String, String>> {
+pub fn string_to_map(s: &str, pair_delimiter: char) -> Option<HashMap<String, String>> {
     if s.trim().is_empty() {
         return Some(HashMap::new());
     }
 
     s.split(',')
         .map(|s| {
-            let mut kv = s.trim().split(pair_delimeter);
+            let mut kv = s.trim().split(pair_delimiter);
             Some((kv.next()?.trim().to_string(), kv.next()?.trim().to_string()))
         })
         .collect()
