@@ -266,6 +266,7 @@ pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
             "int2" => Some(PgType::INT2_ARRAY),
             "int4" => Some(PgType::INT4_ARRAY),
             "int8" => Some(PgType::INT8_ARRAY),
+            "bit" => Some(PgType::BIT_ARRAY),
             "float4" => Some(PgType::FLOAT4_ARRAY),
             "float8" => Some(PgType::FLOAT8_ARRAY),
             "numeric" => Some(PgType::NUMERIC_ARRAY),
@@ -288,6 +289,7 @@ pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
         // Handle non-array types
         match ty_name_lower.as_str() {
             "int2" => Some(PgType::INT2),
+            "bit" => Some(PgType::BIT),
             "int" | "int4" => Some(PgType::INT4),
             "int8" => Some(PgType::INT8),
             "real" | "float4" => Some(PgType::FLOAT4),
@@ -318,6 +320,7 @@ pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
 pub fn pg_type_to_rw_type(pg_type: &PgType) -> ConnectorResult<DataType> {
     let data_type = match *pg_type {
         PgType::BOOL => DataType::Boolean,
+        PgType::BIT => DataType::Boolean,
         PgType::INT2 => DataType::Int16,
         PgType::INT4 => DataType::Int32,
         PgType::INT8 => DataType::Int64,
@@ -339,6 +342,7 @@ pub fn pg_type_to_rw_type(pg_type: &PgType) -> ConnectorResult<DataType> {
         PgType::JSON | PgType::JSONB => DataType::Jsonb,
         // Array types
         PgType::BOOL_ARRAY => DataType::List(Box::new(DataType::Boolean)),
+        PgType::BIT_ARRAY => DataType::List(Box::new(DataType::Boolean)),
         PgType::INT2_ARRAY => DataType::List(Box::new(DataType::Int16)),
         PgType::INT4_ARRAY => DataType::List(Box::new(DataType::Int32)),
         PgType::INT8_ARRAY => DataType::List(Box::new(DataType::Int64)),
