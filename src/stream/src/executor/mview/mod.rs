@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod materialize;
-mod refreshable_materialize;
+pub mod materialize;
 
 #[cfg(test)]
 pub(crate) mod test_utils;
 
 pub use materialize::*;
-pub use refreshable_materialize::*;
