@@ -228,10 +228,7 @@ drop source pg_source_ts cascade;
 system ok
 psql -c "
     DROP TABLE IF EXISTS test_comprehensive_types;
-
-    -- Create extensions for special data types
     CREATE EXTENSION IF NOT EXISTS citext;
-
     CREATE TABLE test_comprehensive_types (
         v1 uuid DEFAULT gen_random_uuid() PRIMARY KEY,
         v2 jsonb NOT NULL,

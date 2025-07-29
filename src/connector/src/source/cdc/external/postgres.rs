@@ -261,8 +261,7 @@ pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
     let ty_name_lower = ty_name.to_lowercase();
 
     // Handle array types (prefixed with _)
-    if ty_name_lower.starts_with('_') {
-        let base_type = &ty_name_lower[1..]; // Remove the _ prefix
+    if let Some(base_type) = ty_name_lower.strip_prefix('_') {
         match base_type {
             "int2" => Some(PgType::INT2_ARRAY),
             "int4" => Some(PgType::INT4_ARRAY),
