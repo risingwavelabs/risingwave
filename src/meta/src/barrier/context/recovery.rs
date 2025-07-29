@@ -442,7 +442,7 @@ impl GlobalBarrierWorkerContextImpl {
                         .await?;
 
                     // get split assignments for all actors
-                    let source_splits = self.source_manager.list_assignments().await;
+                    let source_splits = self.source_manager.list_assignments_from_db().await?;
                     Ok(BarrierWorkerRuntimeInfoSnapshot {
                         active_streaming_nodes,
                         database_job_infos: info,
@@ -571,7 +571,7 @@ impl GlobalBarrierWorkerContextImpl {
         })?;
 
         // get split assignments for all actors
-        let source_splits = self.source_manager.list_assignments().await;
+        let source_splits = self.source_manager.list_assignments_from_db().await?;
         Ok(Some(DatabaseRuntimeInfoSnapshot {
             job_infos: info,
             state_table_committed_epochs,
