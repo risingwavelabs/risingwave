@@ -107,7 +107,9 @@ impl CompleteBarrierTask {
             // Handle load finished source IDs for refreshable batch sources
             // Spawn this asynchronously to avoid deadlock during barrier collection
             if !self.load_finished_source_ids.is_empty() {
-                context.handle_load_finished_source_ids(self.load_finished_source_ids.clone());
+                context
+                    .handle_load_finished_source_ids(self.load_finished_source_ids.clone())
+                    .await?;
             }
 
             for command_ctx in self

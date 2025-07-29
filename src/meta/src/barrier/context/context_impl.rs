@@ -105,53 +105,51 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         self.reload_database_runtime_info_impl(database_id).await
     }
 
-    fn handle_load_finished_source_ids(&self, load_finished_source_ids: Vec<u32>) {
-        let metadata_manager = self.metadata_manager.clone();
-        let barrier_scheduler = self.barrier_scheduler.clone();
+    async fn handle_load_finished_source_ids(
+        &self,
+        load_finished_source_ids: Vec<u32>,
+    ) -> MetaResult<()> {
+        use risingwave_common::catalog::TableId;
 
-        // handle_load_finished_source_ids is called when collecting barrier,
-        // so we need to spawn a new task to yield a LoadFinish barrier to avoid deadlock.
-        tokio::spawn(async move {
-            use risingwave_common::catalog::TableId;
+        use crate::barrier::Command;
+        for associated_source_id in load_finished_source_ids {
+            let res: MetaResult<()> = try {
+                tracing::info!(%associated_source_id, "Scheduling LoadFinish command for refreshable batch source");
 
-            use crate::barrier::Command;
-            for associated_source_id in load_finished_source_ids {
-                let res: MetaResult<()> = try {
-                    tracing::info!(%associated_source_id, "Scheduling LoadFinish command for refreshable batch source");
+                // For refreshable batch sources, associated_source_id is the table_id
+                let table_id = TableId::new(associated_source_id);
+                let associated_source_id = table_id;
 
-                    // For refreshable batch sources, associated_source_id is the table_id
-                    let table_id = TableId::new(associated_source_id);
-                    let associated_source_id = table_id;
+                // Find the database ID for this table
+                let database_id = self
+                    .metadata_manager
+                    .catalog_controller
+                    .get_object_database_id(table_id.table_id() as _)
+                    .await
+                    .context("Failed to get database id for table")?;
 
-                    // Find the database ID for this table
-                    let database_id = metadata_manager
-                        .catalog_controller
-                        .get_object_database_id(table_id.table_id() as _)
-                        .await
-                        .context("Failed to get database id for table")?;
-
-                    // Create LoadFinish command
-                    let load_finish_command = Command::LoadFinish {
-                        table_id,
-                        associated_source_id,
-                    };
-
-                    // Schedule the command through the barrier system
-                    barrier_scheduler
-                        .run_command(
-                            risingwave_common::catalog::DatabaseId::new(database_id as u32),
-                            load_finish_command,
-                        )
-                        .await
-                        .context("Failed to schedule LoadFinish command")?;
-
-                    tracing::info!(%table_id, %associated_source_id, "LoadFinish command scheduled successfully");
+                // Create LoadFinish command
+                let load_finish_command = Command::LoadFinish {
+                    table_id,
+                    associated_source_id,
                 };
-                if let Err(e) = res {
-                    tracing::error!(error = %e.as_report(),%associated_source_id, "Failed to handle source load finished");
-                }
+
+                // Schedule the command through the barrier system without waiting
+                self.barrier_scheduler
+                    .run_command_no_wait(
+                        risingwave_common::catalog::DatabaseId::new(database_id as u32),
+                        load_finish_command,
+                    )
+                    .context("Failed to schedule LoadFinish command")?;
+
+                tracing::info!(%table_id, %associated_source_id, "LoadFinish command scheduled successfully");
+            };
+            if let Err(e) = res {
+                tracing::error!(error = %e.as_report(),%associated_source_id, "Failed to handle source load finished");
             }
-        });
+        }
+
+        Ok(())
     }
 }
 

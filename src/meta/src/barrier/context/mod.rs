@@ -76,7 +76,10 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         database_id: DatabaseId,
     ) -> MetaResult<Option<DatabaseRuntimeInfoSnapshot>>;
 
-    fn handle_load_finished_source_ids(&self, load_finished_source_ids: Vec<u32>);
+    fn handle_load_finished_source_ids(
+        &self,
+        load_finished_source_ids: Vec<u32>,
+    ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 }
 
 pub(super) struct GlobalBarrierWorkerContextImpl {

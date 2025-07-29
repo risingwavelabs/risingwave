@@ -124,7 +124,10 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         unreachable!()
     }
 
-    fn handle_load_finished_source_ids(&self, _load_finished_source_ids: Vec<u32>) {
+    async fn handle_load_finished_source_ids(
+        &self,
+        _load_finished_source_ids: Vec<u32>,
+    ) -> MetaResult<()> {
         unimplemented!()
     }
 }
