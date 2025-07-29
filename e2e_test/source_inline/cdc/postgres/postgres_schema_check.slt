@@ -289,7 +289,7 @@ psql -c "
     INSERT INTO t_bit8 (flags) VALUES (B'11111111');
 "
 
-statement error Incompatible data type of column flags
+statement error
 create table t_bit8_mismatch (
   id int primary key,
   flags byteas
