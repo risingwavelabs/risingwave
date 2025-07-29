@@ -268,6 +268,7 @@ pub async fn handle_create_sql_function(
                     }
                 }
                 Err(e) => {
+                    // TODO: simplify error message
                     if let ErrorCode::BindErrorRoot { expr: _, error } = e.inner() {
                         let invalid_msg = error.to_string();
 

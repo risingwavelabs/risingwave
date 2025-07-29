@@ -21,7 +21,7 @@ use risingwave_common::catalog::FunctionId;
 use risingwave_common::session_config::{SearchPath, SessionConfig};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_sqlparser::ast::{Expr as AstExpr, SelectItem, SetExpr, Statement};
+use risingwave_sqlparser::ast::{Expr as AstExpr, Statement};
 
 use crate::error::Result;
 
@@ -203,8 +203,8 @@ impl UdfContext {
         self.udf_param_context.clone()
     }
 
-    /// A common utility function to extract sql udf
-    /// expression out from the input `ast`
+    /// A common utility function to extract sql udf expression out from the input `ast` as
+    /// a subquery.
     pub fn extract_udf_expression(ast: Vec<Statement>) -> Result<AstExpr> {
         if ast.len() != 1 {
             return Err(ErrorCode::InvalidInputSyntax(
@@ -214,36 +214,14 @@ impl UdfContext {
         }
 
         // Extract the expression out
-        let Statement::Query(query) = ast[0].clone() else {
+        let Statement::Query(query) = ast.into_iter().next().unwrap() else {
             return Err(ErrorCode::InvalidInputSyntax(
                 "invalid function definition, please recheck the syntax".to_owned(),
             )
             .into());
         };
 
-        let SetExpr::Select(select) = query.body else {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "missing `select` body for sql udf expression, please recheck the syntax"
-                    .to_owned(),
-            )
-            .into());
-        };
-
-        if select.projection.len() != 1 {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "`projection` should contain only one `SelectItem`".to_owned(),
-            )
-            .into());
-        }
-
-        let SelectItem::UnnamedExpr(expr) = select.projection[0].clone() else {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "expect `UnnamedExpr` for `projection`".to_owned(),
-            )
-            .into());
-        };
-
-        Ok(expr)
+        Ok(AstExpr::Subquery(query))
     }
 }
 
