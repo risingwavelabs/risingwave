@@ -49,23 +49,16 @@ impl EnforceSecret for WebhookConfig {
 pub struct WebhookSink {
     pub config: WebhookConfig,
     schema: Schema,
-    pk_indices: Vec<usize>,
     is_append_only: bool,
 }
 
 impl EnforceSecret for WebhookSink {}
 
 impl WebhookSink {
-    pub fn new(
-        config: WebhookConfig,
-        schema: Schema,
-        pk_indices: Vec<usize>,
-        is_append_only: bool,
-    ) -> Result<Self> {
+    pub fn new(config: WebhookConfig, schema: Schema, is_append_only: bool) -> Result<Self> {
         Ok(Self {
             config,
             schema,
-            pk_indices,
             is_append_only,
         })
     }
@@ -78,12 +71,7 @@ impl TryFrom<SinkParam> for WebhookSink {
         let schema = param.schema();
         let config = WebhookConfig::from_btreemap(param.properties)
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
-        WebhookSink::new(
-            config,
-            schema,
-            param.downstream_pk,
-            param.sink_type.is_append_only(),
-        )
+        WebhookSink::new(config, schema, param.sink_type.is_append_only())
     }
 }
 
@@ -109,8 +97,7 @@ impl Sink for WebhookSink {
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(
-            WebhookSinkWriter::new(self.config.clone(), self.schema.clone())
-                .await?
+            WebhookSinkWriter::new(self.config.clone(), self.schema.clone())?
                 .into_log_sinker(SinkWriterMetrics::new(&writer_param)),
         )
     }
@@ -123,7 +110,7 @@ pub struct WebhookSinkWriter {
 }
 
 impl WebhookSinkWriter {
-    async fn new(config: WebhookConfig, schema: Schema) -> anyhow::Result<Self> {
+    fn new(config: WebhookConfig, schema: Schema) -> anyhow::Result<Self> {
         let client = construct_http_client(&config.endpoint, config.headers.clone())?;
         Ok(Self {
             config,
@@ -159,17 +146,14 @@ impl SinkWriter for WebhookSinkWriter {
     /// Write a stream chunk to sink
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         for (op, row) in chunk.rows() {
-            match op {
-                Op::Insert => {
-                    let row_json_string = Value::Object(
-                        self.row_encoder
-                            .encode(row)
-                            .map_err(|e| SinkError::Webhook(anyhow!(e)))?,
-                    )
-                    .to_string();
-                    self.write(row_json_string).await?;
-                }
-                _ => {}
+            if op == Op::Insert {
+                let row_json_string = Value::Object(
+                    self.row_encoder
+                        .encode(row)
+                        .map_err(|e| SinkError::Webhook(anyhow!(e)))?,
+                )
+                .to_string();
+                self.write(row_json_string).await?;
             }
         }
         Ok(())
@@ -177,7 +161,7 @@ impl SinkWriter for WebhookSinkWriter {
 
     /// Receive a barrier and mark the end of current epoch. When `is_checkpoint` is true, the sink
     /// writer should commit the current epoch.
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata> {
+    async fn barrier(&mut self, _is_checkpoint: bool) -> Result<Self::CommitMetadata> {
         Ok(())
     }
 }
@@ -190,7 +174,7 @@ pub fn string_to_map(s: &str, pair_delimiter: char) -> Option<HashMap<String, St
     s.split(',')
         .map(|s| {
             let mut kv = s.trim().split(pair_delimiter);
-            Some((kv.next()?.trim().to_string(), kv.next()?.trim().to_string()))
+            Some((kv.next()?.trim().to_owned(), kv.next()?.trim().to_owned()))
         })
         .collect()
 }
