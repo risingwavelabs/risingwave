@@ -3,11 +3,8 @@ control substitution on
 system ok
 psql -c "
     DROP TABLE IF EXISTS t;
-
     CREATE EXTENSION IF NOT EXISTS citext;
-
     CREATE TYPE mood_enum AS ENUM ('happy', 'sad', 'angry');
-
     CREATE TABLE t (
         v1 uuid DEFAULT gen_random_uuid() PRIMARY KEY,
         v2 jsonb NOT NULL,
@@ -56,7 +53,6 @@ psql -c "
         v46 oid,
         v47 mood_enum
     );
-
     INSERT INTO t (v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v42, v43, v44, v45, v46, v47) VALUES (
         '{\"test\": \"abc\"}',
         'source1',
@@ -179,14 +175,11 @@ select count(*) from t;
 system ok
 psql -c "
     DROP TABLE IF EXISTS t_ltree;
-
     CREATE EXTENSION IF NOT EXISTS ltree;
-
     CREATE TABLE t_ltree (
         id serial PRIMARY KEY,
         path ltree NOT NULL
     );
-
     INSERT INTO t_ltree (path) VALUES ('Top.Science.Astronomy.Cosmology');
     INSERT INTO t_ltree (path) VALUES ('Top.Collections.Pictures.Astronomy.Stars');
 "
@@ -201,12 +194,10 @@ create table t_ltree_mismatch (
 system ok
 psql -c "
     DROP TABLE IF EXISTS t_bit;
-
     CREATE TABLE t_bit (
         id serial PRIMARY KEY,
         flag bit(1) NOT NULL
     );
-
     INSERT INTO t_bit (flag) VALUES (B'1');
     INSERT INTO t_bit (flag) VALUES (B'0');
 "
@@ -221,14 +212,11 @@ create table t_bit_mismatch (
 system ok
 psql -c "
     DROP TABLE IF EXISTS t_hstore;
-
     CREATE EXTENSION IF NOT EXISTS hstore;
-
     CREATE TABLE t_hstore (
         id serial PRIMARY KEY,
         attributes hstore NOT NULL
     );
-
     INSERT INTO t_hstore (attributes) VALUES ('key1=>value1, key2=>value2');
     INSERT INTO t_hstore (attributes) VALUES ('color=>red, size=>large');
 "
