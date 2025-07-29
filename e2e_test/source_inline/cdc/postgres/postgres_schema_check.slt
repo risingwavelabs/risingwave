@@ -165,6 +165,7 @@ create table t (
   v47 character varying
 ) from s table 'public.t';
 
+sleep 5s
 
 query TTTT
 select count(*) from t;
