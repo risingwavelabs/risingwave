@@ -46,8 +46,20 @@ use crate::sink::{
 
 pub const REDSHIFT_SINK: &str = "redshift";
 
-fn build_alter_add_column_sql(table_name: &str, columns: &Vec<(String, String)>) -> String {
-    let full_table_name = format!(r#""{}""#, table_name);
+fn build_full_table_name(schema_name: Option<&str>, table_name: &str) -> String {
+    if let Some(schema_name) = schema_name {
+        format!(r#""{}"."{}""#, schema_name, table_name)
+    } else {
+        format!(r#""{}""#, table_name)
+    }
+}
+
+fn build_alter_add_column_sql(
+    schema_name: Option<&str>,
+    table_name: &str,
+    columns: &Vec<(String, String)>,
+) -> String {
+    let full_table_name = build_full_table_name(schema_name, table_name);
     // redshift does not support add column IF NOT EXISTS yet.
     jdbc_jni_client::build_alter_add_column_sql(&full_table_name, columns, false)
 }
@@ -63,6 +75,9 @@ pub struct RedShiftConfig {
 
     #[serde(rename = "password")]
     pub password: Option<String>,
+
+    #[serde(rename = "schema")]
+    pub schema: Option<String>,
 
     #[serde(rename = "target.table.name")]
     pub table: String,
@@ -154,7 +169,12 @@ impl Sink for RedshiftSink {
         if self.config.create_table_if_not_exists {
             let client = self.config.build_client()?;
             let schema = self.param.schema();
-            let build_table_sql = build_create_table_sql(&self.config.table, &schema, false)?;
+            let build_table_sql = build_create_table_sql(
+                self.config.schema.as_deref(),
+                &self.config.table,
+                &schema,
+                false,
+            )?;
             client.execute_sql_sync(&vec![build_table_sql])?;
             if !self.is_append_only {
                 let cdc_table = self.config.cdc_table.as_ref().ok_or_else(|| {
@@ -162,7 +182,12 @@ impl Sink for RedshiftSink {
                         "intermediate.table.name is required for append-only sink"
                     ))
                 })?;
-                let build_cdc_table_sql = build_create_table_sql(cdc_table, &schema, true)?;
+                let build_cdc_table_sql = build_create_table_sql(
+                    self.config.schema.as_deref(),
+                    cdc_table,
+                    &schema,
+                    true,
+                )?;
                 client.execute_sql_sync(&vec![build_cdc_table_sql])?;
             }
         }
@@ -327,6 +352,9 @@ impl RedShiftSinkWriter {
         };
         param.properties.remove("intermediate.table.name");
         param.properties.remove("target.table.name");
+        if let Some(schema_name) = param.properties.remove("schema") {
+            param.properties.insert("schema.name".to_owned(), schema_name);
+        }
         param
             .properties
             .insert("table.name".to_owned(), full_table_name.clone());
@@ -377,13 +405,14 @@ impl SinkWriter for RedShiftSinkWriter {
 
 pub struct RedshiftSinkCommitter {
     client: JdbcJniClient,
+    schema_name: Option<String>,
     table_name: String,
     cdc_table_name: Option<String>,
     pk_column_names: Vec<String>,
     all_column_names: Vec<String>,
     schedule_seconds: u64,
     is_append_only: bool,
-    _periodic_task_handle: Option<tokio::task::JoinHandle<()>>,
+    periodic_task_handle: Option<tokio::task::JoinHandle<()>>,
     shutdown_sender: Option<tokio::sync::mpsc::UnboundedSender<()>>,
 }
 
@@ -397,6 +426,7 @@ impl RedshiftSinkCommitter {
         let client = config.build_client()?;
         let schedule_seconds = config.schedule_seconds;
         let (periodic_task_handle, shutdown_sender) = if !is_append_only {
+            let schema_name = config.schema.clone();
             let target_table_name = config.table.clone();
             let cdc_table_name = config.cdc_table.clone().ok_or_else(|| {
                 SinkError::Config(anyhow!(
@@ -415,6 +445,7 @@ impl RedshiftSinkCommitter {
             let periodic_task_handle = tokio::spawn(async move {
                 Self::run_periodic_query_task(
                     task_client,
+                    schema_name.as_deref(),
                     &cdc_table_name,
                     &target_table_name,
                     pk_column_names,
@@ -431,13 +462,14 @@ impl RedshiftSinkCommitter {
 
         Ok(Self {
             client,
+            schema_name: config.schema.clone(),
             table_name: config.table.clone(),
             cdc_table_name: config.cdc_table.clone(),
             pk_column_names: pk_column_names.clone(),
             all_column_names: all_column_names.clone(),
             is_append_only,
             schedule_seconds,
-            _periodic_task_handle: periodic_task_handle,
+            periodic_task_handle,
             shutdown_sender,
         })
     }
@@ -445,6 +477,7 @@ impl RedshiftSinkCommitter {
     /// Runs a periodic query task every hour
     async fn run_periodic_query_task(
         client: JdbcJniClient,
+        schema_name: Option<&str>,
         cdc_table_name: &str,
         target_table_name: &str,
         pk_column_names: Vec<String>,
@@ -455,6 +488,7 @@ impl RedshiftSinkCommitter {
         let mut interval_timer = interval(Duration::from_secs(schedule_seconds)); // 1 hour = 3600 seconds
         interval_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let sql = build_create_merge_into_task_sql(
+            schema_name,
             cdc_table_name,
             target_table_name,
             &pk_column_names,
@@ -516,6 +550,7 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                 })?;
             }
             let sql = build_alter_add_column_sql(
+                self.schema_name.as_deref(),
                 &self.table_name,
                 &add_columns
                     .iter()
@@ -544,6 +579,7 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                     ))
                 })?;
                 let sql = build_alter_add_column_sql(
+                    self.schema_name.as_deref(),
                     cdc_table_name,
                     &add_columns
                         .iter()
@@ -556,8 +592,16 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                 self.all_column_names
                     .extend(add_columns.iter().map(|f| f.name.clone()));
 
+                if let Some(shutdown_sender) = self.shutdown_sender.take() {
+                    let _ = shutdown_sender.send(());
+                }
+                if let Some(periodic_task_handle) = self.periodic_task_handle.take() {
+                    let _ = periodic_task_handle.await;
+                }
+
                 let (shutdown_sender, shutdown_receiver) = unbounded_channel();
                 let client = self.client.clone();
+                let schema_name = self.schema_name.clone();
                 let cdc_table_name = self.cdc_table_name.clone().unwrap();
                 let target_table_name = self.table_name.clone();
                 let pk_column_names = self.pk_column_names.clone();
@@ -566,6 +610,7 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                 let periodic_task_handle = tokio::spawn(async move {
                     Self::run_periodic_query_task(
                         client,
+                        schema_name.as_deref(),
                         &cdc_table_name,
                         &target_table_name,
                         pk_column_names,
@@ -576,7 +621,7 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                     .await;
                 });
                 self.shutdown_sender = Some(shutdown_sender);
-                self._periodic_task_handle = Some(periodic_task_handle);
+                self.periodic_task_handle = Some(periodic_task_handle);
             }
         }
         Ok(())
@@ -584,7 +629,8 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
 }
 
 pub fn build_create_table_sql(
-    full_table_name: &str,
+    schema_name: Option<&str>,
+    table_name: &str,
     schema: &Schema,
     need_op_and_row_id: bool,
 ) -> Result<String> {
@@ -601,8 +647,9 @@ pub fn build_create_table_sql(
         columns.push(format!("{} INT", SNOWFLAKE_SINK_OP));
     }
     let columns_str = columns.join(", ");
+    let full_table_name = build_full_table_name(schema_name, table_name);
     Ok(format!(
-        "CREATE TABLE IF NOT EXISTS \"{}\" ({})",
+        "CREATE TABLE IF NOT EXISTS {} ({})",
         full_table_name, columns_str
     ))
 }
@@ -633,13 +680,14 @@ fn convert_redshift_data_type(data_type: &DataType) -> Result<String> {
 }
 
 fn build_create_merge_into_task_sql(
+    schema_name: Option<&str>,
     cdc_table_name: &str,
     target_table_name: &str,
     pk_column_names: &Vec<String>,
     all_column_names: &Vec<String>,
 ) -> Vec<String> {
-    let cdc_table_name = format!("\"{}\"", cdc_table_name);
-    let target_table_name = format!("\"{}\"", target_table_name);
+    let cdc_table_name = build_full_table_name(schema_name, cdc_table_name);
+    let target_table_name = build_full_table_name(schema_name, target_table_name);
     let pk_names_str = pk_column_names.join(", ");
     let pk_names_eq_str = pk_column_names
         .iter()

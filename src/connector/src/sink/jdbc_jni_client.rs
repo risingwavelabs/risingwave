@@ -83,11 +83,7 @@ pub fn build_alter_add_column_sql(
         .map(|(name, typ)| format!(r#""{}" {}"#, name, typ))
         .collect();
     let column_definitions_str = column_definitions.join(", ");
-    let if_not_exists_str = if if_not_exists {
-        "IF NOT EXISTS "
-    } else {
-        ""
-    };
+    let if_not_exists_str = if if_not_exists { "IF NOT EXISTS " } else { "" };
     format!(
         "ALTER TABLE {} ADD COLUMN {}{} ",
         full_table_name, if_not_exists_str, column_definitions_str
