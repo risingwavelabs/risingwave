@@ -85,6 +85,9 @@ impl<'a> Reducer<'a> {
     /// - Returns an error if SQL parsing fails or if no statements are found.
     /// - Panics if the checker fails to validate failure preservation on the original failing query.
     pub async fn reduce(&mut self, sql: &str) -> Result<String> {
+        tracing::info!("Preparing schema...");
+        self.checker.prepare_schema().await;
+
         tracing::info!("Starting reduction...");
         let sql_statements = parse_sql(sql);
 
@@ -119,6 +122,10 @@ impl<'a> Reducer<'a> {
             reduced_sqls.push_str(";\n");
         }
         reduced_sqls.push_str(&reduced_sql);
+
+        // Drop the schema after the reduction is complete.
+        self.checker.drop_schema().await;
+
         Ok(reduced_sqls)
     }
 
