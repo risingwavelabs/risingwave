@@ -205,3 +205,85 @@ impl<'a> Reducer<'a> {
         ast.to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use thiserror_ext::AsReport;
+    use tokio_postgres::{Client, NoTls};
+
+    use super::*;
+
+    async fn setup_client() -> Client {
+        let (client, connection) = tokio_postgres::Config::new()
+            .host("localhost")
+            .port(4566)
+            .dbname("dev")
+            .user("root")
+            .password("")
+            .connect_timeout(Duration::from_secs(5))
+            .connect(NoTls)
+            .await
+            .unwrap_or_else(|e| panic!("Failed to connect to database: {}", e.as_report()));
+
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                tracing::error!(error = %e.as_report(), "Postgres connection error");
+            }
+        });
+
+        client
+    }
+
+    fn normalize_sql(sql: &str) -> String {
+        parse_sql(sql)
+            .into_iter()
+            .map(|stmt| stmt.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[tokio::test]
+    async fn test_reducer_pr21930() {
+        let client = setup_client().await;
+
+        let preceding_sql = "
+CREATE TABLE alltypes3 (
+    c1 boolean,
+    c2 smallint,
+    c3 integer,
+    c4 bigint,
+    c5 real,
+    c6 double precision,
+    c7 numeric,
+    c8 date,
+    c9 varchar,
+    c10 time without time zone,
+    c11 timestamp without time zone,
+    c13 interval,
+    c14 struct < a integer >,
+    c15 integer [],
+    c16 varchar [],
+    WATERMARK FOR c11 AS c11 - INTERVAL '5 seconds',
+    PRIMARY KEY (c4)
+) APPEND ONLY;
+        ";
+
+        let preceding_stmts = parse_sql(preceding_sql);
+        let checker = Checker::new(&client, preceding_stmts);
+
+        let failing_sql = "
+CREATE MATERIALIZED VIEW m1 AS SELECT t_0.c11 AS col_0, t_0.c11 AS col_1 FROM alltypes3 AS t_0 WHERE t_0.c1 GROUP BY t_0.c11, t_0.c1, t_0.c14, t_0.c4, t_0.c15 HAVING t_0.c1 EMIT ON WINDOW CLOSE;";
+        let expected_sql = format!(
+            "{}\n{}",
+            preceding_sql,
+            "CREATE MATERIALIZED VIEW m1 AS SELECT t_0.c11 AS col_0 FROM alltypes3 AS t_0 GROUP BY t_0.c11, t_0.c4 EMIT ON WINDOW CLOSE;"
+        );
+
+        let sql = format!("{}\n{}", preceding_sql, failing_sql);
+        let mut reducer = Reducer::new(checker, Strategy::Single);
+        let reduced_sql = reducer.reduce(&sql).await.unwrap();
+        assert_eq!(normalize_sql(&reduced_sql), normalize_sql(&expected_sql));
+    }
+}
