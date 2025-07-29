@@ -104,12 +104,12 @@ psql -c "
 
 statement ok
 create source s with (
-  username = 'postgres',
-  connector='postgres-cdc',
-  hostname='localhost',
-  port='8432',
-  password = '',
-  database.name = 'postgres',
+  connector = 'postgres-cdc',
+  hostname = '${PGHOST:localhost}',
+  port = '${PGPORT:5432}',
+  username = '${PGUSER:$USER}',
+  password = '${PGPASSWORD:}',
+  database.name = '${PGDATABASE:postgres}',
   schema.name = 'public',
   slot.name = 'rw_slot',
   auto.schema.change = 'true'
