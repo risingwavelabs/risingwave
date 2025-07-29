@@ -44,7 +44,9 @@ pub mod starrocks;
 pub mod test_sink;
 pub mod trivial;
 pub mod utils;
+pub mod webhook;
 pub mod writer;
+
 pub mod prelude {
     pub use crate::sink::{
         Result, SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION, Sink, SinkError,
@@ -144,6 +146,8 @@ macro_rules! for_all_sinks {
                 { Mongodb, $crate::sink::mongodb::MongodbSink, $crate::sink::mongodb::MongodbConfig },
                 { SqlServer, $crate::sink::sqlserver::SqlServerSink, $crate::sink::sqlserver::SqlServerConfig },
                 { Postgres, $crate::sink::postgres::PostgresSink, $crate::sink::postgres::PostgresConfig },
+
+                { Webhook, $crate::sink::webhook::WebhookSink, $crate::sink::webhook::WebhookConfig },
 
                 { Test, $crate::sink::test_sink::TestSink, () },
                 { Table, $crate::sink::trivial::TableSink, () }
@@ -995,6 +999,12 @@ pub enum SinkError {
     ),
     #[error("Mongodb error: {0}")]
     Mongodb(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("Webhook error: {0}")]
+    Webhook(
         #[source]
         #[backtrace]
         anyhow::Error,
