@@ -230,12 +230,6 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 Long charMaxLength =
                         res.getObject(3) == null ? null : ((Number) res.getObject(3)).longValue();
                 var udtName = res.getString(4);
-                LOG.info(
-                        "Field: {}, DataType: {}, CharMaxLength: {}, UdtName: {}",
-                        field,
-                        dataType,
-                        charMaxLength,
-                        udtName);
                 schema.put(field.toLowerCase(), new ColumnInfo(dataType, charMaxLength, udtName));
             }
 
