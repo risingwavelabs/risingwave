@@ -806,6 +806,7 @@ impl SchemaCatalog {
         self.index_by_id.get(index_id)
     }
 
+    /// Returns all indexes on the given table. Will not check if the table exists.
     pub fn get_indexes_by_table_id(&self, table_id: &TableId) -> Vec<Arc<IndexCatalog>> {
         self.indexes_by_table_id
             .get(table_id)

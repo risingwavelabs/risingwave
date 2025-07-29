@@ -19,6 +19,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use rand::{Rng, rng as thread_rng};
+use sqllogictest::substitution::well_known;
 use sqllogictest::{
     Condition, ParallelTestError, Partitioner, QueryExpect, Record, StatementExpect,
 };
@@ -463,6 +464,7 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: Opts) {
         let mut tester =
             sqllogictest::Runner::new(|| RisingWave::connect("frontend".into(), "dev".into()));
         tester.add_label("madsim");
+        tester.set_var(well_known::DATABASE.to_owned(), "dev".to_owned());
 
         let file = file.unwrap();
         let path = file.as_path();
