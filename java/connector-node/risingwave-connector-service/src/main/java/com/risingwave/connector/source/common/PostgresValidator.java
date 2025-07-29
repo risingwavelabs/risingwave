@@ -688,8 +688,8 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                     // bit(1) -> BOOLEAN
                     return val == Data.DataType.TypeName.BOOLEAN_VALUE;
                 } else {
-                    // bit(n>1) -> BYTEA
-                    return val == Data.DataType.TypeName.BYTEA_VALUE;
+                    // bit(n>1) is not supported
+                    return false;
                 }
             case "smallint":
             case "smallserial":

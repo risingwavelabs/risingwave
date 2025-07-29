@@ -46,14 +46,13 @@ psql -c "
         v39 macaddr8,
         v40 int[],
         v41 bit(1),
-        v42 bit(8),
         v43 smallserial,
         v44 serial,
         v45 bigserial,
         v46 oid,
         v47 mood_enum
     );
-    INSERT INTO t (v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v42, v43, v44, v45, v46, v47) VALUES (
+    INSERT INTO t (v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v43, v44, v45, v46, v47) VALUES (
         '{\"test\": \"abc\"}',
         'source1',
         42,
@@ -93,7 +92,6 @@ psql -c "
         '08:00:2b:01:02:03:04:05',
         '{1, 2, 3, 4, 5}',
         B'1',
-        B'00000001',
         12345,
         67890,
         123456789,
@@ -157,7 +155,6 @@ create table t (
   v39 character varying,
   v40 int[],
   v41 boolean,
-  v42 bytea,
   v43 smallint,
   v44 int,
   v45 bigint,
@@ -165,7 +162,7 @@ create table t (
   v47 character varying
 ) from s table 'public.t';
 
-sleep 5s
+sleep 10s
 
 query TTTT
 select count(*) from t;
@@ -227,3 +224,21 @@ create table t_hstore_mismatch (
   id int primary key,
   attributes jsonb
 ) from s table 'public.t_hstore';
+
+# Test 4: bit(8) type should cause schema mismatch error when mapped to bytea
+system ok
+psql -c "
+    DROP TABLE IF EXISTS t_bit8;
+    CREATE TABLE t_bit8 (
+        id serial PRIMARY KEY,
+        flags bit(8) NOT NULL
+    );
+    INSERT INTO t_bit8 (flags) VALUES (B'00000001');
+    INSERT INTO t_bit8 (flags) VALUES (B'11111111');
+"
+
+statement error Incompatible data type of column flags
+create table t_bit8_mismatch (
+  id int primary key,
+  flags bytea
+) from s table 'public.t_bit8';
