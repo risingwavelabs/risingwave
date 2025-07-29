@@ -4,10 +4,8 @@ system ok
 psql -c "
     DROP TABLE IF EXISTS t;
 
-    -- Create extensions for special data types
     CREATE EXTENSION IF NOT EXISTS citext;
 
-    -- Create enum type for testing
     CREATE TYPE mood_enum AS ENUM ('happy', 'sad', 'angry');
 
     CREATE TABLE t (
@@ -182,7 +180,6 @@ system ok
 psql -c "
     DROP TABLE IF EXISTS t_ltree;
 
-    -- Create ltree extension
     CREATE EXTENSION IF NOT EXISTS ltree;
 
     CREATE TABLE t_ltree (
@@ -225,7 +222,6 @@ system ok
 psql -c "
     DROP TABLE IF EXISTS t_hstore;
 
-    -- Create hstore extension
     CREATE EXTENSION IF NOT EXISTS hstore;
 
     CREATE TABLE t_hstore (
