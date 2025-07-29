@@ -283,6 +283,7 @@ pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
             "jsonb" => Some(PgType::JSONB_ARRAY),
             "uuid" => Some(PgType::UUID_ARRAY),
             "point" => Some(PgType::POINT_ARRAY),
+            "oid" => Some(PgType::OID_ARRAY),
             _ => None,
         }
     } else {
@@ -312,6 +313,7 @@ pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
             "jsonb" => Some(PgType::JSONB),
             "uuid" => Some(PgType::UUID),
             "point" => Some(PgType::POINT),
+            "oid" => Some(PgType::OID),
             _ => None,
         }
     }
@@ -360,6 +362,8 @@ pub fn pg_type_to_rw_type(pg_type: &PgType) -> ConnectorResult<DataType> {
         PgType::JSON_ARRAY => DataType::List(Box::new(DataType::Jsonb)),
         PgType::JSONB_ARRAY => DataType::List(Box::new(DataType::Jsonb)),
         PgType::UUID_ARRAY => DataType::List(Box::new(DataType::Varchar)),
+        PgType::OID => DataType::Int64,
+        PgType::OID_ARRAY => DataType::List(Box::new(DataType::Int64)),
         PgType::POINT_ARRAY => DataType::List(Box::new(DataType::Struct(
             risingwave_common::types::StructType::new(vec![
                 ("x", DataType::Float32),
