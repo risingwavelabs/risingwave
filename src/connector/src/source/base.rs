@@ -186,6 +186,10 @@ pub async fn create_split_readers<P: SourceProperties>(
 
 /// [`SplitEnumerator`] fetches the split metadata from the external source service.
 /// NOTE: It runs in the meta server, so probably it should be moved to the `meta` crate.
+///
+/// Currently, we validate the source is valid (e.g., can connect & schema matches RW schema) ad-hoc
+/// in `new` or `list_splits`. e.g., for cdc: `new` calls `ValidateSourceRequest`, which calls `isDataTypeCompatible`.
+/// TODO: we might add a dedicated `validate` API like [`crate::sink::Sink::validate`].
 #[async_trait]
 pub trait SplitEnumerator: Sized + Send {
     type Split: SplitMetaData + Send;
@@ -710,6 +714,9 @@ impl SplitImpl {
         match self {
             SplitImpl::BatchPosixFs(batch_posix_fs_split) => {
                 Some(BatchSourceSplitImpl::BatchPosixFs(batch_posix_fs_split))
+            }
+            SplitImpl::BatchBigQuery(big_query_batch_split) => {
+                Some(BatchSourceSplitImpl::BatchBigQuery(big_query_batch_split))
             }
             _ => None,
         }
