@@ -162,6 +162,8 @@ pub struct StorageOpts {
     pub iceberg_compaction_write_parquet_max_row_group_rows: usize,
     pub iceberg_compaction_min_size_per_partition_mb: u32,
     pub iceberg_compaction_max_file_count_per_partition: u32,
+    pub iceberg_compaction_small_file_threshold_mb: u32,
+    pub iceberg_compaction_max_task_total_size_mb: u32,
 
     /// The ratio of iceberg compaction max parallelism to the number of CPU cores
     pub iceberg_compaction_task_parallelism_ratio: f32,
@@ -307,6 +309,12 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             iceberg_compaction_max_file_count_per_partition: c
                 .storage
                 .iceberg_compaction_max_file_count_per_partition,
+            iceberg_compaction_small_file_threshold_mb: c
+                .storage
+                .iceberg_compaction_small_file_threshold_mb,
+            iceberg_compaction_max_task_total_size_mb: c
+                .storage
+                .iceberg_compaction_max_task_total_size_mb,
             iceberg_compaction_task_parallelism_ratio: c
                 .storage
                 .iceberg_compaction_task_parallelism_ratio,
