@@ -268,7 +268,13 @@ psql -c "
         v37 cidr,
         v38 macaddr,
         v39 macaddr8,
-        v40 int[]
+        v40 int[],
+        v41 bit(1),
+        v42 bit(8),
+        v43 smallserial,
+        v44 serial,
+        v45 bigserial,
+        v46 oid
     );
 "
 
@@ -324,12 +330,18 @@ create table rw_test_comprehensive_types (
   v37 character varying,
   v38 character varying,
   v39 character varying,
-  v40 integer[]
+  v40 integer[],
+  v41 boolean,
+  v42 bytea,
+  v43 smallint,
+  v44 int,
+  v45 bigint,
+  v46 bigint
 ) from pg_comprehensive_source table 'public.test_comprehensive_types';
 
 system ok
 psql -c "
-    INSERT INTO test_comprehensive_types (v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40) VALUES (
+    INSERT INTO test_comprehensive_types (v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v42, v43, v44, v45, v46) VALUES (
         '{\"test\": \"abc\"}',
         'source1',
         42,
@@ -367,7 +379,13 @@ psql -c "
         '192.168.1.0/24',
         '08:00:2b:01:02:03',
         '08:00:2b:01:02:03:04:05',
-        '{1, 2, 3, 4, 5}'
+        '{1, 2, 3, 4, 5}',
+        B'1',
+        B'00000001',
+        12345,
+        67890,
+        123456789,
+        12345
     );
 "
 
@@ -383,7 +401,7 @@ SELECT count(*) from rw_test_comprehensive_types;
 system ok
 psql -c "
     ALTER TABLE test_comprehensive_types ADD COLUMN foo JSONB;
-    INSERT INTO test_comprehensive_types (v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, foo) VALUES (
+    INSERT INTO test_comprehensive_types (v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v42, v43, v44, v45, v46, foo) VALUES (
         '{\"test\": \"def\"}',
         'source2',
         43,
@@ -422,6 +440,12 @@ psql -c "
         '08:00:2b:04:05:06',
         '08:00:2b:04:05:06:07:08',
         '{10, 20, 30, 40, 50}',
+        B'0',
+        B'11111111',
+        12345,
+        98765,
+        987654321,
+        12345,
         '{\"new\": \"column\"}'
     );
 "

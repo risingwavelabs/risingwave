@@ -20,7 +20,7 @@ use rand::rng as thread_rng;
 use rand::seq::IndexedRandom;
 use replace_job_plan::{ReplaceSource, ReplaceTable};
 use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
-use risingwave_common::types::{DataType};
+use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager};
 use risingwave_meta::model::TableParallelism;
