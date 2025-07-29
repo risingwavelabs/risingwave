@@ -77,6 +77,23 @@ impl JsonEncoder {
         }
     }
 
+    pub fn new_with_webhook(schema: Schema, col_indices: Option<Vec<usize>>) -> Self {
+        let config = JsonEncoderConfig {
+            time_handling_mode: TimeHandlingMode::Milli,
+            date_handling_mode: DateHandlingMode::FromCe,
+            timestamp_handling_mode: TimestampHandlingMode::String,
+            timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
+            custom_json_type: CustomJsonType::None,
+            jsonb_handling_mode: JsonbHandlingMode::String,
+        };
+        Self {
+            schema,
+            col_indices,
+            kafka_connect: None,
+            config,
+        }
+    }
+
     pub fn new_with_es(schema: Schema, col_indices: Option<Vec<usize>>) -> Self {
         let config = JsonEncoderConfig {
             time_handling_mode: TimeHandlingMode::String,

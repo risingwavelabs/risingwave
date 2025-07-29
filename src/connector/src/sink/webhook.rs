@@ -1,30 +1,21 @@
 use std::collections::BTreeMap;
 use std::fmt::Debug;
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail};
 use async_trait::async_trait;
-use bytes::Bytes;
-use futures::{Future, FutureExt, TryFuture};
-use reqwest::{Client, Request};
-use risingwave_common::array::{Op, RowRef, StreamChunk};
-use risingwave_common::row::Row;
+use reqwest::Client;
+use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::catalog::Schema;
 use serde_derive::Deserialize;
-use serde_with::{DisplayFromStr, serde_as};
+use serde_json::Value;
+use serde_with::serde_as;
 
-use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam, SinkWriterMetrics};
-use crate::connector_common::{
-    AwsAuthProps, KafkaCommon, KafkaConnectionProps, KafkaPrivateLinkCommon,
-    RdKafkaPropertiesCommon, read_kafka_log_level,
-};
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::encoder::{JsonEncoder, RowEncoder};
-use crate::sink::formatter::SinkFormatterImpl;
-use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
-use crate::sink::{DummySinkCommitCoordinator, LogSinker, Result, SinkLogReader, SinkWriterParam};
+use crate::sink::{DummySinkCommitCoordinator, Result, SinkWriterParam};
 
 pub const WEBHOOK_SINK: &str = "webhook";
 
@@ -57,6 +48,7 @@ impl EnforceSecret for WebhookConfig {
 #[derive(Debug)]
 pub struct WebhookSink {
     pub config: WebhookConfig,
+    schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
 }
@@ -66,11 +58,13 @@ impl EnforceSecret for WebhookSink {}
 impl WebhookSink {
     pub fn new(
         config: WebhookConfig,
+        schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
         Ok(Self {
             config,
+            schema,
             pk_indices,
             is_append_only,
         })
@@ -81,10 +75,12 @@ impl TryFrom<SinkParam> for WebhookSink {
     type Error = SinkError;
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
+        let schema = param.schema();
         let config = WebhookConfig::from_btreemap(param.properties)
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
         WebhookSink::new(
             config,
+            schema,
             param.downstream_pk,
             param.sink_type.is_append_only(),
         )
@@ -112,24 +108,31 @@ impl Sink for WebhookSink {
     }
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        Ok(WebhookSinkWriter::new(self.config.clone())
-            .await?
-            .into_log_sinker(SinkWriterMetrics::new(&writer_param)))
+        Ok(
+            WebhookSinkWriter::new(self.config.clone(), self.schema.clone())
+                .await?
+                .into_log_sinker(SinkWriterMetrics::new(&writer_param)),
+        )
     }
 }
 
 pub struct WebhookSinkWriter {
     config: WebhookConfig,
     client: Client,
+    row_encoder: JsonEncoder,
 }
 
 impl WebhookSinkWriter {
-    async fn new(config: WebhookConfig) -> anyhow::Result<Self> {
+    async fn new(config: WebhookConfig, schema: Schema) -> anyhow::Result<Self> {
         let client = construct_http_client(&config.endpoint, config.headers.clone())?;
-        Ok(Self { config, client })
+        Ok(Self {
+            config,
+            client,
+            row_encoder: JsonEncoder::new_with_webhook(schema, None),
+        })
     }
 
-    async fn write(&self, payload: Bytes) -> Result<()> {
+    async fn write(&self, payload: String) -> Result<()> {
         let request = self
             .client
             .post(&self.config.endpoint)
@@ -158,11 +161,13 @@ impl SinkWriter for WebhookSinkWriter {
         for (op, row) in chunk.rows() {
             match op {
                 Op::Insert => {
-                    let payload = row.value_serialize_bytes();
-                    // .map_err(|e| SinkError::Webhook(anyhow!(e)))?;
-                    // .map_err(|e| SinkError::Serialization(anyhow!(e)))?;
-                    println!("Sending payload: {:?}", payload);
-                    self.write(payload).await?;
+                    let row_json_string = Value::Object(
+                        self.row_encoder
+                            .encode(row)
+                            .map_err(|e| SinkError::Webhook(anyhow!(e)))?,
+                    )
+                    .to_string();
+                    self.write(row_json_string).await?;
                 }
                 _ => {}
             }
@@ -173,10 +178,6 @@ impl SinkWriter for WebhookSinkWriter {
     /// Receive a barrier and mark the end of current epoch. When `is_checkpoint` is true, the sink
     /// writer should commit the current epoch.
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata> {
-        if is_checkpoint {
-            // Here we would typically commit the current epoch.
-            // For webhook sinks, this might mean sending a final request or similar.
-        }
         Ok(())
     }
 }
