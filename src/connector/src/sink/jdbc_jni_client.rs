@@ -42,7 +42,7 @@ impl JdbcJniClient {
         Ok(Self { jvm, jdbc_url })
     }
 
-    pub fn execute_sql_sync(&self, sql: &Vec<String>) -> Result<()> {
+    pub fn execute_sql_sync(&self, sql: &Vec<String>) -> anyhow::Result<()> {
         execute_with_jni_env(self.jvm, |env| {
             // get source handler by source id
             let full_url = env.new_string(&self.jdbc_url).with_context(|| {
@@ -76,15 +76,21 @@ impl JdbcJniClient {
 pub fn build_alter_add_column_sql(
     full_table_name: &str,
     columns: &Vec<(String, String)>,
+    if_not_exists: bool,
 ) -> String {
     let column_definitions: Vec<String> = columns
         .iter()
         .map(|(name, typ)| format!(r#""{}" {}"#, name, typ))
         .collect();
     let column_definitions_str = column_definitions.join(", ");
+    let if_not_exists_str = if if_not_exists {
+        "IF NOT EXISTS "
+    } else {
+        ""
+    };
     format!(
-        "ALTER TABLE {} ADD COLUMN {} ",
-        full_table_name, column_definitions_str
+        "ALTER TABLE {} ADD COLUMN {}{} ",
+        full_table_name, if_not_exists_str, column_definitions_str
     )
 }
 

@@ -29,12 +29,13 @@ use serde_with::{DisplayFromStr, serde_as};
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::time::{MissedTickBehavior, interval};
 use tonic::async_trait;
+use tracing::warn;
 use with_options::WithOptions;
 
 use crate::connector_common::IcebergSinkCompactionUpdate;
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::coordinate::CoordinatedLogSinker;
-use crate::sink::jdbc_jni_client::{JdbcJniClient, build_alter_add_column_sql};
+use crate::sink::jdbc_jni_client::{self, JdbcJniClient};
 use crate::sink::remote::CoordinatedRemoteSinkWriter;
 use crate::sink::snowflake::{SNOWFLAKE_SINK_OP, SNOWFLAKE_SINK_ROW_ID};
 use crate::sink::writer::SinkWriter;
@@ -44,6 +45,12 @@ use crate::sink::{
 };
 
 pub const REDSHIFT_SINK: &str = "redshift";
+
+fn build_alter_add_column_sql(table_name: &str, columns: &Vec<(String, String)>) -> String {
+    let full_table_name = format!(r#""{}""#, table_name);
+    // redshift does not support add column IF NOT EXISTS yet.
+    jdbc_jni_client::build_alter_add_column_sql(&full_table_name, columns, false)
+}
 
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions)]
@@ -515,7 +522,21 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                     .map(|f| (f.name.clone(), f.data_type.to_string()))
                     .collect::<Vec<_>>(),
             );
-            self.client.execute_sql_sync(&vec![sql])?;
+            let check_column_exists = |e: anyhow::Error| {
+                let err_str = e.root_cause().to_string();
+                if regex::Regex::new(".+ of relation .+ already exists")
+                    .unwrap()
+                    .find(&err_str)
+                    .is_none()
+                {
+                    return Err(e);
+                }
+                warn!("redshift sink columns already exists. skipped");
+                Ok(())
+            };
+            self.client
+                .execute_sql_sync(&vec![sql.clone()])
+                .or_else(check_column_exists)?;
             if !self.is_append_only {
                 let cdc_table_name = self.cdc_table_name.as_ref().ok_or_else(|| {
                     SinkError::Config(anyhow!(
@@ -529,7 +550,9 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                         .map(|f| (f.name.clone(), f.data_type.to_string()))
                         .collect::<Vec<_>>(),
                 );
-                self.client.execute_sql_sync(&vec![sql])?;
+                self.client
+                    .execute_sql_sync(&vec![sql.clone()])
+                    .or_else(check_column_exists)?;
                 self.all_column_names
                     .extend(add_columns.iter().map(|f| f.name.clone()));
 
