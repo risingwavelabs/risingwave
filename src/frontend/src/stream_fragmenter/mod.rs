@@ -351,6 +351,14 @@ fn build_fragment(
 
                 if let Some(source) = node.source_inner.as_ref()
                     && let Some(source_info) = source.info.as_ref()
+                    && source_info.is_shared()
+                    && source.with_properties.is_cdc_connector()
+                {
+                    current_fragment.fragment_type_mask |= FragmentTypeFlag::SharedCdcSource as u32;
+                }
+
+                if let Some(source) = node.source_inner.as_ref()
+                    && let Some(source_info) = source.info.as_ref()
                     && ((source_info.is_shared() && !source_info.is_distributed)
                         || source.with_properties.is_new_fs_connector()
                         || source.with_properties.is_iceberg_connector())

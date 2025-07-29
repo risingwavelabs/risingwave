@@ -68,19 +68,26 @@ use risingwave_connector::source::{
 pub use risingwave_connector::source::{UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR};
 use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithPropertiesExt};
 use risingwave_pb::catalog::connection_params::PbConnectionType;
-use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc};
+use risingwave_pb::catalog::{
+    CdcEtlSourceInfo, PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc,
+};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
-    AstString, ColumnDef, ColumnOption, CreateSourceStatement, Encode, Format, FormatEncodeOptions,
-    ObjectName, SourceWatermark, SqlOptionValue, TableConstraint, Value, get_delimiter,
+    AstString, CdcTableInfo, ColumnDef, ColumnOption, CreateSourceStatement, Encode, Format,
+    FormatEncodeOptions, ObjectName, SourceWatermark, SqlOptionValue, TableConstraint, Value,
+    get_delimiter,
 };
 use risingwave_sqlparser::parser::{IncludeOption, IncludeOptionItem};
 use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
+use super::create_table::{
+    bind_cdc_table_schema_externally, derive_cdc_table_desc, generated_columns_check_for_cdc_table,
+    get_shared_source_info,
+};
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::catalog::source_catalog::SourceCatalog;
@@ -171,6 +178,8 @@ pub enum CreateSourceType {
     NonShared,
     /// create table with connector
     Table,
+    /// The cdc source for an upstream table created after a `SharedCdc` Source
+    CdcEtl,
 }
 
 impl CreateSourceType {
@@ -178,7 +187,11 @@ impl CreateSourceType {
     pub fn for_newly_created(
         session: &SessionImpl,
         with_properties: &impl WithPropertiesExt,
+        is_from_source: bool,
     ) -> Self {
+        if is_from_source {
+            return CreateSourceType::CdcEtl;
+        }
         if with_properties.is_shareable_cdc_connector() {
             CreateSourceType::SharedCdc
         } else if with_properties.is_shareable_non_cdc_connector()
@@ -815,8 +828,6 @@ pub async fn bind_create_source_or_table_with_connector(
     constraints: Vec<TableConstraint>,
     wildcard_idx: Option<usize>,
     source_watermarks: Vec<SourceWatermark>,
-    columns_from_resolve_source: Option<Vec<ColumnCatalog>>,
-    source_info: StreamSourceInfo,
     include_column_options: IncludeOption,
     col_id_gen: &mut ColumnIdGenerator,
     create_source_type: CreateSourceType,
@@ -857,6 +868,15 @@ pub async fn bind_create_source_or_table_with_connector(
             }
         }
     }
+
+    // TODO: omit this step if `sql_column_strategy` is `Follow`.
+    let (columns_from_resolve_source, source_info) = bind_columns_from_source(
+        session,
+        &format_encode,
+        Either::Left(&with_properties),
+        create_source_type,
+    )
+    .await?;
 
     let sql_pk_names = bind_sql_pk_names(sql_columns_defs, bind_table_constraints(&constraints)?)?;
 
@@ -1040,7 +1060,103 @@ HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<c
         created_at_cluster_version: None,
         initialized_at_cluster_version: None,
         rate_limit: source_rate_limit,
+        cdc_etl_info: None,
     };
+    Ok(source)
+}
+
+pub async fn bind_create_source_from_source(
+    handler_args: HandlerArgs,
+    full_name: ObjectName,
+    with_properties: WithOptions,
+    sql_column_defs: &[ColumnDef],
+    wildcard_idx: Option<usize>,
+    include_column_options: IncludeOption,
+    col_id_gen: &mut ColumnIdGenerator,
+    _create_source_type: CreateSourceType,
+    source_rate_limit: Option<u32>,
+    cdc_table_info: CdcTableInfo,
+) -> Result<SourceCatalog> {
+    let session = &handler_args.session;
+    let db_name: &str = &session.database();
+    let (schema_name, source_name) =
+        Binder::resolve_schema_qualified_name(db_name, full_name.clone())?;
+    let (database_id, schema_id) =
+        session.get_database_and_schema_id_for_create(schema_name.clone())?;
+
+    let (shared_source, shared_source_with_options) =
+        get_shared_source_info(session, &cdc_table_info)?;
+
+    let (columns, pk_names) = match wildcard_idx {
+        Some(_) => bind_cdc_table_schema_externally(shared_source_with_options.clone()).await?,
+        None => {
+            return Err(ErrorCode::BindError(
+                "Must use * for column definition when creating a source on a shared CDC source"
+                    .to_owned(),
+            )
+            .into());
+        }
+    };
+
+    let source_info = StreamSourceInfo {
+        format: shared_source.info.format,
+        row_encode: shared_source.info.row_encode,
+        ..Default::default()
+    };
+
+    let (cdc_table_desc, columns, pk_column_ids) = derive_cdc_table_desc(
+        session,
+        shared_source.clone(),
+        cdc_table_info.external_table_name.clone(),
+        sql_column_defs.to_vec(),
+        columns,
+        pk_names,
+        shared_source_with_options,
+        col_id_gen,
+        include_column_options,
+        full_name,
+        TableId::placeholder(),
+    )?;
+
+    let shared_source_with_properties = WithOptionsSecResolved::new(
+        cdc_table_desc.connect_properties,
+        cdc_table_desc.secret_refs,
+    );
+
+    let (etl_with_properties, _) = with_properties
+        .try_to_sec_resolved_only_plain_properties()?
+        .into_parts();
+    let cdc_etl_info = CdcEtlSourceInfo {
+        shared_source_id: cdc_table_desc.source_id.table_id,
+        external_table_name: cdc_table_desc.external_table_name.clone(),
+        properties: etl_with_properties,
+    };
+
+    let source = SourceCatalog {
+        id: TableId::placeholder().table_id,
+        name: source_name,
+        schema_id,
+        database_id,
+        columns,
+        pk_col_ids: pk_column_ids.clone(),
+        append_only: false,
+        owner: session.user_id(),
+        info: source_info,
+        row_id_index: None,
+        with_properties: shared_source_with_properties,
+        watermark_descs: vec![],
+        associated_table_id: None,
+        definition: handler_args.normalized_sql.clone(),
+        connection_id: None,
+        created_at_epoch: None,
+        initialized_at_epoch: None,
+        version: INITIAL_SOURCE_VERSION_ID,
+        created_at_cluster_version: None,
+        initialized_at_cluster_version: None,
+        rate_limit: source_rate_limit,
+        cdc_etl_info: Some(cdc_etl_info),
+    };
+
     Ok(source)
 }
 
@@ -1059,23 +1175,14 @@ pub async fn handle_create_source(
         return Ok(resp);
     }
 
-    if handler_args.with_options.is_empty() {
+    if handler_args.with_options.is_empty() && stmt.from_source.is_none() {
         return Err(RwError::from(InvalidInputSyntax(
             "missing WITH clause".to_owned(),
         )));
     }
 
     let format_encode = stmt.format_encode.into_v2_with_warning();
-    let with_properties = bind_connector_props(&handler_args, &format_encode, true)?;
 
-    let create_source_type = CreateSourceType::for_newly_created(&session, &*with_properties);
-    let (columns_from_resolve_source, source_info) = bind_columns_from_source(
-        &session,
-        &format_encode,
-        Either::Left(&with_properties),
-        create_source_type,
-    )
-    .await?;
     let mut col_id_gen = ColumnIdGenerator::new_initial();
 
     if stmt.columns.iter().any(|col| {
@@ -1088,24 +1195,54 @@ pub async fn handle_create_source(
         )));
     }
 
-    let source_catalog = bind_create_source_or_table_with_connector(
-        handler_args.clone(),
-        stmt.source_name,
-        format_encode,
-        with_properties,
-        &stmt.columns,
-        stmt.constraints,
-        stmt.wildcard_idx,
-        stmt.source_watermarks,
-        columns_from_resolve_source,
-        source_info,
-        stmt.include_column_options,
-        &mut col_id_gen,
-        create_source_type,
-        overwrite_options.source_rate_limit,
-        SqlColumnStrategy::FollowChecked,
-    )
-    .await?;
+    let with_properties = handler_args.with_options.clone().into_connector_props();
+    let create_source_type = CreateSourceType::for_newly_created(
+        &session,
+        &*with_properties,
+        stmt.from_source.is_some(),
+    );
+
+    let source_catalog = if let Some(from_source) = stmt.from_source {
+        sanity_check_for_source_on_shared_cdc_source(
+            &stmt.columns,
+            stmt.wildcard_idx,
+            &stmt.constraints,
+            &stmt.source_watermarks,
+        )?;
+
+        // If `from_source` is specified, we will create a source from another source.
+        bind_create_source_from_source(
+            handler_args.clone(),
+            stmt.source_name,
+            with_properties,
+            &stmt.columns,
+            stmt.wildcard_idx,
+            stmt.include_column_options,
+            &mut col_id_gen,
+            CreateSourceType::CdcEtl,
+            overwrite_options.source_rate_limit,
+            from_source,
+        )
+        .await?
+    } else {
+        let connector_properties = bind_connector_props(&handler_args, &format_encode, true)?;
+        bind_create_source_or_table_with_connector(
+            handler_args.clone(),
+            stmt.source_name,
+            format_encode,
+            connector_properties,
+            &stmt.columns,
+            stmt.constraints,
+            stmt.wildcard_idx,
+            stmt.source_watermarks,
+            stmt.include_column_options,
+            &mut col_id_gen,
+            create_source_type,
+            overwrite_options.source_rate_limit,
+            SqlColumnStrategy::FollowChecked,
+        )
+        .await?
+    };
 
     // If it is a temporary source, put it into SessionImpl.
     if stmt.temporary {
@@ -1133,6 +1270,63 @@ pub async fn handle_create_source(
     }
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SOURCE))
+}
+
+// Only for table from cdc source
+fn sanity_check_for_source_on_shared_cdc_source(
+    column_defs: &Vec<ColumnDef>,
+    wildcard_idx: Option<usize>,
+    constraints: &Vec<TableConstraint>,
+    source_watermarks: &Vec<SourceWatermark>,
+) -> Result<()> {
+    // wildcard cannot be used with column definitions
+    // TODO: allow generated columns when using wildcard
+    if wildcard_idx.is_some() && !column_defs.is_empty() {
+        return Err(ErrorCode::NotSupported(
+            "wildcard(*) and column definitions cannot be used together".to_owned(),
+            "Remove the wildcard or column definitions".to_owned(),
+        )
+        .into());
+    }
+
+    // wildcard cannot be used with column definitions
+    if wildcard_idx.is_none() {
+        return Err(ErrorCode::BindError(
+            "Must use * for column definition when creating a source on a shared CDC source"
+                .to_owned(),
+        )
+        .into());
+    }
+
+    // No table constraints allowed on a source created from a shared CDC source
+    if !constraints.is_empty() {
+        return Err(ErrorCode::NotSupported(
+            "table constraints defined on the source created from a shared CDC source".into(),
+            "Remove the table constraints".into(),
+        )
+        .into());
+    }
+
+    // No columns other than generated columns allowed on a source created from a shared CDC source
+    if column_defs.iter().any(|col| !col.is_generated()) {
+        return Err(ErrorCode::NotSupported(
+            "columns defined on the source created from a shared CDC source".into(),
+            "Remove the non-generated columns".into(),
+        )
+        .into());
+    }
+
+    generated_columns_check_for_cdc_table(column_defs)?;
+
+    if !source_watermarks.is_empty() {
+        return Err(ErrorCode::NotSupported(
+            "watermark defined on the source created from a shared CDC source".into(),
+            "Remove the Watermark definitions".into(),
+        )
+        .into());
+    }
+
+    Ok(())
 }
 
 pub(super) fn generate_stream_graph_for_source(

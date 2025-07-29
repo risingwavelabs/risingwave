@@ -1224,22 +1224,30 @@ impl CompleteStreamFragmentGraph {
         {
             for (&id, fragment) in &mut graph.fragments {
                 let uses_shuffled_backfill = fragment.has_shuffled_backfill();
-
                 for (&upstream_table_id, required_columns) in &fragment.upstream_table_columns {
                     let upstream_fragment = upstream_root_fragments
                         .get(&upstream_table_id)
                         .context("upstream fragment not found")?;
                     let upstream_root_fragment_id =
                         GlobalFragmentId::new(upstream_fragment.fragment_id);
-
                     let edge = match job_type {
-                        StreamingJobType::Table(TableJobType::SharedCdcSource) => {
-                            // we traverse all fragments in the graph, and we should find out the
-                            // CdcFilter fragment and add an edge between upstream source fragment and it.
-                            assert_ne!(
-                                (fragment.fragment_type_mask & FragmentTypeFlag::CdcFilter as u32),
-                                0
-                            );
+                        // Handle CDC backfill
+                        StreamingJobType::Table(TableJobType::SharedCdcSource)
+                        | StreamingJobType::MaterializedView
+                        | StreamingJobType::Sink
+                        | StreamingJobType::Index
+                            if fragment.fragment_type_mask & FragmentTypeFlag::CdcFilter as u32
+                                != 0 =>
+                        {
+                            if upstream_fragment.fragment_type_mask
+                                & FragmentTypeFlag::SharedCdcSource as u32
+                                == 0
+                            {
+                                bail!(
+                                    "the upstream fragment should be a SharedCdcSource, got fragment type: {:b}",
+                                    upstream_fragment.fragment_type_mask
+                                );
+                            }
 
                             tracing::debug!(
                                 ?upstream_root_fragment_id,
@@ -1266,8 +1274,17 @@ impl CompleteStreamFragmentGraph {
                                 },
                             }
                         }
-
-                        // handle MV on MV/Source
+                        StreamingJobType::Table(TableJobType::SharedCdcSource)
+                            if fragment.fragment_type_mask & FragmentTypeFlag::CdcFilter as u32
+                                == 0 =>
+                        {
+                            // we traverse all fragments in the graph, and we should find out the
+                            // CdcFilter fragment and add an edge between upstream source fragment and it.
+                            bail!(
+                                "there should be a `CdcFilter` in fragment {:?} after a shared CDC source fragment",
+                                id
+                            )
+                        }
                         StreamingJobType::MaterializedView
                         | StreamingJobType::Sink
                         | StreamingJobType::Index => {
