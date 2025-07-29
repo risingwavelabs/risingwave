@@ -677,7 +677,6 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             Data.DataType.TypeName typeName,
             Long charMaxLength,
             String udtName) {
-
         int val = typeName.getNumber();
         switch (pgDataType) {
             case "boolean":
@@ -798,7 +797,10 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                         case "citext":
                             // CITEXT -> CHARACTER VARYING
                             return val == Data.DataType.TypeName.VARCHAR_VALUE;
-
+                        case "ltree":
+                            return false;
+                        case "hstore":
+                            return false;
                         default:
                             // For other user-defined types, assume they are enum types and pass
                             // validation
