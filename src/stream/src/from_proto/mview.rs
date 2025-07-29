@@ -21,7 +21,8 @@ use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAw
 use risingwave_pb::stream_plan::{ArrangeNode, MaterializeNode};
 
 use super::*;
-use crate::executor::{MaterializeExecutor, RefreshableMaterializeExecutor};
+use crate::executor::MaterializeExecutor;
+use crate::executor::materialize::RefreshableMaterializeArgs;
 
 pub struct MaterializeExecutorBuilder;
 
@@ -49,9 +50,37 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             ConflictBehavior::from_protobuf(&table.handle_pk_conflict_behavior());
         let version_column_index = table.version_column_index;
 
-        macro_rules! new_executor {
-            ($SD:ident) => {
-                MaterializeExecutor::<_, $SD>::new(
+        let exec = if refreshable {
+            // Create refresh args for refreshable tables
+            let refresh_args = RefreshableMaterializeArgs::<_, ColumnAwareSerde>::new(
+                store.clone(),
+                table,
+                node.staging_table.as_ref().unwrap(),
+                params.vnode_bitmap.clone().map(Arc::new),
+            )
+            .await;
+
+            // Use unified MaterializeExecutor with refresh args
+            MaterializeExecutor::<_, ColumnAwareSerde>::new(
+                input,
+                params.info.schema.clone(),
+                store,
+                order_key,
+                params.actor_context,
+                params.vnode_bitmap.map(Arc::new),
+                table,
+                params.watermark_epoch,
+                conflict_behavior,
+                version_column_index,
+                params.executor_stats.clone(),
+                Some(refresh_args),
+            )
+            .await
+            .boxed()
+        } else {
+            // Use standard MaterializeExecutor for regular tables (no refresh args)
+            if versioned {
+                MaterializeExecutor::<_, ColumnAwareSerde>::new(
                     input,
                     params.info.schema.clone(),
                     store,
@@ -63,36 +92,27 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
                     conflict_behavior,
                     version_column_index,
                     params.executor_stats.clone(),
+                    None, // No refresh args for regular tables
                 )
                 .await
                 .boxed()
-            };
-        }
-
-        let exec = if refreshable {
-            // Use RefreshableMaterializeExecutor for tables marked as refreshable
-            RefreshableMaterializeExecutor::<_, ColumnAwareSerde>::new(
-                input,
-                params.info.schema.clone(),
-                store,
-                order_key,
-                params.actor_context,
-                params.vnode_bitmap.map(Arc::new),
-                table,
-                node.staging_table.as_ref().unwrap(),
-                params.watermark_epoch,
-                conflict_behavior,
-                version_column_index,
-                params.executor_stats.clone(),
-            )
-            .await
-            .boxed()
-        } else {
-            // Use standard MaterializeExecutor for regular tables
-            if versioned {
-                new_executor!(ColumnAwareSerde)
             } else {
-                new_executor!(BasicSerde)
+                MaterializeExecutor::<_, BasicSerde>::new(
+                    input,
+                    params.info.schema.clone(),
+                    store,
+                    order_key,
+                    params.actor_context,
+                    params.vnode_bitmap.map(Arc::new),
+                    table,
+                    params.watermark_epoch,
+                    conflict_behavior,
+                    version_column_index,
+                    params.executor_stats.clone(),
+                    None, // No refresh args for regular tables
+                )
+                .await
+                .boxed()
             }
         };
 
@@ -139,6 +159,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             conflict_behavior,
             version_column_index,
             params.executor_stats.clone(),
+            None, // ArrangeExecutor doesn't support refresh functionality
         )
         .await;
 

@@ -16,7 +16,7 @@ use std::assert_matches::assert_matches;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
-use std::ops::{Deref, Index};
+use std::ops::{Bound, Deref, Index};
 
 use bytes::Bytes;
 use futures::stream;
@@ -26,15 +26,18 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, TableId, checked_conflict_behaviors,
 };
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType, cmp_datum};
 use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerializer};
 use risingwave_pb::catalog::Table;
-use risingwave_pb::catalog::table::Engine;
+use risingwave_pb::catalog::table::{Engine, OptionalAssociatedSourceId};
 use risingwave_storage::mem_table::KeyOp;
 use risingwave_storage::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
+use risingwave_storage::store::PrefetchOptions;
+use risingwave_storage::table::KeyedRow;
 
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
@@ -71,6 +74,145 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     /// No data will be written to hummock table. This Materialize is just a dummy node.
     /// Used for APPEND ONLY table with iceberg engine. All data will be written to iceberg table directly.
     is_dummy_table: bool,
+
+    /// Optional refresh arguments and state for refreshable materialized views
+    refresh_args: Option<RefreshableMaterializeArgs<S, SD>>,
+}
+
+/// Arguments and state for refreshable materialized views
+pub struct RefreshableMaterializeArgs<S: StateStore, SD: ValueRowSerde> {
+    /// Table catalog for main table
+    pub table_catalog: Table,
+
+    /// Table catalog for staging table
+    pub staging_table_catalog: Table,
+
+    /// Flag indicating if this table is currently being refreshed
+    pub is_refreshing: bool,
+
+    /// During data refresh (between `RefreshStart` and `LoadFinish`),
+    /// data will be written to both the main table and the staging table.
+    ///
+    /// The staging table is PK-only.
+    ///
+    /// After `LoadFinish`, we will do a `DELETE FROM main_table WHERE pk NOT IN (SELECT pk FROM staging_table)`, and then purge the staging table.
+    pub staging_table: StateTableInner<S, SD>,
+
+    /// Table ID for this refreshable materialized view
+    pub table_id: TableId,
+}
+
+impl<S: StateStore, SD: ValueRowSerde> RefreshableMaterializeArgs<S, SD> {
+    /// Create new `RefreshableMaterializeArgs`
+    pub async fn new(
+        store: S,
+        table_catalog: &Table,
+        staging_table_catalog: &Table,
+        vnodes: Option<Arc<Bitmap>>,
+    ) -> Self {
+        let table_id = TableId::new(table_catalog.id);
+
+        // staging table is pk-only, and we don't need to check value consistency
+        let staging_table = StateTableInner::from_table_catalog_inconsistent_op(
+            staging_table_catalog,
+            store,
+            vnodes,
+        )
+        .await;
+
+        Self {
+            table_catalog: table_catalog.clone(),
+            staging_table_catalog: staging_table_catalog.clone(),
+            is_refreshing: false,
+            staging_table,
+            table_id,
+        }
+    }
+
+    /// `DELETE FROM original_table WHERE pk NOT IN (SELECT pk FROM tmp_table)`
+    pub async fn on_load_finish(
+        &mut self,
+        state_table: &mut StateTableInner<S, SD>,
+    ) -> StreamExecutorResult<()> {
+        tracing::info!(table_id = %self.table_id, "on_load_finish: Starting table replacement operation");
+
+        debug_assert_eq!(state_table.vnodes(), self.staging_table.vnodes());
+        for vnode in state_table.vnodes().clone().iter_vnodes() {
+            let pk_range: (Bound<OwnedRow>, Bound<OwnedRow>) = (Bound::Unbounded, Bound::Unbounded);
+
+            // TODO: can we delete while iterating?
+            let mut rows_to_delete = vec![];
+
+            {
+                let iter_main = state_table
+                    .iter_keyed_row_with_vnode(
+                        vnode,
+                        &pk_range,
+                        PrefetchOptions::prefetch_for_large_range_scan(),
+                    )
+                    .await?;
+                let iter_staging = self
+                    .staging_table
+                    .iter_keyed_row_with_vnode(
+                        vnode,
+                        &pk_range,
+                        PrefetchOptions::prefetch_for_large_range_scan(),
+                    )
+                    .await?;
+                pin_mut!(iter_main);
+                pin_mut!(iter_staging);
+
+                // Sort-merge join implementation using dual pointers
+                let mut main_item: Option<KeyedRow<Bytes>> = iter_main.next().await.transpose()?;
+                let mut staging_item: Option<KeyedRow<Bytes>> =
+                    iter_staging.next().await.transpose()?;
+
+                while let Some(main_kv) = main_item {
+                    let main_key = main_kv.key();
+
+                    // Advance staging iterator until we find a key >= main_key
+                    while let Some(staging_kv) = &staging_item {
+                        let staging_key = staging_kv.key();
+                        match main_key.cmp(staging_key) {
+                            std::cmp::Ordering::Greater => {
+                                // main_key > staging_key, advance staging
+                                staging_item = iter_staging.next().await.transpose()?;
+                            }
+                            std::cmp::Ordering::Equal => {
+                                // Keys match, this row exists in both tables, no need to delete
+                                break;
+                            }
+                            std::cmp::Ordering::Less => {
+                                // main_key < staging_key, main row doesn't exist in staging, delete it
+                                rows_to_delete.push(main_kv.row().clone());
+                                break;
+                            }
+                        }
+                    }
+
+                    // If staging_item is None, all remaining main rows should be deleted
+                    if staging_item.is_none() {
+                        rows_to_delete.push(main_kv.row().clone());
+                    }
+
+                    // Advance main iterator
+                    main_item = iter_main.next().await.transpose()?;
+                }
+            }
+
+            tracing::trace!(?rows_to_delete, ?vnode, "on_load_finish: rows to delete");
+
+            for row in rows_to_delete {
+                state_table.delete(row);
+            }
+        }
+
+        // Clear the staging table for the next refresh
+        self.staging_table.clear_all_rows().await?;
+        tracing::info!(table_id = %self.table_id, "on_load_finish: Staging table cleared and diff applied");
+
+        Ok(())
+    }
 }
 
 pub fn get_op_consistency_level(
@@ -106,6 +248,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         conflict_behavior: ConflictBehavior,
         version_column_index: Option<u32>,
         metrics: Arc<StreamingMetrics>,
+        refresh_args: Option<RefreshableMaterializeArgs<S, SD>>,
     ) -> Self {
         let table_columns: Vec<ColumnDesc> = table_catalog
             .columns
@@ -169,6 +312,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             may_have_downstream,
             depended_subscription_ids,
             metrics: mv_metrics,
+            refresh_args,
         }
     }
 
@@ -184,6 +328,11 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
         self.state_table.init_epoch(first_epoch).await?;
+
+        // Initialize staging table for refreshable materialized views
+        if let Some(ref mut refresh_args) = self.refresh_args {
+            refresh_args.staging_table.init_epoch(first_epoch).await?;
+        }
 
         #[for_await]
         for msg in input {
@@ -215,7 +364,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                 // empty chunk
                                 continue;
                             }
-                            let (data_chunk, ops) = chunk.into_parts();
+                            let (data_chunk, ops) = chunk.clone().into_parts();
 
                             if self.state_table.value_indices().is_some() {
                                 // TODO(st1page): when materialize partial columns(), we should
@@ -227,6 +376,26 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             let values = data_chunk.serialize();
 
                             let key_chunk = data_chunk.project(self.state_table.pk_indices());
+
+                            // For refreshable materialized views, write to staging table during refresh
+                            // Do not use generate_output here.
+                            if let Some(ref mut refresh_args) = self.refresh_args
+                                && refresh_args.is_refreshing
+                            {
+                                let key_chunk =
+                                    chunk.clone().project(self.state_table.pk_indices());
+                                tracing::trace!(
+                                    staging_chunk = %key_chunk.to_pretty(),
+                                    input_chunk = %chunk.to_pretty(),
+                                    "writing to staging table"
+                                );
+                                if cfg!(debug_assertions) {
+                                    // refreshable source should be append-only
+                                    assert!(key_chunk.ops().iter().all(|op| op == &Op::Insert));
+                                }
+                                refresh_args.staging_table.write_chunk(key_chunk.clone());
+                                refresh_args.staging_table.try_flush().await?;
+                            }
 
                             let pks = {
                                 let mut pks = vec![vec![]; data_chunk.capacity()];
@@ -274,11 +443,82 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         | ConflictBehavior::DoUpdateIfNotNull => {
                             self.state_table.write_chunk(chunk.clone());
                             self.state_table.try_flush().await?;
+
+                            // For refreshable materialized views, also write to staging table during refresh
+                            if let Some(ref mut refresh_args) = self.refresh_args
+                                && refresh_args.is_refreshing
+                            {
+                                let key_chunk =
+                                    chunk.clone().project(self.state_table.pk_indices());
+                                tracing::trace!(
+                                    staging_chunk = %key_chunk.to_pretty(),
+                                    input_chunk = %chunk.to_pretty(),
+                                    "writing to staging table"
+                                );
+                                if cfg!(debug_assertions) {
+                                    // refreshable source should be append-only
+                                    assert!(key_chunk.ops().iter().all(|op| op == &Op::Insert));
+                                }
+                                refresh_args.staging_table.write_chunk(key_chunk.clone());
+                                refresh_args.staging_table.try_flush().await?;
+                            }
+
                             Message::Chunk(chunk)
                         } // ConflictBehavior::DoUpdateIfNotNull => unimplemented!(),
                     }
                 }
                 Message::Barrier(b) => {
+                    // Handle refresh mutations for refreshable materialized views
+                    if let Some(ref mut refresh_args) = self.refresh_args {
+                        if let Some(m) = b.mutation.as_deref() {
+                            tracing::debug!(?m, "barrier mutation received");
+                        }
+                        match b.mutation.as_deref() {
+                            Some(Mutation::RefreshStart {
+                                table_id: refresh_table_id,
+                                associated_source_id: _,
+                            }) if *refresh_table_id == refresh_args.table_id => {
+                                refresh_args.is_refreshing = true;
+                                tracing::info!(table_id = %refresh_table_id, "RefreshStart barrier received");
+                            }
+                            Some(Mutation::LoadFinish {
+                                associated_source_id: load_finish_source_id,
+                            }) => {
+                                // Get associated source id from table catalog
+                                let associated_source_id = match refresh_args
+                                    .table_catalog
+                                    .optional_associated_source_id
+                                {
+                                    Some(OptionalAssociatedSourceId::AssociatedSourceId(id)) => id,
+                                    None => unreachable!("associated_source_id is not set"),
+                                };
+
+                                if load_finish_source_id.table_id() == associated_source_id {
+                                    debug_assert!(refresh_args.is_refreshing);
+                                    // Reset the refreshing flag
+                                    refresh_args.is_refreshing = false;
+
+                                    tracing::info!(
+                                        %load_finish_source_id,
+                                        "LoadFinish received, starting data replacement"
+                                    );
+
+                                    // Execute the atomic swap from staging to main table
+                                    refresh_args
+                                        .on_load_finish(&mut self.state_table)
+                                        .instrument_await("on_load_finish")
+                                        .await?;
+
+                                    tracing::info!(
+                                        %load_finish_source_id,
+                                        "Data replacement complete, refresh cycle finished"
+                                    );
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+
                     // If a downstream mv depends on the current table, we need to do conflict check again.
                     if !self.may_have_downstream
                         && b.has_more_downstream_fragments(self.actor_context.id)
@@ -304,15 +544,32 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     }
 
                     let update_vnode_bitmap = b.as_update_vnode_bitmap(self.actor_context.id);
+
+                    // Commit staging table for refreshable materialized views
+                    let staging_post_commit = if let Some(ref mut refresh_args) = self.refresh_args
+                    {
+                        Some(refresh_args.staging_table.commit(b.epoch).await?)
+                    } else {
+                        None
+                    };
+
                     let b_epoch = b.epoch;
                     yield Message::Barrier(b);
 
                     // Update the vnode bitmap for the state table if asked.
-                    if let Some((_, cache_may_stale)) =
-                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                    if let Some((_, cache_may_stale)) = post_commit
+                        .post_yield_barrier(update_vnode_bitmap.clone())
+                        .await?
                         && cache_may_stale
                     {
                         self.materialize_cache.lru_cache.clear();
+                    }
+
+                    // Handle staging table post commit
+                    if let Some(staging_post_commit) = staging_post_commit {
+                        staging_post_commit
+                            .post_yield_barrier(update_vnode_bitmap)
+                            .await?;
                     }
 
                     self.metrics
@@ -421,6 +678,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             may_have_downstream: true,
             depended_subscription_ids: HashSet::new(),
             metrics,
+            refresh_args: None, // Test constructor doesn't support refresh functionality
         }
     }
 }
