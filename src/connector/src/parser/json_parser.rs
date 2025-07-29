@@ -31,15 +31,15 @@ use super::utils::{bytes_from_url, get_kafka_topic};
 use super::{JsonProperties, SchemaRegistryConfig};
 use crate::error::ConnectorResult;
 use crate::parser::AccessBuilder;
+use crate::parser::memory_pool::{GlobalMemoryPool, PooledJsonAccessBuilder};
 use crate::parser::unified::AccessImpl;
-use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
+use crate::parser::unified::json::JsonAccess;
 use crate::schema::schema_registry::{Client, handle_sr_list};
 
 #[derive(Debug)]
 pub struct JsonAccessBuilder {
-    value: Option<Vec<u8>>,
-    payload_start_idx: usize,
-    json_parse_options: JsonParseOptions,
+    pooled_builder: PooledJsonAccessBuilder,
+    use_memory_pool: bool,
 }
 
 impl AccessBuilder for JsonAccessBuilder {
@@ -49,35 +49,49 @@ impl AccessBuilder for JsonAccessBuilder {
         payload: Vec<u8>,
         _: &crate::source::SourceMeta,
     ) -> ConnectorResult<AccessImpl<'_>> {
-        // XXX: When will we enter this branch?
-        if payload.is_empty() {
-            self.value = Some("{}".into());
+        if self.use_memory_pool {
+            // Use memory pooling for better performance
+            self.pooled_builder.generate_accessor(&payload)
         } else {
-            self.value = Some(payload);
+            // Fallback to original implementation for compatibility
+            let mut value = if payload.is_empty() {
+                "{}".as_bytes().to_vec()
+            } else {
+                payload
+            };
+            let value =
+                simd_json::to_borrowed_value(&mut value[self.pooled_builder.payload_start_idx..])
+                    .context("failed to parse json payload")?;
+            Ok(AccessImpl::Json(JsonAccess::new_with_options(
+                value,
+                &self.pooled_builder.json_parse_options,
+            )))
         }
-        let value = simd_json::to_borrowed_value(
-            &mut self.value.as_mut().unwrap()[self.payload_start_idx..],
-        )
-        .context("failed to parse json payload")?;
-        Ok(AccessImpl::Json(JsonAccess::new_with_options(
-            value,
-            // Debezium and Canal have their special json access builder and will not
-            // use this
-            &self.json_parse_options,
-        )))
     }
 }
 
 impl JsonAccessBuilder {
     pub fn new(config: JsonProperties) -> ConnectorResult<Self> {
-        let mut json_parse_options = JsonParseOptions::DEFAULT;
-        if let Some(mode) = config.timestamptz_handling {
-            json_parse_options.timestamptz_handling = mode;
-        }
+        // Create pooled version using global memory pool
+        let global_pool = GlobalMemoryPool::new();
+        let pool = global_pool.get_pool();
+        let pooled_builder = PooledJsonAccessBuilder::new(config.clone(), pool)?;
+
         Ok(Self {
-            value: None,
-            payload_start_idx: if config.use_schema_registry { 5 } else { 0 },
-            json_parse_options,
+            pooled_builder,
+            use_memory_pool: true, // Enable memory pooling by default
+        })
+    }
+
+    /// Create a new JsonAccessBuilder without memory pooling for testing
+    pub fn new_without_pool(config: JsonProperties) -> ConnectorResult<Self> {
+        let global_pool = GlobalMemoryPool::new();
+        let pool = global_pool.get_pool();
+        let pooled_builder = PooledJsonAccessBuilder::new(config, pool)?;
+
+        Ok(Self {
+            pooled_builder,
+            use_memory_pool: false,
         })
     }
 }

@@ -22,6 +22,7 @@ use super::{
 };
 use crate::error::ConnectorResult;
 use crate::parser::bytes_parser::BytesAccessBuilder;
+use crate::parser::memory_pool::GlobalMemoryPool;
 use crate::parser::simd_json_parser::DebeziumJsonAccessBuilder;
 use crate::parser::unified::AccessImpl;
 use crate::parser::unified::debezium::{parse_schema_change, parse_transaction_meta};
@@ -40,6 +41,7 @@ pub struct PlainParser {
     // parsing transaction metadata for shared cdc source
     pub transaction_meta_builder: Option<AccessBuilderImpl>,
     pub schema_change_builder: Option<AccessBuilderImpl>,
+    use_memory_pool: bool,
 }
 
 impl PlainParser {
@@ -83,6 +85,7 @@ impl PlainParser {
             source_ctx,
             transaction_meta_builder,
             schema_change_builder,
+            use_memory_pool: true, // Enable memory pooling by default
         })
     }
 

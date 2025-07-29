@@ -63,6 +63,7 @@ mod csv_parser;
 mod debezium;
 mod json_parser;
 mod maxwell;
+pub mod memory_pool;
 mod mysql;
 pub mod parquet_parser;
 pub mod plain_parser;

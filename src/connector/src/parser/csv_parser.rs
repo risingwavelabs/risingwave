@@ -19,6 +19,7 @@ use super::unified::{AccessError, AccessResult};
 use super::{ByteStreamSourceParser, CsvProperties};
 use crate::error::ConnectorResult;
 use crate::only_parse_payload;
+use crate::parser::memory_pool::GlobalMemoryPool;
 use crate::parser::{ParserFormat, SourceStreamChunkRowWriter};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -39,6 +40,7 @@ pub struct CsvParser {
     source_ctx: SourceContextRef,
     headers: Option<Vec<String>>,
     delimiter: u8,
+    use_memory_pool: bool,
 }
 
 impl CsvParser {
@@ -57,10 +59,19 @@ impl CsvParser {
             delimiter,
             headers: if has_header { Some(Vec::new()) } else { None },
             source_ctx,
+            use_memory_pool: true, // Enable memory pooling by default
         })
     }
 
     fn read_row(&self, buf: &[u8]) -> ConnectorResult<Vec<String>> {
+        if self.use_memory_pool {
+            self.read_row_pooled(buf)
+        } else {
+            self.read_row_standard(buf)
+        }
+    }
+
+    fn read_row_standard(&self, buf: &[u8]) -> ConnectorResult<Vec<String>> {
         let mut reader_builder = csv::ReaderBuilder::default();
         reader_builder.delimiter(self.delimiter).has_headers(false);
         let record = reader_builder
@@ -70,6 +81,32 @@ impl CsvParser {
             .transpose()?;
         Ok(record
             .map(|record| record.iter().map(|field| field.to_owned()).collect())
+            .unwrap_or_default())
+    }
+
+    fn read_row_pooled(&self, buf: &[u8]) -> ConnectorResult<Vec<String>> {
+        let global_pool = GlobalMemoryPool::new();
+        let pool = global_pool.get_pool();
+
+        let mut reader_builder = csv::ReaderBuilder::default();
+        reader_builder.delimiter(self.delimiter).has_headers(false);
+        let record = reader_builder
+            .from_reader(buf)
+            .records()
+            .next()
+            .transpose()?;
+
+        Ok(record
+            .map(|record| {
+                record
+                    .iter()
+                    .map(|field| {
+                        let mut string = pool.get_string();
+                        string.push_str(field);
+                        string.to_string()
+                    })
+                    .collect()
+            })
             .unwrap_or_default())
     }
 

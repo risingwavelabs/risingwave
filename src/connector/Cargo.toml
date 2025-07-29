@@ -184,6 +184,7 @@ tokio-stream = { workspace = true }
 tokio-util = { workspace = true, features = ["codec", "io"] }
 tonic = { workspace = true }
 tracing = "0.1"
+typed-arena = "2.0.2"
 typed-builder = "^0.21"
 url = "2"
 urlencoding = "2"
@@ -232,6 +233,10 @@ harness = false
 
 [[bench]]
 name = "json_vs_plain_parser"
+harness = false
+
+[[bench]]
+name = "memory_pooling_bench"
 harness = false
 
 [lints]
