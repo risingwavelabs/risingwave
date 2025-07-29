@@ -743,7 +743,7 @@ fn build_alter_add_column_sql(
     columns: &Vec<(String, String)>,
 ) -> String {
     let full_table_name = format!(r#""{}"."{}"."{}""#, database, schema, table_name);
-    jdbc_jni_client::build_alter_add_column_sql(&full_table_name, columns)
+    jdbc_jni_client::build_alter_add_column_sql(&full_table_name, columns, true)
 }
 
 fn build_start_task_sql(snowflake_task_context: &SnowflakeTaskContext) -> String {
