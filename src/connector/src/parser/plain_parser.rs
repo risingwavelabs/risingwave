@@ -21,6 +21,7 @@ use super::{
     SpecificParserConfig,
 };
 use crate::error::ConnectorResult;
+use crate::parser::batch_json_parser::BatchJsonAccessBuilder;
 use crate::parser::bytes_parser::BytesAccessBuilder;
 use crate::parser::simd_json_parser::DebeziumJsonAccessBuilder;
 use crate::parser::unified::AccessImpl;
@@ -40,6 +41,9 @@ pub struct PlainParser {
     // parsing transaction metadata for shared cdc source
     pub transaction_meta_builder: Option<AccessBuilderImpl>,
     pub schema_change_builder: Option<AccessBuilderImpl>,
+    // Batch processing support for JSON arrays
+    pub batch_json_builder: Option<BatchJsonAccessBuilder>,
+    pub pending_accesses: Vec<Vec<u8>>,
 }
 
 impl PlainParser {
@@ -58,12 +62,12 @@ impl PlainParser {
             None
         };
 
-        let payload_builder = match props.encoding_config {
+        let payload_builder = match &props.encoding_config {
             EncodingProperties::Json(_)
             | EncodingProperties::Protobuf(_)
             | EncodingProperties::Avro(_)
             | EncodingProperties::Bytes(_) => {
-                AccessBuilderImpl::new_default(props.encoding_config).await?
+                AccessBuilderImpl::new_default(props.encoding_config.clone()).await?
             }
             _ => bail!("Unsupported encoding for Plain"),
         };
@@ -73,8 +77,16 @@ impl PlainParser {
         ));
 
         let schema_change_builder = Some(AccessBuilderImpl::DebeziumJson(
-            DebeziumJsonAccessBuilder::new_for_schema_event()?,
+            DebeziumJsonAccessBuilder::new_for_schema_event()?
         ));
+
+        // Initialize batch JSON builder for JSON encoding
+        let batch_json_builder = match &props.encoding_config {
+            EncodingProperties::Json(config) => {
+                Some(BatchJsonAccessBuilder::new(config.clone(), true)?)
+            }
+            _ => None,
+        };
 
         Ok(Self {
             key_builder,
@@ -83,6 +95,8 @@ impl PlainParser {
             source_ctx,
             transaction_meta_builder,
             schema_change_builder,
+            batch_json_builder,
+            pending_accesses: Vec::new(),
         })
     }
 
@@ -151,17 +165,46 @@ impl PlainParser {
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> ConnectorResult<ParseResult> {
         let meta = writer.source_meta();
+
+        // Process new payload with batch processing for JSON
+        if let Some(ref data) = payload {
+            if let Some(ref mut batch_builder) = self.batch_json_builder {
+                // Use batch processing for JSON arrays
+                let accesses = batch_builder.parse_to_batch(data.clone())?;
+                
+                if accesses.is_empty() {
+                    return Ok(ParseResult::Rows);
+                }
+                
+                // Process all accesses in the batch
+                for access in accesses {
+                    let mut row_op: KvEvent<AccessImpl<'_>, AccessImpl<'_>> = KvEvent::default();
+
+                    if let Some(ref key_data) = key {
+                        if let Some(ref mut key_builder) = self.key_builder {
+                            row_op.with_key(key_builder.generate_accessor(key_data.clone(), meta).await?);
+                        }
+                    }
+                    
+                    row_op.with_value(access);
+                    writer.do_insert(|column: &SourceColumnDesc| row_op.access_field::<false>(column))?;
+                }
+                return Ok(ParseResult::Rows);
+            }
+        }
+
+        // Fallback to individual processing for non-JSON or when batch processing is disabled
         let mut row_op: KvEvent<AccessImpl<'_>, AccessImpl<'_>> = KvEvent::default();
 
-        if let Some(data) = key
-            && let Some(key_builder) = self.key_builder.as_mut()
-        {
-            // key is optional in format plain
-            row_op.with_key(key_builder.generate_accessor(data, meta).await?);
+        if let Some(ref data) = key {
+            if let Some(ref mut key_builder) = self.key_builder {
+                // key is optional in format plain
+                row_op.with_key(key_builder.generate_accessor(data.clone(), meta).await?);
+            }
         }
-        if let Some(data) = payload {
+        if let Some(ref data) = payload {
             // the data part also can be an empty vec
-            row_op.with_value(self.payload_builder.generate_accessor(data, meta).await?);
+            row_op.with_value(self.payload_builder.generate_accessor(data.clone(), meta).await?);
         }
 
         writer.do_insert(|column: &SourceColumnDesc| row_op.access_field::<false>(column))?;
@@ -242,7 +285,6 @@ mod tests {
         )
         .await
         .unwrap();
-
         let mut transactional = false;
         // for untransactional source, we expect emit a chunk for each message batch
         let message_stream = source_message_stream(transactional);

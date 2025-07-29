@@ -55,6 +55,7 @@ use crate::source::{
 mod access_builder;
 pub mod additional_columns;
 mod avro;
+mod batch_json_parser;
 mod bytes_parser;
 mod canal;
 mod chunk_builder;
