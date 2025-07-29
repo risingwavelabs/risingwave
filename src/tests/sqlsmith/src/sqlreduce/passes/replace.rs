@@ -132,3 +132,30 @@ impl Transform for NullReplace {
         ast.clone()
     }
 }
+
+mod tests {
+    use super::*;
+    use crate::parse_sql;
+
+    #[test]
+    fn test_scalar_replace() {
+        let sql = "SELECT 42, 'hello', false, null;";
+        let ast = parse_sql(sql);
+        let reduction_points = ScalarReplace.get_reduction_points(ast[0].clone());
+        assert_eq!(reduction_points, vec![0, 1, 2, 3]);
+
+        let new_ast = ScalarReplace.apply_on(&mut ast[0].clone(), reduction_points);
+        assert_eq!(new_ast, parse_sql("SELECT 1, 'a', true, null;")[0].clone());
+    }
+
+    #[test]
+    fn test_null_replace() {
+        let sql = "SELECT a, b, c;";
+        let ast = parse_sql(sql);
+        let reduction_points = NullReplace.get_reduction_points(ast[0].clone());
+        assert_eq!(reduction_points, vec![0, 1, 2]);
+
+        let new_ast = NullReplace.apply_on(&mut ast[0].clone(), reduction_points);
+        assert_eq!(new_ast, parse_sql("SELECT NULL, NULL, NULL;")[0].clone());
+    }
+}

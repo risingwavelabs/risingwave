@@ -174,7 +174,7 @@ impl Transform for RowPullup {
                 if let SelectItem::UnnamedExpr(ref mut expr) = select.projection[i]
                     && let Expr::Row(elements) = expr
                 {
-                    *expr = elements[0].clone();
+                    *expr = Expr::Row(vec![elements[0].clone()]);
                 }
             }
         }
@@ -293,5 +293,131 @@ impl Transform for SetOperationPullup {
             }
         }
         new_ast
+    }
+}
+
+mod tests {
+    use super::*;
+    use crate::parse_sql;
+
+    #[test]
+    fn test_binary_operator_pullup_with_single_binary() {
+        let sql = "SELECT 1 + 2 + 3;";
+        let ast = parse_sql(sql);
+        let reduction_points = BinaryOperatorPullup.get_reduction_points(ast[0].clone());
+        assert_eq!(reduction_points, vec![0]);
+
+        let new_ast = BinaryOperatorPullup.apply_on(&mut ast[0].clone(), reduction_points);
+        assert_eq!(new_ast, parse_sql("SELECT 3;")[0].clone());
+    }
+
+    #[test]
+    fn test_binary_operator_pullup_with_multiple_binary() {
+        let sql = "SELECT 1 + 2 + 3, 4 + 5 + 6;";
+        let ast = parse_sql(sql);
+        let reduction_points = BinaryOperatorPullup.get_reduction_points(ast[0].clone());
+        assert_eq!(reduction_points, vec![0, 1]);
+
+        let new_ast = BinaryOperatorPullup.apply_on(&mut ast[0].clone(), reduction_points);
+        assert_eq!(new_ast, parse_sql("SELECT 3, 6;")[0].clone());
+    }
+
+    #[test]
+    fn test_case_pullup_with_single_when() {
+        let sql = "SELECT CASE WHEN 1 = 1 THEN 1 ELSE 2 END;";
+        let ast = parse_sql(sql);
+        let reduction_points = CasePullup.get_reduction_points(ast[0].clone());
+        assert_eq!(reduction_points, vec![0]);
+
+        let new_ast = CasePullup.apply_on(&mut ast[0].clone(), reduction_points);
+        assert_eq!(new_ast, parse_sql("SELECT 1;")[0].clone());
+    }
+
+    #[test]
+    fn test_row_pullup_with_single_row() {
+        let sql = "SELECT ROW(1, 2, 3);";
+        let ast = parse_sql(sql);
+        let reduction_points = RowPullup.get_reduction_points(ast[0].clone());
+        assert_eq!(reduction_points, vec![0]);
+
+        let new_ast = RowPullup.apply_on(&mut ast[0].clone(), reduction_points);
+        assert_eq!(new_ast, parse_sql("SELECT ROW(1);")[0].clone());
+    }
+
+    #[test]
+    fn test_row_pullup_with_multiple_rows() {
+        let sql = "SELECT ROW(1, 2, 3), ROW(4, 5, 6);";
+        let ast = parse_sql(sql);
+        let reduction_points = RowPullup.get_reduction_points(ast[0].clone());
+        assert_eq!(reduction_points, vec![0, 1]);
+
+        let new_ast = RowPullup.apply_on(&mut ast[0].clone(), reduction_points);
+        assert_eq!(new_ast, parse_sql("SELECT ROW(1), ROW(4);")[0].clone());
+    }
+
+    #[test]
+    fn test_array_pullup_with_single_array() {
+        let sql = "SELECT ARRAY[1, 2, 3];";
+        let ast = parse_sql(sql);
+        let reduction_points = ArrayPullup.get_reduction_points(ast[0].clone());
+        assert_eq!(reduction_points, vec![0]);
+
+        let new_ast = ArrayPullup.apply_on(&mut ast[0].clone(), reduction_points);
+        assert_eq!(new_ast, parse_sql("SELECT ARRAY[1];")[0].clone());
+    }
+
+    #[test]
+    fn test_array_pullup_with_multiple_arrays() {
+        let sql = "SELECT ARRAY[1, 2, 3], ARRAY[4, 5, 6];";
+        let ast = parse_sql(sql);
+        let reduction_points = ArrayPullup.get_reduction_points(ast[0].clone());
+        assert_eq!(reduction_points, vec![0, 1]);
+
+        let new_ast = ArrayPullup.apply_on(&mut ast[0].clone(), reduction_points);
+        assert_eq!(new_ast, parse_sql("SELECT ARRAY[1], ARRAY[4];")[0].clone());
+    }
+
+    #[test]
+    fn test_case_pullup_with_multiple_when() {
+        let sql = "SELECT CASE WHEN 1 = 1 THEN 1 WHEN 2 = 2 THEN 2 ELSE 3 END;";
+        let ast = parse_sql(sql);
+        let reduction_points = CasePullup.get_reduction_points(ast[0].clone());
+        assert_eq!(reduction_points, vec![0]);
+
+        let new_ast = CasePullup.apply_on(&mut ast[0].clone(), reduction_points);
+        assert_eq!(new_ast, parse_sql("SELECT 1;")[0].clone());
+    }
+
+    #[test]
+    fn test_set_operation_pullup_union() {
+        let sql = "SELECT 1 UNION SELECT 2;";
+        let ast = parse_sql(sql);
+        let reduction_points = SetOperationPullup.get_reduction_points(ast[0].clone());
+        assert_eq!(reduction_points, vec![0, 1]);
+
+        let new_ast = SetOperationPullup.apply_on(&mut ast[0].clone(), reduction_points);
+        assert_eq!(new_ast, parse_sql("SELECT 1;")[0].clone());
+    }
+
+    #[test]
+    fn test_set_operation_pullup_intersect() {
+        let sql = "SELECT 1 INTERSECT SELECT 2;";
+        let ast = parse_sql(sql);
+        let reduction_points = SetOperationPullup.get_reduction_points(ast[0].clone());
+        assert_eq!(reduction_points, vec![0, 1]);
+
+        let new_ast = SetOperationPullup.apply_on(&mut ast[0].clone(), reduction_points);
+        assert_eq!(new_ast, parse_sql("SELECT 1;")[0].clone());
+    }
+
+    #[test]
+    fn test_set_operation_pullup_except() {
+        let sql = "SELECT 1 EXCEPT SELECT 2;";
+        let ast = parse_sql(sql);
+        let reduction_points = SetOperationPullup.get_reduction_points(ast[0].clone());
+        assert_eq!(reduction_points, vec![0, 1]);
+
+        let new_ast = SetOperationPullup.apply_on(&mut ast[0].clone(), reduction_points);
+        assert_eq!(new_ast, parse_sql("SELECT 1;")[0].clone());
     }
 }

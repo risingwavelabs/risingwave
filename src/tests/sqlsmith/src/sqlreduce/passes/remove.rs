@@ -42,6 +42,7 @@ impl Transform for GroupByRemove {
                 reduction_points.push(i);
             }
         }
+        reduction_points.reverse();
         reduction_points
     }
 
@@ -81,6 +82,7 @@ impl Transform for OrderByRemove {
                 reduction_points.push(i);
             }
         }
+        reduction_points.reverse();
         reduction_points
     }
 
@@ -119,6 +121,7 @@ impl Transform for WhereRemove {
         {
             reduction_points.push(0);
         }
+        reduction_points.reverse();
         reduction_points
     }
 
@@ -161,6 +164,7 @@ impl Transform for FromRemove {
                 reduction_points.push(i);
             }
         }
+        reduction_points.reverse();
         reduction_points
     }
 
@@ -202,6 +206,7 @@ impl Transform for SelectItemRemove {
                 reduction_points.push(i);
             }
         }
+        reduction_points.reverse();
         reduction_points
     }
 
@@ -233,6 +238,7 @@ impl Transform for HavingRemove {
             reduction_points.push(0);
         }
 
+        reduction_points.reverse();
         reduction_points
     }
 
@@ -245,5 +251,109 @@ impl Transform for HavingRemove {
             }
         }
         ast.clone()
+    }
+}
+
+mod tests {
+    use super::*;
+    use crate::parse_sql;
+
+    #[test]
+    fn test_groupby_remove_with_single_strategy() {
+        let sql = "SELECT a, COUNT(*) FROM t GROUP BY a, b, c;";
+        let ast = parse_sql(sql);
+        let reduction_points = GroupByRemove.get_reduction_points(ast[0].clone());
+        assert_eq!(reduction_points, vec![2, 1, 0]);
+
+        let new_ast = GroupByRemove.apply_on(&mut ast[0].clone(), reduction_points[..1].to_vec());
+        assert_eq!(new_ast, parse_sql("SELECT a, COUNT(*) FROM t GROUP BY a, b;")[0].clone());
+    }
+
+    #[test]
+    fn test_groupby_remove_with_multiple_strategy() {
+        let sql = "SELECT a, COUNT(*) FROM t GROUP BY a, b, c;";
+        let ast = parse_sql(sql);
+        let reduction_points = GroupByRemove.get_reduction_points(ast[0].clone());
+        assert_eq!(reduction_points, vec![2, 1, 0]);
+
+        let new_ast = GroupByRemove.apply_on(&mut ast[0].clone(), reduction_points);
+        assert_eq!(new_ast, parse_sql("SELECT a, COUNT(*) FROM t;")[0].clone());
+    }
+
+    #[test]
+    fn test_orderby_remove_with_single_strategy() {
+        let sql = "SELECT a, b FROM t ORDER BY a, b, c;";
+        let ast = parse_sql(sql);
+        let reduction_points = OrderByRemove.get_reduction_points(ast[0].clone());
+        assert_eq!(reduction_points, vec![2, 1, 0]);
+
+        let new_ast = OrderByRemove.apply_on(&mut ast[0].clone(), reduction_points[..1].to_vec());
+        assert_eq!(new_ast, parse_sql("SELECT a, b FROM t ORDER BY a, b;")[0].clone());
+    }
+
+    #[test]
+    fn test_orderby_remove_with_multiple_strategy() {
+        let sql = "SELECT a, b FROM t ORDER BY a, b, c;";
+        let ast = parse_sql(sql);
+        let reduction_points = OrderByRemove.get_reduction_points(ast[0].clone());
+        assert_eq!(reduction_points, vec![2, 1, 0]);
+
+        let new_ast = OrderByRemove.apply_on(&mut ast[0].clone(), reduction_points);
+        assert_eq!(new_ast, parse_sql("SELECT a, b FROM t;")[0].clone());
+    }
+
+    #[test]
+    fn test_where_remove() {
+        let sql = "SELECT * FROM t WHERE a > 1;";
+        let ast = parse_sql(sql);
+        let reduction_points = WhereRemove.get_reduction_points(ast[0].clone());
+        assert_eq!(reduction_points, vec![0]);
+
+        let new_ast = WhereRemove.apply_on(&mut ast[0].clone(), reduction_points);
+        assert_eq!(new_ast, parse_sql("SELECT * FROM t;")[0].clone());
+    }
+
+    #[test]
+    fn test_from_remove_with_single_strategy() {
+        let sql = "SELECT * FROM t1, t2;";
+        let ast = parse_sql(sql);
+        let reduction_points = FromRemove.get_reduction_points(ast[0].clone());
+        assert_eq!(reduction_points, vec![1, 0]);
+
+        let new_ast = FromRemove.apply_on(&mut ast[0].clone(), reduction_points[..1].to_vec());
+        assert_eq!(new_ast, parse_sql("SELECT * FROM t1;")[0].clone());
+    }
+
+    #[test]
+    fn test_from_remove_with_multiple_strategy() {
+        let sql = "SELECT * FROM t1, t2;";
+        let ast = parse_sql(sql);
+        let reduction_points = FromRemove.get_reduction_points(ast[0].clone());
+        assert_eq!(reduction_points, vec![1, 0]);
+
+        let new_ast = FromRemove.apply_on(&mut ast[0].clone(), reduction_points);
+        assert_eq!(new_ast, parse_sql("SELECT *;")[0].clone());
+    }
+
+    #[test]
+    fn test_select_item_remove() {
+        let sql = "SELECT a, b, c FROM t;";
+        let ast = parse_sql(sql);
+        let reduction_points = SelectItemRemove.get_reduction_points(ast[0].clone());
+        assert_eq!(reduction_points, vec![2, 1, 0]);
+
+        let new_ast = SelectItemRemove.apply_on(&mut ast[0].clone(), reduction_points[..1].to_vec());
+        assert_eq!(new_ast, parse_sql("SELECT a, b FROM t;")[0].clone());
+    }
+
+    #[test]
+    fn test_having_remove() {
+        let sql = "SELECT * FROM t HAVING a > 1;";
+        let ast = parse_sql(sql);
+        let reduction_points = HavingRemove.get_reduction_points(ast[0].clone());
+        assert_eq!(reduction_points, vec![0]);
+
+        let new_ast = HavingRemove.apply_on(&mut ast[0].clone(), reduction_points);
+        assert_eq!(new_ast, parse_sql("SELECT * FROM t;")[0].clone());
     }
 }
