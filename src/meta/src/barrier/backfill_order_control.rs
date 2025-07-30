@@ -14,7 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use risingwave_pb::stream_plan::FragmentTypeFlag;
+use risingwave_common::catalog::FragmentTypeFlag;
 
 use crate::model::{FragmentId, StreamJobFragments};
 
@@ -67,7 +67,10 @@ impl BackfillOrderState {
         let mut backfill_nodes: HashMap<FragmentId, BackfillNode> = HashMap::new();
 
         for fragment in stream_job_fragments.fragments() {
-            if fragment.fragment_type_mask & (FragmentTypeFlag::StreamScan as u32) > 0 {
+            if fragment
+                .fragment_type_mask
+                .contains_any([FragmentTypeFlag::StreamScan, FragmentTypeFlag::SourceScan])
+            {
                 let fragment_id = fragment.fragment_id;
                 backfill_nodes.insert(
                     fragment_id,
@@ -116,24 +119,47 @@ impl BackfillOrderState {
 // state transitions
 impl BackfillOrderState {
     pub fn finish_actor(&mut self, actor_id: ActorId) -> Vec<FragmentId> {
-        // Find the fragment_id of the actor.
-        if let Some(fragment_id) = self.actor_to_fragment_id.get(&actor_id)
-            // Decrease the remaining_actor_count of the operator.
-            // If the remaining_actor_count is 0, add the operator to the current_backfill_nodes.
-            && let Some(node) = self.current_backfill_nodes.get_mut(fragment_id)
-        {
-            assert!(node.remaining_actors.remove(&actor_id), "missing actor");
-            tracing::debug!(
-                actor_id,
-                remaining_actors = node.remaining_actors.len(),
-                fragment_id,
-                "finish_backfilling_actor"
-            );
-            if node.remaining_actors.is_empty() {
-                return self.finish_fragment(*fragment_id);
+        let Some(fragment_id) = self.actor_to_fragment_id.get(&actor_id) else {
+            tracing::error!(actor_id, "fragment not found for actor");
+            return vec![];
+        };
+        // NOTE(kwannoel):
+        // Backfill order are specified by the user, for instance:
+        // t1->t2 means that t1 must be backfilled before t2.
+        // However, each snapshot executor may finish ahead of time if there's no data to backfill.
+        // For instance, if t2 has no data to backfill,
+        // and t1 has a lot of data to backfill,
+        // t2's scan operator might finish immediately,
+        // and t2 will finish before t1.
+        // In such cases, we should directly update it in remaining backfill nodes instead,
+        // so we should track whether a node finished in order.
+        let (node, is_in_order) = match self.current_backfill_nodes.get_mut(fragment_id) {
+            Some(node) => (node, true),
+            None => {
+                let Some(node) = self.remaining_backfill_nodes.get_mut(fragment_id) else {
+                    tracing::error!(
+                        fragment_id,
+                        actor_id,
+                        "fragment not found in current_backfill_nodes or remaining_backfill_nodes"
+                    );
+                    return vec![];
+                };
+                (node, false)
             }
+        };
+
+        assert!(node.remaining_actors.remove(&actor_id), "missing actor");
+        tracing::debug!(
+            actor_id,
+            remaining_actors = node.remaining_actors.len(),
+            fragment_id,
+            "finish_backfilling_actor"
+        );
+        if node.remaining_actors.is_empty() && is_in_order {
+            self.finish_fragment(*fragment_id)
+        } else {
+            vec![]
         }
-        vec![]
     }
 
     pub fn finish_fragment(&mut self, fragment_id: FragmentId) -> Vec<FragmentId> {
@@ -142,18 +168,29 @@ impl BackfillOrderState {
         // If the remaining_dependency_count is 0, add the child to the current_backfill_nodes.
         if let Some(node) = self.current_backfill_nodes.remove(&fragment_id) {
             for child_id in &node.children {
-                let child = self.remaining_backfill_nodes.get_mut(child_id).unwrap();
-                assert!(
-                    child.remaining_dependencies.remove(&fragment_id),
-                    "missing dependency"
-                );
-                if child.remaining_dependencies.is_empty() {
-                    tracing::debug!(fragment_id = ?child_id, "schedule next backfill node");
-                    self.current_backfill_nodes
-                        .insert(child.fragment_id, child.clone());
-                    newly_scheduled.push(child.fragment_id)
+                let newly_scheduled_child_finished = {
+                    let child = self.remaining_backfill_nodes.get_mut(child_id).unwrap();
+                    assert!(
+                        child.remaining_dependencies.remove(&fragment_id),
+                        "missing dependency"
+                    );
+                    if child.remaining_dependencies.is_empty() {
+                        tracing::debug!(fragment_id = ?child_id, "schedule next backfill node");
+                        self.current_backfill_nodes
+                            .insert(child.fragment_id, child.clone());
+                        newly_scheduled.push(child.fragment_id);
+                        child.remaining_actors.is_empty()
+                    } else {
+                        false
+                    }
+                };
+                if newly_scheduled_child_finished {
+                    newly_scheduled.extend(self.finish_fragment(*child_id));
                 }
             }
+        } else {
+            tracing::error!(fragment_id, "fragment not found in current_backfill_nodes");
+            return vec![];
         }
         newly_scheduled
     }

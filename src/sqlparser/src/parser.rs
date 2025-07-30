@@ -2150,13 +2150,6 @@ impl Parser<'_> {
             parser_err!("CDC source cannot define columns and constraints");
         }
 
-<<<<<<< HEAD
-=======
-        // row format for nexmark source must be native
-        // default row format for datagen source is native
-        let format_encode = self.parse_format_encode_with_connector(&connector, cdc_source_job)?;
-        
->>>>>>> 695aa2a4d1 (parser)
         // Check if source is created FROM another source
         let from_source = if self.parse_keyword(Keyword::FROM) {
             let source_name = self.parse_object_name()?;
@@ -2165,11 +2158,7 @@ impl Parser<'_> {
             } else {
                 None
             };
-<<<<<<< HEAD
 
-=======
-            
->>>>>>> 695aa2a4d1 (parser)
             // Create a CdcTableInfo here instead of a tuple
             Some(CdcTableInfo {
                 source_name,
@@ -2177,23 +2166,15 @@ impl Parser<'_> {
             })
         } else {
             None
-<<<<<<< HEAD
         };
         let format_encode = if from_source.is_none() {
             // row format for nexmark source must be native
             // default row format for datagen source is native
             self.parse_format_encode_with_connector(&connector, cdc_source_job)?
         } else {
-            // source from source deos not support format encode
+            // source from source does not support format encode
             FormatEncodeOptions::none().into()
         };
-
-=======
-        };
-
-        
-       
->>>>>>> 695aa2a4d1 (parser)
         Ok(Statement::CreateSource {
             stmt: CreateSourceStatement {
                 temporary,

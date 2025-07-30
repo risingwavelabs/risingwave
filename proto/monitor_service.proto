@@ -21,6 +21,7 @@ message StackTraceResponse {
   map<uint64, string> inflight_barrier_traces = 4;
   map<uint32, string> barrier_worker_state = 5; // key: worker id
   map<uint32, string> jvm_stack_traces = 6; // key: worker id. Might be empty if the worker doesn't run JVM.
+  map<string, string> meta_traces = 7;
 }
 
 // CPU profiling

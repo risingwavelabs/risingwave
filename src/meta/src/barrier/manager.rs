@@ -19,6 +19,7 @@ use anyhow::Context;
 use arc_swap::ArcSwap;
 use risingwave_common::bail;
 use risingwave_hummock_sdk::HummockVersionId;
+use risingwave_meta_model::{CreateType, DatabaseId};
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::meta::PbRecoveryStatus;
 use tokio::sync::mpsc::unbounded_channel;
@@ -55,20 +56,18 @@ impl GlobalBarrierManager {
         };
         // If not in tracker, means the first barrier not collected yet.
         // In that case just return progress 0.
-        let mviews = self
+        let job_info = self
             .metadata_manager
             .catalog_controller
-            .list_background_creating_mviews(true)
+            .list_background_creating_jobs(true)
             .await?;
-        for mview in mviews {
-            if let Entry::Vacant(e) = ddl_progress.entry(mview.table_id as _) {
-                warn!(
-                    job_id = mview.table_id,
-                    "background job has no ddl progress"
-                );
+        for (job_id, definition, _init_at) in job_info {
+            if let Entry::Vacant(e) = ddl_progress.entry(job_id as _) {
+                warn!(job_id, "background job has no ddl progress");
                 e.insert(DdlProgress {
-                    id: mview.table_id as u64,
-                    statement: mview.definition,
+                    id: job_id as u64,
+                    statement: definition,
+                    create_type: CreateType::Background.as_str().into(),
                     progress: "0.0%".into(),
                 });
             }
@@ -83,6 +82,25 @@ impl GlobalBarrierManager {
             .send(BarrierManagerRequest::AdhocRecovery(tx))
             .context("failed to send adhoc recovery request")?;
         rx.await.context("failed to wait adhoc recovery")?;
+        Ok(())
+    }
+
+    pub async fn update_database_barrier(
+        &self,
+        database_id: DatabaseId,
+        barrier_interval_ms: Option<u32>,
+        checkpoint_frequency: Option<u64>,
+    ) -> MetaResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.request_tx
+            .send(BarrierManagerRequest::UpdateDatabaseBarrier {
+                database_id: (database_id as u32).into(),
+                barrier_interval_ms,
+                checkpoint_frequency,
+                sender: tx,
+            })
+            .context("failed to send update database barrier request")?;
+        rx.await.context("failed to wait update database barrier")?;
         Ok(())
     }
 

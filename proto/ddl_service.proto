@@ -170,6 +170,9 @@ message DropMaterializedViewResponse {
 
 message CreateViewRequest {
   catalog.View view = 1;
+
+  // The list of object IDs that this view depends on.
+  repeated uint32 dependencies = 2;
 }
 
 message CreateViewResponse {
@@ -214,6 +217,8 @@ message CreateTableRequest {
   stream_plan.StreamFragmentGraph fragment_graph = 3;
   TableJobType job_type = 4;
   bool if_not_exists = 5;
+  // The list of object IDs that this table depends on, currently only used for `SHARED_CDC_SOURCE`.
+  repeated uint32 dependencies = 6;
 }
 
 message CreateTableResponse {
@@ -393,9 +398,14 @@ message ReplaceJobPlan {
     catalog.Source source = 1;
   }
 
+  message ReplaceMaterializedView {
+    catalog.Table table = 1;
+  }
+
   oneof replace_job {
     ReplaceTable replace_table = 3;
     ReplaceSource replace_source = 4;
+    ReplaceMaterializedView replace_materialized_view = 5;
   }
 }
 
@@ -424,6 +434,7 @@ message DdlProgress {
   uint64 id = 1;
   string statement = 2;
   string progress = 3;
+  string create_type = 4;
 }
 
 message GetDdlProgressResponse {
@@ -492,6 +503,7 @@ message ListConnectionsResponse {
 
 message DropConnectionRequest {
   uint32 connection_id = 1;
+  bool cascade = 2;
 }
 
 message DropConnectionResponse {
@@ -558,6 +570,16 @@ message AlterDatabaseParamResponse {
   WaitVersion version = 2;
 }
 
+message CompactIcebergTableRequest {
+  uint32 sink_id = 1;
+}
+
+message CompactIcebergTableResponse {
+  common.Status status = 1;
+  // The compaction task ID that was triggered
+  uint64 task_id = 2;
+}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -601,4 +623,5 @@ service DdlService {
   rpc AutoSchemaChange(AutoSchemaChangeRequest) returns (AutoSchemaChangeResponse);
   rpc AlterSwapRename(AlterSwapRenameRequest) returns (AlterSwapRenameResponse);
   rpc AlterDatabaseParam(AlterDatabaseParamRequest) returns (AlterDatabaseParamResponse);
+  rpc CompactIcebergTable(CompactIcebergTableRequest) returns (CompactIcebergTableResponse);
 }

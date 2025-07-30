@@ -149,7 +149,7 @@ async fn get_new_table_plan(
     Ok(ReplaceJobPlan {
         replace_job: Some(replace_job_plan::ReplaceJob::ReplaceTable(
             replace_job_plan::ReplaceTable {
-                table: Some(table),
+                table: Some(table.to_prost()),
                 source: None, // none for cdc table
                 job_type: job_type as _,
             },

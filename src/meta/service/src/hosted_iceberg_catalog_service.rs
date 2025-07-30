@@ -43,7 +43,6 @@ enum IcebergTableCols {
 
 #[async_trait::async_trait]
 impl HostedIcebergCatalogService for HostedIcebergCatalogServiceImpl {
-    #[cfg_attr(coverage, coverage(off))]
     async fn list_iceberg_tables(
         &self,
         _request: Request<ListIcebergTablesRequest>,

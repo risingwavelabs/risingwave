@@ -318,9 +318,11 @@ pub struct SyncedKvLogStoreExecutor<S: StateStore> {
     max_buffer_size: usize,
 
     // Max chunk size when reading from logstore / buffer
-    chunk_size: u32,
+    chunk_size: usize,
 
     pause_duration_ms: Duration,
+
+    aligned: bool,
 }
 // Stream interface
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
@@ -332,9 +334,10 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         serde: LogStoreRowSerde,
         state_store: S,
         buffer_size: usize,
-        chunk_size: u32,
+        chunk_size: usize,
         upstream: Executor,
         pause_duration_ms: Duration,
+        aligned: bool,
     ) -> Self {
         Self {
             actor_context,
@@ -346,6 +349,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             max_buffer_size: buffer_size,
             chunk_size,
             pause_duration_ms,
+            aligned,
         }
     }
 }
@@ -536,15 +540,84 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                 },
                 is_replicated: false,
                 vnodes: self.serde.vnodes().clone(),
+                upload_on_flush: false,
             })
             .await;
 
-        let (mut read_state, mut initial_write_state) =
-            new_log_store_state(self.table_id, local_state_store, self.serde);
+        let (mut read_state, mut initial_write_state) = new_log_store_state(
+            self.table_id,
+            local_state_store,
+            self.serde,
+            self.chunk_size,
+        );
         initial_write_state.init(first_write_epoch).await?;
 
         let mut pause_stream = first_barrier.is_pause_on_startup();
         let mut initial_write_epoch = first_write_epoch;
+
+        if self.aligned {
+            tracing::info!("aligned mode");
+            // We want to realign the buffer and the stream.
+            // We just block the upstream input stream,
+            // and wait until the persisted logstore is empty.
+            // Then after that we can consume the input stream.
+            let log_store_stream = read_state
+                .read_persisted_log_store(
+                    self.metrics.persistent_log_read_metrics.clone(),
+                    initial_write_epoch.curr,
+                    LogStoreReadStateStreamRangeStart::Unbounded,
+                )
+                .await?;
+
+            #[for_await]
+            for message in log_store_stream {
+                let (_epoch, message) = message?;
+                match message {
+                    KvLogStoreItem::Barrier { .. } => {
+                        continue;
+                    }
+                    KvLogStoreItem::StreamChunk { chunk, .. } => {
+                        yield Message::Chunk(chunk);
+                    }
+                }
+            }
+
+            let mut realigned_logstore = false;
+
+            #[for_await]
+            for message in input {
+                match message? {
+                    Message::Barrier(barrier) => {
+                        let is_checkpoint = barrier.is_checkpoint();
+                        let mut progress = LogStoreVnodeProgress::None;
+                        progress.apply_aligned(
+                            read_state.vnodes().clone(),
+                            barrier.epoch.prev,
+                            None,
+                        );
+                        // Truncate the logstore
+                        let post_seal = initial_write_state
+                            .seal_current_epoch(barrier.epoch.curr, progress.take());
+                        let update_vnode_bitmap =
+                            barrier.as_update_vnode_bitmap(self.actor_context.id);
+                        yield Message::Barrier(barrier);
+                        post_seal.post_yield_barrier(update_vnode_bitmap).await?;
+                        if !realigned_logstore && is_checkpoint {
+                            realigned_logstore = true;
+                            tracing::info!("realigned logstore");
+                        }
+                    }
+                    Message::Chunk(chunk) => {
+                        yield Message::Chunk(chunk);
+                    }
+                    Message::Watermark(watermark) => {
+                        yield Message::Watermark(watermark);
+                    }
+                }
+            }
+
+            return Ok(());
+        }
 
         // We only recreate the consume stream when:
         // 1. On bootstrap
@@ -838,6 +911,11 @@ impl<S: StateStoreRead> ReadFuture<S> {
                             cardinality = chunk.cardinality(),
                             "read buffered chunk of size"
                         );
+                        progress.apply_aligned(
+                            read_state.vnodes().clone(),
+                            item_epoch,
+                            Some(end_seq_id),
+                        );
                         return Ok(chunk);
                     }
                     LogStoreBufferItem::Flushed {
@@ -958,7 +1036,7 @@ struct SyncedLogStoreBuffer {
     buffer: VecDeque<(u64, LogStoreBufferItem)>,
     current_size: usize,
     max_size: usize,
-    max_chunk_size: u32,
+    max_chunk_size: usize,
     next_chunk_id: ChunkId,
     metrics: SyncedKvLogStoreMetrics,
     flushed_count: usize,
@@ -1005,7 +1083,7 @@ impl SyncedLogStoreBuffer {
         new_vnode_bitmap: Bitmap,
         epoch: u64,
     ) {
-        let new_chunk_size = end_seq_id - start_seq_id + 1;
+        let new_chunk_size = (end_seq_id - start_seq_id + 1) as usize;
 
         if let Some((
             item_epoch,
@@ -1016,9 +1094,9 @@ impl SyncedLogStoreBuffer {
                 ..
             },
         )) = self.buffer.back_mut()
-            && let flushed_chunk_size = *prev_end_seq_id - *prev_start_seq_id + 1
+            && let flushed_chunk_size = (*prev_end_seq_id - *prev_start_seq_id + 1) as usize
             && let projected_flushed_chunk_size = flushed_chunk_size + new_chunk_size
-            && projected_flushed_chunk_size as u32 <= self.max_chunk_size
+            && projected_flushed_chunk_size <= self.max_chunk_size
         {
             assert!(
                 *prev_end_seq_id < start_seq_id,
@@ -1190,6 +1268,7 @@ mod tests {
             256,
             source,
             Duration::from_millis(256),
+            false,
         )
         .boxed();
 
@@ -1284,6 +1363,7 @@ mod tests {
             256,
             source,
             Duration::from_millis(256),
+            false,
         )
         .boxed();
 
@@ -1375,6 +1455,7 @@ mod tests {
             256,
             source,
             Duration::from_millis(256),
+            false,
         )
         .boxed();
 

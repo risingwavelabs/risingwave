@@ -90,10 +90,10 @@ impl PostgresExternalTable {
                 SslMode::VerifyFull => PgSslMode::VerifyFull,
             });
 
-        if *ssl_mode == SslMode::VerifyCa || *ssl_mode == SslMode::VerifyFull {
-            if let Some(root_cert) = ssl_root_cert {
-                options = options.ssl_root_cert(root_cert.as_str());
-            }
+        if (*ssl_mode == SslMode::VerifyCa || *ssl_mode == SslMode::VerifyFull)
+            && let Some(root_cert) = ssl_root_cert
+        {
+            options = options.ssl_root_cert(root_cert.as_str());
         }
 
         let connection = PgPool::connect_with(options).await?;

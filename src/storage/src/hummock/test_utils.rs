@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use foyer::{
-    Engine, Hint, HybridCache, HybridCacheBuilder, StorageKey as HybridKey,
+    Engine, Hint, HybridCache, HybridCacheBuilder, LargeEngineOptions, StorageKey as HybridKey,
     StorageValue as HybridValue,
 };
 use futures::TryFutureExt;
@@ -75,6 +75,7 @@ pub fn default_opts_for_test() -> StorageOpts {
         share_buffer_upload_concurrency: 1,
         compactor_memory_limit_mb: 64,
         sstable_id_remote_fetch_number: 1,
+        vector_file_block_size_kb: 8,
         ..Default::default()
     }
 }
@@ -477,7 +478,7 @@ where
 {
     HybridCacheBuilder::new()
         .memory(10)
-        .storage(Engine::Large)
+        .storage(Engine::Large(LargeEngineOptions::new()))
         .build()
         .await
         .unwrap()

@@ -160,6 +160,7 @@ impl ToBinary for ScalarRefImpl<'_> {
             ScalarRefImpl::Time(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Bytea(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Jsonb(v) => v.to_binary_with_type(ty),
+            ScalarRefImpl::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
             ScalarRefImpl::List(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Struct(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Map(_) => {

@@ -197,6 +197,7 @@ async fn test_merger_sum_aggr() {
                     outputs,
                     local_barrier_manager.clone(),
                     schema,
+                    100,
                 )
                 .boxed(),
             );

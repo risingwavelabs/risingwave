@@ -21,8 +21,9 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwStreamingJob {
     #[primary_key]
-    job: i32,
+    id: i32,
     name: String,
+    database_id: i32,
     status: String,
     parallelism: String,
     max_parallelism: i32,
@@ -38,9 +39,10 @@ async fn read_rw_streaming_jobs(reader: &SysCatalogReaderImpl) -> Result<Vec<RwS
         .map(|state| {
             let parallelism = extract_parallelism_from_table_state(&state);
             RwStreamingJob {
-                job: state.table_id as i32,
+                id: state.table_id as i32,
                 status: state.state().as_str_name().into(),
                 name: state.name,
+                database_id: state.database_id as i32,
                 parallelism: parallelism.to_uppercase(),
                 max_parallelism: state.max_parallelism as i32,
                 resource_group: state.resource_group,

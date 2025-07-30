@@ -336,6 +336,7 @@ fn wasm_identifier_v1(
                     .join(",")
             ),
             DataType::Map(_m) => todo!("map in wasm udf"),
+            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
         }
     }
 

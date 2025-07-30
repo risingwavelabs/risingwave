@@ -38,6 +38,7 @@ mod stream_reader_with_pause {
         PollNext,
     >;
 
+    #[define_opaque(StreamReaderWithPauseInner)]
     pub(super) fn new_inner<M, const BIASED: bool>(
         message_stream: ReaderArm<M>,
         data_stream: ReaderArm<M>,

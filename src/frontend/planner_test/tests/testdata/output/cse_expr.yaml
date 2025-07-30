@@ -38,9 +38,10 @@
         └─BatchScan { table: t, columns: [t.v2], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [a, b, x, y, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [(PgSleep(t.v2) + 1:Int32) as $expr2, (PgSleep(t.v2) + 1:Int32) as $expr3, $expr1, $expr1, t._row_id] }
-      └─StreamProject { exprs: [t.v2, (t.v2 + 1:Float64) as $expr1, t._row_id] }
-        └─StreamTableScan { table: t, columns: [t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [$expr2, $expr3, $expr1, $expr1, t._row_id] }
+      └─StreamMaterializedExprs { exprs: [(PgSleep(t.v2) + 1:Int32) as $expr2, (PgSleep(t.v2) + 1:Int32) as $expr3] }
+        └─StreamProject { exprs: [t.v2, (t.v2 + 1:Float64) as $expr1, t._row_id] }
+          └─StreamTableScan { table: t, columns: [t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: Common sub expression shouldn't extract const
   sql: |
     SELECT x,

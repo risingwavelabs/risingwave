@@ -62,7 +62,7 @@ fn test_func_sig_map() {
             "cast(anyarray) -> character varying/anyarray",
             "cast(bigint) -> rw_int256/serial/integer/smallint/numeric/double precision/real/character varying",
             "cast(boolean) -> integer/character varying",
-            "cast(character varying) -> jsonb/interval/timestamp without time zone/time without time zone/date/rw_int256/real/double precision/numeric/smallint/integer/bigint/character varying/boolean/bytea/anyarray",
+            "cast(character varying) -> jsonb/interval/timestamp without time zone/time without time zone/date/rw_int256/real/double precision/numeric/smallint/integer/bigint/character varying/boolean/bytea/anyarray/vector",
             "cast(date) -> timestamp without time zone/character varying",
             "cast(double precision) -> numeric/real/bigint/integer/smallint/character varying",
             "cast(integer) -> rw_int256/smallint/numeric/double precision/real/bigint/boolean/character varying",

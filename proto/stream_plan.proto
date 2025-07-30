@@ -123,6 +123,17 @@ message StartFragmentBackfillMutation {
   repeated uint32 fragment_ids = 1;
 }
 
+message RefreshStartMutation {
+  // Table ID to start refresh operation.
+  uint32 table_id = 1;
+  // Associated source ID for this refresh operation.
+  uint32 associated_source_id = 2;
+}
+message LoadFinishMutation {
+  // Associated source ID for this load operation.
+  uint32 associated_source_id = 1;
+}
+
 message BarrierMutation {
   oneof mutation {
     // Add new dispatchers to some actors, used for creating materialized views.
@@ -150,6 +161,10 @@ message BarrierMutation {
     // If we use rate limit to pause / resume backfill fragments, if user manually
     // resumes some fragments, this will overwrite the backfill order configuration.
     StartFragmentBackfillMutation start_fragment_backfill = 14;
+    // Start refresh signal for refreshing tables
+    RefreshStartMutation refresh_start = 15;
+    // Load finish signal for refreshing tables
+    LoadFinishMutation load_finish = 16;
     // Combined mutation.
     // Currently, it can only be Add & Update, which is for sink into table.
     CombinedMutation combined = 100;
@@ -456,6 +471,12 @@ message InequalityPair {
   DeltaExpression delta_expression = 4;
 }
 
+enum JoinEncodingType {
+  UNSPECIFIED = 0;
+  MEMORY_OPTIMIZED = 1;
+  CPU_OPTIMIZED = 2;
+}
+
 message HashJoinNode {
   plan_common.JoinType join_type = 1;
   repeated int32 left_key = 2;
@@ -487,6 +508,9 @@ message HashJoinNode {
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 14;
+
+  // Which encoding will be used to encode join rows in operator cache.
+  JoinEncodingType join_encoding_type = 15;
 }
 
 message AsOfJoinNode {
@@ -509,6 +533,8 @@ message AsOfJoinNode {
   repeated uint32 right_deduped_input_pk_indices = 8;
   repeated bool null_safe = 9;
   optional plan_common.AsOfJoinDesc asof_desc = 10;
+  // Which encoding will be used to encode join rows in operator cache.
+  JoinEncodingType join_encoding_type = 11;
 }
 
 message TemporalJoinNode {
@@ -586,8 +612,8 @@ message MergeNode {
   // Type of the upstream dispatcher. If there's always one upstream according to this
   // type, the compute node may use the `ReceiverExecutor` as an optimization.
   DispatcherType upstream_dispatcher_type = 3;
-  // The schema of input columns. TODO: remove this field.
-  repeated plan_common.Field fields = 4;
+  // The schema of input columns. Already deprecated.
+  repeated plan_common.Field fields = 4 [deprecated = true];
 }
 
 // passed from frontend to meta, used by fragmenter to generate `MergeNode`
@@ -892,6 +918,7 @@ message SyncLogStoreNode {
   catalog.Table log_store_table = 1;
   uint32 pause_duration_ms = 2;
   uint32 buffer_size = 3;
+  bool aligned = 4;
 }
 
 message MaterializedExprsNode {
@@ -1072,7 +1099,6 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_CROSS_DB_SNAPSHOT_BACKFILL_STREAM_SCAN = 8192;
   FRAGMENT_TYPE_FLAG_SHARED_CDC_SOURCE = 16384;
 }
-
 // The streaming context associated with a stream plan
 message StreamContext {
   // The timezone associated with the streaming plan. Only applies to MV for now.

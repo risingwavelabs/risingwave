@@ -32,6 +32,10 @@ mod hummock_read_version_tests;
 
 #[cfg(test)]
 mod hummock_storage_tests;
+
+#[cfg(test)]
+mod hummock_vector_tests;
+
 mod mock_notification_client;
 #[cfg(all(test, feature = "sync_point"))]
 mod sync_point_tests;

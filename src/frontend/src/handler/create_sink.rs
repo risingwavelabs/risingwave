@@ -31,7 +31,6 @@ use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
-use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
 use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
 use risingwave_connector::sink::kafka::KAFKA_SINK;
@@ -39,23 +38,26 @@ use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_SNAPSHOT_OPTION, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
     enforce_secret_sink,
 };
+use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithPropertiesExt};
+use risingwave_pb::catalog::PbSink;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
-use risingwave_pb::catalog::{PbSink, PbSource, Table};
 use risingwave_pb::ddl_service::{ReplaceJobPlan, TableJobType, replace_job_plan};
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
 use risingwave_pb::stream_plan::{MergeNode, StreamFragmentGraph, StreamNode};
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
     CreateSink, CreateSinkStatement, EmitMode, Encode, ExplainOptions, Format, FormatEncodeOptions,
-    Query, Statement,
+    ObjectName, Query, Statement,
 };
 
 use super::RwPgResponse;
 use super::create_mv::get_column_names;
 use super::create_source::{SqlColumnStrategy, UPSTREAM_SOURCE_KEY};
 use super::util::gen_query_from_table_name;
-use crate::binder::Binder;
+use crate::binder::{Binder, Relation};
 use crate::catalog::SinkId;
+use crate::catalog::source_catalog::SourceCatalog;
+use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef, rewrite_now_to_proctime};
 use crate::handler::HandlerArgs;
@@ -64,7 +66,7 @@ use crate::handler::create_mv::parse_column_names;
 use crate::handler::create_table::{ColumnIdGenerator, generate_stream_graph_for_replace_table};
 use crate::handler::util::{check_connector_match_connection_type, ensure_connection_type_allowed};
 use crate::optimizer::plan_node::{
-    IcebergPartitionInfo, LogicalSource, PartitionComputeInfo, StreamProject, generic,
+    IcebergPartitionInfo, LogicalSource, PartitionComputeInfo, Stream, StreamProject, generic,
 };
 use crate::optimizer::{OptimizerContext, PlanRef, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
@@ -112,7 +114,7 @@ pub async fn gen_sink_plan(
     let user_specified_columns = !stmt.columns.is_empty();
     let db_name = &session.database();
     let (sink_schema_name, sink_table_name) =
-        Binder::resolve_schema_qualified_name(db_name, stmt.sink_name.clone())?;
+        Binder::resolve_schema_qualified_name(db_name, &stmt.sink_name)?;
 
     let mut with_options = handler_args.with_options.clone();
 
@@ -155,20 +157,49 @@ pub async fn gen_sink_plan(
         OptimizerContext::from_handler_args(handler_args.clone())
     };
 
+    let is_auto_schema_change = resolved_with_options
+        .remove(AUTO_SCHEMA_CHANGE_KEY)
+        .map(|value| {
+            value.parse::<bool>().map_err(|_| {
+                ErrorCode::InvalidInputSyntax(format!(
+                    "invalid value {} of '{}' option, expect",
+                    value, AUTO_SCHEMA_CHANGE_KEY
+                ))
+            })
+        })
+        .transpose()?
+        .unwrap_or(false);
+
+    if is_auto_schema_change {
+        Feature::SinkAutoSchemaChange
+            .check_available()
+            .map_err(|e| anyhow::anyhow!(e))?;
+    }
+
     // Used for debezium's table name
     let sink_from_table_name;
     // `true` means that sink statement has the form: `CREATE SINK s1 FROM ...`
     // `false` means that sink statement has the form: `CREATE SINK s1 AS <query>`
-    let direct_sink;
+    let direct_sink_from_name: Option<(ObjectName, bool)>;
     let query = match stmt.sink_from {
         CreateSink::From(from_name) => {
             sink_from_table_name = from_name.0.last().unwrap().real_value();
-            direct_sink = true;
+            direct_sink_from_name = Some((from_name.clone(), is_auto_schema_change));
+            if is_auto_schema_change && stmt.into_table_name.is_some() {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "auto schema change not supported for sink-into-table".to_owned(),
+                )));
+            }
             Box::new(gen_query_from_table_name(from_name))
         }
         CreateSink::AsQuery(query) => {
+            if is_auto_schema_change {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "auto schema change not supported for CREATE SINK AS QUERY".to_owned(),
+                )));
+            }
             sink_from_table_name = sink_table_name.clone();
-            direct_sink = false;
+            direct_sink_from_name = None;
             query
         }
     };
@@ -178,13 +209,47 @@ pub async fn gen_sink_plan(
     let (sink_database_id, sink_schema_id) =
         session.get_database_and_schema_id_for_create(sink_schema_name.clone())?;
 
-    let (dependent_relations, dependent_udfs, bound) = {
+    let (dependent_relations, dependent_udfs, bound, auto_refresh_schema_from_table) = {
         let mut binder = Binder::new_for_stream(session);
-        let bound = binder.bind_query(*query.clone())?;
+        let auto_refresh_schema_from_table = if let Some((from_name, true)) = &direct_sink_from_name
+        {
+            let from_relation = binder.bind_relation_by_name(from_name, None, None, true)?;
+            if let Relation::BaseTable(table) = from_relation {
+                if table.table_catalog.table_type != TableType::Table {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "auto schema change only support on TABLE, but got {:?}",
+                        table.table_catalog.table_type
+                    ))
+                    .into());
+                }
+                if table.table_catalog.database_id != sink_database_id {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "auto schema change sink does not support created from cross database table".to_owned()
+                    )
+                        .into());
+                }
+                for col in &table.table_catalog.columns {
+                    if !col.is_hidden() && (col.is_generated() || col.is_rw_sys_column()) {
+                        return Err(ErrorCode::InvalidInputSyntax(format!("auto schema change not supported for table with non-hidden generated column or sys column, but got {}", col.name())).into());
+                    }
+                }
+                Some(table.table_catalog)
+            } else {
+                return Err(RwError::from(ErrorCode::NotSupported(
+                    "auto schema change only supported for TABLE".to_owned(),
+                    "try recreating the sink from table".to_owned(),
+                )));
+            }
+        } else {
+            None
+        };
+        let bound = binder.bind_query(&query)?;
+
         (
             binder.included_relations().clone(),
             binder.included_udfs().clone(),
             bound,
+            auto_refresh_schema_from_table,
         )
     };
 
@@ -247,7 +312,7 @@ pub async fn gen_sink_plan(
 
     let without_backfill = match resolved_with_options.remove(SINK_SNAPSHOT_OPTION) {
         Some(flag) if flag.eq_ignore_ascii_case("false") => {
-            if direct_sink || is_iceberg_engine_internal {
+            if direct_sink_from_name.is_some() || is_iceberg_engine_internal {
                 true
             } else {
                 return Err(ErrorCode::BindError(
@@ -306,6 +371,7 @@ pub async fn gen_sink_plan(
         target_table_catalog.clone(),
         partition_info,
         user_specified_columns,
+        auto_refresh_schema_from_table,
     )?;
 
     let sink_desc = sink_plan.sink_desc().clone();
@@ -323,7 +389,7 @@ pub async fn gen_sink_plan(
     // TODO(rc): To be consistent with UDF dependency check, we should collect relation dependencies
     // during binding instead of visiting the optimized plan.
     let dependencies =
-        RelationCollectorVisitor::collect_with(dependent_relations, sink_plan.clone())
+        RelationCollectorVisitor::collect_with::<Stream>(dependent_relations, sink_plan.clone())
             .into_iter()
             .map(|id| id.table_id() as ObjectId)
             .chain(
@@ -516,11 +582,7 @@ pub async fn handle_create_sink(
         let (mut graph, mut table, source, target_job_type) =
             reparse_table_for_sink(&session, &table_catalog).await?;
 
-        sink.original_target_columns = table
-            .columns
-            .iter()
-            .map(|col| ColumnCatalog::from(col.clone()))
-            .collect_vec();
+        sink.original_target_columns = table.columns.clone();
 
         table
             .incoming_sinks
@@ -545,8 +607,8 @@ pub async fn handle_create_sink(
         target_table_replace_plan = Some(ReplaceJobPlan {
             replace_job: Some(replace_job_plan::ReplaceJob::ReplaceTable(
                 replace_job_plan::ReplaceTable {
-                    table: Some(table),
-                    source,
+                    table: Some(table.to_prost()),
+                    source: source.map(|x| x.to_prost()),
                     job_type: target_job_type as _,
                 },
             )),
@@ -600,7 +662,12 @@ pub fn fetch_incoming_sinks(
 pub(crate) async fn reparse_table_for_sink(
     session: &Arc<SessionImpl>,
     table_catalog: &Arc<TableCatalog>,
-) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
+) -> Result<(
+    StreamFragmentGraph,
+    TableCatalog,
+    Option<SourceCatalog>,
+    TableJobType,
+)> {
     // Retrieve the original table definition and parse it to AST.
     let definition = table_catalog.create_sql_ast_purified()?;
     let Statement::CreateTable { name, .. } = &definition else {
@@ -953,7 +1020,7 @@ pub mod tests {
 
         // Check sink exists.
         let (sink, _) = catalog_reader
-            .get_sink_by_name(DEFAULT_DATABASE_NAME, SchemaPath::Name(schema_name), "snk1")
+            .get_created_sink_by_name(DEFAULT_DATABASE_NAME, SchemaPath::Name(schema_name), "snk1")
             .unwrap();
         assert_eq!(sink.name, "snk1");
     }

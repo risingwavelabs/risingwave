@@ -62,10 +62,11 @@ use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
     EventLog, FragmentDistribution, PbTableParallelism, PbThrottleTarget, RecoveryStatus,
-    SystemParams,
+    RefreshRequest, RefreshResponse, SystemParams,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
+use risingwave_pb::user::alter_default_privilege_request::Operation as AlterDefaultPrivilegeOperation;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
@@ -74,7 +75,7 @@ use tempfile::{Builder, NamedTempFile};
 use crate::FrontendOpts;
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
-use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SecretId};
+use crate::catalog::{DatabaseId, SchemaId, SecretId, SinkId};
 use crate::error::{ErrorCode, Result};
 use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
@@ -307,7 +308,18 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_view(&self, mut view: PbView) -> Result<()> {
+    async fn replace_materialized_view(
+        &self,
+        mut table: PbTable,
+        _graph: StreamFragmentGraph,
+    ) -> Result<()> {
+        table.stream_job_status = PbStreamJobStatus::Created as _;
+        assert_eq!(table.vnode_count(), VirtualNode::COUNT_FOR_TEST);
+        self.catalog.write().update_table(&table);
+        Ok(())
+    }
+
+    async fn create_view(&self, mut view: PbView, _dependencies: HashSet<ObjectId>) -> Result<()> {
         view.id = self.gen_id();
         self.catalog.write().create_view(&view);
         self.add_table_or_source_id(view.id, view.schema_id, view.database_id);
@@ -321,6 +333,7 @@ impl CatalogWriter for MockCatalogWriter {
         graph: StreamFragmentGraph,
         _job_type: PbTableJobType,
         if_not_exists: bool,
+        _dependencies: HashSet<ObjectId>,
     ) -> Result<()> {
         if let Some(source) = source {
             let source_id = self.create_source_inner(source)?;
@@ -576,7 +589,7 @@ impl CatalogWriter for MockCatalogWriter {
         unreachable!()
     }
 
-    async fn drop_connection(&self, _connection_id: ConnectionId) -> Result<()> {
+    async fn drop_connection(&self, _connection_id: u32, _cascade: bool) -> Result<()> {
         unreachable!()
     }
 
@@ -856,6 +869,7 @@ impl MockCatalogWriter {
 
     fn create_sink_inner(&self, mut sink: PbSink, _graph: StreamFragmentGraph) -> Result<()> {
         sink.id = self.gen_id();
+        sink.stream_job_status = PbStreamJobStatus::Created as _;
         self.catalog.write().create_sink(&sink);
         self.add_table_or_sink_id(sink.id, sink.schema_id, sink.database_id);
         Ok(())
@@ -968,6 +982,17 @@ impl UserInfoWriter for MockUserInfoWriter {
         }
         Ok(())
     }
+
+    async fn alter_default_privilege(
+        &self,
+        _users: Vec<UserId>,
+        _database_id: DatabaseId,
+        _schemas: Vec<SchemaId>,
+        _operation: AlterDefaultPrivilegeOperation,
+        _operated_by: UserId,
+    ) -> Result<()> {
+        todo!()
+    }
 }
 
 impl MockUserInfoWriter {
@@ -1025,6 +1050,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(vec![])
     }
 
+    async fn list_creating_fragment_distribution(&self) -> RpcResult<Vec<FragmentDistribution>> {
+        Ok(vec![])
+    }
+
     async fn list_actor_states(&self) -> RpcResult<Vec<ActorState>> {
         Ok(vec![])
     }
@@ -1039,10 +1068,6 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn list_meta_snapshots(&self) -> RpcResult<Vec<MetaSnapshotMetadata>> {
         Ok(vec![])
-    }
-
-    async fn get_system_params(&self) -> RpcResult<SystemParamsReader> {
-        Ok(SystemParams::default().into())
     }
 
     async fn set_system_param(
@@ -1160,6 +1185,16 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
+    async fn alter_source_connector_props(
+        &self,
+        _source_id: u32,
+        _changed_props: BTreeMap<String, String>,
+        _changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        _connector_conn_ref: Option<u32>,
+    ) -> RpcResult<()> {
+        unimplemented!()
+    }
+
     async fn list_hosted_iceberg_tables(&self) -> RpcResult<Vec<IcebergTable>> {
         unimplemented!()
     }
@@ -1173,6 +1208,18 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     fn worker_id(&self) -> u32 {
         0
+    }
+
+    async fn set_sync_log_store_aligned(&self, _job_id: u32, _aligned: bool) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn compact_iceberg_table(&self, _sink_id: SinkId) -> RpcResult<u64> {
+        Ok(1)
+    }
+
+    async fn refresh(&self, _request: RefreshRequest) -> RpcResult<RefreshResponse> {
+        Ok(RefreshResponse { status: None })
     }
 }
 

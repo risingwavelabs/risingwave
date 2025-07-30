@@ -116,7 +116,7 @@ pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> Str
         } => {
             let idx = table_name.0.len() - 1;
             if table_name.0[idx].real_value() == from {
-                table_name.0[idx] = Ident::new_unchecked(to);
+                table_name.0[idx] = Ident::from_real_value(to);
             } else {
                 match sink_from {
                     CreateSink::From(table_name) => replace_table_name(table_name, to),
@@ -133,7 +133,7 @@ pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> Str
 /// non-empty. e.g. `schema.table` or `database.schema.table`.
 fn replace_table_name(table_name: &mut ObjectName, to: &str) {
     let idx = table_name.0.len() - 1;
-    table_name.0[idx] = Ident::new_unchecked(to);
+    table_name.0[idx] = Ident::from_real_value(to);
 }
 
 /// `QueryRewriter` is a visitor that updates all references of relation named `from` to `to` in the
@@ -158,7 +158,7 @@ impl QueryRewriter<'_> {
                     risingwave_sqlparser::ast::CteInner::ChangeLog(name) => {
                         let idx = name.0.len() - 1;
                         if name.0[idx].real_value() == self.from {
-                            name.0[idx] = Ident::with_quote_unchecked('"', self.to);
+                            replace_table_name(name, self.to);
                         }
                     }
                 }
@@ -188,11 +188,11 @@ impl QueryRewriter<'_> {
                 if name.0[idx].real_value() == self.from {
                     if alias.is_none() {
                         *alias = Some(TableAlias {
-                            name: Ident::new_unchecked(self.from),
+                            name: Ident::from_real_value(self.from),
                             columns: vec![],
                         });
                     }
-                    name.0[idx] = Ident::new_unchecked(self.to);
+                    name.0[idx] = Ident::from_real_value(self.to);
                 }
             }
             TableFactor::Derived { subquery, .. } => self.visit_query(subquery),

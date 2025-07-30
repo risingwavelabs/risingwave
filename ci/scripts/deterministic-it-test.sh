@@ -19,6 +19,9 @@ mv target/ci-sim target/sim
 
 if [[ -z "${1:-}" ]]; then
   TEST_PATTERN=""
+elif [[ "$1" == "pull-request" ]]; then
+  # exclude logstore tests
+  TEST_PATTERN="-E 'not test(/^log_store/)'"
 else
   TEST_PATTERN="-E 'test(/^$1/)'"
 fi

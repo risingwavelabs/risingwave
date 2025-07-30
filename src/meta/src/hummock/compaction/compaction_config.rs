@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::config::CompactionConfig as CompactionConfigOpt;
-use risingwave_common::config::default::compaction_config;
+use risingwave_common::config::meta::default::compaction_config;
 use risingwave_pb::hummock::CompactionConfig;
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 

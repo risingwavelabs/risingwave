@@ -88,7 +88,7 @@ pub struct IcebergCommon {
     #[serde(rename = "table.name")]
     pub table_name: String,
     /// Credential for accessing iceberg catalog, only applicable in rest catalog.
-    /// A credential to exchange for a token in the OAuth2 client credentials flow.
+    /// A credential to exchange for a token in the `OAuth2` client credentials flow.
     #[serde(rename = "catalog.credential")]
     pub credential: Option<String>,
     /// token for accessing iceberg catalog, only applicable in rest catalog.
@@ -100,7 +100,7 @@ pub struct IcebergCommon {
     #[serde(rename = "catalog.oauth2_server_uri")]
     pub oauth2_server_uri: Option<String>,
     /// scope for accessing iceberg catalog, only applicable in rest catalog.
-    /// Additional scope for OAuth2.
+    /// Additional scope for `OAuth2`.
     #[serde(rename = "catalog.scope")]
     pub scope: Option<String>,
 
@@ -112,7 +112,7 @@ pub struct IcebergCommon {
     #[serde(rename = "catalog.rest.signing_name")]
     pub rest_signing_name: Option<String>,
 
-    /// Whether to use SigV4 for signing requests to the REST catalog.
+    /// Whether to use `SigV4` for signing requests to the REST catalog.
     #[serde(
         rename = "catalog.rest.sigv4_enabled",
         default,
@@ -137,6 +137,15 @@ pub struct IcebergCommon {
         deserialize_with = "deserialize_optional_bool_from_string"
     )]
     pub hosted_catalog: Option<bool>,
+
+    /// The http header to be used in the catalog requests.
+    /// Example:
+    /// `catalog.header = "key1=value1;key2=value2;key3=value3"`
+    /// explain the format of the header:
+    /// - Each header is a key-value pair, separated by an '='.
+    /// - Multiple headers can be specified, separated by a ';'.
+    #[serde(rename = "catalog.header")]
+    pub header: Option<String>,
 }
 
 impl EnforceSecret for IcebergCommon {
@@ -158,8 +167,25 @@ impl IcebergCommon {
     pub fn catalog_name(&self) -> String {
         self.catalog_name
             .as_ref()
-            .map(|s| s.to_string())
+            .cloned()
             .unwrap_or_else(|| "risingwave".to_owned())
+    }
+
+    pub fn headers(&self) -> ConnectorResult<HashMap<String, String>> {
+        if let Some(header) = &self.header {
+            let mut headers = HashMap::new();
+            for pair in header.split(';') {
+                let mut parts = pair.split('=');
+                if let (Some(key), Some(value)) = (parts.next(), parts.next()) {
+                    headers.insert(key.to_owned(), value.to_owned());
+                } else {
+                    bail!("Invalid header format: {}", pair);
+                }
+            }
+            Ok(headers)
+        } else {
+            Ok(HashMap::new())
+        }
     }
 
     pub fn enable_config_load(&self) -> bool {
@@ -315,6 +341,11 @@ impl IcebergCommon {
                     "s3.path-style-access".to_owned(),
                     path_style_access.to_string(),
                 );
+            }
+
+            let headers = self.headers()?;
+            for (header_name, header_value) in headers {
+                java_catalog_configs.insert(format!("header.{}", header_name), header_value);
             }
 
             match self.catalog_type.as_deref() {
@@ -491,6 +522,11 @@ impl IcebergCommon {
                 }
                 if let Some(scope) = &self.scope {
                     iceberg_configs.insert("scope".to_owned(), scope.clone());
+                }
+
+                let headers = self.headers()?;
+                for (header_name, header_value) in headers {
+                    iceberg_configs.insert(format!("header.{}", header_name), header_value);
                 }
 
                 let config_builder =

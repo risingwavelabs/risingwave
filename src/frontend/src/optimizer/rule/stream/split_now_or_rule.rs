@@ -15,9 +15,8 @@
 use risingwave_common::types::DataType;
 
 use crate::expr::{ExprImpl, ExprType, FunctionCall};
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::{LogicalFilter, LogicalShare, LogicalUnion, PlanTreeNodeUnary};
-use crate::optimizer::rule::{BoxedRule, Rule};
+use crate::optimizer::rule::prelude::{PlanRef, *};
 
 /// Convert `LogicalFilter` with now or others predicates to a `UNION ALL`
 ///
@@ -42,7 +41,7 @@ use crate::optimizer::rule::{BoxedRule, Rule};
 ///             Input
 /// ```text
 pub struct SplitNowOrRule {}
-impl Rule for SplitNowOrRule {
+impl Rule<Logical> for SplitNowOrRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
         let input = filter.input();

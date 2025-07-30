@@ -54,7 +54,6 @@ impl TaskService for BatchServiceImpl {
     type CreateTaskStream = ReceiverStream<TaskInfoResponseResult>;
     type ExecuteStream = ReceiverStream<GetDataResponseResult>;
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn create_task(
         &self,
         request: Request<CreateTaskRequest>,
@@ -97,7 +96,6 @@ impl TaskService for BatchServiceImpl {
         }
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn cancel_task(
         &self,
         req: Request<CancelTaskRequest>,
@@ -109,7 +107,6 @@ impl TaskService for BatchServiceImpl {
         Ok(Response::new(CancelTaskResponse { status: None }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn execute(
         &self,
         req: Request<ExecuteRequest>,
@@ -120,7 +117,6 @@ impl TaskService for BatchServiceImpl {
         BatchServiceImpl::get_execute_stream(env, mgr, req).await
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn fast_insert(
         &self,
         request: Request<FastInsertRequest>,

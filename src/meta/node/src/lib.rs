@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #![feature(let_chains)]
-#![cfg_attr(coverage, feature(coverage_attribute))]
+#![feature(coverage_attribute)]
 
 mod server;
 
@@ -78,6 +78,11 @@ pub struct MetaNodeOpts {
     /// Database of sql backend, required when meta backend set to MySQL or PostgreSQL.
     #[clap(long, hide = true, env = "RW_SQL_DATABASE", default_value = "")]
     pub sql_database: String,
+
+    /// Params for the URL connection, such as `sslmode=disable`.
+    /// Example: `param1=value1&param2=value2`
+    #[clap(long, hide = true, env = "RW_SQL_URL_PARAMS")]
+    pub sql_url_params: Option<String>,
 
     /// The HTTP REST-API address of the Prometheus instance associated to this cluster.
     /// This address is used to serve `PromQL` queries to Prometheus.
@@ -211,6 +216,7 @@ impl risingwave_common::opts::Opts for MetaNodeOpts {
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use risingwave_common::config::{MetaBackend, RwConfig, load_config};
 use tracing::info;
@@ -244,7 +250,7 @@ pub fn start(
                     .sql_endpoint
                     .expect("sql endpoint is required")
                     .expose_secret()
-                    .to_string(),
+                    .clone(),
                 config: meta_store_config,
             },
             MetaBackend::Sqlite => MetaStoreBackend::Sql {
@@ -258,25 +264,39 @@ pub fn start(
             },
             MetaBackend::Postgres => MetaStoreBackend::Sql {
                 endpoint: format!(
-                    "postgres://{}:{}@{}/{}",
+                    "postgres://{}:{}@{}/{}{}",
                     opts.sql_username,
                     opts.sql_password.expose_secret(),
                     opts.sql_endpoint
                         .expect("sql endpoint is required")
                         .expose_secret(),
-                    opts.sql_database
+                    opts.sql_database,
+                    if let Some(params) = &opts.sql_url_params
+                        && !params.is_empty()
+                    {
+                        format!("?{}", params)
+                    } else {
+                        "".to_owned()
+                    }
                 ),
                 config: meta_store_config,
             },
             MetaBackend::Mysql => MetaStoreBackend::Sql {
                 endpoint: format!(
-                    "mysql://{}:{}@{}/{}",
+                    "mysql://{}:{}@{}/{}{}",
                     opts.sql_username,
                     opts.sql_password.expose_secret(),
                     opts.sql_endpoint
                         .expect("sql endpoint is required")
                         .expose_secret(),
-                    opts.sql_database
+                    opts.sql_database,
+                    if let Some(params) = &opts.sql_url_params
+                        && !params.is_empty()
+                    {
+                        format!("?{}", params)
+                    } else {
+                        "".to_owned()
+                    }
                 ),
                 config: meta_store_config,
             },
@@ -414,6 +434,9 @@ pub fn start(
                 enable_committed_sst_sanity_check: config.meta.enable_committed_sst_sanity_check,
                 periodic_compaction_interval_sec: config.meta.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: config.meta.node_num_monitor_interval_sec,
+                protect_drop_table_with_incoming_sink: config
+                    .meta
+                    .protect_drop_table_with_incoming_sink,
                 prometheus_endpoint: opts.prometheus_endpoint,
                 prometheus_selector: opts.prometheus_selector,
                 vpc_id: opts.vpc_id,
@@ -507,6 +530,13 @@ pub fn start(
                 compute_client_config: config.meta.developer.compute_client_config.clone(),
                 stream_client_config: config.meta.developer.stream_client_config.clone(),
                 frontend_client_config: config.meta.developer.frontend_client_config.clone(),
+                redact_sql_option_keywords: Arc::new(
+                    config
+                        .batch
+                        .redact_sql_option_keywords
+                        .into_iter()
+                        .collect(),
+                ),
             },
             config.system.into_init_system_params(),
             Default::default(),

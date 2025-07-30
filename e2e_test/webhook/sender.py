@@ -159,6 +159,21 @@ def send_hubspot_sha256_v2(secret):
     }
     send_webhook(url, headers, payload_json)
 
+def send_batched(secret):
+    payload = message
+    payload['source'] = "github"
+    payload['auth_algo'] = "hmac_sha1"
+    url = SERVER_URL + "batched"
+
+    payload_jsonl = '\n'.join([json.dumps(payload) for i in range(10)])
+
+    signature = generate_signature_hmac(secret, payload_jsonl, 'sha1', "sha1=")
+    # Webhook message headers
+    headers = {
+        "Content-Type": "application/json",
+        "X-Hub-Signature": signature  # Custom signature header
+    }
+    send_webhook(url, headers, payload_jsonl)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Simulate sending Webhook messages")
@@ -180,3 +195,5 @@ if __name__ == "__main__":
     send_test_primary_key(secret)
     # check using raw string to verify the signature
     send_validate_raw_string(secret)
+    # batch multiple rows per request
+    send_batched(secret)

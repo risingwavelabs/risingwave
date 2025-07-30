@@ -307,10 +307,19 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
 
     fn parse_type(&mut self) -> DataType {
         match self.tokens.next().expect("Unexpected end of input") {
-            Token::Literal(name) => name
-                .replace('_', " ")
-                .parse::<DataType>()
-                .expect_str("type", &name),
+            Token::Literal(name) => {
+                let mut processed_name = name.replace('_', " ");
+
+                // Special logic to support Map type in `build_from_pretty`.
+                // Please refer to `src/expr/impl/src/scalar/map_filter.rs`.
+                if processed_name.starts_with("map") {
+                    processed_name = processed_name.replace('<', "(").replace('>', ")");
+                }
+
+                processed_name
+                    .parse::<DataType>()
+                    .expect_str("type", &processed_name)
+            }
             t => panic!("Expected a Literal, got {t:?}"),
         }
     }

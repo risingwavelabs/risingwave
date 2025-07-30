@@ -37,7 +37,7 @@ use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt, FormattedSink,
 };
-use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriterParam};
+use crate::sink::{Result, Sink, SinkError, SinkWriterParam};
 pub const KINESIS_SINK: &str = "kinesis";
 
 #[derive(Clone, Debug)]
@@ -83,7 +83,6 @@ impl TryFrom<SinkParam> for KinesisSink {
 const KINESIS_SINK_MAX_PENDING_CHUNK_NUM: usize = 64;
 
 impl Sink for KinesisSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = AsyncTruncateLogSinkerOf<KinesisSinkWriter>;
 
     const SINK_NAME: &'static str = KINESIS_SINK;
@@ -221,6 +220,7 @@ mod opaque_type {
         impl TryFuture<Ok = (), Error = SinkError> + Unpin + Send + 'static;
 
     impl KinesisSinkPayloadWriter {
+        #[define_opaque(KinesisSinkPayloadWriterDeliveryFuture)]
         pub(super) fn finish(self) -> KinesisSinkPayloadWriterDeliveryFuture {
             // For reference to the behavior of `put_records`
             // https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/kinesis/client/put_records.html

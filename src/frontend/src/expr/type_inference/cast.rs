@@ -70,7 +70,7 @@ pub fn align_types<'a>(
     let ret_type = ret_type.unwrap_or(DataType::Varchar);
     for e in exprs {
         // unwrap: cast to least_restrictive type always succeeds
-        e.cast_implicit_mut(ret_type.clone()).unwrap();
+        e.cast_implicit_mut(&ret_type).unwrap();
     }
     Ok(ret_type)
 }
@@ -112,7 +112,7 @@ pub fn align_array_and_element(
     let array_type = DataType::List(Box::new(common_element_type));
 
     // elements are already casted by `align_types`, we cast the array argument here
-    inputs[array_idx].cast_implicit_mut(array_type.clone())?;
+    inputs[array_idx].cast_implicit_mut(&array_type)?;
     tracing::trace!(?inputs, "align_array_and_element done");
     Ok(array_type)
 }
@@ -184,6 +184,11 @@ pub fn cast_ok(source: &DataType, target: &DataType, allows: CastContext) -> boo
 /// Both `source` and `target` must be base types, i.e. not struct or array.
 pub fn cast_ok_base(source: &DataType, target: &DataType, allows: CastContext) -> bool {
     matches!(CAST_TABLE.get(&(source.into(), target.into())), Some(context) if *context <= allows)
+    // TODO(VECTOR_PLACEHOLDER): not in CAST_TABLE because
+    // * `DataType::try_from(DataTypeName::Vector).unwrap().to_oid()` panics
+    // * `DataTypeName::Vector.to_oid()` is better but `to_oid` does not work for `DataTypeName::List`
+    || matches!((source, target), (DataType::Varchar, DataType::Vector(_)) if CastContext::Explicit <= allows)
+    || matches!((source, target), (DataType::Vector(_), DataType::Varchar) if CastContext::Assign <= allows)
 }
 
 fn cast_struct(source: &DataType, target: &DataType, allows: CastContext) -> CastResult {

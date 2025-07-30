@@ -16,6 +16,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Formatter;
 
+use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
@@ -25,7 +26,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_meta_model::WorkerId;
-use risingwave_pb::catalog::{CreateType, Table};
+use risingwave_pb::catalog::CreateType;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
@@ -35,7 +36,7 @@ use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation, Dispatcher,
-    Dispatchers, DropSubscriptionsMutation, PauseMutation, ResumeMutation,
+    Dispatchers, DropSubscriptionsMutation, LoadFinishMutation, PauseMutation, ResumeMutation,
     SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
     SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
@@ -58,8 +59,8 @@ use crate::model::{
     StreamJobFragments, StreamJobFragmentsToCreate,
 };
 use crate::stream::{
-    ConnectorPropsChange, FragmentBackfillOrder, JobReschedulePostUpdates, SplitAssignment,
-    ThrottleConfig, build_actor_connector_splits,
+    AutoRefreshSchemaSinkContext, ConnectorPropsChange, FragmentBackfillOrder,
+    JobReschedulePostUpdates, SplitAssignment, ThrottleConfig, build_actor_connector_splits,
 };
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -120,14 +121,18 @@ pub struct ReplaceStreamJobPlan {
     pub tmp_id: u32,
     /// The state table ids to be dropped.
     pub to_drop_state_table_ids: Vec<TableId>,
+    pub auto_refresh_schema_sinks: Option<Vec<AutoRefreshSchemaSinkContext>>,
 }
 
 impl ReplaceStreamJobPlan {
     fn fragment_changes(&self) -> HashMap<FragmentId, CommandFragmentChanges> {
         let mut fragment_changes = HashMap::new();
         for (fragment_id, new_fragment) in self.new_fragments.new_fragment_info() {
-            let fragment_change =
-                CommandFragmentChanges::NewFragment(self.streaming_job.id().into(), new_fragment);
+            let fragment_change = CommandFragmentChanges::NewFragment {
+                job_id: self.streaming_job.id().into(),
+                info: new_fragment,
+                is_existing: false,
+            };
             fragment_changes
                 .try_insert(fragment_id, fragment_change)
                 .expect("non-duplicate");
@@ -144,6 +149,24 @@ impl ReplaceStreamJobPlan {
                     CommandFragmentChanges::ReplaceNodeUpstream(replace_map.clone()),
                 )
                 .expect("non-duplicate");
+        }
+        if let Some(sinks) = &self.auto_refresh_schema_sinks {
+            for sink in sinks {
+                let fragment_change = CommandFragmentChanges::NewFragment {
+                    job_id: TableId::new(sink.original_sink.id as _),
+                    info: sink.new_fragment_info(),
+                    is_existing: false,
+                };
+                fragment_changes
+                    .try_insert(sink.new_fragment.fragment_id, fragment_change)
+                    .expect("non-duplicate");
+                fragment_changes
+                    .try_insert(
+                        sink.original_fragment.fragment_id,
+                        CommandFragmentChanges::RemoveFragment,
+                    )
+                    .expect("non-duplicate");
+            }
         }
         fragment_changes
     }
@@ -180,7 +203,6 @@ pub struct CreateStreamingJobCommandInfo {
     pub job_type: StreamingJobType,
     pub create_type: CreateType,
     pub streaming_job: StreamingJob,
-    pub internal_tables: Vec<Table>,
     pub fragment_backfill_ordering: FragmentBackfillOrder,
 }
 
@@ -242,7 +264,8 @@ pub enum CreateStreamingJobType {
 /// [`Command`] is the input of [`crate::barrier::worker::GlobalBarrierWorker`]. For different commands,
 /// it will [build different barriers to send](Self::to_mutation),
 /// and may [do different stuffs after the barrier is collected](CommandContext::post_collect).
-#[derive(Debug, strum::Display)]
+// FIXME: this enum is significantly large on stack, box it
+#[derive(Debug)]
 pub enum Command {
     /// `Flush` command will generate a checkpoint barrier. After the barrier is collected and committed
     /// all messages before the checkpoint barrier should have been committed.
@@ -340,6 +363,74 @@ pub enum Command {
     StartFragmentBackfill {
         fragment_ids: Vec<FragmentId>,
     },
+
+    /// `Refresh` command generates a barrier to refresh a table by truncating state
+    /// and reloading data from source.
+    Refresh {
+        table_id: TableId,
+        associated_source_id: TableId,
+    },
+    LoadFinish {
+        table_id: TableId,
+        associated_source_id: TableId,
+    },
+}
+
+// For debugging and observability purposes. Can add more details later if needed.
+impl std::fmt::Display for Command {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Command::Flush => write!(f, "Flush"),
+            Command::Pause => write!(f, "Pause"),
+            Command::Resume => write!(f, "Resume"),
+            Command::DropStreamingJobs {
+                table_fragments_ids,
+                ..
+            } => {
+                write!(
+                    f,
+                    "DropStreamingJobs: {}",
+                    table_fragments_ids.iter().sorted().join(", ")
+                )
+            }
+            Command::CreateStreamingJob { info, .. } => {
+                write!(f, "CreateStreamingJob: {}", info.streaming_job)
+            }
+            Command::MergeSnapshotBackfillStreamingJobs(_) => {
+                write!(f, "MergeSnapshotBackfillStreamingJobs")
+            }
+            Command::RescheduleFragment { .. } => write!(f, "RescheduleFragment"),
+            Command::ReplaceStreamJob(plan) => {
+                write!(f, "ReplaceStreamJob: {}", plan.streaming_job)
+            }
+            Command::SourceChangeSplit(_) => write!(f, "SourceChangeSplit"),
+            Command::Throttle(_) => write!(f, "Throttle"),
+            Command::CreateSubscription {
+                subscription_id, ..
+            } => write!(f, "CreateSubscription: {subscription_id}"),
+            Command::DropSubscription {
+                subscription_id, ..
+            } => write!(f, "DropSubscription: {subscription_id}"),
+            Command::ConnectorPropsChange(_) => write!(f, "ConnectorPropsChange"),
+            Command::StartFragmentBackfill { .. } => write!(f, "StartFragmentBackfill"),
+            Command::Refresh {
+                table_id,
+                associated_source_id,
+            } => write!(
+                f,
+                "Refresh: {} (source: {})",
+                table_id, associated_source_id
+            ),
+            Command::LoadFinish {
+                table_id,
+                associated_source_id,
+            } => write!(
+                f,
+                "LoadFinish: {} (source: {})",
+                table_id, associated_source_id
+            ),
+        }
+    }
 }
 
 impl Command {
@@ -388,10 +479,11 @@ impl Command {
                     .map(|(fragment_id, fragment_info)| {
                         (
                             fragment_id,
-                            CommandFragmentChanges::NewFragment(
-                                info.streaming_job.id().into(),
-                                fragment_info,
-                            ),
+                            CommandFragmentChanges::NewFragment {
+                                job_id: info.streaming_job.id().into(),
+                                info: fragment_info,
+                                is_existing: false,
+                            },
                         )
                     })
                     .collect();
@@ -455,6 +547,8 @@ impl Command {
             Command::DropSubscription { .. } => None,
             Command::ConnectorPropsChange(_) => None,
             Command::StartFragmentBackfill { .. } => None,
+            Command::Refresh { .. } => None, // Refresh doesn't change fragment structure
+            Command::LoadFinish { .. } => None, // LoadFinish doesn't change fragment structure
         }
     }
 
@@ -523,6 +617,22 @@ impl std::fmt::Debug for CommandContext {
             .field("barrier_info", &self.barrier_info)
             .field("command", &self.command)
             .finish()
+    }
+}
+
+impl std::fmt::Display for CommandContext {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "prev_epoch={}, curr_epoch={}, kind={}",
+            self.barrier_info.prev_epoch.value().0,
+            self.barrier_info.curr_epoch.value().0,
+            self.barrier_info.kind.as_str_name()
+        )?;
+        if let Some(command) = &self.command {
+            write!(f, ", command={}", command)?;
+        }
+        Ok(())
     }
 }
 
@@ -776,7 +886,7 @@ impl Command {
                         })
                         .collect();
                     let update = Self::generate_update_mutation_for_replace_table(
-                        old_fragments,
+                        old_fragments.actor_ids(),
                         merge_updates,
                         dispatchers,
                         init_split_assignment,
@@ -813,6 +923,7 @@ impl Command {
                 replace_upstream,
                 upstream_fragment_downstreams,
                 init_split_assignment,
+                auto_refresh_schema_sinks,
                 ..
             }) => {
                 let edges = edges.as_mut().expect("should exist");
@@ -827,7 +938,19 @@ impl Command {
                     })
                     .collect();
                 Self::generate_update_mutation_for_replace_table(
-                    old_fragments,
+                    old_fragments.actor_ids().into_iter().chain(
+                        auto_refresh_schema_sinks
+                            .as_ref()
+                            .into_iter()
+                            .flat_map(|sinks| {
+                                sinks.iter().flat_map(|sink| {
+                                    sink.original_fragment
+                                        .actors
+                                        .iter()
+                                        .map(|actor| actor.actor_id)
+                                })
+                            }),
+                    ),
                     merge_updates,
                     dispatchers,
                     init_split_assignment,
@@ -1039,6 +1162,21 @@ impl Command {
                     fragment_ids: fragment_ids.clone(),
                 }),
             ),
+            Command::Refresh {
+                table_id,
+                associated_source_id,
+            } => Some(Mutation::RefreshStart(
+                risingwave_pb::stream_plan::RefreshStartMutation {
+                    table_id: table_id.table_id,
+                    associated_source_id: associated_source_id.table_id,
+                },
+            )),
+            Command::LoadFinish {
+                table_id: _,
+                associated_source_id,
+            } => Some(Mutation::LoadFinish(LoadFinishMutation {
+                associated_source_id: associated_source_id.table_id,
+            })),
         }
     }
 
@@ -1112,19 +1250,42 @@ impl Command {
             }
             Command::ReplaceStreamJob(replace_table) => {
                 let edges = edges.as_mut().expect("should exist");
-                Some(edges.collect_actors_to_create(replace_table.new_fragments.actors_to_create()))
+                let mut actors =
+                    edges.collect_actors_to_create(replace_table.new_fragments.actors_to_create());
+                if let Some(sinks) = &replace_table.auto_refresh_schema_sinks {
+                    let sink_actors = edges.collect_actors_to_create(sinks.iter().map(|sink| {
+                        (
+                            sink.new_fragment.fragment_id,
+                            &sink.new_fragment.nodes,
+                            sink.new_fragment.actors.iter().map(|actor| {
+                                (
+                                    actor,
+                                    sink.actor_status[&actor.actor_id]
+                                        .location
+                                        .as_ref()
+                                        .unwrap()
+                                        .worker_node_id as _,
+                                )
+                            }),
+                        )
+                    }));
+                    for (worker_id, fragment_actors) in sink_actors {
+                        actors.entry(worker_id).or_default().extend(fragment_actors);
+                    }
+                }
+                Some(actors)
             }
             _ => None,
         }
     }
 
     fn generate_update_mutation_for_replace_table(
-        old_fragments: &StreamJobFragments,
+        dropped_actors: impl IntoIterator<Item = ActorId>,
         merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
         dispatchers: FragmentActorDispatchers,
         init_split_assignment: &SplitAssignment,
     ) -> Option<Mutation> {
-        let dropped_actors = old_fragments.actor_ids();
+        let dropped_actors = dropped_actors.into_iter().collect();
 
         let actor_new_dispatchers = dispatchers
             .into_values()

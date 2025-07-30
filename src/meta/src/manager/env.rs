@@ -28,9 +28,11 @@ use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{
     FrontendClientPool, FrontendClientPoolRef, StreamClientPool, StreamClientPoolRef,
 };
+use risingwave_sqlparser::ast::RedactSqlOptionKeywordsRef;
 use sea_orm::EntityTrait;
 
 use crate::MetaResult;
+use crate::barrier::SharedActorInfos;
 use crate::controller::SqlMetaStore;
 use crate::controller::id::{
     IdGeneratorManager as SqlIdGeneratorManager, IdGeneratorManagerRef as SqlIdGeneratorManagerRef,
@@ -61,6 +63,8 @@ pub struct MetaSrvEnv {
     /// notification manager.
     notification_manager: NotificationManagerRef,
 
+    shared_actor_info: SharedActorInfos,
+
     /// stream client pool memorization.
     stream_client_pool: StreamClientPoolRef,
 
@@ -76,6 +80,9 @@ pub struct MetaSrvEnv {
     cluster_id: ClusterId,
 
     pub hummock_seq: Arc<SequenceGenerator>,
+
+    /// The await-tree registry of the current meta node.
+    await_tree_reg: await_tree::Registry,
 
     /// options read by all services
     pub opts: Arc<MetaOpts>,
@@ -146,7 +153,8 @@ pub struct MetaOpts {
     pub periodic_compaction_interval_sec: u64,
     /// Interval of reporting the number of nodes in the cluster.
     pub node_num_monitor_interval_sec: u64,
-
+    /// Whether to protect the drop table operation with incoming sink.
+    pub protect_drop_table_with_incoming_sink: bool,
     /// The Prometheus endpoint for Meta Dashboard Service.
     /// The Dashboard service uses this in the following ways:
     /// 1. Query Prometheus for relevant metrics to find Stream Graph Bottleneck, and display it.
@@ -267,6 +275,7 @@ pub struct MetaOpts {
     pub compute_client_config: RpcClientConfig,
     pub stream_client_config: RpcClientConfig,
     pub frontend_client_config: RpcClientConfig,
+    pub redact_sql_option_keywords: RedactSqlOptionKeywordsRef,
 }
 
 impl MetaOpts {
@@ -305,6 +314,7 @@ impl MetaOpts {
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 60,
             node_num_monitor_interval_sec: 10,
+            protect_drop_table_with_incoming_sink: false,
             prometheus_endpoint: None,
             prometheus_selector: None,
             vpc_id: None,
@@ -353,6 +363,7 @@ impl MetaOpts {
             compute_client_config: RpcClientConfig::default(),
             stream_client_config: RpcClientConfig::default(),
             frontend_client_config: RpcClientConfig::default(),
+            redact_sql_option_keywords: Arc::new(Default::default()),
         }
     }
 }
@@ -433,6 +444,7 @@ impl MetaSrvEnv {
             system_param_manager_impl: system_param_controller,
             session_param_manager_impl: session_param_controller,
             meta_store_impl: meta_store_impl.clone(),
+            shared_actor_info: SharedActorInfos::new(notification_manager.clone()),
             notification_manager,
             stream_client_pool,
             frontend_client_pool,
@@ -441,6 +453,8 @@ impl MetaSrvEnv {
             cluster_id,
             hummock_seq: Arc::new(SequenceGenerator::new(meta_store_impl.conn.clone())),
             opts: opts.into(),
+            // Await trees on the meta node is lightweight, thus always enabled.
+            await_tree_reg: await_tree::Registry::new(Default::default()),
         })
     }
 
@@ -503,19 +517,32 @@ impl MetaSrvEnv {
     pub fn event_log_manager_ref(&self) -> EventLogManagerRef {
         self.event_log_manager.clone()
     }
+
+    pub fn await_tree_reg(&self) -> &await_tree::Registry {
+        &self.await_tree_reg
+    }
+
+    pub(crate) fn shared_actor_infos(&self) -> &SharedActorInfos {
+        &self.shared_actor_info
+    }
 }
 
 #[cfg(any(test, feature = "test"))]
 impl MetaSrvEnv {
     // Instance for test.
     pub async fn for_test() -> Self {
-        Self::for_test_opts(MetaOpts::test(false)).await
+        Self::for_test_opts(MetaOpts::test(false), |_| ()).await
     }
 
-    pub async fn for_test_opts(opts: MetaOpts) -> Self {
+    pub async fn for_test_opts(
+        opts: MetaOpts,
+        on_test_system_params: impl FnOnce(&mut risingwave_pb::meta::PbSystemParams),
+    ) -> Self {
+        let mut system_params = risingwave_common::system_param::system_params_for_test();
+        on_test_system_params(&mut system_params);
         Self::new(
             opts,
-            risingwave_common::system_param::system_params_for_test(),
+            system_params,
             Default::default(),
             SqlMetaStore::for_test().await,
         )

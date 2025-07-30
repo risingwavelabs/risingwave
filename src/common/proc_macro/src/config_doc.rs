@@ -41,18 +41,17 @@ fn extract_comment(attrs: &Vec<Attribute>) -> String {
     attrs
         .iter()
         .filter_map(|attr| {
-            if let Ok(meta) = attr.parse_meta() {
-                if meta.path().is_ident("doc") {
-                    if let syn::Meta::NameValue(syn::MetaNameValue {
-                        lit: syn::Lit::Str(comment),
-                        ..
-                    }) = meta
-                    {
-                        return Some(comment.value());
-                    }
-                }
+            if let Ok(meta) = attr.parse_meta()
+                && meta.path().is_ident("doc")
+                && let syn::Meta::NameValue(syn::MetaNameValue {
+                    lit: syn::Lit::Str(comment),
+                    ..
+                }) = meta
+            {
+                Some(comment.value())
+            } else {
+                None
             }
-            None
         })
         .filter_map(|comment| {
             let trimmed = comment.trim();

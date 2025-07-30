@@ -803,7 +803,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
 
     let (cdc_table_desc, columns, pk_column_ids) = derive_cdc_table_desc(
         &session,
-        shared_source.clone(),
+        source.clone(),
         external_table_name.clone(),
         column_defs,
         columns,
@@ -906,7 +906,7 @@ pub fn derive_cdc_table_desc(
         session,
         table_or_source_name.real_value(),
         &mut columns,
-        column_defs,
+        &column_defs,
         &pk_column_ids,
     )?;
 
@@ -1094,7 +1094,11 @@ pub(super) async fn handle_create_table_plan(
         engine,
     };
 
+<<<<<<< HEAD
     let ((plan, source, table), job_type, shared_shource_id) = match (
+=======
+    let ((plan, source, table), job_type, shared_source_id) = match (
+>>>>>>> yuhao/cdc-table-source
         format_encode,
         cdc_table_info.as_ref(),
     ) {
@@ -1153,29 +1157,7 @@ pub(super) async fn handle_create_table_plan(
                 session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
             // cdc table cannot be append-only
-<<<<<<< HEAD
             let (shared_source, cdc_with_options) = get_shared_source_info(session, cdc_table)?;
-=======
-            let (shared_source_schema_name, shared_source_name) =
-                Binder::resolve_schema_qualified_name(db_name, cdc_table.source_name.clone())?;
-
-            let shared_source = {
-                let catalog_reader = session.env().catalog_reader().read_guard();
-                let schema_path =
-                    SchemaPath::new(shared_source_schema_name.as_deref(), &search_path, user_name);
-
-                let (source, _) = catalog_reader.get_source_by_name(
-                    db_name,
-                    schema_path,
-                    shared_source_name.as_str(),
-                )?;
-                source.clone()
-            };
-            let cdc_with_options: WithOptionsSecResolved = derive_with_options_for_cdc_table(
-                &shared_source.with_properties,
-                cdc_table.external_table_name.clone(),
-            )?;
->>>>>>> d9c8a639e9 (minor)
 
             let (columns, pk_names) = match wildcard_idx {
                 Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
@@ -1208,7 +1190,7 @@ pub(super) async fn handle_create_table_plan(
 
             let context: OptimizerContextRef =
                 OptimizerContext::new(handler_args, explain_options).into();
-            let shared_source_id = source.id;
+            let shared_source_id = shared_source.id;
             let (plan, table) = gen_create_table_plan_for_cdc_table(
                 context,
                 shared_source,
@@ -1245,6 +1227,38 @@ pub(super) async fn handle_create_table_plan(
         }
     };
     Ok((plan, source, table, job_type, shared_source_id))
+<<<<<<< HEAD
+=======
+}
+
+// Get (shared source catalog, cdc WITH option) from the source in `cdc_table`
+pub fn get_shared_source_info(
+    session: &SessionImpl,
+    cdc_table: &CdcTableInfo,
+) -> Result<(Arc<SourceCatalog>, WithOptionsSecResolved)> {
+    let db_name = &session.database();
+    let search_path = &session.config().search_path();
+    let user_name = &session.user_name();
+
+    let (shared_source_schema_name, shared_source_name) =
+        Binder::resolve_schema_qualified_name(db_name, &cdc_table.source_name.clone())?;
+
+    let shared_source = {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let schema_path =
+            SchemaPath::new(shared_source_schema_name.as_deref(), search_path, user_name);
+
+        let (source, _) =
+            catalog_reader.get_source_by_name(db_name, schema_path, shared_source_name.as_str())?;
+        source.clone()
+    };
+    let cdc_with_options: WithOptionsSecResolved = derive_with_options_for_cdc_table(
+        &shared_source.with_properties,
+        cdc_table.external_table_name.clone(),
+    )?;
+
+    Ok((shared_source, cdc_with_options))
+>>>>>>> yuhao/cdc-table-source
 }
 
 // Get (shared source catalog, cdc WITH option) from the source in `cdc_table`

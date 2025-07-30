@@ -33,7 +33,7 @@ use risingwave_common_estimate_size::EstimateSize;
 use smallbitset::Set64;
 use static_assertions::const_assert_eq;
 
-use crate::array::{ListValue, MapValue, StructValue};
+use crate::array::{ListValue, MapValue, StructValue, VectorRef, VectorVal};
 use crate::types::{
     DataType, Date, Decimal, F32, F64, Int256, Int256Ref, JsonbVal, Scalar, ScalarRef,
     ScalarRefImpl, Serial, Time, Timestamp, Timestamptz,
@@ -622,6 +622,22 @@ impl HashKeyDe for Timestamptz {
 impl_value_encoding_hash_key_serde!(Box<str>);
 impl_value_encoding_hash_key_serde!(Box<[u8]>);
 impl_value_encoding_hash_key_serde!(JsonbVal);
+
+impl<'a> HashKeySer<'a> for VectorRef<'a> {
+    fn serialize_into(self, _mut_buf: impl BufMut) {
+        todo!("VECTOR_PLACEHOLDER")
+    }
+
+    fn exact_size() -> Option<usize> {
+        todo!("VECTOR_PLACEHOLDER")
+    }
+}
+
+impl HashKeyDe for VectorVal {
+    fn deserialize(_data_type: &DataType, _mut_buf: impl Buf) -> Self {
+        todo!("VECTOR_PLACEHOLDER")
+    }
+}
 
 // It's possible there's `Decimal` or `Interval` in these composite types, so we currently always
 // use the memcmp encoding for safety.

@@ -643,6 +643,9 @@ where
                 self.stream
                     .write_no_flush(&BeMessage::BackendKeyData(session.id()))?;
 
+                self.stream.write_no_flush(&BeMessage::ParameterStatus(
+                    BeParameterStatusMessage::TimeZone(&session.get_config("timezone")?),
+                ))?;
                 self.stream
                     .write_parameter_status_msg_no_flush(&ParameterStatus {
                         application_name: application_name.cloned(),
@@ -665,9 +668,13 @@ where
     }
 
     async fn process_password_msg(&mut self, msg: FePasswordMessage) -> PsqlResult<()> {
-        let authenticator = self.session.as_ref().unwrap().user_authenticator();
+        let session = self.session.as_ref().unwrap();
+        let authenticator = session.user_authenticator();
         authenticator.authenticate(&msg.password).await?;
         self.stream.write_no_flush(&BeMessage::AuthenticationOk)?;
+        self.stream.write_no_flush(&BeMessage::ParameterStatus(
+            BeParameterStatusMessage::TimeZone(&session.get_config("timezone")?),
+        ))?;
         self.stream
             .write_parameter_status_msg_no_flush(&ParameterStatus::default())?;
         self.ready_for_query()?;
@@ -680,7 +687,7 @@ where
         tracing::trace!("cancel query in session: {:?}", session_id);
         self.session_mgr.cancel_queries_in_session(session_id);
         self.session_mgr.cancel_creating_jobs_in_session(session_id);
-        self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
+        self.is_terminate = true;
         Ok(())
     }
 
@@ -1426,7 +1433,7 @@ mod tests {
         ";
         assert_eq!(
             redact_sql(sql, keywords),
-            "CREATE SOURCE temp (k BIGINT, v CHARACTER VARYING) WITH (connector = 'datagen', v1 = 123, v2 = '[REDACTED]', v3 = false, v4 = '[REDACTED]') FORMAT PLAIN ENCODE JSON (a = '1', b = '[REDACTED]')"
+            "CREATE SOURCE temp (k BIGINT, v CHARACTER VARYING) WITH (connector = 'datagen', v1 = 123, v2 = [REDACTED], v3 = false, v4 = [REDACTED]) FORMAT PLAIN ENCODE JSON (a = '1', b = [REDACTED])"
         );
     }
 }

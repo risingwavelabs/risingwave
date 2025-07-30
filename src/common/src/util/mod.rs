@@ -29,6 +29,7 @@ pub mod panic;
 pub mod pretty_bytes;
 pub mod prost;
 pub mod query_log;
+pub mod quote_ident;
 pub use rw_resource_util as resource_util;
 pub mod functional;
 pub mod recursive;

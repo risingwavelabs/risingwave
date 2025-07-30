@@ -197,6 +197,9 @@ message VectorIndexObject {
 message VectorFileInfo {
   uint64 object_id = 1;
   uint64 file_size = 2;
+  uint64 start_vector_id = 3;
+  uint32 vector_count = 4;
+  uint64 meta_offset = 5;
 }
 
 message FlatIndexConfig {}
@@ -204,10 +207,12 @@ message FlatIndexConfig {}
 message FlatIndex {
   FlatIndexConfig config = 1;
   repeated VectorFileInfo vector_files = 2;
+  uint64 next_vector_id = 3;
 }
 
 message FlatIndexAdd {
   repeated VectorFileInfo added_vector_files = 1;
+  uint64 next_vector_id = 2;
 }
 
 message VectorIndex {

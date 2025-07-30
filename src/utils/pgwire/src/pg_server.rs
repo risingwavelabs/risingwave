@@ -24,6 +24,7 @@ use parking_lot::Mutex;
 use risingwave_common::types::DataType;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
+use risingwave_jni_core::jvm_runtime::register_jvm_builder;
 use risingwave_sqlparser::ast::Statement;
 use serde::Deserialize;
 use thiserror_ext::AsReport;
@@ -125,6 +126,8 @@ pub trait Session: Send + Sync {
     fn user_authenticator(&self) -> &UserAuthenticator;
 
     fn id(&self) -> SessionId;
+
+    fn get_config(&self, key: &str) -> Result<String, BoxedError>;
 
     fn set_config(&self, key: &str, value: String) -> Result<String, BoxedError>;
 
@@ -272,7 +275,7 @@ pub async fn pg_serve(
 ) -> Result<(), BoxedError> {
     let listener = Listener::bind(addr).await?;
     tracing::info!(addr, "server started");
-
+    register_jvm_builder();
     let acceptor_runtime = BackgroundShutdownRuntime::from({
         let mut builder = tokio::runtime::Builder::new_multi_thread();
         builder.worker_threads(1);
@@ -478,6 +481,13 @@ mod tests {
 
         fn id(&self) -> SessionId {
             (0, 0)
+        }
+
+        fn get_config(&self, key: &str) -> Result<String, BoxedError> {
+            match key {
+                "timezone" => Ok("UTC".to_owned()),
+                _ => Err(format!("Unknown config key: {key}").into()),
+            }
         }
 
         fn set_config(&self, _key: &str, _value: String) -> Result<String, BoxedError> {

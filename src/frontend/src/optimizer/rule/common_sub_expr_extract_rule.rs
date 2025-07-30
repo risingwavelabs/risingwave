@@ -14,15 +14,15 @@
 
 use itertools::Itertools;
 
-use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_expr_rewriter::CseRewriter;
 use crate::optimizer::plan_expr_visitor::CseExprCounter;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::*;
 
 pub struct CommonSubExprExtractRule {}
-impl Rule for CommonSubExprExtractRule {
+impl Rule<Logical> for CommonSubExprExtractRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let project: &LogicalProject = plan.as_logical_project()?;
 

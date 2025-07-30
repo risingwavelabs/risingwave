@@ -54,6 +54,55 @@ pub fn position(str: &str, sub_str: &str) -> i32 {
     }
 }
 
+/// Returns the index of the first occurrence of the specified bytea substring in the input bytea,
+/// or zero if the substring is not present.
+///
+/// # Example
+///
+/// ```slt
+/// query I
+/// select position('\x6c6f'::bytea in '\x68656c6c6f2c20776f726c64'::bytea);
+/// ----
+/// 4
+///
+/// query I
+/// select position('\x6967'::bytea in '\x68696768'::bytea);
+/// ----
+/// 2
+///
+/// query I
+/// select position('\x64'::bytea in '\x616263'::bytea);
+/// ----
+/// 0
+///
+/// query I
+/// select position(''::bytea in '\x616263'::bytea);
+/// ----
+/// 1
+///
+/// query I
+/// select position('\x616263'::bytea in ''::bytea);
+/// ----
+/// 0
+/// ```
+#[function("position(bytea, bytea) -> int4")]
+pub fn bytea_position(bytea: &[u8], sub_bytea: &[u8]) -> i32 {
+    if sub_bytea.is_empty() {
+        return 1;
+    }
+    if sub_bytea.len() > bytea.len() {
+        return 0;
+    }
+    let mut i = 0;
+    while i <= bytea.len().saturating_sub(sub_bytea.len()) {
+        if &bytea[i..i + sub_bytea.len()] == sub_bytea {
+            return (i + 1) as i32;
+        }
+        i += 1;
+    }
+    0
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -69,6 +118,18 @@ mod tests {
 
         for (str, sub_str, expected) in cases {
             assert_eq!(position(str, sub_str), expected)
+        }
+    }
+
+    #[test]
+    fn test_bytea_position() {
+        let cases: [(&[u8], &[u8], i32); 3] = [
+            (b"\x01\x02\x03", b"\x03", 3),
+            (b"\x01\x02\x03", b"\x04", 0),
+            (b"\x01\x02\x03", b"", 1),
+        ];
+        for (bytea, sub_bytea, expected) in cases {
+            assert_eq!(bytea_position(bytea, sub_bytea), expected)
         }
     }
 }
