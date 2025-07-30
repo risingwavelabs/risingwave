@@ -45,7 +45,7 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 
-use crate::barrier::{Command, Reschedule};
+use crate::barrier::{Command, Reschedule, SharedFragmentInfo};
 use crate::controller::scale::{
     RescheduleWorkingSet, TargetResourcePolicy, WorkerInfo, render_jobs,
 };
@@ -444,12 +444,12 @@ impl ScaleController {
 
     pub async fn diff_fragment(
         &self,
-        fragment_info: &InflightFragmentInfo,
+        prev_fragment_info: &SharedFragmentInfo,
         curr_actors: &HashMap<crate::model::ActorId, InflightActorInfo>,
         upstream_fragments: HashMap<FragmentId, DispatcherType>,
         downstream_fragments: HashMap<FragmentId, DispatcherType>,
     ) -> MetaResult<Reschedule> {
-        let prev_actors: HashMap<_, _> = fragment_info
+        let prev_actors: HashMap<_, _> = prev_fragment_info
             .actors
             .iter()
             .map(|(actor_id, actor)| (*actor_id, actor))
@@ -501,7 +501,7 @@ impl ScaleController {
             .collect();
 
         let upstream_dispatcher_mapping =
-            if let DistributionType::Hash = fragment_info.distribution_type {
+            if let DistributionType::Hash = prev_fragment_info.distribution_type {
                 Some(ActorMapping::from_bitmaps(&actor_mapping))
             } else {
                 None
@@ -513,7 +513,7 @@ impl ScaleController {
             .map(|(upstream_fragment, _)| {
                 (
                     *upstream_fragment as FragmentId,
-                    fragment_info.fragment_id as DispatcherId,
+                    prev_fragment_info.fragment_id as DispatcherId,
                 )
             })
             .collect();
@@ -533,6 +533,7 @@ impl ScaleController {
             downstream_fragment_ids,
             actor_splits: Default::default(),
             newly_created_actors: Default::default(),
+            cdc_table_snapshot_split_assignment: Default::default(),
         };
 
         Ok(reschedule)
@@ -2293,6 +2294,30 @@ impl ScaleController {
         let result = render_jobs(&txn, jobs, workers).await?;
 
         println!("result {:#?}", result);
+
+        for (database_id, jobs) in result {
+            for (job, fragments) in jobs {
+                for (fragment, fragment_info) in fragments {
+                    let read_gurad = self.env.shared_actor_infos().read_guard();
+                    let prev_fragment = read_gurad.get_fragment(fragment as FragmentId).unwrap();
+
+                    let InflightFragmentInfo {
+                        fragment_id,
+                        job_id,
+                        distribution_type,
+                        fragment_type_mask,
+                        vnode_count,
+                        nodes,
+                        actors,
+                        state_table_ids,
+                    } = fragment_info;
+
+                    // self.diff_fragment(prev_fragment, &actors, );
+                }
+            }
+        }
+
+        //        self.diff_fragment()
 
         //        self.diff_fragment()
 
