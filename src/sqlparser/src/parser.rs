@@ -2172,10 +2172,9 @@ impl Parser<'_> {
             // default row format for datagen source is native
             self.parse_format_encode_with_connector(&connector, cdc_source_job)?
         } else {
-            // source from source deos not support format encode
+            // source from source does not support format encode
             FormatEncodeOptions::none().into()
         };
-
         Ok(Statement::CreateSource {
             stmt: CreateSourceStatement {
                 temporary,
