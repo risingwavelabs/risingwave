@@ -274,6 +274,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::CosineDistance
             | Type::L1Distance
             | Type::InnerProduct
+            | Type::VecConcat
             | Type::VnodeUser
             | Type::RwEpochToTs
             | Type::CheckNotNull

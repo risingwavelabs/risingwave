@@ -325,3 +325,35 @@ fn vector_multiply(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> 
         .try_collect()?;
     Ok(result)
 }
+
+/// ```slt
+/// query R
+/// SELECT '[1,2,3]'::vector(3) || '[4,5]';
+/// ----
+/// [1,2,3,4,5]
+///
+/// query error cast
+/// SELECT '[1,2,3]'::vector(3) || null;
+///
+/// query R
+/// SELECT '[1,2,3]'::vector(3) || null::vector(4);
+/// ----
+/// NULL
+///
+/// query error vector cannot have more than 16000 dimensions
+/// SELECT null::vector(16000) || '[1]';
+/// ```
+#[function("vec_concat(vector, vector) -> vector", type_infer = "unreachable")]
+fn vector_concat(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
+    let lhs = lhs.into_slice();
+    let rhs = rhs.into_slice();
+
+    let result = lhs
+        .iter()
+        .chain(rhs)
+        .copied()
+        .map(Finite32::try_from)
+        .try_collect()
+        .map_err(|_| ExprError::NumericOverflow)?;
+    Ok(result)
+}
