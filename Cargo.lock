@@ -11688,6 +11688,7 @@ dependencies = [
  "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
  "tracing",
+ "url",
 ]
 
 [[package]]

@@ -68,7 +68,7 @@ pub async fn handle_alter_secret(
                 }
                 secret::SecretBackend::HashicorpVault(_vault_backend) => {
                     return Err(crate::error::ErrorCode::InvalidParameterValue(
-                        "credential must be null when altering hashicorp_vault backend".to_owned(),
+                        "alter secret with hashicorp_vault backend is not supported".to_owned(),
                     )
                     .into());
                 }

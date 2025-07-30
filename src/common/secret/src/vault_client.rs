@@ -23,6 +23,7 @@ use risingwave_pb::secret;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::{DisplayFromStr, serde_as};
+use url::Url;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct TokenCacheKey {
@@ -50,17 +51,12 @@ static GLOBAL_VAULT_TOKEN_CACHE: LazyLock<MokaCache<TokenCacheKey, CachedToken>>
 pub struct HashiCorpVaultConfig {
     pub addr: String,
     pub path: String,
-    #[serde(default = "default_field")]
     pub field: String,
     #[serde(flatten)]
     pub auth: HashiCorpVaultAuth,
     #[serde(default)]
     #[serde_as(as = "DisplayFromStr")]
     pub tls_skip_verify: bool,
-}
-
-fn default_field() -> String {
-    "value".to_owned()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -194,14 +190,11 @@ impl HashiCorpVaultClient {
             let token = self.get_token_internal(force_refresh_token).await?;
 
             // Fetch secret from Vault
-            let url = format!(
-                "{}/v1/{}",
-                self.config.addr.trim_end_matches('/'),
-                self.config.path
-            );
+            let mut url = Url::parse(&self.config.addr).context("Failed to parse Vault address")?;
+            url.set_path(&format!("v1/{}", self.config.path));
             let response = self
                 .client
-                .get(&url)
+                .get(url.as_str())
                 .header("X-Vault-Token", &token)
                 .send()
                 .await
@@ -306,10 +299,9 @@ impl HashiCorpVaultClient {
                 }
 
                 // Login with app role
-                let login_url = format!(
-                    "{}/v1/auth/approle/login",
-                    self.config.addr.trim_end_matches('/')
-                );
+                let mut login_url =
+                    Url::parse(&self.config.addr).context("Failed to parse Vault address")?;
+                login_url.set_path("v1/auth/approle/login");
                 let login_request = VaultAppRoleLoginRequest {
                     role_id: auth_role_id.clone(),
                     secret_id: auth_secret_id.clone(),
@@ -317,7 +309,7 @@ impl HashiCorpVaultClient {
 
                 let response = self
                     .client
-                    .post(&login_url)
+                    .post(login_url.as_str())
                     .json(&login_request)
                     .send()
                     .await
