@@ -237,6 +237,16 @@ fn cast_array(source: &DataType, target: &DataType, allows: CastContext) -> Cast
         // https://www.postgresql.org/docs/14/sql-createcast.html#id-1.9.3.58.7.4
         (DataType::Varchar, DataType::List(_)) => canbo(CastContext::Explicit <= allows),
         (DataType::List(_), DataType::Varchar) => canbo(CastContext::Assign <= allows),
+        // https://github.com/pgvector/pgvector/blob/v0.8.0/sql/vector.sql#L157-L170
+        (DataType::Vector(_), DataType::List(elem)) => {
+            canbo(**elem == DataType::Float32 && CastContext::Implicit <= allows)
+        }
+        (DataType::List(elem), DataType::Vector(_)) => canbo(
+            matches!(
+                **elem,
+                DataType::Int32 | DataType::Decimal | DataType::Float32 | DataType::Float64
+            ) && CastContext::Assign <= allows,
+        ),
         _ => cannot(),
     }
 }
