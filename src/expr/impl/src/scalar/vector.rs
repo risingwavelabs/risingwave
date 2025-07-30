@@ -13,8 +13,11 @@
 // limitations under the License.
 
 use risingwave_common::array::Finite32;
-use risingwave_common::types::{F64, VectorRef, VectorVal};
+use risingwave_common::types::{
+    DataType, F32, F64, ListRef, ListValue, ScalarRefImpl, VectorRef, VectorVal,
+};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::expr::Context;
 use risingwave_expr::{ExprError, Result, function};
 
 fn check_dims(name: &'static str, lhs: &[f32], rhs: &[f32]) -> Result<()> {
@@ -355,5 +358,129 @@ fn vector_concat(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
         .map(Finite32::try_from)
         .try_collect()
         .map_err(|_| ExprError::NumericOverflow)?;
+    Ok(result)
+}
+
+/// ```slt
+/// query T
+/// SELECT '[1,2,3]'::vector(3)::real[];
+/// ----
+/// {1,2,3}
+/// ```
+#[function("cast(vector) -> float4[]")]
+fn vector_to_float4(v: VectorRef<'_>) -> ListValue {
+    v.into_slice().iter().copied().map(F32::from).collect()
+}
+
+/// ```slt
+/// query T
+/// SELECT ARRAY[1,2,3]::vector(3);
+/// ----
+/// [1,2,3]
+///
+/// query T
+/// SELECT ARRAY[1.0,2.0,3.0]::vector(3);
+/// ----
+/// [1,2,3]
+///
+/// query T
+/// SELECT ARRAY[1,2,3]::float4[]::vector(3);
+/// ----
+/// [1,2,3]
+///
+/// query T
+/// SELECT ARRAY[1,2,3]::float8[]::vector(3);
+/// ----
+/// [1,2,3]
+///
+/// query T
+/// SELECT ARRAY[1,2,3]::numeric[]::vector(3);
+/// ----
+/// [1,2,3]
+///
+/// query T
+/// SELECT '{1,2,3}'::real[]::vector(3);
+/// ----
+/// [1,2,3]
+///
+/// query error expected 2 dimensions, not 3
+/// SELECT '{1,2,3}'::real[]::vector(2);
+///
+/// query error array must not contain nulls
+/// SELECT '{NULL}'::real[]::vector(1);
+///
+/// query error NaN not allowed in vector
+/// SELECT '{NaN}'::real[]::vector(1);
+///
+/// query error inf not allowed in vector
+/// SELECT '{Infinity}'::real[]::vector(1);
+///
+/// query error -inf not allowed in vector
+/// SELECT '{-Infinity}'::real[]::vector(1);
+///
+/// query error dimension
+/// SELECT '{}'::real[]::vector(1);
+///
+/// query error cannot cast
+/// SELECT '{{1}}'::real[][]::vector(1);
+///
+/// query T
+/// SELECT '{1,2,3}'::double precision[]::vector(3);
+/// ----
+/// [1,2,3]
+///
+/// query error expected 2 dimensions, not 3
+/// SELECT '{1,2,3}'::double precision[]::vector(2);
+///
+/// query error out of range
+/// SELECT '{4e38,-4e38}'::double precision[]::vector(2);
+///
+/// # Caveat: pgvector does not check underflow and returns 0 here.
+/// query error out of range
+/// SELECT '{1e-46,-1e-46}'::double precision[]::vector(2);
+/// ```
+#[function("cast(int4[]) -> vector", type_infer = "unreachable")]
+#[function("cast(decimal[]) -> vector", type_infer = "unreachable")]
+#[function("cast(float4[]) -> vector", type_infer = "unreachable")]
+#[function("cast(float8[]) -> vector", type_infer = "unreachable")]
+fn array_to_vector(array: ListRef<'_>, ctx: &Context) -> Result<VectorVal> {
+    macro_rules! bail_invalid_param {
+        ($($arg:tt)*) => {
+            return Err(ExprError::InvalidParam {
+                name: "array_to_vector",
+                reason: format!($($arg)*).into(),
+            });
+        };
+    }
+
+    let DataType::Vector(size) = ctx.return_type else {
+        unreachable!()
+    };
+    if array.len() != size {
+        bail_invalid_param!("expected {} dimensions, not {}", size, array.len());
+    }
+    let result = array
+        .iter()
+        .map(|scalar| {
+            let Some(scalar) = scalar else {
+                bail_invalid_param!("array must not contain nulls");
+            };
+            let val = match scalar {
+                ScalarRefImpl::Int32(val) => val.into(),
+                ScalarRefImpl::Decimal(val) => {
+                    val.try_into().map_err(|_| ExprError::NumericOverflow)?
+                }
+                ScalarRefImpl::Float32(val) => val,
+                ScalarRefImpl::Float64(val) => {
+                    val.try_into().map_err(|_| ExprError::NumericOverflow)?
+                }
+                _ => unreachable!(),
+            };
+            Finite32::try_from(val.0).map_err(|err| ExprError::InvalidParam {
+                name: "array_to_vector",
+                reason: err.into(),
+            })
+        })
+        .try_collect()?;
     Ok(result)
 }
