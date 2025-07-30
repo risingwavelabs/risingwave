@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::time::Duration;
 
-use anyhow::{anyhow, bail};
+use anyhow::{Context, anyhow, bail};
 use async_trait::async_trait;
 use reqwest::Client;
 use risingwave_common::array::{Op, StreamChunk};
@@ -195,9 +195,9 @@ pub fn string_to_map(s: &str, pair_delimiter: char) -> Option<HashMap<String, St
 
 /// Construct the http client for the webhook sink.
 fn construct_http_client(endpoint: &str, headers: Option<String>) -> anyhow::Result<Client> {
-    if let Err(e) = reqwest::Url::parse(endpoint) {
-        bail!("invalid endpoint '{}': {:?}", endpoint, e)
-    };
+    if let Err(_e) = reqwest::Url::parse(endpoint) {
+        bail!("invalid endpoint '{}'", endpoint)
+    }
 
     let headers: anyhow::Result<HeaderMap> = string_to_map(headers.as_deref().unwrap_or(""), ':')
         .expect("Invalid header map")
@@ -216,7 +216,7 @@ fn construct_http_client(endpoint: &str, headers: Option<String>) -> anyhow::Res
         .default_headers(headers?)
         .timeout(Duration::from_secs(5))
         .build()
-        .map_err(|e| anyhow!("could not construct HTTP client: {:?}", e))?;
+        .context("could not construct HTTP client")?;
 
     Ok(client)
 }
