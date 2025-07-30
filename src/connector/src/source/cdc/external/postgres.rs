@@ -21,9 +21,10 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use serde_derive::{Deserialize, Serialize};
-use tokio_postgres::types::PgLsn;
+use tokio_postgres::types::{PgLsn, Type as PgType};
 
 use crate::connector_common::create_pg_client;
 use crate::error::{ConnectorError, ConnectorResult};
@@ -254,6 +255,126 @@ impl PostgresExternalTableReader {
     fn quote_column(column: &str) -> String {
         format!("\"{}\"", column)
     }
+}
+
+pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
+    let ty_name_lower = ty_name.to_lowercase();
+
+    // Handle array types (prefixed with _)
+    if let Some(base_type) = ty_name_lower.strip_prefix('_') {
+        match base_type {
+            "int2" => Some(PgType::INT2_ARRAY),
+            "int4" => Some(PgType::INT4_ARRAY),
+            "int8" => Some(PgType::INT8_ARRAY),
+            "bit" => Some(PgType::BIT_ARRAY),
+            "float4" => Some(PgType::FLOAT4_ARRAY),
+            "float8" => Some(PgType::FLOAT8_ARRAY),
+            "numeric" => Some(PgType::NUMERIC_ARRAY),
+            "bool" => Some(PgType::BOOL_ARRAY),
+            "varchar" => Some(PgType::VARCHAR_ARRAY),
+            "text" => Some(PgType::TEXT_ARRAY),
+            "bytea" => Some(PgType::BYTEA_ARRAY),
+            "date" => Some(PgType::DATE_ARRAY),
+            "time" => Some(PgType::TIME_ARRAY),
+            "timestamp" => Some(PgType::TIMESTAMP_ARRAY),
+            "timestamptz" => Some(PgType::TIMESTAMPTZ_ARRAY),
+            "interval" => Some(PgType::INTERVAL_ARRAY),
+            "json" => Some(PgType::JSON_ARRAY),
+            "jsonb" => Some(PgType::JSONB_ARRAY),
+            "uuid" => Some(PgType::UUID_ARRAY),
+            "point" => Some(PgType::POINT_ARRAY),
+            "oid" => Some(PgType::OID_ARRAY),
+            _ => None,
+        }
+    } else {
+        // Handle non-array types
+        match ty_name_lower.as_str() {
+            "int2" => Some(PgType::INT2),
+            "bit" => Some(PgType::BIT),
+            "int" | "int4" => Some(PgType::INT4),
+            "int8" => Some(PgType::INT8),
+            "real" | "float4" => Some(PgType::FLOAT4),
+            "double precision" | "float8" => Some(PgType::FLOAT8),
+            "numeric" | "decimal" => Some(PgType::NUMERIC),
+            "money" => Some(PgType::MONEY),
+            "boolean" | "bool" => Some(PgType::BOOL),
+            "inet" | "xml" | "varchar" | "character varying" | "int4range" | "int8range"
+            | "numrange" | "tsrange" | "tstzrange" | "daterange" | "macaddr" | "macaddr8"
+            | "cidr" => Some(PgType::VARCHAR),
+            "char" | "character" | "bpchar" => Some(PgType::BPCHAR),
+            "citext" | "text" => Some(PgType::TEXT),
+            "bytea" => Some(PgType::BYTEA),
+            "date" => Some(PgType::DATE),
+            "time" | "timetz" => Some(PgType::TIME),
+            "timestamp" | "timestamp without time zone" => Some(PgType::TIMESTAMP),
+            "timestamptz" | "timestamp with time zone" => Some(PgType::TIMESTAMPTZ),
+            "interval" => Some(PgType::INTERVAL),
+            "json" => Some(PgType::JSON),
+            "jsonb" => Some(PgType::JSONB),
+            "uuid" => Some(PgType::UUID),
+            "point" => Some(PgType::POINT),
+            "oid" => Some(PgType::OID),
+            _ => None,
+        }
+    }
+}
+
+pub fn pg_type_to_rw_type(pg_type: &PgType) -> ConnectorResult<DataType> {
+    let data_type = match *pg_type {
+        PgType::BOOL => DataType::Boolean,
+        PgType::BIT => DataType::Boolean,
+        PgType::INT2 => DataType::Int16,
+        PgType::INT4 => DataType::Int32,
+        PgType::INT8 => DataType::Int64,
+        PgType::FLOAT4 => DataType::Float32,
+        PgType::FLOAT8 => DataType::Float64,
+        PgType::NUMERIC | PgType::MONEY => DataType::Decimal,
+        PgType::DATE => DataType::Date,
+        PgType::TIME => DataType::Time,
+        PgType::TIMETZ => DataType::Time,
+        PgType::POINT => DataType::Struct(risingwave_common::types::StructType::new(vec![
+            ("x", DataType::Float32),
+            ("y", DataType::Float32),
+        ])),
+        PgType::TIMESTAMP => DataType::Timestamp,
+        PgType::TIMESTAMPTZ => DataType::Timestamptz,
+        PgType::INTERVAL => DataType::Interval,
+        PgType::VARCHAR | PgType::TEXT | PgType::BPCHAR | PgType::UUID => DataType::Varchar,
+        PgType::BYTEA => DataType::Bytea,
+        PgType::JSON | PgType::JSONB => DataType::Jsonb,
+        // Array types
+        PgType::BOOL_ARRAY => DataType::List(Box::new(DataType::Boolean)),
+        PgType::BIT_ARRAY => DataType::List(Box::new(DataType::Boolean)),
+        PgType::INT2_ARRAY => DataType::List(Box::new(DataType::Int16)),
+        PgType::INT4_ARRAY => DataType::List(Box::new(DataType::Int32)),
+        PgType::INT8_ARRAY => DataType::List(Box::new(DataType::Int64)),
+        PgType::FLOAT4_ARRAY => DataType::List(Box::new(DataType::Float32)),
+        PgType::FLOAT8_ARRAY => DataType::List(Box::new(DataType::Float64)),
+        PgType::NUMERIC_ARRAY => DataType::List(Box::new(DataType::Decimal)),
+        PgType::VARCHAR_ARRAY => DataType::List(Box::new(DataType::Varchar)),
+        PgType::TEXT_ARRAY => DataType::List(Box::new(DataType::Varchar)),
+        PgType::BYTEA_ARRAY => DataType::List(Box::new(DataType::Bytea)),
+        PgType::DATE_ARRAY => DataType::List(Box::new(DataType::Date)),
+        PgType::TIME_ARRAY => DataType::List(Box::new(DataType::Time)),
+        PgType::TIMESTAMP_ARRAY => DataType::List(Box::new(DataType::Timestamp)),
+        PgType::TIMESTAMPTZ_ARRAY => DataType::List(Box::new(DataType::Timestamptz)),
+        PgType::INTERVAL_ARRAY => DataType::List(Box::new(DataType::Interval)),
+        PgType::JSON_ARRAY => DataType::List(Box::new(DataType::Jsonb)),
+        PgType::JSONB_ARRAY => DataType::List(Box::new(DataType::Jsonb)),
+        PgType::UUID_ARRAY => DataType::List(Box::new(DataType::Varchar)),
+        PgType::OID => DataType::Int64,
+        PgType::OID_ARRAY => DataType::List(Box::new(DataType::Int64)),
+        PgType::POINT_ARRAY => DataType::List(Box::new(DataType::Struct(
+            risingwave_common::types::StructType::new(vec![
+                ("x", DataType::Float32),
+                ("y", DataType::Float32),
+            ]),
+        ))),
+        _ => {
+            return Err(anyhow::anyhow!("unsupported postgres type: {}", pg_type).into());
+        }
+    };
+    Ok(data_type)
 }
 
 #[cfg(test)]
