@@ -156,8 +156,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         // after compacting with the stream key, the two event with the same user defined sink pk must have different stream key.
         // So the delete event is not to delete the inserted record in our internal streaming SQL semantic.
-        let need_advance_delete =
-            stream_key_sink_pk_mismatch && sink_param.sink_type != SinkType::AppendOnly;
+        let need_advance_delete = stream_key_sink_pk_mismatch
+            && !matches!(
+                sink_param.sink_type,
+                SinkType::AppendOnly | SinkType::ForceAppendOnly
+            );
         // NOTE(st1page): reconstruct with sink pk need extra cost to buffer a barrier's data, so currently we bind it with mismatch case.
         let re_construct_with_sink_pk = need_advance_delete
             && sink_param.sink_type == SinkType::Upsert
