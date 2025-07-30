@@ -243,16 +243,10 @@ pub async fn handle_create_sql_function(
         let ast = parse_result.unwrap();
         let mut binder = Binder::new_for_system(session);
 
-        binder
-            .udf_context_mut()
-            .update_context(create_mock_udf_context(
-                arg_types.clone(),
-                arg_names.clone(),
-            ));
-
-        // Need to set the initial global count to 1
-        // otherwise the context will not be probed during the semantic check
-        binder.udf_context_mut().incr_global_count();
+        binder.init_mock_udf_context(create_mock_udf_context(
+            arg_types.clone(),
+            arg_names.clone(),
+        ));
 
         if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
             match binder.bind_expr(&expr) {
@@ -270,7 +264,7 @@ pub async fn handle_create_sql_function(
                 Err(e) => {
                     // TODO: simplify error message
                     if let ErrorCode::BindErrorRoot { expr: _, error } = e.inner() {
-                        let invalid_msg = error.to_string();
+                        let invalid_msg = error.to_report_string();
 
                         // First validate the message
                         let err_msg_type = validate_err_msg(invalid_msg.as_str());

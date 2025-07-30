@@ -16,7 +16,8 @@ use core::fmt;
 
 use risingwave_common::types::DataType;
 
-use super::Expr;
+use super::{Expr, ExprImpl, InputRef};
+use crate::expr::ExprRewriter;
 
 pub type Depth = usize;
 pub type CorrelatedId = u32;
@@ -93,6 +94,41 @@ impl fmt::Debug for CorrelatedInputRef {
         f.debug_struct("CorrelatedInputRef")
             .field("index", &self.index)
             .field("correlated_id", &self.correlated_id())
+            .field("depth", &self.depth())
             .finish()
+    }
+}
+
+/// Rewrite `InputRef` to `CorrelatedInputRef` with offset.
+pub struct InputRefDepthRewriter {
+    offset: usize,
+}
+
+impl InputRefDepthRewriter {
+    pub fn new(offset: usize) -> Self {
+        assert!(offset > 0, "offset should be greater than 0");
+        Self { offset }
+    }
+}
+
+impl ExprRewriter for InputRefDepthRewriter {
+    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+        if self.offset == 0 {
+            input_ref.into()
+        } else {
+            CorrelatedInputRef::new(input_ref.index(), input_ref.return_type(), self.offset).into()
+        }
+    }
+
+    fn rewrite_correlated_input_ref(
+        &mut self,
+        correlated_input_ref: CorrelatedInputRef,
+    ) -> ExprImpl {
+        CorrelatedInputRef::new(
+            correlated_input_ref.index(),
+            correlated_input_ref.return_type(),
+            correlated_input_ref.depth() + self.offset,
+        )
+        .into()
     }
 }
