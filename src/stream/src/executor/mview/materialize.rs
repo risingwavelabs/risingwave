@@ -215,7 +215,7 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshableMaterializeArgs<S, SD> {
     }
 }
 
-pub fn get_op_consistency_level(
+fn get_op_consistency_level(
     conflict_behavior: ConflictBehavior,
     may_have_downstream: bool,
     depended_subscriptions: &HashSet<u32>,
@@ -584,7 +584,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
     }
 
     /// return true when changed
-    pub fn may_update_depended_subscriptions(
+    fn may_update_depended_subscriptions(
         depended_subscriptions: &mut HashSet<u32>,
         barrier: &Barrier,
         mv_table_id: TableId,
@@ -684,7 +684,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
 }
 
 /// Construct output `StreamChunk` from given buffer.
-pub fn generate_output(
+fn generate_output(
     change_buffer: ChangeBuffer,
     data_types: Vec<DataType>,
 ) -> StreamExecutorResult<Option<StreamChunk>> {
@@ -820,8 +820,8 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S
 }
 
 /// A cache for materialize executors.
-pub struct MaterializeCache<SD> {
-    pub lru_cache: ManagedLruCache<Vec<u8>, CacheValue>,
+struct MaterializeCache<SD> {
+    lru_cache: ManagedLruCache<Vec<u8>, CacheValue>,
     row_serde: BasicSerde,
     version_column_index: Option<u32>,
     _serde: PhantomData<SD>,
@@ -830,7 +830,7 @@ pub struct MaterializeCache<SD> {
 type CacheValue = Option<CompactedRow>;
 
 impl<SD: ValueRowSerde> MaterializeCache<SD> {
-    pub fn new(
+    fn new(
         watermark_sequence: AtomicU64Ref,
         metrics_info: MetricsInfo,
         row_serde: BasicSerde,
@@ -848,7 +848,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
 
     /// First populate the cache from `table`, and then calculate a [`ChangeBuffer`].
     /// `table` will not be written in this method.
-    pub async fn handle<S: StateStore>(
+    async fn handle<S: StateStore>(
         &mut self,
         row_ops: Vec<(Op, Vec<u8>, Bytes)>,
         table: &StateTableInner<S, SD>,
@@ -1025,7 +1025,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         })
     }
 
-    pub fn evict(&mut self) {
+    fn evict(&mut self) {
         self.lru_cache.evict()
     }
 }
