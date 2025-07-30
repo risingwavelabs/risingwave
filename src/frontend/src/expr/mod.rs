@@ -52,7 +52,7 @@ mod type_inference;
 mod utils;
 
 pub use agg_call::AggCall;
-pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef, Depth};
+pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef, Depth, InputRefDepthRewriter};
 pub use expr_mutator::ExprMutator;
 pub use expr_rewriter::{ExprRewriter, default_rewrite_expr};
 pub use expr_visitor::{ExprVisitor, default_visit_expr};

@@ -24,6 +24,7 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_sqlparser::ast::{Expr as AstExpr, Statement};
 
 use crate::error::Result;
+use crate::expr::ExprImpl;
 
 mod bind_context;
 mod bind_param;
@@ -67,7 +68,6 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogResult, DatabaseId, TableId, ViewId};
 use crate::error::ErrorCode;
-use crate::expr::ExprImpl;
 use crate::session::{AuthContext, SessionImpl, TemporarySourceManager};
 use crate::user::user_service::UserInfoReadGuard;
 
@@ -93,7 +93,7 @@ pub struct Binder {
     db_name: String,
     database_id: DatabaseId,
     session_id: SessionId,
-    context: BindContext,
+    pub context: BindContext, // TODO: no pub
     auth_context: Arc<AuthContext>,
     /// A stack holding contexts of outer queries when binding a subquery.
     /// It also holds all of the lateral contexts for each respective
@@ -132,6 +132,7 @@ pub struct Binder {
     param_types: ParameterTypes,
 
     /// The sql udf context that will be used during binding phase
+    // TODO: may simplify this as the only field is `udf_global_counter`.
     udf_context: UdfContext,
 
     /// The temporary sources that will be used during binding phase
@@ -153,10 +154,6 @@ pub struct SecureCompareContext {
 
 #[derive(Clone, Debug, Default)]
 pub struct UdfContext {
-    /// The mapping from `sql udf parameters` to a bound `ExprImpl` generated from `ast expressions`
-    /// Note: The expressions are constructed during runtime, correspond to the actual users' input
-    udf_param_context: HashMap<String, ExprImpl>,
-
     /// The global counter that records the calling stack depth
     /// of the current binding sql udf chain
     udf_global_counter: u32,
@@ -165,7 +162,6 @@ pub struct UdfContext {
 impl UdfContext {
     pub fn new() -> Self {
         Self {
-            udf_param_context: HashMap::new(),
             udf_global_counter: 0,
         }
     }
@@ -182,25 +178,8 @@ impl UdfContext {
         self.udf_global_counter -= 1;
     }
 
-    pub fn _is_empty(&self) -> bool {
-        self.udf_param_context.is_empty()
-    }
-
-    pub fn update_context(&mut self, context: HashMap<String, ExprImpl>) {
-        self.udf_param_context = context;
-    }
-
     pub fn _clear(&mut self) {
         self.udf_global_counter = 0;
-        self.udf_param_context.clear();
-    }
-
-    pub fn get_expr(&self, name: &str) -> Option<&ExprImpl> {
-        self.udf_param_context.get(name)
-    }
-
-    pub fn get_context(&self) -> HashMap<String, ExprImpl> {
-        self.udf_param_context.clone()
     }
 
     /// A common utility function to extract sql udf expression out from the input `ast` as
@@ -497,8 +476,9 @@ impl Binder {
         self.context.clause = clause;
     }
 
-    pub fn udf_context_mut(&mut self) -> &mut UdfContext {
-        &mut self.udf_context
+    pub fn init_mock_udf_context(&mut self, udf_arguments: HashMap<String, ExprImpl>) {
+        self.udf_context.incr_global_count();
+        self.context.udf_arguments = udf_arguments;
     }
 }
 

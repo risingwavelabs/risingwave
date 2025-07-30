@@ -17,7 +17,10 @@ use risingwave_sqlparser::ast::Ident;
 
 use crate::binder::{Binder, Clause};
 use crate::error::{ErrorCode, Result};
-use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
+use crate::expr::{
+    CorrelatedInputRef, ExprImpl, ExprRewriter as _, ExprType, FunctionCall, InputRef,
+    InputRefDepthRewriter, Literal,
+};
 
 impl Binder {
     pub fn bind_column(&mut self, idents: &[Ident]) -> Result<ExprImpl> {
@@ -71,6 +74,11 @@ impl Binder {
                     return Err(e.into());
                 }
             }
+        }
+
+        // If we find it as an argument for SQL UDF in the current context, directly return it.
+        if let Some(expr) = self.context.udf_arguments.get(&column_name) {
+            return Ok(expr.clone());
         }
 
         // Try to find a correlated column in `upper_contexts`, starting from the innermost context.
@@ -148,6 +156,12 @@ impl Binder {
                     }
                 }
             }
+
+            // If we find it as an argument for SQL UDF, offset the depth for `InputRef` and return it.
+            if let Some(expr) = context.udf_arguments.get(&column_name) {
+                let mut rewriter = InputRefDepthRewriter::new(depth);
+                return Ok(rewriter.rewrite_expr(expr.clone()));
+            }
         }
         // `CTID` is a system column in postgres.
         // https://www.postgresql.org/docs/current/ddl-system-columns.html
@@ -162,16 +176,6 @@ impl Binder {
         {
             return Ok(Literal::new(Some("".into()), DataType::Varchar).into());
         }
-
-        // If we're binding a SQL UDF, an invalid column reference might actually be a
-        // reference to an input parameter. Check for `udf_context`.
-        if let ErrorCode::ItemNotFound(_) = err
-            && self.udf_context.global_count() != 0
-            && let Some(expr) = self.udf_context.get_expr(&column_name)
-        {
-            return Ok(expr.clone());
-        }
-
         Err(err.into())
     }
 }
