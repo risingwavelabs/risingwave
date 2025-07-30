@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{F64, VectorRef};
+use risingwave_common::array::Finite32;
+use risingwave_common::types::{F64, VectorRef, VectorVal};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::{ExprError, Result, function};
 
@@ -234,4 +235,93 @@ fn inner_product(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<F64> {
         sum += l * r;
     }
     Ok((sum as f64).into())
+}
+
+/// ```slt
+/// query R
+/// SELECT '[1,2,3]'::vector(3) + '[4,5,6]';
+/// ----
+/// [5,7,9]
+///
+/// query error out of range: overflow
+/// SELECT '[3e38]'::vector(1) + '[3e38]';
+///
+/// query error dimensions
+/// SELECT '[1,2]'::vector(2) + '[3]';
+/// ```
+#[function("add(vector, vector) -> vector", type_infer = "unreachable")]
+fn vector_add(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
+    let lhs = lhs.into_slice();
+    let rhs = rhs.into_slice();
+    check_dims("vector_add", lhs, rhs)?;
+
+    let result = lhs
+        .iter()
+        .zip_eq_fast(rhs.iter())
+        .map(|(l, r)| Finite32::try_from(l + r))
+        .try_collect()
+        .map_err(|_| ExprError::NumericOverflow)?;
+    Ok(result)
+}
+
+/// ```slt
+/// query R
+/// SELECT '[1,2,3]'::vector(3) - '[4,5,6]';
+/// ----
+/// [-3,-3,-3]
+///
+/// query error out of range: overflow
+/// SELECT '[-3e38]'::vector(1) - '[3e38]';
+///
+/// query error dimensions
+/// SELECT '[1,2]'::vector(2) - '[3]';
+/// ```
+#[function("subtract(vector, vector) -> vector", type_infer = "unreachable")]
+fn vector_subtract(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
+    let lhs = lhs.into_slice();
+    let rhs = rhs.into_slice();
+    check_dims("vector_subtract", lhs, rhs)?;
+
+    let result = lhs
+        .iter()
+        .zip_eq_fast(rhs.iter())
+        .map(|(l, r)| Finite32::try_from(l - r))
+        .try_collect()
+        .map_err(|_| ExprError::NumericOverflow)?;
+    Ok(result)
+}
+
+/// ```slt
+/// query R
+/// SELECT '[1,2,3]'::vector(3) * '[4,5,6]';
+/// ----
+/// [4,10,18]
+///
+/// query error out of range: overflow
+/// SELECT '[1e37]'::vector(1) * '[1e37]';
+///
+/// query error out of range: underflow
+/// SELECT '[1e-37]'::vector(1) * '[1e-37]';
+///
+/// query error dimensions
+/// SELECT '[1,2]'::vector(2) * '[3]';
+/// ```
+#[function("multiply(vector, vector) -> vector", type_infer = "unreachable")]
+fn vector_multiply(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
+    let lhs = lhs.into_slice();
+    let rhs = rhs.into_slice();
+    check_dims("vector_multiply", lhs, rhs)?;
+
+    let result = lhs
+        .iter()
+        .zip_eq_fast(rhs.iter())
+        .map(|(l, r)| {
+            let v = l * r;
+            match v == 0. && !(*l == 0. || *r == 0.) {
+                true => Err(ExprError::NumericUnderflow),
+                false => Finite32::try_from(v).map_err(|_| ExprError::NumericOverflow),
+            }
+        })
+        .try_collect()?;
+    Ok(result)
 }
