@@ -434,6 +434,7 @@ message DdlProgress {
   uint64 id = 1;
   string statement = 2;
   string progress = 3;
+  string create_type = 4;
 }
 
 message GetDdlProgressResponse {
@@ -502,6 +503,7 @@ message ListConnectionsResponse {
 
 message DropConnectionRequest {
   uint32 connection_id = 1;
+  bool cascade = 2;
 }
 
 message DropConnectionResponse {
@@ -568,6 +570,16 @@ message AlterDatabaseParamResponse {
   WaitVersion version = 2;
 }
 
+message CompactIcebergTableRequest {
+  uint32 sink_id = 1;
+}
+
+message CompactIcebergTableResponse {
+  common.Status status = 1;
+  // The compaction task ID that was triggered
+  uint64 task_id = 2;
+}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -611,4 +623,5 @@ service DdlService {
   rpc AutoSchemaChange(AutoSchemaChangeRequest) returns (AutoSchemaChangeResponse);
   rpc AlterSwapRename(AlterSwapRenameRequest) returns (AlterSwapRenameResponse);
   rpc AlterDatabaseParam(AlterDatabaseParamRequest) returns (AlterDatabaseParamResponse);
+  rpc CompactIcebergTable(CompactIcebergTableRequest) returns (CompactIcebergTableResponse);
 }

@@ -58,6 +58,7 @@ use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ConflictBehavior, Fi
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::sink::catalog::SinkFormatDesc;
 use risingwave_pb::stream_plan::StreamScanType;
 
@@ -81,8 +82,8 @@ use crate::expr::TimestamptzExprFinder;
 use crate::handler::create_table::{CreateTableInfo, CreateTableProps};
 use crate::optimizer::plan_node::generic::{SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
-    BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive, StreamExchange, StreamUnion,
-    ToStream, VisitExprsRecursive,
+    Batch, BatchExchange, ConventionMarker, Logical, PlanNodeType, PlanTreeNode, Stream,
+    StreamExchange, StreamUnion, ToStream, VisitExprsRecursive,
 };
 use crate::optimizer::plan_visitor::{RwTimestampValidator, TemporalJoinValidator};
 use crate::optimizer::property::Distribution;
@@ -327,7 +328,7 @@ impl BatchOptimizedLogicalPlanRoot {
 
         let mut plan = self.plan;
 
-        if TemporalJoinValidator::exist_dangling_temporal_scan(plan.clone()) {
+        if TemporalJoinValidator::exist_dangling_temporal_scan::<Logical>(plan.clone()) {
             return Err(ErrorCode::NotSupported(
                 "do not support temporal join for batch queries".to_owned(),
                 "please use temporal join in streaming queries".to_owned(),
@@ -337,10 +338,10 @@ impl BatchOptimizedLogicalPlanRoot {
 
         let ctx = plan.ctx();
         // Inline session timezone mainly for rewriting now()
-        plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
+        plan = inline_session_timezone_in_exprs::<Logical>(ctx.clone(), plan)?;
 
         // Const eval of exprs at the last minute, but before `to_batch` to make functional index selection happy.
-        plan = const_eval_exprs(plan)?;
+        plan = const_eval_exprs::<Logical>(plan)?;
 
         if ctx.is_explain_trace() {
             ctx.trace("Const eval exprs:");
@@ -361,7 +362,7 @@ impl BatchOptimizedLogicalPlanRoot {
         ))?;
 
         // Inline session timezone
-        plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
+        plan = inline_session_timezone_in_exprs::<Batch>(ctx.clone(), plan)?;
 
         if ctx.is_explain_trace() {
             ctx.trace("Inline Session Timezone:");
@@ -369,7 +370,7 @@ impl BatchOptimizedLogicalPlanRoot {
         }
 
         #[cfg(debug_assertions)]
-        InputRefValidator.validate(plan.clone());
+        InputRefValidator.validate::<Batch>(plan.clone());
         assert!(
             *plan.distribution() == Distribution::Single,
             "{}",
@@ -562,7 +563,7 @@ impl LogicalPlanRoot {
             ))?;
         }
         // Inline session timezone
-        plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
+        plan = inline_session_timezone_in_exprs::<Stream>(ctx.clone(), plan)?;
 
         if ctx.is_explain_trace() {
             ctx.trace("Inline session timezone:");
@@ -570,7 +571,7 @@ impl LogicalPlanRoot {
         }
 
         // Const eval of exprs at the last minute
-        plan = const_eval_exprs(plan)?;
+        plan = const_eval_exprs::<Stream>(plan)?;
 
         if ctx.is_explain_trace() {
             ctx.trace("Const eval exprs:");
@@ -578,9 +579,9 @@ impl LogicalPlanRoot {
         }
 
         #[cfg(debug_assertions)]
-        InputRefValidator.validate(plan.clone());
+        InputRefValidator.validate::<Stream>(plan.clone());
 
-        if TemporalJoinValidator::exist_dangling_temporal_scan(plan.clone()) {
+        if TemporalJoinValidator::exist_dangling_temporal_scan::<Stream>(plan.clone()) {
             return Err(ErrorCode::NotSupported(
                 "exist dangling temporal scan".to_owned(),
                 "please check your temporal join syntax e.g. consider removing the right outer join if it is being used.".to_owned(),
@@ -936,12 +937,18 @@ impl LogicalPlanRoot {
             RequiredDist::ShardByKey(bitset)
         };
 
-        let mut stream_plan = inline_session_timezone_in_exprs(context, stream_plan)?;
+        let mut stream_plan = inline_session_timezone_in_exprs::<Stream>(context, stream_plan)?;
 
         if !not_null_idxs.is_empty() {
             stream_plan =
                 StreamFilter::filter_out_any_null_rows(stream_plan.clone(), &not_null_idxs);
         }
+
+        // Determine if the table should be refreshable based on the connector type
+        let refreshable = source_catalog
+            .as_ref()
+            .map(|catalog| catalog.with_properties.is_refreshable_connector())
+            .unwrap_or(false);
 
         StreamMaterialize::create_for_table(
             stream_plan,
@@ -960,6 +967,7 @@ impl LogicalPlanRoot {
             retention_seconds,
             webhook_info,
             engine,
+            refreshable,
         )
     }
 
@@ -1029,6 +1037,7 @@ impl LogicalPlanRoot {
         target_table: Option<Arc<TableCatalog>>,
         partition_info: Option<PartitionComputeInfo>,
         user_specified_columns: bool,
+        auto_refresh_schema_from_table: Option<Arc<TableCatalog>>,
     ) -> Result<StreamSink> {
         let stream_scan_type = if without_backfill {
             StreamScanType::UpstreamOnly
@@ -1040,6 +1049,15 @@ impl LogicalPlanRoot {
         } else {
             StreamScanType::Backfill
         };
+        if auto_refresh_schema_from_table.is_some()
+            && stream_scan_type != StreamScanType::ArrangementBackfill
+        {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "auto schema change only support for ArrangementBackfill, but got: {:?}",
+                stream_scan_type
+            ))
+            .into());
+        }
         assert_eq!(self.plan.convention(), Convention::Logical);
         let stream_plan =
             self.gen_optimized_stream_plan_inner(emit_on_window_close, stream_scan_type)?;
@@ -1059,6 +1077,7 @@ impl LogicalPlanRoot {
             properties,
             format_desc,
             partition_info,
+            auto_refresh_schema_from_table,
         )
     }
 }
@@ -1141,21 +1160,26 @@ fn find_version_column_index(
     ))?
 }
 
-fn const_eval_exprs(plan: PlanRef) -> Result<PlanRef> {
+fn const_eval_exprs<C: ConventionMarker>(plan: PlanRef) -> Result<PlanRef> {
     let mut const_eval_rewriter = ConstEvalRewriter { error: None };
 
-    let plan = plan.rewrite_exprs_recursive(&mut const_eval_rewriter);
+    plan.expect_convention::<C>();
+    let plan = plan.rewrite_exprs_recursive::<C>(&mut const_eval_rewriter);
     if let Some(error) = const_eval_rewriter.error {
         return Err(error);
     }
     Ok(plan)
 }
 
-fn inline_session_timezone_in_exprs(ctx: OptimizerContextRef, plan: PlanRef) -> Result<PlanRef> {
+fn inline_session_timezone_in_exprs<C: ConventionMarker>(
+    ctx: OptimizerContextRef,
+    plan: PlanRef,
+) -> Result<PlanRef> {
+    plan.expect_convention::<C>();
     let mut v = TimestamptzExprFinder::default();
     plan.visit_exprs_recursive(&mut v);
     if v.has() {
-        Ok(plan.rewrite_exprs_recursive(ctx.session_timezone().deref_mut()))
+        Ok(plan.rewrite_exprs_recursive::<C>(ctx.session_timezone().deref_mut()))
     } else {
         Ok(plan)
     }

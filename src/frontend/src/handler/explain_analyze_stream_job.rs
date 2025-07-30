@@ -104,8 +104,7 @@ mod bind {
             | AnalyzeTarget::MaterializedView(name) => {
                 let session = &handler_args.session;
                 let db_name = session.database();
-                let (schema_name, name) =
-                    Binder::resolve_schema_qualified_name(&db_name, name.clone())?;
+                let (schema_name, name) = Binder::resolve_schema_qualified_name(&db_name, name)?;
                 let search_path = session.config().search_path();
                 let user_name = &session.user_name();
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -126,7 +125,7 @@ mod bind {
                     }
                     AnalyzeTarget::Sink(_) => {
                         let (catalog, _schema_name) =
-                            catalog.get_sink_by_name(&db_name, schema_path, &name)?;
+                            catalog.get_any_sink_by_name(&db_name, schema_path, &name)?;
                         catalog.id.sink_id
                     }
                     AnalyzeTarget::MaterializedView(_) => {

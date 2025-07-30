@@ -1,0 +1,40 @@
+name: "Copilot Setup Steps"
+
+# Automatically run the setup steps when they are changed to allow for easy validation, and
+# allow manual testing through the repository's "Actions" tab
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+
+jobs:
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        run: rustup show
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -yy && \
+          DEBIAN_FRONTEND=noninteractive sudo apt-get -y install sudo make build-essential cmake protobuf-compiler curl parallel python3 python3-pip python3-venv software-properties-common psmisc jq \
+          openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config bash openjdk-17-jdk wget unzip git tmux lld postgresql-client kcat netcat-openbsd mysql-client sqlite3 \
+          maven zstd libzstd-dev locales \
+          python3.12 python3.12-dev \
+          golang perl \
+          dumb-init \
+          libblas-dev liblapack-dev libomp-dev
+
+      - name: Install tools
+        run: |
+          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+          cargo binstall -y --locked cargo-llvm-cov cargo-nextest cargo-sort cargo-cache cargo-machete \
+          cargo-make@0.37.24 \
+          sqllogictest-bin@0.28.3

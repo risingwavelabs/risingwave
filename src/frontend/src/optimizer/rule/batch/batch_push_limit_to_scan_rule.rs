@@ -19,14 +19,13 @@
 
 use itertools::Itertools;
 
-use crate::optimizer::PlanRef;
+use super::prelude::*;
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use crate::optimizer::plan_node::{BatchLimit, BatchSeqScan, PlanTreeNodeUnary};
-use crate::optimizer::rule::{BoxedRule, Rule};
 
 pub struct BatchPushLimitToScanRule {}
 
-impl Rule for BatchPushLimitToScanRule {
+impl Rule<Batch> for BatchPushLimitToScanRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let limit: &BatchLimit = plan.as_batch_limit()?;
         let limit_input = limit.input();

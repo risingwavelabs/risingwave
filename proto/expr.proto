@@ -309,6 +309,9 @@ message ExprNode {
 
     // Vector functions
     L2_DISTANCE = 750;
+    COSINE_DISTANCE = 751;
+    L1_DISTANCE = 752;
+    INNER_PRODUCT = 753;
 
     // Internal function for schema change
     COMPOSITE_CAST = 800;
@@ -317,7 +320,7 @@ message ExprNode {
     // ------------------------
     // Internal functions
     VNODE = 1101;
-    TEST_PAID_TIER = 1102;
+    TEST_FEATURE = 1102;
     VNODE_USER = 1103;
     LICENSE = 1104;
     // Non-deterministic functions
@@ -345,6 +348,7 @@ message ExprNode {
     RW_EPOCH_TO_TS = 2413;
     PG_TABLE_IS_VISIBLE = 2414;
     HAS_FUNCTION_PRIVILEGE = 2415;
+    HAS_DATABASE_PRIVILEGE = 2416;
 
     // EXTERNAL
     ICEBERG_TRANSFORM = 2201;

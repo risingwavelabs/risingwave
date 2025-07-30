@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use thiserror_ext::AsReport as _;
 
-use super::plan_node::RewriteExprsRecursive;
+use super::plan_node::{ConventionMarker, Logical};
 use super::plan_visitor::has_logical_max_one_row;
 use crate::error::Result;
 use crate::expr::NowProcTimeFinder;
@@ -36,11 +36,12 @@ use crate::utils::Condition;
 use crate::{Explain, OptimizerContextRef};
 
 impl PlanRef {
-    fn optimize_by_rules_inner(
+    fn optimize_by_rules_inner<C: ConventionMarker>(
         self,
-        heuristic_optimizer: &mut HeuristicOptimizer<'_>,
+        heuristic_optimizer: &mut HeuristicOptimizer<'_, C>,
         stage_name: &str,
     ) -> Result<PlanRef> {
+        self.expect_convention::<C>();
         let ctx = self.ctx();
 
         let result = heuristic_optimizer.optimize(self);
@@ -59,15 +60,18 @@ impl PlanRef {
         result
     }
 
-    pub(crate) fn optimize_by_rules(
+    pub(crate) fn optimize_by_rules<C: ConventionMarker>(
         self,
         OptimizationStage {
             stage_name,
             rules,
             apply_order,
-        }: &OptimizationStage,
+        }: &OptimizationStage<C>,
     ) -> Result<PlanRef> {
-        self.optimize_by_rules_inner(&mut HeuristicOptimizer::new(apply_order, rules), stage_name)
+        self.optimize_by_rules_inner(
+            &mut HeuristicOptimizer::<C>::new(apply_order, rules),
+            stage_name,
+        )
     }
 
     pub(crate) fn optimize_by_rules_until_fix_point(
@@ -88,14 +92,14 @@ impl PlanRef {
     }
 }
 
-pub struct OptimizationStage {
+pub struct OptimizationStage<C: ConventionMarker = Logical> {
     stage_name: String,
-    rules: Vec<BoxedRule>,
+    rules: Vec<BoxedRule<C>>,
     apply_order: ApplyOrder,
 }
 
-impl OptimizationStage {
-    pub fn new<S>(name: S, rules: Vec<BoxedRule>, apply_order: ApplyOrder) -> Self
+impl<C: ConventionMarker> OptimizationStage<C> {
+    pub fn new<S>(name: S, rules: Vec<BoxedRule<C>>, apply_order: ApplyOrder) -> Self
     where
         S: Into<String>,
     {
@@ -586,7 +590,7 @@ impl LogicalOptimizer {
 
         let mut v = ctx.session_ctx().pinned_snapshot().inline_now_proc_time();
 
-        let plan = plan.rewrite_exprs_recursive(&mut v);
+        let plan = plan.rewrite_exprs_recursive::<Logical>(&mut v);
 
         if ctx.is_explain_trace() {
             ctx.trace("Inline Now and ProcTime:");
@@ -717,7 +721,7 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT)?;
 
         #[cfg(debug_assertions)]
-        InputRefValidator.validate(plan.clone());
+        InputRefValidator.validate::<Logical>(plan.clone());
 
         if ctx.is_explain_logical() {
             match ctx.explain_format() {
@@ -842,7 +846,7 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&DAG_TO_TREE)?;
 
         #[cfg(debug_assertions)]
-        InputRefValidator.validate(plan.clone());
+        InputRefValidator.validate::<Logical>(plan.clone());
 
         if ctx.is_explain_logical() {
             match ctx.explain_format() {

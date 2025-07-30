@@ -92,6 +92,7 @@ risedev slt './e2e_test/sink/blackhole_sink.slt'
 risedev slt './e2e_test/sink/remote/types.slt'
 risedev slt './e2e_test/sink/sink_into_table/*.slt'
 risedev slt './e2e_test/sink/file_sink.slt'
+risedev slt './e2e_test/sink/auto_schema_change.slt'
 sleep 1
 
 echo "--- preparing postgresql"

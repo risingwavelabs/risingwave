@@ -17,15 +17,29 @@ mod rpc;
 pub mod server;
 mod telemetry;
 
-use clap::Parser;
-use risingwave_common::config::{
-    AsyncStackTraceOption, CompactorMode, MetricLevel, OverrideConfig,
-};
+use clap::{Parser, ValueEnum};
+use risingwave_common::config::{AsyncStackTraceOption, MetricLevel, OverrideConfig};
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 
 use crate::server::{compactor_serve, shared_compactor_serve};
+
+#[derive(Debug, Default, Clone, Copy, ValueEnum)]
+pub enum CompactorMode {
+    #[default]
+    #[clap(alias = "dedicated")]
+    Dedicated,
+
+    #[clap(alias = "shared")]
+    Shared,
+
+    #[clap(alias = "dedicated_iceberg")]
+    DedicatedIceberg,
+
+    #[clap(alias = "shared_iceberg")]
+    SharedIceberg,
+}
 
 /// Command-line arguments for compactor-node.
 #[derive(Parser, Clone, Debug, OverrideConfig)]

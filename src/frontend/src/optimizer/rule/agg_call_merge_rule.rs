@@ -12,15 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Rule};
-use crate::PlanRef;
+use super::prelude::{PlanRef, *};
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{LogicalProject, PlanTreeNodeUnary};
 
 /// Merges duplicated aggregate function calls in `LogicalAgg`, and project them back to the desired schema.
 pub struct AggCallMergeRule {}
 
-impl Rule for AggCallMergeRule {
+impl Rule<Logical> for AggCallMergeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let agg = plan.as_logical_agg()?;
 

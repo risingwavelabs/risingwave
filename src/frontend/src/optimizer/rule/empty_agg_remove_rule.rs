@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::*;
 
 /// Remove empty output [`LogicalAgg`] nodes.
 pub struct EmptyAggRemoveRule {}
-impl Rule for EmptyAggRemoveRule {
+impl Rule<Logical> for EmptyAggRemoveRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let agg = plan.as_logical_agg()?;
         if agg.agg_calls().is_empty() && agg.group_key().is_empty() {

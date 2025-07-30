@@ -70,16 +70,15 @@ use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::scale::resolve_streaming_job_definition;
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, get_fragment_actor_dispatchers,
-    get_fragment_mappings, rebuild_fragment_mapping_from_actors,
-    resolve_no_shuffle_actor_dispatcher,
+    get_fragment_mappings, resolve_no_shuffle_actor_dispatcher,
 };
-use crate::manager::LocalNotification;
+use crate::manager::{LocalNotification, NotificationManager};
 use crate::model::{
     DownstreamFragmentRelation, Fragment, FragmentActorDispatchers, FragmentDownstreamRelation,
     StreamActor, StreamContext, StreamJobFragments, TableParallelism,
 };
 use crate::stream::{SplitAssignment, build_actor_split_impls};
-use crate::{MetaError, MetaResult, model};
+use crate::{MetaError, MetaResult};
 
 /// Some information of running (inflight) actors.
 #[derive(Clone, Debug)]
@@ -144,8 +143,8 @@ impl CatalogControllerInner {
     }
 }
 
-impl CatalogController {
-    pub(crate) async fn notify_fragment_mapping(
+impl NotificationManager {
+    pub(crate) fn notify_fragment_mapping(
         &self,
         operation: NotificationOperation,
         fragment_mappings: Vec<PbFragmentWorkerSlotMapping>,
@@ -154,59 +153,56 @@ impl CatalogController {
             .iter()
             .map(|mapping| mapping.fragment_id)
             .collect_vec();
+        if fragment_ids.is_empty() {
+            return;
+        }
         // notify all fragment mappings to frontend.
         for fragment_mapping in fragment_mappings {
-            self.env
-                .notification_manager()
-                .notify_frontend(
-                    operation,
-                    NotificationInfo::StreamingWorkerSlotMapping(fragment_mapping),
-                )
-                .await;
+            self.notify_frontend_without_version(
+                operation,
+                NotificationInfo::StreamingWorkerSlotMapping(fragment_mapping),
+            );
         }
 
         // update serving vnode mappings.
         match operation {
             NotificationOperation::Add | NotificationOperation::Update => {
-                self.env
-                    .notification_manager()
-                    .notify_local_subscribers(LocalNotification::FragmentMappingsUpsert(
-                        fragment_ids,
-                    ))
-                    .await;
+                self.notify_local_subscribers(LocalNotification::FragmentMappingsUpsert(
+                    fragment_ids,
+                ));
             }
             NotificationOperation::Delete => {
-                self.env
-                    .notification_manager()
-                    .notify_local_subscribers(LocalNotification::FragmentMappingsDelete(
-                        fragment_ids,
-                    ))
-                    .await;
+                self.notify_local_subscribers(LocalNotification::FragmentMappingsDelete(
+                    fragment_ids,
+                ));
             }
             op => {
                 tracing::warn!("unexpected fragment mapping op: {}", op.as_str_name());
             }
         }
     }
+}
 
+impl CatalogController {
     pub fn extract_fragment_and_actors_from_fragments(
-        stream_job_fragments: &StreamJobFragments,
+        job_id: ObjectId,
+        fragments: impl Iterator<Item = &Fragment>,
+        actor_status: &BTreeMap<crate::model::ActorId, PbActorStatus>,
+        actor_splits: &HashMap<crate::model::ActorId, Vec<SplitImpl>>,
     ) -> MetaResult<Vec<(fragment::Model, Vec<actor::Model>)>> {
-        stream_job_fragments
-            .fragments
-            .values()
+        fragments
             .map(|fragment| {
                 Self::extract_fragment_and_actors_for_new_job(
-                    stream_job_fragments.stream_job_id.table_id as _,
+                    job_id,
                     fragment,
-                    &stream_job_fragments.actor_status,
-                    &stream_job_fragments.actor_splits,
+                    actor_status,
+                    actor_splits,
                 )
             })
             .try_collect()
     }
 
-    fn extract_fragment_and_actors_for_new_job(
+    pub fn extract_fragment_and_actors_for_new_job(
         job_id: ObjectId,
         fragment: &Fragment,
         actor_status: &BTreeMap<crate::model::ActorId, PbActorStatus>,
@@ -662,7 +658,7 @@ impl CatalogController {
     pub async fn get_job_fragment_backfill_scan_type(
         &self,
         job_id: ObjectId,
-    ) -> MetaResult<HashMap<model::FragmentId, PbStreamScanType>> {
+    ) -> MetaResult<HashMap<crate::model::FragmentId, PbStreamScanType>> {
         let inner = self.inner.read().await;
         let fragments: Vec<_> = FragmentModel::find()
             .filter(fragment::Column::JobId.eq(job_id))
@@ -683,7 +679,7 @@ impl CatalogController {
                     match node.stream_scan_type() {
                         StreamScanType::Unspecified => {}
                         scan_type => {
-                            result.insert(fragment_id as model::FragmentId, scan_type);
+                            result.insert(fragment_id as crate::model::FragmentId, scan_type);
                         }
                     }
                 }
@@ -1239,12 +1235,6 @@ impl CatalogController {
         }
 
         txn.commit().await?;
-
-        self.notify_fragment_mapping(
-            NotificationOperation::Update,
-            rebuild_fragment_mapping_from_actors(actors),
-        )
-        .await;
 
         Ok(())
     }

@@ -16,8 +16,7 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::types::DataType;
 use risingwave_expr::window_function::WindowFuncKind;
 
-use super::{BoxedRule, Rule};
-use crate::PlanRef;
+use super::prelude::{PlanRef, *};
 use crate::expr::{
     Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, Literal, collect_input_refs,
 };
@@ -56,7 +55,7 @@ impl OverWindowToTopNRule {
     }
 }
 
-impl Rule for OverWindowToTopNRule {
+impl Rule<Logical> for OverWindowToTopNRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let ctx = plan.ctx();
         let (project, plan) = {
@@ -290,7 +289,11 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
     for cond in rank_preds {
         if let Some((input_ref, cmp, v)) = cond.as_comparison_const() {
             assert_eq!(input_ref.index, window_func_pos);
-            let v = v.cast_implicit(DataType::Int64).ok()?.fold_const().ok()??;
+            let v = v
+                .cast_implicit(&DataType::Int64)
+                .ok()?
+                .fold_const()
+                .ok()??;
             let v = *v.as_int64();
             match cmp {
                 ExprType::LessThanOrEqual => ub = ub.map_or(Some(v), |ub| Some(ub.min(v))),
@@ -301,7 +304,11 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
             }
         } else if let Some((input_ref, v)) = cond.as_eq_const() {
             assert_eq!(input_ref.index, window_func_pos);
-            let v = v.cast_implicit(DataType::Int64).ok()?.fold_const().ok()??;
+            let v = v
+                .cast_implicit(&DataType::Int64)
+                .ok()?
+                .fold_const()
+                .ok()??;
             let v = *v.as_int64();
             if let Some(eq) = eq
                 && eq != v

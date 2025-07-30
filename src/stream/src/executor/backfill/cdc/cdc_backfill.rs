@@ -246,9 +246,17 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         );
 
         let mut upstream = upstream.peekable();
-        let mut last_binlog_offset: Option<CdcOffset> = state
-            .last_cdc_offset
-            .map_or(upstream_table_reader.current_cdc_offset().await?, Some);
+
+        let mut last_binlog_offset: Option<CdcOffset> = {
+            // Limit concurrent CDC connections globally to 10 using a semaphore.
+            static CDC_CONN_SEMAPHORE: tokio::sync::Semaphore =
+                tokio::sync::Semaphore::const_new(10);
+
+            let _permit = CDC_CONN_SEMAPHORE.acquire().await.unwrap();
+            state
+                .last_cdc_offset
+                .map_or(upstream_table_reader.current_cdc_offset().await?, Some)
+        };
 
         let offset_parse_func = upstream_table_reader.reader.get_cdc_offset_parser();
         let mut consumed_binlog_offset: Option<CdcOffset> = None;

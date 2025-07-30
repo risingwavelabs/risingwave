@@ -271,6 +271,9 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::MapInsert
             | Type::MapLength
             | Type::L2Distance
+            | Type::CosineDistance
+            | Type::L1Distance
+            | Type::InnerProduct
             | Type::VnodeUser
             | Type::RwEpochToTs
             | Type::CheckNotNull
@@ -284,7 +287,7 @@ impl ExprVisitor for ImpureAnalyzer {
             }
             // expression output is not deterministic
             Type::Vnode // obtain vnode count from the context
-            | Type::TestPaidTier
+            | Type::TestFeature
             | Type::License
             | Type::Proctime
             | Type::PgSleep
@@ -307,7 +310,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::RwRecoveryStatus
             | Type::PgTableIsVisible
             | Type::HasFunctionPrivilege
-            | Type::OpenaiEmbedding => self.impure = true,
+            | Type::OpenaiEmbedding
+            | Type::HasDatabasePrivilege => self.impure = true,
         }
     }
 }

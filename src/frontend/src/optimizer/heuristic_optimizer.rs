@@ -23,7 +23,7 @@ use super::ApplyResult;
 use crate::Explain;
 use crate::error::Result;
 use crate::optimizer::PlanRef;
-use crate::optimizer::plan_node::PlanTreeNode;
+use crate::optimizer::plan_node::ConventionMarker;
 use crate::optimizer::rule::BoxedRule;
 
 /// Traverse order of [`HeuristicOptimizer`]
@@ -35,14 +35,14 @@ pub enum ApplyOrder {
 // TODO: we should have a builder of HeuristicOptimizer here
 /// A rule-based heuristic optimizer, which traverses every plan nodes and tries to
 /// apply each rule on them.
-pub struct HeuristicOptimizer<'a> {
+pub struct HeuristicOptimizer<'a, C: ConventionMarker> {
     apply_order: &'a ApplyOrder,
-    rules: &'a [BoxedRule],
+    rules: &'a [BoxedRule<C>],
     stats: Stats,
 }
 
-impl<'a> HeuristicOptimizer<'a> {
-    pub fn new(apply_order: &'a ApplyOrder, rules: &'a [BoxedRule]) -> Self {
+impl<'a, C: ConventionMarker> HeuristicOptimizer<'a, C> {
+    pub fn new(apply_order: &'a ApplyOrder, rules: &'a [BoxedRule<C>]) -> Self {
         Self {
             apply_order,
             rules,
@@ -76,7 +76,7 @@ impl<'a> HeuristicOptimizer<'a> {
             .try_collect()?;
 
         Ok(if pre_applied != self.stats.total_applied() {
-            plan.clone_with_inputs(&inputs)
+            plan.clone_root_with_inputs::<C>(&inputs)
         } else {
             plan
         })
@@ -128,7 +128,7 @@ impl Stats {
         }
     }
 
-    pub fn count_rule(&mut self, rule: &BoxedRule) {
+    pub fn count_rule(&mut self, rule: &BoxedRule<impl ConventionMarker>) {
         self.total_applied += 1;
         match self.rule_counter.entry(rule.description().to_owned()) {
             Entry::Occupied(mut entry) => {
