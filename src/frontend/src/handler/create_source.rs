@@ -35,7 +35,6 @@ use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::parser::additional_columns::{
     build_additional_column_desc, get_supported_additional_columns,
     source_add_partition_offset_cols,
@@ -52,10 +51,10 @@ use risingwave_connector::schema::schema_registry::{
     SCHEMA_REGISTRY_USERNAME, SchemaRegistryConfig, name_strategy_from_str,
 };
 use risingwave_connector::source::cdc::{
-    CDC_AUTO_SCHEMA_CHANGE_KEY, CDC_MONGODB_STRONG_SCHEMA_KEY, CDC_SHARING_MODE_KEY,
-    CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
-    CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CITUS_CDC_CONNECTOR, MONGODB_CDC_CONNECTOR,
-    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR,
+    CDC_MONGODB_STRONG_SCHEMA_KEY, CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL,
+    CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY, CDC_WAIT_FOR_STREAMING_START_TIMEOUT,
+    CITUS_CDC_CONNECTOR, MONGODB_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
+    SQL_SERVER_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
@@ -67,6 +66,7 @@ use risingwave_connector::source::{
     OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR,
 };
 pub use risingwave_connector::source::{UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR};
+use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithPropertiesExt};
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{
     CdcEtlSourceInfo, PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc,
@@ -178,7 +178,11 @@ pub enum CreateSourceType {
     NonShared,
     /// create table with connector
     Table,
+<<<<<<< HEAD
     /// The cdc source for an upstream table created after a `SharedCdc` Source
+=======
+    /// The cdc source for an upstream table created after a `SharedCdc`` Source
+>>>>>>> 695aa2a4d1 (parser)
     CdcEtl,
 }
 
@@ -695,7 +699,7 @@ pub(super) fn bind_source_watermark(
             let col_name = source_watermark.column.real_value();
             let watermark_idx = binder.get_column_binding_index(name.clone(), &col_name)?;
 
-            let expr = binder.bind_expr(source_watermark.expr)?;
+            let expr = binder.bind_expr(&source_watermark.expr)?;
             let watermark_col_type = column_catalogs[watermark_idx].data_type();
             let watermark_expr_type = &expr.return_type();
             if watermark_col_type != watermark_expr_type {
@@ -751,10 +755,13 @@ pub fn bind_connector_props(
         ))));
     }
     if is_create_source && create_cdc_source_job {
-        if let Some(value) = with_properties.get(CDC_AUTO_SCHEMA_CHANGE_KEY)
-            && value
-                .parse::<bool>()
-                .map_err(|_| anyhow!("invalid value of '{}' option", CDC_AUTO_SCHEMA_CHANGE_KEY))?
+        if let Some(value) = with_properties.get(AUTO_SCHEMA_CHANGE_KEY)
+            && value.parse::<bool>().map_err(|_| {
+                ErrorCode::InvalidInputSyntax(format!(
+                    "invalid value of '{}' option",
+                    AUTO_SCHEMA_CHANGE_KEY
+                ))
+            })?
         {
             Feature::CdcAutoSchemaChange
                 .check_available()
@@ -833,7 +840,7 @@ pub async fn bind_create_source_or_table_with_connector(
 ) -> Result<SourceCatalog> {
     let session = &handler_args.session;
     let db_name: &str = &session.database();
-    let (schema_name, source_name) = Binder::resolve_schema_qualified_name(db_name, full_name)?;
+    let (schema_name, source_name) = Binder::resolve_schema_qualified_name(db_name, &full_name)?;
     let (database_id, schema_id) =
         session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
@@ -1023,7 +1030,7 @@ HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<c
         source_name.clone(),
         &mut columns,
         // TODO(st1page): pass the ref
-        sql_columns_defs.to_vec(),
+        sql_columns_defs,
         &pk_col_ids,
     )?;
     check_format_encode(&with_properties, row_id_index, &columns)?;
