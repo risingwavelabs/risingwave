@@ -321,7 +321,7 @@ pub fn parse_schema_change(
                             let default_val_expr_str = default_val_expr_str.as_str().unwrap();
                             // Only process constant default values
                             if !is_constant_default_value(default_val_expr_str) {
-                                tracing::debug!(target: "auto_schema_change", 
+                                tracing::debug!(target: "auto_schema_change",
                                     "Skipping non-constant default value expression: {}", default_val_expr_str);
                                 ColumnDesc::named(name, ColumnId::placeholder(), data_type)
                             } else {

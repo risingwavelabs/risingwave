@@ -808,6 +808,7 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
                 editor.defaultValueExpression(columnMetadata.getDefaultValueExpression());
             }
 
+            /* patch code */
             // Check if this column is an enum type and set enum values
             if (columnMetadata.getPostgresType().getEnumValues() != null) {
                 List<String> enumValues = columnMetadata.getPostgresType().getEnumValues();
@@ -820,6 +821,7 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
                             enumValues);
                 }
             }
+            /* patch code */
 
             columns.add(editor.create());
         }
