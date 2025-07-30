@@ -273,4 +273,4 @@ SELECT count(*) from t;
 2
 
 statement ok
-drop source pg_comprehensive_source cascade;
+drop source s cascade;
