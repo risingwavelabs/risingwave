@@ -196,16 +196,17 @@ pub trait PlanNodeCommon<C: ConventionMarker> = PlanTreeNode<C>
     + Downcast
     + ExprRewritable<C>
     + ExprVisitable
-    + AnyPlanNodeMeta<C>;
+    + AnyPlanNodeMeta<C>
+    + ToPb;
 
 /// The common trait over all plan nodes. Used by optimizer framework which will treat all node as
 /// `dyn PlanNode`
 ///
 /// We split the trait into lots of sub-trait so that we can easily use macro to impl them.
-pub trait StreamPlanNode: PlanNodeCommon<Stream> + ToPb {}
-pub trait BatchPlanNode: PlanNodeCommon<Batch> + ToDistributedBatch + ToPb + ToLocalBatch {}
+pub trait StreamPlanNode: PlanNodeCommon<Stream> {}
+pub trait BatchPlanNode: PlanNodeCommon<Batch> + ToDistributedBatch + ToLocalBatch {}
 pub trait LogicalPlanNode:
-    PlanNodeCommon<Logical> + ColPrunable + PredicatePushdown + ToBatch + ToStream + ToPb
+    PlanNodeCommon<Logical> + ColPrunable + PredicatePushdown + ToBatch + ToStream
 {
 }
 
