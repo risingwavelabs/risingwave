@@ -803,7 +803,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
 
     let (cdc_table_desc, columns, pk_column_ids) = derive_cdc_table_desc(
         &session,
-        shared_source.clone(),
+        source.clone(),
         external_table_name.clone(),
         column_defs,
         columns,
@@ -906,7 +906,7 @@ pub fn derive_cdc_table_desc(
         session,
         table_or_source_name.real_value(),
         &mut columns,
-        column_defs,
+        &column_defs,
         &pk_column_ids,
     )?;
 
@@ -1094,7 +1094,7 @@ pub(super) async fn handle_create_table_plan(
         engine,
     };
 
-    let ((plan, source, table), job_type, shared_shource_id) = match (
+    let ((plan, source, table), job_type, shared_source_id) = match (
         format_encode,
         cdc_table_info.as_ref(),
     ) {
@@ -1186,7 +1186,7 @@ pub(super) async fn handle_create_table_plan(
 
             let context: OptimizerContextRef =
                 OptimizerContext::new(handler_args, explain_options).into();
-            let shared_source_id = source.id;
+            let shared_source_id = shared_source.id;
             let (plan, table) = gen_create_table_plan_for_cdc_table(
                 context,
                 shared_source,
@@ -1235,7 +1235,7 @@ pub fn get_shared_source_info(
     let user_name = &session.user_name();
 
     let (shared_source_schema_name, shared_source_name) =
-        Binder::resolve_schema_qualified_name(db_name, cdc_table.source_name.clone())?;
+        Binder::resolve_schema_qualified_name(db_name, &cdc_table.source_name.clone())?;
 
     let shared_source = {
         let catalog_reader = session.env().catalog_reader().read_guard();

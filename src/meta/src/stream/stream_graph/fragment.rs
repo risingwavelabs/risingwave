@@ -1239,9 +1239,9 @@ impl CompleteStreamFragmentGraph {
                             if fragment.fragment_type_mask & FragmentTypeFlag::CdcFilter as u32
                                 != 0 =>
                         {
-                            if upstream_fragment.fragment_type_mask
-                                & FragmentTypeFlag::SharedCdcSource as u32
-                                == 0
+                            if !upstream_fragment
+                                .fragment_type_mask
+                                .contains(FragmentTypeFlag::SharedCdcSource)
                             {
                                 bail!(
                                     "the upstream fragment should be a SharedCdcSource, got fragment type: {:b}",

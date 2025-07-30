@@ -216,7 +216,7 @@ impl LogicalCdcScan {
                 // TODO(yuhao): avoid this `from_expr_proto`.
                 let proj_expr =
                     rewriter.rewrite_expr(ExprImpl::from_expr_proto(expr.as_ref().unwrap())?);
-                let casted_expr = proj_expr.cast_assign(ret_data_type)?;
+                let casted_expr = proj_expr.cast_assign(&ret_data_type)?;
                 exprs.push(casted_expr);
             } else {
                 let input_ref = InputRef {

@@ -1080,7 +1080,7 @@ pub async fn bind_create_source_from_source(
     let session = &handler_args.session;
     let db_name: &str = &session.database();
     let (schema_name, source_name) =
-        Binder::resolve_schema_qualified_name(db_name, full_name.clone())?;
+        Binder::resolve_schema_qualified_name(db_name, &full_name.clone())?;
     let (database_id, schema_id) =
         session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
