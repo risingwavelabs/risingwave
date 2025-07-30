@@ -5,13 +5,13 @@ control substitution on
 
 # Setup test directory and initial test files
 system ok
-rm -rf ./e2e_test/streaming/refresh_table_tmp && mkdir -p ./e2e_test/streaming/refresh_table_tmp
+rm -rf ./e2e_test/source_inline/refresh/refresh_table_tmp && mkdir -p ./e2e_test/source_inline/refresh/refresh_table_tmp
 
 system ok
-echo "1,alice" > ./e2e_test/streaming/refresh_table_tmp/file1.csv
+echo "1,alice" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file1.csv
 
 system ok
-echo "2,bob" > ./e2e_test/streaming/refresh_table_tmp/file2.csv
+echo "2,bob" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file2.csv
 
 # ----
 # Test 1: Create refreshable table and initial load (must have PRIMARY KEY)
@@ -53,7 +53,7 @@ DROP TABLE non_refreshable_t;
 statement error
 CREATE TABLE no_pk_refresh_t (id int, name varchar) WITH (
     connector = '__for_testing_only_batch_posix_fs',
-    batch_posix_fs.root = './e2e_test/streaming/refresh_table_tmp',
+    batch_posix_fs.root = './e2e_test/source_inline/refresh/refresh_table_tmp',
     match_pattern = '*.csv'
 ) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
 ----
@@ -63,10 +63,25 @@ Caused by:
   Bind error: Refreshable tables must have a PRIMARY KEY. Please define a primary key for the table.
 
 
+statement error
+CREATE SOURCE refresh_fs_t (id int PRIMARY KEY, name varchar) WITH (
+    connector = '__for_testing_only_batch_posix_fs',
+    batch_posix_fs.root = './e2e_test/source_inline/refresh/refresh_table_tmp',
+    match_pattern = '*.csv'
+) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Bind error: can't CREATE SOURCE with refreshable batch connector
+
+Hint: use CREATE TABLE instead
+
+
 statement ok
 CREATE TABLE refresh_fs_t (id int PRIMARY KEY, name varchar) WITH (
     connector = '__for_testing_only_batch_posix_fs',
-    batch_posix_fs.root = './e2e_test/streaming/refresh_table_tmp',
+    batch_posix_fs.root = './e2e_test/source_inline/refresh/refresh_table_tmp',
     match_pattern = '*.csv'
 ) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
 
@@ -76,7 +91,7 @@ CREATE TABLE refresh_fs_t_on_conflict_ignore (id int PRIMARY KEY, name varchar)
 ON CONFLICT IGNORE
 WITH (
     connector = '__for_testing_only_batch_posix_fs',
-    batch_posix_fs.root = './e2e_test/streaming/refresh_table_tmp',
+    batch_posix_fs.root = './e2e_test/source_inline/refresh/refresh_table_tmp',
     match_pattern = '*.csv'
 )
 FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
@@ -85,7 +100,7 @@ FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
 statement ok
 CREATE TABLE refresh_fs_t_complex (id int PRIMARY KEY, name varchar, ts timestamptz AS proctime(), x int as id+1) WITH (
     connector = '__for_testing_only_batch_posix_fs',
-    batch_posix_fs.root = './e2e_test/streaming/refresh_table_tmp',
+    batch_posix_fs.root = './e2e_test/source_inline/refresh/refresh_table_tmp',
     match_pattern = '*.csv'
 ) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
 
@@ -102,10 +117,10 @@ SELECT * FROM refresh_fs_t;
 # ----
 # Test 2: Add new files and refresh (INSERT scenario)
 system ok
-echo "3,charlie" > ./e2e_test/streaming/refresh_table_tmp/file3.csv
+echo "3,charlie" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file3.csv
 
 system ok
-echo "4,david" > ./e2e_test/streaming/refresh_table_tmp/new_file.csv
+echo "4,david" > ./e2e_test/source_inline/refresh/refresh_table_tmp/new_file.csv
 
 sleep 2s
 
@@ -146,10 +161,10 @@ SELECT * FROM refresh_fs_t;
 # ----
 # Test 3: Modify existing file content (UPDATE scenario)
 system ok
-echo "1,alice_updated" > ./e2e_test/streaming/refresh_table_tmp/file1.csv
+echo "1,alice_updated" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file1.csv
 
 system ok
-echo "2,bob_updated" > ./e2e_test/streaming/refresh_table_tmp/file2.csv
+echo "2,bob_updated" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file2.csv
 
 statement ok
 REFRESH TABLE refresh_fs_t;
@@ -169,10 +184,10 @@ SELECT * FROM refresh_fs_t;
 # ----
 # Test 4: Remove files (DELETE scenario)
 system ok
-rm ./e2e_test/streaming/refresh_table_tmp/file3.csv
+rm ./e2e_test/source_inline/refresh/refresh_table_tmp/file3.csv
 
 system ok
-rm ./e2e_test/streaming/refresh_table_tmp/new_file.csv
+rm ./e2e_test/source_inline/refresh/refresh_table_tmp/new_file.csv
 
 statement ok
 REFRESH TABLE refresh_fs_t;
@@ -190,20 +205,20 @@ SELECT * FROM refresh_fs_t;
 # ----
 # Test 5: Mixed operations - add, update, delete simultaneously
 system ok
-echo "1,alice_final" > ./e2e_test/streaming/refresh_table_tmp/file1.csv
+echo "1,alice_final" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file1.csv
 
 system ok
-rm ./e2e_test/streaming/refresh_table_tmp/file2.csv
+rm ./e2e_test/source_inline/refresh/refresh_table_tmp/file2.csv
 
 system ok
-echo "5,eve" > ./e2e_test/streaming/refresh_table_tmp/file5.csv
+echo "5,eve" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file5.csv
 
 system ok
-echo "6,frank" > ./e2e_test/streaming/refresh_table_tmp/file6.csv
+echo "6,frank" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file6.csv
 
 # Test on conflict behavior (default is overwrite)
 system ok
-echo "6,frank_updated" >> ./e2e_test/streaming/refresh_table_tmp/file6.csv
+echo "6,frank_updated" >> ./e2e_test/source_inline/refresh/refresh_table_tmp/file6.csv
 
 statement ok
 REFRESH TABLE refresh_fs_t;
@@ -232,7 +247,7 @@ SELECT * FROM refresh_fs_t_on_conflict_ignore;
 # ----
 # Test 6: Empty directory (all files deleted)
 system ok
-rm ./e2e_test/streaming/refresh_table_tmp/*.csv
+rm ./e2e_test/source_inline/refresh/refresh_table_tmp/*.csv
 
 statement ok
 REFRESH TABLE refresh_fs_t;
@@ -246,10 +261,10 @@ SELECT * FROM refresh_fs_t;
 # ----
 # Test 7: Re-populate after empty
 system ok
-echo "7,grace" > ./e2e_test/streaming/refresh_table_tmp/new1.csv
+echo "7,grace" > ./e2e_test/source_inline/refresh/refresh_table_tmp/new1.csv
 
 system ok
-echo "8,henry" > ./e2e_test/streaming/refresh_table_tmp/new2.csv
+echo "8,henry" > ./e2e_test/source_inline/refresh/refresh_table_tmp/new2.csv
 
 statement ok
 REFRESH TABLE refresh_fs_t;
@@ -273,4 +288,4 @@ statement ok
 DROP TABLE refresh_fs_t_on_conflict_ignore;
 
 system ok
-rm -rf ./e2e_test/streaming/refresh_table_tmp
+rm -rf ./e2e_test/source_inline/refresh/refresh_table_tmp
