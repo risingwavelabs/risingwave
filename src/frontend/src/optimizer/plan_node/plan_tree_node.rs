@@ -17,7 +17,7 @@ use smallvec::SmallVec;
 use crate::optimizer::{ConventionMarker, PlanRef};
 use crate::utils::ColIndexMapping;
 
-/// The trait [`PlanNode`](super::PlanNode) really need about tree structure and used by optimizer
+/// The plan node trait of different conventions really need about tree structure and used by optimizer
 /// framework. every plan node should impl it.
 ///
 /// The trait [`PlanTreeNodeLeaf`], [`PlanTreeNodeUnary`] and [`PlanTreeNodeBinary`], is just

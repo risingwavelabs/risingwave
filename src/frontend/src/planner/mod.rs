@@ -34,7 +34,7 @@ pub use query::LIMIT_ALL_COUNT;
 
 use crate::optimizer::plan_node::LogicalPlanRef as PlanRef;
 
-/// `Planner` converts a bound statement to a [`crate::optimizer::plan_node::PlanNode`] tree
+/// `Planner` converts a bound statement to a [`crate::optimizer::plan_node::LogicalPlanNode`] tree
 pub struct Planner {
     ctx: OptimizerContextRef,
     /// Mapping of `ShareId` to its share plan.
