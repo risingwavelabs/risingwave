@@ -443,7 +443,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             for c in StreamChunkCompactor::new(stream_key.clone(), chunks)
                                 .into_compacted_chunks()
                             {
-                                if sink_type != SinkType::ForceAppendOnly {
+                                // We only enter the branch if need_advance_delete, in which case `sink_type` is not ForceAppendOnly or AppendOnly.
+                                {
                                     // Force append-only by dropping UPDATE/DELETE messages. We do this when the
                                     // user forces the sink to be append-only while it is actually not based on
                                     // the frontend derivation result.
