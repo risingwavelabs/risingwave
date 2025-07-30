@@ -27,7 +27,11 @@ use risingwave_sqlparser::ast::{
 use crate::binder::Binder;
 use crate::binder::expr::function::is_sys_function_without_args;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, Parameter, SubqueryKind};
+use crate::expr::{
+    Expr as _, ExprImpl, ExprRewriter as _, ExprType, FunctionCall, InputRef,
+    InputRefDepthRewriter, Parameter, SubqueryKind,
+};
+use crate::handler::create_sql_function::SQL_UDF_PATTERN;
 
 mod binary_op;
 mod column;
@@ -436,22 +440,41 @@ impl Binder {
         FunctionCall::new(ExprType::Overlay, args).map(|f| f.into())
     }
 
+    fn bind_udf_parameter(&mut self, name: &str) -> Result<ExprImpl> {
+        for (depth, context) in std::iter::once(&self.context)
+            .chain(
+                self.upper_subquery_contexts
+                    .iter()
+                    .map(|(context, _)| context)
+                    .rev(),
+            )
+            .enumerate()
+        {
+            if !context.udf_arguments.is_empty() {
+                if let Some(expr) = context.udf_arguments.get(name) {
+                    let mut rewriter = InputRefDepthRewriter::new(depth);
+                    return Ok(rewriter.rewrite_expr(expr.clone()));
+                } else {
+                    break;
+                }
+            }
+        }
+
+        return Err(ErrorCode::BindError(format!(
+            "{SQL_UDF_PATTERN} failed to find parameter ${name}"
+        ))
+        .into());
+    }
+
     fn bind_parameter(&mut self, index: u64) -> Result<ExprImpl> {
         // Special check for sql udf
         // Note: This is specific to sql udf with unnamed parameters, since the
         // parameters will be parsed and treated as `Parameter`.
         // For detailed explanation, consider checking `bind_column`.
-        // if self.udf_context.global_count() != 0 {
-        //     if let Some(expr) = self.udf_context.get_expr(&format!("${index}")) {
-        //         return Ok(expr.clone());
-        //     }
-        //     // Same as `bind_column`, the error message here
-        //     // help with hint display when invalid definition occurs
-        //     return Err(ErrorCode::BindError(format!(
-        //         "{SQL_UDF_PATTERN} failed to find unnamed parameter ${index}"
-        //     ))
-        //     .into());
-        // }
+        if self.udf_context.is_binding_udf() {
+            let column_name = format!("${index}");
+            return self.bind_udf_parameter(&column_name);
+        }
 
         Ok(Parameter::new(index, self.param_types.clone()).into())
     }

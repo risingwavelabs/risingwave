@@ -106,7 +106,6 @@ pub struct InputRefDepthRewriter {
 
 impl InputRefDepthRewriter {
     pub fn new(offset: usize) -> Self {
-        assert!(offset > 0, "offset should be greater than 0");
         Self { offset }
     }
 }

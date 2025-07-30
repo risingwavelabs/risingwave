@@ -170,6 +170,10 @@ impl UdfContext {
         self.udf_global_counter
     }
 
+    pub fn is_binding_udf(&self) -> bool {
+        self.udf_global_counter > 0
+    }
+
     pub fn incr_global_count(&mut self) {
         self.udf_global_counter += 1;
     }

@@ -17,10 +17,7 @@ use risingwave_sqlparser::ast::Ident;
 
 use crate::binder::{Binder, Clause};
 use crate::error::{ErrorCode, Result};
-use crate::expr::{
-    CorrelatedInputRef, ExprImpl, ExprRewriter as _, ExprType, FunctionCall, InputRef,
-    InputRefDepthRewriter, Literal,
-};
+use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 
 impl Binder {
     pub fn bind_column(&mut self, idents: &[Ident]) -> Result<ExprImpl> {
@@ -74,11 +71,6 @@ impl Binder {
                     return Err(e.into());
                 }
             }
-        }
-
-        // If we find it as an argument for SQL UDF in the current context, directly return it.
-        if let Some(expr) = self.context.udf_arguments.get(&column_name) {
-            return Ok(expr.clone());
         }
 
         // Try to find a correlated column in `upper_contexts`, starting from the innermost context.
@@ -156,13 +148,8 @@ impl Binder {
                     }
                 }
             }
-
-            // If we find it as an argument for SQL UDF, offset the depth for `InputRef` and return it.
-            if let Some(expr) = context.udf_arguments.get(&column_name) {
-                let mut rewriter = InputRefDepthRewriter::new(depth);
-                return Ok(rewriter.rewrite_expr(expr.clone()));
-            }
         }
+
         // `CTID` is a system column in postgres.
         // https://www.postgresql.org/docs/current/ddl-system-columns.html
         //
@@ -176,6 +163,13 @@ impl Binder {
         {
             return Ok(Literal::new(Some("".into()), DataType::Varchar).into());
         }
+
+        if let ErrorCode::ItemNotFound(_) = err
+            && self.udf_context.is_binding_udf()
+        {
+            return self.bind_udf_parameter(&column_name);
+        }
+
         Err(err.into())
     }
 }
