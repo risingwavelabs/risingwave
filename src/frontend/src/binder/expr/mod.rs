@@ -1078,7 +1078,17 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         }
         AstDataType::Bytea => DataType::Bytea,
         AstDataType::Jsonb => DataType::Jsonb,
-        AstDataType::Vector(size) => DataType::Vector(*size as _),
+        AstDataType::Vector(size) => match (1..=DataType::VEC_MAX_SIZE).contains(&(*size as _)) {
+            true => DataType::Vector(*size as _),
+            false => {
+                return Err(ErrorCode::BindError(format!(
+                    "vector size {} is out of range [1, {}]",
+                    size,
+                    DataType::VEC_MAX_SIZE
+                ))
+                .into());
+            }
+        },
         AstDataType::Regclass
         | AstDataType::Regproc
         | AstDataType::Uuid
