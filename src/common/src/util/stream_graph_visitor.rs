@@ -262,8 +262,13 @@ pub fn visit_stream_node_tables_inner<F>(
             }
 
             // Note: add internal tables for new nodes here.
-            NodeBody::Materialize(node) if !internal_tables_only => {
-                always!(node.table, "Materialize")
+            NodeBody::Materialize(node)
+                if !internal_tables_only
+                    || (internal_tables_only
+                        && node.table.as_ref().unwrap().table_type()
+                            == risingwave_pb::catalog::table::TableType::Internal) =>
+            {
+                always!(node.table, "Materialize");
             }
 
             // Global Approx Percentile

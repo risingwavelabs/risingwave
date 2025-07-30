@@ -17,16 +17,18 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{CdcTableDesc, ColumnCatalog, ColumnDesc, TableId};
+use risingwave_common::catalog::{
+    CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior, TableId,
+};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::plan_common::GeneratedColumnDesc;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 
 use super::generic::{GenericPlanRef, SourceNodeKind};
-use super::utils::{Distill, childless_record};
+use super::utils::{Distill, TableCatalogBuilder, childless_record};
 use super::{
     ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef, PredicatePushdown,
-    StreamProject, ToBatch, ToStream, generic,
+    StreamMaterialize, StreamProject, ToBatch, ToStream, generic,
 };
 use crate::WithOptions;
 use crate::catalog::ColumnId;
@@ -35,7 +37,7 @@ use crate::error::Result;
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::CdcScanOptions;
+use crate::optimizer::plan_node::generic::{CdcScanOptions, PhysicalPlanRef};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamCdcTableScan,
     ToStreamContext,
@@ -444,6 +446,31 @@ impl ToStream for LogicalCdcScan {
                 if let Some(exprs) = &self.output_exprs {
                     let logical_project = generic::Project::new(exprs.to_vec(), plan);
                     plan = StreamProject::new(logical_project).into();
+                }
+
+                // Insert an internal StreamMaterialize after the project.
+                {
+                    use risingwave_common::util::sort_util::OrderType;
+
+                    // Build an internal table catalog identical to the current plan schema.
+                    let mut builder = TableCatalogBuilder::default();
+                    builder.set_conflict_behavior(ConflictBehavior::Overwrite);
+                    for field in plan.schema().fields() {
+                        builder.add_column(field);
+                    }
+
+                    let stream_key = plan.expect_stream_key();
+                    // Use upstream stream key as order columns.
+                    for &idx in stream_key {
+                        builder.add_order_column(idx, OrderType::ascending());
+                    }
+                    builder.set_stream_key(stream_key.to_vec());
+                    let dist_keys = plan.distribution().dist_column_indices().to_vec();
+                    let read_prefix_len_hint = stream_key.len();
+                    let internal_table = builder.build(dist_keys, read_prefix_len_hint);
+
+                    plan = StreamMaterialize::new(plan, internal_table).into();
+                    dbg!(&plan);
                 }
             }
             SourceNodeKind::CreateSharedSource => {

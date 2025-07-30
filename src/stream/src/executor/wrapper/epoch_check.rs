@@ -32,6 +32,11 @@ pub async fn epoch_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
         let message = message?;
 
         if let Message::Barrier(b) = &message {
+            if b.is_etl_cdc_clear() {
+                // ETL CDC clear barrier is not a normal barrier, it does not carry epoch information.
+                yield message;
+                continue;
+            }
             let new_epoch = b.epoch.curr;
             let stale = last_epoch
                 .map(|last_epoch| last_epoch > new_epoch)

@@ -69,7 +69,10 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     metrics: MaterializeMetrics,
 
     /// No data will be written to hummock table. This Materialize is just a dummy node.
-    /// Used for APPEND ONLY table with iceberg engine. All data will be written to iceberg table directly.
+    /// Two cases:
+    /// 1. Used for APPEND ONLY table with iceberg engine. All data will be written to iceberg table directly.
+    /// 2. Used for ETL CDC, which is a special case that the materialize executor
+    ///    need to turn into dummy after finishing reading snapshot.
     is_dummy_table: bool,
 }
 
@@ -182,6 +185,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         let barrier = expect_first_barrier(&mut input).await?;
         let first_epoch = barrier.epoch;
         // The first barrier message should be propagated.
+        dbg!(&first_epoch, &self.actor_context.id);
         yield Message::Barrier(barrier);
         self.state_table.init_epoch(first_epoch).await?;
 
@@ -279,6 +283,16 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     }
                 }
                 Message::Barrier(b) => {
+                    if b.is_etl_cdc_clear() {
+                        // TODO: If the barrier is an ETL CDC clear, we need to clear the state table.
+                        // Now we just clear the materialize cache.
+                        self.materialize_cache.lru_cache.clear();
+                        // Turn into a dummy table.
+                        self.is_dummy_table = true;
+                        // Do not sent this barrier to downstream.
+                        continue;
+                    }
+
                     // If a downstream mv depends on the current table, we need to do conflict check again.
                     if !self.may_have_downstream
                         && b.has_more_downstream_fragments(self.actor_context.id)

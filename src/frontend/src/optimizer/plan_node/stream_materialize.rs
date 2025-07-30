@@ -395,9 +395,15 @@ impl PlanTreeNodeUnary for StreamMaterialize {
 impl_plan_tree_node_for_unary! { StreamMaterialize }
 
 impl StreamNode for StreamMaterialize {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
 
+        let table = if self.table().is_internal_table() {
+            // For internal tables
+            self.table.clone().with_id(state.gen_table_id_wrapped())
+        } else {
+            self.table.clone()
+        };
         PbNodeBody::Materialize(Box::new(MaterializeNode {
             // We don't need table id for materialize node in frontend. The id will be generated on
             // meta catalog service.
@@ -408,7 +414,7 @@ impl StreamNode for StreamMaterialize {
                 .iter()
                 .map(ColumnOrder::to_protobuf)
                 .collect(),
-            table: Some(self.table().to_internal_table_prost()),
+            table: Some(table.to_internal_table_prost()),
         }))
     }
 }
