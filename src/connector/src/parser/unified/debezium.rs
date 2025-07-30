@@ -371,12 +371,11 @@ where
     }
 
     pub fn is_update(&self) -> AccessResult<bool> {
-        if let Some(accessor) = &self.value_accessor {
-            if let Some(ScalarRefImpl::Utf8(op)) =
+        if let Some(accessor) = &self.value_accessor
+            && let Some(ScalarRefImpl::Utf8(op)) =
                 accessor.access(&[OP], &DataType::Varchar)?.to_datum_ref()
-            {
-                return Ok(op == DEBEZIUM_UPDATE_OP);
-            }
+        {
+            return Ok(op == DEBEZIUM_UPDATE_OP);
         }
         Ok(false)
     }

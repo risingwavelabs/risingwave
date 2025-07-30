@@ -876,7 +876,7 @@ async fn parse_debezium_chunk(
         use risingwave_common::array::{ArrayBuilder, StreamChunk, Utf8ArrayBuilder};
         let mut offset_builder = Utf8ArrayBuilder::new(builder_chunk_size);
 
-        for (payload_row, offset_row) in payloads.rows().zip(offsets.rows()) {
+        for (payload_row, offset_row) in payloads.rows().zip_eq(offsets.rows()) {
             let ScalarRefImpl::Jsonb(jsonb_ref) =
                 payload_row.datum_at(0).expect("payload must exist")
             else {
@@ -897,7 +897,6 @@ async fn parse_debezium_chunk(
                 ParseResult::DeleteInsertRows => 2,
                 ParseResult::SchemaChange(_) | ParseResult::TransactionControl(_) => 0,
             };
-            dbg!(&new_rows_cnt);
 
             for _ in 0..new_rows_cnt {
                 offset_builder.append(offset_datum.map(|scalar| scalar.into_utf8()));
@@ -913,8 +912,7 @@ async fn parse_debezium_chunk(
         };
 
         let (ops, mut columns, vis) = parsed_chunk.into_inner();
-        dbg!(&new_offsets);
-        dbg!(&columns);
+
         columns.push(Arc::new(new_offsets.into()));
         Ok(StreamChunk::from_parts(
             ops,

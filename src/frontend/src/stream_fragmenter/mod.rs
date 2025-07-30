@@ -364,7 +364,9 @@ fn build_fragment(
                     && source_info.is_shared()
                     && source.with_properties.is_cdc_connector()
                 {
-                    current_fragment.fragment_type_mask |= FragmentTypeFlag::SharedCdcSource as u32;
+                    current_fragment
+                        .fragment_type_mask
+                        .add(FragmentTypeFlag::SharedCdcSource);
                 }
 
                 if let Some(source) = node.source_inner.as_ref()
