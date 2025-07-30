@@ -229,8 +229,8 @@ impl HashiCorpVaultClient {
             return self.process_secret_response(response).await;
         }
 
-        // Should never reach here due to early returns, but adding unreachable for safety
-        unreachable!("")
+        // todo: refine error message
+        Err(anyhow::anyhow!("Failed to get secret from Vault"))
     }
 
     async fn process_secret_response(&self, response: reqwest::Response) -> Result<Vec<u8>> {
