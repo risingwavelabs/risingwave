@@ -189,7 +189,7 @@ impl HashiCorpVaultClient {
         let mut force_refresh_token = false;
 
         // Retry loop for handling token invalidation
-        for retry_count in 0..1 {
+        for retry_count in 0..2 {
             // Get token (either directly or via app role)
             let token = self.get_token_internal(force_refresh_token).await?;
 
@@ -234,6 +234,7 @@ impl HashiCorpVaultClient {
     }
 
     async fn process_secret_response(&self, response: reqwest::Response) -> Result<Vec<u8>> {
+        // https://developer.hashicorp.com/vault/docs/secrets/kv/kv-v2/cookbook/read-data
         // a demo response:
         //   {
         //     "request_id": "e345b77b-8b5a-552b-eb2c-7d80a627c9ad",

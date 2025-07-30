@@ -23,6 +23,7 @@ if [ $timeout -le 0 ]; then
 fi
 
 # Check if kv-v2 secrets engine is already enabled
+# https://developer.hashicorp.com/vault/api-docs/secret/kv/kv-v2
 if ! curl -s -H "X-Vault-Token: $VAULT_TOKEN" "$VAULT_ADDR/v1/sys/mounts" | grep -q '"secret/"'; then
     echo "Enabling KV v2 secrets engine..."
     curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
@@ -90,6 +91,7 @@ curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
 # Enable approle auth method if not already enabled
 if ! curl -s -H "X-Vault-Token: $VAULT_TOKEN" "$VAULT_ADDR/v1/sys/auth" | grep -q '"approle/"'; then
     echo "Enabling AppRole authentication..."
+    # https://developer.hashicorp.com/vault/docs/auth/approle
     curl -s -H "X-Vault-Token: $VAULT_TOKEN" \
          -H "Content-Type: application/json" \
          -X POST \
