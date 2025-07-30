@@ -217,7 +217,9 @@ impl VectorVal {
     /// This is leak of implementation. Prefer [`VectorVal::from_iter`] below.
     pub fn from_inner(inner: ListValue) -> Result<Self, ArrayError> {
         for element in inner.iter() {
-            let Some(scalar) = element else { continue };
+            let Some(scalar) = element else {
+                return Err(ArrayError::internal("NULL not allowed in vector"));
+            };
             let ScalarRefImpl::Float32(val) = scalar else {
                 return Err(ArrayError::internal(format!(
                     "vector element must be f32 but found {scalar:?}"
