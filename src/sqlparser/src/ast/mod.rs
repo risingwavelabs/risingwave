@@ -1269,6 +1269,10 @@ pub enum Statement {
     Truncate {
         table_name: ObjectName,
     },
+    /// Refresh table
+    Refresh {
+        table_name: ObjectName,
+    },
     /// SELECT
     Query(Box<Query>),
     /// INSERT
@@ -1798,6 +1802,10 @@ impl Statement {
             Statement::Query(s) => write!(f, "{}", s),
             Statement::Truncate { table_name } => {
                 write!(f, "TRUNCATE TABLE {}", table_name)?;
+                Ok(())
+            }
+            Statement::Refresh { table_name } => {
+                write!(f, "REFRESH TABLE {}", table_name)?;
                 Ok(())
             }
             Statement::Analyze { table_name } => {

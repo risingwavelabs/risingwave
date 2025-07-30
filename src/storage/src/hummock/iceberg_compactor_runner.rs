@@ -41,6 +41,7 @@ use risingwave_connector::sink::iceberg::{
     IcebergConfig, commit_branch, should_enable_iceberg_cow,
 };
 use risingwave_pb::iceberg_compaction::IcebergCompactionTask;
+use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
@@ -63,6 +64,7 @@ pub struct IcebergCompactorRunner {
 
     config: IcebergCompactorRunnerConfig,
     metrics: Arc<CompactorMetrics>,
+    pub task_type: TaskType,
 }
 
 pub fn default_writer_properties() -> WriterProperties {
@@ -88,6 +90,10 @@ pub struct IcebergCompactorRunnerConfig {
     pub max_record_batch_rows: usize,
     #[builder(default = "default_writer_properties()")]
     pub write_parquet_properties: WriterProperties,
+    #[builder(default = "32 * 1024 * 1024")] // 32MB
+    pub small_file_threshold: u64,
+    #[builder(default = "50 * 1024 * 1024 * 1024")] // 50GB
+    pub max_task_total_size: u64,
     #[builder(default = "iceberg_compaction_enable_heuristic_output_parallelism()")]
     pub enable_heuristic_output_parallelism: bool,
     #[builder(default = "iceberg_compaction_max_concurrent_closes()")]
@@ -134,7 +140,11 @@ impl IcebergCompactorRunner {
         config: IcebergCompactorRunnerConfig,
         metrics: Arc<CompactorMetrics>,
     ) -> HummockResult<Self> {
-        let IcebergCompactionTask { task_id, props } = iceberg_compaction_task;
+        let IcebergCompactionTask {
+            task_id,
+            props,
+            task_type,
+        } = iceberg_compaction_task;
         let iceberg_config = IcebergConfig::from_btreemap(BTreeMap::from_iter(props.into_iter()))
             .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
         let catalog = iceberg_config
@@ -152,6 +162,9 @@ impl IcebergCompactorRunner {
             iceberg_config,
             config,
             metrics,
+            task_type: TaskType::try_from(task_type).map_err(|e| {
+                HummockError::compaction_executor(format!("Invalid task type: {}", e.as_report()))
+            })?,
         })
     }
 
@@ -164,6 +177,7 @@ impl IcebergCompactorRunner {
         let now = std::time::Instant::now();
 
         let compact = async move {
+            let compaction_type = Self::get_compaction_type(self.task_type);
             let planning_config = CompactionPlanningConfigBuilder::default()
                 .max_parallelism(self.config.max_parallelism as usize)
                 .min_size_per_partition(self.config.min_size_per_partition)
@@ -174,6 +188,8 @@ impl IcebergCompactorRunner {
                 .enable_heuristic_output_parallelism(
                     self.config.enable_heuristic_output_parallelism,
                 )
+                .small_file_threshold(self.config.small_file_threshold)
+                .max_task_total_size(self.config.max_task_total_size)
                 .build()
                 .unwrap_or_else(|e| {
                     panic!(
@@ -196,7 +212,7 @@ impl IcebergCompactorRunner {
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
             let compaction_plan = planner
-                .plan_compaction_with_branch(&table, CompactionType::Full, &branch)
+                .plan_compaction_with_branch(&table, compaction_type, &branch)
                 .await
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
@@ -239,6 +255,7 @@ impl IcebergCompactorRunner {
 
             tracing::info!(
                 task_id = task_id,
+                task_type = ?self.task_type,
                 table = ?self.table_ident,
                 input_parallelism = input_parallelism,
                 output_parallelism = output_parallelism,
@@ -421,11 +438,24 @@ impl IcebergCompactorRunner {
 
         IcebergCompactionTaskStatistics {
             total_data_file_size,
-            total_data_file_count: total_data_file_count as u32,
+            total_data_file_count,
             total_pos_del_file_size,
-            total_pos_del_file_count: total_pos_del_file_count as u32,
+            total_pos_del_file_count,
             total_eq_del_file_size,
-            total_eq_del_file_count: total_eq_del_file_count as u32,
+            total_eq_del_file_count,
+        }
+    }
+
+    fn get_compaction_type(task_type: TaskType) -> CompactionType {
+        match task_type {
+            TaskType::SmallDataFileCompaction => CompactionType::MergeSmallDataFiles,
+            TaskType::FullCompaction => CompactionType::Full,
+            _ => {
+                unreachable!(
+                    "Unexpected task type for Iceberg compaction: {:?}",
+                    task_type
+                )
+            }
         }
     }
 }

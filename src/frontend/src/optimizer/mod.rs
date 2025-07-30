@@ -58,6 +58,7 @@ use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ConflictBehavior, Fi
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::sink::catalog::SinkFormatDesc;
 use risingwave_pb::stream_plan::StreamScanType;
 
@@ -943,6 +944,12 @@ impl LogicalPlanRoot {
                 StreamFilter::filter_out_any_null_rows(stream_plan.clone(), &not_null_idxs);
         }
 
+        // Determine if the table should be refreshable based on the connector type
+        let refreshable = source_catalog
+            .as_ref()
+            .map(|catalog| catalog.with_properties.is_refreshable_connector())
+            .unwrap_or(false);
+
         StreamMaterialize::create_for_table(
             stream_plan,
             table_name,
@@ -960,6 +967,7 @@ impl LogicalPlanRoot {
             retention_seconds,
             webhook_info,
             engine,
+            refreshable,
         )
     }
 

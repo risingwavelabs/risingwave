@@ -15,15 +15,14 @@
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::expr::{ExprImpl, ExprVisitor};
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalProject, LogicalValues};
 use crate::optimizer::plan_visitor::ExprCorrelatedIdFinder;
 
 pub struct ValuesExtractProjectRule {}
-impl Rule for ValuesExtractProjectRule {
+impl Rule<Logical> for ValuesExtractProjectRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let old_values: &LogicalValues = plan.as_logical_values()?;
 
