@@ -93,7 +93,7 @@ pub struct Binder {
     db_name: String,
     database_id: DatabaseId,
     session_id: SessionId,
-    pub context: BindContext, // TODO: no pub
+    context: BindContext,
     auth_context: Arc<AuthContext>,
     /// A stack holding contexts of outer queries when binding a subquery.
     /// It also holds all of the lateral contexts for each respective
@@ -170,9 +170,9 @@ impl UdfContext {
         self.udf_global_counter
     }
 
-    pub fn is_binding_udf(&self) -> bool {
-        self.udf_global_counter > 0
-    }
+    // pub fn is_binding_udf(&self) -> bool {
+    //     self.udf_global_counter > 0
+    // }
 
     pub fn incr_global_count(&mut self) {
         self.udf_global_counter += 1;
@@ -446,6 +446,15 @@ impl Binder {
         }
     }
 
+    fn visible_upper_subquery_contexts_rev(
+        &self,
+    ) -> impl Iterator<Item = &(BindContext, Vec<LateralBindContext>)> + '_ {
+        self.upper_subquery_contexts
+            .iter()
+            .rev()
+            .take_while(|(context, _)| context.udf_arguments.is_none())
+    }
+
     fn next_subquery_id(&mut self) -> usize {
         let id = self.next_subquery_id;
         self.next_subquery_id += 1;
@@ -482,7 +491,7 @@ impl Binder {
 
     pub fn init_mock_udf_context(&mut self, udf_arguments: HashMap<String, ExprImpl>) {
         self.udf_context.incr_global_count();
-        self.context.udf_arguments = udf_arguments;
+        self.context.udf_arguments = Some(udf_arguments);
     }
 }
 

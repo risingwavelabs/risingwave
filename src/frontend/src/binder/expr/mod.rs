@@ -440,19 +440,25 @@ impl Binder {
         FunctionCall::new(ExprType::Overlay, args).map(|f| f.into())
     }
 
-    fn bind_udf_parameter(&mut self, name: &str) -> Result<ExprImpl> {
-        for (depth, context) in std::iter::once(&self.context)
-            .chain(
-                self.upper_subquery_contexts
-                    .iter()
-                    .map(|(context, _)| context)
-                    .rev(),
-            )
+    fn is_binding_sql_udf(&self) -> bool {
+        self.upper_subquery_contexts
+            .iter()
+            .any(|(context, _)| context.udf_arguments.is_some())
+    }
+
+    fn bind_sql_udf_parameter(&mut self, name: &str) -> Result<ExprImpl> {
+        for (i, context) in self
+            .upper_subquery_contexts
+            .iter()
+            .map(|(context, _)| context)
+            .rev()
             .enumerate()
         {
+            let depth = i + 1;
+
             // Find the first non-empty udf context.
-            if !context.udf_arguments.is_empty() {
-                if let Some(expr) = context.udf_arguments.get(name) {
+            if let Some(args) = &context.udf_arguments {
+                if let Some(expr) = args.get(name) {
                     let mut rewriter = InputRefDepthRewriter::new(depth);
                     return Ok(rewriter.rewrite_expr(expr.clone()));
                 } else {
@@ -473,9 +479,9 @@ impl Binder {
         // Note: This is specific to sql udf with unnamed parameters, since the
         // parameters will be parsed and treated as `Parameter`.
         // For detailed explanation, consider checking `bind_column`.
-        if self.udf_context.is_binding_udf() {
+        if self.is_binding_sql_udf() {
             let column_name = format!("${index}");
-            return self.bind_udf_parameter(&column_name);
+            return self.bind_sql_udf_parameter(&column_name);
         }
 
         Ok(Parameter::new(index, self.param_types.clone()).into())
