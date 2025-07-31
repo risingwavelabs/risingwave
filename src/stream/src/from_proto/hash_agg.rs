@@ -92,6 +92,9 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             build_distinct_dedup_table_from_proto(node.get_distinct_dedup_tables(), store, vnodes)
                 .await;
 
+        // 10 is used to be the default.
+        let extreme_cache_size = *node.get_extreme_cache_size().unwrap_or(&10) as usize;
+
         let exec = HashAggExecutorDispatcherArgs {
             args: AggExecutorArgs {
                 version: node.version(),
@@ -100,7 +103,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
                 actor_ctx: params.actor_context,
                 info: params.info.clone(),
 
-                extreme_cache_size: params.env.config().developer.unsafe_extreme_cache_size,
+                extreme_cache_size,
 
                 agg_calls,
                 row_count_index: node.get_row_count_index() as usize,
