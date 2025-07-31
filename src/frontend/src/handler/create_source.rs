@@ -840,7 +840,7 @@ pub async fn bind_create_source_or_table_with_connector(
 
     if is_create_source {
         // reject refreshable batch source
-        if with_properties.is_refreshable_connector() {
+        if with_properties.is_batch_connector() {
             return Err(ErrorCode::BindError(
             "can't CREATE SOURCE with refreshable batch connector\n\nHint: use CREATE TABLE instead"
                 .to_owned(),

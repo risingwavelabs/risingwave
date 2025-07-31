@@ -947,7 +947,7 @@ impl LogicalPlanRoot {
         // Determine if the table should be refreshable based on the connector type
         let refreshable = source_catalog
             .as_ref()
-            .map(|catalog| catalog.with_properties.is_refreshable_connector())
+            .map(|catalog| catalog.with_properties.is_batch_connector())
             .unwrap_or(false);
 
         // Validate that refreshable tables have a user-defined primary key (i.e., does not have rowid)

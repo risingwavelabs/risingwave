@@ -14,10 +14,14 @@
 
 use crate::source::{SplitImpl, SplitMetaData};
 
-/// # Batch Refreshable Source
+/// # Refreshable Batch Source/Table
 ///
-/// A batch refreshable source can be refreshed - reload all data from the source, e.g., re-run a `SELECT *` query from the source.
+/// A refreshable batch source can be refreshed - reload all data from the source, e.g., re-run a `SELECT *` query from the source.
 /// The reloaded data will be handled by `RefreshableMaterialize` to calculate a diff to send to downstream.
+///
+/// - *Batch* means the source loads all data at once, instead of continuously streaming data.
+/// - *Refreshable* part is handled by the materialize executor. When creating a table with a refreshable batch source, the table can be
+///   refreshed by running `REFRESH TABLE t` SQL command.
 ///
 /// See <https://github.com/risingwavelabs/risingwave/issues/22690> for the whole picture of the user journey.
 ///

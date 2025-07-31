@@ -64,9 +64,7 @@ where
         source_desc_builder: SourceDescBuilder,
         split_state_store: SourceStateTableHandler<S>,
     ) -> Self {
-        let is_batch_source = source_desc_builder
-            .with_properties()
-            .is_refreshable_connector();
+        let is_batch_source = source_desc_builder.with_properties().is_batch_connector();
         Self {
             source_id,
             source_name,

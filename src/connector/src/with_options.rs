@@ -202,7 +202,8 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
             .unwrap_or(false)
     }
 
-    fn is_refreshable_connector(&self) -> bool {
+    /// See [`crate::source::batch::BatchSourceSplit`] for more details.
+    fn is_batch_connector(&self) -> bool {
         false
         // TODO: enable this when implementation done
         // self.get(UPSTREAM_SOURCE_KEY)
@@ -211,7 +212,7 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
     }
 
     fn requires_singleton(&self) -> bool {
-        self.is_new_fs_connector() || self.is_iceberg_connector() || self.is_refreshable_connector()
+        self.is_new_fs_connector() || self.is_iceberg_connector() || self.is_batch_connector()
     }
 }
 
