@@ -14,9 +14,11 @@
 
 use std::collections::HashMap;
 
+pub use batch_posix_fs_source::{BatchPosixFsEnumerator, BatchPosixFsReader, BatchPosixFsSplit};
 pub use opendal_enumerator::OpendalEnumerator;
 
 pub mod azblob_source;
+pub mod batch_posix_fs_source;
 pub mod gcs_source;
 pub mod posix_fs_source;
 pub mod s3_source;
@@ -44,6 +46,7 @@ pub const GCS_CONNECTOR: &str = "gcs";
 /// If user inputs `connector='s3_v2'`, it will be rejected.
 pub const OPENDAL_S3_CONNECTOR: &str = "s3_v2";
 pub const POSIX_FS_CONNECTOR: &str = "posix_fs";
+pub const BATCH_POSIX_FS_CONNECTOR: &str = "__for_testing_only_batch_posix_fs";
 
 pub const DEFAULT_REFRESH_INTERVAL_SEC: u64 = 60;
 
@@ -278,4 +281,41 @@ impl OpendalSource for OpendalAzblob {
     fn new_enumerator(properties: Self::Properties) -> ConnectorResult<OpendalEnumerator<Self>> {
         OpendalEnumerator::new_azblob_source(properties)
     }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
+pub struct BatchPosixFsProperties {
+    /// The root directory of the files to search. The files will be searched recursively.
+    #[serde(rename = "batch_posix_fs.root")]
+    pub root: String,
+
+    /// The glob pattern to match files under root directory.
+    #[serde(rename = "match_pattern", default)]
+    pub match_pattern: Option<String>,
+
+    #[serde(flatten)]
+    pub fs_common: FsSourceCommon,
+
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
+}
+
+impl EnforceSecret for BatchPosixFsProperties {
+    fn enforce_secret<'a>(_prop_iter: impl Iterator<Item = &'a str>) -> Result<(), ConnectorError> {
+        Ok(())
+    }
+}
+
+impl UnknownFields for BatchPosixFsProperties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.unknown_fields.clone()
+    }
+}
+
+impl SourceProperties for BatchPosixFsProperties {
+    type Split = batch_posix_fs_source::BatchPosixFsSplit;
+    type SplitEnumerator = batch_posix_fs_source::BatchPosixFsEnumerator;
+    type SplitReader = batch_posix_fs_source::BatchPosixFsReader;
+
+    const SOURCE_NAME: &'static str = BATCH_POSIX_FS_CONNECTOR;
 }
