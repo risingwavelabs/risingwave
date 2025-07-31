@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::error::RwError;
+use crate::error::{ErrorCode, RwError};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, Literal, default_rewrite_expr};
 
 pub(crate) struct ConstEvalRewriter {
@@ -31,10 +31,12 @@ impl ExprRewriter for ConstEvalRewriter {
                     expr
                 }
             }
-        } else if let ExprImpl::Parameter(_) = expr {
-            unreachable!(
-                "Parameter should not appear here. It will be replaced by a literal before this step."
-            )
+        } else if let ExprImpl::Parameter(param) = &expr {
+            self.error = Some(
+                (ErrorCode::InvalidInputSyntax(format!("there is no parameter ${}", param.index)))
+                    .into(),
+            );
+            expr
         } else {
             default_rewrite_expr(self, expr)
         }
