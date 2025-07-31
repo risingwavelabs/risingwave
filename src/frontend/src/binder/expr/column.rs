@@ -73,6 +73,11 @@ impl Binder {
             }
         }
 
+        // Failed to resolve the column in current context. Now check if it's a sql udf parameter.
+        if self.udf_context.is_binding_udf() {
+            return self.bind_udf_parameter(&column_name);
+        }
+
         // Try to find a correlated column in `upper_contexts`, starting from the innermost context.
         let mut err = ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name));
 
@@ -162,12 +167,6 @@ impl Binder {
             && column_name == "ctid"
         {
             return Ok(Literal::new(Some("".into()), DataType::Varchar).into());
-        }
-
-        if let ErrorCode::ItemNotFound(_) = err
-            && self.udf_context.is_binding_udf()
-        {
-            return self.bind_udf_parameter(&column_name);
         }
 
         Err(err.into())
