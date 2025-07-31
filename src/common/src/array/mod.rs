@@ -64,7 +64,7 @@ pub use stream_chunk::{Op, StreamChunk, StreamChunkTestExt};
 pub use stream_chunk_builder::StreamChunkBuilder;
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
-pub use vector_array::{VectorArray, VectorArrayBuilder, VectorRef, VectorVal};
+pub use vector_array::{Finite32, VectorArray, VectorArrayBuilder, VectorRef, VectorVal};
 
 pub use self::error::ArrayError;
 pub use crate::array::num256_array::{

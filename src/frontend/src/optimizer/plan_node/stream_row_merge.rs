@@ -19,15 +19,14 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use crate::PlanRef;
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
-use crate::optimizer::plan_node::stream::StreamPlanRef;
+use crate::optimizer::plan_node::stream::StreamPlanNodeMetadata;
 use crate::optimizer::plan_node::utils::{Distill, childless_record};
 use crate::optimizer::plan_node::{
-    ExprRewritable, PlanBase, PlanTreeNodeBinary, Stream, StreamNode,
+    ExprRewritable, PlanBase, PlanTreeNodeBinary, Stream, StreamNode, StreamPlanRef as PlanRef,
 };
 use crate::optimizer::property::{FunctionalDependencySet, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -116,7 +115,7 @@ impl Distill for StreamRowMerge {
     }
 }
 
-impl PlanTreeNodeBinary for StreamRowMerge {
+impl PlanTreeNodeBinary<Stream> for StreamRowMerge {
     fn left(&self) -> PlanRef {
         self.lhs_input.clone()
     }
@@ -136,7 +135,7 @@ impl PlanTreeNodeBinary for StreamRowMerge {
     }
 }
 
-impl_plan_tree_node_for_binary! { StreamRowMerge }
+impl_plan_tree_node_for_binary! { Stream, StreamRowMerge }
 
 impl StreamNode for StreamRowMerge {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -147,7 +146,7 @@ impl StreamNode for StreamRowMerge {
     }
 }
 
-impl ExprRewritable for StreamRowMerge {
+impl ExprRewritable<Stream> for StreamRowMerge {
     fn has_rewritable_expr(&self) -> bool {
         false
     }

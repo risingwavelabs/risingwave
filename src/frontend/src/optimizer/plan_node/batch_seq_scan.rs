@@ -20,7 +20,7 @@ use risingwave_sqlparser::ast::AsOf;
 
 use super::batch::prelude::*;
 use super::utils::{Distill, childless_record, scan_ranges_as_strs, to_pb_time_travel_as_of};
-use super::{ExprRewritable, PlanBase, PlanRef, ToDistributedBatch, generic};
+use super::{BatchPlanRef as PlanRef, ExprRewritable, PlanBase, ToDistributedBatch, generic};
 use crate::catalog::ColumnId;
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
@@ -136,7 +136,7 @@ impl BatchSeqScan {
     }
 }
 
-impl_plan_tree_node_for_leaf! { BatchSeqScan }
+impl_plan_tree_node_for_leaf! { Batch, BatchSeqScan }
 
 impl Distill for BatchSeqScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -220,7 +220,7 @@ impl ToLocalBatch for BatchSeqScan {
     }
 }
 
-impl ExprRewritable for BatchSeqScan {
+impl ExprRewritable<Batch> for BatchSeqScan {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

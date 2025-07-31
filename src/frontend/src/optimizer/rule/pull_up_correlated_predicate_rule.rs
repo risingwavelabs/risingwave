@@ -15,10 +15,10 @@
 use itertools::{Either, Itertools};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
-use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::expr::{CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::*;
 use crate::optimizer::plan_visitor::{PlanCorrelatedIdFinder, PlanVisitor};
 use crate::utils::Condition;
 
@@ -27,7 +27,7 @@ use crate::utils::Condition;
 /// To unnest, we just pull predicates contain correlated variables in Filter into Apply, and
 /// convert it into corresponding type of Join.
 pub struct PullUpCorrelatedPredicateRule {}
-impl Rule for PullUpCorrelatedPredicateRule {
+impl Rule<Logical> for PullUpCorrelatedPredicateRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
         let (apply_left, apply_right, apply_on, join_type, correlated_id, _, max_one_row) =

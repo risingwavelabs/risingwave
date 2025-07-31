@@ -6,7 +6,7 @@
         {
             "description": "A dummy feature for testing purposes.",
             "type": "string",
-            "const": "TestPaid"
+            "const": "TestDummy"
         },
         {
             "description": "Query historical data within the retention period.",

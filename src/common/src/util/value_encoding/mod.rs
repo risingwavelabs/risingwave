@@ -366,7 +366,9 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         DataType::Vector(size) => {
             let inner = deserialize_list(&DataType::Float32, data)?.into_list();
             assert_eq!(inner.len(), *size);
-            VectorVal::from_inner(inner).into()
+            VectorVal::from_inner(inner)
+                .map_err(ValueEncodingError::InvalidListEncoding)?
+                .into()
         }
         DataType::List(item_type) => deserialize_list(item_type, data)?,
         DataType::Map(map_type) => {

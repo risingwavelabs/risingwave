@@ -489,11 +489,12 @@ pub(crate) mod tests {
     use crate::catalog::root_catalog::Catalog;
     use crate::catalog::table_catalog::TableType;
     use crate::expr::InputRef;
+    use crate::optimizer::OptimizerContext;
     use crate::optimizer::plan_node::{
-        BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalScan, ToBatch, generic,
+        BatchExchange, BatchFilter, BatchHashJoin, BatchPlanRef as PlanRef, EqJoinPredicate,
+        LogicalScan, ToBatch, generic,
     };
     use crate::optimizer::property::{Cardinality, Distribution, Order};
-    use crate::optimizer::{OptimizerContext, PlanRef};
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
     use crate::scheduler::{
@@ -552,6 +553,7 @@ pub(crate) mod tests {
             database_id: 0,
             associated_source_id: None,
             name: "test".to_owned(),
+            refreshable: false,
             columns: vec![
                 ColumnCatalog {
                     column_desc: ColumnDesc::named("a", 0.into(), DataType::Int32),
@@ -602,7 +604,7 @@ pub(crate) mod tests {
             engine: Engine::Hummock,
             clean_watermark_index_in_pk: None,
         };
-        let batch_plan_node: PlanRef = LogicalScan::create(
+        let batch_plan_node = LogicalScan::create(
             "".to_owned(),
             table_catalog.into(),
             vec![],

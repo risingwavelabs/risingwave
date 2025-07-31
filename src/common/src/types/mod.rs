@@ -398,6 +398,8 @@ pub mod data_types {
 }
 
 impl DataType {
+    pub const VEC_MAX_SIZE: usize = 16000;
+
     pub fn create_array_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         use crate::array::*;
 

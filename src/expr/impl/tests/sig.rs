@@ -75,6 +75,7 @@ fn test_func_sig_map() {
             "cast(smallint) -> rw_int256/rw_uint256/numeric/double precision/real/bigint/integer/character varying",
             "cast(time without time zone) -> interval/character varying",
             "cast(timestamp without time zone) -> time without time zone/date/character varying",
+            "cast(vector) -> character varying/real[]",
             "greatest() -> bytea/character varying/timestamp with time zone/timestamp without time zone/interval/time without time zone/date/rw_uint256/rw_int256/serial/real/double precision/numeric/smallint/integer/bigint/boolean",
             "least() -> bytea/character varying/timestamp with time zone/timestamp without time zone/interval/time without time zone/date/rw_uint256/rw_int256/serial/real/double precision/numeric/smallint/integer/bigint/boolean",
         ]

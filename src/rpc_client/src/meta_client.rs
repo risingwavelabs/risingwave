@@ -648,6 +648,21 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn alter_cdc_table_backfill_parallelism(
+        &self,
+        table_id: u32,
+        parallelism: PbTableParallelism,
+    ) -> Result<()> {
+        let request = AlterCdcTableBackfillParallelismRequest {
+            table_id,
+            parallelism: Some(parallelism),
+        };
+        self.inner
+            .alter_cdc_table_backfill_parallelism(request)
+            .await?;
+        Ok(())
+    }
+
     pub async fn alter_resource_group(
         &self,
         table_id: u32,
@@ -1728,6 +1743,10 @@ impl MetaClient {
         self.inner.set_sync_log_store_aligned(request).await?;
         Ok(())
     }
+
+    pub async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse> {
+        self.inner.refresh(request).await
+    }
 }
 
 #[async_trait]
@@ -2323,11 +2342,13 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, alter_connector_props, AlterConnectorPropsRequest, AlterConnectorPropsResponse }
             ,{ stream_client, get_fragment_by_id, GetFragmentByIdRequest, GetFragmentByIdResponse }
             ,{ stream_client, set_sync_log_store_aligned, SetSyncLogStoreAlignedRequest, SetSyncLogStoreAlignedResponse }
+            ,{ stream_client, refresh, RefreshRequest, RefreshResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
+            ,{ ddl_client, alter_cdc_table_backfill_parallelism, AlterCdcTableBackfillParallelismRequest, AlterCdcTableBackfillParallelismResponse }
             ,{ ddl_client, alter_resource_group, AlterResourceGroupRequest, AlterResourceGroupResponse }
             ,{ ddl_client, alter_database_param, AlterDatabaseParamRequest, AlterDatabaseParamResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }

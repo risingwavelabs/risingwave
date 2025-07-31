@@ -17,8 +17,7 @@ use risingwave_expr::window_function::WindowFuncKind;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
-use crate::PlanRef;
+use super::prelude::{PlanRef, *};
 use crate::expr::{AggCall, ExprImpl, FunctionCall, InputRef, OrderBy};
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalJoin, LogicalProject, LogicalShare, PlanTreeNodeUnary,
@@ -32,7 +31,7 @@ impl OverWindowToAggAndJoinRule {
     }
 }
 
-impl Rule for OverWindowToAggAndJoinRule {
+impl Rule<Logical> for OverWindowToAggAndJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let over_window = plan.as_logical_over_window()?;
         let window_functions = over_window.window_functions();
