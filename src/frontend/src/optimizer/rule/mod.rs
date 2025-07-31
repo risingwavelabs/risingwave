@@ -125,6 +125,8 @@ mod project_merge_rule;
 pub use project_merge_rule::*;
 mod pull_up_correlated_predicate_rule;
 pub use pull_up_correlated_predicate_rule::*;
+mod pull_up_correlated_project_value_rule;
+pub use pull_up_correlated_project_value_rule::*;
 mod index_delta_join_rule;
 pub use index_delta_join_rule::*;
 mod left_deep_tree_join_ordering_rule;
@@ -291,6 +293,7 @@ macro_rules! for_all_rules {
             , { ProjectJoinMergeRule }
             , { ProjectMergeRule }
             , { PullUpCorrelatedPredicateRule }
+            , { PullUpCorrelatedProjectValueRule }
             , { LeftDeepTreeJoinOrderingRule }
             , { TranslateApplyRule }
             , { PushCalculationOfJoinRule }
