@@ -17,7 +17,7 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::correlated_expr_rewriter::ProjectValueRewriter;
 use super::prelude::{PlanRef, *};
-use crate::expr::{ExprImpl, ExprRewriter, InputRef};
+use crate::expr::{ExprRewriter, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::*;
 use crate::optimizer::plan_visitor::{PlanCorrelatedIdFinder, PlanVisitor};
@@ -29,6 +29,10 @@ use crate::optimizer::plan_visitor::{PlanCorrelatedIdFinder, PlanVisitor};
 /// the left input expressions and the new right input expressions. This also handles cases
 /// where there are no correlated expressions (e.g., SELECT (SELECT 1)) by inlining the
 /// constant values directly.
+///
+/// This rule is restricted to Values nodes with empty schemas (no columns) to avoid the
+/// complexity of constant folding. This covers the common case of scalar subqueries that
+/// don't reference any tables in their FROM clause.
 pub struct PullUpCorrelatedProjectValueRule {}
 
 impl Rule<Logical> for PullUpCorrelatedProjectValueRule {
@@ -63,6 +67,12 @@ impl Rule<Logical> for PullUpCorrelatedProjectValueRule {
             return None;
         }
 
+        // Restrict to Values with empty schema (no columns) to avoid complex constant folding
+        // This handles cases like SELECT (SELECT 1) where the Values has no input columns
+        if !values.schema().fields().is_empty() {
+            return None;
+        }
+
         let mut rewriter = ProjectValueRewriter::new(correlated_id);
 
         // Split project expressions into correlated and uncorrelated expressions
@@ -94,21 +104,9 @@ impl Rule<Logical> for PullUpCorrelatedProjectValueRule {
         // Add the correlated expressions (these now reference the left input)
         new_proj_exprs.extend(cor_exprs);
 
-        // Handle uncorrelated expressions by evaluating them from the Values
-        if !uncor_exprs.is_empty() {
-            let values_row = &values.rows()[0];
-
-            for expr in uncor_exprs.iter() {
-                // For uncorrelated expressions, evaluate them against the Values row
-                if let Some(const_expr) = Self::try_evaluate_const_expr(expr, values_row) {
-                    new_proj_exprs.push(const_expr);
-                } else {
-                    // If we can't evaluate as constant, fall back to original expression
-                    // This shouldn't happen for simple scalar subqueries with Values
-                    new_proj_exprs.push(expr.clone());
-                }
-            }
-        }
+        // Handle uncorrelated expressions - since Values has empty schema,
+        // these expressions are pure constants that can be added directly
+        new_proj_exprs.extend(uncor_exprs);
 
         // Create the new project node that replaces the Apply
         Some(LogicalProject::new(apply_left, new_proj_exprs).into())
@@ -118,25 +116,5 @@ impl Rule<Logical> for PullUpCorrelatedProjectValueRule {
 impl PullUpCorrelatedProjectValueRule {
     pub fn create() -> BoxedRule {
         Box::new(PullUpCorrelatedProjectValueRule {})
-    }
-
-    /// Try to evaluate a constant expression from a Values row
-    fn try_evaluate_const_expr(expr: &ExprImpl, values_row: &[ExprImpl]) -> Option<ExprImpl> {
-        match expr {
-            // If the expression is an InputRef to the Values,
-            // we can directly return the corresponding expression from the Values row
-            ExprImpl::InputRef(input_ref) => {
-                if input_ref.index() < values_row.len() {
-                    Some(values_row[input_ref.index()].clone())
-                } else {
-                    None
-                }
-            }
-            // If the expression is already a literal, return it as-is
-            ExprImpl::Literal(_) => Some(expr.clone()),
-            // For other expressions, we could implement more sophisticated constant folding
-            // For now, return the expression as-is for simple cases
-            _ => Some(expr.clone()),
-        }
     }
 }
