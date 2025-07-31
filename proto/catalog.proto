@@ -392,6 +392,7 @@ message Table {
   uint32 database_id = 3;
   string name = 4;
   repeated plan_common.ColumnCatalog columns = 5;
+  // Storage-level PK. Beyond `stream_key`, it also includes order by columns.
   repeated common.ColumnOrder pk = 6;
   reserved 8;
   reserved "dependent_relations";
