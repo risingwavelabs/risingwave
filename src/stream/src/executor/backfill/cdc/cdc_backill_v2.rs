@@ -239,7 +239,9 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                     yield Message::Chunk(filtered_chunk);
                                 }
                             }
-                            msg @ Message::Watermark(_) => yield msg,
+                            Message::Watermark(_) => {
+                                // Ignore watermark, like the `CdcBackfillExecutor`.
+                            }
                         }
                     }
                 } else {
@@ -373,8 +375,8 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                         upstream_chunk_buffer.push(filtered_chunk.compact());
                                     }
                                 }
-                                msg @ Message::Watermark(_) => {
-                                    yield msg;
+                                Message::Watermark(_) => {
+                                    // Ignore watermark during backfill, like the `CdcBackfillExecutor`.
                                 }
                             }
                         }
