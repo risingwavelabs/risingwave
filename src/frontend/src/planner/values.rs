@@ -14,7 +14,7 @@
 
 use crate::binder::BoundValues;
 use crate::error::Result;
-use crate::optimizer::plan_node::{LogicalValues, PlanRef};
+use crate::optimizer::plan_node::{LogicalPlanRef as PlanRef, LogicalValues};
 use crate::planner::Planner;
 
 impl Planner {

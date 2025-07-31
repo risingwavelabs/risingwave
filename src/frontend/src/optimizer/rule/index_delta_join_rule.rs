@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::StreamScanType;
 
-use crate::optimizer::plan_node::{PlanRef, Stream, *};
+use crate::optimizer::plan_node::{Stream, StreamPlanRef as PlanRef, *};
 use crate::optimizer::rule::{BoxedRule, Rule};
 
 /// Use index scan and delta joins for supported queries.

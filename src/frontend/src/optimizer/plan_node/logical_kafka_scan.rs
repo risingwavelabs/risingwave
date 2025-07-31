@@ -24,8 +24,8 @@ use risingwave_common::types::DataType;
 use super::generic::GenericPlanRef;
 use super::utils::{Distill, childless_record};
 use super::{
-    ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalProject, PlanBase, PlanRef,
-    PredicatePushdown, ToBatch, ToStream, generic,
+    ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalPlanRef as PlanRef, LogicalProject,
+    PlanBase, PredicatePushdown, ToBatch, ToStream, generic,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::Result;
@@ -82,7 +82,7 @@ impl LogicalKafkaScan {
     }
 }
 
-impl_plan_tree_node_for_leaf! {LogicalKafkaScan}
+impl_plan_tree_node_for_leaf! { Logical, LogicalKafkaScan}
 impl Distill for LogicalKafkaScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let fields = if let Some(catalog) = self.source_catalog() {
@@ -107,7 +107,7 @@ impl ColPrunable for LogicalKafkaScan {
     }
 }
 
-impl ExprRewritable for LogicalKafkaScan {}
+impl ExprRewritable<Logical> for LogicalKafkaScan {}
 
 impl ExprVisitable for LogicalKafkaScan {}
 
@@ -294,15 +294,17 @@ impl PredicatePushdown for LogicalKafkaScan {
 }
 
 impl ToBatch for LogicalKafkaScan {
-    fn to_batch(&self) -> Result<PlanRef> {
-        let plan: PlanRef =
-            BatchKafkaScan::new(self.core.clone(), self.kafka_timestamp_range).into();
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
+        let plan = BatchKafkaScan::new(self.core.clone(), self.kafka_timestamp_range).into();
         Ok(plan)
     }
 }
 
 impl ToStream for LogicalKafkaScan {
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(
+        &self,
+        _ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         unreachable!()
     }
 
