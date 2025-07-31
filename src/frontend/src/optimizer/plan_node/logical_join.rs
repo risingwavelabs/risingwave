@@ -449,11 +449,12 @@ impl LogicalJoin {
 
         let new_scan_output_column_ids = new_scan.output_column_ids();
         let as_of = new_scan.as_of.clone();
+        let new_logical_scan: LogicalScan = new_scan.into();
 
         // Construct a new logical join, because we have change its RHS.
         let new_logical_join = generic::Join::new(
             logical_join.left,
-            new_scan.into(),
+            new_logical_scan.to_batch()?,
             new_join_on,
             logical_join.join_type,
             new_join_output_indices,

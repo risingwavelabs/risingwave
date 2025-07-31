@@ -21,7 +21,7 @@ use risingwave_sqlparser::ast::AsOf;
 
 use super::batch::prelude::*;
 use super::utils::{Distill, childless_record, to_pb_time_travel_as_of};
-use super::{BatchPlanRef as PlanRef, ExprRewritable, LogicalScan, generic};
+use super::{BatchPlanRef as PlanRef, BatchSeqScan, ExprRewritable, generic};
 use crate::error::Result;
 use crate::expr::{Expr, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -37,7 +37,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchLookupJoin {
     pub base: PlanBase<Batch>,
-    core: generic::Join<PlanRef, LogicalScan>,
+    core: generic::Join<PlanRef>,
 
     /// The join condition must be equivalent to `logical.on`, but separated into equal and
     /// non-equal parts to facilitate execution later
@@ -63,7 +63,7 @@ pub struct BatchLookupJoin {
 
 impl BatchLookupJoin {
     pub fn new(
-        core: generic::Join<PlanRef, LogicalScan>,
+        core: generic::Join<PlanRef>,
         eq_join_predicate: EqJoinPredicate,
         right_table_desc: TableDesc,
         right_output_column_ids: Vec<ColumnId>,
@@ -91,10 +91,7 @@ impl BatchLookupJoin {
         }
     }
 
-    fn derive_dist(
-        left: &Distribution,
-        core: &generic::Join<PlanRef, impl GenericPlanRef>,
-    ) -> Distribution {
+    fn derive_dist(left: &Distribution, core: &generic::Join<PlanRef>) -> Distribution {
         match left {
             Distribution::Single => Distribution::Single,
             Distribution::HashShard(_) | Distribution::UpstreamHashShard(_, _) => {
@@ -144,10 +141,9 @@ impl Distill for BatchLookupJoin {
             vec.push(("output", data));
         }
 
-        vec.push((
-            "lookup table",
-            Pretty::display(&self.core.right.table_name()),
-        ));
+        let scan: &BatchSeqScan = self.core.right.as_batch_seq_scan().unwrap();
+
+        vec.push(("lookup table", Pretty::display(&scan.core().table_name)));
 
         childless_record("BatchLookupJoin", vec)
     }
