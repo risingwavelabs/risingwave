@@ -436,6 +436,9 @@ impl Binder {
                 ("map_length", raw_call(ExprType::MapLength)),
                 // vector
                 ("l2_distance", raw_call(ExprType::L2Distance)),
+                ("cosine_distance", raw_call(ExprType::CosineDistance)),
+                ("l1_distance", raw_call(ExprType::L1Distance)),
+                ("inner_product", raw_call(ExprType::InnerProduct)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least
@@ -721,7 +724,8 @@ impl Binder {
                 // internal
                 ("rw_vnode", raw_call(ExprType::VnodeUser)),
                 ("rw_license", raw_call(ExprType::License)),
-                ("rw_test_paid_tier", raw_call(ExprType::TestPaidTier)), // for testing purposes
+                ("rw_test_paid_tier", raw_call(ExprType::TestFeature)), // deprecated, kept for compatibility
+                ("rw_test_feature", raw_call(ExprType::TestFeature)), // for testing purposes
                 // TODO: choose which pg version we should return.
                 ("version", raw_literal(ExprImpl::literal_varchar(current_cluster_version()))),
                 // non-deterministic

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -36,7 +36,7 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::{Expr, ExprImpl, InputRef, Literal};
+use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::create_sink::{fetch_incoming_sinks, insert_merger_to_union_with_project};
 use crate::session::SessionImpl;
 use crate::{Binder, TableCatalog};
@@ -151,26 +151,31 @@ pub(crate) fn hijack_merger_for_target_table(
         sink_columns = target_columns.to_vec();
     }
 
-    let mut i = 0;
-    let mut j = 0;
-    let mut exprs = Vec::new();
-
-    while j < target_columns.len() {
-        if i < sink_columns.len() && sink_columns[i].data_type() == target_columns[j].data_type() {
+    let mut exprs = Vec::with_capacity(target_columns.len());
+    let sink_idx_by_col_id = sink_columns
+        .iter()
+        .enumerate()
+        .map(|(idx, col)| (col.column_id(), idx))
+        .collect::<HashMap<_, _>>();
+    let default_column_exprs = TableCatalog::default_column_exprs(target_columns);
+    for (target_idx, target_col) in target_columns.iter().enumerate() {
+        if let Some(idx) = sink_idx_by_col_id.get(&target_col.column_id()) {
+            assert_eq!(
+                target_col.data_type(),
+                sink_columns[*idx].data_type(),
+                "data type mismatch for column {}: {} vs {}",
+                target_col.name(),
+                target_col.data_type(),
+                sink_columns[*idx].data_type()
+            );
+            // If the sink has the corresponding column id, use the sink's data.
             exprs.push(ExprImpl::InputRef(Box::new(InputRef {
-                data_type: sink_columns[i].data_type().clone(),
-                index: i,
+                data_type: target_col.data_type().clone(),
+                index: *idx,
             })));
-
-            i += 1;
-            j += 1;
         } else {
-            exprs.push(ExprImpl::Literal(Box::new(Literal::new(
-                None,
-                target_columns[j].data_type().clone(),
-            ))));
-
-            j += 1;
+            // If the sink does not have the corresponding column, use a default value.
+            exprs.push(default_column_exprs[target_idx].clone());
         }
     }
 

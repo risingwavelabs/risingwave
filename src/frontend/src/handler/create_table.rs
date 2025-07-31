@@ -88,7 +88,11 @@ use crate::{Binder, Explain, TableCatalog, WithOptions};
 
 mod col_id_gen;
 pub use col_id_gen::*;
-use risingwave_connector::sink::iceberg::parse_partition_by_exprs;
+use risingwave_connector::sink::iceberg::{
+    COMPACTION_INTERVAL_SEC, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
+    ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ, WRITE_MODE,
+    parse_partition_by_exprs,
+};
 
 use crate::handler::drop_table::handle_drop_table;
 
@@ -1692,8 +1696,12 @@ pub async fn create_iceberg_engine_table(
 
     let mut sink_with = with_common.clone();
 
-    sink_with.insert("primary_key".to_owned(), pks.join(","));
-    sink_with.insert("type".to_owned(), "upsert".to_owned());
+    if table.append_only {
+        sink_with.insert("type".to_owned(), "append-only".to_owned());
+    } else {
+        sink_with.insert("primary_key".to_owned(), pks.join(","));
+        sink_with.insert("type".to_owned(), "upsert".to_owned());
+    }
     // sink_with.insert(SINK_SNAPSHOT_OPTION.to_owned(), "false".to_owned());
     //
     // Note: in theory, we don't need to backfill from the table to the sink,
@@ -1747,10 +1755,6 @@ pub async fn create_iceberg_engine_table(
     sink_with.insert("create_table_if_not_exists".to_owned(), "true".to_owned());
 
     sink_with.insert("is_exactly_once".to_owned(), "true".to_owned());
-
-    const ENABLE_COMPACTION: &str = "enable_compaction";
-    const COMPACTION_INTERVAL_SEC: &str = "compaction_interval_sec";
-    const ENABLE_SNAPSHOT_EXPIRATION: &str = "enable_snapshot_expiration";
 
     if let Some(enable_compaction) = handler_args.with_options.get(ENABLE_COMPACTION) {
         match enable_compaction.to_lowercase().as_str() {
@@ -1840,6 +1844,54 @@ pub async fn create_iceberg_engine_table(
                 .check_available()
                 .is_ok()
                 .to_string(),
+        );
+    }
+
+    if let Some(write_mode) = handler_args.with_options.get(WRITE_MODE) {
+        match write_mode.to_lowercase().as_str() {
+            ICEBERG_WRITE_MODE_MERGE_ON_READ => {
+                sink_with.insert(
+                    WRITE_MODE.to_owned(),
+                    ICEBERG_WRITE_MODE_MERGE_ON_READ.to_owned(),
+                );
+            }
+
+            ICEBERG_WRITE_MODE_COPY_ON_WRITE => {
+                risingwave_common::license::Feature::IcebergCompaction
+                    .check_available()
+                    .map_err(|e| anyhow::anyhow!(e))?;
+
+                if table.append_only {
+                    return Err(ErrorCode::NotSupported(
+                        "COPY ON WRITE is not supported for append-only iceberg table".to_owned(),
+                        "Please use MERGE ON READ instead".to_owned(),
+                    )
+                    .into());
+                }
+
+                sink_with.insert(
+                    WRITE_MODE.to_owned(),
+                    ICEBERG_WRITE_MODE_COPY_ON_WRITE.to_owned(),
+                );
+            }
+
+            _ => {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "write_mode must be one of: {}, {}",
+                    ICEBERG_WRITE_MODE_MERGE_ON_READ, ICEBERG_WRITE_MODE_COPY_ON_WRITE
+                ))
+                .into());
+            }
+        }
+
+        // remove write_mode from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove("write_mode"));
+    } else {
+        sink_with.insert(
+            WRITE_MODE.to_owned(),
+            ICEBERG_WRITE_MODE_MERGE_ON_READ.to_owned(),
         );
     }
 

@@ -1979,7 +1979,7 @@ dependencies = [
  "bitflags 2.9.0",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "log",
@@ -2002,7 +2002,7 @@ dependencies = [
  "bitflags 2.9.0",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "regex",
@@ -4532,9 +4532,9 @@ dependencies = [
 
 [[package]]
 name = "deltalake"
-version = "0.26.1"
+version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f5811a4ec058831963bc8e13f85b732547e18b54ea8ebbda46bfd372be964ac"
+checksum = "c5c9558d4d4f64d006196dd05e01bef3ac25e4250164f04e89f6461b8d8130f8"
 dependencies = [
  "deltalake-aws",
  "deltalake-core",
@@ -6826,7 +6826,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.61.0",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -6841,7 +6841,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=a788a196287f4047f08b48b6e5588fb559a11f3c#a788a196287f4047f08b48b6e5588fb559a11f3c"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=f4d3827e906b5e1e885d396c02591480dcfc92d5#f4d3827e906b5e1e885d396c02591480dcfc92d5"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0",
@@ -6893,7 +6893,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=a788a196287f4047f08b48b6e5588fb559a11f3c#a788a196287f4047f08b48b6e5588fb559a11f3c"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=f4d3827e906b5e1e885d396c02591480dcfc92d5#f4d3827e906b5e1e885d396c02591480dcfc92d5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6910,7 +6910,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-memory"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=a788a196287f4047f08b48b6e5588fb559a11f3c#a788a196287f4047f08b48b6e5588fb559a11f3c"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=f4d3827e906b5e1e885d396c02591480dcfc92d5#f4d3827e906b5e1e885d396c02591480dcfc92d5"
 dependencies = [
  "async-trait",
  "futures",
@@ -6923,7 +6923,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=a788a196287f4047f08b48b6e5588fb559a11f3c#a788a196287f4047f08b48b6e5588fb559a11f3c"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=f4d3827e906b5e1e885d396c02591480dcfc92d5#f4d3827e906b5e1e885d396c02591480dcfc92d5"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6943,7 +6943,7 @@ dependencies = [
 [[package]]
 name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=2172a6de9388a1b41d823e6a7b49c1f0891cbb56#2172a6de9388a1b41d823e6a7b49c1f0891cbb56"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=1f6a0dfa58fce8bd704fc4eda8c395c089d67524#1f6a0dfa58fce8bd704fc4eda8c395c089d67524"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6974,7 +6974,7 @@ dependencies = [
 [[package]]
 name = "iceberg-datafusion"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=a788a196287f4047f08b48b6e5588fb559a11f3c#a788a196287f4047f08b48b6e5588fb559a11f3c"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=f4d3827e906b5e1e885d396c02591480dcfc92d5#f4d3827e906b5e1e885d396c02591480dcfc92d5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -10293,7 +10293,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0f3e5beed80eb580c68e2c600937ac2c4eedabdfd5ef1e5b7ea4f3fba84497b"
 dependencies = [
  "heck 0.5.0",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "log",
  "multimap 0.10.0",
  "once_cell",
@@ -10326,7 +10326,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "157c5a9d7ea5c2ed2d9fb8f495b64759f7816c7eaea54ba3978f0d63000162e3"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.101",
@@ -15080,9 +15080,9 @@ dependencies = [
 
 [[package]]
 name = "sysinfo"
-version = "0.35.0"
+version = "0.35.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b897c8ea620e181c7955369a31be5f48d9a9121cb59fd33ecef9ff2a34323422"
+checksum = "3c3ffa3e4ff2b324a57f7aeb3c349656c7b127c3c189520251a648102a92496e"
 dependencies = [
  "libc",
  "memchr",
@@ -15359,7 +15359,7 @@ dependencies = [
 [[package]]
 name = "tikv-jemalloc-ctl"
 version = "0.5.4"
-source = "git+https://github.com/risingwavelabs/jemallocator.git?rev=64a2d9#64a2d988d687a94cd859855e19241cd8b0705466"
+source = "git+https://github.com/risingwavelabs/jemallocator.git?rev=64a2d988d687a94cd859855e19241cd8b0705466#64a2d988d687a94cd859855e19241cd8b0705466"
 dependencies = [
  "libc",
  "paste",
@@ -15369,7 +15369,7 @@ dependencies = [
 [[package]]
 name = "tikv-jemalloc-sys"
 version = "0.5.4+5.3.0-patched"
-source = "git+https://github.com/risingwavelabs/jemallocator.git?rev=64a2d9#64a2d988d687a94cd859855e19241cd8b0705466"
+source = "git+https://github.com/risingwavelabs/jemallocator.git?rev=64a2d988d687a94cd859855e19241cd8b0705466#64a2d988d687a94cd859855e19241cd8b0705466"
 dependencies = [
  "cc",
  "libc",
@@ -15378,7 +15378,7 @@ dependencies = [
 [[package]]
 name = "tikv-jemallocator"
 version = "0.5.4"
-source = "git+https://github.com/risingwavelabs/jemallocator.git?rev=64a2d9#64a2d988d687a94cd859855e19241cd8b0705466"
+source = "git+https://github.com/risingwavelabs/jemallocator.git?rev=64a2d988d687a94cd859855e19241cd8b0705466#64a2d988d687a94cd859855e19241cd8b0705466"
 dependencies = [
  "libc",
  "tikv-jemalloc-sys",

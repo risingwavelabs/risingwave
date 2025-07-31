@@ -17,9 +17,8 @@ use std::collections::HashMap;
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef};
 use crate::optimizer::plan_node::{
     LogicalApply, LogicalJoin, LogicalProject, LogicalScan, LogicalShare, PlanTreeNodeBinary,
@@ -51,7 +50,7 @@ pub struct TranslateApplyRule {
     enable_share_plan: bool,
 }
 
-impl Rule for TranslateApplyRule {
+impl Rule<Logical> for TranslateApplyRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
         if apply.translated() {

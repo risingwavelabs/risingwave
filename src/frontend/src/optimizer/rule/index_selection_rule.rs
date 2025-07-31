@@ -60,13 +60,12 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_sqlparser::ast::AsOf;
 
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::catalog::IndexCatalog;
 use crate::expr::{
     Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, to_conjunctions,
     to_disjunctions,
 };
-use crate::optimizer::PlanRef;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
@@ -89,7 +88,7 @@ const MAX_CONJUNCTION_SIZE: usize = 8;
 
 pub struct IndexSelectionRule {}
 
-impl Rule for IndexSelectionRule {
+impl Rule<Logical> for IndexSelectionRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let logical_scan: &LogicalScan = plan.as_logical_scan()?;
         let indexes = logical_scan.indexes();

@@ -12,16 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::PlanRef;
+use super::prelude::*;
 use crate::optimizer::plan_node::{
     LogicalJoin, PlanTreeNodeBinary, StreamExchange, StreamHashJoin,
 };
-use crate::optimizer::rule::{BoxedRule, Rule};
 
 /// Separate consecutive stream hash joins by no-shuffle exchange
 pub struct SeparateConsecutiveJoinRule {}
 
-impl Rule for SeparateConsecutiveJoinRule {
+impl Rule<Stream> for SeparateConsecutiveJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let join = plan.as_stream_hash_join()?;
         let left_input = join.left();

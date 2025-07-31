@@ -16,7 +16,7 @@ use std::collections::HashSet;
 
 use risingwave_common::catalog::TableId;
 
-use super::{DefaultBehavior, DefaultValue};
+use super::{BatchPlanVisitor, DefaultBehavior, DefaultValue};
 use crate::optimizer::BatchPlanRoot;
 use crate::optimizer::plan_node::{BatchLogSeqScan, BatchLookupJoin};
 use crate::optimizer::plan_visitor::PlanVisitor;
@@ -34,7 +34,7 @@ impl ReadStorageTableVisitor {
     }
 }
 
-impl PlanVisitor for ReadStorageTableVisitor {
+impl BatchPlanVisitor for ReadStorageTableVisitor {
     type Result = ();
 
     type DefaultBehavior = impl DefaultBehavior<Self::Result>;
