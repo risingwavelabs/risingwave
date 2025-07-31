@@ -17,6 +17,7 @@ package com.risingwave.connector.source.common;
 import com.mongodb.ConnectionString;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingStore;
+import com.risingwave.connector.cdc.debezium.internal.OpendalSchemaHistory;
 import java.io.IOException;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
@@ -149,8 +150,7 @@ public class DbzConnectorConfig {
             if (isCdcBackfill) {
                 // disable snapshot locking at all
                 mysqlProps.setProperty("snapshot.locking.mode", "none");
-                mysqlProps.setProperty(
-                        "schema.history.internal.source.id", String.valueOf(sourceId));
+                mysqlProps.setProperty(OpendalSchemaHistory.SOURCE_ID, String.valueOf(sourceId));
                 // If cdc backfill enabled, the source only emit incremental changes, so we must
                 // rewind to the given offset and continue binlog reading from there
                 if (null != startOffset && !startOffset.isBlank()) {

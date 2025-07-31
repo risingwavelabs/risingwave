@@ -76,12 +76,12 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
                             + getClass().getSimpleName()
                             + "; check the logs for details");
         }
-        sourceId = config.getString("schema.history.internal.source.id");
+        sourceId = config.getString(SOURCE_ID);
         if (sourceId == null || sourceId.isEmpty()) {
-            sourceId = "default_source";
-            config = config.edit().with("source_id", sourceId).build();
+            throw new DebeziumException(
+                    "Source ID is required for schema history. Please provide a unique source ID to avoid path conflicts between multiple sources.");
         }
-        objectDir = String.format("mysql-cdc-schema-history-source-%s", sourceId);
+        objectDir = String.format("rw-cdc-schema-history-source-%s", sourceId);
         objectName = String.format("%s/schema_history.dat", objectDir);
         String maxRecordsStr = config.getString(MAX_RECORDS_PER_FILE_CONFIG);
         if (maxRecordsStr != null) {
