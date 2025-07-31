@@ -450,20 +450,22 @@ impl Binder {
             )
             .enumerate()
         {
+            // Find the first non-empty udf context.
             if !context.udf_arguments.is_empty() {
                 if let Some(expr) = context.udf_arguments.get(name) {
                     let mut rewriter = InputRefDepthRewriter::new(depth);
                     return Ok(rewriter.rewrite_expr(expr.clone()));
                 } else {
+                    // Will not continue to the upper context.
                     break;
                 }
             }
         }
 
-        return Err(ErrorCode::BindError(format!(
+        Err(ErrorCode::BindError(format!(
             "{SQL_UDF_PATTERN} failed to find parameter ${name}"
         ))
-        .into());
+        .into())
     }
 
     fn bind_parameter(&mut self, index: u64) -> Result<ExprImpl> {
