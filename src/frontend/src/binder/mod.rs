@@ -21,7 +21,7 @@ use risingwave_common::catalog::FunctionId;
 use risingwave_common::session_config::{SearchPath, SessionConfig};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_sqlparser::ast::{Expr as AstExpr, Statement};
+use risingwave_sqlparser::ast::Statement;
 
 use crate::error::Result;
 use crate::expr::ExprImpl;
@@ -131,10 +131,6 @@ pub struct Binder {
 
     param_types: ParameterTypes,
 
-    /// The sql udf context that will be used during binding phase
-    // TODO: may simplify this as the only field is `udf_global_counter`.
-    udf_context: UdfContext,
-
     /// The temporary sources that will be used during binding phase
     temporary_source_manager: TemporarySourceManager,
 
@@ -150,62 +146,6 @@ pub struct SecureCompareContext {
     pub column_name: String,
     /// The secret (usually a token provided by the webhook source user) to validate the calls
     pub secret_name: Option<String>,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct UdfContext {
-    /// The global counter that records the calling stack depth
-    /// of the current binding sql udf chain
-    udf_global_counter: u32,
-}
-
-impl UdfContext {
-    pub fn new() -> Self {
-        Self {
-            udf_global_counter: 0,
-        }
-    }
-
-    pub fn global_count(&self) -> u32 {
-        self.udf_global_counter
-    }
-
-    // pub fn is_binding_udf(&self) -> bool {
-    //     self.udf_global_counter > 0
-    // }
-
-    pub fn incr_global_count(&mut self) {
-        self.udf_global_counter += 1;
-    }
-
-    pub fn decr_global_count(&mut self) {
-        self.udf_global_counter -= 1;
-    }
-
-    pub fn _clear(&mut self) {
-        self.udf_global_counter = 0;
-    }
-
-    /// A common utility function to extract sql udf expression out from the input `ast` as
-    /// a subquery.
-    pub fn extract_udf_expression(ast: Vec<Statement>) -> Result<AstExpr> {
-        if ast.len() != 1 {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "the query for sql udf should contain only one statement".to_owned(),
-            )
-            .into());
-        }
-
-        // Extract the expression out
-        let Statement::Query(query) = ast.into_iter().next().unwrap() else {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "invalid function definition, please recheck the syntax".to_owned(),
-            )
-            .into());
-        };
-
-        Ok(AstExpr::Subquery(query))
-    }
 }
 
 /// `ParameterTypes` is used to record the types of the parameters during binding prepared stataments.
@@ -314,7 +254,6 @@ impl Binder {
             included_relations: HashSet::new(),
             included_udfs: HashSet::new(),
             param_types: ParameterTypes::new(param_types),
-            udf_context: UdfContext::new(),
             temporary_source_manager: session.temporary_source_manager(),
             secure_compare_context: None,
         }
@@ -489,8 +428,7 @@ impl Binder {
         self.context.clause = clause;
     }
 
-    pub fn init_mock_udf_context(&mut self, udf_arguments: HashMap<String, ExprImpl>) {
-        self.udf_context.incr_global_count();
+    pub fn set_mock_udf_arguments(&mut self, udf_arguments: HashMap<String, ExprImpl>) {
         self.context.udf_arguments = Some(udf_arguments);
     }
 }

@@ -23,7 +23,6 @@ use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_sqlparser::parser::{Parser, ParserError};
 
 use super::*;
-use crate::binder::UdfContext;
 use crate::expr::{Expr, ExprImpl, Literal};
 use crate::{Binder, bind_data_type};
 
@@ -243,12 +242,12 @@ pub async fn handle_create_sql_function(
         let ast = parse_result.unwrap();
         let mut binder = Binder::new_for_system(session);
 
-        binder.init_mock_udf_context(create_mock_udf_context(
+        binder.set_mock_udf_arguments(create_mock_udf_context(
             arg_types.clone(),
             arg_names.clone(),
         ));
 
-        if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
+        if let Ok(expr) = Binder::extract_udf_expr_as_subquery(ast) {
             match binder.bind_expr(&expr) {
                 Ok(expr) => {
                     // Check if the return type mismatches
