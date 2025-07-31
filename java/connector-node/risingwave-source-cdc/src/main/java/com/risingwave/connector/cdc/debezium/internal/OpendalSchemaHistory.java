@@ -26,6 +26,7 @@ import static com.risingwave.java.binding.Binding.putObject;
 
 import io.debezium.DebeziumException;
 import io.debezium.config.Configuration;
+import io.debezium.config.Field;
 import io.debezium.relational.history.AbstractFileBasedSchemaHistory;
 import io.debezium.relational.history.HistoryRecord;
 import io.debezium.relational.history.HistoryRecordComparator;
@@ -58,10 +59,24 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     public static final String MAX_RECORDS_PER_FILE_CONFIG =
             "schema.history.internal.max.records.per.file";
     private int maxRecordsPerFile = 2048; // default records nums per file
-    private List<HistoryRecord> buffer = new ArrayList<>();
     private String objectDir = "";
     private static final Pattern HISTORY_FILE_PATTERN =
             Pattern.compile("schema_history_(\\d+)\\.dat");
+
+    // Override ALL_FIELDS to include our custom configuration fields
+    // This ensures that our custom fields are properly validated by Debezium
+    public static final Field.Set ALL_FIELDS =
+            Field.setOf(
+                    Field.create(SOURCE_ID, "Unique source ID for schema history storage")
+                            .withDescription(
+                                    "A unique identifier for this source to avoid path conflicts between multiple sources")
+                            .required(),
+                    Field.create(
+                                    MAX_RECORDS_PER_FILE_CONFIG,
+                                    "Maximum number of records per schema history file")
+                            .withDescription(
+                                    "Maximum number of schema history records to store in a single file before creating a new file")
+                            .withDefault(2048));
 
     @Override
     public void configure(
@@ -204,18 +219,6 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     @Override
     public String toString() {
         return getObjectStoreType();
-    }
-
-    private void flushBufferToNewFile() {
-        if (buffer.isEmpty()) {
-            return;
-        }
-        String fileName =
-                String.format("%s/schema_history_%d.dat", objectDir, System.currentTimeMillis());
-        byte[] data = fromHistoryRecords(buffer);
-        putObject(fileName, data);
-        buffer.clear();
-        LOGGER.info("Flushed schema history to {}", fileName);
     }
 
     // Serialize multiple records

@@ -29,7 +29,15 @@ static OBJECT_STORE_INSTANCE: OnceLock<Arc<ObjectStoreImpl>> = OnceLock::new();
 // schema history is internal state, all data is stored under the DATA_DIRECTORY directory.
 fn prepend_data_directory(path: &str) -> String {
     let data_dir = DATA_DIRECTORY.get().map(|s| s.as_str()).unwrap_or("");
-    if data_dir.is_empty() || path.starts_with(data_dir) {
+    if data_dir.is_empty() {
+        // In cloud environments, using empty data directory can cause data conflicts
+        // between different instances sharing the same bucket. We should ensure
+        // data_directory is properly set to avoid data overwrites.
+        panic!(
+            "DATA_DIRECTORY is not set. This is dangerous in cloud environments as it can cause data conflicts between multiple instances sharing the same bucket. Please ensure data_directory is properly configured."
+        );
+    }
+    if path.starts_with(data_dir) {
         path.to_owned()
     } else if data_dir.ends_with('/') || path.starts_with('/') {
         format!("{}{}", data_dir, path)
@@ -44,9 +52,9 @@ async fn get_object_store() -> Arc<ObjectStoreImpl> {
     } else {
         let hummock_url = STATE_STORE_URL.get().unwrap();
         let object_store = build_remote_object_store(
-            hummock_url.strip_prefix("hummock+").unwrap(),
+            hummock_url.strip_prefix("hummock+").unwrap_or("memory"),
             Arc::new(ObjectStoreMetrics::unused()),
-            "mysql-cdc-schema-history",
+            "rw-cdc-schema-history",
             Arc::new(ObjectStoreConfig::default()),
         )
         .await;
