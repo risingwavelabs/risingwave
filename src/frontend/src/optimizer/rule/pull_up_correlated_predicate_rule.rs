@@ -23,6 +23,32 @@ use crate::optimizer::plan_node::*;
 use crate::optimizer::plan_visitor::{PlanCorrelatedIdFinder, PlanVisitor};
 use crate::utils::Condition;
 
+/// Pull up correlated predicates from the right side of Apply to the `on` clause of Join.
+///
+/// Before:
+///
+/// ```text
+///     LogicalApply
+///    /            \
+///  LHS          Project
+///                 |
+///               Filter [correlated_input_ref(yyy) = xxx]
+///                 |
+///               ...
+/// ```
+///
+/// After:
+///
+/// ```text
+///     LogicalJoin [yyy = xxx]
+///    /            \
+///  LHS          Project
+///                 |
+///               Filter
+///                 |
+///               ...
+/// ```
+///
 /// This rule is for pattern: Apply->Project->Filter.
 ///
 /// To unnest, we just pull predicates contain correlated variables in Filter into Apply, and

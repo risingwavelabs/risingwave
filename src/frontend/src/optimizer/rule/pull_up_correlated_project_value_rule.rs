@@ -22,6 +22,26 @@ use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::*;
 use crate::optimizer::plan_visitor::{PlanCorrelatedIdFinder, PlanVisitor};
 
+/// Pull up correlated expressions from scalar subqueries to inline them directly.
+///
+/// Before:
+///
+/// ```text
+///     LogicalApply { type: LeftOuter, max_one_row: true }
+///    /            \
+///  LHS          Project [correlated_input_ref(yyy) + 1, literal]
+///                 |
+///               Values [[]]  // empty schema
+/// ```
+///
+/// After:
+///
+/// ```text
+///     Project [LHS.*, yyy + 1, literal]
+///       |
+///     LHS
+/// ```
+///
 /// This rule is for pattern: Apply->Project->Values.
 ///
 /// To unnest simple scalar subqueries, we pull correlated expressions from the Project node
