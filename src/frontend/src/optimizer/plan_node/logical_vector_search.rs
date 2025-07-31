@@ -21,15 +21,15 @@ use risingwave_pb::common::PbDistanceType;
 
 use crate::PlanRef;
 use crate::expr::{
-    Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, collect_input_refs,
+    ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, collect_input_refs,
 };
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, TopNLimit, VectorSearch};
 use crate::optimizer::plan_node::utils::{Distill, childless_record};
 use crate::optimizer::plan_node::{
-    BatchProject, BatchTopN, ColPrunable, ColumnPruningContext, ExprRewritable, Logical, PlanBase,
-    PlanTreeNodeUnary, PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, ToBatch,
-    ToStream, ToStreamContext, gen_filter_and_pushdown, generic,
+    BatchProject, BatchTopN, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
+    LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown, PredicatePushdownContext,
+    RewriteStreamContext, ToBatch, ToStream, ToStreamContext, gen_filter_and_pushdown, generic,
 };
 use crate::optimizer::property::Order;
 use crate::utils::Condition;
@@ -71,18 +71,16 @@ impl Distill for LogicalVectorSearch {
 
         if verbose {
             vec.push((
-                "non_distance_columns",
+                "output_columns",
                 Pretty::Array(
                     self.core
-                        .non_distance_columns
+                        .output_input_idx
                         .iter()
-                        .map(Pretty::debug)
+                        .map(|input_idx| {
+                            Pretty::debug(&self.core.input.schema().fields()[*input_idx])
+                        })
                         .collect(),
                 ),
-            ));
-            vec.push((
-                "non_distance_columns",
-                Pretty::debug(&self.core.include_distance),
             ));
         }
 
@@ -92,43 +90,80 @@ impl Distill for LogicalVectorSearch {
 
 impl ColPrunable for LogicalVectorSearch {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
-        let input_col_num: usize = self.input().schema().len();
-        let mut output_non_distance_col = vec![];
-        let mut output_has_distance_col = false;
-        let output_has_distance_col = &mut output_has_distance_col;
-        for &orig_col_idx in required_cols {
-            if orig_col_idx == self.core.non_distance_columns.len() {
-                assert!(!*output_has_distance_col);
-                *output_has_distance_col = true;
-            } else {
-                output_non_distance_col.push(orig_col_idx);
+        let input_schema = self.core.input.schema();
+        let distance_required_input_idx =
+            collect_input_refs(input_schema.len(), [&self.core.left, &self.core.right]);
+        let mut required_input_idx_bitset = distance_required_input_idx.clone();
+        let mut non_distance_required_input_idx = Vec::new();
+        let mut required_cols_new_output_mapping = vec![None; required_cols.len()];
+        for (original_output_idx, input_idx) in self.core.output_input_idx.iter().enumerate() {
+            if let Some(new_output_idx) =
+                required_cols
+                    .iter()
+                    .position(|required_original_output_idx| {
+                        required_original_output_idx == &original_output_idx
+                    })
+            {
+                assert_eq!(
+                    required_cols_new_output_mapping[new_output_idx]
+                        .replace(non_distance_required_input_idx.len()),
+                    None
+                );
+                non_distance_required_input_idx.push(*input_idx);
+                required_input_idx_bitset.set(*input_idx, true);
             }
         }
-        let input_required_cols = collect_input_refs(
-            input_col_num,
+        if let Some(distance_new_output_idx) =
             required_cols
                 .iter()
-                .filter_map(|i| self.core.non_distance_columns.get(*i))
-                .chain([&self.core.left, &self.core.right]),
-        )
-        .ones()
-        .collect_vec();
-        let new_input = self.input().prune_col(&input_required_cols, ctx);
+                .position(|required_original_output_idx| {
+                    *required_original_output_idx == self.core.output_input_idx.len()
+                })
+        {
+            assert_eq!(
+                required_cols_new_output_mapping[distance_new_output_idx]
+                    .replace(non_distance_required_input_idx.len()),
+                None
+            );
+        }
+        let required_cols_new_output_mapping = required_cols_new_output_mapping
+            .into_iter()
+            .map(Option::unwrap)
+            .collect_vec();
+        let input_required_idx = required_input_idx_bitset.ones().collect_vec();
+
+        let new_input = self.input().prune_col(&input_required_idx, ctx);
+        // mapping from idx of original input to new input
         let mut mapping = ColIndexMapping::with_remaining_columns(
-            &input_required_cols,
+            &input_required_idx,
             self.input().schema().len(),
         );
 
         let mut new_core = self.core.clone_with_input(new_input);
         new_core.left = mapping.rewrite_expr(new_core.left);
         new_core.right = mapping.rewrite_expr(new_core.right);
-        new_core.non_distance_columns = output_non_distance_col
+        new_core.output_input_idx = non_distance_required_input_idx
             .iter()
-            .map(|i| mapping.rewrite_expr(self.core.non_distance_columns[*i].clone()))
+            .map(|input_idx| mapping.map(*input_idx))
             .collect();
-        new_core.include_distance = *output_has_distance_col;
         let vector_search = Self::with_core(new_core);
-        vector_search.into()
+        let plan: PlanRef = vector_search.into();
+        if required_cols_new_output_mapping.len() == plan.schema().len()
+            && required_cols_new_output_mapping.is_sorted()
+        {
+            // the current plan output has match the required column order.
+            plan
+        } else {
+            let exprs = required_cols_new_output_mapping
+                .iter()
+                .map(|output_idx| {
+                    ExprImpl::InputRef(
+                        InputRef::new(*output_idx, plan.schema()[*output_idx].data_type()).into(),
+                    )
+                })
+                .collect();
+            LogicalProject::create(plan, exprs)
+        }
     }
 }
 
@@ -176,7 +211,20 @@ impl ToStream for LogicalVectorSearch {
 impl ToBatch for LogicalVectorSearch {
     fn to_batch(&self) -> crate::error::Result<PlanRef> {
         let input = self.input().to_batch()?;
-        let mut exprs = self.core.non_distance_columns.clone();
+        let mut exprs = self
+            .core
+            .output_input_idx
+            .iter()
+            .map(|input_idx| {
+                ExprImpl::InputRef(
+                    InputRef::new(
+                        *input_idx,
+                        self.core.input.schema().fields[*input_idx].data_type(),
+                    )
+                    .into(),
+                )
+            })
+            .collect_vec();
         let (neg, expr_type) = match self.core.distance_type {
             PbDistanceType::Unspecified => {
                 unreachable!()
@@ -202,28 +250,10 @@ impl ToBatch for LogicalVectorSearch {
             TopNLimit::Simple(self.core.top_n),
             0,
             Order::new(vec![ColumnOrder::new(
-                self.core.non_distance_columns.len(),
+                self.core.output_input_idx.len(),
                 OrderType::ascending(),
             )]),
         );
-        let mut plan = BatchTopN::new(top_n).into();
-        if !self.core.include_distance {
-            plan = BatchProject::new(generic::Project::new(
-                (0..self.core.non_distance_columns.len())
-                    .map(|idx| {
-                        ExprImpl::InputRef(
-                            InputRef {
-                                index: idx,
-                                data_type: self.core.non_distance_columns[idx].return_type(),
-                            }
-                            .into(),
-                        )
-                    })
-                    .collect(),
-                plan,
-            ))
-            .into();
-        }
-        Ok(plan)
+        Ok(BatchTopN::new(top_n).into())
     }
 }

@@ -12,7 +12,7 @@
       └─LogicalProject { exprs: [items.id, items.embedding, items._rw_timestamp, L2Distance(items.embedding, '[3,1,2]':Vector(3)) as $expr1] }
         └─LogicalScan { table: items, columns: [items.id, items.embedding, items._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
-    LogicalVectorSearch { distance_type: L2, top_n: 5, left: $1, right: '[3,1,2]':Vector(3), non_distance_columns: [$0, $1, $2], non_distance_columns: true }
+    LogicalVectorSearch { distance_type: L2, top_n: 5, left: $1, right: '[3,1,2]':Vector(3), output_columns: [items.id:Int32, items.embedding:Vector(3), items._rw_timestamp:Timestamptz] }
     └─LogicalScan { table: items, columns: [items.id, items.embedding, items._rw_timestamp] }
   batch_plan: |-
     BatchTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
@@ -36,19 +36,18 @@
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [count, items.id] }
     └─LogicalAgg { group_key: [items.id], aggs: [count] }
-      └─LogicalVectorSearch { distance_type: Cosine, top_n: 5, left: $1, right: '[3,1,2]':Vector(3), non_distance_columns: [$0], non_distance_columns: false }
+      └─LogicalVectorSearch { distance_type: Cosine, top_n: 5, left: $1, right: '[3,1,2]':Vector(3), output_columns: [items.id:Int32] }
         └─LogicalScan { table: items, columns: [items.id, items.embedding] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [count, items.id] }
       └─BatchHashAgg { group_key: [items.id], aggs: [count] }
         └─BatchExchange { order: [], dist: HashShard(items.id) }
-          └─BatchProject { exprs: [items.id] }
-            └─BatchTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
-              └─BatchExchange { order: [], dist: Single }
-                └─BatchTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
-                  └─BatchProject { exprs: [items.id, CosineDistance(items.embedding, '[3,1,2]':Vector(3)) as $expr1] }
-                    └─BatchScan { table: items, columns: [items.id, items.embedding], distribution: UpstreamHashShard(items.id) }
+          └─BatchTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
+            └─BatchExchange { order: [], dist: Single }
+              └─BatchTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
+                └─BatchProject { exprs: [items.id, CosineDistance(items.embedding, '[3,1,2]':Vector(3)) as $expr1] }
+                  └─BatchScan { table: items, columns: [items.id, items.embedding], distribution: UpstreamHashShard(items.id) }
 - before:
   - create_table
   sql: |
@@ -60,12 +59,12 @@
         └─LogicalScan { table: items, columns: [items.id, items.embedding, items._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [items.embedding, vector_distance, items.id] }
-    └─LogicalVectorSearch { distance_type: InnerProduct, top_n: 5, left: $1, right: '[3,1,2]':Vector(3), non_distance_columns: [$1, $0], non_distance_columns: true }
+    └─LogicalVectorSearch { distance_type: InnerProduct, top_n: 5, left: $1, right: '[3,1,2]':Vector(3), output_columns: [items.id:Int32, items.embedding:Vector(3)] }
       └─LogicalScan { table: items, columns: [items.id, items.embedding] }
   batch_plan: |-
     BatchProject { exprs: [items.embedding, $expr1, items.id] }
     └─BatchTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
       └─BatchExchange { order: [], dist: Single }
         └─BatchTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
-          └─BatchProject { exprs: [items.embedding, items.id, Neg(InnerProduct(items.embedding, '[3,1,2]':Vector(3))) as $expr1] }
+          └─BatchProject { exprs: [items.id, items.embedding, Neg(InnerProduct(items.embedding, '[3,1,2]':Vector(3))) as $expr1] }
             └─BatchScan { table: items, columns: [items.id, items.embedding], distribution: UpstreamHashShard(items.id) }

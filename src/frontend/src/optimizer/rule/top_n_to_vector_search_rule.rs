@@ -19,7 +19,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::common::PbDistanceType;
 
 use crate::PlanRef;
-use crate::expr::{Expr, ExprImpl, ExprType, InputRef};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::plan_node::generic::{TopNLimit, VectorSearch};
 use crate::optimizer::plan_node::{LogicalProject, LogicalVectorSearch, PlanTreeNodeUnary};
 use crate::optimizer::rule::prelude::*;
@@ -56,8 +56,8 @@ impl Rule<Logical> for TopNToVectorSearchRule {
             return None;
         }
 
-        let input = top_n.input();
-        let projection = input.as_logical_project()?;
+        let top_n_input = top_n.input();
+        let projection = top_n_input.as_logical_project()?;
         let exprs = projection.exprs();
 
         let order_expr = &exprs[order.column_index];
@@ -94,58 +94,34 @@ impl Rule<Logical> for TopNToVectorSearchRule {
         let [left, right]: &[_; 2] = call.inputs().try_into().unwrap();
         assert_matches!(left.return_type(), DataType::Vector(_));
         assert_matches!(right.return_type(), DataType::Vector(_));
+        let projection_input = projection.input();
 
         let core = VectorSearch {
             top_n: limit,
             left: left.clone(),
             right: right.clone(),
-            non_distance_columns: exprs[0..order.column_index]
-                .iter()
-                .chain(&exprs[order.column_index + 1..])
-                .cloned()
-                .collect(),
-            input: projection.input(),
+            output_input_idx: (0..projection_input.schema().len()).collect(),
+            input: projection_input.clone(),
             distance_type,
-            include_distance: true,
         };
 
-        let mut plan = LogicalVectorSearch::with_core(core).into();
+        let mut i2o_mapping = core.i2o_mapping();
 
-        // reorder columns when distance is not at the end
-        if order.column_index < projection.exprs().len() - 1 {
-            plan = LogicalProject::new(
-                plan,
-                (0..order.column_index)
-                    .map(|i| {
-                        ExprImpl::InputRef(
-                            InputRef {
-                                index: i,
-                                data_type: exprs[i].return_type(),
-                            }
-                            .into(),
-                        )
-                    })
-                    .chain([ExprImpl::InputRef(
-                        InputRef {
-                            index: exprs.len() - 1,
-                            data_type: DataType::Float64,
-                        }
-                        .into(),
-                    )])
-                    .chain((order.column_index + 1..exprs.len()).map(|i| {
-                        ExprImpl::InputRef(
-                            InputRef {
-                                index: i - 1,
-                                data_type: exprs[i].return_type(),
-                            }
-                            .into(),
-                        )
-                    }))
-                    .collect(),
-            )
-            .into()
+        let plan = LogicalVectorSearch::with_core(core).into();
+        let mut output_exprs = Vec::with_capacity(exprs.len());
+        for expr in &exprs[0..order.column_index] {
+            output_exprs.push(i2o_mapping.rewrite_expr(expr.clone()));
         }
-
-        Some(plan)
+        output_exprs.push(ExprImpl::InputRef(
+            InputRef {
+                index: projection_input.schema().len(),
+                data_type: DataType::Float64,
+            }
+            .into(),
+        ));
+        for expr in &exprs[order.column_index + 1..exprs.len()] {
+            output_exprs.push(i2o_mapping.rewrite_expr(expr.clone()));
+        }
+        Some(LogicalProject::create(plan, output_exprs))
     }
 }
