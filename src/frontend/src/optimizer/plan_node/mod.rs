@@ -163,7 +163,7 @@ pub trait PlanNodeMeta {
 mod plan_node_meta {
     use super::*;
 
-    /// The object-safe version of [`PlanNodeMeta`], used as a super trait of [`PlanNode`].
+    /// The object-safe version of [`PlanNodeMeta`], used as a super trait of `PlanNode`.
     ///
     /// Check [`PlanNodeMeta`] for more details.
     pub trait AnyPlanNodeMeta<C: ConventionMarker> {

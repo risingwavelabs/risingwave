@@ -22,7 +22,7 @@ use thiserror_ext::AsReport;
 use super::PlanRef;
 use crate::error::RwError;
 
-/// Result when applying a [`Rule`] to a [`PlanNode`](super::plan_node::PlanNode).
+/// Result when applying a [`Rule`] to a `PlanNode`
 pub enum ApplyResult<T> {
     /// Successfully applied the rule and returned a new plan.
     Ok(T),
@@ -68,7 +68,7 @@ where
     }
 }
 
-/// An one-to-one transform for the [`PlanNode`](super::plan_node::PlanNode).
+/// An one-to-one transform for the `PlanNode`.
 ///
 /// It's a convenient trait to implement [`FallibleRule`], thus made available only within this module.
 trait InfallibleRule<C: ConventionMarker>: Send + Sync + Description {
@@ -81,7 +81,7 @@ trait InfallibleRule<C: ConventionMarker>: Send + Sync + Description {
 
 use InfallibleRule as Rule;
 
-/// An one-to-one transform for the [`PlanNode`](super::plan_node::PlanNode) that may return an
+/// An one-to-one transform for the `PlanNode` that may return an
 /// unrecoverable error that stops further optimization.
 ///
 /// An [`InfallibleRule`] is always a [`FallibleRule`].
