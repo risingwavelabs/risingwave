@@ -165,7 +165,7 @@ pub struct BindContext {
     pub named_windows: HashMap<String, WindowSpec>,
     /// Bound arguments for the current SQL UDF.
     // TODO: use enum for named or positional arguments
-    pub udf_arguments: HashMap<String, ExprImpl>,
+    pub udf_arguments: Option<HashMap<String, ExprImpl>>,
 }
 
 /// Holds the context for the `BindContext`'s `ColumnGroup`s.

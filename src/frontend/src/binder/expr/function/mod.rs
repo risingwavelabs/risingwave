@@ -672,23 +672,23 @@ impl Binder {
         };
 
         // Stash the current arguments.
-        let stashed_udf_arguments = std::mem::take(&mut self.context.udf_arguments);
+        // TODO: should this always be empty, as SQL UDF must be a `ExprImpl::Subquery` which always
+        // push a new context?
+        let stashed_udf_arguments = self.context.udf_arguments.take();
 
         // The actual inline logic for sql udf
         // Note that we will always create new udf context for each sql udf
+        let mut udf_arguments = HashMap::new();
         for (i, arg) in args.into_iter().enumerate() {
             if func.arg_names[i].is_empty() {
                 // unnamed argument, use `$1`, `$2` as the name
-                self.context
-                    .udf_arguments
-                    .insert(format!("${}", i + 1), arg);
+                udf_arguments.insert(format!("${}", i + 1), arg);
             } else {
                 // named argument
-                self.context
-                    .udf_arguments
-                    .insert(func.arg_names[i].clone(), arg);
+                udf_arguments.insert(func.arg_names[i].clone(), arg);
             }
         }
+        self.context.udf_arguments = Some(udf_arguments);
 
         // Check for potential recursive calling
         if self.udf_context.global_count() >= SQL_UDF_MAX_CALLING_DEPTH {
