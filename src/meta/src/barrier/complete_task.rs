@@ -54,6 +54,7 @@ pub(super) enum CompletingTask {
     Err(MetaError),
 }
 
+/// Only for checkpoint barrier. For normal barrier, there won't be a task.
 #[derive(Default)]
 pub(super) struct CompleteBarrierTask {
     pub(super) commit_info: CommitEpochInfo,

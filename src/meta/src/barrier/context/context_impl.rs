@@ -111,6 +111,11 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     ) -> MetaResult<()> {
         use risingwave_common::catalog::TableId;
 
+        tracing::info!(
+            "Handling load finished source IDs: {:?}",
+            load_finished_source_ids
+        );
+
         use crate::barrier::Command;
         for associated_source_id in load_finished_source_ids {
             let res: MetaResult<()> = try {

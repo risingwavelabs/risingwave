@@ -36,16 +36,13 @@ pub(super) fn collect_resp_info(
     Vec<LocalSstableInfo>,
     HashMap<TableId, TableWatermarks>,
     Vec<SstableInfo>,
-    Vec<u32>,
 ) {
     let mut sst_to_worker: HashMap<HummockSstableObjectId, u32> = HashMap::new();
     let mut synced_ssts: Vec<LocalSstableInfo> = vec![];
     let mut table_watermarks = Vec::with_capacity(resps.len());
     let mut old_value_ssts = Vec::with_capacity(resps.len());
-    let mut load_finished_source_ids = Vec::new();
 
     for resp in resps {
-        load_finished_source_ids.extend(resp.load_finished_source_ids);
         let ssts_iter = resp.synced_sstables.into_iter().map(|local_sst| {
             let sst_info = local_sst.sst.expect("field not None");
             sst_to_worker.insert(sst_info.object_id.into(), resp.worker_id);
@@ -77,7 +74,6 @@ pub(super) fn collect_resp_info(
                 .collect_vec(),
         ),
         old_value_ssts,
-        load_finished_source_ids,
     )
 }
 
@@ -88,8 +84,7 @@ pub(super) fn collect_creating_job_commit_epoch_info(
     tables_to_commit: impl Iterator<Item = TableId>,
     is_first_time: bool,
 ) {
-    let (sst_to_context, sstables, new_table_watermarks, old_value_sst, _load_finished_source_ids) =
-        collect_resp_info(resps);
+    let (sst_to_context, sstables, new_table_watermarks, old_value_sst) = collect_resp_info(resps);
     assert!(old_value_sst.is_empty());
     commit_info.sst_to_context.extend(sst_to_context);
     commit_info.sstables.extend(sstables);

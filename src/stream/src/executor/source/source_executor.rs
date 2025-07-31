@@ -607,7 +607,9 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     let epoch = barrier.epoch;
 
-                    if self.is_batch_source() && is_refreshing {
+                    // NOTE: We rely on CompleteBarrierTask, which is only for checkpoint barrier,
+                    // so we wait for a checkpoint barrier here.
+                    if barrier.is_checkpoint() && self.is_batch_source() && is_refreshing {
                         #[expect(unused_variables)]
                         let batch_split = self.stream_source_core.get_batch_split();
                         #[expect(unreachable_code)]

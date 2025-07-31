@@ -820,6 +820,22 @@ impl DatabaseCheckpointControl {
                 let (_, mut node) = self.command_ctx_queue.pop_first().expect("non-empty");
                 assert!(node.state.creating_jobs_to_wait.is_empty());
                 assert!(node.state.node_to_collect.is_empty());
+
+                // Process load_finished_source_ids for all barrier types (checkpoint and non-checkpoint)
+                let load_finished_source_ids: Vec<_> = node
+                    .state
+                    .resps
+                    .iter()
+                    .flat_map(|resp| &resp.load_finished_source_ids)
+                    .cloned()
+                    .collect();
+                if !load_finished_source_ids.is_empty() {
+                    // Add load_finished_source_ids to the task for processing
+                    let task = task.get_or_insert_default();
+                    task.load_finished_source_ids
+                        .extend(load_finished_source_ids);
+                }
+
                 let mut finished_jobs = self.create_mview_tracker.apply_collected_command(
                     node.command_ctx.command.as_ref(),
                     &node.command_ctx.barrier_info,
@@ -853,7 +869,7 @@ impl DatabaseCheckpointControl {
                         }));
                     });
                 let task = task.get_or_insert_default();
-                let load_finished_source_ids = node.command_ctx.collect_commit_epoch_info(
+                node.command_ctx.collect_commit_epoch_info(
                     &mut task.commit_info,
                     take(&mut node.state.resps),
                     self.collect_backfill_pinned_upstream_log_epoch(),
@@ -861,8 +877,6 @@ impl DatabaseCheckpointControl {
                 self.completing_barrier = Some(node.command_ctx.barrier_info.prev_epoch());
                 task.finished_jobs.extend(finished_jobs);
                 task.notifiers.extend(node.notifiers);
-                task.load_finished_source_ids
-                    .extend(load_finished_source_ids);
                 task.epoch_infos
                     .try_insert(
                         self.database_id,
