@@ -15,8 +15,9 @@
 use itertools::{Either, Itertools};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
+use super::correlated_expr_rewriter::PredicateRewriter;
 use super::prelude::{PlanRef, *};
-use crate::expr::{CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::*;
 use crate::optimizer::plan_visitor::{PlanCorrelatedIdFinder, PlanVisitor};
@@ -50,11 +51,10 @@ impl Rule<Logical> for PullUpCorrelatedPredicateRule {
         let input = project.input();
         let filter = input.as_logical_filter()?;
 
-        let mut rewriter = Rewriter {
-            input_refs: vec![],
-            index: proj_exprs.len() + apply_left.schema().fields().len(),
+        let mut rewriter = PredicateRewriter::new(
             correlated_id,
-        };
+            proj_exprs.len() + apply_left.schema().fields().len(),
+        );
         // Split predicates in LogicalFilter into correlated expressions and uncorrelated
         // expressions.
         let (cor_exprs, uncor_exprs) =
@@ -109,54 +109,6 @@ impl Rule<Logical> for PullUpCorrelatedPredicateRule {
             )
             .into(),
         )
-    }
-}
-
-/// Rewrites a pulled predicate expression. It is pulled from the right of the apply to the `on`
-/// clause.
-///
-/// Rewrites `correlated_input_ref` (referencing left side) to `input_ref` and shifting `input_ref`
-/// (referencing right side).
-///
-/// Also collects all `InputRef`s, which will be added to the project, so that they are accessible
-/// by the expression after it is pulled.
-struct Rewriter {
-    // All uncorrelated `InputRef`s in the expression.
-    pub input_refs: Vec<InputRef>,
-
-    pub index: usize,
-
-    pub correlated_id: CorrelatedId,
-}
-
-impl ExprRewriter for Rewriter {
-    fn rewrite_correlated_input_ref(
-        &mut self,
-        correlated_input_ref: CorrelatedInputRef,
-    ) -> ExprImpl {
-        // Convert correlated_input_ref to input_ref.
-        // only rewrite the correlated_input_ref with the same correlated_id
-        if correlated_input_ref.correlated_id() == self.correlated_id {
-            InputRef::new(
-                correlated_input_ref.index(),
-                correlated_input_ref.return_type(),
-            )
-            .into()
-        } else {
-            correlated_input_ref.into()
-        }
-    }
-
-    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
-        let data_type = input_ref.return_type();
-
-        // It will be appended to exprs in LogicalProject, so its index remain the same.
-        self.input_refs.push(input_ref);
-
-        // Rewrite input_ref's index to its new location.
-        let input_ref = InputRef::new(self.index, data_type);
-        self.index += 1;
-        input_ref.into()
     }
 }
 

@@ -13,19 +13,19 @@
 // limitations under the License.
 
 use itertools::{Either, Itertools};
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_pb::plan_common::JoinType;
 
+use super::correlated_expr_rewriter::ProjectValueRewriter;
 use super::prelude::{PlanRef, *};
-use crate::expr::{CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::expr::{ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::*;
- use risingwave_pb::plan_common::JoinType;
 use crate::optimizer::plan_visitor::{PlanCorrelatedIdFinder, PlanVisitor};
 
 /// This rule is for pattern: Apply->Project->Values.
 ///
-/// To unnest simple scalar subqueries, we pull correlated expressions from the Project node 
-/// that operates on Values and replace the Apply operator with a Project that concatenates 
+/// To unnest simple scalar subqueries, we pull correlated expressions from the Project node
+/// that operates on Values and replace the Apply operator with a Project that concatenates
 /// the left input expressions and the new right input expressions. This also handles cases
 /// where there are no correlated expressions (e.g., SELECT (SELECT 1)) by inlining the
 /// constant values directly.
@@ -63,16 +63,11 @@ impl Rule<Logical> for PullUpCorrelatedProjectValueRule {
             return None;
         }
 
-        let mut rewriter = Rewriter {
-            input_refs: vec![],
-            index: apply_left.schema().fields().len(),
-            correlated_id,
-        };
+        let mut rewriter = ProjectValueRewriter::new(correlated_id);
 
         // Split project expressions into correlated and uncorrelated expressions
-        let (cor_exprs, uncor_exprs): (Vec<_>, Vec<_>) = proj_exprs
-            .into_iter()
-            .partition_map(|expr| {
+        let (cor_exprs, uncor_exprs): (Vec<_>, Vec<_>) =
+            proj_exprs.into_iter().partition_map(|expr| {
                 if expr.has_correlated_input_ref_by_correlated_id(correlated_id) {
                     Either::Left(rewriter.rewrite_expr(expr))
                 } else {
@@ -90,12 +85,10 @@ impl Rule<Logical> for PullUpCorrelatedProjectValueRule {
         // Create new project expressions by concatenating left input expressions with
         // the correlated expressions that were pulled up
         let mut new_proj_exprs = Vec::new();
-        
+
         // Add all expressions from the left input (outer query)
         for (i, field) in apply_left.schema().fields().iter().enumerate() {
-            new_proj_exprs.push(
-                InputRef::new(i, field.data_type().clone()).into()
-            );
+            new_proj_exprs.push(InputRef::new(i, field.data_type().clone()).into());
         }
 
         // Add the correlated expressions (these now reference the left input)
@@ -104,7 +97,7 @@ impl Rule<Logical> for PullUpCorrelatedProjectValueRule {
         // Handle uncorrelated expressions by evaluating them from the Values
         if !uncor_exprs.is_empty() {
             let values_row = &values.rows()[0];
-            
+
             for expr in uncor_exprs.iter() {
                 // For uncorrelated expressions, evaluate them against the Values row
                 if let Some(const_expr) = Self::try_evaluate_const_expr(expr, values_row) {
@@ -118,9 +111,7 @@ impl Rule<Logical> for PullUpCorrelatedProjectValueRule {
         }
 
         // Create the new project node that replaces the Apply
-        Some(
-            LogicalProject::new(apply_left, new_proj_exprs).into()
-        )
+        Some(LogicalProject::new(apply_left, new_proj_exprs).into())
     }
 }
 
@@ -147,44 +138,5 @@ impl PullUpCorrelatedProjectValueRule {
             // For now, return the expression as-is for simple cases
             _ => Some(expr.clone()),
         }
-    }
-}
-
-/// Rewrites a pulled expression from project to reference the left input instead of correlated input.
-///
-/// Rewrites `correlated_input_ref` (referencing left side) to `input_ref` and shifts `input_ref`
-/// indices as needed.
-struct Rewriter {
-    // All uncorrelated `InputRef`s in the expression.
-    pub input_refs: Vec<InputRef>,
-    
-    pub index: usize,
-    
-    pub correlated_id: CorrelatedId,
-}
-
-impl ExprRewriter for Rewriter {
-    fn rewrite_correlated_input_ref(
-        &mut self,
-        correlated_input_ref: CorrelatedInputRef,
-    ) -> ExprImpl {
-        // Convert correlated_input_ref to input_ref pointing to the left input
-        // only rewrite the correlated_input_ref with the same correlated_id
-        if correlated_input_ref.correlated_id() == self.correlated_id {
-            InputRef::new(
-                correlated_input_ref.index(),
-                correlated_input_ref.return_type(),
-            )
-            .into()
-        } else {
-            correlated_input_ref.into()
-        }
-    }
-
-    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
-        // For this rule, input_refs in the project should reference Values
-        // Since we're inlining, we don't need to preserve these references
-        // They should be constant-folded or handled separately
-        input_ref.into()
     }
 }
