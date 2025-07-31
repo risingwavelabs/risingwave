@@ -415,8 +415,6 @@ message VectorIndexNearestNode {
   uint32 top_n = 5;
   // The distance metric to use for the search.
   common.DistanceType distance_type = 6;
-  bool include_vector_col = 7;
-  bool include_distance_col = 8;
 }
 
 message PlanNode {
