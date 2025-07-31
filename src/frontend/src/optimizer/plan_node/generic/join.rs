@@ -34,9 +34,9 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 /// condition. In addition, the output columns are a subset of the columns of the left and
 /// right columns, dependent on the output indices provided. A repeat output index is illegal.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Join<PlanRef, RightPlanRef = PlanRef> {
+pub struct Join<PlanRef> {
     pub left: PlanRef,
-    pub right: RightPlanRef,
+    pub right: PlanRef,
     pub on: Condition,
     pub join_type: JoinType,
     pub output_indices: Vec<usize>,
@@ -46,7 +46,7 @@ pub(crate) fn has_repeated_element(slice: &[usize]) -> bool {
     (1..slice.len()).any(|i| slice[i..].contains(&slice[i - 1]))
 }
 
-impl<PlanRef: GenericPlanRef, RightPlanRef: GenericPlanRef> Join<PlanRef, RightPlanRef> {
+impl<PlanRef: GenericPlanRef> Join<PlanRef> {
     pub(crate) fn clone_with_inputs<OtherPlanRef>(
         &self,
         left: OtherPlanRef,
@@ -78,7 +78,7 @@ impl<PlanRef: GenericPlanRef, RightPlanRef: GenericPlanRef> Join<PlanRef, RightP
 
     pub fn new(
         left: PlanRef,
-        right: RightPlanRef,
+        right: PlanRef,
         on: Condition,
         join_type: JoinType,
         output_indices: Vec<usize>,
@@ -162,9 +162,7 @@ impl Join<StreamPlanRef> {
     }
 }
 
-impl<PlanRef: GenericPlanRef, RightPlanRef: GenericPlanRef> GenericPlanNode
-    for Join<PlanRef, RightPlanRef>
-{
+impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
     fn schema(&self) -> Schema {
         let left_schema = self.left.schema();
         let right_schema = self.right.schema();
@@ -340,7 +338,7 @@ impl<PlanRef> Join<PlanRef> {
     }
 }
 
-impl<PlanRef: GenericPlanRef, RightPlanRef: GenericPlanRef> Join<PlanRef, RightPlanRef> {
+impl<PlanRef: GenericPlanRef> Join<PlanRef> {
     pub fn full_out_col_num(left_len: usize, right_len: usize, join_type: JoinType) -> usize {
         match join_type {
             JoinType::Inner
@@ -357,7 +355,7 @@ impl<PlanRef: GenericPlanRef, RightPlanRef: GenericPlanRef> Join<PlanRef, RightP
 
     pub fn with_full_output(
         left: PlanRef,
-        right: RightPlanRef,
+        right: PlanRef,
         join_type: JoinType,
         on: Condition,
     ) -> Self {

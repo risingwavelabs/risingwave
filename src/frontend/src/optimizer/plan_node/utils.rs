@@ -301,7 +301,7 @@ pub struct IndicesDisplay<'a> {
 impl<'a> IndicesDisplay<'a> {
     /// Returns `None` means all
     pub fn from_join<'b>(
-        join: &'a generic::Join<impl GenericPlanRef, impl GenericPlanRef>,
+        join: &'a generic::Join<impl GenericPlanRef>,
         input_schema: &'a Schema,
     ) -> Pretty<'b> {
         let col_num = join.internal_column_num();
