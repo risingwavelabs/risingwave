@@ -189,10 +189,9 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchUpdate { table: t, exprs: [$4, $1, $2] }
-      └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
-        ├─BatchExchange { order: [], dist: Single }
-        │ └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp], distribution: UpstreamHashShard(t._row_id) }
-        └─BatchValues { rows: [[666:Int32]] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchProject { exprs: [t.v1, t.v2, t._row_id, t._rw_timestamp, 666:Int32] }
+          └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp], distribution: UpstreamHashShard(t._row_id) }
 - name: update table to subquery with runtime cardinality
   sql: |
     create table t (v1 int, v2 int);

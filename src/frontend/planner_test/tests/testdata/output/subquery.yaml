@@ -192,15 +192,11 @@
       └─LogicalProject { exprs: [PgGetUserbyid(1:Int32) as $expr1] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   optimized_logical_plan_for_batch: |-
-    LogicalJoin { type: LeftOuter, on: true, output: all }
-    ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-    └─LogicalProject { exprs: [PgGetUserbyid(1:Int32) as $expr1] }
-      └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    LogicalProject { exprs: [PgGetUserbyid(1:Int32) as $expr1] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |-
-    BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
-    ├─BatchValues { rows: [[]] }
-    └─BatchProject { exprs: [PgGetUserbyid(1:Int32) as $expr1] }
-      └─BatchValues { rows: [[]] }
+    BatchProject { exprs: [PgGetUserbyid(1:Int32) as $expr1] }
+    └─BatchValues { rows: [[]] }
 - sql: |
     SELECT n.nspname as "Schema",
     c.relname as "Name",
@@ -805,9 +801,7 @@
   batch_plan: |-
     BatchProject { exprs: [GenerateSeries(1:Int32, $0)] }
     └─BatchProjectSet { select_list: [GenerateSeries(1:Int32, $0)] }
-      └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
-        ├─BatchValues { rows: [[]] }
-        └─BatchValues { rows: [[1:Int32]] }
+      └─BatchValues { rows: [[1:Int32]] }
 - name: array subquery
   sql: |
     select Array(select 1 union select 2);

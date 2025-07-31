@@ -206,13 +206,15 @@ static SIMPLE_UNNESTING: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Simple Unnesting",
         vec![
+            // Pull correlated predicates up the algebra tree to unnest simple subquery.
+            PullUpCorrelatedPredicateRule::create(),
+            // Pull correlated project expressions with values to inline scalar subqueries.
+            PullUpCorrelatedProjectValueRule::create(),
+            PullUpCorrelatedPredicateAggRule::create(),
             // Eliminate max one row
             MaxOneRowEliminateRule::create(),
             // Convert apply to join.
             ApplyToJoinRule::create(),
-            // Pull correlated predicates up the algebra tree to unnest simple subquery.
-            PullUpCorrelatedPredicateRule::create(),
-            PullUpCorrelatedPredicateAggRule::create(),
         ],
         ApplyOrder::BottomUp,
     )
