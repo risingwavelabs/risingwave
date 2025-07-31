@@ -17,7 +17,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema, TableId};
-use risingwave_common::row::{Row, RowDeserializer, RowExt};
+use risingwave_common::row::{OwnedRow, RowDeserializer};
 use risingwave_common::types::{DataType, Scalar, ScalarImpl, VectorVal};
 use risingwave_common::util::value_encoding::BasicDeserializer;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -26,7 +26,7 @@ use risingwave_storage::store::{
     NewReadSnapshotOptions, StateStoreReadVector, VectorNearestOptions,
 };
 use risingwave_storage::table::collect_data_chunk;
-use risingwave_storage::vector::{DistanceMeasurement, Vector, VectorRef};
+use risingwave_storage::vector::{DistanceMeasurement, Vector};
 use risingwave_storage::{StateStore, dispatch_state_store};
 
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
@@ -44,8 +44,6 @@ pub struct VectorIndexNearestExecutor<S: StateStore> {
     top_n: usize,
     measure: DistanceMeasurement,
     deserializer: BasicDeserializer,
-    include_vector_col: bool,
-    include_distance_col: bool,
 }
 
 pub struct VectorIndexNearestExecutorBuilder {}
@@ -80,16 +78,7 @@ impl BoxedExecutorBuilder for VectorIndexNearestExecutorBuilder {
                 .collect_vec(),
         );
 
-        if vector_index_nearest_node.include_vector_col {
-            fields.push(Field::new(
-                "__vector",
-                DataType::Vector(vector_index_nearest_node.query_vector.len()),
-            ));
-        }
-
-        if vector_index_nearest_node.include_distance_col {
-            fields.push(Field::new("__distance", DataType::Float64));
-        }
+        fields.push(Field::new("__distance", DataType::Float64));
 
         let schema = Schema::new(fields);
 
@@ -104,15 +93,16 @@ impl BoxedExecutorBuilder for VectorIndexNearestExecutorBuilder {
                 table_id: vector_index_nearest_node.table_id.into(),
                 epoch,
                 vector: VectorVal::from_iter(
-                    vector_index_nearest_node.query_vector.iter().cloned(),
+                    vector_index_nearest_node
+                        .query_vector
+                        .iter()
+                        .map(|&v| v.try_into().unwrap()),
                 ),
                 top_n: vector_index_nearest_node.top_n as usize,
                 measure: PbDistanceType::try_from(vector_index_nearest_node.distance_type)
                     .unwrap()
                     .into(),
                 deserializer,
-                include_vector_col: vector_index_nearest_node.include_vector_col,
-                include_distance_col: vector_index_nearest_node.include_distance_col,
             }))
         })
     }
@@ -144,8 +134,6 @@ impl<S: StateStore> VectorIndexNearestExecutor<S> {
             measure,
             schema,
             deserializer,
-            include_vector_col,
-            include_distance_col,
             ..
         } = *self;
         let read_snapshot: S::ReadSnapshot = state_store
@@ -155,24 +143,14 @@ impl<S: StateStore> VectorIndexNearestExecutor<S> {
             .nearest(
                 Vector::new(vector.as_scalar_ref().into_slice()),
                 VectorNearestOptions { top_n, measure },
-                move |vec: VectorRef<'_>, distance, value| {
-                    deserializer.deserialize(value).map(|row| {
-                        // TODO: optimize without repeated to_owned_row
-                        let row = if include_vector_col {
-                            row.chain([Some(ScalarImpl::Vector(VectorVal::from_iter(
-                                vec.as_slice().iter().cloned(),
-                            )))])
-                            .to_owned_row()
-                        } else {
-                            row
-                        };
-                        if include_distance_col {
-                            row.chain([Some(ScalarImpl::Float64((distance as f64).into()))])
-                                .to_owned_row()
-                        } else {
-                            row
-                        }
-                    })
+                move |_vec, distance, value| {
+                    let mut values = Vec::with_capacity(deserializer.data_types().len() + 1);
+                    deserializer
+                        .deserialize_to(value, &mut values)
+                        .map(move |_| {
+                            values.push(Some(ScalarImpl::Float64((distance as f64).into())));
+                            OwnedRow::new(values)
+                        })
                 },
             )
             .await?;
