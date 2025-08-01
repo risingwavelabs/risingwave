@@ -20,7 +20,7 @@ use risingwave_pb::common::PbDistanceType;
 
 use crate::PlanRef;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
-use crate::optimizer::plan_node::generic::{TopNLimit, VectorSearch};
+use crate::optimizer::plan_node::generic::TopNLimit;
 use crate::optimizer::plan_node::{LogicalProject, LogicalVectorSearch, PlanTreeNodeUnary};
 use crate::optimizer::rule::prelude::*;
 use crate::optimizer::rule::{BoxedRule, Rule};
@@ -96,18 +96,16 @@ impl Rule<Logical> for TopNToVectorSearchRule {
         assert_matches!(right.return_type(), DataType::Vector(_));
         let projection_input = projection.input();
 
-        let core = VectorSearch {
-            top_n: limit,
-            left: left.clone(),
-            right: right.clone(),
-            output_input_idx: (0..projection_input.schema().len()).collect(),
-            input: projection_input.clone(),
+        let vector_search = LogicalVectorSearch::new(
+            limit,
             distance_type,
-        };
-
-        let mut i2o_mapping = core.i2o_mapping();
-
-        let plan = LogicalVectorSearch::with_core(core).into();
+            left.clone(),
+            right.clone(),
+            (0..projection_input.schema().len()).collect(),
+            projection_input.clone(),
+        );
+        let mut i2o_mapping = vector_search.i2o_mapping();
+        let plan = vector_search.into();
         let mut output_exprs = Vec::with_capacity(exprs.len());
         for expr in &exprs[0..order.column_index] {
             output_exprs.push(i2o_mapping.rewrite_expr(expr.clone()));

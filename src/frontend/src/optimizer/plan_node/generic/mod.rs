@@ -96,9 +96,6 @@ mod mysql_query;
 
 pub use mysql_query::*;
 
-mod vector_search;
-pub use vector_search::*;
-
 pub trait DistillUnit {
     fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> XmlNode<'a>;
 }
