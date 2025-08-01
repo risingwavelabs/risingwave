@@ -14,7 +14,7 @@
 
 use std::fmt::Write;
 
-use risingwave_expr::function;
+use risingwave_expr::{Result, function};
 
 #[function("trim(varchar) -> varchar")]
 pub fn trim(s: &str, writer: &mut impl Write) {
@@ -56,6 +56,42 @@ pub fn ltrim_characters(s: &str, characters: &str, writer: &mut impl Write) {
 pub fn rtrim_characters(s: &str, characters: &str, writer: &mut impl Write) {
     let pattern = |c| characters.chars().any(|ch| ch == c);
     writer.write_str(s.trim_end_matches(pattern)).unwrap();
+}
+
+#[function("trim(bytea, bytea) -> bytea")]
+pub fn trim_bytea(bytes: &[u8], bytesremoved: &[u8]) -> Box<[u8]> {
+    let existed = |b: &u8| bytesremoved.contains(b);
+    let start = bytes
+        .iter()
+        .position(|b| !existed(b))
+        .unwrap_or(bytes.len());
+    let end = bytes
+        .iter()
+        .rposition(|b| !existed(b))
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    bytes[start..end].iter().copied().collect()
+}
+
+#[function("ltrim(bytea, bytea) -> bytea")]
+pub fn ltrim_bytea(bytes: &[u8], bytesremoved: &[u8]) -> Box<[u8]> {
+    let existed = |b: &u8| bytesremoved.contains(b);
+    let start = bytes
+        .iter()
+        .position(|b| !existed(b))
+        .unwrap_or(bytes.len());
+    bytes[start..].iter().copied().collect()
+}
+
+#[function("rtrim(bytea, bytea) -> bytea")]
+pub fn rtrim_bytea(bytes: &[u8], bytesremoved: &[u8]) -> Box<[u8]> {
+    let existed = |b: &u8| bytesremoved.contains(b);
+    let end = bytes
+        .iter()
+        .rposition(|b| !existed(b))
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    bytes[..end].iter().copied().collect()
 }
 
 #[cfg(test)]
