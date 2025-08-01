@@ -319,11 +319,17 @@ public class DbzConnectorConfig {
         } else {
             throw new RuntimeException("unsupported source type: " + source);
         }
-
         var otherProps = extractDebeziumProperties(userProps);
         for (var entry : otherProps.entrySet()) {
-            dbzProps.putIfAbsent(entry.getKey(), entry.getValue());
+            // For time.precision.mode, user configuration should override default configuration
+            if ("time.precision.mode".equals(entry.getKey())) {
+                dbzProps.put(entry.getKey(), entry.getValue());
+                LOG.info("Overriding time.precision.mode with user value: {}", entry.getValue());
+            } else {
+                dbzProps.putIfAbsent(entry.getKey(), entry.getValue());
+            }
         }
+        LOG.info("Final Debezium properties: {}", dbzProps);
 
         this.sourceId = sourceId;
         this.sourceType = source;

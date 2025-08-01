@@ -58,15 +58,47 @@ pub fn str_to_bool(input: &str) -> Result<bool> {
 /// This would cause no problem for timestamp in [1973-03-03 09:46:40, 5138-11-16 09:46:40).
 #[inline]
 pub fn i64_to_timestamptz(t: i64) -> Result<Timestamptz> {
+    println!("这里cast i64: {} to timestamptz", t);
     const E11: u64 = 100_000_000_000;
+    // 253370764800000
+    // 253370764800000
     const E14: u64 = 100_000_000_000_000;
     const E17: u64 = 100_000_000_000_000_000;
-    match t.abs_diff(0) {
-        0..E11 => Ok(Timestamptz::from_secs(t).unwrap()), // s
-        E11..E14 => Ok(Timestamptz::from_millis(t).unwrap()), // ms
-        E14..E17 => Ok(Timestamptz::from_micros(t)),      // us
-        E17.. => Ok(Timestamptz::from_micros(t / 1000)),  // ns
-    }
+
+    let abs_diff = t.abs_diff(0);
+    println!(
+        "abs_diff: {}, E11: {}, E14: {}, E17: {}",
+        abs_diff, E11, E14, E17
+    );
+
+    let result = match abs_diff {
+        0..E11 => {
+            let secs_result = Timestamptz::from_secs(t).unwrap();
+            println!("treating as seconds -> {:?}", secs_result);
+            Ok(secs_result)
+        } // s
+        E11..E14 => {
+            let millis_result = Timestamptz::from_millis(t).unwrap();
+            println!("treating as milliseconds -> {:?}", millis_result);
+            Ok(millis_result)
+        } // ms
+        E14..E17 => {
+            let micros_result = Timestamptz::from_micros(t);
+            println!("treating as microseconds -> {:?}", micros_result);
+            Ok(micros_result)
+        } // us
+        E17.. => {
+            let ns_result = Timestamptz::from_micros(t);
+            println!(
+                "treating as nanoseconds (divided by 1000) -> {:?}",
+                ns_result
+            );
+            Ok(ns_result)
+        } // ns
+    };
+
+    println!("i64_to_timestamptz final result: {:?}", result);
+    result
 }
 
 /// Converts UNIX epoch time to timestamp.
@@ -105,7 +137,16 @@ pub fn i64_to_timestamptz(t: i64) -> Result<Timestamptz> {
 /// ```
 #[inline]
 pub fn i64_to_timestamp(t: i64) -> Result<Timestamp> {
+    println!("i64_to_timestamp这里 t : {}", t);
     let tz = i64_to_timestamptz(t)?;
+    Ok(Timestamp::from_timestamp_uncheck(
+        tz.timestamp(),
+        tz.timestamp_subsec_nanos(),
+    ))
+}
+
+pub fn i64_to_timestamp_milli(t: i64) -> Result<Timestamp> {
+    let tz = Timestamptz::from_millis(t).unwrap();
     Ok(Timestamp::from_timestamp_uncheck(
         tz.timestamp(),
         tz.timestamp_subsec_nanos(),

@@ -19,7 +19,7 @@ use base64::Engine;
 use itertools::Itertools;
 use num_bigint::BigInt;
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz, str_to_bytea};
+use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz, str_to_bytea, i64_to_timestamp_milli};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{
     DataType, Date, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
@@ -182,6 +182,7 @@ impl JsonParseOptions {
     };
 
     pub fn new_for_debezium(timestamptz_handling: TimestamptzHandling) -> Self {
+        println!("这里new_for_debezium: {:?}", timestamptz_handling);
         Self {
             bytea_handling: ByteaHandling::Base64,
             time_handling: TimeHandling::Micro,
@@ -474,18 +475,32 @@ impl JsonParseOptions {
                 .map_err(|_| create_error())?
                 .into(),
             // ---- Timestamp -----
-            (DataType::Timestamp, ValueType::String) => value
-                .as_str()
-                .unwrap()
-                .parse::<Timestamp>()
-                .map_err(|_| create_error())?
-                .into(),
+            (DataType::Timestamp, ValueType::String) => {
+                println!("111timestamptz_handling: {:?}", self.timestamptz_handling);
+                value
+                    .as_str()
+                    .unwrap()
+                    .parse::<Timestamp>()
+                    .map_err(|_| create_error())?
+                    .into()
+            },
             (
                 DataType::Timestamp,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
-            ) => i64_to_timestamp(value.as_i64().unwrap())
-                .map_err(|_| create_error())?
-                .into(),
+            ) => {
+                println!("111timestamptz_handling: {:?}", self.timestamptz_handling);
+                if let TimestamptzHandling::Milli = self.timestamptz_handling {
+                    i64_to_timestamp_milli(value.as_i64().unwrap())
+                    .map_err(|_| create_error())?
+                    .into()
+                } else {
+                    i64_to_timestamp(value.as_i64().unwrap())
+                    .map_err(|_| create_error())?
+                    .into()
+                }
+           
+               
+            },
             // ---- Timestamptz -----
             (DataType::Timestamptz, ValueType::String) => match self.timestamptz_handling {
                 TimestamptzHandling::UtcWithoutSuffix => value
