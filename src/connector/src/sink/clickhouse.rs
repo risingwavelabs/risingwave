@@ -22,7 +22,6 @@ use clickhouse::{Client as ClickHouseClient, Row as ClickHouseRow};
 use itertools::Itertools;
 use phf::{Set, phf_set};
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FieldLike, Schema};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Decimal, ScalarRefImpl, Serial};
