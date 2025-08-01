@@ -21,6 +21,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::common::PbDistanceType;
 
+use crate::OptimizerContextRef;
 use crate::expr::{
     ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, collect_input_refs,
 };
@@ -28,13 +29,13 @@ use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::{GenericPlanNode, GenericPlanRef, TopNLimit};
 use crate::optimizer::plan_node::utils::{Distill, childless_record};
 use crate::optimizer::plan_node::{
-    BatchProject, BatchTopN, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
-    LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown, PredicatePushdownContext,
-    RewriteStreamContext, ToBatch, ToStream, ToStreamContext, gen_filter_and_pushdown, generic,
+    BatchPlanRef, BatchProject, BatchTopN, ColPrunable, ColumnPruningContext, ExprRewritable,
+    Logical, LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PlanTreeNodeUnary,
+    PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, StreamPlanRef, ToBatch,
+    ToStream, ToStreamContext, gen_filter_and_pushdown, generic,
 };
 use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMappingRewriteExt, Condition};
-use crate::{OptimizerContextRef, PlanRef};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct VectorSearchCore {
@@ -141,9 +142,9 @@ impl LogicalVectorSearch {
     }
 }
 
-impl_plan_tree_node_for_unary! { LogicalVectorSearch }
+impl_plan_tree_node_for_unary! { Logical, LogicalVectorSearch }
 
-impl PlanTreeNodeUnary for LogicalVectorSearch {
+impl PlanTreeNodeUnary<Logical> for LogicalVectorSearch {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -254,7 +255,7 @@ impl ColPrunable for LogicalVectorSearch {
     }
 }
 
-impl ExprRewritable for LogicalVectorSearch {
+impl ExprRewritable<Logical> for LogicalVectorSearch {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
@@ -290,13 +291,13 @@ impl ToStream for LogicalVectorSearch {
         bail!("LogicalVectorSearch can only for batch plan, not stream plan");
     }
 
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> crate::error::Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> crate::error::Result<StreamPlanRef> {
         bail!("LogicalVectorSearch can only for batch plan, not stream plan");
     }
 }
 
 impl ToBatch for LogicalVectorSearch {
-    fn to_batch(&self) -> crate::error::Result<PlanRef> {
+    fn to_batch(&self) -> crate::error::Result<BatchPlanRef> {
         let input = self.input().to_batch()?;
         let (neg, expr_type) = match self.core.distance_type {
             PbDistanceType::Unspecified => {
