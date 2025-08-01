@@ -353,7 +353,9 @@ impl RedShiftSinkWriter {
         param.properties.remove("intermediate.table.name");
         param.properties.remove("target.table.name");
         if let Some(schema_name) = param.properties.remove("schema") {
-            param.properties.insert("schema.name".to_owned(), schema_name);
+            param
+                .properties
+                .insert("schema.name".to_owned(), schema_name);
         }
         param
             .properties
