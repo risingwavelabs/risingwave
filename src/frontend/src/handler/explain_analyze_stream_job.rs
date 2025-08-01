@@ -190,7 +190,7 @@ mod net {
         dispatcher_fragment_ids: &[u32],
         profiling_duration: Duration,
     ) -> Result<ExecutorStats> {
-        let mut aggregated_stats = ExecutorStats::new();
+        let mut initial_aggregated_stats = ExecutorStats::new();
         for node in worker_nodes {
             let mut compute_client = handler_args.session.env().client_pool().get(node).await?;
             let stats = compute_client
@@ -201,15 +201,17 @@ mod net {
                 })
                 .await
                 .expect("get profiling stats failed");
-            aggregated_stats.start_record(
+            initial_aggregated_stats.record(
                 executor_ids,
                 dispatcher_fragment_ids,
                 &stats.into_inner(),
             );
         }
+        tracing::debug!(?initial_aggregated_stats, "initial aggregated stats");
 
         sleep(profiling_duration).await;
 
+        let mut final_aggregated_stats = ExecutorStats::new();
         for node in worker_nodes {
             let mut compute_client = handler_args.session.env().client_pool().get(node).await?;
             let stats = compute_client
@@ -220,14 +222,22 @@ mod net {
                 })
                 .await
                 .expect("get profiling stats failed");
-            aggregated_stats.finish_record(
+            final_aggregated_stats.record(
                 executor_ids,
                 dispatcher_fragment_ids,
                 &stats.into_inner(),
             );
         }
+        tracing::debug!(?final_aggregated_stats, "final aggregated stats");
 
-        Ok(aggregated_stats)
+        let delta_aggregated_stats = ExecutorStats::get_delta(
+            &initial_aggregated_stats,
+            &final_aggregated_stats,
+            executor_ids,
+            dispatcher_fragment_ids,
+        );
+
+        Ok(delta_aggregated_stats)
     }
 }
 
@@ -279,8 +289,8 @@ mod metrics {
             self.executor_stats.get(executor_id)
         }
 
-        /// Establish metrics baseline for profiling
-        pub(super) fn start_record<'a>(
+        /// Record metrics for profiling
+        pub(super) fn record<'a>(
             &mut self,
             executor_ids: &'a HashSet<ExecutorId>,
             dispatch_fragment_ids: &'a [FragmentId],
@@ -332,70 +342,58 @@ mod metrics {
             }
         }
 
-        /// Compute the deltas for reporting
-        pub(super) fn finish_record<'a>(
-            &mut self,
-            executor_ids: &'a HashSet<ExecutorId>,
-            dispatch_fragment_ids: &'a [FragmentId],
-            metrics: &'a GetProfileStatsResponse,
-        ) {
+        pub(super) fn get_delta(
+            initial: &Self,
+            other: &Self,
+            executor_ids: &HashSet<ExecutorId>,
+            dispatch_fragment_ids: &[FragmentId],
+        ) -> Self {
+            let mut delta_aggregated_stats = Self::new();
             for executor_id in executor_ids {
-                let Some(stats) = self.executor_stats.get_mut(executor_id) else {
+                let Some(initial_stats) = initial.executor_stats.get(executor_id) else {
+                    tracing::warn!("missing initial stats for executor {}", executor_id);
                     continue;
                 };
-                let Some(total_output_throughput) =
-                    metrics.stream_node_output_row_count.get(executor_id)
-                else {
+                let Some(other_stats) = other.executor_stats.get(executor_id) else {
+                    tracing::warn!("missing final stats for executor {}", executor_id);
                     continue;
                 };
-                let Some(total_output_pending_ns) = metrics
-                    .stream_node_output_blocking_duration_ns
-                    .get(executor_id)
-                else {
-                    continue;
+                let delta_stats = ExecutorMetrics {
+                    executor_id: *executor_id,
+                    epoch: 0,
+                    total_output_throughput: other_stats.total_output_throughput
+                        - initial_stats.total_output_throughput,
+                    total_output_pending_ns: other_stats.total_output_pending_ns
+                        - initial_stats.total_output_pending_ns,
                 };
-                let Some(throughput_delta) =
-                    total_output_throughput.checked_sub(stats.total_output_throughput)
-                else {
-                    continue;
-                };
-                let Some(output_ns_delta) =
-                    total_output_pending_ns.checked_sub(stats.total_output_pending_ns)
-                else {
-                    continue;
-                };
-                stats.total_output_throughput = throughput_delta;
-                stats.total_output_pending_ns = output_ns_delta;
+                delta_aggregated_stats
+                    .executor_stats
+                    .insert(*executor_id, delta_stats);
             }
 
             for fragment_id in dispatch_fragment_ids {
-                let Some(stats) = self.dispatch_stats.get_mut(fragment_id) else {
+                let Some(initial_stats) = initial.dispatch_stats.get(fragment_id) else {
+                    tracing::warn!("missing initial stats for fragment {}", fragment_id);
                     continue;
                 };
-                let Some(total_output_throughput) =
-                    metrics.dispatch_fragment_output_row_count.get(fragment_id)
-                else {
+                let Some(other_stats) = other.dispatch_stats.get(fragment_id) else {
+                    tracing::warn!("missing final stats for fragment {}", fragment_id);
                     continue;
                 };
-                let Some(total_output_pending_ns) = metrics
-                    .dispatch_fragment_output_blocking_duration_ns
-                    .get(fragment_id)
-                else {
-                    continue;
+                let delta_stats = DispatchMetrics {
+                    fragment_id: *fragment_id,
+                    epoch: 0,
+                    total_output_throughput: other_stats.total_output_throughput
+                        - initial_stats.total_output_throughput,
+                    total_output_pending_ns: other_stats.total_output_pending_ns
+                        - initial_stats.total_output_pending_ns,
                 };
-                let Some(throughput_delta) =
-                    total_output_throughput.checked_sub(stats.total_output_throughput)
-                else {
-                    continue;
-                };
-                let Some(output_ns_delta) =
-                    total_output_pending_ns.checked_sub(stats.total_output_pending_ns)
-                else {
-                    continue;
-                };
-                stats.total_output_throughput = throughput_delta;
-                stats.total_output_pending_ns = output_ns_delta;
+                delta_aggregated_stats
+                    .dispatch_stats
+                    .insert(*fragment_id, delta_stats);
             }
+
+            delta_aggregated_stats
         }
     }
 
