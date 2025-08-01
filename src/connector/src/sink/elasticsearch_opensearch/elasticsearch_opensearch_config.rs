@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use anyhow::anyhow;
+use maplit::hashset;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use serde::Deserialize;
@@ -26,12 +27,29 @@ use super::super::SinkError;
 use super::elasticsearch::ES_SINK;
 use super::elasticsearch_opensearch_client::ElasticSearchOpenSearchClient;
 use super::opensearch::OPENSEARCH_SINK;
+use crate::connector_common::ElasticsearchConnection;
+use crate::enforce_secret::EnforceSecret;
+use crate::error::ConnectorError;
 use crate::sink::Result;
 
 pub const ES_OPTION_DELIMITER: &str = "delimiter";
 pub const ES_OPTION_INDEX_COLUMN: &str = "index_column";
 pub const ES_OPTION_INDEX: &str = "index";
 pub const ES_OPTION_ROUTING_COLUMN: &str = "routing_column";
+
+#[serde_as]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
+pub struct ElasticSearchConfig {
+    #[serde(flatten)]
+    pub inner: ElasticSearchOpenSearchConfig,
+}
+
+#[serde_as]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
+pub struct OpenSearchConfig {
+    #[serde(flatten)]
+    pub inner: ElasticSearchOpenSearchConfig,
+}
 
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -82,6 +100,13 @@ pub struct ElasticSearchOpenSearchConfig {
     pub r#type: String,
 }
 
+impl EnforceSecret for ElasticSearchOpenSearchConfig {
+    const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf::phf_set! {
+        "username",
+        "password",
+    };
+}
+
 fn default_type() -> String {
     "upsert".to_owned()
 }
@@ -100,6 +125,49 @@ fn default_batch_size_kb() -> usize {
 
 fn default_concurrent_requests() -> usize {
     1024
+}
+
+impl TryFrom<&ElasticsearchConnection> for ElasticSearchOpenSearchConfig {
+    type Error = ConnectorError;
+
+    fn try_from(value: &ElasticsearchConnection) -> std::result::Result<Self, Self::Error> {
+        let allowed_fields: HashSet<&str> = hashset!["url", "username", "password"]; // from ElasticsearchOpenSearchConfig
+
+        for k in value.0.keys() {
+            if !allowed_fields.contains(k.as_str()) {
+                return Err(ConnectorError::from(anyhow!(
+                    "Invalid field: {}, allowed fields: {:?}",
+                    k,
+                    allowed_fields
+                )));
+            }
+        }
+
+        let config = serde_json::from_value::<ElasticSearchOpenSearchConfig>(
+            serde_json::to_value(value.0.clone()).unwrap(),
+        )
+        .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        Ok(config)
+    }
+}
+
+impl ElasticSearchConfig {
+    pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
+        let config = serde_json::from_value::<ElasticSearchConfig>(
+            serde_json::to_value(properties).unwrap(),
+        )
+        .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        Ok(config)
+    }
+}
+
+impl OpenSearchConfig {
+    pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
+        let config =
+            serde_json::from_value::<OpenSearchConfig>(serde_json::to_value(properties).unwrap())
+                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        Ok(config)
+    }
 }
 
 impl ElasticSearchOpenSearchConfig {

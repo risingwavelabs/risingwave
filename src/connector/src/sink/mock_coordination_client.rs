@@ -37,23 +37,29 @@ pub enum SinkCoordinationRpcClientEnum {
 impl SinkCoordinationRpcClientEnum {
     pub async fn new_stream_handle(
         self,
-        param: SinkParam,
+        param: &SinkParam,
         vnode_bitmap: Bitmap,
-    ) -> super::Result<CoordinatorStreamHandle> {
+    ) -> super::Result<(CoordinatorStreamHandle, Option<u64>)> {
         match self {
             SinkCoordinationRpcClientEnum::SinkCoordinationRpcClient(
                 sink_coordination_rpc_client,
-            ) => Ok(CoordinatorStreamHandle::new(
-                sink_coordination_rpc_client,
-                param.to_proto(),
-                vnode_bitmap,
-            )
-            .await?),
+            ) => {
+                let (handle, log_store_rewind_start_epoch) = CoordinatorStreamHandle::new(
+                    sink_coordination_rpc_client,
+                    param.to_proto(),
+                    vnode_bitmap,
+                )
+                .await?;
+                Ok((handle, log_store_rewind_start_epoch))
+            }
             SinkCoordinationRpcClientEnum::MockSinkCoordinationRpcClient(
                 mock_sink_coordination_rpc_client,
-            ) => Ok(mock_sink_coordination_rpc_client
-                .new_stream_handle(param.to_proto(), vnode_bitmap)
-                .await?),
+            ) => {
+                let handle = mock_sink_coordination_rpc_client
+                    .new_stream_handle(param.to_proto(), vnode_bitmap)
+                    .await?;
+                Ok((handle, None))
+            }
         }
     }
 }
@@ -95,10 +101,12 @@ impl MockSinkCoordinationRpcClient {
         param: PbSinkParam,
         vnode_bitmap: Bitmap,
     ) -> std::result::Result<CoordinatorStreamHandle, RpcError> {
-        CoordinatorStreamHandle::new_with_init_stream(param, vnode_bitmap, |rx| async move {
-            self.coordinate(rx).await
-        })
-        .await
+        let (res, _) =
+            CoordinatorStreamHandle::new_with_init_stream(param, vnode_bitmap, |rx| async move {
+                self.coordinate(rx).await
+            })
+            .await?;
+        Ok(res)
     }
 
     pub async fn coordinate(
@@ -132,7 +140,9 @@ impl MockSinkCoordinationRpcClient {
         response_tx
             .send(Ok(CoordinateResponse {
                 msg: Some(coordinate_response::Msg::StartResponse(
-                    StartCoordinationResponse {},
+                    StartCoordinationResponse {
+                        log_store_rewind_start_epoch: None,
+                    },
                 )),
             }))
             .await

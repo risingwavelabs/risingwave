@@ -28,6 +28,7 @@ use thiserror_ext::AsReport;
 use crate::cmd_impl::hummock::{
     build_compaction_config_vec, list_pinned_versions, migrate_legacy_object,
 };
+use crate::cmd_impl::scale::set_cdc_table_backfill_parallelism;
 use crate::cmd_impl::throttle::apply_throttle;
 use crate::common::CtlContext;
 
@@ -69,9 +70,10 @@ enum Commands {
     /// Commands for Benchmarks
     #[clap(subcommand)]
     Bench(BenchCommands),
-    /// Dump the await-tree of compute nodes and compactors
+    /// Commands for await-tree, such as dumping, analyzing and transcribing
+    #[clap(subcommand)]
     #[clap(visible_alias("trace"))]
-    AwaitTree,
+    AwaitTree(AwaitTreeCommands),
     // TODO(yuhao): profile other nodes
     /// Commands for profilng the compute nodes
     #[clap(subcommand)]
@@ -205,6 +207,8 @@ enum HummockCommands {
         level0_stop_write_threshold_max_sst_count: Option<u32>,
         #[clap(long)]
         level0_stop_write_threshold_max_size: Option<u64>,
+        #[clap(long)]
+        enable_optimize_l0_interval_selection: Option<bool>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -461,6 +465,37 @@ enum MetaCommands {
         #[clap(long, required = true)]
         endpoint: String,
     },
+
+    SetCdcTableBackfillParallelism {
+        #[clap(long, required = true)]
+        table_id: u32,
+        #[clap(long, required = true)]
+        parallelism: u32,
+    },
+}
+
+#[derive(Subcommand, Clone, Debug)]
+pub enum AwaitTreeCommands {
+    /// Dump Await Tree
+    Dump {
+        /// The format of actor traces in the diagnose file. Allowed values: `json`, `text`. `json` by default.
+        #[clap(short, long = "actor-traces-format")]
+        actor_traces_format: Option<String>,
+    },
+    /// Analyze Await Tree
+    Analyze {
+        /// The path to the diagnose file, if None, ctl will first pull one from the cluster
+        /// The actor traces format can be either `json` or `text`. The analyze command will
+        /// automatically detect the format.
+        #[clap(long = "path")]
+        path: Option<String>,
+    },
+    /// Transcribe Await Tree From JSON to Text format
+    Transcribe {
+        /// The path to the await tree file to be transcribed
+        #[clap(long = "path")]
+        path: String,
+    },
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -619,6 +654,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             emergency_level0_sub_level_partition,
             level0_stop_write_threshold_max_sst_count,
             level0_stop_write_threshold_max_size,
+            enable_optimize_l0_interval_selection,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -657,6 +693,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     emergency_level0_sub_level_partition,
                     level0_stop_write_threshold_max_sst_count,
                     level0_stop_write_threshold_max_size,
+                    enable_optimize_l0_interval_selection,
                 ),
             )
             .await?
@@ -847,7 +884,15 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::GraphCheck { endpoint }) => {
             cmd_impl::meta::graph_check(endpoint).await?
         }
-        Commands::AwaitTree => cmd_impl::await_tree::dump(context).await?,
+        Commands::AwaitTree(AwaitTreeCommands::Dump {
+            actor_traces_format,
+        }) => cmd_impl::await_tree::dump(context, actor_traces_format).await?,
+        Commands::AwaitTree(AwaitTreeCommands::Analyze { path }) => {
+            cmd_impl::await_tree::bottleneck_detect(context, path).await?
+        }
+        Commands::AwaitTree(AwaitTreeCommands::Transcribe { path }) => {
+            rw_diagnose_tools::await_tree::transcribe(path)?
+        }
         Commands::Profile(ProfileCommands::Cpu { sleep }) => {
             cmd_impl::profile::cpu_profile(context, sleep).await?
         }
@@ -867,6 +912,12 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Throttle(ThrottleCommands::Mv(args)) => {
             apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Mv, args).await?;
+        }
+        Commands::Meta(MetaCommands::SetCdcTableBackfillParallelism {
+            table_id,
+            parallelism,
+        }) => {
+            set_cdc_table_backfill_parallelism(context, table_id, parallelism).await?;
         }
     }
     Ok(())

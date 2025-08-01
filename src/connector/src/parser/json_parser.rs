@@ -28,7 +28,7 @@ use risingwave_common::catalog::Field;
 use risingwave_connector_codec::JsonSchema;
 
 use super::utils::{bytes_from_url, get_kafka_topic};
-use super::{JsonProperties, SchemaRegistryAuth};
+use super::{JsonProperties, SchemaRegistryConfig};
 use crate::error::ConnectorResult;
 use crate::parser::AccessBuilder;
 use crate::parser::unified::AccessImpl;
@@ -84,7 +84,7 @@ impl JsonAccessBuilder {
 
 pub async fn fetch_json_schema_and_map_to_columns(
     schema_location: &str,
-    schema_registry_auth: Option<SchemaRegistryAuth>,
+    schema_registry_auth: Option<SchemaRegistryConfig>,
     props: &BTreeMap<String, String>,
 ) -> ConnectorResult<Vec<Field>> {
     let url = handle_sr_list(schema_location)?;

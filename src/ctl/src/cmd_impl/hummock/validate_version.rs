@@ -171,9 +171,10 @@ pub async fn print_version_delta_in_archive(
     context: &CtlContext,
     archive_ids: impl IntoIterator<Item = HummockVersionId>,
     data_dir: String,
-    sst_id: HummockSstableObjectId,
+    sst_id: impl Into<HummockSstableObjectId>,
     use_new_object_prefix_strategy: bool,
 ) -> anyhow::Result<()> {
+    let sst_id = sst_id.into();
     let hummock_opts =
         HummockServiceOpts::from_env(Some(data_dir.clone()), use_new_object_prefix_strategy)?;
     let hummock = context.hummock_store(hummock_opts).await?;
@@ -215,7 +216,7 @@ fn match_delta(delta: &DeltaType, sst_id: HummockSstableObjectId) -> bool {
                 .inserted_table_infos
                 .iter()
                 .any(|sst| sst.sst_id == sst_id)
-                || delta.removed_table_ids.contains(&sst_id)
+                || delta.removed_table_ids.contains(&sst_id.inner())
         }
         DeltaType::NewL0SubLevel(delta) => delta
             .inserted_table_infos

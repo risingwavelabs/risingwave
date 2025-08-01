@@ -81,10 +81,10 @@ pub fn is_env_set(var: &str) -> bool {
     if let Ok(val) = std::env::var(var) {
         if let Ok(true) = val.parse() {
             return true;
-        } else if let Ok(x) = val.parse::<usize>() {
-            if x != 0 {
-                return true;
-            }
+        } else if let Ok(x) = val.parse::<usize>()
+            && x != 0
+        {
+            return true;
         }
     }
     false
@@ -106,7 +106,7 @@ pub fn risedev_cmd() -> &'static str {
     RISEDEV_CMD.as_str()
 }
 
-pub fn stylized_risedev_subcmd(subcmd: &str) -> impl Display {
+pub fn stylized_risedev_subcmd(subcmd: &str) -> impl Display + use<> {
     console::style(format!("{} {}", risedev_cmd(), subcmd))
         .blue()
         .bold()

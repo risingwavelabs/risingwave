@@ -51,12 +51,15 @@ impl DollarExpander {
                         for cap in self.re.captures_iter(v) {
                             let cap = cap.get(1).unwrap();
                             let name = cap.as_str();
-                            let value = if let Some(item) = y.get(&Yaml::String(name.to_owned())) {
-                                yaml_to_string(item)?
-                            } else if let Some(item) = self.extra_info.get(name) {
-                                item.clone()
-                            } else {
-                                return Err(anyhow!("{} not found in {:?}", name, y));
+                            let value = match y.get(&Yaml::String(name.to_owned())) {
+                                Some(item) => yaml_to_string(item)?,
+                                _ => {
+                                    if let Some(item) = self.extra_info.get(name) {
+                                        item.clone()
+                                    } else {
+                                        return Err(anyhow!("{} not found in {:?}", name, y));
+                                    }
+                                }
                             };
                             target += &v[last_location..(cap.start() - 2)]; // ignore `${`
                             target += &value;

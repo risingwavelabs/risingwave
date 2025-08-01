@@ -6,16 +6,15 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-chrono = { version = "0.4", default-features = false, features = [
+chrono = { workspace = true, features = [
     "clock",
     "std",
 ] }
 parking_lot = { workspace = true }
 risingwave_common = { workspace = true }
-thiserror = "1"
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tikv-jemalloc-ctl = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio" }

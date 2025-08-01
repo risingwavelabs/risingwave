@@ -48,10 +48,6 @@
         </dependency>
         <dependency>
             <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-deltalake</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
             <artifactId>s3-common</artifactId>
         </dependency>
         <dependency>

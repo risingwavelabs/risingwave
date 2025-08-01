@@ -18,7 +18,7 @@ use futures::stream;
 use risingwave_common::array::{Array, ArrayImpl, Op};
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::row::{self, OwnedRow as RowData, once};
+use risingwave_common::row::once;
 use risingwave_common::types::{DefaultOrd, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::{
@@ -257,24 +257,6 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         }
     }
 
-    async fn recover_rhs(&mut self) -> Result<Option<RowData>, StreamExecutorError> {
-        // Recover value for RHS if available
-        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
-        let rhs_stream = self
-            .right_table
-            .iter_with_prefix(row::empty(), sub_range, Default::default())
-            .await?;
-        pin_mut!(rhs_stream);
-
-        if let Some(res) = rhs_stream.next().await {
-            let value = res?.into_owned_row();
-            assert!(rhs_stream.next().await.is_none());
-            Ok(Some(value))
-        } else {
-            Ok(None)
-        }
-    }
-
     fn to_row_bound(bound: Bound<ScalarImpl>) -> Bound<impl Row> {
         bound.map(|s| once(Some(s)))
     }
@@ -327,7 +309,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         self.right_table.init_epoch(first_epoch).await?;
         self.left_table.init_epoch(first_epoch).await?;
 
-        let recovered_rhs = self.recover_rhs().await?;
+        let recovered_rhs = self.right_table.get_from_one_row_table().await?;
         let recovered_rhs_value = recovered_rhs.as_ref().map(|r| r[0].clone());
         // At the beginning of an epoch, the `committed_rhs_value` == `staging_rhs_value`
         let mut committed_rhs_value: Option<Datum> = recovered_rhs_value.clone();
@@ -552,7 +534,7 @@ mod tests {
         )
         .await;
         let state_table_r = StateTable::from_table_catalog(
-            &gen_pbtable(TableId::new(1), column_descs, order_types, pk_indices, 0),
+            &gen_pbtable(TableId::new(1), column_descs, vec![], vec![], 0),
             mem_state,
             None,
         )

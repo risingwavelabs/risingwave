@@ -14,7 +14,7 @@
 
 //! Common utilities shared by JSON parser benchmarks.
 
-use rand::distributions::Alphanumeric;
+use rand::distr::Alphanumeric;
 use rand::prelude::*;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::types::{DataType, Date, Timestamp};
@@ -25,20 +25,20 @@ pub const NUM_RECORDS: usize = 1 << 18; // ~ 250,000
 pub fn generate_json_row(rng: &mut impl Rng) -> String {
     format!(
         "{{\"i32\":{},\"bool\":{},\"i16\":{},\"i64\":{},\"f32\":{},\"f64\":{},\"varchar\":\"{}\",\"date\":\"{}\",\"timestamp\":\"{}\"}}",
-        rng.gen::<i32>(),
-        rng.gen::<bool>(),
-        rng.gen::<i16>(),
-        rng.gen::<i64>(),
-        rng.gen::<f32>(),
-        rng.gen::<f64>(),
+        rng.random::<i32>(),
+        rng.random::<bool>(),
+        rng.random::<i16>(),
+        rng.random::<i64>(),
+        rng.random::<f32>(),
+        rng.random::<f64>(),
         rng.sample_iter(&Alphanumeric)
             .take(7)
             .map(char::from)
             .collect::<String>(),
-        Date::from_num_days_from_ce_uncheck((rng.gen::<u32>() % (1 << 20)) as i32).0,
+        Date::from_num_days_from_ce_uncheck((rng.random::<u32>() % (1 << 20)) as i32).0,
         {
             let datetime =
-                Timestamp::from_timestamp_uncheck((rng.gen::<u32>() % (1u32 << 28)) as i64, 0).0;
+                Timestamp::from_timestamp_uncheck((rng.random::<u32>() % (1u32 << 28)) as i64, 0).0;
             format!("{:?} {:?}", datetime.date(), datetime.time())
         }
     )

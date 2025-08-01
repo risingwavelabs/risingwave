@@ -84,7 +84,8 @@ where
 
     // `TOKIO` will be read by tokio. Duplicate `RW` for compatibility.
     if let Some(worker_threads) = std::env::var_os("RW_WORKER_THREADS") {
-        std::env::set_var("TOKIO_WORKER_THREADS", worker_threads);
+        // safety: single-threaded now.
+        unsafe { std::env::set_var("TOKIO_WORKER_THREADS", worker_threads) };
     }
 
     // Set the default number of worker threads to be at least `MIN_WORKER_THREADS`, in production.
@@ -102,7 +103,8 @@ where
             tracing::warn!(
                 "the default number of worker threads ({worker_threads}) is too small, which may lead to issues, increasing to {MIN_WORKER_THREADS}"
             );
-            std::env::set_var("TOKIO_WORKER_THREADS", MIN_WORKER_THREADS.to_string());
+            // safety: single-threaded now.
+            unsafe { std::env::set_var("TOKIO_WORKER_THREADS", MIN_WORKER_THREADS.to_string()) };
         }
     }
 

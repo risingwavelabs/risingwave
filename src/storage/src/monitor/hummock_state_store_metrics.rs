@@ -39,20 +39,20 @@ use tracing::warn;
 /// job or an executor should be collected by views like `StateStats` and `JobStats`.
 #[derive(Debug, Clone)]
 pub struct HummockStateStoreMetrics {
-    pub bloom_filter_true_negative_counts: RelabeledGuardedIntCounterVec<2>,
-    pub bloom_filter_check_counts: RelabeledGuardedIntCounterVec<2>,
+    pub bloom_filter_true_negative_counts: RelabeledGuardedIntCounterVec,
+    pub bloom_filter_check_counts: RelabeledGuardedIntCounterVec,
     pub iter_merge_sstable_counts: RelabeledHistogramVec,
-    pub sst_store_block_request_counts: RelabeledGuardedIntCounterVec<2>,
-    pub iter_scan_key_counts: RelabeledGuardedIntCounterVec<2>,
+    pub sst_store_block_request_counts: RelabeledGuardedIntCounterVec,
+    pub iter_scan_key_counts: RelabeledGuardedIntCounterVec,
     pub get_shared_buffer_hit_counts: RelabeledCounterVec,
     pub remote_read_time: RelabeledHistogramVec,
-    pub iter_fetch_meta_duration: RelabeledGuardedHistogramVec<1>,
+    pub iter_fetch_meta_duration: RelabeledGuardedHistogramVec,
     pub iter_fetch_meta_cache_unhits: IntGauge,
     pub iter_slow_fetch_meta_cache_unhits: IntGauge,
 
-    pub read_req_bloom_filter_positive_counts: RelabeledGuardedIntCounterVec<2>,
-    pub read_req_positive_but_non_exist_counts: RelabeledGuardedIntCounterVec<2>,
-    pub read_req_check_bloom_filter_counts: RelabeledGuardedIntCounterVec<2>,
+    pub read_req_bloom_filter_positive_counts: RelabeledGuardedIntCounterVec,
+    pub read_req_positive_but_non_exist_counts: RelabeledGuardedIntCounterVec,
+    pub read_req_check_bloom_filter_counts: RelabeledGuardedIntCounterVec,
 
     pub write_batch_tuple_counts: RelabeledCounterVec,
     pub write_batch_duration: RelabeledHistogramVec,

@@ -6,7 +6,6 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 anyhow = "1"
@@ -21,7 +20,7 @@ tracing = "0.1"
 url = "2"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1.44", features = ["full"] }
 tracing-subscriber = "0.3"
 
 [build-dependencies]

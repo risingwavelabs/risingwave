@@ -15,13 +15,12 @@
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
+use phf::{Set, phf_set};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
-use crate::sink::{
-    DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkError, SinkLogReader, SinkParam,
-    SinkWriterParam,
-};
+use crate::sink::{LogSinker, Result, Sink, SinkError, SinkLogReader, SinkParam, SinkWriterParam};
 
 pub const BLACKHOLE_SINK: &str = "blackhole";
 pub const TABLE_SINK: &str = "table";
@@ -51,6 +50,10 @@ pub type TableSink = TrivialSink<TableSinkName>;
 #[derive(Debug)]
 pub struct TrivialSink<T: TrivialSinkName>(PhantomData<T>);
 
+impl<T: TrivialSinkName> EnforceSecret for TrivialSink<T> {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {};
+}
+
 impl<T: TrivialSinkName> TryFrom<SinkParam> for TrivialSink<T> {
     type Error = SinkError;
 
@@ -60,14 +63,21 @@ impl<T: TrivialSinkName> TryFrom<SinkParam> for TrivialSink<T> {
 }
 
 impl<T: TrivialSinkName> Sink for TrivialSink<T> {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = Self;
 
     const SINK_NAME: &'static str = T::SINK_NAME;
 
-    // Disable sink decoupling for all trivial sinks because it introduces overhead without any benefit
-    fn is_sink_decouple(_user_specified: &SinkDecouple) -> Result<bool> {
-        Ok(false)
+    /// Enable sink decoupling for sink-into-table.
+    /// Disable sink decoupling for blackhole sink. It introduces overhead without any benefit
+    fn is_sink_decouple(user_specified: &SinkDecouple) -> Result<bool> {
+        match user_specified {
+            SinkDecouple::Enable => Ok(true),
+            SinkDecouple::Default | SinkDecouple::Disable => Ok(false),
+        }
+    }
+
+    fn support_schema_change() -> bool {
+        true
     }
 
     async fn new_log_sinker(&self, _writer_env: SinkWriterParam) -> Result<Self::LogSinker> {
@@ -81,7 +91,8 @@ impl<T: TrivialSinkName> Sink for TrivialSink<T> {
 
 #[async_trait]
 impl<T: TrivialSinkName> LogSinker for TrivialSink<T> {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+    async fn consume_log_and_sink(self, mut log_reader: impl SinkLogReader) -> Result<!> {
+        log_reader.start_from(None).await?;
         loop {
             let (epoch, item) = log_reader.next_item().await?;
             match item {
@@ -91,7 +102,6 @@ impl<T: TrivialSinkName> LogSinker for TrivialSink<T> {
                 LogStoreReadItem::Barrier { .. } => {
                     log_reader.truncate(TruncateOffset::Barrier { epoch })?;
                 }
-                LogStoreReadItem::UpdateVnodeBitmap(_) => {}
             }
         }
     }

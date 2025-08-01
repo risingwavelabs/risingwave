@@ -29,3 +29,15 @@
     StreamProject { exprs: [t2.b, null:Int32] }
     └─StreamSink { type: upsert, columns: [b], downstream_pk: [t2.b] }
       └─StreamTableScan { table: t2, columns: [b] }
+- id: create decoupled sink into table
+  sql: |
+    create table t1 (a int primary key, b int);
+    create table t2 (a int, b int primary key);
+    set sink_decouple = true;
+    explain create sink s into t1 from t2;
+  explain_output: |
+    StreamProject { exprs: [t2.a, t2.b] }
+    └─StreamSink { type: upsert, columns: [a, b], downstream_pk: [t2.a] }
+      └─StreamSyncLogStore { buffer_size: 2048, pause_duration_ms: 64 }
+        └─StreamExchange { dist: HashShard(t2.a) }
+          └─StreamTableScan { table: t2, columns: [a, b] }

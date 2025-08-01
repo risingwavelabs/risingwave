@@ -27,8 +27,8 @@
 #![feature(coroutines)]
 #![feature(test)]
 #![feature(iter_array_chunks)]
-#![feature(result_flattening)]
 #![feature(used_with_arg)]
+#![feature(coverage_attribute)]
 
 mod aggregate;
 mod scalar;

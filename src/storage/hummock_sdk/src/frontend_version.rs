@@ -22,7 +22,9 @@ use risingwave_pb::hummock::{
     StateTableInfoDelta,
 };
 
-use crate::change_log::{ChangeLogDeltaCommon, EpochNewChangeLogCommon, TableChangeLogCommon};
+use crate::change_log::{
+    ChangeLogDeltaCommon, EpochNewChangeLogCommon, TableChangeLogCommon, resolve_pb_log_epochs,
+};
 use crate::version::{HummockVersion, HummockVersionDelta, HummockVersionStateTableInfo};
 use crate::{HummockVersionId, INVALID_VERSION_ID};
 
@@ -46,9 +48,10 @@ impl FrontendHummockVersion {
                         *table_id,
                         TableChangeLogCommon::new(change_log.iter().map(|change_log| {
                             EpochNewChangeLogCommon {
-                                new_value: vec![],
-                                old_value: vec![],
-                                epochs: change_log.epochs.clone(),
+                                new_value: vec![(); change_log.new_value.len()],
+                                old_value: vec![(); change_log.new_value.len()],
+                                non_checkpoint_epochs: change_log.non_checkpoint_epochs.clone(),
+                                checkpoint_epoch: change_log.checkpoint_epoch,
                             }
                         })),
                     )
@@ -74,9 +77,15 @@ impl FrontendHummockVersion {
                             change_logs: change_log
                                 .iter()
                                 .map(|change_log| PbEpochNewChangeLog {
-                                    old_value: vec![],
-                                    new_value: vec![],
-                                    epochs: change_log.epochs.clone(),
+                                    old_value: vec![
+                                        PbSstableInfo::default();
+                                        change_log.old_value.len()
+                                    ],
+                                    new_value: vec![
+                                        PbSstableInfo::default();
+                                        change_log.new_value.len()
+                                    ],
+                                    epochs: change_log.epochs().collect(),
                                 })
                                 .collect(),
                         },
@@ -84,6 +93,7 @@ impl FrontendHummockVersion {
                 })
                 .collect(),
             state_table_info: self.state_table_info.to_protobuf(),
+            vector_indexes: Default::default(),
         }
     }
 
@@ -98,10 +108,16 @@ impl FrontendHummockVersion {
                     (
                         TableId::new(table_id),
                         TableChangeLogCommon::new(change_log.change_logs.into_iter().map(
-                            |change_log| EpochNewChangeLogCommon {
-                                new_value: vec![],
-                                old_value: vec![],
-                                epochs: change_log.epochs,
+                            |change_log| {
+                                let (non_checkpoint_epochs, checkpoint_epoch) =
+                                    resolve_pb_log_epochs(&change_log.epochs);
+                                EpochNewChangeLogCommon {
+                                    // Here we need to determine if value is null but don't care what the value is, so we fill him in using `()`
+                                    new_value: vec![(); change_log.new_value.len()],
+                                    old_value: vec![(); change_log.old_value.len()],
+                                    non_checkpoint_epochs,
+                                    checkpoint_epoch,
+                                }
                             },
                         )),
                     )
@@ -155,7 +171,11 @@ impl FrontendHummockVersionDelta {
                                 // Here we need to determine if value is null but don't care what the value is, so we fill him in using `()`
                                 new_value: vec![(); change_log_delta.new_log.new_value.len()],
                                 old_value: vec![(); change_log_delta.new_log.old_value.len()],
-                                epochs: change_log_delta.new_log.epochs.clone(),
+                                non_checkpoint_epochs: change_log_delta
+                                    .new_log
+                                    .non_checkpoint_epochs
+                                    .clone(),
+                                checkpoint_epoch: change_log_delta.new_log.checkpoint_epoch,
                             },
                         },
                     )
@@ -195,7 +215,7 @@ impl FrontendHummockVersionDelta {
                                     PbSstableInfo::default();
                                     delta.new_log.new_value.len()
                                 ],
-                                epochs: delta.new_log.epochs.clone(),
+                                epochs: delta.new_log.epochs().collect(),
                             }),
                             truncate_epoch: delta.truncate_epoch,
                         },
@@ -207,6 +227,7 @@ impl FrontendHummockVersionDelta {
                 .iter()
                 .map(|(table_id, delta)| (table_id.table_id, *delta))
                 .collect(),
+            vector_index_delta: Default::default(),
         }
     }
 
@@ -236,11 +257,14 @@ impl FrontendHummockVersionDelta {
                                 .new_log
                                 .as_ref()
                                 .map(|new_log| {
+                                    let (non_checkpoint_epochs, checkpoint_epoch) =
+                                        resolve_pb_log_epochs(&new_log.epochs);
                                     EpochNewChangeLogCommon {
                                         // Here we need to determine if value is null but don't care what the value is, so we fill him in using `()`
                                         new_value: vec![(); new_log.new_value.len()],
                                         old_value: vec![(); new_log.old_value.len()],
-                                        epochs: new_log.epochs.clone(),
+                                        non_checkpoint_epochs,
+                                        checkpoint_epoch,
                                     }
                                 })
                                 .unwrap(),

@@ -142,7 +142,7 @@ pub mod tests {
             level_type: LevelType::Overlapping,
             total_file_size: sst.sst_size,
             uncompressed_file_size: sst.uncompressed_file_size,
-            sub_level_id: sst.sst_id,
+            sub_level_id: sst.sst_id.inner(),
             table_infos: vec![sst],
             ..Default::default()
         });
@@ -159,7 +159,7 @@ pub mod tests {
             .iter()
             .map(|table| table.uncompressed_file_size)
             .sum();
-        let sub_level_id = table_infos[0].sst_id;
+        let sub_level_id = table_infos[0].sst_id.inner();
         levels.l0.total_file_size += total_file_size;
         levels.l0.sub_levels.push(Level {
             level_idx: 0,
@@ -191,8 +191,8 @@ pub mod tests {
     ) -> SstableInfoInner {
         let object_size = (right - left + 1) as u64;
         SstableInfoInner {
-            object_id: id,
-            sst_id: id,
+            object_id: id.into(),
+            sst_id: id.into(),
             key_range: KeyRange {
                 left: iterator_test_key_of_epoch(table_prefix, left, epoch).into(),
                 right: iterator_test_key_of_epoch(table_prefix, right, epoch).into(),
@@ -220,8 +220,8 @@ pub mod tests {
     ) -> SstableInfo {
         let object_size = (right - left + 1) as u64;
         SstableInfoInner {
-            object_id: id,
-            sst_id: id,
+            object_id: id.into(),
+            sst_id: id.into(),
             key_range: KeyRange {
                 left: iterator_test_key_of_epoch(table_prefix, left, epoch).into(),
                 right: iterator_test_key_of_epoch(table_prefix, right, epoch).into(),

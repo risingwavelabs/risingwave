@@ -14,7 +14,7 @@ Meanwhile, components such as metadata provider, scheduler, monitoring are more 
 
 Metadata should be regarded as transactional data. Especially, we need guarantees like atomicity, consistency (e.g. read-after-write) and transaction support. Besides, it's not necessary to scale out it to multiple nodes.
 
-We choose [etcd](https://etcd.io/) for production deployments, which is a replicated key-value storage based on B-Tree and Raft protocol.
+We choose [PostgreSQL](https://www.postgresql.org/) for production deployments, which is a robust, open-source OLTP database system, providing reliable and persistent data storage with strong support for data integrity and complex queries.
 
 To fit into the key-value data model, metadata entries are serialized with Protobuf as the value and the key is the ID or version of them, with respect to the kind of metadata.
 

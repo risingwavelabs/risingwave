@@ -614,3 +614,82 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name: subqueries in case when exprs
+  sql: |
+    WITH input AS (
+        SELECT
+            'Empty JSON item' AS test_case,
+            ('{}'::JSONB) AS item
+    )
+
+    SELECT
+        test_case,
+
+        CASE
+    	    WHEN JSONB_PATH_QUERY_FIRST(JSONB_PATH_QUERY_FIRST(item, '$.binary_set_attribute'), '$.BS') IS NULL THEN NULL
+            ELSE ARRAY(
+                SELECT parsed_item
+                FROM (
+                    SELECT DECODE(((nested_item) #>> '{}'), 'base64') AS parsed_item
+                    FROM (
+                        SELECT nested_item
+                        FROM JSONB_ARRAY_ELEMENTS(JSONB_PATH_QUERY_FIRST((JSONB_PATH_QUERY_FIRST(item, '$.binary_set_attribute')), '$.BS'))
+                        AS t(nested_item)
+                    )
+                )
+                ORDER BY parsed_item
+            )
+        END AS binary_set_attribute,
+
+        CASE
+            WHEN JSONB_PATH_QUERY_FIRST(JSONB_PATH_QUERY_FIRST(item, '$.number_set_attribute'), '$.NS') IS NULL THEN NULL
+            ELSE ARRAY(
+                SELECT parsed_item
+                FROM (
+                    SELECT CAST(nested_item #>> '{}' AS BIGINT) AS parsed_item
+                    FROM (
+        				SELECT nested_item
+        				FROM JSONB_ARRAY_ELEMENTS(JSONB_PATH_QUERY_FIRST((JSONB_PATH_QUERY_FIRST(item, '$.number_set_attribute')), '$.NS'))
+        				AS t(nested_item)
+    				)
+                )
+                ORDER BY parsed_item
+            )
+        END AS number_set_attribute,
+
+        CASE
+    	    WHEN JSONB_PATH_QUERY_FIRST((JSONB_PATH_QUERY_FIRST(item, '$.float_set_attribute')), '$.NS') IS NULL THEN NULL
+            ELSE ARRAY(
+                SELECT parsed_item
+                FROM (
+                    SELECT CAST(nested_item #>> '{}' AS FLOAT)
+                    AS parsed_item
+                    FROM (
+        				SELECT nested_item
+    				    FROM JSONB_ARRAY_ELEMENTS(JSONB_PATH_QUERY_FIRST((JSONB_PATH_QUERY_FIRST(item, '$.float_set_attribute')), '$.NS'))
+        				AS t(nested_item)
+    				)
+                )
+                ORDER BY parsed_item
+            )
+        END AS float_set_attribute,
+
+        CASE
+    	    WHEN JSONB_PATH_QUERY_FIRST((JSONB_PATH_QUERY_FIRST(item, '$.string_set_attribute')), '$.SS') IS NULL THEN NULL
+            ELSE ARRAY(
+                SELECT parsed_item
+                FROM (
+                    SELECT nested_item #>> '{}' AS parsed_item
+                    FROM (
+        				SELECT nested_item
+        				FROM JSONB_ARRAY_ELEMENTS(JSONB_PATH_QUERY_FIRST((JSONB_PATH_QUERY_FIRST(item, '$.string_set_attribute')), '$.SS'))
+        				AS t(nested_item)
+    				)
+                )
+                ORDER BY parsed_item
+            )
+        END AS string_set_attribute
+    FROM input
+  expected_outputs:
+    - batch_plan
+    - stream_plan

@@ -21,8 +21,8 @@ pub struct GetAmountResponse {
 /// Generated client implementations.
 pub mod model_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
-    use tonic::codegen::http::Uri;
     use tonic::codegen::*;
+    use tonic::codegen::http::Uri;
     #[derive(Debug, Clone)]
     pub struct ModelClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -49,12 +49,10 @@ pub mod model_client {
             let inner = tonic::client::Grpc::new(inner);
             Self { inner }
         }
-
         pub fn with_origin(inner: T, origin: Uri) -> Self {
             let inner = tonic::client::Grpc::with_origin(inner, origin);
             Self { inner }
         }
-
         pub fn with_interceptor<F>(
             inner: T,
             interceptor: F,
@@ -68,12 +66,12 @@ pub mod model_client {
                     <T as tonic::client::GrpcService<tonic::body::BoxBody>>::ResponseBody,
                 >,
             >,
-            <T as tonic::codegen::Service<http::Request<tonic::body::BoxBody>>>::Error:
-                Into<StdError> + Send + Sync,
+            <T as tonic::codegen::Service<
+                http::Request<tonic::body::BoxBody>,
+            >>::Error: Into<StdError> + Send + Sync,
         {
             ModelClient::new(InterceptedService::new(inner, interceptor))
         }
-
         /// Compress requests with the given encoding.
         ///
         /// This requires the server to support it otherwise it might respond with an
@@ -83,14 +81,12 @@ pub mod model_client {
             self.inner = self.inner.send_compressed(encoding);
             self
         }
-
         /// Enable decompressing responses.
         #[must_use]
         pub fn accept_compressed(mut self, encoding: CompressionEncoding) -> Self {
             self.inner = self.inner.accept_compressed(encoding);
             self
         }
-
         /// Limits the maximum size of a decoded message.
         ///
         /// Default: `4MB`
@@ -99,7 +95,6 @@ pub mod model_client {
             self.inner = self.inner.max_decoding_message_size(limit);
             self
         }
-
         /// Limits the maximum size of an encoded message.
         ///
         /// Default: `usize::MAX`
@@ -108,40 +103,48 @@ pub mod model_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
-
         pub async fn get_amount(
             &mut self,
             request: impl tonic::IntoRequest<super::GetAmountRequest>,
-        ) -> std::result::Result<tonic::Response<super::GetAmountResponse>, tonic::Status> {
-            self.inner.ready().await.map_err(|e| {
-                tonic::Status::new(
-                    tonic::Code::Unknown,
-                    format!("Service was not ready: {}", e.into()),
-                )
-            })?;
+        ) -> std::result::Result<
+            tonic::Response<super::GetAmountResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static("/model.Model/GetAmount");
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(GrpcMethod::new("model.Model", "GetAmount"));
+            req.extensions_mut().insert(GrpcMethod::new("model.Model", "GetAmount"));
             self.inner.unary(req, path, codec).await
         }
-
         pub async fn training(
             &mut self,
             request: impl tonic::IntoRequest<super::TrainingRequest>,
-        ) -> std::result::Result<tonic::Response<super::TrainingResponse>, tonic::Status> {
-            self.inner.ready().await.map_err(|e| {
-                tonic::Status::new(
-                    tonic::Code::Unknown,
-                    format!("Service was not ready: {}", e.into()),
-                )
-            })?;
+        ) -> std::result::Result<
+            tonic::Response<super::TrainingResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static("/model.Model/Training");
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(GrpcMethod::new("model.Model", "Training"));
+            req.extensions_mut().insert(GrpcMethod::new("model.Model", "Training"));
             self.inner.unary(req, path, codec).await
         }
     }
@@ -156,11 +159,17 @@ pub mod model_server {
         async fn get_amount(
             &self,
             request: tonic::Request<super::GetAmountRequest>,
-        ) -> std::result::Result<tonic::Response<super::GetAmountResponse>, tonic::Status>;
+        ) -> std::result::Result<
+            tonic::Response<super::GetAmountResponse>,
+            tonic::Status,
+        >;
         async fn training(
             &self,
             request: tonic::Request<super::TrainingRequest>,
-        ) -> std::result::Result<tonic::Response<super::TrainingResponse>, tonic::Status>;
+        ) -> std::result::Result<
+            tonic::Response<super::TrainingResponse>,
+            tonic::Status,
+        >;
     }
     #[derive(Debug)]
     pub struct ModelServer<T: Model> {
@@ -175,7 +184,6 @@ pub mod model_server {
         pub fn new(inner: T) -> Self {
             Self::from_arc(Arc::new(inner))
         }
-
         pub fn from_arc(inner: Arc<T>) -> Self {
             let inner = _Inner(inner);
             Self {
@@ -186,28 +194,27 @@ pub mod model_server {
                 max_encoding_message_size: None,
             }
         }
-
-        pub fn with_interceptor<F>(inner: T, interceptor: F) -> InterceptedService<Self, F>
+        pub fn with_interceptor<F>(
+            inner: T,
+            interceptor: F,
+        ) -> InterceptedService<Self, F>
         where
             F: tonic::service::Interceptor,
         {
             InterceptedService::new(Self::new(inner), interceptor)
         }
-
         /// Enable decompressing requests with the given encoding.
         #[must_use]
         pub fn accept_compressed(mut self, encoding: CompressionEncoding) -> Self {
             self.accept_compression_encodings.enable(encoding);
             self
         }
-
         /// Compress responses with the given encoding, if the client supports it.
         #[must_use]
         pub fn send_compressed(mut self, encoding: CompressionEncoding) -> Self {
             self.send_compression_encodings.enable(encoding);
             self
         }
-
         /// Limits the maximum size of a decoded message.
         ///
         /// Default: `4MB`
@@ -216,7 +223,6 @@ pub mod model_server {
             self.max_decoding_message_size = Some(limit);
             self
         }
-
         /// Limits the maximum size of an encoded message.
         ///
         /// Default: `usize::MAX`
@@ -232,34 +238,36 @@ pub mod model_server {
         B: Body + Send + 'static,
         B::Error: Into<StdError> + Send + 'static,
     {
+        type Response = http::Response<tonic::body::BoxBody>;
         type Error = std::convert::Infallible;
         type Future = BoxFuture<Self::Response, Self::Error>;
-        type Response = http::Response<tonic::body::BoxBody>;
-
         fn poll_ready(
             &mut self,
             _cx: &mut Context<'_>,
         ) -> Poll<std::result::Result<(), Self::Error>> {
             Poll::Ready(Ok(()))
         }
-
         fn call(&mut self, req: http::Request<B>) -> Self::Future {
             let inner = self.inner.clone();
             match req.uri().path() {
                 "/model.Model/GetAmount" => {
                     #[allow(non_camel_case_types)]
                     struct GetAmountSvc<T: Model>(pub Arc<T>);
-                    impl<T: Model> tonic::server::UnaryService<super::GetAmountRequest> for GetAmountSvc<T> {
-                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
+                    impl<T: Model> tonic::server::UnaryService<super::GetAmountRequest>
+                    for GetAmountSvc<T> {
                         type Response = super::GetAmountResponse;
-
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GetAmountRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut =
-                                async move { <T as Model>::get_amount(&inner, request).await };
+                            let fut = async move {
+                                <T as Model>::get_amount(&inner, request).await
+                            };
                             Box::pin(fut)
                         }
                     }
@@ -289,16 +297,21 @@ pub mod model_server {
                 "/model.Model/Training" => {
                     #[allow(non_camel_case_types)]
                     struct TrainingSvc<T: Model>(pub Arc<T>);
-                    impl<T: Model> tonic::server::UnaryService<super::TrainingRequest> for TrainingSvc<T> {
-                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
+                    impl<T: Model> tonic::server::UnaryService<super::TrainingRequest>
+                    for TrainingSvc<T> {
                         type Response = super::TrainingResponse;
-
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::TrainingRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move { <T as Model>::training(&inner, request).await };
+                            let fut = async move {
+                                <T as Model>::training(&inner, request).await
+                            };
                             Box::pin(fut)
                         }
                     }
@@ -325,14 +338,18 @@ pub mod model_server {
                     };
                     Box::pin(fut)
                 }
-                _ => Box::pin(async move {
-                    Ok(http::Response::builder()
-                        .status(200)
-                        .header("grpc-status", "12")
-                        .header("content-type", "application/grpc")
-                        .body(empty_body())
-                        .unwrap())
-                }),
+                _ => {
+                    Box::pin(async move {
+                        Ok(
+                            http::Response::builder()
+                                .status(200)
+                                .header("grpc-status", "12")
+                                .header("content-type", "application/grpc")
+                                .body(empty_body())
+                                .unwrap(),
+                        )
+                    })
+                }
             }
         }
     }

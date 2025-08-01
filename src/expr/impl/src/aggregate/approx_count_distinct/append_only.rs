@@ -18,7 +18,7 @@ use risingwave_expr::Result;
 
 use super::Bucket;
 
-#[derive(Clone, Copy, Default, Debug, EstimateSize)]
+#[derive(Clone, Copy, Default, Debug, EstimateSize, PartialEq, Eq)]
 pub struct AppendOnlyBucket(pub u8);
 
 impl Bucket for AppendOnlyBucket {

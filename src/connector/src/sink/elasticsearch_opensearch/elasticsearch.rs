@@ -16,9 +16,10 @@ use risingwave_common::catalog::Schema;
 use tonic::async_trait;
 
 use super::super::writer::{AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriterExt};
-use super::super::{DummySinkCommitCoordinator, Sink, SinkError, SinkParam, SinkWriterParam};
+use super::super::{Sink, SinkError, SinkParam, SinkWriterParam};
 use super::elasticsearch_opensearch_client::ElasticSearchOpenSearchSinkWriter;
-use super::elasticsearch_opensearch_config::ElasticSearchOpenSearchConfig;
+use super::elasticsearch_opensearch_config::{ElasticSearchConfig, ElasticSearchOpenSearchConfig};
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::Result;
 
 pub const ES_SINK: &str = "elasticsearch";
@@ -31,13 +32,24 @@ pub struct ElasticSearchSink {
     is_append_only: bool,
 }
 
+impl EnforceSecret for ElasticSearchSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            ElasticSearchOpenSearchConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
+}
+
 #[async_trait]
 impl TryFrom<SinkParam> for ElasticSearchSink {
     type Error = SinkError;
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = ElasticSearchOpenSearchConfig::from_btreemap(param.properties)?;
+        let config = ElasticSearchConfig::from_btreemap(param.properties)?.inner;
         Ok(Self {
             config,
             schema,
@@ -48,7 +60,6 @@ impl TryFrom<SinkParam> for ElasticSearchSink {
 }
 
 impl Sink for ElasticSearchSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = AsyncTruncateLogSinkerOf<ElasticSearchOpenSearchSinkWriter>;
 
     const SINK_NAME: &'static str = ES_SINK;

@@ -43,6 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "expr",
         "health",
         "hummock",
+        "iceberg_compaction",
         "java_binding",
         "meta",
         "monitor_service",
@@ -53,6 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "task_service",
         "telemetry",
         "user",
+        "serverless_backfill_controller",
         "secret",
         "frontend_service",
     ];
@@ -81,6 +83,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ".stream_plan.StreamSource",
         ".batch_plan.SourceNode",
         ".batch_plan.IcebergScanNode",
+        ".iceberg_compaction.IcebergCompactionTask",
     ];
 
     // Build protobuf structs.
@@ -101,6 +104,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute(
             "node_body",
             "#[derive(::enum_as_inner::EnumAsInner, ::strum::Display, ::strum::EnumDiscriminants)]",
+        )
+        .type_attribute(
+            "node_body",
+            "#[strum_discriminants(derive(::strum::Display, Hash))]",
         )
         .type_attribute("rex_node", "#[derive(::enum_as_inner::EnumAsInner)]")
         .type_attribute(
@@ -160,6 +167,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .boxed(".stream_plan.StreamNode.node_body.row_merge")
         .boxed(".stream_plan.StreamNode.node_body.as_of_join")
         .boxed(".stream_plan.StreamNode.node_body.sync_log_store")
+        .boxed(".stream_plan.StreamNode.node_body.materialized_exprs")
         // `Udf` is 248 bytes, while 2nd largest field is 32 bytes.
         .boxed(".expr.ExprNode.rex_node.udf")
         // Eq + Hash are for plan nodes to do common sub-plan detection.

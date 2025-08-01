@@ -20,7 +20,7 @@
 
 use std::sync::Arc;
 
-pub use super::arrow_53::{
+pub use super::arrow_54::{
     FromArrow, ToArrow, arrow_array, arrow_buffer, arrow_cast, arrow_schema,
 };
 use crate::array::{ArrayError, ArrayImpl, DataType, DecimalArray, JsonbArray};
@@ -276,6 +276,12 @@ mod tests {
             MapArray
             [
               StructArray
+            -- validity:
+            [
+              valid,
+              valid,
+              valid,
+            ]
             [
             -- child 0: "key" (Utf8)
             StringArray
@@ -294,6 +300,11 @@ mod tests {
             ],
               null,
               StructArray
+            -- validity:
+            [
+              valid,
+              valid,
+            ]
             [
             -- child 0: "key" (Utf8)
             StringArray
@@ -308,9 +319,14 @@ mod tests {
               3,
             ]
             ],
-            ]
-        "#]]
-        .assert_debug_eq(&arrow);
+            ]"#]]
+        .assert_eq(
+            &format!("{:#?}", arrow)
+                .lines()
+                .map(|s| s.trim_end())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
 
         let rw_array_new = UdfArrowConvert::default()
             .from_map_array(arrow.as_any().downcast_ref().unwrap())

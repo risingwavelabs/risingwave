@@ -1,0 +1,5 @@
+pyarrow
+minio
+psycopg2-binary
+opendal
+pandas

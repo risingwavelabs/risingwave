@@ -115,22 +115,13 @@ impl SplitReader for NexmarkSplitReader {
         let split_id = self.split_id.clone();
         let metrics = self.source_ctx.metrics.clone();
 
-        let partition_input_count_metric =
-            metrics.partition_input_count.with_guarded_label_values(&[
-                &actor_id,
-                &source_id,
-                &split_id,
-                &source_name,
-                &fragment_id,
-            ]);
-        let partition_input_bytes_metric =
-            metrics.partition_input_bytes.with_guarded_label_values(&[
-                &actor_id,
-                &source_id,
-                &split_id,
-                &source_name,
-                &fragment_id,
-            ]);
+        let labels: &[&str] = &[&actor_id, &source_id, &split_id, &source_name, &fragment_id];
+        let partition_input_count_metric = metrics
+            .partition_input_count
+            .with_guarded_label_values(labels);
+        let partition_input_bytes_metric = metrics
+            .partition_input_bytes
+            .with_guarded_label_values(labels);
 
         // Will buffer at most 4 event chunks.
         const BUFFER_SIZE: usize = 4;

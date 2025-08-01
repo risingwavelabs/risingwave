@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::mem::replace;
 use std::sync::Arc;
 
 use risingwave_common::bitmap::Bitmap;
@@ -42,46 +45,161 @@ pub mod test_utils;
 mod writer;
 
 pub(crate) use reader::{REWIND_BACKOFF_FACTOR, REWIND_BASE_DELAY, REWIND_MAX_DELAY};
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::ArrayVec;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::sort_util::OrderType;
 
-pub(crate) type SeqIdType = i32;
+#[derive(Debug)]
+pub(crate) enum LogStoreVnodeProgress {
+    None,
+    PerVnode(HashMap<VirtualNode, (Epoch, Option<SeqId>)>),
+    Aligned(Arc<Bitmap>, Epoch, Option<SeqId>),
+}
+
+impl LogStoreVnodeProgress {
+    pub(crate) fn take(&mut self) -> Self {
+        replace(self, Self::None)
+    }
+
+    fn assert_progress_increase(
+        prev_epoch: Epoch,
+        prev_progress: Option<SeqId>,
+        epoch: Epoch,
+        progress: Option<SeqId>,
+    ) {
+        match prev_progress {
+            None => {
+                assert!(
+                    prev_epoch < epoch,
+                    "barrier epoch {} decrease to {}",
+                    prev_epoch,
+                    epoch
+                );
+            }
+            Some(prev_progress) => {
+                assert_eq!(prev_epoch, epoch);
+                if let Some(progress) = progress {
+                    assert!(progress > prev_progress);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn apply_per_vnode(&mut self, epoch: Epoch, progress: HashMap<VirtualNode, SeqId>) {
+        fn apply_to_progress_map(
+            prev_progress: &mut HashMap<VirtualNode, (Epoch, Option<SeqId>)>,
+            epoch: Epoch,
+            progress: HashMap<VirtualNode, SeqId>,
+        ) {
+            for (vnode, seq_id) in progress {
+                match prev_progress.entry(vnode) {
+                    Entry::Occupied(entry) => {
+                        let (prev_epoch, prev_seq_id) = entry.into_mut();
+                        LogStoreVnodeProgress::assert_progress_increase(
+                            *prev_epoch,
+                            *prev_seq_id,
+                            epoch,
+                            Some(seq_id),
+                        );
+                        *prev_epoch = epoch;
+                        *prev_seq_id = Some(seq_id);
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert((epoch, Some(seq_id)));
+                    }
+                }
+            }
+        }
+        match self {
+            LogStoreVnodeProgress::None => {
+                *self = LogStoreVnodeProgress::PerVnode(
+                    progress
+                        .into_iter()
+                        .map(|(vnode, seq_id)| (vnode, (epoch, Some(seq_id))))
+                        .collect(),
+                )
+            }
+            LogStoreVnodeProgress::PerVnode(prev_progress) => {
+                apply_to_progress_map(prev_progress, epoch, progress);
+            }
+            LogStoreVnodeProgress::Aligned(vnodes, prev_epoch, prev_progress) => {
+                let mut progress_map = vnodes
+                    .iter_vnodes()
+                    .map(|vnode| (vnode, (*prev_epoch, *prev_progress)))
+                    .collect();
+                apply_to_progress_map(&mut progress_map, epoch, progress);
+                *self = LogStoreVnodeProgress::PerVnode(progress_map);
+            }
+        }
+    }
+
+    pub(crate) fn apply_aligned(
+        &mut self,
+        vnodes: Arc<Bitmap>,
+        epoch: Epoch,
+        progress: Option<SeqId>,
+    ) {
+        match self {
+            LogStoreVnodeProgress::None => {}
+            LogStoreVnodeProgress::PerVnode(prev_progress) => {
+                for (vnode, (prev_epoch, prev_progress)) in prev_progress.drain() {
+                    assert!(
+                        vnodes.is_set(vnode.to_index()),
+                        "aligned progress not covered existing vnode {}",
+                        vnode
+                    );
+                    Self::assert_progress_increase(prev_epoch, prev_progress, epoch, progress);
+                }
+            }
+            LogStoreVnodeProgress::Aligned(prev_vnodes, prev_epoch, prev_progress) => {
+                assert_eq!(vnodes.len(), prev_vnodes.len());
+                assert!(prev_vnodes.iter_ones().all(|vnode| vnodes.is_set(vnode)));
+                Self::assert_progress_increase(*prev_epoch, *prev_progress, epoch, progress);
+            }
+        }
+        *self = LogStoreVnodeProgress::Aligned(vnodes, epoch, progress);
+    }
+}
+
+// TODO: unify with `risingwave_common::Epoch`
+pub(crate) type Epoch = u64;
+
+pub(crate) type SeqId = i32;
 type RowOpCodeType = i16;
 
-pub(crate) const FIRST_SEQ_ID: SeqIdType = 0;
+pub(crate) const FIRST_SEQ_ID: SeqId = 0;
 
 /// Readers truncate the offset at the granularity of seq id.
 /// None `SeqIdType` means that the whole epoch is truncated.
-pub(crate) type ReaderTruncationOffsetType = (u64, Option<SeqIdType>);
+pub(crate) type ReaderTruncationOffsetType = (u64, Option<SeqId>);
 
 #[derive(Clone)]
 pub struct KvLogStoreReadMetrics {
-    pub storage_read_count: LabelGuardedIntCounter<5>,
-    pub storage_read_size: LabelGuardedIntCounter<5>,
+    pub storage_read_count: LabelGuardedIntCounter,
+    pub storage_read_size: LabelGuardedIntCounter,
 }
 
 impl KvLogStoreReadMetrics {
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
         Self {
-            storage_read_count: LabelGuardedIntCounter::test_int_counter(),
-            storage_read_size: LabelGuardedIntCounter::test_int_counter(),
+            storage_read_count: LabelGuardedIntCounter::test_int_counter::<5>(),
+            storage_read_size: LabelGuardedIntCounter::test_int_counter::<5>(),
         }
     }
 }
 
 #[derive(Clone)]
 pub(crate) struct KvLogStoreMetrics {
-    pub storage_write_count: LabelGuardedIntCounter<4>,
-    pub storage_write_size: LabelGuardedIntCounter<4>,
-    pub rewind_count: LabelGuardedIntCounter<4>,
-    pub rewind_delay: LabelGuardedHistogram<4>,
-    pub buffer_unconsumed_item_count: LabelGuardedIntGauge<4>,
-    pub buffer_unconsumed_row_count: LabelGuardedIntGauge<4>,
-    pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge<4>,
-    pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge<4>,
+    pub storage_write_count: LabelGuardedIntCounter,
+    pub storage_write_size: LabelGuardedIntCounter,
+    pub rewind_count: LabelGuardedIntCounter,
+    pub rewind_delay: LabelGuardedHistogram,
+    pub buffer_unconsumed_item_count: LabelGuardedIntGauge,
+    pub buffer_unconsumed_row_count: LabelGuardedIntGauge,
+    pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge,
+    pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge,
     pub persistent_log_read_metrics: KvLogStoreReadMetrics,
     pub flushed_buffer_read_metrics: KvLogStoreReadMetrics,
 }
@@ -128,18 +246,18 @@ impl KvLogStoreMetrics {
         let persistent_log_read_size = metrics
             .kv_log_store_storage_read_size
             .with_guarded_label_values(&[
-                &actor_id_str,
+                actor_id_str.as_str(),
                 target,
-                &id_str,
+                id_str.as_str(),
                 name,
                 READ_PERSISTENT_LOG,
             ]);
         let persistent_log_read_count = metrics
             .kv_log_store_storage_read_count
             .with_guarded_label_values(&[
-                &actor_id_str,
+                actor_id_str.as_str(),
                 target,
-                &id_str,
+                id_str.as_str(),
                 name,
                 READ_PERSISTENT_LOG,
             ]);
@@ -147,18 +265,18 @@ impl KvLogStoreMetrics {
         let flushed_buffer_read_size = metrics
             .kv_log_store_storage_read_size
             .with_guarded_label_values(&[
-                &actor_id_str,
+                actor_id_str.as_str(),
                 target,
-                &id_str,
+                id_str.as_str(),
                 name,
                 READ_FLUSHED_BUFFER,
             ]);
         let flushed_buffer_read_count = metrics
             .kv_log_store_storage_read_count
             .with_guarded_label_values(&[
-                &actor_id_str,
+                actor_id_str.as_str(),
                 target,
-                &id_str,
+                id_str.as_str(),
                 name,
                 READ_FLUSHED_BUFFER,
             ]);
@@ -207,14 +325,14 @@ impl KvLogStoreMetrics {
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
         KvLogStoreMetrics {
-            storage_write_count: LabelGuardedIntCounter::test_int_counter(),
-            storage_write_size: LabelGuardedIntCounter::test_int_counter(),
-            buffer_unconsumed_item_count: LabelGuardedIntGauge::test_int_gauge(),
-            buffer_unconsumed_row_count: LabelGuardedIntGauge::test_int_gauge(),
-            buffer_unconsumed_epoch_count: LabelGuardedIntGauge::test_int_gauge(),
-            buffer_unconsumed_min_epoch: LabelGuardedIntGauge::test_int_gauge(),
-            rewind_count: LabelGuardedIntCounter::test_int_counter(),
-            rewind_delay: LabelGuardedHistogram::test_histogram(),
+            storage_write_count: LabelGuardedIntCounter::test_int_counter::<4>(),
+            storage_write_size: LabelGuardedIntCounter::test_int_counter::<4>(),
+            buffer_unconsumed_item_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
+            buffer_unconsumed_row_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
+            buffer_unconsumed_epoch_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
+            buffer_unconsumed_min_epoch: LabelGuardedIntGauge::test_int_gauge::<4>(),
+            rewind_count: LabelGuardedIntCounter::test_int_counter::<4>(),
+            rewind_delay: LabelGuardedHistogram::test_histogram::<4>(),
             persistent_log_read_metrics: KvLogStoreReadMetrics::for_test(),
             flushed_buffer_read_metrics: KvLogStoreReadMetrics::for_test(),
         }
@@ -254,7 +372,7 @@ pub(crate) struct KvLogStorePkInfo {
     pub predefined_columns: &'static [(&'static str, DataType)],
     pub pk_orderings: &'static [OrderType],
     pub compute_pk:
-        fn(vnode: VirtualNode, encoded_epoch: i64, seq_id: Option<SeqIdType>) -> KvLogStorePkRow,
+        fn(vnode: VirtualNode, encoded_epoch: i64, seq_id: Option<SeqId>) -> KvLogStorePkRow,
 }
 
 impl KvLogStorePkInfo {
@@ -287,14 +405,14 @@ mod v1 {
     use risingwave_common::types::ScalarImpl;
 
     use super::{KvLogStorePkInfo, KvLogStorePkRow};
-    use crate::common::log_store_impl::kv_log_store::SeqIdType;
+    use crate::common::log_store_impl::kv_log_store::SeqId;
 
     #[deprecated]
     pub(crate) static KV_LOG_STORE_V1_INFO: LazyLock<KvLogStorePkInfo> = LazyLock::new(|| {
         fn compute_pk(
             _vnode: VirtualNode,
             encoded_epoch: i64,
-            seq_id: Option<SeqIdType>,
+            seq_id: Option<SeqId>,
         ) -> KvLogStorePkRow {
             KvLogStorePkRow::from_array_len(
                 [
@@ -338,13 +456,13 @@ mod v2 {
     use risingwave_common::types::ScalarImpl;
 
     use super::{KvLogStorePkInfo, KvLogStorePkRow};
-    use crate::common::log_store_impl::kv_log_store::SeqIdType;
+    use crate::common::log_store_impl::kv_log_store::SeqId;
 
     pub(crate) static KV_LOG_STORE_V2_INFO: LazyLock<KvLogStorePkInfo> = LazyLock::new(|| {
         fn compute_pk(
             vnode: VirtualNode,
             encoded_epoch: i64,
-            seq_id: Option<SeqIdType>,
+            seq_id: Option<SeqId>,
         ) -> KvLogStorePkRow {
             KvLogStorePkRow::from([
                 Some(ScalarImpl::Int64(encoded_epoch)),
@@ -370,15 +488,14 @@ pub struct KvLogStoreFactory<S: StateStore> {
 
     vnodes: Option<Arc<Bitmap>>,
 
-    max_row_count: usize,
+    max_buffer_row_count: usize,
+    chunk_size: usize,
 
     metrics: KvLogStoreMetrics,
 
     identity: String,
 
     pk_info: &'static KvLogStorePkInfo,
-
-    align_epoch_on_init: bool,
 }
 
 impl<S: StateStore> KvLogStoreFactory<S> {
@@ -387,21 +504,21 @@ impl<S: StateStore> KvLogStoreFactory<S> {
         state_store: S,
         table_catalog: Table,
         vnodes: Option<Arc<Bitmap>>,
-        max_row_count: usize,
+        max_buffer_row_count: usize,
+        chunk_size: usize,
         metrics: KvLogStoreMetrics,
         identity: impl Into<String>,
         pk_info: &'static KvLogStorePkInfo,
-        align_epoch_on_init: bool,
     ) -> Self {
         Self {
             state_store,
             table_catalog,
             vnodes,
-            max_row_count,
+            max_buffer_row_count,
+            chunk_size,
             metrics,
             identity: identity.into(),
             pk_info,
-            align_epoch_on_init,
         }
     }
 }
@@ -427,12 +544,18 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
                 },
                 is_replicated: false,
                 vnodes: serde.vnodes().clone(),
+                upload_on_flush: false,
             })
             .await;
 
-        let (tx, rx) = new_log_store_buffer(self.max_row_count, self.metrics.clone());
+        let (tx, rx) = new_log_store_buffer(
+            self.max_buffer_row_count,
+            self.chunk_size,
+            self.metrics.clone(),
+        );
 
-        let (read_state, write_state) = new_log_store_state(table_id, local_state_store, serde);
+        let (read_state, write_state) =
+            new_log_store_state(table_id, local_state_store, serde, self.chunk_size);
 
         let (init_epoch_tx, init_epoch_rx) = oneshot::channel();
         let (update_vnode_bitmap_tx, update_vnode_bitmap_rx) = unbounded_channel();
@@ -445,7 +568,6 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
             self.metrics.clone(),
             pause_rx,
             self.identity.clone(),
-            self.align_epoch_on_init,
         );
 
         let writer = KvLogStoreWriter::new(
@@ -456,7 +578,6 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
             self.metrics,
             pause_tx,
             self.identity,
-            self.align_epoch_on_init,
         );
 
         (reader, writer)
@@ -522,10 +643,10 @@ mod tests {
             table.clone(),
             Some(Arc::new(bitmap)),
             max_row_count,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            false,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -566,6 +687,7 @@ mod tests {
         assert!(!sync_result.uncommitted_ssts.is_empty());
 
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         match reader.next_item().await.unwrap() {
             (
                 epoch,
@@ -580,7 +702,7 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch1);
                 assert!(!is_checkpoint)
             }
@@ -600,7 +722,7 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
                 assert_eq!(epoch, epoch2);
                 assert!(is_checkpoint)
             }
@@ -639,10 +761,10 @@ mod tests {
             table.clone(),
             Some(bitmap.clone()),
             max_row_count,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            false,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -676,6 +798,7 @@ mod tests {
             .unwrap();
 
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         match reader.next_item().await.unwrap() {
             (
                 epoch,
@@ -734,10 +857,10 @@ mod tests {
             table.clone(),
             Some(bitmap),
             max_row_count,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            false,
         );
         let (mut reader, mut writer) = factory.build().await;
         test_env
@@ -748,6 +871,7 @@ mod tests {
             .await
             .unwrap();
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         match reader.next_item().await.unwrap() {
             (
                 epoch,
@@ -829,10 +953,10 @@ mod tests {
             table.clone(),
             Some(bitmap.clone()),
             max_row_count,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            false,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -864,6 +988,7 @@ mod tests {
         test_env.commit_epoch(epoch1).await;
 
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_id1 = match reader.next_item().await.unwrap() {
             (
                 epoch,
@@ -950,10 +1075,10 @@ mod tests {
             table.clone(),
             Some(bitmap),
             max_row_count,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            false,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -968,6 +1093,7 @@ mod tests {
         writer.write_chunk(stream_chunk3.clone()).await.unwrap();
 
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         match reader.next_item().await.unwrap() {
             (
                 epoch,
@@ -1025,15 +1151,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_vnode_recover() {
-        test_update_vnode_recover_inner(false).await
-    }
-
-    #[tokio::test]
-    async fn test_update_vnode_recover_with_align_init_epoch() {
-        test_update_vnode_recover_inner(true).await
-    }
-
-    async fn test_update_vnode_recover_inner(align_init_epoch: bool) {
         let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V2_INFO;
         let test_env = prepare_hummock_test_env().await;
 
@@ -1057,20 +1174,20 @@ mod tests {
             table.clone(),
             Some(vnodes1),
             10 * TEST_DATA_SIZE,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            false,
         );
         let factory2 = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
             Some(vnodes2),
             10 * TEST_DATA_SIZE,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            align_init_epoch,
         );
         let (mut reader1, mut writer1) = factory1.build().await;
         let (mut reader2, mut writer2) = factory2.build().await;
@@ -1093,7 +1210,9 @@ mod tests {
             .await
             .unwrap();
         reader1.init().await.unwrap();
+        reader1.start_from(None).await.unwrap();
         reader2.init().await.unwrap();
+        reader2.start_from(None).await.unwrap();
         let [chunk1_1, chunk1_2] = gen_multi_vnode_stream_chunks::<2>(0, 100, pk_info);
         writer1.write_chunk(chunk1_1.clone()).await.unwrap();
         writer2.write_chunk(chunk1_2.clone()).await.unwrap();
@@ -1203,10 +1322,10 @@ mod tests {
             table.clone(),
             Some(vnodes),
             10 * TEST_DATA_SIZE,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            align_init_epoch,
         );
         let (mut reader, mut writer) = factory.build().await;
         test_env
@@ -1217,7 +1336,8 @@ mod tests {
             .await
             .unwrap();
         reader.init().await.unwrap();
-        if !align_init_epoch {
+        reader.start_from(None).await.unwrap();
+        {
             // Though we don't truncate reader2 with epoch1, we have truncated reader1 with epoch1, and with align_init_epoch
             // set to true, we won't receive the following commented items.
             match reader.next_item().await.unwrap() {
@@ -1225,6 +1345,7 @@ mod tests {
                     assert_eq!(epoch, epoch1);
                     assert!(check_stream_chunk_eq(&chunk1_2, &chunk));
                 }
+
                 _ => unreachable!(),
             }
             match reader.next_item().await.unwrap() {
@@ -1273,10 +1394,10 @@ mod tests {
             table.clone(),
             Some(Arc::new(bitmap)),
             0,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            false,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -1301,6 +1422,7 @@ mod tests {
             .unwrap();
 
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
 
         {
             let mut future = pin!(reader.next_item());
@@ -1421,10 +1543,10 @@ mod tests {
             table.clone(),
             Some(bitmap.clone()),
             1024,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            false,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -1470,6 +1592,7 @@ mod tests {
         test_env.commit_epoch(epoch3).await;
 
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
 
         let chunk_ids = check_reader(
             &mut reader,
@@ -1490,6 +1613,7 @@ mod tests {
             })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader(
             &mut reader,
             [
@@ -1506,6 +1630,7 @@ mod tests {
             .truncate(TruncateOffset::Barrier { epoch: epoch1 })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader(
             &mut reader,
             [
@@ -1524,6 +1649,7 @@ mod tests {
             })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader(&mut reader, [(epoch3, None)].iter()).await;
         assert_eq!(0, chunk_ids.len());
 
@@ -1536,10 +1662,10 @@ mod tests {
             table.clone(),
             Some(bitmap.clone()),
             1024,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            false,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -1553,6 +1679,7 @@ mod tests {
             .unwrap();
 
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
 
         let data = [
             (epoch1, Some(&stream_chunk1)),
@@ -1566,6 +1693,7 @@ mod tests {
             .truncate(TruncateOffset::Barrier { epoch: epoch1 })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader(&mut reader, data[1..].iter()).await;
         assert_eq!(2, chunk_ids.len());
 
@@ -1576,6 +1704,7 @@ mod tests {
             })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader(&mut reader, data[1..].iter()).await;
         assert_eq!(2, chunk_ids.len());
 
@@ -1590,6 +1719,7 @@ mod tests {
             .truncate(TruncateOffset::Barrier { epoch: epoch2 })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader(&mut reader, data[2..].iter()).await;
         assert_eq!(1, chunk_ids.len());
 
@@ -1602,10 +1732,10 @@ mod tests {
             table.clone(),
             Some(bitmap.clone()),
             1024,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            false,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -1625,7 +1755,7 @@ mod tests {
         writer.write_chunk(stream_chunk5.clone()).await.unwrap();
 
         reader.init().await.unwrap();
-
+        reader.start_from(None).await.unwrap();
         let data = [
             (epoch1, Some(&stream_chunk1)),
             (epoch2, Some(&stream_chunk2)),
@@ -1645,6 +1775,7 @@ mod tests {
             .truncate(TruncateOffset::Barrier { epoch: epoch1 })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, data[1..].iter()).await;
         assert_eq!(4, chunk_ids.len());
 
@@ -1655,6 +1786,7 @@ mod tests {
             })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, data[1..].iter()).await;
         assert_eq!(4, chunk_ids.len());
 
@@ -1662,6 +1794,7 @@ mod tests {
             .truncate(TruncateOffset::Barrier { epoch: epoch2 })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, data[2..].iter()).await;
         assert_eq!(3, chunk_ids.len());
 
@@ -1669,6 +1802,7 @@ mod tests {
             .truncate(TruncateOffset::Barrier { epoch: epoch3 })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, data[3..].iter()).await;
         assert_eq!(2, chunk_ids.len());
 
@@ -1679,6 +1813,7 @@ mod tests {
             })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader_last_unsealed(
             &mut reader,
             [(epoch4, None), (epoch5, Some(&stream_chunk5))].iter(),
@@ -1690,6 +1825,7 @@ mod tests {
             .truncate(TruncateOffset::Barrier { epoch: epoch4 })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids =
             check_reader_last_unsealed(&mut reader, [(epoch5, Some(&stream_chunk5))].iter()).await;
         assert_eq!(1, chunk_ids.len());
@@ -1701,6 +1837,7 @@ mod tests {
             })
             .unwrap();
         reader.rewind().await.unwrap();
+        reader.start_from(None).await.unwrap();
         let chunk_ids = check_reader_last_unsealed(&mut reader, empty()).await;
         assert!(chunk_ids.is_empty());
     }
@@ -1768,10 +1905,10 @@ mod tests {
             table.clone(),
             Some(bitmap.clone()),
             max_row_count,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            false,
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -1807,6 +1944,7 @@ mod tests {
         test_env.commit_epoch(epoch2).await;
 
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         validate_reader(
             &mut reader,
             [
@@ -1821,6 +1959,8 @@ mod tests {
                     epoch1,
                     LogStoreReadItem::Barrier {
                         is_checkpoint: false,
+                        new_vnode_bitmap: None,
+                        is_stop: false,
                     },
                 ),
                 (
@@ -1834,6 +1974,8 @@ mod tests {
                     epoch2,
                     LogStoreReadItem::Barrier {
                         is_checkpoint: true,
+                        new_vnode_bitmap: None,
+                        is_stop: false,
                     },
                 ),
             ],
@@ -1851,10 +1993,10 @@ mod tests {
             table.clone(),
             Some(bitmap.clone()),
             max_row_count,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            false,
         );
         let (mut reader, mut writer) = factory.build().await;
         test_env
@@ -1865,6 +2007,7 @@ mod tests {
             .await
             .unwrap();
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         validate_reader(
             &mut reader,
             [
@@ -1879,6 +2022,8 @@ mod tests {
                     epoch1,
                     LogStoreReadItem::Barrier {
                         is_checkpoint: false,
+                        new_vnode_bitmap: None,
+                        is_stop: false,
                     },
                 ),
                 (
@@ -1892,6 +2037,8 @@ mod tests {
                     epoch2,
                     LogStoreReadItem::Barrier {
                         is_checkpoint: true,
+                        new_vnode_bitmap: None,
+                        is_stop: false,
                     },
                 ),
             ],
@@ -1919,10 +2066,10 @@ mod tests {
             table.clone(),
             Some(bitmap),
             max_row_count,
+            1024,
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-            false,
         );
         let (mut reader, mut writer) = factory.build().await;
         test_env
@@ -1933,6 +2080,7 @@ mod tests {
             .await
             .unwrap();
         reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
         validate_reader(
             &mut reader,
             [
@@ -1947,240 +2095,12 @@ mod tests {
                     epoch2,
                     LogStoreReadItem::Barrier {
                         is_checkpoint: true,
+                        new_vnode_bitmap: None,
+                        is_stop: false,
                     },
                 ),
             ],
         )
         .await;
-    }
-
-    #[tokio::test]
-    async fn test_align_init_epoch() {
-        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V2_INFO;
-        let test_env = prepare_hummock_test_env().await;
-
-        let table = gen_test_log_store_table(pk_info);
-
-        test_env.register_table(table.clone()).await;
-
-        fn build_bitmap(indexes: impl Iterator<Item = usize>) -> Arc<Bitmap> {
-            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
-            for i in indexes {
-                builder.set(i, true);
-            }
-            Arc::new(builder.finish())
-        }
-
-        let vnodes1 = build_bitmap((0..VirtualNode::COUNT_FOR_TEST).filter(|i| i % 2 == 0));
-        let vnodes2 = build_bitmap((0..VirtualNode::COUNT_FOR_TEST).filter(|i| i % 2 == 1));
-
-        let factory1 = KvLogStoreFactory::new(
-            test_env.storage.clone(),
-            table.clone(),
-            Some(vnodes1.clone()),
-            10 * TEST_DATA_SIZE,
-            KvLogStoreMetrics::for_test(),
-            "test",
-            pk_info,
-            true,
-        );
-        let factory2 = KvLogStoreFactory::new(
-            test_env.storage.clone(),
-            table.clone(),
-            Some(vnodes2.clone()),
-            10 * TEST_DATA_SIZE,
-            KvLogStoreMetrics::for_test(),
-            "test",
-            pk_info,
-            true,
-        );
-        let (mut reader1, mut writer1) = factory1.build().await;
-        let (mut reader2, mut writer2) = factory2.build().await;
-
-        let epoch1 = test_env
-            .storage
-            .get_pinned_version()
-            .table_committed_epoch(TableId::new(table.id))
-            .unwrap()
-            .next_epoch();
-        test_env
-            .storage
-            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
-        writer1
-            .init(EpochPair::new_test_epoch(epoch1), false)
-            .await
-            .unwrap();
-        writer2
-            .init(EpochPair::new_test_epoch(epoch1), false)
-            .await
-            .unwrap();
-        reader1.init().await.unwrap();
-        reader2.init().await.unwrap();
-        let [chunk1_1, chunk1_2] = gen_multi_vnode_stream_chunks::<2>(0, 100, pk_info);
-        writer1.write_chunk(chunk1_1.clone()).await.unwrap();
-        writer2.write_chunk(chunk1_2.clone()).await.unwrap();
-        let epoch2 = epoch1.next_epoch();
-        test_env
-            .storage
-            .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
-        writer1
-            .flush_current_epoch_for_test(epoch2, false)
-            .await
-            .unwrap();
-        writer2
-            .flush_current_epoch_for_test(epoch2, false)
-            .await
-            .unwrap();
-        let [chunk2_1, chunk2_2] = gen_multi_vnode_stream_chunks::<2>(200, 100, pk_info);
-        writer1.write_chunk(chunk2_1.clone()).await.unwrap();
-        writer2.write_chunk(chunk2_2.clone()).await.unwrap();
-
-        match reader1.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
-                assert_eq!(epoch, epoch1);
-                assert!(check_stream_chunk_eq(&chunk1_1, &chunk));
-            }
-            _ => unreachable!(),
-        };
-        match reader1.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
-                assert_eq!(epoch, epoch1);
-                assert!(!is_checkpoint);
-            }
-            _ => unreachable!(),
-        }
-
-        match reader2.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
-                assert_eq!(epoch, epoch1);
-                assert!(check_stream_chunk_eq(&chunk1_2, &chunk));
-            }
-            _ => unreachable!(),
-        }
-        match reader2.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
-                assert_eq!(epoch, epoch1);
-                assert!(!is_checkpoint);
-            }
-            _ => unreachable!(),
-        }
-
-        // Only reader1 will truncate
-        reader1
-            .truncate(TruncateOffset::Barrier { epoch: epoch1 })
-            .unwrap();
-
-        match reader1.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
-                assert_eq!(epoch, epoch2);
-                assert!(check_stream_chunk_eq(&chunk2_1, &chunk));
-            }
-            _ => unreachable!(),
-        }
-        match reader2.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
-                assert_eq!(epoch, epoch2);
-                assert!(check_stream_chunk_eq(&chunk2_2, &chunk));
-            }
-            _ => unreachable!(),
-        }
-
-        let epoch3 = epoch2.next_epoch();
-        writer1
-            .flush_current_epoch_for_test(epoch3, true)
-            .await
-            .unwrap();
-        writer2
-            .flush_current_epoch_for_test(epoch3, true)
-            .await
-            .unwrap();
-
-        match reader1.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
-                assert_eq!(epoch, epoch2);
-                assert!(is_checkpoint);
-            }
-            _ => unreachable!(),
-        }
-        match reader2.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
-                assert_eq!(epoch, epoch2);
-                assert!(is_checkpoint);
-            }
-            _ => unreachable!(),
-        }
-
-        // Truncation of reader1 on epoch1 should work because it is before this sync
-        test_env.commit_epoch(epoch2).await;
-
-        drop(writer1);
-        drop(writer2);
-
-        // Recovery
-        test_env.storage.clear_shared_buffer().await;
-
-        let factory1 = KvLogStoreFactory::new(
-            test_env.storage.clone(),
-            table.clone(),
-            Some(vnodes1.clone()),
-            10 * TEST_DATA_SIZE,
-            KvLogStoreMetrics::for_test(),
-            "test",
-            pk_info,
-            true,
-        );
-        let factory2 = KvLogStoreFactory::new(
-            test_env.storage.clone(),
-            table.clone(),
-            Some(vnodes2.clone()),
-            10 * TEST_DATA_SIZE,
-            KvLogStoreMetrics::for_test(),
-            "test",
-            pk_info,
-            true,
-        );
-        let (mut reader1, mut writer1) = factory1.build().await;
-        let (mut reader2, mut writer2) = factory2.build().await;
-        test_env
-            .storage
-            .start_epoch(epoch3, HashSet::from_iter([TableId::new(table.id)]));
-        writer1
-            .init(EpochPair::new(epoch3, epoch2), false)
-            .await
-            .unwrap();
-        writer2
-            .init(EpochPair::new(epoch3, epoch2), false)
-            .await
-            .unwrap();
-        reader1.init().await.unwrap();
-        match reader1.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
-                assert_eq!(epoch, epoch2);
-                assert!(check_rows_eq(chunk2_1.rows(), chunk.rows()));
-            }
-            _ => unreachable!(),
-        }
-        match reader1.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
-                assert_eq!(epoch, epoch2);
-                assert!(is_checkpoint);
-            }
-            _ => unreachable!(),
-        }
-        reader2.init().await.unwrap();
-        match reader2.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
-                assert_eq!(epoch, epoch2);
-                assert!(check_rows_eq(chunk2_2.rows(), chunk.rows()));
-            }
-            _ => unreachable!(),
-        }
-        match reader2.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
-                assert_eq!(epoch, epoch2);
-                assert!(is_checkpoint);
-            }
-            _ => unreachable!(),
-        }
     }
 }

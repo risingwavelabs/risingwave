@@ -23,7 +23,7 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{IndexId, TableDesc, TableId};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_pb::catalog::{PbIndex, PbIndexColumnProperties, PbStreamJobStatus, PbTable};
+use risingwave_pb::catalog::{PbIndex, PbIndexColumnProperties, PbStreamJobStatus};
 use risingwave_sqlparser::ast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 
@@ -36,12 +36,14 @@ use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_expr_rewriter::ConstEvalRewriter;
-use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMaterialize};
+use crate::optimizer::plan_node::{
+    Explain, LogicalProject, LogicalScan, StreamMaterialize, StreamPlanRef as PlanRef,
+};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
-use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRoot};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
-use crate::stream_fragmenter::build_graph;
+use crate::stream_fragmenter::{GraphJobType, build_graph};
 
 pub(crate) fn resolve_index_schema(
     session: &SessionImpl,
@@ -49,7 +51,7 @@ pub(crate) fn resolve_index_schema(
     table_name: ObjectName,
 ) -> Result<(String, Arc<TableCatalog>, String)> {
     let db_name = &session.database();
-    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
+    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, &table_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -72,7 +74,7 @@ pub(crate) fn gen_create_index_plan(
     columns: Vec<OrderByExpr>,
     include: Vec<Ident>,
     distributed_by: Vec<ast::Expr>,
-) -> Result<(PlanRef, PbTable, PbIndex)> {
+) -> Result<(PlanRef, TableCatalog, PbIndex)> {
     let table_name = table.name.clone();
 
     if table.is_index() {
@@ -82,9 +84,11 @@ pub(crate) fn gen_create_index_plan(
     }
 
     if !session.is_super_user() && session.user_id() != table.owner {
-        return Err(
-            ErrorCode::PermissionDenied(format!("must be owner of table {}", table.name)).into(),
-        );
+        return Err(ErrorCode::PermissionDenied(format!(
+            "must be owner of table \"{}\"",
+            table.name
+        ))
+        .into());
     }
 
     let mut binder = Binder::new_for_stream(session);
@@ -95,7 +99,7 @@ pub(crate) fn gen_create_index_plan(
     let mut distributed_columns_expr = vec![];
     for column in columns {
         let order_type = OrderType::from_bools(column.asc, column.nulls_first);
-        let expr_impl = binder.bind_expr(column.expr)?;
+        let expr_impl = binder.bind_expr(&column.expr)?;
         // Do constant folding and timezone transportation on expressions so that batch queries can match it in the same form.
         let mut const_eval = ConstEvalRewriter { error: None };
         let expr_impl = const_eval.rewrite_expr(expr_impl);
@@ -136,13 +140,13 @@ pub(crate) fn gen_create_index_plan(
     } else {
         for column in include {
             let expr_impl =
-                binder.bind_expr(risingwave_sqlparser::ast::Expr::Identifier(column))?;
+                binder.bind_expr(&risingwave_sqlparser::ast::Expr::Identifier(column))?;
             include_columns_expr.push(expr_impl);
         }
     };
 
     for column in distributed_by {
-        let expr_impl = binder.bind_expr(column)?;
+        let expr_impl = binder.bind_expr(&column)?;
         distributed_columns_expr.push(expr_impl);
     }
 
@@ -214,15 +218,13 @@ pub(crate) fn gen_create_index_plan(
         table.cardinality,
     )?;
 
-    let index_table = materialize.table();
-    let mut index_table_prost = index_table.to_prost();
+    let mut index_table = materialize.table().clone();
     {
         // Inherit table properties
-        index_table_prost.retention_seconds = table.retention_seconds;
+        index_table.retention_seconds = table.retention_seconds;
     }
 
-    index_table_prost.owner = table.owner;
-    index_table_prost.dependent_relations = vec![table.id.table_id];
+    index_table.owner = table.owner;
 
     let index_columns_len = index_columns_ordered_expr.len() as u32;
     let index_column_properties = index_columns_ordered_expr
@@ -233,7 +235,7 @@ pub(crate) fn gen_create_index_plan(
         })
         .collect();
     let index_item = build_index_item(
-        index_table,
+        &index_table,
         table.name(),
         table_desc,
         index_columns_ordered_expr,
@@ -244,7 +246,7 @@ pub(crate) fn gen_create_index_plan(
         schema_id: index_schema_id,
         database_id: index_database_id,
         name: index_table_name,
-        owner: index_table_prost.owner,
+        owner: index_table.owner,
         index_table_id: TableId::placeholder().table_id,
         primary_table_id: table.id.table_id,
         index_item,
@@ -265,7 +267,7 @@ pub(crate) fn gen_create_index_plan(
         ctx.trace(plan.explain_to_string());
     }
 
-    Ok((plan, index_table_prost, index_prost))
+    Ok((plan, index_table, index_prost))
 }
 
 fn build_index_item(
@@ -434,8 +436,8 @@ pub async fn handle_create_index(
         let (schema_name, table, index_table_name) =
             resolve_index_schema(&session, index_name, table_name)?;
         let qualified_index_name = ObjectName(vec![
-            Ident::with_quote_unchecked('"', &schema_name),
-            Ident::with_quote_unchecked('"', &index_table_name),
+            Ident::from_real_value(&schema_name),
+            Ident::from_real_value(&index_table_name),
         ]);
         if let Either::Right(resp) = session.check_relation_name_duplicated(
             qualified_index_name,
@@ -456,7 +458,7 @@ pub async fn handle_create_index(
             include,
             distributed_by,
         )?;
-        let graph = build_graph(plan)?;
+        let graph = build_graph(plan, Some(GraphJobType::Index))?;
 
         (graph, index_table, index)
     };
@@ -480,7 +482,7 @@ pub async fn handle_create_index(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_index(index, index_table, graph)
+        .create_index(index, index_table.to_prost(), graph, if_not_exists)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_INDEX))

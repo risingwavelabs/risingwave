@@ -26,6 +26,7 @@ use risingwave_common::config::{
     AsyncStackTraceOption, MAX_CONNECTION_WINDOW_SIZE, MetricLevel, STREAM_WINDOW_SIZE,
     StorageMemoryConfig, load_config,
 };
+use risingwave_common::license::LicenseManager;
 use risingwave_common::lru::init_global_sequencer_args;
 use risingwave_common::monitor::{RouterExt, TcpConfig};
 use risingwave_common::secret::LocalSecretManager;
@@ -42,6 +43,7 @@ use risingwave_common_service::{MetricsManager, ObserverManager, TracingExtractL
 use risingwave_connector::source::iceberg::GLOBAL_ICEBERG_SCAN_METRICS;
 use risingwave_connector::source::monitor::GLOBAL_SOURCE_METRICS;
 use risingwave_dml::dml_manager::DmlManager;
+use risingwave_jni_core::jvm_runtime::register_jvm_builder;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
@@ -82,7 +84,6 @@ use crate::rpc::service::health_service::HealthServiceImpl;
 use crate::rpc::service::monitor_service::{AwaitTreeMiddlewareLayer, MonitorServiceImpl};
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::telemetry::ComputeTelemetryCreator;
-
 /// Bootstraps the compute-node.
 ///
 /// Returns when the `shutdown` token is triggered.
@@ -105,7 +106,7 @@ pub async fn compute_node_serve(
     // Initialize all the configs
     let stream_config = Arc::new(config.streaming.clone());
     let batch_config = Arc::new(config.batch.clone());
-
+    register_jvm_builder();
     // Initialize operator lru cache global sequencer args.
     init_global_sequencer_args(
         config
@@ -204,6 +205,7 @@ pub async fn compute_node_serve(
             .ok(),
     };
 
+    LicenseManager::get().refresh(system_params.license_key());
     let state_store = StateStoreImpl::new(
         state_store_url,
         storage_opts.clone(),
@@ -225,8 +227,13 @@ pub async fn compute_node_serve(
     );
 
     // Initialize observer manager.
+    let batch_client_pool = Arc::new(ComputeClientPool::new(
+        config.batch_exchange_connection_pool_size(),
+        config.batch.developer.compute_client_config.clone(),
+    ));
     let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params.clone()));
-    let compute_observer_node = ComputeObserverNode::new(system_params_manager.clone());
+    let compute_observer_node =
+        ComputeObserverNode::new(system_params_manager.clone(), batch_client_pool.clone());
     let observer_manager =
         ObserverManager::new_with_meta_client(meta_client.clone(), compute_observer_node).await;
     observer_manager.start().await;
@@ -256,7 +263,7 @@ pub async fn compute_node_serve(
             let (handle, shutdown_sender) = start_compactor(
                 compactor_context,
                 hummock_meta_client.clone(),
-                storage.sstable_object_id_manager().clone(),
+                storage.object_id_manager().clone(),
                 storage.compaction_catalog_manager_ref().clone(),
             );
             sub_tasks.push((handle, shutdown_sender));
@@ -347,9 +354,6 @@ pub async fn compute_node_serve(
     ));
 
     // Initialize batch environment.
-    let batch_client_pool = Arc::new(ComputeClientPool::new(
-        config.batch_exchange_connection_pool_size(),
-    ));
     let batch_env = BatchEnvironment::new(
         batch_mgr.clone(),
         advertise_addr.clone(),
@@ -368,6 +372,7 @@ pub async fn compute_node_serve(
     // Initialize the streaming environment.
     let stream_client_pool = Arc::new(ComputeClientPool::new(
         config.streaming_exchange_connection_pool_size(),
+        config.streaming.developer.compute_client_config.clone(),
     ));
     let stream_env = StreamEnvironment::new(
         advertise_addr.clone(),
@@ -529,9 +534,8 @@ fn total_storage_memory_limit_bytes(storage_memory_config: &StorageMemoryConfig)
 
 /// Checks whether an embedded compactor starts with a compute node.
 fn embedded_compactor_enabled(state_store_url: &str, disable_remote_compactor: bool) -> bool {
-    // We treat `hummock+memory-shared` as a shared storage, so we won't start the compactor
-    // along with the compute node.
-    state_store_url == "hummock+memory"
+    // Always start an embedded compactor if the state store is in-memory.
+    state_store_url.starts_with("hummock+memory")
         || state_store_url.starts_with("hummock+disk")
         || disable_remote_compactor
 }

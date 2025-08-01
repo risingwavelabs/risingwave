@@ -18,6 +18,8 @@ use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 
 use crate::connector_common::{AwsAuthProps, KafkaConnectionProps, KafkaPrivateLinkCommon};
+use crate::enforce_secret::EnforceSecret;
+use crate::error::ConnectorResult;
 
 mod client_context;
 pub mod enumerator;
@@ -51,17 +53,30 @@ pub struct RdKafkaPropertiesConsumer {
     /// consumer queue.
     #[serde(rename = "properties.queued.min.messages")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub queued_min_messages: Option<usize>,
 
     #[serde(rename = "properties.queued.max.messages.kbytes")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub queued_max_messages_kbytes: Option<usize>,
 
     /// Maximum time the broker may wait to fill the Fetch response with `fetch.min.`bytes of
     /// messages.
     #[serde(rename = "properties.fetch.wait.max.ms")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub fetch_wait_max_ms: Option<usize>,
+
+    /// Minimum number of bytes the broker responds with. If fetch.wait.max.ms expires the accumulated data will be sent to the client regardless of this setting.
+    #[serde(rename = "properties.fetch.min.bytes")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub fetch_min_bytes: Option<usize>,
+
+    /// Initial maximum number of bytes per topic+partition to request when fetching messages from the broker. If the client encounters a message larger than this value it will gradually try to increase it until the entire message can be fetched.
+    #[serde(rename = "properties.fetch.message.max.bytes")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub fetch_message_max_bytes: Option<usize>,
 
     /// How long to postpone the next fetch request for a topic+partition in case the current fetch
     /// queue thresholds (`queued.min.messages` or `queued.max.messages.kbytes`) have been
@@ -70,27 +85,30 @@ pub struct RdKafkaPropertiesConsumer {
     /// increase CPU utilization.
     #[serde(rename = "properties.fetch.queue.backoff.ms")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub fetch_queue_backoff_ms: Option<usize>,
 
     /// Maximum amount of data the broker shall return for a Fetch request. Messages are fetched in
     /// batches by the consumer and if the first message batch in the first non-empty partition of
     /// the Fetch request is larger than this value, then the message batch will still be returned
     /// to ensure the consumer can make progress. The maximum message batch size accepted by the
-    /// broker is defined via `message.max.bytes` (broker config) or `max.message.bytes` (broker
-    /// topic config). `fetch.max.bytes` is automatically adjusted upwards to be at least
-    /// `message.max.bytes` (consumer config).
+    /// broker is defined via `message.max.bytes` (broker config) or `max.message.bytes` (broker
+    /// topic config). `fetch.max.bytes` is automatically adjusted upwards to be at least
+    /// `message.max.bytes` (consumer config).
     #[serde(rename = "properties.fetch.max.bytes")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub fetch_max_bytes: Option<usize>,
 
     /// Whether to automatically and periodically commit offsets in the background.
     ///
-    /// Note that RisingWave does NOT rely on committed offsets. Committing offset is only for exposing the
+    /// Note that RisingWave does NOT rely on committed offsets. Committing offset is only for exposing the
     /// progress for monitoring. Setting this to false can avoid creating consumer groups.
     ///
     /// default: true
     #[serde(rename = "properties.enable.auto.commit")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub enable_auto_commit: Option<bool>,
 }
 
@@ -132,6 +150,7 @@ pub struct KafkaProperties {
     ///   offsets, and does not join the consumer group. It just reports offsets
     ///   to the group.
     #[serde(rename = "group.id.prefix")]
+    #[with_option(allow_alter_on_fly)]
     pub group_id_prefix: Option<String>,
 
     /// This parameter is used to tell `KafkaSplitReader` to produce `UpsertMessage`s, which
@@ -160,6 +179,16 @@ pub struct KafkaProperties {
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
+}
+
+impl EnforceSecret for KafkaProperties {
+    fn enforce_secret<'a>(prop_iter: impl Iterator<Item = &'a str>) -> ConnectorResult<()> {
+        for prop in prop_iter {
+            KafkaConnectionProps::enforce_one(prop)?;
+            AwsAuthProps::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 impl SourceProperties for KafkaProperties {
@@ -203,6 +232,12 @@ impl RdKafkaPropertiesConsumer {
         }
         if let Some(v) = &self.fetch_wait_max_ms {
             c.set("fetch.wait.max.ms", v.to_string());
+        }
+        if let Some(v) = &self.fetch_min_bytes {
+            c.set("fetch.min.bytes", v.to_string());
+        }
+        if let Some(v) = &self.fetch_message_max_bytes {
+            c.set("fetch.message.max.bytes", v.to_string());
         }
         if let Some(v) = &self.fetch_queue_backoff_ms {
             c.set("fetch.queue.backoff.ms", v.to_string());

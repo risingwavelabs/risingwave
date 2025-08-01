@@ -22,7 +22,7 @@ use cfg_or_panic::cfg_or_panic;
 use clap::Parser;
 use itertools::Itertools;
 use rand::seq::IteratorRandom;
-use rand::{Rng, thread_rng};
+use rand::{Rng, rng as thread_rng};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
@@ -195,7 +195,7 @@ impl Fragment {
         let target_worker_slot_count = match self.inner.distribution_type() {
             FragmentDistributionType::Unspecified => unreachable!(),
             FragmentDistributionType::Single => 1,
-            FragmentDistributionType::Hash => rng.gen_range(1..=all_worker_slots.len()),
+            FragmentDistributionType::Hash => rng.random_range(1..=all_worker_slots.len()),
         };
 
         let target_worker_slots: HashSet<_> = all_worker_slots
@@ -329,7 +329,7 @@ impl Cluster {
     /// Locate some random fragments that are reschedulable.
     pub async fn locate_random_fragments(&mut self) -> Result<Vec<Fragment>> {
         let fragments = self.locate_fragments([predicate::can_reschedule()]).await?;
-        let len = thread_rng().gen_range(1..=fragments.len());
+        let len = thread_rng().random_range(1..=fragments.len());
         let selected = fragments
             .into_iter()
             .choose_multiple(&mut thread_rng(), len);

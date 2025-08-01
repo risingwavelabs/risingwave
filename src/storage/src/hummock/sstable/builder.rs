@@ -23,7 +23,7 @@ use risingwave_hummock_sdk::key::{FullKey, MAX_KEY_LEN, user_key};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
-use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, LocalSstableInfo};
 use risingwave_pb::hummock::BloomFilterType;
 
 use super::utils::CompressionAlgorithm;
@@ -115,7 +115,7 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     raw_key: BytesMut,
     raw_value: BytesMut,
     last_table_id: Option<u32>,
-    sstable_id: u64,
+    sst_object_id: HummockSstableObjectId,
 
     /// Per table stats.
     table_stats: TableStatsMap,
@@ -161,13 +161,14 @@ impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
 
 impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     pub fn new(
-        sstable_id: u64,
+        sst_object_id: impl Into<HummockSstableObjectId>,
         writer: W,
         filter_builder: F,
         options: SstableBuilderOptions,
         compaction_catalog_agent_ref: CompactionCatalogAgentRef,
         memory_limiter: Option<Arc<MemoryLimiter>>,
     ) -> Self {
+        let sst_object_id = sst_object_id.into();
         Self {
             options: options.clone(),
             writer,
@@ -183,7 +184,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             raw_key: BytesMut::new(),
             raw_value: BytesMut::new(),
             last_full_key: vec![],
-            sstable_id,
+            sst_object_id,
             compaction_catalog_agent_ref,
             table_stats: Default::default(),
             last_table_stats: Default::default(),
@@ -239,7 +240,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                     let value = HummockValue::from_slice(iter.value()).unwrap_or_else(|_| {
                         panic!(
                             "decode failed for fast compact sst_id {} block_idx {} last_table_id {:?}",
-                            self.sstable_id, self.block_metas.len(), self.last_table_id
+                            self.sst_object_id, self.block_metas.len(), self.last_table_id
                         )
                     });
                     self.add_impl(iter.key(), value, false).await?;
@@ -326,7 +327,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 could_switch_block,
                 "is_new_user_key {} sst_id {} block_idx {} table_id {} last_table_id {:?} full_key {:?}",
                 is_new_user_key,
-                self.sstable_id,
+                self.sst_object_id,
                 self.block_metas.len(),
                 table_id,
                 self.last_table_id,
@@ -351,7 +352,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                     panic!(
                         "WARN overflow can't convert writer_data_len {} into u32 sst_id {} block_idx {} tables {:?}",
                         self.writer.data_len(),
-                        self.sstable_id,
+                        self.sst_object_id,
                         self.block_metas.len(),
                         self.table_ids,
                     )
@@ -519,8 +520,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         };
 
         let sst_info: SstableInfo = SstableInfoInner {
-            object_id: self.sstable_id,
-            sst_id: self.sstable_id,
+            object_id: self.sst_object_id,
+            // use the same sst_id as object_id for initial sst
+            sst_id: self.sst_object_id.inner().into(),
             bloom_filter_kind,
             key_range: KeyRange {
                 left: Bytes::from(meta.smallest_key.clone()),

@@ -38,14 +38,14 @@ use thiserror_ext::AsReport;
 
 pub use self::mysql::{mysql_datum_to_rw_datum, mysql_row_to_owned_row};
 use self::plain_parser::PlainParser;
-pub use self::postgres::postgres_row_to_owned_row;
+pub use self::postgres::{postgres_cell_to_scalar_impl, postgres_row_to_owned_row};
 pub use self::sql_server::{ScalarImplTiberiusWrapper, sql_server_row_to_owned_row};
 pub use self::unified::Access;
 pub use self::unified::json::{JsonAccess, TimestamptzHandling};
 use self::upsert_parser::UpsertParser;
 use crate::error::ConnectorResult;
 use crate::parser::maxwell::MaxwellParser;
-use crate::schema::schema_registry::SchemaRegistryAuth;
+use crate::schema::schema_registry::SchemaRegistryConfig;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
     BoxSourceMessageStream, SourceChunkStream, SourceColumnDesc, SourceColumnType, SourceContext,
@@ -458,8 +458,9 @@ impl ByteStreamSourceParserImpl {
             (ProtocolProperties::Plain, EncodingProperties::Csv(config)) => {
                 CsvParser::new(rw_columns, *config, source_ctx).map(Self::Csv)
             }
-            (ProtocolProperties::DebeziumMongo, EncodingProperties::Json(_)) => {
-                DebeziumMongoJsonParser::new(rw_columns, source_ctx).map(Self::DebeziumMongoJson)
+            (ProtocolProperties::DebeziumMongo, EncodingProperties::MongoJson(props)) => {
+                DebeziumMongoJsonParser::new(rw_columns, source_ctx, props.clone())
+                    .map(Self::DebeziumMongoJson)
             }
             (ProtocolProperties::Canal, EncodingProperties::Json(config)) => {
                 CanalJsonParser::new(rw_columns, source_ctx, config).map(Self::CanalJson)

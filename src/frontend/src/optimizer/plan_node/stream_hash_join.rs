@@ -14,6 +14,7 @@
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::session_config::join_encoding_type::JoinEncodingType;
 use risingwave_common::util::functional::SameOrElseExt;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -24,7 +25,8 @@ use super::stream::prelude::*;
 use super::stream_join_common::StreamJoinCommon;
 use super::utils::{Distill, childless_record, plan_node_name, watermark_pretty};
 use super::{
-    ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode, generic,
+    ExprRewritable, PlanBase, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode,
+    StreamPlanRef as PlanRef, generic,
 };
 use crate::expr::{Expr, ExprDisplay, ExprRewriter, ExprVisitor, InequalityInputPair};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -61,6 +63,9 @@ pub struct StreamHashJoin {
     /// `HashJoinExecutor`. If any equal condition is able to clean state table, this field
     /// will always be `None`.
     clean_right_state_conjunction_idx: Option<usize>,
+
+    /// Determine which encoding will be used to encode join rows in operator cache.
+    join_encoding_type: JoinEncodingType,
 }
 
 impl StreamHashJoin {
@@ -220,6 +225,7 @@ impl StreamHashJoin {
             is_append_only: append_only,
             clean_left_state_conjunction_idx,
             clean_right_state_conjunction_idx,
+            join_encoding_type: ctx.session_ctx().config().streaming_join_encoding(),
         }
     }
 
@@ -306,7 +312,7 @@ impl Distill for StreamHashJoin {
     }
 }
 
-impl PlanTreeNodeBinary for StreamHashJoin {
+impl PlanTreeNodeBinary<Stream> for StreamHashJoin {
     fn left(&self) -> PlanRef {
         self.core.left.clone()
     }
@@ -323,7 +329,7 @@ impl PlanTreeNodeBinary for StreamHashJoin {
     }
 }
 
-impl_plan_tree_node_for_binary! { StreamHashJoin }
+impl_plan_tree_node_for_binary! { Stream, StreamHashJoin }
 
 impl StreamNode for StreamHashJoin {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
@@ -336,13 +342,13 @@ impl StreamNode for StreamHashJoin {
 
         let (left_table, left_degree_table, left_deduped_input_pk_indices) =
             Join::infer_internal_and_degree_table_catalog(
-                self.left().plan_base(),
+                self.left(),
                 left_jk_indices,
                 dk_indices_in_jk.clone(),
             );
         let (right_table, right_degree_table, right_deduped_input_pk_indices) =
             Join::infer_internal_and_degree_table_catalog(
-                self.right().plan_base(),
+                self.right(),
                 right_jk_indices,
                 dk_indices_in_jk,
             );
@@ -412,11 +418,12 @@ impl StreamNode for StreamHashJoin {
             right_deduped_input_pk_indices,
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
             is_append_only: self.is_append_only,
+            join_encoding_type: self.join_encoding_type as i32,
         }))
     }
 }
 
-impl ExprRewritable for StreamHashJoin {
+impl ExprRewritable<Stream> for StreamHashJoin {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

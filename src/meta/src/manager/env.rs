@@ -17,7 +17,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Context;
-use risingwave_common::config::{CompactionConfig, DefaultParallelism, ObjectStoreConfig};
+use risingwave_common::config::{
+    CompactionConfig, DefaultParallelism, ObjectStoreConfig, RpcClientConfig,
+};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::{bail, system_param};
@@ -26,9 +28,11 @@ use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{
     FrontendClientPool, FrontendClientPoolRef, StreamClientPool, StreamClientPoolRef,
 };
+use risingwave_sqlparser::ast::RedactSqlOptionKeywordsRef;
 use sea_orm::EntityTrait;
 
 use crate::MetaResult;
+use crate::barrier::SharedActorInfos;
 use crate::controller::SqlMetaStore;
 use crate::controller::id::{
     IdGeneratorManager as SqlIdGeneratorManager, IdGeneratorManagerRef as SqlIdGeneratorManagerRef,
@@ -59,6 +63,8 @@ pub struct MetaSrvEnv {
     /// notification manager.
     notification_manager: NotificationManagerRef,
 
+    shared_actor_info: SharedActorInfos,
+
     /// stream client pool memorization.
     stream_client_pool: StreamClientPoolRef,
 
@@ -74,6 +80,9 @@ pub struct MetaSrvEnv {
     cluster_id: ClusterId,
 
     pub hummock_seq: Arc<SequenceGenerator>,
+
+    /// The await-tree registry of the current meta node.
+    await_tree_reg: await_tree::Registry,
 
     /// options read by all services
     pub opts: Arc<MetaOpts>,
@@ -119,6 +128,9 @@ pub struct MetaOpts {
     pub hummock_time_travel_epoch_version_insert_batch_size: usize,
     pub hummock_gc_history_insert_batch_size: usize,
     pub hummock_time_travel_filter_out_objects_batch_size: usize,
+    pub hummock_time_travel_filter_out_objects_v1: bool,
+    pub hummock_time_travel_filter_out_objects_list_version_batch_size: usize,
+    pub hummock_time_travel_filter_out_objects_list_delta_batch_size: usize,
     /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
     /// attempt is rejected. Greater value reduces object store IO, meanwhile it results in
     /// more loss of in memory `HummockVersionCheckpoint::stale_objects` state when meta node is
@@ -141,7 +153,8 @@ pub struct MetaOpts {
     pub periodic_compaction_interval_sec: u64,
     /// Interval of reporting the number of nodes in the cluster.
     pub node_num_monitor_interval_sec: u64,
-
+    /// Whether to protect the drop table operation with incoming sink.
+    pub protect_drop_table_with_incoming_sink: bool,
     /// The Prometheus endpoint for Meta Dashboard Service.
     /// The Dashboard service uses this in the following ways:
     /// 1. Query Prometheus for relevant metrics to find Stream Graph Bottleneck, and display it.
@@ -246,6 +259,8 @@ pub struct MetaOpts {
 
     pub periodic_scheduling_compaction_group_merge_interval_sec: u64,
 
+    pub compaction_group_merge_dimension_threshold: f64,
+
     // The private key for the secret store, used when the secret is stored in the meta.
     pub secret_store_private_key: Option<Vec<u8>>,
     /// The path of the temp secret file directory.
@@ -256,6 +271,15 @@ pub struct MetaOpts {
     pub actor_cnt_per_worker_parallelism_soft_limit: usize,
 
     pub license_key_path: Option<PathBuf>,
+
+    pub compute_client_config: RpcClientConfig,
+    pub stream_client_config: RpcClientConfig,
+    pub frontend_client_config: RpcClientConfig,
+    pub redact_sql_option_keywords: RedactSqlOptionKeywordsRef,
+
+    pub cdc_table_split_init_sleep_interval_splits: u64,
+    pub cdc_table_split_init_sleep_duration_millis: u64,
+    pub cdc_table_split_init_insert_batch_size: u64,
 }
 
 impl MetaOpts {
@@ -282,6 +306,9 @@ impl MetaOpts {
             hummock_time_travel_epoch_version_insert_batch_size: 1000,
             hummock_gc_history_insert_batch_size: 1000,
             hummock_time_travel_filter_out_objects_batch_size: 1000,
+            hummock_time_travel_filter_out_objects_v1: false,
+            hummock_time_travel_filter_out_objects_list_version_batch_size: 10,
+            hummock_time_travel_filter_out_objects_list_delta_batch_size: 1000,
             min_delta_log_num_for_hummock_version_checkpoint: 1,
             min_sst_retention_time_sec: 3600 * 24 * 7,
             full_gc_interval_sec: 3600 * 24 * 7,
@@ -291,6 +318,7 @@ impl MetaOpts {
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 60,
             node_num_monitor_interval_sec: 10,
+            protect_drop_table_with_incoming_sink: false,
             prometheus_endpoint: None,
             prometheus_selector: None,
             vpc_id: None,
@@ -334,7 +362,15 @@ impl MetaOpts {
             table_stat_throuput_window_seconds_for_split: 60,
             table_stat_throuput_window_seconds_for_merge: 240,
             periodic_scheduling_compaction_group_merge_interval_sec: 60 * 10,
+            compaction_group_merge_dimension_threshold: 1.2,
             license_key_path: None,
+            compute_client_config: RpcClientConfig::default(),
+            stream_client_config: RpcClientConfig::default(),
+            frontend_client_config: RpcClientConfig::default(),
+            redact_sql_option_keywords: Arc::new(Default::default()),
+            cdc_table_split_init_sleep_interval_splits: 1000,
+            cdc_table_split_init_sleep_duration_millis: 10,
+            cdc_table_split_init_insert_batch_size: 1000,
         }
     }
 }
@@ -347,8 +383,12 @@ impl MetaSrvEnv {
         meta_store_impl: SqlMetaStore,
     ) -> MetaResult<Self> {
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
-        let stream_client_pool = Arc::new(StreamClientPool::new(1)); // typically no need for plural clients
-        let frontend_client_pool = Arc::new(FrontendClientPool::new(1));
+        let stream_client_pool =
+            Arc::new(StreamClientPool::new(1, opts.stream_client_config.clone())); // typically no need for plural clients
+        let frontend_client_pool = Arc::new(FrontendClientPool::new(
+            1,
+            opts.frontend_client_config.clone(),
+        ));
         let event_log_manager = Arc::new(start_event_log_manager(
             opts.event_log_enabled,
             opts.event_log_channel_max_size,
@@ -411,6 +451,7 @@ impl MetaSrvEnv {
             system_param_manager_impl: system_param_controller,
             session_param_manager_impl: session_param_controller,
             meta_store_impl: meta_store_impl.clone(),
+            shared_actor_info: SharedActorInfos::new(notification_manager.clone()),
             notification_manager,
             stream_client_pool,
             frontend_client_pool,
@@ -419,6 +460,8 @@ impl MetaSrvEnv {
             cluster_id,
             hummock_seq: Arc::new(SequenceGenerator::new(meta_store_impl.conn.clone())),
             opts: opts.into(),
+            // Await trees on the meta node is lightweight, thus always enabled.
+            await_tree_reg: await_tree::Registry::new(Default::default()),
         })
     }
 
@@ -481,19 +524,32 @@ impl MetaSrvEnv {
     pub fn event_log_manager_ref(&self) -> EventLogManagerRef {
         self.event_log_manager.clone()
     }
+
+    pub fn await_tree_reg(&self) -> &await_tree::Registry {
+        &self.await_tree_reg
+    }
+
+    pub(crate) fn shared_actor_infos(&self) -> &SharedActorInfos {
+        &self.shared_actor_info
+    }
 }
 
 #[cfg(any(test, feature = "test"))]
 impl MetaSrvEnv {
     // Instance for test.
     pub async fn for_test() -> Self {
-        Self::for_test_opts(MetaOpts::test(false)).await
+        Self::for_test_opts(MetaOpts::test(false), |_| ()).await
     }
 
-    pub async fn for_test_opts(opts: MetaOpts) -> Self {
+    pub async fn for_test_opts(
+        opts: MetaOpts,
+        on_test_system_params: impl FnOnce(&mut risingwave_pb::meta::PbSystemParams),
+    ) -> Self {
+        let mut system_params = risingwave_common::system_param::system_params_for_test();
+        on_test_system_params(&mut system_params);
         Self::new(
             opts,
-            risingwave_common::system_param::system_params_for_test(),
+            system_params,
             Default::default(),
             SqlMetaStore::for_test().await,
         )

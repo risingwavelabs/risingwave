@@ -137,7 +137,7 @@ async fn test_vnode_watermark_reclaim_impl(
     let original_compaction_group_id = compaction_group_id_by_table_id(session, table_id).await;
     // Move the table to a dedicated group to prevent its vnode watermark from being reclaimed during the compaction of other tables.
     cluster
-        .split_compaction_group(original_compaction_group_id, table_id)
+        .split_compaction_group(original_compaction_group_id, table_id.into())
         .await
         .unwrap();
     let compaction_group_id = compaction_group_id_by_table_id(session, table_id).await;

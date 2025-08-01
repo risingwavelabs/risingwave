@@ -175,6 +175,26 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
                     ],
                 ),
                 panels.timeseries_count(
+                        "Table Change Log Object Count",
+                        "Per table change log object count",
+                        [
+                            panels.target(
+                                f"{metric('storage_table_change_log_object_count')}",
+                                "{{table_id}}",
+                            ),
+                        ],
+                    ),
+                panels.timeseries_bytes(
+                        "Table Change Log Object Size",
+                        "Per table change log object size",
+                        [
+                            panels.target(
+                                f"{metric('storage_table_change_log_object_size')}",
+                                "{{table_id}}",
+                            ),
+                        ],
+                    ),
+                panels.timeseries_count(
                     "Delta Log Total Number",
                     "total number of hummock version delta log",
                     [

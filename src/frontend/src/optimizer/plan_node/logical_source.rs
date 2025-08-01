@@ -16,10 +16,7 @@ use std::rc::Rc;
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field};
-use risingwave_common::types::DataType;
-use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
-use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
+use risingwave_common::catalog::ColumnCatalog;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_sqlparser::ast::AsOf;
@@ -28,9 +25,9 @@ use super::generic::{GenericPlanRef, SourceNodeKind};
 use super::stream_watermark_filter::StreamWatermarkFilter;
 use super::utils::{Distill, childless_record};
 use super::{
-    BatchProject, BatchSource, ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalProject,
-    PlanBase, PlanRef, PredicatePushdown, StreamProject, StreamRowIdGen, StreamSource,
-    StreamSourceScan, ToBatch, ToStream, generic,
+    BatchProject, BatchSource, ColPrunable, ExprRewritable, Logical, LogicalFilter,
+    LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PredicatePushdown, StreamPlanRef,
+    StreamProject, StreamRowIdGen, StreamSource, StreamSourceScan, ToBatch, ToStream, generic,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::Result;
@@ -44,9 +41,7 @@ use crate::optimizer::plan_node::{
     ToStreamContext,
 };
 use crate::optimizer::property::Distribution::HashShard;
-use crate::optimizer::property::{
-    Distribution, MonotonicityMap, Order, RequiredDist, WatermarkColumns,
-};
+use crate::optimizer::property::{Distribution, MonotonicityMap, RequiredDist, WatermarkColumns};
 use crate::utils::{ColIndexMapping, Condition, IndexRewriter};
 
 /// `LogicalSource` returns contents of a table or other equivalent object
@@ -165,7 +160,7 @@ impl LogicalSource {
                 // TODO(yuhao): avoid this `from_expr_proto`.
                 let proj_expr =
                     rewriter.rewrite_expr(ExprImpl::from_expr_proto(expr.as_ref().unwrap())?);
-                let casted_expr = proj_expr.cast_assign(ret_data_type)?;
+                let casted_expr = proj_expr.cast_assign(&ret_data_type)?;
                 exprs.push(casted_expr);
             } else {
                 let input_ref = InputRef {
@@ -180,45 +175,24 @@ impl LogicalSource {
         Ok(Some(exprs))
     }
 
-    /// `StreamSource` (list) -> shuffle -> `StreamDedup`
-    fn create_fs_list_plan(core: generic::Source) -> Result<PlanRef> {
-        let logical_source = generic::Source {
-            column_catalog: vec![
-                ColumnCatalog {
-                    column_desc: ColumnDesc::from_field_with_column_id(
-                        &Field {
-                            name: "filename".to_owned(),
-                            data_type: DataType::Varchar,
-                        },
-                        0,
-                    ),
-                    is_hidden: false,
-                },
-                ColumnCatalog {
-                    column_desc: ColumnDesc::from_field_with_column_id(
-                        &Field {
-                            name: "last_edit_time".to_owned(),
-                            data_type: DataType::Timestamptz,
-                        },
-                        1,
-                    ),
-                    is_hidden: false,
-                },
-                ColumnCatalog {
-                    column_desc: ColumnDesc::from_field_with_column_id(
-                        &Field {
-                            name: "file_size".to_owned(),
-                            data_type: DataType::Int64,
-                        },
-                        0,
-                    ),
-                    is_hidden: false,
-                },
-            ],
-            row_id_index: None,
-            ..core
-        };
-        let mut new_s3_plan: PlanRef = StreamSource {
+    fn create_non_shared_source_plan(core: generic::Source) -> Result<StreamPlanRef> {
+        let mut plan;
+        if core.is_new_fs_connector() {
+            plan = Self::create_list_plan(core.clone(), true)?;
+            plan = StreamFsFetch::new(plan, core.clone()).into();
+        } else if core.is_iceberg_connector() {
+            plan = Self::create_list_plan(core.clone(), false)?;
+            plan = StreamFsFetch::new(plan, core.clone()).into();
+        } else {
+            plan = StreamSource::new(core.clone()).into()
+        }
+        Ok(plan)
+    }
+
+    /// `StreamSource` (list) -> shuffle -> (optional) `StreamDedup`
+    fn create_list_plan(core: generic::Source, dedup: bool) -> Result<StreamPlanRef> {
+        let logical_source = generic::Source::file_list_node(core);
+        let mut list_plan: StreamPlanRef = StreamSource {
             base: PlanBase::new_stream_with_core(
                 &logical_source,
                 Distribution::Single,
@@ -230,15 +204,17 @@ impl LogicalSource {
             core: logical_source,
         }
         .into();
-        new_s3_plan = RequiredDist::shard_by_key(3, &[0])
-            .enforce_if_not_satisfies(new_s3_plan, &Order::any())?;
-        new_s3_plan = StreamDedup::new(generic::Dedup {
-            input: new_s3_plan,
-            dedup_cols: vec![0],
-        })
-        .into();
+        list_plan = RequiredDist::shard_by_key(list_plan.schema().len(), &[0])
+            .streaming_enforce_if_not_satisfies(list_plan)?;
+        if dedup {
+            list_plan = StreamDedup::new(generic::Dedup {
+                input: list_plan,
+                dedup_cols: vec![0],
+            })
+            .into();
+        }
 
-        Ok(new_s3_plan)
+        Ok(list_plan)
     }
 
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
@@ -246,7 +222,7 @@ impl LogicalSource {
     }
 
     pub fn clone_with_column_catalog(&self, column_catalog: Vec<ColumnCatalog>) -> Result<Self> {
-        let row_id_index = self.core.row_id_index;
+        let row_id_index = column_catalog.iter().position(|c| c.is_row_id_column());
         let kind = self.core.kind.clone();
         let ctx = self.core.ctx.clone();
         let as_of = self.core.as_of.clone();
@@ -261,7 +237,7 @@ impl LogicalSource {
     }
 }
 
-impl_plan_tree_node_for_leaf! {LogicalSource}
+impl_plan_tree_node_for_leaf! { Logical, LogicalSource}
 impl Distill for LogicalSource {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let fields = if let Some(catalog) = self.source_catalog() {
@@ -283,12 +259,13 @@ impl Distill for LogicalSource {
 
 impl ColPrunable for LogicalSource {
     fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
+        // TODO: iceberg source can prune columns
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
         LogicalProject::with_mapping(self.clone().into(), mapping).into()
     }
 }
 
-impl ExprRewritable for LogicalSource {
+impl ExprRewritable<Logical> for LogicalSource {
     fn has_rewritable_expr(&self) -> bool {
         self.output_exprs.is_some()
     }
@@ -328,7 +305,7 @@ impl PredicatePushdown for LogicalSource {
 }
 
 impl ToBatch for LogicalSource {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         assert!(
             !self.core.is_kafka_connector(),
             "LogicalSource with a kafka property should be converted to LogicalKafkaScan"
@@ -337,7 +314,7 @@ impl ToBatch for LogicalSource {
             !self.core.is_iceberg_connector(),
             "LogicalSource with a iceberg property should be converted to LogicalIcebergScan"
         );
-        let mut plan: PlanRef = BatchSource::new(self.core.clone()).into();
+        let mut plan = BatchSource::new(self.core.clone()).into();
 
         if let Some(exprs) = &self.output_exprs {
             let logical_project = generic::Project::new(exprs.to_vec(), plan);
@@ -349,19 +326,17 @@ impl ToBatch for LogicalSource {
 }
 
 impl ToStream for LogicalSource {
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        let mut plan: PlanRef;
+    fn to_stream(
+        &self,
+        _ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
+        let mut plan;
 
         match self.core.kind {
             SourceNodeKind::CreateTable | SourceNodeKind::CreateSharedSource => {
                 // Note: for create table, row_id and generated columns is created in plan_root.gen_table_plan.
                 // for shared source, row_id and generated columns is created after SourceBackfill node.
-                if self.core.is_new_fs_connector() {
-                    plan = Self::create_fs_list_plan(self.core.clone())?;
-                    plan = StreamFsFetch::new(plan, self.core.clone()).into();
-                } else {
-                    plan = StreamSource::new(self.core.clone()).into()
-                }
+                plan = Self::create_non_shared_source_plan(self.core.clone())?;
             }
             SourceNodeKind::CreateMViewOrBatch => {
                 // Create MV on source.
@@ -372,12 +347,7 @@ impl ToStream for LogicalSource {
                     plan = StreamSourceScan::new(self.core.clone()).into();
                 } else {
                     // non-shared source
-                    if self.core.is_new_fs_connector() {
-                        plan = Self::create_fs_list_plan(self.core.clone())?;
-                        plan = StreamFsFetch::new(plan, self.core.clone()).into();
-                    } else {
-                        plan = StreamSource::new(self.core.clone()).into()
-                    }
+                    plan = Self::create_non_shared_source_plan(self.core.clone())?;
                 }
 
                 if let Some(exprs) = &self.output_exprs {
@@ -399,18 +369,6 @@ impl ToStream for LogicalSource {
                     )
                     .into();
                 }
-            }
-        }
-        if let Some(source) = &self.core.catalog {
-            let connector = &source
-                .with_properties
-                .get(UPSTREAM_SOURCE_KEY)
-                .map(|s| s.to_lowercase())
-                .unwrap();
-            if ICEBERG_CONNECTOR == connector {
-                return Err(
-                    anyhow::anyhow!("Iceberg source is not supported in stream queries").into(),
-                );
             }
         }
         Ok(plan)

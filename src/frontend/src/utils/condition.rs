@@ -528,7 +528,6 @@ impl Condition {
                     false
                 }
             });
-
         // optimize for single row conjunctions. More optimisations may come later
         // For example, (v1,v2,v3) > (1, 2, 3) means all data from (1, 2, 3).
         // Suppose v1 v2 v3 are both pk, we can push (v1,v2,v3）> (1,2,3) down to scan
@@ -651,23 +650,19 @@ impl Condition {
         }
 
         // It's an OR.
-        if self.conjunctions.len() == 1 {
-            if let Some(disjunctions) = self.conjunctions[0].as_or_disjunctions() {
-                if let Some((scan_ranges, maintaining_condition)) =
-                    Self::disjunctions_to_scan_ranges(
-                        table_desc,
-                        max_split_range_gap,
-                        disjunctions,
-                    )?
-                {
-                    if maintaining_condition {
-                        return Ok((scan_ranges, self));
-                    } else {
-                        return Ok((scan_ranges, Condition::true_cond()));
-                    }
+        if self.conjunctions.len() == 1
+            && let Some(disjunctions) = self.conjunctions[0].as_or_disjunctions()
+        {
+            if let Some((scan_ranges, maintaining_condition)) =
+                Self::disjunctions_to_scan_ranges(table_desc, max_split_range_gap, disjunctions)?
+            {
+                if maintaining_condition {
+                    return Ok((scan_ranges, self));
                 } else {
-                    return Ok((vec![], self));
+                    return Ok((scan_ranges, Condition::true_cond()));
                 }
+            } else {
+                return Ok((vec![], self));
             }
         }
         if let Some((scan_ranges, other_condition)) =
@@ -845,9 +840,8 @@ impl Condition {
         // analyze exprs in the group. scan_range is not updated
         for expr in group {
             if let Some((input_ref, const_expr)) = expr.as_eq_const() {
-                let new_expr = if let Ok(expr) = const_expr
-                    .clone()
-                    .cast_implicit(input_ref.data_type.clone())
+                let new_expr = if let Ok(expr) =
+                    const_expr.clone().cast_implicit(&input_ref.data_type)
                 {
                     expr
                 } else {
@@ -881,9 +875,7 @@ impl Condition {
                 for const_expr in in_const_list {
                     // The cast should succeed, because otherwise the input_ref is casted
                     // and thus `as_in_const_list` returns None.
-                    let const_expr = const_expr
-                        .cast_implicit(input_ref.data_type.clone())
-                        .unwrap();
+                    let const_expr = const_expr.cast_implicit(&input_ref.data_type).unwrap();
                     let value = const_expr.fold_const()?;
                     let Some(value) = value else {
                         continue;
@@ -909,24 +901,22 @@ impl Condition {
                     .sorted_by(DefaultOrd::default_cmp)
                     .collect();
             } else if let Some((input_ref, op, const_expr)) = expr.as_comparison_const() {
-                let new_expr = if let Ok(expr) = const_expr
-                    .clone()
-                    .cast_implicit(input_ref.data_type.clone())
-                {
-                    expr
-                } else {
-                    match self::cast_compare::cast_compare_for_cmp(
-                        const_expr,
-                        input_ref.data_type,
-                        op,
-                    ) {
-                        Ok(ResultForCmp::Success(expr)) => expr,
-                        _ => {
-                            other_conds.push(expr);
-                            continue;
+                let new_expr =
+                    if let Ok(expr) = const_expr.clone().cast_implicit(&input_ref.data_type) {
+                        expr
+                    } else {
+                        match self::cast_compare::cast_compare_for_cmp(
+                            const_expr,
+                            input_ref.data_type,
+                            op,
+                        ) {
+                            Ok(ResultForCmp::Success(expr)) => expr,
+                            _ => {
+                                other_conds.push(expr);
+                                continue;
+                            }
                         }
-                    }
-                };
+                    };
                 let Some(value) = new_expr.fold_const()? else {
                     // column compare with NULL, the result is always  NULL.
                     return Ok(None);
@@ -1181,12 +1171,12 @@ impl Condition {
         });
         // if there is a `false` in conjunctions, the whole condition will be `false`
         for expr in &mut res {
-            if let Some(v) = try_get_bool_constant(expr) {
-                if !v {
-                    res.clear();
-                    res.push(ExprImpl::literal_bool(false));
-                    break;
-                }
+            if let Some(v) = try_get_bool_constant(expr)
+                && !v
+            {
+                res.clear();
+                res.push(ExprImpl::literal_bool(false));
+                break;
             }
         }
         Self { conjunctions: res }
@@ -1306,12 +1296,12 @@ mod cast_compare {
                     Ok(ShrinkResult::OutLowerBound)
                 } else {
                     Ok(ShrinkResult::InRange(
-                        const_expr.cast_explicit(target).unwrap(),
+                        const_expr.cast_explicit(&target).unwrap(),
                     ))
                 }
             }
             None => Ok(ShrinkResult::InRange(
-                const_expr.cast_explicit(target).unwrap(),
+                const_expr.cast_explicit(&target).unwrap(),
             )),
         }
     }
@@ -1330,13 +1320,13 @@ mod tests {
 
         let ty = DataType::Int32;
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         let left: ExprImpl = FunctionCall::new(
             ExprType::LessThanOrEqual,
             vec![
-                InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into(),
-                InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into(),
+                InputRef::new(rng.random_range(0..left_col_num), ty.clone()).into(),
+                InputRef::new(rng.random_range(0..left_col_num), ty.clone()).into(),
             ],
         )
         .unwrap()
@@ -1346,12 +1336,12 @@ mod tests {
             ExprType::LessThan,
             vec![
                 InputRef::new(
-                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    rng.random_range(left_col_num..left_col_num + right_col_num),
                     ty.clone(),
                 )
                 .into(),
                 InputRef::new(
-                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    rng.random_range(left_col_num..left_col_num + right_col_num),
                     ty.clone(),
                 )
                 .into(),
@@ -1363,9 +1353,9 @@ mod tests {
         let other: ExprImpl = FunctionCall::new(
             ExprType::GreaterThan,
             vec![
-                InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into(),
+                InputRef::new(rng.random_range(0..left_col_num), ty.clone()).into(),
                 InputRef::new(
-                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    rng.random_range(left_col_num..left_col_num + right_col_num),
                     ty,
                 )
                 .into(),
@@ -1392,9 +1382,9 @@ mod tests {
 
         let ty = DataType::Int32;
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
-        let x: ExprImpl = InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into();
+        let x: ExprImpl = InputRef::new(rng.random_range(0..left_col_num), ty.clone()).into();
 
         let left: ExprImpl = FunctionCall::new(ExprType::Equal, vec![x.clone(), x.clone()])
             .unwrap()
@@ -1404,12 +1394,12 @@ mod tests {
             ExprType::LessThan,
             vec![
                 InputRef::new(
-                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    rng.random_range(left_col_num..left_col_num + right_col_num),
                     ty.clone(),
                 )
                 .into(),
                 InputRef::new(
-                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    rng.random_range(left_col_num..left_col_num + right_col_num),
                     ty.clone(),
                 )
                 .into(),
@@ -1421,9 +1411,9 @@ mod tests {
         let other: ExprImpl = FunctionCall::new(
             ExprType::GreaterThan,
             vec![
-                InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into(),
+                InputRef::new(rng.random_range(0..left_col_num), ty.clone()).into(),
                 InputRef::new(
-                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    rng.random_range(left_col_num..left_col_num + right_col_num),
                     ty,
                 )
                 .into(),

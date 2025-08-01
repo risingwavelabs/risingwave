@@ -94,7 +94,7 @@ impl FunctionAttr {
             }
             if let Some(i) = self.args.iter().position(|t| t == "anyarray") {
                 // infer as the element type of "anyarray" argument
-                return Ok(quote! { |args| Ok(args[#i].as_list().clone()) });
+                return Ok(quote! { |args| Ok(args[#i].as_list_element_type().clone()) });
             }
         } else if self.ret == "anyarray" {
             if let Some(i) = self.args.iter().position(|t| t == "anyarray") {
@@ -1308,6 +1308,7 @@ fn sig_data_type(ty: &str) -> TokenStream2 {
         "any" => quote! { SigDataType::Any },
         "anyarray" => quote! { SigDataType::AnyArray },
         "anymap" => quote! { SigDataType::AnyMap },
+        "vector" => quote! { SigDataType::Vector },
         "struct" => quote! { SigDataType::AnyStruct },
         _ if ty.starts_with("struct") && ty.contains("any") => quote! { SigDataType::AnyStruct },
         _ => {

@@ -28,7 +28,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use clap::Parser;
-use foyer::{Engine, HybridCacheBuilder};
+use foyer::{CacheBuilder, Engine, HybridCacheBuilder, LargeEngineOptions};
 use replay_impl::{GlobalReplayImpl, get_replay_notification_client};
 use risingwave_common::config::{
     NoOverride, ObjectStoreConfig, extract_storage_memory_config, load_config,
@@ -70,7 +70,7 @@ struct Args {
 async fn main() {
     let args = Args::parse();
     // disable runtime tracing when replaying
-    std::env::set_var(USE_TRACE, "false");
+    unsafe { std::env::set_var(USE_TRACE, "false") };
     run_replay(args).await.unwrap();
 }
 
@@ -87,7 +87,7 @@ async fn run_replay(args: Args) -> Result<()> {
     Ok(())
 }
 
-async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalReplay> {
+async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalReplay + use<>> {
     let config = load_config(&args.config, NoOverride);
     let storage_memory_config = extract_storage_memory_config(&config);
     let system_params_reader =
@@ -115,14 +115,14 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
     let meta_cache = HybridCacheBuilder::new()
         .memory(storage_opts.meta_cache_capacity_mb * (1 << 20))
         .with_shards(storage_opts.meta_cache_shard_num)
-        .storage(Engine::Large)
+        .storage(Engine::Large(LargeEngineOptions::new()))
         .build()
         .await
         .unwrap();
     let block_cache = HybridCacheBuilder::new()
         .memory(storage_opts.block_cache_capacity_mb * (1 << 20))
         .with_shards(storage_opts.block_cache_shard_num)
-        .storage(Engine::Large)
+        .storage(Engine::Large(LargeEngineOptions::new()))
         .build()
         .await
         .unwrap();
@@ -137,6 +137,8 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         use_new_object_prefix_strategy: args.use_new_object_prefix_strategy,
         meta_cache,
         block_cache,
+        vector_meta_cache: CacheBuilder::new(1 << 10).build(),
+        vector_block_cache: CacheBuilder::new(1 << 10).build(),
     }));
 
     let (hummock_meta_client, notification_client, notifier) = {

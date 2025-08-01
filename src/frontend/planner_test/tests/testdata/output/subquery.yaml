@@ -174,21 +174,13 @@
     LogicalAgg { aggs: [count(1:Int32)] }
     └─LogicalProject { exprs: [1:Int32] }
       └─LogicalJoin { type: Inner, on: true, output: all }
-        ├─LogicalAgg { aggs: [] }
-        │ └─LogicalAgg { group_key: [1:Int32], aggs: [] }
-        │   └─LogicalProject { exprs: [1:Int32] }
-        │     └─LogicalScan { table: t1, columns: [] }
+        ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
         └─LogicalScan { table: t2, columns: [] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [count(1:Int32)] }
     └─BatchProject { exprs: [1:Int32] }
       └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
-        ├─BatchSimpleAgg { aggs: [] }
-        │ └─BatchExchange { order: [], dist: Single }
-        │   └─BatchHashAgg { group_key: [1:Int32], aggs: [] }
-        │     └─BatchExchange { order: [], dist: HashShard(1:Int32) }
-        │       └─BatchProject { exprs: [1:Int32] }
-        │         └─BatchScan { table: t1, columns: [], distribution: SomeShard }
+        ├─BatchValues { rows: [[]] }
         └─BatchExchange { order: [], dist: Single }
           └─BatchScan { table: t2, columns: [], distribution: SomeShard }
 - sql: |
@@ -338,8 +330,7 @@
         ├─LogicalJoin { type: Inner, on: true, output: all }
         │ ├─LogicalAgg { group_key: [a.a1], aggs: [] }
         │ │ └─LogicalScan { table: a, columns: [a.a1] }
-        │ └─LogicalAgg { aggs: [] }
-        │   └─LogicalScan { table: b, columns: [] }
+        │ └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
         └─LogicalJoin { type: Inner, on: true, output: all }
           ├─LogicalAgg { group_key: [a.a1], aggs: [] }
           │ └─LogicalScan { table: a, columns: [a.a1] }
@@ -445,13 +436,10 @@
       │ └─LogicalProject { exprs: [a1] }
       │   └─LogicalSource { source: a, columns: [a1, a2, _row_id] }
       └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a1, a1), output: all }
-        ├─LogicalJoin { type: Inner, on: true, output: all }
-        │ ├─LogicalAgg { group_key: [a1], aggs: [] }
-        │ │ └─LogicalShare { id: 2 }
-        │ │   └─LogicalProject { exprs: [a1] }
-        │ │     └─LogicalSource { source: a, columns: [a1, a2, _row_id] }
-        │ └─LogicalAgg { aggs: [] }
-        │   └─LogicalSource { source: b, columns: [b1, b2, _row_id] }
+        ├─LogicalAgg { group_key: [a1], aggs: [] }
+        │ └─LogicalShare { id: 2 }
+        │   └─LogicalProject { exprs: [a1] }
+        │     └─LogicalSource { source: a, columns: [a1, a2, _row_id] }
         └─LogicalJoin { type: Inner, on: true, output: [a1] }
           ├─LogicalAgg { group_key: [a1], aggs: [] }
           │ └─LogicalShare { id: 2 }
@@ -577,16 +565,17 @@
                       └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [i, col, integers._row_id(hidden), integers.i(hidden)], stream_key: [integers._row_id, i], pk_columns: [i, integers._row_id], pk_conflict: NoCheck }
-    └─StreamHashJoin { type: LeftOuter, predicate: integers.i IS NOT DISTINCT FROM integers.i, output: [integers.i, row_number, integers._row_id, integers.i] }
-      ├─StreamExchange { dist: HashShard(integers.i) }
-      │ └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
-      └─StreamGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
-        └─StreamProject { exprs: [integers.i, row_number, integers._row_id] }
-          └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-            └─StreamExchange { dist: HashShard(integers.i) }
-              └─StreamProject { exprs: [integers.i, integers.i, integers._row_id] }
-                └─StreamFilter { predicate: IsNotNull(integers.i) }
-                  └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
+    └─StreamExchange { dist: HashShard(integers.i, integers._row_id) }
+      └─StreamHashJoin { type: LeftOuter, predicate: integers.i IS NOT DISTINCT FROM integers.i, output: [integers.i, row_number, integers._row_id, integers.i] }
+        ├─StreamExchange { dist: HashShard(integers.i) }
+        │ └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
+        └─StreamGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
+          └─StreamProject { exprs: [integers.i, row_number, integers._row_id] }
+            └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+              └─StreamExchange { dist: HashShard(integers.i) }
+                └─StreamProject { exprs: [integers.i, integers.i, integers._row_id] }
+                  └─StreamFilter { predicate: IsNotNull(integers.i) }
+                    └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
 - name: test over window subquery 2 (with nested loop join so cannot be transformed into a stream plan)
   sql: |
     CREATE TABLE integers(i INTEGER);
@@ -635,16 +624,17 @@
                       └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [i, col, integers._row_id(hidden), integers.i(hidden)], stream_key: [integers._row_id, i], pk_columns: [i, integers._row_id], pk_conflict: NoCheck }
-    └─StreamHashJoin { type: LeftOuter, predicate: integers.i IS NOT DISTINCT FROM integers.i, output: [integers.i, sum, integers._row_id, integers.i] }
-      ├─StreamExchange { dist: HashShard(integers.i) }
-      │ └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
-      └─StreamGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
-        └─StreamProject { exprs: [integers.i, sum, integers._row_id] }
-          └─StreamOverWindow { window_functions: [sum(integers.i) OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-            └─StreamExchange { dist: HashShard(integers.i) }
-              └─StreamProject { exprs: [integers.i, integers.i, integers._row_id] }
-                └─StreamFilter { predicate: IsNotNull(integers.i) }
-                  └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
+    └─StreamExchange { dist: HashShard(integers.i, integers._row_id) }
+      └─StreamHashJoin { type: LeftOuter, predicate: integers.i IS NOT DISTINCT FROM integers.i, output: [integers.i, sum, integers._row_id, integers.i] }
+        ├─StreamExchange { dist: HashShard(integers.i) }
+        │ └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
+        └─StreamGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
+          └─StreamProject { exprs: [integers.i, sum, integers._row_id] }
+            └─StreamOverWindow { window_functions: [sum(integers.i) OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+              └─StreamExchange { dist: HashShard(integers.i) }
+                └─StreamProject { exprs: [integers.i, integers.i, integers._row_id] }
+                  └─StreamFilter { predicate: IsNotNull(integers.i) }
+                    └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
 - name: test over window subquery 4  (with nested loop join so cannot be transformed into a stream plan)
   sql: |
     CREATE TABLE integers(i INTEGER);

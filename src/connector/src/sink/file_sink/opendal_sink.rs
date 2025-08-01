@@ -23,6 +23,7 @@ use bytes::BytesMut;
 use chrono::{TimeZone, Utc};
 use opendal::{FuturesAsyncWriter, Operator, Writer as OpendalWriter};
 use parquet::arrow::AsyncArrowWriter;
+use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::arrow::arrow_schema_iceberg::{self, SchemaRef};
@@ -35,13 +36,14 @@ use strum_macros::{Display, EnumString};
 use tokio_util::compat::{Compat, FuturesAsyncWriteCompatExt};
 use with_options::WithOptions;
 
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::catalog::SinkEncode;
 use crate::sink::encoder::{
     JsonEncoder, JsonbHandlingMode, RowEncoder, TimeHandlingMode, TimestampHandlingMode,
     TimestamptzHandlingMode,
 };
 use crate::sink::file_sink::batching_log_sink::BatchingLogSinker;
-use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkFormatDesc, SinkParam};
+use crate::sink::{Result, Sink, SinkError, SinkFormatDesc, SinkParam};
 use crate::source::TryFromBTreeMap;
 use crate::with_options::WithOptions;
 
@@ -75,6 +77,8 @@ pub struct FileSink<S: OpendalSinkBackend> {
     pub(crate) engine_type: EngineType,
     pub(crate) _marker: PhantomData<S>,
 }
+
+impl<S: OpendalSinkBackend> EnforceSecret for FileSink<S> {}
 
 /// The `OpendalSinkBackend` trait unifies the behavior of various sink backends
 /// implemented through `OpenDAL`(`<https://github.com/apache/opendal>`).
@@ -114,12 +118,16 @@ pub enum EngineType {
 }
 
 impl<S: OpendalSinkBackend> Sink for FileSink<S> {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = BatchingLogSinker;
 
     const SINK_NAME: &'static str = S::SINK_NAME;
 
     async fn validate(&self) -> Result<()> {
+        if matches!(self.engine_type, EngineType::Snowflake) {
+            risingwave_common::license::Feature::SnowflakeSink
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
         if !self.is_append_only {
             return Err(SinkError::Config(anyhow!(
                 "File sink only supports append-only mode at present. \
@@ -427,7 +435,7 @@ impl OpenDalSinkWriter {
         let object_writer = self.create_object_writer().await?;
         match self.encode_type {
             SinkEncode::Parquet => {
-                let props = WriterProperties::builder();
+                let props = WriterProperties::builder().set_compression(Compression::SNAPPY);
                 let parquet_writer: tokio_util::compat::Compat<opendal::FuturesAsyncWriter> =
                     object_writer.into_futures_async_write().compat_write();
                 self.sink_writer = Some(FileWriterEnum::ParquetFileWriter(

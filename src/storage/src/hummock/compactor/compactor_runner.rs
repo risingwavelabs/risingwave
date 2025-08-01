@@ -15,7 +15,7 @@
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::sync::Arc;
 
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
 use futures::{FutureExt, StreamExt, stream};
 use itertools::Itertools;
@@ -78,7 +78,7 @@ impl CompactorRunner {
         split_index: usize,
         context: CompactorContext,
         task: CompactTask,
-        object_id_getter: Box<dyn GetObjectId>,
+        object_id_getter: Arc<dyn GetObjectId>,
     ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.compression_algorithm = match task.compression_algorithm {
@@ -161,7 +161,7 @@ impl CompactorRunner {
         &self,
         task_progress: Arc<TaskProgress>,
         compaction_catalog_agent_ref: CompactionCatalogAgentRef,
-    ) -> HummockResult<impl HummockIterator<Direction = Forward>> {
+    ) -> HummockResult<impl HummockIterator<Direction = Forward> + use<>> {
         let compactor_iter_max_io_retry_times = self
             .compactor
             .context
@@ -300,15 +300,15 @@ pub fn partition_overlapping_sstable_infos(
     });
     for sst in origin_infos {
         // Pick group with the smallest right bound for every new sstable. So do not check the larger one if the smallest one does not meet condition.
-        if let Some(mut prev_group) = groups.peek_mut() {
-            if KeyComparator::encoded_full_key_less_than(
+        if let Some(mut prev_group) = groups.peek_mut()
+            && KeyComparator::encoded_full_key_less_than(
                 &prev_group.max_right_bound,
                 &sst.key_range.left,
-            ) {
-                prev_group.max_right_bound.clone_from(&sst.key_range.right);
-                prev_group.ssts.push(sst);
-                continue;
-            }
+            )
+        {
+            prev_group.max_right_bound.clone_from(&sst.key_range.right);
+            prev_group.ssts.push(sst);
+            continue;
         }
         groups.push(SstableGroup {
             max_right_bound: sst.key_range.right.clone(),
@@ -325,7 +325,7 @@ pub async fn compact_with_agent(
     compactor_context: CompactorContext,
     mut compact_task: CompactTask,
     mut shutdown_rx: Receiver<()>,
-    object_id_getter: Box<dyn GetObjectId>,
+    object_id_getter: Arc<dyn GetObjectId>,
     compaction_catalog_agent_ref: CompactionCatalogAgentRef,
 ) -> (
     (
@@ -439,6 +439,7 @@ pub async fn compact_with_agent(
             compaction_catalog_agent_ref.clone(),
             object_id_getter.clone(),
             task_progress_guard.progress.clone(),
+            multi_filter,
         );
 
         tokio::select! {
@@ -583,7 +584,7 @@ pub async fn compact(
     compactor_context: CompactorContext,
     compact_task: CompactTask,
     shutdown_rx: Receiver<()>,
-    object_id_getter: Box<dyn GetObjectId>,
+    object_id_getter: Arc<dyn GetObjectId>,
     compaction_catalog_manager_ref: CompactionCatalogManagerRef,
 ) -> (
     (
@@ -691,12 +692,12 @@ pub(crate) fn compact_done(
     context
         .compactor_metrics
         .compact_write_bytes
-        .with_label_values(&[&group_label, level_label.as_str()])
+        .with_label_values(&[&group_label, &level_label])
         .inc_by(compaction_write_bytes);
     context
         .compactor_metrics
         .compact_write_sstn
-        .with_label_values(&[&group_label, level_label.as_str()])
+        .with_label_values(&[&group_label, &level_label])
         .inc_by(compact_task.sorted_output_ssts.len() as u64);
 
     (compact_task, table_stats_map, object_timestamps)
@@ -715,10 +716,10 @@ where
     if !task_config.key_range.left.is_empty() {
         let full_key = FullKey::decode(&task_config.key_range.left);
         iter.seek(full_key)
-            .verbose_instrument_await("iter_seek")
+            .instrument_await("iter_seek".verbose())
             .await?;
     } else {
-        iter.rewind().verbose_instrument_await("rewind").await?;
+        iter.rewind().instrument_await("rewind".verbose()).await?;
     };
 
     let end_key = if task_config.key_range.right.is_empty() {
@@ -805,7 +806,7 @@ where
                 last_table_stats.total_value_size -= iter.value().encoded_len() as i64;
             }
             iter.next()
-                .verbose_instrument_await("iter_next_in_drop")
+                .instrument_await("iter_next_in_drop".verbose())
                 .await?;
             continue;
         }
@@ -839,7 +840,7 @@ where
                     let new_put = HummockValue::put(new_value.as_slice());
                     sst_builder
                         .add_full_key(iter_key, new_put, is_new_user_key)
-                        .verbose_instrument_await("add_rewritten_full_key")
+                        .instrument_await("add_rewritten_full_key".verbose())
                         .await?;
                     let value_size_change = value_size as i64 - new_value.len() as i64;
                     assert!(value_size_change >= 0);
@@ -852,11 +853,11 @@ where
             // Don't allow two SSTs to share same user key
             sst_builder
                 .add_full_key(iter_key, value, is_new_user_key)
-                .verbose_instrument_await("add_full_key")
+                .instrument_await("add_full_key".verbose())
                 .await?;
         }
 
-        iter.next().verbose_instrument_await("iter_next").await?;
+        iter.next().instrument_await("iter_next".verbose()).await?;
     }
 
     if let Some(last_table_id) = last_table_id.take() {

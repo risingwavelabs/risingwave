@@ -219,7 +219,7 @@ pub mod queries {
     pub mod q105 {
         use super::*;
         pub const CREATE: &str = include_str!("nexmark/q105.sql");
-        pub const SELECT: &str = "SELECT * FROM nexmark_q105 ORDER BY 1,2,3;";
+        pub const SELECT: &str = "SELECT * FROM nexmark_q105;";
         pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q105;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;

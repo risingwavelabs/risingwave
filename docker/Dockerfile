@@ -3,7 +3,8 @@ FROM ubuntu:24.04 AS base
 ENV LANG en_US.utf8
 
 RUN apt-get update \
-  && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-17-jdk software-properties-common python3.12 python3.12-dev openssl pkg-config curl git
+  && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-17-jdk software-properties-common \
+    python3.12 python3.12-dev openssl pkg-config curl git libblas-dev liblapack-dev libomp-dev
 
 FROM base AS rust-base
 
@@ -75,7 +76,7 @@ ENV ENABLE_BUILD_DASHBOARD=1
 ENV OPENSSL_STATIC=1
 
 RUN cargo fetch && \
-  cargo build -p risingwave_cmd_all --profile ${CARGO_PROFILE} --features "rw-static-link" --features all-udf && \
+  cargo build -p risingwave_cmd_all --profile ${CARGO_PROFILE} --features "rw-static-link" --features udf && \
   mkdir -p /risingwave/bin && \
   mv /risingwave/target/${CARGO_PROFILE}/risingwave /risingwave/bin/ && \
   mv /risingwave/target/${CARGO_PROFILE}/risingwave.dwp /risingwave/bin/ && \

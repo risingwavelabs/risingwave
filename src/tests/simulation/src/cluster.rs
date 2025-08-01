@@ -434,7 +434,7 @@ impl Cluster {
         for i in 1..=conf.meta_nodes {
             meta_addrs.push(format!("http://meta-{i}:5690"));
         }
-        std::env::set_var("RW_META_ADDR", meta_addrs.join(","));
+        unsafe { std::env::set_var("RW_META_ADDR", meta_addrs.join(",")) };
 
         let sqlite_file_handle: NamedTempFile = NamedTempFile::new().unwrap();
         let file_path = sqlite_file_handle.path().display().to_string();
@@ -485,6 +485,8 @@ impl Cluster {
                 conf.config_path.as_str(),
                 "--listen-addr",
                 "0.0.0.0:4566",
+                "--health-check-listener-addr",
+                "0.0.0.0:6786",
                 "--advertise-addr",
                 &format!("192.168.2.{i}:4566"),
                 "--temp-secret-file-dir",
@@ -662,7 +664,7 @@ impl Cluster {
         }
         let rand_nodes = worker_nodes
             .iter()
-            .choose_multiple(&mut rand::thread_rng(), n)
+            .choose_multiple(&mut rand::rng(), n)
             .to_vec();
         Ok(rand_nodes.iter().cloned().cloned().collect_vec())
     }
@@ -708,12 +710,12 @@ impl Cluster {
     pub async fn kill_node(&self, opts: &KillOpts) {
         let mut nodes = vec![];
         if opts.kill_meta {
-            let rand = rand::thread_rng().gen_range(0..3);
+            let rand = rand::rng().random_range(0..3);
             for i in 1..=self.config.meta_nodes {
                 match rand {
-                    0 => break,                                         // no killed
-                    1 => {}                                             // all killed
-                    _ if !rand::thread_rng().gen_bool(0.5) => continue, // random killed
+                    0 => break,                                     // no killed
+                    1 => {}                                         // all killed
+                    _ if !rand::rng().random_bool(0.5) => continue, // random killed
                     _ => {}
                 }
                 nodes.push(format!("meta-{}", i));
@@ -724,36 +726,36 @@ impl Cluster {
             }
         }
         if opts.kill_frontend {
-            let rand = rand::thread_rng().gen_range(0..3);
+            let rand = rand::rng().random_range(0..3);
             for i in 1..=self.config.frontend_nodes {
                 match rand {
-                    0 => break,                                         // no killed
-                    1 => {}                                             // all killed
-                    _ if !rand::thread_rng().gen_bool(0.5) => continue, // random killed
+                    0 => break,                                     // no killed
+                    1 => {}                                         // all killed
+                    _ if !rand::rng().random_bool(0.5) => continue, // random killed
                     _ => {}
                 }
                 nodes.push(format!("frontend-{}", i));
             }
         }
         if opts.kill_compute {
-            let rand = rand::thread_rng().gen_range(0..3);
+            let rand = rand::rng().random_range(0..3);
             for i in 1..=self.config.compute_nodes {
                 match rand {
-                    0 => break,                                         // no killed
-                    1 => {}                                             // all killed
-                    _ if !rand::thread_rng().gen_bool(0.5) => continue, // random killed
+                    0 => break,                                     // no killed
+                    1 => {}                                         // all killed
+                    _ if !rand::rng().random_bool(0.5) => continue, // random killed
                     _ => {}
                 }
                 nodes.push(format!("compute-{}", i));
             }
         }
         if opts.kill_compactor {
-            let rand = rand::thread_rng().gen_range(0..3);
+            let rand = rand::rng().random_range(0..3);
             for i in 1..=self.config.compactor_nodes {
                 match rand {
-                    0 => break,                                         // no killed
-                    1 => {}                                             // all killed
-                    _ if !rand::thread_rng().gen_bool(0.5) => continue, // random killed
+                    0 => break,                                     // no killed
+                    1 => {}                                         // all killed
+                    _ if !rand::rng().random_bool(0.5) => continue, // random killed
                     _ => {}
                 }
                 nodes.push(format!("compactor-{}", i));
@@ -763,7 +765,7 @@ impl Cluster {
         self.kill_nodes(nodes, opts.restart_delay_secs).await
     }
 
-    /// Kill the given nodes by their names and restart them in 2s + restart_delay_secs with a
+    /// Kill the given nodes by their names and restart them in 2s + `restart_delay_secs` with a
     /// probability of 0.1.
     #[cfg_or_panic(madsim)]
     pub async fn kill_nodes(
@@ -773,16 +775,15 @@ impl Cluster {
     ) {
         join_all(nodes.into_iter().map(|name| async move {
             let name = name.as_ref();
-            let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
+            let t = rand::rng().random_range(Duration::from_secs(0)..Duration::from_secs(1));
             tokio::time::sleep(t).await;
             tracing::info!("kill {name}");
             Handle::current().kill(name);
 
-            let mut t =
-                rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
+            let mut t = rand::rng().random_range(Duration::from_secs(0)..Duration::from_secs(1));
             // has a small chance to restart after a long time
             // so that the node is expired and removed from the cluster
-            if rand::thread_rng().gen_bool(0.1) {
+            if rand::rng().random_bool(0.1) {
                 // max_heartbeat_interval_secs = 15
                 t += Duration::from_secs(restart_delay_secs as u64);
             }
@@ -903,6 +904,45 @@ impl Cluster {
             }
         }
     }
+
+    pub async fn wait_for_recovery(&mut self) -> Result<()> {
+        let timeout = Duration::from_secs(200);
+        let mut session = self.start_session();
+        tokio::time::timeout(timeout, async {
+            loop {
+                if let Ok(result) = session.run("select rw_recovery_status()").await
+                    && result == "RUNNING"
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_nanos(10)).await;
+            }
+        })
+        .await?;
+        Ok(())
+    }
+
+    /// This function only works if all actors in your cluster are following adaptive scaling.
+    pub async fn wait_for_scale(&mut self, parallelism: usize) -> Result<()> {
+        let timeout = Duration::from_secs(200);
+        let mut session = self.start_session();
+        tokio::time::timeout(timeout, async {
+            loop {
+                let parallelism_sql = format!(
+                    "select count(parallelism) filter (where parallelism != {parallelism})\
+                from (select count(*) parallelism from rw_actors group by fragment_id);"
+                );
+                if let Ok(result) = session.run(&parallelism_sql).await
+                    && result == "0"
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_nanos(10)).await;
+            }
+        })
+        .await?;
+        Ok(())
+    }
 }
 
 type SessionRequest = (
@@ -917,6 +957,16 @@ pub struct Session {
 }
 
 impl Session {
+    /// Run the given SQLs on the session.
+    pub async fn run_all(&mut self, sqls: Vec<impl Into<String>>) -> Result<Vec<String>> {
+        let mut results = Vec::with_capacity(sqls.len());
+        for sql in sqls {
+            let result = self.run(sql).await?;
+            results.push(result);
+        }
+        Ok(results)
+    }
+
     /// Run the given SQL query on the session.
     pub async fn run(&mut self, sql: impl Into<String>) -> Result<String> {
         let (tx, rx) = oneshot::channel();

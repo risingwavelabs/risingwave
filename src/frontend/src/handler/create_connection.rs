@@ -15,20 +15,24 @@
 use std::collections::BTreeMap;
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_connector::connector_common::SCHEMA_REGISTRY_CONNECTION_TYPE;
+use risingwave_connector::sink::elasticsearch_opensearch::elasticsearch::ES_SINK;
+use risingwave_connector::source::enforce_secret_connection;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::kafka::{KAFKA_CONNECTOR, PRIVATELINK_CONNECTION};
 use risingwave_pb::catalog::connection_params::ConnectionType;
 use risingwave_pb::catalog::{ConnectionParams, PbConnectionParams};
 use risingwave_pb::ddl_service::create_connection_request;
 use risingwave_pb::secret::SecretRef;
+use risingwave_pb::secret::secret_ref::RefAsType;
 use risingwave_sqlparser::ast::CreateConnectionStatement;
 
 use super::RwPgResponse;
 use crate::WithOptions;
 use crate::binder::Binder;
 use crate::catalog::SecretId;
-use crate::catalog::schema_catalog::SchemaCatalog;
+use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::error::ErrorCode::ProtocolError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
@@ -71,6 +75,7 @@ fn resolve_create_connection_payload(
         KAFKA_CONNECTOR => ConnectionType::Kafka,
         ICEBERG_CONNECTOR => ConnectionType::Iceberg,
         SCHEMA_REGISTRY_CONNECTION_TYPE => ConnectionType::SchemaRegistry,
+        ES_SINK => ConnectionType::Elasticsearch,
         _ => {
             return Err(RwError::from(ProtocolError(format!(
                 "Connection type \"{connection_type}\" is not supported"
@@ -93,7 +98,7 @@ pub async fn handle_create_connection(
     let session = handler_args.session.clone();
     let db_name = &session.database();
     let (schema_name, connection_name) =
-        Binder::resolve_schema_qualified_name(db_name, stmt.connection_name.clone())?;
+        Binder::resolve_schema_qualified_name(db_name, &stmt.connection_name)?;
 
     if let Err(e) = session.check_connection_name_duplicated(stmt.connection_name) {
         return if stmt.if_not_exists {
@@ -113,6 +118,24 @@ pub async fn handle_create_connection(
     let create_connection_payload = resolve_create_connection_payload(with_properties, &session)?;
 
     let catalog_writer = session.catalog_writer()?;
+
+    if session
+        .env()
+        .system_params_manager()
+        .get_params()
+        .load()
+        .enforce_secret()
+    {
+        use risingwave_pb::ddl_service::create_connection_request::Payload::ConnectionParams;
+        let ConnectionParams(cp) = &create_connection_payload else {
+            unreachable!()
+        };
+        enforce_secret_connection(
+            &cp.connection_type(),
+            cp.properties.keys().map(|s| s.as_str()),
+        )?;
+    }
+
     catalog_writer
         .create_connection(
             connection_name,
@@ -126,17 +149,22 @@ pub async fn handle_create_connection(
     Ok(PgResponse::empty_result(StatementType::CREATE_CONNECTION))
 }
 
-pub fn print_connection_params(params: &PbConnectionParams, schema: &SchemaCatalog) -> String {
+pub fn print_connection_params(
+    db_name: &str,
+    params: &PbConnectionParams,
+    catalog_reader: &CatalogReadGuard,
+) -> String {
     let print_secret_ref = |secret_ref: &SecretRef| -> String {
-        let secret_name = schema
-            .get_secret_by_id(&SecretId::from(secret_ref.secret_id))
-            .map(|s| s.name.as_str())
+        // the lookup across all schemas in the database but should guarantee the secret exists
+        let (schema_name, secret_name) = catalog_reader
+            .find_schema_secret_by_secret_id(db_name, SecretId::from(secret_ref.secret_id))
             .unwrap();
-        format!(
-            "SECRET {} AS {}",
-            secret_name,
-            secret_ref.get_ref_as().unwrap().as_str_name()
-        )
+        let maybe_print_as = match secret_ref.get_ref_as().unwrap() {
+            RefAsType::Text => "",
+            RefAsType::File => " AS FILE",
+            RefAsType::Unspecified => "",
+        };
+        format!("SECRET {}.{}{}", schema_name, secret_name, maybe_print_as,)
     };
     let deref_secrets = params
         .get_secret_refs()

@@ -1,0 +1,2 @@
+include ./test_complex.slt.batch
+include ./test_complex.slt.streaming

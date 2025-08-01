@@ -43,7 +43,7 @@ fn _pg_expandarray(array: ListRef<'_>) -> impl Iterator<Item = (Option<ScalarRef
 
 fn infer_type(args: &[DataType]) -> Result<DataType> {
     Ok(DataType::Struct(StructType::new(vec![
-        ("x", args[0].as_list().clone()),
+        ("x", args[0].as_list_element_type().clone()),
         ("n", DataType::Int32),
     ])))
 }

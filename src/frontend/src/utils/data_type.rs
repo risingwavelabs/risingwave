@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{DataType as AstDataType, StructField};
+use risingwave_sqlparser::ast::{DataType as AstDataType, Ident, StructField};
 
 #[easy_ext::ext(DataTypeToAst)]
 impl DataType {
@@ -41,7 +41,7 @@ impl DataType {
                 let fields = fields
                     .iter()
                     .map(|(name, ty)| StructField {
-                        name: name.into(),
+                        name: Ident::from_real_value(name),
                         data_type: ty.to_ast(),
                     })
                     .collect();
@@ -51,6 +51,7 @@ impl DataType {
             DataType::Map(map) => {
                 AstDataType::Map(Box::new((map.key().to_ast(), map.value().to_ast())))
             }
+            DataType::Vector(n) => AstDataType::Vector(*n as _),
             DataType::Serial => unreachable!("serial type should not be user-defined"),
         }
     }

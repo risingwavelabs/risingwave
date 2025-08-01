@@ -40,10 +40,11 @@ use super::writer::{
 };
 use crate::connector_common::MongodbCommon;
 use crate::deserialize_bool_from_string;
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::encoder::RowEncoder;
 use crate::sink::{
-    DummySinkCommitCoordinator, Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
-    Sink, SinkError, SinkParam, SinkWriterParam,
+    Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink, SinkError, SinkParam,
+    SinkWriterParam,
 };
 
 mod send_bulk_write_command_future {
@@ -57,6 +58,7 @@ mod send_bulk_write_command_future {
 
     pub(super) type SendBulkWriteCommandFuture = impl Future<Output = Result<()>> + 'static;
 
+    #[define_opaque(SendBulkWriteCommandFuture)]
     pub(super) fn send_bulk_write_commands(
         db: Database,
         upsert: Option<Document>,
@@ -74,7 +76,7 @@ mod send_bulk_write_command_future {
     }
 
     async fn send_bulk_write_command(db: Database, command: Document) -> Result<()> {
-        let result = db.run_command(command, None).await.map_err(|err| {
+        let result = db.run_command(command).await.map_err(|err| {
             SinkError::Mongodb(anyhow!(err).context(format!(
                 "sending bulk write command failed, database: {}",
                 db.name()
@@ -149,6 +151,12 @@ pub struct MongodbConfig {
     pub bulk_write_max_entries: usize,
 }
 
+impl EnforceSecret for MongodbConfig {
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        MongodbCommon::enforce_one(prop)
+    }
+}
+
 impl MongodbConfig {
     pub fn from_btreemap(properties: BTreeMap<String, String>) -> crate::sink::Result<Self> {
         let config =
@@ -213,6 +221,17 @@ pub struct MongodbSink {
     is_append_only: bool,
 }
 
+impl EnforceSecret for MongodbSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::sink::ConnectorResult<()> {
+        for prop in prop_iter {
+            MongodbConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
+}
+
 impl MongodbSink {
     pub fn new(param: SinkParam) -> Result<Self> {
         let config = MongodbConfig::from_btreemap(param.properties.clone())?;
@@ -238,7 +257,6 @@ impl TryFrom<SinkParam> for MongodbSink {
 }
 
 impl Sink for MongodbSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = AsyncTruncateLogSinkerOf<MongodbSinkWriter>;
 
     const SINK_NAME: &'static str = MONGODB_SINK;
@@ -297,7 +315,7 @@ impl Sink for MongodbSink {
         let client = ClientGuard::new(self.param.sink_name.clone(), client);
         client
             .database("admin")
-            .run_command(doc! {"hello":1}, None)
+            .run_command(doc! {"hello":1})
             .await
             .map_err(|err| {
                 SinkError::Mongodb(anyhow!(err).context("failed to send hello command to mongodb"))
@@ -462,6 +480,7 @@ pub type MongodbSinkDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> 
 impl AsyncTruncateSinkWriter for MongodbSinkWriter {
     type DeliveryFuture = MongodbSinkDeliveryFuture;
 
+    #[define_opaque(MongodbSinkDeliveryFuture)]
     async fn write_chunk<'a>(
         &'a mut self,
         chunk: StreamChunk,

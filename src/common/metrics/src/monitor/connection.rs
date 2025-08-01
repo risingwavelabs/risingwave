@@ -392,7 +392,7 @@ pub struct ConnectionMetrics {
     write_rate: IntCounterVec,
     writer_count: IntGaugeVec,
 
-    io_err_rate: LabelGuardedIntCounterVec<4>,
+    io_err_rate: LabelGuardedIntCounterVec,
 }
 
 pub static GLOBAL_CONNECTION_METRICS: LazyLock<ConnectionMetrics> =

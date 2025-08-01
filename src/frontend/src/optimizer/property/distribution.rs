@@ -67,6 +67,10 @@ use crate::optimizer::property::Order;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Distribution {
     /// There is only one partition. All records are placed on it.
+    ///
+    /// Note: singleton will not be enforced automatically.
+    /// It's set in `crate::stream_fragmenter::build_fragment`,
+    /// by setting `requires_singleton` manually.
     Single,
     /// Records are sharded into partitions, and satisfy the `AnyShard` but without any guarantee
     /// about their placement rules.
@@ -296,26 +300,29 @@ impl RequiredDist {
         Self::PhysicalDist(Distribution::HashShard(key.to_vec()))
     }
 
-    pub fn enforce_if_not_satisfies(
+    pub fn batch_enforce_if_not_satisfies(
         &self,
-        mut plan: PlanRef,
+        mut plan: BatchPlanRef,
         required_order: &Order,
-    ) -> Result<PlanRef> {
-        if let Convention::Batch = plan.convention() {
-            plan = required_order.enforce_if_not_satisfies(plan)?;
-        }
+    ) -> Result<BatchPlanRef> {
+        plan = required_order.enforce_if_not_satisfies(plan)?;
         if !plan.distribution().satisfies(self) {
-            Ok(self.enforce(plan, required_order))
+            Ok(self.batch_enforce(plan, required_order))
         } else {
             Ok(plan)
         }
     }
 
-    pub fn no_shuffle(plan: PlanRef) -> PlanRef {
-        match plan.convention() {
-            Convention::Stream => StreamExchange::new_no_shuffle(plan).into(),
-            Convention::Logical | Convention::Batch => unreachable!(),
+    pub fn streaming_enforce_if_not_satisfies(&self, plan: StreamPlanRef) -> Result<StreamPlanRef> {
+        if !plan.distribution().satisfies(self) {
+            Ok(self.stream_enforce(plan))
+        } else {
+            Ok(plan)
         }
+    }
+
+    pub fn no_shuffle(plan: StreamPlanRef) -> StreamPlanRef {
+        StreamExchange::new_no_shuffle(plan).into()
     }
 
     /// check if the distribution satisfies other required distribution
@@ -334,13 +341,14 @@ impl RequiredDist {
         }
     }
 
-    pub fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
+    pub fn batch_enforce(&self, plan: BatchPlanRef, required_order: &Order) -> BatchPlanRef {
         let dist = self.to_dist();
-        match plan.convention() {
-            Convention::Batch => BatchExchange::new(plan, required_order.clone(), dist).into(),
-            Convention::Stream => StreamExchange::new(plan, dist).into(),
-            _ => unreachable!(),
-        }
+        BatchExchange::new(plan, required_order.clone(), dist).into()
+    }
+
+    pub fn stream_enforce(&self, plan: StreamPlanRef) -> StreamPlanRef {
+        let dist = self.to_dist();
+        StreamExchange::new(plan, dist).into()
     }
 
     fn to_dist(&self) -> Distribution {

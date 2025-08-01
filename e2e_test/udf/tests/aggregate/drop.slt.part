@@ -1,0 +1,5 @@
+statement error "weighted_avg" is an aggregate function
+drop function weighted_avg;
+
+statement ok
+drop aggregate weighted_avg;

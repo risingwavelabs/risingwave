@@ -22,8 +22,7 @@ use super::agg_common::{
 };
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::SimpleAggExecutor;
-use crate::executor::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
+use crate::executor::aggregate::{AggExecutorArgs, SimpleAggExecutor, SimpleAggExecutorExtraArgs};
 
 pub struct SimpleAggExecutorBuilder;
 

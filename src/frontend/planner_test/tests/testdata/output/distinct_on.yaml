@@ -115,3 +115,54 @@
         └─BatchExchange { order: [], dist: HashShard($expr1) }
           └─BatchProject { exprs: [t.a, t.b, t.c, (t.a + 1:Int32) as $expr1] }
             └─BatchScan { table: t, columns: [t.a, t.b, t.c], distribution: SomeShard }
+- sql: |
+    create table t (a int, b int, c int);
+    select count(*) from (select distinct on(a) * from t);
+  logical_plan: |-
+    LogicalProject { exprs: [count] }
+    └─LogicalAgg { aggs: [count] }
+      └─LogicalProject { exprs: [] }
+        └─LogicalDedup { dedup_cols: [t.a] }
+          └─LogicalProject { exprs: [t.a, t.b, t.c] }
+            └─LogicalScan { table: t, columns: [t.a, t.b, t.c, t._row_id, t._rw_timestamp] }
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [sum0(count)] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [count] }
+        └─BatchGroupTopN { order: [], limit: 1, offset: 0, group_key: [t.a] }
+          └─BatchExchange { order: [], dist: HashShard(t.a) }
+            └─BatchScan { table: t, columns: [t.a], distribution: SomeShard }
+- sql: |
+    create table t (a int, b int, c int);
+    select count(*) from (select distinct on(b) * from t);
+  logical_plan: |-
+    LogicalProject { exprs: [count] }
+    └─LogicalAgg { aggs: [count] }
+      └─LogicalProject { exprs: [] }
+        └─LogicalDedup { dedup_cols: [t.b] }
+          └─LogicalProject { exprs: [t.a, t.b, t.c] }
+            └─LogicalScan { table: t, columns: [t.a, t.b, t.c, t._row_id, t._rw_timestamp] }
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [sum0(count)] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [count] }
+        └─BatchGroupTopN { order: [], limit: 1, offset: 0, group_key: [t.b] }
+          └─BatchExchange { order: [], dist: HashShard(t.b) }
+            └─BatchScan { table: t, columns: [t.b], distribution: SomeShard }
+- sql: |
+    create table t (a int, b int, c int);
+    select count(*) from (select distinct on(a,b) * from t);
+  logical_plan: |-
+    LogicalProject { exprs: [count] }
+    └─LogicalAgg { aggs: [count] }
+      └─LogicalProject { exprs: [] }
+        └─LogicalDedup { dedup_cols: [t.a, t.b] }
+          └─LogicalProject { exprs: [t.a, t.b, t.c] }
+            └─LogicalScan { table: t, columns: [t.a, t.b, t.c, t._row_id, t._rw_timestamp] }
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [sum0(count)] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [count] }
+        └─BatchGroupTopN { order: [], limit: 1, offset: 0, group_key: [t.a, t.b] }
+          └─BatchExchange { order: [], dist: HashShard(t.a, t.b) }
+            └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }

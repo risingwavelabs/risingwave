@@ -23,7 +23,7 @@ use risingwave_backup::{MetaBackupJobId, MetaSnapshotId, MetaSnapshotManifest};
 use risingwave_common::bail;
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_hummock_sdk::HummockRawObjectId;
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::backup_service::{BackupJobStatus, MetaBackupManifestId};
@@ -108,8 +108,7 @@ impl BackupManager {
         let (local_notification_tx, mut local_notification_rx) =
             tokio::sync::mpsc::unbounded_channel();
         env.notification_manager()
-            .insert_local_sender(local_notification_tx)
-            .await;
+            .insert_local_sender(local_notification_tx);
         let this = instance.clone();
         tokio::spawn(async move {
             loop {
@@ -315,15 +314,15 @@ impl BackupManager {
         Ok(())
     }
 
-    /// List all `SSTables` required by backups.
-    pub fn list_pinned_ssts(&self) -> HashSet<HummockSstableObjectId> {
+    /// List id of all objects required by backups.
+    pub fn list_pinned_object_ids(&self) -> HashSet<HummockRawObjectId> {
         self.backup_store
             .load()
             .0
             .manifest()
             .snapshot_metadata
             .iter()
-            .flat_map(|s| s.ssts.clone())
+            .flat_map(|s| s.objects.iter().copied())
             .collect()
     }
 

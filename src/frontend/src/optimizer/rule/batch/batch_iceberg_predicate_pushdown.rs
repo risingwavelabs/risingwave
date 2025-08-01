@@ -21,13 +21,12 @@ use chrono::Datelike;
 use iceberg::expr::{Predicate as IcebergPredicate, Reference};
 use iceberg::spec::Datum as IcebergDatum;
 use risingwave_common::catalog::Field;
-use risingwave_common::types::{Decimal, ScalarImpl};
+use risingwave_common::types::ScalarImpl;
 
+use super::prelude::*;
 use crate::expr::{Expr, ExprImpl, ExprType, Literal};
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{BatchFilter, BatchIcebergScan, PlanTreeNodeUnary};
-use crate::optimizer::rule::{BoxedRule, Rule};
 use crate::utils::Condition;
 
 /// NOTE(kwannoel): We do predicate pushdown to the iceberg-sdk here.
@@ -36,7 +35,7 @@ use crate::utils::Condition;
 /// See: <https://github.com/apache/iceberg-rust/blob/5c1a9e68da346819072a15327080a498ad91c488/crates/iceberg/src/arrow/reader.rs#L229-L235>.
 pub struct BatchIcebergPredicatePushDownRule {}
 
-impl Rule for BatchIcebergPredicatePushDownRule {
+impl Rule<Batch> for BatchIcebergPredicatePushDownRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter: &BatchFilter = plan.as_batch_filter()?;
         let input = filter.input();
@@ -69,14 +68,9 @@ fn rw_literal_to_iceberg_datum(literal: &Literal) -> Option<IcebergDatum> {
         ScalarImpl::Int64(i) => Some(IcebergDatum::long(*i)),
         ScalarImpl::Float32(f) => Some(IcebergDatum::float(*f)),
         ScalarImpl::Float64(f) => Some(IcebergDatum::double(*f)),
-        ScalarImpl::Decimal(d) => {
-            let Decimal::Normalized(d) = d else {
-                return None;
-            };
-            let Ok(d) = IcebergDatum::decimal(*d) else {
-                return None;
-            };
-            Some(d)
+        ScalarImpl::Decimal(_) => {
+            // TODO(iceberg): iceberg-rust doesn't support decimal predicate pushdown yet.
+            None
         }
         ScalarImpl::Date(d) => {
             let Ok(datum) = IcebergDatum::date_from_ymd(d.0.year(), d.0.month(), d.0.day()) else {

@@ -15,7 +15,7 @@
 use multimap::MultiMap;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_expr::table_function::repeat;
-use risingwave_stream::executor::ProjectSetExecutor;
+use risingwave_stream::executor::project::ProjectSetExecutor;
 use risingwave_stream::task::ActorEvalErrorReport;
 
 use crate::prelude::*;

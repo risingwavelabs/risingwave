@@ -1,0 +1,99 @@
+statement ok
+create function int_42() returns int language python as $$
+def int_42():
+    return 42
+$$;
+
+statement ok
+create function gcd(a int, b int) returns int language python as $$
+def gcd(a, b):
+    while b != 0:
+        a, b = b, a % b
+    return a
+$$;
+
+statement ok
+create function decimal_add(a decimal, b decimal) returns decimal language python as $$
+def decimal_add(a, b):
+    return a + b
+$$;
+
+# TODO(rc): Support `date` and `time` for Python UDF
+include ./fallback/datetime.slt.part
+
+statement ok
+create function jsonb_access(json jsonb, index int) returns jsonb language python as $$
+def jsonb_access(json, index):
+    if json is None:
+        return None
+    try:
+        return json[index]
+    except (IndexError, TypeError):
+        return None
+$$;
+
+statement ok
+create function sum_array(arr int[]) returns int language python as $$
+def sum_array(arr):
+    return sum(arr)
+$$;
+
+statement ok
+create function key_value(kv varchar) returns struct<key varchar, value varchar> language python as $$
+class KeyValue:
+    def __init__(self, key, value):
+        self.key = key
+        self.value = value
+def key_value(kv):
+    if not kv or '=' not in kv:
+        return None
+    key, value = kv.split('=', 1)
+    return KeyValue(key, value)
+$$;
+
+statement ok
+create function return_all(a boolean, b smallint, c int, d bigint, e real, f double precision, g decimal, h varchar, i bytea, j jsonb, s struct<f1 int, f2 int>)
+returns struct<a boolean, b smallint, c int, d bigint, e real, f double precision, g decimal, h varchar, i bytea, j jsonb, s struct<f1 int, f2 int>>
+language python as $$
+class Ret:
+    def __init__(self, a, b, c, d, e, f, g, h, i, j, s):
+        self.a = a
+        self.b = b
+        self.c = c
+        self.d = d
+        self.e = e
+        self.f = f
+        self.g = g
+        self.h = h
+        self.i = i
+        self.j = j
+        self.s = s
+def return_all(a, b, c, d, e, f, g, h, i, j, s):
+    return Ret(a, b, c, d, e, f, g, h, i, j, s)
+$$;
+
+statement ok
+create function series(n int) returns table (x int) language python as $$
+def series(n):
+    for i in range(n):
+        yield i
+$$;
+
+statement ok
+create function key_values(kv varchar) returns table (key varchar, value varchar) language python as $$
+class KeyValue:
+    def __init__(self, key, value):
+        self.key = key
+        self.value = value
+def key_values(kv):
+    if not kv:
+        return
+    for pair in kv.split(','):
+        if '=' in pair:
+            key, value = pair.split('=', 1)
+            yield KeyValue(key, value)
+$$;
+
+include ./test_basic.slt.part
+include ./test_complex.slt.part
+include ./drop.slt.part

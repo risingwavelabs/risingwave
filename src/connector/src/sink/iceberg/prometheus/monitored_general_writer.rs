@@ -21,15 +21,15 @@ use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 #[derive(Clone)]
 pub struct MonitoredGeneralWriterBuilder<B: IcebergWriterBuilder> {
     inner: B,
-    write_qps: LabelGuardedIntCounter<3>,
-    write_latency: LabelGuardedHistogram<3>,
+    write_qps: LabelGuardedIntCounter,
+    write_latency: LabelGuardedHistogram,
 }
 
 impl<B: IcebergWriterBuilder> MonitoredGeneralWriterBuilder<B> {
     pub fn new(
         inner: B,
-        write_qps: LabelGuardedIntCounter<3>,
-        write_latency: LabelGuardedHistogram<3>,
+        write_qps: LabelGuardedIntCounter,
+        write_latency: LabelGuardedHistogram,
     ) -> Self {
         Self {
             inner,
@@ -55,8 +55,8 @@ impl<B: IcebergWriterBuilder> IcebergWriterBuilder for MonitoredGeneralWriterBui
 
 pub struct MonitoredGeneralWriter<F: IcebergWriter> {
     inner: F,
-    write_qps: LabelGuardedIntCounter<3>,
-    write_latency: LabelGuardedHistogram<3>,
+    write_qps: LabelGuardedIntCounter,
+    write_latency: LabelGuardedHistogram,
 }
 
 #[async_trait::async_trait]

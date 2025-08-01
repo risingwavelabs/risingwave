@@ -52,7 +52,7 @@ use crate::hummock::{
 use crate::monitor::StoreLocalStatistic;
 
 pub struct RemoteBuilderFactory<W: SstableWriterFactory, F: FilterBuilder> {
-    pub object_id_getter: Box<dyn GetObjectId>,
+    pub object_id_getter: Arc<dyn GetObjectId>,
     pub limiter: Arc<MemoryLimiter>,
     pub options: SstableBuilderOptions,
     pub policy: CachePolicy,
@@ -624,12 +624,12 @@ pub fn metrics_report_for_task(compact_task: &CompactTask, context: &CompactorCo
     context
         .compactor_metrics
         .compact_read_next_level
-        .with_label_values(&[&group_label, next_level_label.as_str()])
+        .with_label_values(&[&group_label, &next_level_label])
         .inc_by(target_level_read_bytes);
     context
         .compactor_metrics
         .compact_read_sstn_next_level
-        .with_label_values(&[&group_label, next_level_label.as_str()])
+        .with_label_values(&[&group_label, &next_level_label])
         .inc_by(target_table_infos.len() as u64);
 }
 

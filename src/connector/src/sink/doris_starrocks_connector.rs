@@ -346,13 +346,14 @@ impl InserterInner {
 
         let chunk = mem::replace(&mut self.buffer, BytesMut::with_capacity(BUFFER_SIZE));
 
-        if let Err(_e) = self.sender.as_mut().unwrap().send(chunk.freeze()) {
-            self.sender.take();
-            self.wait_handle().await?;
+        match self.sender.as_mut().unwrap().send(chunk.freeze()) {
+            Err(_e) => {
+                self.sender.take();
+                self.wait_handle().await?;
 
-            Err(SinkError::DorisStarrocksConnect(anyhow!("channel closed")))
-        } else {
-            Ok(())
+                Err(SinkError::DorisStarrocksConnect(anyhow!("channel closed")))
+            }
+            _ => Ok(()),
         }
     }
 

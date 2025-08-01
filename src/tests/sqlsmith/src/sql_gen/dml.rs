@@ -62,7 +62,7 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
     ) -> Result<Vec<Statement>> {
         let mut updates = vec![];
         for insert in inserts {
-            if self.rng.gen_bool(0.2) {
+            if self.rng.random_bool(0.2) {
                 match insert {
                     Statement::Insert {
                         table_name, source, ..
@@ -118,7 +118,7 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
             let update_values = values
                 .iter()
                 .filter_map(|row| {
-                    if self.rng.gen_bool(0.1) {
+                    if self.rng.random_bool(0.1) {
                         let mut updated_row = row.clone();
                         for value_index in &value_indices {
                             let data_type = &data_types[*value_index];
@@ -130,11 +130,10 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
                     }
                 })
                 .collect_vec();
-            let update_statements = update_values
+            update_values
                 .iter()
                 .map(|row| Self::row_to_update_statement(table, pk_indices, &value_indices, row))
-                .collect_vec();
-            update_statements
+                .collect_vec()
         }
     }
 
@@ -148,8 +147,7 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
             .iter()
             .copied()
             .map(|i| {
-                let name = table.columns[i].name.as_str();
-                let id = vec![name.into()];
+                let id = vec![table.columns[i].base_name()];
                 let value = AssignmentValue::Expr(row[i].clone());
                 Assignment { id, value }
             })
@@ -170,7 +168,7 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
             .copied()
             .map(|i| {
                 let match_val = row[i].clone();
-                let match_col = Expr::Identifier(table.columns[i].name.as_str().into());
+                let match_col = table.columns[i].name_expr();
 
                 Expr::BinaryOp {
                     left: Box::new(match_col),
@@ -198,7 +196,7 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
         values
             .iter()
             .filter_map(|row| {
-                if self.rng.gen_bool(0.1) {
+                if self.rng.random_bool(0.1) {
                     let selection = Some(Self::create_selection_expr(table, &selected, row));
                     Some(Statement::Delete {
                         table_name: ObjectName::from_test_str(&table.name),

@@ -24,6 +24,15 @@ create materialized view mv_before_produce as select * from s_before_produce;
 
 sleep 2s
 
+statement ok
+set STREAMING_USE_SNAPSHOT_BACKFILL TO true;
+
+statement error Not supported: Snapshot backfill with shared source backfill is not supported
+create materialized view mv_snapshot_backfill_shared_source as (select * from mv_before_produce) union (select * from s_before_produce);
+
+statement ok
+set STREAMING_USE_SNAPSHOT_BACKFILL TO false;
+
 # All partitions starts with backfill_info: NoDataToBackfill, so it finishes immediately.
 system ok
 internal_table.mjs --name mv_before_produce --type sourcebackfill

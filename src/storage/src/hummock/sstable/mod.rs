@@ -47,16 +47,13 @@ use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType, UserKey, UserKeyRange
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 
 mod filter;
-mod sstable_object_id_manager;
 mod utils;
 
 pub use filter::FilterBuilder;
-pub use sstable_object_id_manager::*;
-pub use utils::CompressionAlgorithm;
+pub use utils::{CompressionAlgorithm, xxhash64_checksum, xxhash64_verify};
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
 use xxhash_rust::{xxh32, xxh64};
 
-use self::utils::{xxhash64_checksum, xxhash64_verify};
 use super::{HummockError, HummockResult};
 use crate::hummock::CachePolicy;
 use crate::store::ReadOptions;

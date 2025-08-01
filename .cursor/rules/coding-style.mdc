@@ -1,0 +1,10 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# Coding Style
+
+- Always write code comments in English.
+- Write simple, easy-to-read and easy-to-maintain code.
+- Use `cargo fmt` to format the code if needed.

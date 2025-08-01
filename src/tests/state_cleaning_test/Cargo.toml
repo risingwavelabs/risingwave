@@ -11,7 +11,7 @@ repository = { workspace = true }
 anyhow = "1"
 clap = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-regex = "1"
+regex = { workspace = true }
 risingwave_rt = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_with = "3"

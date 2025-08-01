@@ -59,7 +59,7 @@ type PartitionCache = ManagedLruCache<MemcmpEncoded, Partition>; // TODO(rc): us
 /// The reason not to use [`SortBuffer`] is that the table schemas of [`EowcOverWindowExecutor`] and
 /// [`SortBuffer`] are different, since we don't have something like a _grouped_ sort buffer.
 ///
-/// [`SortBuffer`]: crate::executor::sort_buffer::SortBuffer
+/// [`SortBuffer`]: crate::executor::eowc::SortBuffer
 ///
 /// Basic idea:
 ///
@@ -374,10 +374,9 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
 
                     if let Some((_, cache_may_stale)) =
                         post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                        && cache_may_stale
                     {
-                        if cache_may_stale {
-                            vars.partitions.clear();
-                        }
+                        vars.partitions.clear();
                     }
                 }
             }

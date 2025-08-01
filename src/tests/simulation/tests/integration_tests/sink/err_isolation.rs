@@ -27,11 +27,20 @@ use crate::{assert_eq_with_err_returned as assert_eq, assert_with_err_returned a
 
 #[tokio::test]
 async fn test_sink_decouple_err_isolation() -> Result<()> {
+    test_sink_decouple_err_isolation_inner(false).await
+}
+
+#[tokio::test]
+async fn test_coordinated_sink_decouple_err_isolation() -> Result<()> {
+    test_sink_decouple_err_isolation_inner(true).await
+}
+
+async fn test_sink_decouple_err_isolation_inner(is_coordinated_sink: bool) -> Result<()> {
     let mut cluster = start_sink_test_cluster().await?;
 
     let source_parallelism = 6;
 
-    let test_sink = SimulationTestSink::register_new();
+    let test_sink = SimulationTestSink::register_new(is_coordinated_sink);
     let test_source = SimulationTestSource::register_new(source_parallelism, 0..100000, 0.2, 20);
 
     let mut session = cluster.start_session();
@@ -60,7 +69,7 @@ async fn test_sink_decouple_err_isolation() -> Result<()> {
 
     assert_eq!(0, test_sink.parallelism_counter.load(Relaxed));
     test_sink.store.check_simple_result(&test_source.id_list)?;
-    assert!(test_sink.store.inner().checkpoint_count > 0);
+    assert!(test_sink.store.checkpoint_count() > 0);
 
     Ok(())
 }
@@ -71,7 +80,7 @@ async fn test_sink_error_event_logs() -> Result<()> {
 
     let source_parallelism = 6;
 
-    let test_sink = SimulationTestSink::register_new();
+    let test_sink = SimulationTestSink::register_new(false);
     test_sink.set_err_rate(1.0);
     let test_source = SimulationTestSource::register_new(source_parallelism, 0..100000, 0.2, 20);
 

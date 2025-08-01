@@ -18,11 +18,11 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes};
-use foyer::CacheHint;
+use foyer::Hint;
 use futures::TryStreamExt;
 use itertools::Itertools;
-use risingwave_common::bitmap::BitmapBuilder;
-use risingwave_common::catalog::TableId;
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::range::RangeBoundsExt;
 use risingwave_common::util::epoch::{EpochExt, INVALID_EPOCH, test_epoch};
@@ -33,7 +33,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::table_watermark::{
-    TableWatermarksIndex, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
+    PkPrefixTableWatermarksIndex, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
 use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo};
 use risingwave_meta::hummock::test_utils::get_compaction_group_id_by_table_id;
@@ -41,7 +41,7 @@ use risingwave_meta::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::store::version::read_filter_for_version;
-use risingwave_storage::hummock::test_utils::*;
+use risingwave_storage::hummock::test_utils::{ReadOptions, *};
 use risingwave_storage::hummock::{CachePolicy, HummockStorage, LocalHummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
@@ -115,16 +115,7 @@ async fn test_storage_basic() {
     hummock_storage.init_for_test(epoch1).await.unwrap();
 
     // Write the first batch.
-    hummock_storage
-        .ingest_batch(
-            batch1,
-            WriteOptions {
-                epoch: epoch1,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch1).await.unwrap();
 
     // Get the value after flushing to remote.
     let value = test_env
@@ -135,7 +126,7 @@ async fn test_storage_basic() {
             ReadOptions {
                 table_id: TEST_TABLE_ID,
 
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -150,7 +141,7 @@ async fn test_storage_basic() {
             epoch1,
             ReadOptions {
                 table_id: TEST_TABLE_ID,
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -167,7 +158,7 @@ async fn test_storage_basic() {
             epoch1,
             ReadOptions {
                 table_id: TEST_TABLE_ID,
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -180,16 +171,7 @@ async fn test_storage_basic() {
         .storage
         .start_epoch(epoch2, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
-    hummock_storage
-        .ingest_batch(
-            batch2,
-            WriteOptions {
-                epoch: epoch2,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch2).await.unwrap();
 
     // Get the value after flushing to remote.
     let value = test_env
@@ -200,7 +182,7 @@ async fn test_storage_basic() {
             ReadOptions {
                 table_id: TEST_TABLE_ID,
 
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -215,16 +197,7 @@ async fn test_storage_basic() {
         .storage
         .start_epoch(epoch3, HashSet::from_iter([TEST_TABLE_ID]));
     hummock_storage.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
-    hummock_storage
-        .ingest_batch(
-            batch3,
-            WriteOptions {
-                epoch: epoch3,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch3).await.unwrap();
 
     // Get the value after flushing to remote.
     let value = test_env
@@ -234,7 +207,7 @@ async fn test_storage_basic() {
             epoch3,
             ReadOptions {
                 table_id: TEST_TABLE_ID,
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -251,7 +224,7 @@ async fn test_storage_basic() {
             ReadOptions {
                 table_id: TEST_TABLE_ID,
 
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -271,7 +244,7 @@ async fn test_storage_basic() {
             ReadOptions {
                 table_id: TEST_TABLE_ID,
 
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -312,7 +285,7 @@ async fn test_storage_basic() {
             ReadOptions {
                 table_id: TEST_TABLE_ID,
 
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -330,7 +303,7 @@ async fn test_storage_basic() {
             ReadOptions {
                 table_id: TEST_TABLE_ID,
 
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -349,7 +322,7 @@ async fn test_storage_basic() {
             epoch2,
             ReadOptions {
                 table_id: TEST_TABLE_ID,
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -403,7 +376,7 @@ async fn test_storage_basic() {
             epoch3,
             ReadOptions {
                 table_id: TEST_TABLE_ID,
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
         )
@@ -497,16 +470,7 @@ async fn test_state_store_sync() {
     ];
 
     batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    hummock_storage
-        .ingest_batch(
-            batch1,
-            WriteOptions {
-                epoch: epoch1,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch1).await.unwrap();
 
     // ingest 24B batch
     let mut batch2 = vec![
@@ -524,16 +488,7 @@ async fn test_state_store_sync() {
         ),
     ];
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    hummock_storage
-        .ingest_batch(
-            batch2,
-            WriteOptions {
-                epoch: epoch1,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch2).await.unwrap();
 
     let epoch2 = epoch1.next_epoch();
     test_env
@@ -547,16 +502,7 @@ async fn test_state_store_sync() {
         StorageValue::new_put("6666"),
     )];
     batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    hummock_storage
-        .ingest_batch(
-            batch3,
-            WriteOptions {
-                epoch: epoch2,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch3).await.unwrap();
 
     let epoch3 = epoch2.next_epoch();
     test_env
@@ -578,7 +524,7 @@ async fn test_state_store_sync() {
     {
         // after sync 1 epoch
         let read_version = hummock_storage.read_version();
-        assert_eq!(1, read_version.read().staging().imm.len());
+        assert_eq!(1, read_version.read().staging().uploading_imms.len());
         assert!(read_version.read().staging().sst.is_empty());
     }
 
@@ -599,7 +545,7 @@ async fn test_state_store_sync() {
                     epoch1,
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
-                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                        cache_policy: CachePolicy::Fill(Hint::Normal),
                         ..Default::default()
                     },
                 )
@@ -624,7 +570,7 @@ async fn test_state_store_sync() {
     {
         // after sync all epoch
         let read_version = hummock_storage.read_version();
-        assert!(read_version.read().staging().imm.is_empty());
+        assert!(read_version.read().staging().uploading_imms.is_empty());
         assert!(read_version.read().staging().sst.is_empty());
     }
 
@@ -645,7 +591,7 @@ async fn test_state_store_sync() {
                     epoch2,
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
-                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                        cache_policy: CachePolicy::Fill(Hint::Normal),
                         ..Default::default()
                     },
                 )
@@ -668,7 +614,7 @@ async fn test_state_store_sync() {
                 epoch1,
                 ReadOptions {
                     table_id: TEST_TABLE_ID,
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     read_committed: true,
                     ..Default::default()
                 },
@@ -688,7 +634,7 @@ async fn test_state_store_sync() {
                 epoch1,
                 ReadOptions {
                     table_id: TEST_TABLE_ID,
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     read_committed: true,
                     ..Default::default()
                 },
@@ -750,7 +696,7 @@ async fn test_state_store_sync() {
                 epoch2,
                 ReadOptions {
                     table_id: TEST_TABLE_ID,
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
                 },
             )
@@ -770,7 +716,7 @@ async fn test_state_store_sync() {
                 epoch2,
                 ReadOptions {
                     table_id: TEST_TABLE_ID,
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
                 },
             )
@@ -834,6 +780,198 @@ async fn test_state_store_sync() {
 }
 
 #[tokio::test]
+async fn test_state_store_multiple_flush_no_upload() {
+    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
+    let test_env = prepare_hummock_test_env().await;
+    test_env.register_table_id(TEST_TABLE_ID).await;
+    let mut hummock_storage = test_env
+        .storage
+        .new_local(NewLocalOptions {
+            table_id: TEST_TABLE_ID,
+            op_consistency_level: OpConsistencyLevel::Inconsistent,
+            table_option: TableOption {
+                retention_seconds: None,
+            },
+            is_replicated: false,
+            vnodes: Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+            upload_on_flush: false,
+        })
+        .await;
+
+    let flushed_reader = hummock_storage.new_flushed_snapshot_reader();
+
+    let read_version = hummock_storage.read_version();
+
+    let base_epoch = read_version
+        .read()
+        .committed()
+        .table_committed_epoch(TEST_TABLE_ID)
+        .unwrap();
+    let epoch1 = base_epoch.next_epoch();
+    test_env
+        .storage
+        .start_epoch(epoch1, HashSet::from_iter([TEST_TABLE_ID]));
+    hummock_storage.init_for_test(epoch1).await.unwrap();
+
+    // ingest 16B batch
+    let mut batch1 = vec![
+        (
+            gen_key_from_str(VirtualNode::ZERO, "aaaa"),
+            StorageValue::new_put("1111"),
+        ),
+        (
+            gen_key_from_str(VirtualNode::ZERO, "bbbb"),
+            StorageValue::new_put("2222"),
+        ),
+        (
+            gen_key_from_str(VirtualNode::ZERO, "cccc"),
+            StorageValue::new_put("3333"),
+        ),
+    ];
+
+    batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    hummock_storage.ingest_batch(batch1).await.unwrap();
+
+    // ingest 24B batch
+    let mut batch2 = vec![
+        (
+            gen_key_from_str(VirtualNode::ZERO, "aaaa"),
+            StorageValue::new_put("1112"),
+        ),
+        (
+            gen_key_from_str(VirtualNode::ZERO, "bbbb"),
+            StorageValue::new_delete(),
+        ),
+        (
+            gen_key_from_str(VirtualNode::ZERO, "dddd"),
+            StorageValue::new_put("4444"),
+        ),
+    ];
+    batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    hummock_storage.ingest_batch(batch2).await.unwrap();
+
+    let check_flushed_reader = async || {
+        let kv_map = [
+            (gen_key_from_str(VirtualNode::ZERO, "aaaa"), "1112"),
+            (gen_key_from_str(VirtualNode::ZERO, "cccc"), "3333"),
+            (gen_key_from_str(VirtualNode::ZERO, "dddd"), "4444"),
+        ];
+
+        for (k, v) in &kv_map {
+            let value = flushed_reader
+                .get(
+                    k.clone(),
+                    ReadOptions {
+                        table_id: TEST_TABLE_ID,
+                        cache_policy: CachePolicy::Fill(Hint::Normal),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(value, Bytes::from(*v));
+        }
+
+        let iter = flushed_reader
+            .iter(
+                (
+                    Unbounded,
+                    Included(gen_key_from_str(VirtualNode::ZERO, "eeee")),
+                ),
+                risingwave_storage::store::ReadOptions::default(),
+            )
+            .await
+            .unwrap()
+            .into_stream(to_owned_item);
+        futures::pin_mut!(iter);
+        let mut i = 0;
+        while let Some(row) = iter.try_next().await.unwrap() {
+            assert_eq!(row.0.user_key.table_id, TEST_TABLE_ID);
+            assert_eq!(row.0.user_key.table_key, kv_map[i].0);
+            assert_eq!(row.1, kv_map[i].1);
+            i += 1;
+        }
+        assert_eq!(i, kv_map.len());
+
+        let rev_iter = flushed_reader
+            .rev_iter(
+                (
+                    Unbounded,
+                    Included(gen_key_from_str(VirtualNode::ZERO, "eeee")),
+                ),
+                risingwave_storage::store::ReadOptions::default(),
+            )
+            .await
+            .unwrap()
+            .into_stream(to_owned_item);
+        futures::pin_mut!(rev_iter);
+        let mut i = 0;
+        while let Some(row) = rev_iter.try_next().await.unwrap() {
+            let idx = kv_map.len() - 1 - i;
+            assert_eq!(row.0.user_key.table_id, TEST_TABLE_ID);
+            assert_eq!(row.0.user_key.table_key, kv_map[idx].0);
+            assert_eq!(row.1, kv_map[idx].1);
+            i += 1;
+        }
+        assert_eq!(i, kv_map.len());
+    };
+
+    check_flushed_reader().await;
+
+    {
+        // after two flushes, but not sealed
+        let read_version = hummock_storage.read_version();
+        assert_eq!(2, read_version.read().staging().pending_imms.len());
+        assert!(read_version.read().staging().uploading_imms.is_empty());
+        assert!(read_version.read().staging().sst.is_empty());
+    }
+
+    let epoch2 = epoch1.next_epoch();
+    test_env
+        .storage
+        .start_epoch(epoch2, HashSet::from_iter([TEST_TABLE_ID]));
+    hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
+
+    {
+        // after two flushes, but not sealed
+        let read_version = hummock_storage.read_version();
+        assert!(read_version.read().staging().pending_imms.is_empty());
+        assert_eq!(2, read_version.read().staging().uploading_imms.len());
+        assert!(read_version.read().staging().sst.is_empty());
+    }
+
+    check_flushed_reader().await;
+
+    let res = test_env
+        .storage
+        .seal_and_sync_epoch(epoch1, table_id_set.clone())
+        .await
+        .unwrap();
+    {
+        // after two flushes, but not sealed
+        let read_version = hummock_storage.read_version();
+        assert!(read_version.read().staging().pending_imms.is_empty());
+        assert!(read_version.read().staging().uploading_imms.is_empty());
+        assert_eq!(1, read_version.read().staging().sst.len());
+    }
+    test_env
+        .meta_client
+        .commit_epoch(epoch1, res)
+        .await
+        .unwrap();
+    test_env.wait_sync_committed_version().await;
+    {
+        // after sync 1 epoch
+        let read_version = hummock_storage.read_version();
+        assert!(read_version.read().staging().pending_imms.is_empty());
+        assert!(read_version.read().staging().uploading_imms.is_empty());
+        assert!(read_version.read().staging().sst.is_empty());
+    }
+}
+
+#[tokio::test]
 async fn test_delete_get() {
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
     let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
@@ -867,16 +1005,7 @@ async fn test_delete_get() {
             StorageValue::new_put("222"),
         ),
     ];
-    hummock_storage
-        .ingest_batch(
-            batch1,
-            WriteOptions {
-                epoch: epoch1,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch1).await.unwrap();
 
     let epoch2 = epoch1.next_epoch();
     test_env
@@ -898,16 +1027,7 @@ async fn test_delete_get() {
         gen_key_from_str(VirtualNode::ZERO, "bb"),
         StorageValue::new_delete(),
     )];
-    hummock_storage
-        .ingest_batch(
-            batch2,
-            WriteOptions {
-                epoch: epoch2,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch2).await.unwrap();
     hummock_storage.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
     let res = test_env
         .storage
@@ -928,7 +1048,7 @@ async fn test_delete_get() {
                 epoch2,
                 ReadOptions {
                     prefix_hint: None,
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
                 }
             )
@@ -971,16 +1091,7 @@ async fn test_multiple_epoch_sync() {
             StorageValue::new_put("222"),
         ),
     ];
-    hummock_storage
-        .ingest_batch(
-            batch1,
-            WriteOptions {
-                epoch: epoch1,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch1).await.unwrap();
 
     let epoch2 = epoch1.next_epoch();
     test_env
@@ -991,16 +1102,7 @@ async fn test_multiple_epoch_sync() {
         gen_key_from_str(VirtualNode::ZERO, "bb"),
         StorageValue::new_delete(),
     )];
-    hummock_storage
-        .ingest_batch(
-            batch2,
-            WriteOptions {
-                epoch: epoch2,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch2).await.unwrap();
 
     let epoch3 = epoch2.next_epoch();
     test_env
@@ -1017,16 +1119,7 @@ async fn test_multiple_epoch_sync() {
             StorageValue::new_put("555"),
         ),
     ];
-    hummock_storage
-        .ingest_batch(
-            batch3,
-            WriteOptions {
-                epoch: epoch3,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch3).await.unwrap();
     let test_get = |read_committed: bool| {
         let hummock_storage_clone = &test_env.storage;
         async move {
@@ -1038,7 +1131,7 @@ async fn test_multiple_epoch_sync() {
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
                             read_committed,
-                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                            cache_policy: CachePolicy::Fill(Hint::Normal),
                             ..Default::default()
                         },
                     )
@@ -1055,7 +1148,7 @@ async fn test_multiple_epoch_sync() {
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
                             read_committed,
-                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                            cache_policy: CachePolicy::Fill(Hint::Normal),
                             ..Default::default()
                         },
                     )
@@ -1071,7 +1164,7 @@ async fn test_multiple_epoch_sync() {
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
                             read_committed,
-                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                            cache_policy: CachePolicy::Fill(Hint::Normal),
                             ..Default::default()
                         },
                     )
@@ -1167,16 +1260,7 @@ async fn test_iter_with_min_epoch() {
         .await
         .unwrap();
 
-    hummock_storage
-        .ingest_batch(
-            batch_epoch1,
-            WriteOptions {
-                epoch: epoch1,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch_epoch1).await.unwrap();
 
     let epoch2 = (32 * 1000) << 16;
     test_env
@@ -1188,16 +1272,7 @@ async fn test_iter_with_min_epoch() {
         .map(|index| (gen_key(index), StorageValue::new_put(gen_val(index))))
         .collect();
 
-    hummock_storage
-        .ingest_batch(
-            batch_epoch2,
-            WriteOptions {
-                epoch: epoch2,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch_epoch2).await.unwrap();
 
     let epoch3 = (33 * 1000) << 16;
     test_env
@@ -1219,7 +1294,7 @@ async fn test_iter_with_min_epoch() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                        cache_policy: CachePolicy::Fill(Hint::Normal),
                         ..Default::default()
                     },
                 )
@@ -1245,7 +1320,7 @@ async fn test_iter_with_min_epoch() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                        cache_policy: CachePolicy::Fill(Hint::Normal),
                         ..Default::default()
                     },
                 )
@@ -1270,7 +1345,7 @@ async fn test_iter_with_min_epoch() {
                         table_id: TEST_TABLE_ID,
                         retention_seconds: Some(0),
                         prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                        cache_policy: CachePolicy::Fill(Hint::Normal),
                         ..Default::default()
                     },
                 )
@@ -1322,7 +1397,7 @@ async fn test_iter_with_min_epoch() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                        cache_policy: CachePolicy::Fill(Hint::Normal),
                         read_committed: true,
                         ..Default::default()
                     },
@@ -1349,7 +1424,7 @@ async fn test_iter_with_min_epoch() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                        cache_policy: CachePolicy::Fill(Hint::Normal),
                         ..Default::default()
                     },
                 )
@@ -1376,7 +1451,7 @@ async fn test_iter_with_min_epoch() {
                         table_id: TEST_TABLE_ID,
                         retention_seconds: Some(0),
                         prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                        cache_policy: CachePolicy::Fill(Hint::Normal),
                         ..Default::default()
                     },
                 )
@@ -1394,6 +1469,7 @@ async fn test_iter_with_min_epoch() {
 
 #[tokio::test]
 async fn test_hummock_version_reader() {
+    use risingwave_storage::store::ReadOptions;
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
     let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
     let test_env = prepare_hummock_test_env().await;
@@ -1448,40 +1524,13 @@ async fn test_hummock_version_reader() {
             .init_for_test_with_prev_epoch(epoch1, prev_epoch)
             .await
             .unwrap();
-        hummock_storage
-            .ingest_batch(
-                batch_epoch1,
-                WriteOptions {
-                    epoch: epoch1,
-                    table_id: TEST_TABLE_ID,
-                },
-            )
-            .await
-            .unwrap();
+        hummock_storage.ingest_batch(batch_epoch1).await.unwrap();
 
         hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
-        hummock_storage
-            .ingest_batch(
-                batch_epoch2,
-                WriteOptions {
-                    epoch: epoch2,
-                    table_id: TEST_TABLE_ID,
-                },
-            )
-            .await
-            .unwrap();
+        hummock_storage.ingest_batch(batch_epoch2).await.unwrap();
 
         hummock_storage.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
-        hummock_storage
-            .ingest_batch(
-                batch_epoch3,
-                WriteOptions {
-                    epoch: epoch3,
-                    table_id: TEST_TABLE_ID,
-                },
-            )
-            .await
-            .unwrap();
+        hummock_storage.ingest_batch(batch_epoch3).await.unwrap();
 
         let epoch4 = (34 * 1000) << 16;
         test_env
@@ -1510,10 +1559,10 @@ async fn test_hummock_version_reader() {
                             VirtualNode::ZERO,
                         ),
                         epoch1,
+                        TEST_TABLE_ID,
                         ReadOptions {
-                            table_id: TEST_TABLE_ID,
                             prefetch_options: PrefetchOptions::default(),
-                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                            cache_policy: CachePolicy::Fill(Hint::Normal),
                             ..Default::default()
                         },
                         read_snapshot,
@@ -1545,10 +1594,10 @@ async fn test_hummock_version_reader() {
                             VirtualNode::ZERO,
                         ),
                         epoch2,
+                        TEST_TABLE_ID,
                         ReadOptions {
-                            table_id: TEST_TABLE_ID,
                             prefetch_options: PrefetchOptions::default(),
-                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                            cache_policy: CachePolicy::Fill(Hint::Normal),
                             ..Default::default()
                         },
                         read_snapshot,
@@ -1580,11 +1629,11 @@ async fn test_hummock_version_reader() {
                             VirtualNode::ZERO,
                         ),
                         epoch2,
+                        TEST_TABLE_ID,
                         ReadOptions {
-                            table_id: TEST_TABLE_ID,
                             retention_seconds: Some(0),
                             prefetch_options: PrefetchOptions::default(),
-                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                            cache_policy: CachePolicy::Fill(Hint::Normal),
                             ..Default::default()
                         },
                         read_snapshot,
@@ -1653,10 +1702,10 @@ async fn test_hummock_version_reader() {
                             VirtualNode::ZERO,
                         ),
                         epoch1,
+                        TEST_TABLE_ID,
                         ReadOptions {
-                            table_id: TEST_TABLE_ID,
                             prefetch_options: PrefetchOptions::default(),
-                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                            cache_policy: CachePolicy::Fill(Hint::Normal),
                             ..Default::default()
                         },
                         read_snapshot,
@@ -1701,10 +1750,10 @@ async fn test_hummock_version_reader() {
                             VirtualNode::ZERO,
                         ),
                         epoch2,
+                        TEST_TABLE_ID,
                         ReadOptions {
-                            table_id: TEST_TABLE_ID,
                             prefetch_options: PrefetchOptions::default(),
-                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                            cache_policy: CachePolicy::Fill(Hint::Normal),
                             ..Default::default()
                         },
                         read_snapshot,
@@ -1736,11 +1785,11 @@ async fn test_hummock_version_reader() {
                             VirtualNode::ZERO,
                         ),
                         epoch2,
+                        TEST_TABLE_ID,
                         ReadOptions {
-                            table_id: TEST_TABLE_ID,
                             retention_seconds: Some(0),
                             prefetch_options: PrefetchOptions::default(),
-                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                            cache_policy: CachePolicy::Fill(Hint::Normal),
                             ..Default::default()
                         },
                         read_snapshot,
@@ -1772,10 +1821,10 @@ async fn test_hummock_version_reader() {
                             VirtualNode::ZERO,
                         ),
                         epoch3,
+                        TEST_TABLE_ID,
                         ReadOptions {
-                            table_id: TEST_TABLE_ID,
                             prefetch_options: PrefetchOptions::default(),
-                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                            cache_policy: CachePolicy::Fill(Hint::Normal),
                             ..Default::default()
                         },
                         read_snapshot,
@@ -1810,10 +1859,10 @@ async fn test_hummock_version_reader() {
                         .iter(
                             key_range.clone(),
                             epoch2,
+                            TEST_TABLE_ID,
                             ReadOptions {
-                                table_id: TEST_TABLE_ID,
                                 prefetch_options: PrefetchOptions::default(),
-                                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                                cache_policy: CachePolicy::Fill(Hint::Normal),
                                 ..Default::default()
                             },
                             read_snapshot,
@@ -1842,10 +1891,10 @@ async fn test_hummock_version_reader() {
                         .iter(
                             key_range.clone(),
                             epoch3,
+                            TEST_TABLE_ID,
                             ReadOptions {
-                                table_id: TEST_TABLE_ID,
                                 prefetch_options: PrefetchOptions::default(),
-                                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                                cache_policy: CachePolicy::Fill(Hint::Normal),
                                 ..Default::default()
                             },
                             read_snapshot,
@@ -1899,16 +1948,7 @@ async fn test_get_with_min_epoch() {
         .map(|index| (gen_key(index), StorageValue::new_put(gen_val(index))))
         .collect();
 
-    hummock_storage
-        .ingest_batch(
-            batch_epoch1,
-            WriteOptions {
-                epoch: epoch1,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch_epoch1).await.unwrap();
 
     let epoch2 = (32 * 1000) << 16;
     test_env
@@ -1920,16 +1960,7 @@ async fn test_get_with_min_epoch() {
         .map(|index| (gen_key(index), StorageValue::new_put(gen_val(index))))
         .collect();
 
-    hummock_storage
-        .ingest_batch(
-            batch_epoch2,
-            WriteOptions {
-                epoch: epoch2,
-                table_id: TEST_TABLE_ID,
-            },
-        )
-        .await
-        .unwrap();
+    hummock_storage.ingest_batch(batch_epoch2).await.unwrap();
 
     hummock_storage.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
 
@@ -1951,7 +1982,7 @@ async fn test_get_with_min_epoch() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         prefetch_options: Default::default(),
-                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                        cache_policy: CachePolicy::Fill(Hint::Normal),
                         ..Default::default()
                     },
                 )
@@ -1969,7 +2000,7 @@ async fn test_get_with_min_epoch() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         prefix_hint: Some(Bytes::from(prefix_hint.clone())),
-                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                        cache_policy: CachePolicy::Fill(Hint::Normal),
                         ..Default::default()
                     },
                 )
@@ -1987,7 +2018,7 @@ async fn test_get_with_min_epoch() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         prefix_hint: Some(Bytes::from(prefix_hint.clone())),
-                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                        cache_policy: CachePolicy::Fill(Hint::Normal),
                         ..Default::default()
                     },
                 )
@@ -2007,7 +2038,7 @@ async fn test_get_with_min_epoch() {
                         retention_seconds: Some(0),
                         prefix_hint: Some(Bytes::from(prefix_hint.clone())),
                         prefetch_options: Default::default(),
-                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                        cache_policy: CachePolicy::Fill(Hint::Normal),
                         ..Default::default()
                     },
                 )
@@ -2057,7 +2088,7 @@ async fn test_get_with_min_epoch() {
                 epoch1,
                 ReadOptions {
                     table_id: TEST_TABLE_ID,
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     read_committed: true,
                     ..Default::default()
                 },
@@ -2077,7 +2108,7 @@ async fn test_get_with_min_epoch() {
                     table_id: TEST_TABLE_ID,
                     read_committed: true,
                     prefix_hint: Some(Bytes::from(prefix_hint.clone())),
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
                 },
             )
@@ -2096,7 +2127,7 @@ async fn test_get_with_min_epoch() {
                 ReadOptions {
                     table_id: TEST_TABLE_ID,
                     prefix_hint: Some(Bytes::from(prefix_hint.clone())),
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
                 },
             )
@@ -2117,7 +2148,7 @@ async fn test_get_with_min_epoch() {
                     retention_seconds: Some(0),
 
                     prefix_hint: Some(Bytes::from(prefix_hint.clone())),
-                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
                 },
             )
@@ -2223,33 +2254,24 @@ async fn test_table_watermark() {
     {
         for (local, vnode) in [(&local1, vnode1), (&local2, vnode2)] {
             for index in epoch1_indexes() {
-                let value = risingwave_storage::store::LocalStateStore::get(
-                    local,
-                    gen_key(vnode, index),
-                    ReadOptions {
-                        table_id: TEST_TABLE_ID,
-                        ..Default::default()
-                    },
-                )
-                .await
-                .unwrap();
+                let value = local
+                    .get(gen_key(vnode, index), Default::default())
+                    .await
+                    .unwrap();
                 assert_eq!(value.unwrap(), gen_val(index));
             }
-            let result = risingwave_storage::store::LocalStateStore::iter(
-                local,
-                RangeBoundsExt::map(&gen_range(), |index| gen_key(vnode, *index)),
-                ReadOptions {
-                    table_id: TEST_TABLE_ID,
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap()
-            .into_stream(to_owned_item)
-            .map_ok(|(full_key, value)| (full_key.user_key, value))
-            .try_collect::<Vec<_>>()
-            .await
-            .unwrap();
+            let result = local
+                .iter(
+                    RangeBoundsExt::map(&gen_range(), |index| gen_key(vnode, *index)),
+                    Default::default(),
+                )
+                .await
+                .unwrap()
+                .into_stream(to_owned_item)
+                .map_ok(|(full_key, value)| (full_key.user_key, value))
+                .try_collect::<Vec<_>>()
+                .await
+                .unwrap();
             let expected = epoch1_indexes()
                 .map(|index| {
                     (
@@ -2290,16 +2312,10 @@ async fn test_table_watermark() {
     {
         for (local, vnode) in [(&local1, vnode1), (&local2, vnode2)] {
             for index in epoch1_indexes() {
-                let value = risingwave_storage::store::LocalStateStore::get(
-                    local,
-                    gen_key(vnode, index),
-                    ReadOptions {
-                        table_id: TEST_TABLE_ID,
-                        ..Default::default()
-                    },
-                )
-                .await
-                .unwrap();
+                let value = local
+                    .get(gen_key(vnode, index), Default::default())
+                    .await
+                    .unwrap();
                 if index < watermark1 {
                     assert!(value.is_none());
                 } else {
@@ -2312,10 +2328,7 @@ async fn test_table_watermark() {
                 let result = risingwave_storage::store::LocalStateStore::iter(
                     local,
                     RangeBoundsExt::map(&gen_range(), |index| gen_key(vnode, *index)),
-                    ReadOptions {
-                        table_id: TEST_TABLE_ID,
-                        ..Default::default()
-                    },
+                    Default::default(),
                 )
                 .await
                 .unwrap()
@@ -2344,10 +2357,7 @@ async fn test_table_watermark() {
                         Included(gen_key(vnode, 0)),
                         Included(gen_key(vnode, watermark1 - 1)),
                     ),
-                    ReadOptions {
-                        table_id: TEST_TABLE_ID,
-                        ..Default::default()
-                    },
+                    Default::default(),
                 )
                 .await
                 .unwrap()
@@ -2394,16 +2404,10 @@ async fn test_table_watermark() {
     let test_after_epoch2 = |local1: LocalHummockStorage, local2: LocalHummockStorage| async {
         for (local, vnode) in [(&local1, vnode1), (&local2, vnode2)] {
             for index in indexes_after_epoch2() {
-                let value = risingwave_storage::store::LocalStateStore::get(
-                    local,
-                    gen_key(vnode, index),
-                    ReadOptions {
-                        table_id: TEST_TABLE_ID,
-                        ..Default::default()
-                    },
-                )
-                .await
-                .unwrap();
+                let value = local
+                    .get(gen_key(vnode, index), Default::default())
+                    .await
+                    .unwrap();
                 if index < watermark1 {
                     assert!(value.is_none());
                 } else {
@@ -2416,10 +2420,7 @@ async fn test_table_watermark() {
                 let result = risingwave_storage::store::LocalStateStore::iter(
                     local,
                     RangeBoundsExt::map(&gen_range(), |index| gen_key(vnode, *index)),
-                    ReadOptions {
-                        table_id: TEST_TABLE_ID,
-                        ..Default::default()
-                    },
+                    Default::default(),
                 )
                 .await
                 .unwrap()
@@ -2448,10 +2449,7 @@ async fn test_table_watermark() {
                         Included(gen_key(vnode, 0)),
                         Included(gen_key(vnode, watermark1 - 1)),
                     ),
-                    ReadOptions {
-                        table_id: TEST_TABLE_ID,
-                        ..Default::default()
-                    },
+                    Default::default(),
                 )
                 .await
                 .unwrap()
@@ -2474,7 +2472,7 @@ async fn test_table_watermark() {
             .get(&TEST_TABLE_ID)
             .unwrap()
             .committed_epoch;
-        let table_watermarks = TableWatermarksIndex::new_committed(
+        let table_watermarks = PkPrefixTableWatermarksIndex::new_committed(
             version
                 .table_watermarks
                 .get(&TEST_TABLE_ID)
@@ -2506,7 +2504,7 @@ async fn test_table_watermark() {
                     .get(
                         gen_key(vnode, index),
                         epoch,
-                        ReadOptions {
+                        StateStoreTestReadOptions {
                             table_id: TEST_TABLE_ID,
                             ..Default::default()
                         },
@@ -2527,7 +2525,7 @@ async fn test_table_watermark() {
                     .iter(
                         RangeBoundsExt::map(&gen_range(), |index| gen_key(vnode, *index)),
                         epoch,
-                        ReadOptions {
+                        StateStoreTestReadOptions {
                             table_id: TEST_TABLE_ID,
                             ..Default::default()
                         },
@@ -2560,7 +2558,7 @@ async fn test_table_watermark() {
                             Included(gen_key(vnode, watermark1 - 1)),
                         ),
                         epoch,
-                        ReadOptions {
+                        StateStoreTestReadOptions {
                             table_id: TEST_TABLE_ID,
                             ..Default::default()
                         },
@@ -2669,6 +2667,7 @@ async fn test_commit_multi_epoch() {
                         }],
                         new_table_fragment_infos,
                         change_log_delta: Default::default(),
+                        vector_index_delta: Default::default(),
                         tables_to_commit,
                     })
                     .await
@@ -2681,8 +2680,8 @@ async fn test_commit_multi_epoch() {
         let table_key_l = gen_key_from_str(VirtualNode::ZERO, "key_1");
         let table_key_r = gen_key_from_str(VirtualNode::ZERO, "key_2");
         SstableInfoInner {
-            sst_id: 11,
-            object_id: 1,
+            sst_id: 11.into(),
+            object_id: 1.into(),
             table_ids: vec![existing_table_id.table_id],
             file_size: 100,
             sst_size: 100,
@@ -2737,8 +2736,8 @@ async fn test_commit_multi_epoch() {
         let table_key_l = gen_key_from_str(VirtualNode::ZERO, "key_1");
         let table_key_r = gen_key_from_str(VirtualNode::ZERO, "key_2");
         SstableInfoInner {
-            sst_id: 22,
-            object_id: 2,
+            sst_id: 22.into(),
+            object_id: 2.into(),
             table_ids: vec![existing_table_id.table_id],
             file_size: 100,
             sst_size: 100,
@@ -2785,8 +2784,8 @@ async fn test_commit_multi_epoch() {
         let table_key_l = gen_key_from_str(VirtualNode::ZERO, "key_1");
         let table_key_r = gen_key_from_str(VirtualNode::ZERO, "key_2");
         SstableInfoInner {
-            sst_id: 33,
-            object_id: 3,
+            sst_id: 33.into(),
+            object_id: 3.into(),
             table_ids: vec![new_table_id.table_id],
             file_size: 100,
             sst_size: 100,
@@ -2838,8 +2837,8 @@ async fn test_commit_multi_epoch() {
         let table_key_l = gen_key_from_str(VirtualNode::ZERO, "key_1");
         let table_key_r = gen_key_from_str(VirtualNode::ZERO, "key_2");
         SstableInfoInner {
-            sst_id: 44,
-            object_id: 4,
+            sst_id: 44.into(),
+            object_id: 4.into(),
             table_ids: vec![new_table_id.table_id],
             file_size: 100,
             sst_size: 100,
@@ -2883,8 +2882,8 @@ async fn test_commit_multi_epoch() {
         let table_key_l = gen_key_from_str(VirtualNode::ZERO, "key_1");
         let table_key_r = gen_key_from_str(VirtualNode::ZERO, "key_2");
         SstableInfoInner {
-            sst_id: 55,
-            object_id: 5,
+            sst_id: 55.into(),
+            object_id: 5.into(),
             table_ids: vec![existing_table_id.table_id, new_table_id.table_id],
             file_size: 100,
             sst_size: 100,
@@ -2995,6 +2994,7 @@ async fn test_commit_with_large_size() {
                         sstables,
                         new_table_fragment_infos,
                         change_log_delta: Default::default(),
+                        vector_index_delta: Default::default(),
                         tables_to_commit,
                     })
                     .await
@@ -3004,8 +3004,8 @@ async fn test_commit_with_large_size() {
 
     let epoch1 = initial_epoch.next_epoch();
     let sst1_epoch1: SstableInfo = SstableInfoInner {
-        sst_id: 11,
-        object_id: 1,
+        sst_id: 11.into(),
+        object_id: 1.into(),
         table_ids: vec![existing_table_id.table_id],
         file_size: 512 << 20,
         sst_size: 512 << 20,
@@ -3014,8 +3014,8 @@ async fn test_commit_with_large_size() {
     .into();
 
     let sst1_epoch2: SstableInfo = SstableInfoInner {
-        sst_id: 12,
-        object_id: 2,
+        sst_id: 12.into(),
+        object_id: 2.into(),
         table_ids: vec![existing_table_id.table_id],
         file_size: 512 << 20,
         sst_size: 512 << 20,
@@ -3024,8 +3024,8 @@ async fn test_commit_with_large_size() {
     .into();
 
     let sst1_epoch3: SstableInfo = SstableInfoInner {
-        sst_id: 13,
-        object_id: 3,
+        sst_id: 13.into(),
+        object_id: 3.into(),
         table_ids: vec![existing_table_id.table_id],
         file_size: 512 << 20,
         sst_size: 512 << 20,

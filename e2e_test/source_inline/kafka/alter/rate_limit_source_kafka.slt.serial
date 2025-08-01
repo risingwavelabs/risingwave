@@ -26,7 +26,6 @@ from
 ############## Source from kafka (rate_limit = 0)
 
 # Wait for the topic to create
-skipif in-memory
 sleep 5s
 
 statement ok
@@ -42,7 +41,6 @@ flush;
 
 ############## Check data
 
-skipif in-memory
 sleep 3s
 
 ############## Create MV on source
@@ -90,7 +88,6 @@ rl_mv3 SOURCE {SOURCE} 0
 
 ############## Alter Source (rate_limit = 0 --> rate_limit = 1000)
 
-skipif in-memory
 statement count 0
 alter source kafka_source set source_rate_limit to 1000;
 
@@ -102,7 +99,6 @@ rl_mv1 SOURCE {SOURCE} 1000
 rl_mv2 SOURCE {SOURCE} 1000
 rl_mv3 SOURCE {SOURCE} 1000
 
-skipif in-memory
 statement count 0
 alter source kafka_source set source_rate_limit to default;
 
@@ -112,22 +108,18 @@ select count(*) from rw_rate_limit;
 ----
 0
 
-skipif in-memory
 sleep 3s
 
-skipif in-memory
 query I
 select count(*) > 0 from rl_mv1;
 ----
 t
 
-skipif in-memory
 query I
 select count(*) > 0 from rl_mv2;
 ----
 t
 
-skipif in-memory
 query I
 select count(*) > 0 from rl_mv3;
 ----

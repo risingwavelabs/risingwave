@@ -15,7 +15,7 @@
 use std::ops::Bound::*;
 use std::sync::Arc;
 
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use thiserror_ext::AsReport;
@@ -237,7 +237,7 @@ impl SstableIterator {
                     self.options.cache_policy,
                     &mut self.stats,
                 )
-                .verbose_instrument_await("prefetch_blocks")
+                .instrument_await("prefetch_blocks".verbose())
                 .await
             {
                 Ok(preload_stream) => self.preload_stream = Some(preload_stream),
@@ -298,7 +298,7 @@ impl SstableIterator {
                             self.options.cache_policy,
                             &mut self.stats,
                         )
-                        .verbose_instrument_await("prefetch_blocks")
+                        .instrument_await("prefetch_blocks".verbose())
                         .await
                     {
                         Ok(stream) => {
@@ -420,9 +420,10 @@ mod tests {
     use std::collections::Bound;
 
     use bytes::Bytes;
-    use foyer::CacheHint;
+    use foyer::Hint;
     use itertools::Itertools;
     use rand::prelude::*;
+    use rand::rng as thread_rng;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
@@ -593,7 +594,7 @@ mod tests {
             TableKey(Bytes::from(end_key.user_key.table_key.0)),
         );
         let options = Arc::new(SstableIteratorReadOptions {
-            cache_policy: CachePolicy::Fill(CacheHint::Normal),
+            cache_policy: CachePolicy::Fill(Hint::Normal),
             must_iterated_end_user_key: Some(Bound::Included(uk.clone())),
             max_preload_retry_times: 0,
             prefetch_for_large_query: false,

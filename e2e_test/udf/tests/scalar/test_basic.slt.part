@@ -1,0 +1,79 @@
+# Expected functions:
+# int_42() -> int
+# gcd(int, int) -> int
+# decimal_add(decimal, decimal) -> decimal
+# datetime(date, time) -> timestamp
+# jsonb_access(jsonb, int) -> jsonb
+# sum_array(integer[]) -> integer
+# key_value(varchar) -> struct<key varchar, value varchar>
+# return_all(a boolean, b smallint, c int, d bigint, e real, f double precision, g decimal, h varchar, i bytea, j jsonb, s struct<f1 int, f2 int>) -> struct<a boolean, b smallint, c int, d bigint, e real, f double precision, g decimal, h varchar, i bytea, j jsonb, s struct<f1 int, f2 int>>
+# series(n int) ->> (x int)
+# key_values(varchar) ->> (key varchar, value varchar)
+
+query I
+select int_42();
+----
+42
+
+query I
+select gcd(25, 15);
+----
+5
+
+query R
+select decimal_add(1.11, 2.22);
+----
+3.33
+
+query T
+select datetime('2020-01-01', '12:34:56');
+----
+2020-01-01 12:34:56
+
+query T
+select jsonb_access(a::jsonb, 1) from
+(values ('["a", "b", "c"]'), (null), ('[0, false]')) t(a);
+----
+"b"
+NULL
+false
+
+query I
+select sum_array(array[1, 2, 3]);
+----
+6
+
+query T
+select key_value('a=1');
+----
+(a,1)
+
+query T
+select (return_all(
+    true,
+    1 ::smallint,
+    1,
+    1,
+    1,
+    1,
+    12345678901234567890.12345678,
+    'string',
+    'bytes',
+    '{"key":1}',
+    row(1, 2)::struct<f1 int, f2 int>
+)).*;
+----
+t 1 1 1 1 1 12345678901234567890.12345678 string \x6279746573 {"key": 1} (1,2)
+
+query I
+select series(3);
+----
+0
+1
+2
+
+query T
+select * from key_values('a=1,b=2');
+----
+a 1
+b 2

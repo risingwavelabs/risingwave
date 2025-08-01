@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus};
 use risingwave_pb::meta::table_fragments::PbState as PbStreamJobState;
 use risingwave_pb::secret::PbSecretRef;
-use risingwave_pb::stream_plan::PbStreamNode;
+use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamNode};
 use sea_orm::entity::prelude::*;
 use sea_orm::{DeriveActiveEnum, EnumIter, FromJsonQueryResult};
 use serde::{Deserialize, Serialize};
@@ -25,14 +25,15 @@ use serde::{Deserialize, Serialize};
 pub mod prelude;
 
 pub mod actor;
-pub mod actor_dispatcher;
 pub mod catalog_version;
+pub mod cdc_table_snapshot_split;
 pub mod cluster;
 pub mod compaction_config;
 pub mod compaction_status;
 pub mod compaction_task;
 pub mod connection;
 pub mod database;
+pub mod exactly_once_iceberg_sink;
 pub mod fragment;
 pub mod fragment_relation;
 pub mod function;
@@ -46,6 +47,8 @@ pub mod hummock_time_travel_delta;
 pub mod hummock_time_travel_version;
 pub mod hummock_version_delta;
 pub mod hummock_version_stats;
+pub mod iceberg_namespace_properties;
+pub mod iceberg_tables;
 pub mod index;
 pub mod object;
 pub mod object_dependency;
@@ -60,6 +63,7 @@ pub mod subscription;
 pub mod system_parameter;
 pub mod table;
 pub mod user;
+pub mod user_default_privilege;
 pub mod user_privilege;
 pub mod view;
 pub mod worker;
@@ -83,6 +87,7 @@ pub type ConnectionId = ObjectId;
 pub type SecretId = ObjectId;
 pub type UserId = i32;
 pub type PrivilegeId = i32;
+pub type DefaultPrivilegeId = i32;
 
 pub type HummockVersionId = i64;
 pub type Epoch = i64;
@@ -149,6 +154,15 @@ impl From<PbCreateType> for CreateType {
             PbCreateType::Background => Self::Background,
             PbCreateType::Foreground => Self::Foreground,
             PbCreateType::Unspecified => unreachable!("Unspecified create type"),
+        }
+    }
+}
+
+impl CreateType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CreateType::Background => "BACKGROUND",
+            CreateType::Foreground => "FOREGROUND",
         }
     }
 }
@@ -411,6 +425,12 @@ derive_from_blob!(ActorMapping, risingwave_pb::stream_plan::PbActorMapping);
 derive_from_blob!(ExprContext, risingwave_pb::plan_common::PbExprContext);
 
 derive_array_from_blob!(
+    TypePairArray,
+    risingwave_pb::stream_plan::dispatch_output_mapping::TypePair,
+    PbTypePairArray
+);
+
+derive_array_from_blob!(
     HummockVersionDeltaArray,
     risingwave_pb::hummock::PbHummockVersionDelta,
     PbHummockVersionDeltaArray
@@ -424,3 +444,41 @@ pub enum StreamingParallelism {
 }
 
 impl Eq for StreamingParallelism {}
+
+#[derive(
+    Hash, Copy, Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize,
+)]
+#[sea_orm(rs_type = "String", db_type = "string(None)")]
+pub enum DispatcherType {
+    #[sea_orm(string_value = "HASH")]
+    Hash,
+    #[sea_orm(string_value = "BROADCAST")]
+    Broadcast,
+    #[sea_orm(string_value = "SIMPLE")]
+    Simple,
+    #[sea_orm(string_value = "NO_SHUFFLE")]
+    NoShuffle,
+}
+
+impl From<PbDispatcherType> for DispatcherType {
+    fn from(val: PbDispatcherType) -> Self {
+        match val {
+            PbDispatcherType::Unspecified => unreachable!(),
+            PbDispatcherType::Hash => DispatcherType::Hash,
+            PbDispatcherType::Broadcast => DispatcherType::Broadcast,
+            PbDispatcherType::Simple => DispatcherType::Simple,
+            PbDispatcherType::NoShuffle => DispatcherType::NoShuffle,
+        }
+    }
+}
+
+impl From<DispatcherType> for PbDispatcherType {
+    fn from(val: DispatcherType) -> Self {
+        match val {
+            DispatcherType::Hash => PbDispatcherType::Hash,
+            DispatcherType::Broadcast => PbDispatcherType::Broadcast,
+            DispatcherType::Simple => PbDispatcherType::Simple,
+            DispatcherType::NoShuffle => PbDispatcherType::NoShuffle,
+        }
+    }
+}

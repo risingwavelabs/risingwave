@@ -16,9 +16,8 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use risingwave_pb::catalog::{PbDatabase, PbSchema};
-use risingwave_pb::user::grant_privilege::Object;
 
-use super::OwnedByUserCatalog;
+use super::{OwnedByUserCatalog, OwnedGrantObject};
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{DatabaseId, SchemaId, TableId};
 use crate::user::UserId;
@@ -31,6 +30,8 @@ pub struct DatabaseCatalog {
     schema_name_by_id: HashMap<SchemaId, String>,
     pub owner: u32,
     pub resource_group: String,
+    pub barrier_interval_ms: Option<u32>,
+    pub checkpoint_frequency: Option<u64>,
 }
 
 impl DatabaseCatalog {
@@ -81,7 +82,7 @@ impl DatabaseCatalog {
         self.schema_by_name.get_mut(name)
     }
 
-    pub fn get_grant_object_by_oid(&self, oid: u32) -> Option<Object> {
+    pub fn get_grant_object_by_oid(&self, oid: u32) -> Option<OwnedGrantObject> {
         for schema in self.schema_by_name.values() {
             let object = schema.get_grant_object_by_oid(oid);
             if object.is_some() {
@@ -118,6 +119,17 @@ impl DatabaseCatalog {
     pub fn name(&self) -> &str {
         &self.name
     }
+
+    pub fn to_prost(&self) -> PbDatabase {
+        PbDatabase {
+            id: self.id,
+            name: self.name.clone(),
+            owner: self.owner,
+            resource_group: self.resource_group.clone(),
+            barrier_interval_ms: self.barrier_interval_ms,
+            checkpoint_frequency: self.checkpoint_frequency,
+        }
+    }
 }
 
 impl OwnedByUserCatalog for DatabaseCatalog {
@@ -135,6 +147,8 @@ impl From<&PbDatabase> for DatabaseCatalog {
             schema_name_by_id: HashMap::new(),
             owner: db.owner,
             resource_group: db.resource_group.clone(),
+            barrier_interval_ms: db.barrier_interval_ms,
+            checkpoint_frequency: db.checkpoint_frequency,
         }
     }
 }

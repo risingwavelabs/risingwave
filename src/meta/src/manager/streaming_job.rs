@@ -14,9 +14,8 @@
 
 use std::collections::HashSet;
 
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::TableVersionId;
-use risingwave_common::util::epoch::Epoch;
-use risingwave_common::{bail_not_implemented, current_cluster_version};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{SourceModel, TableModel};
 use risingwave_meta_model::{SourceId, TableId, TableVersion, source, table};
@@ -33,7 +32,7 @@ use super::{
 use crate::stream::StreamFragmentGraph;
 use crate::{MetaError, MetaResult};
 
-// This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
+// This enum is used to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
 #[derive(Debug, Clone, EnumIs, EnumTryAs)]
 pub enum StreamingJob {
@@ -42,6 +41,20 @@ pub enum StreamingJob {
     Table(Option<PbSource>, Table, TableJobType),
     Index(Index, Table),
     Source(PbSource),
+}
+
+impl std::fmt::Display for StreamingJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StreamingJob::MaterializedView(table) => {
+                write!(f, "MaterializedView: {}({})", table.name, table.id)
+            }
+            StreamingJob::Sink(sink, _) => write!(f, "Sink: {}({})", sink.name, sink.id),
+            StreamingJob::Table(_, table, _) => write!(f, "Table: {}({})", table.name, table.id),
+            StreamingJob::Index(index, _) => write!(f, "Index: {}({})", index.name, index.id),
+            StreamingJob::Source(source) => write!(f, "Source: {}({})", source.name, source.id),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -75,93 +88,11 @@ impl Default for StreamingJobType {
     }
 }
 
-impl StreamingJob {
-    pub fn mark_created(&mut self) {
-        let created_at_epoch = Some(Epoch::now().0);
-        let created_at_cluster_version = Some(current_cluster_version());
-        match self {
-            StreamingJob::MaterializedView(table) => {
-                table.created_at_epoch = created_at_epoch;
-                table.created_at_cluster_version = created_at_cluster_version;
-            }
-            StreamingJob::Sink(table, _) => table.created_at_epoch = created_at_epoch,
-            StreamingJob::Table(source, table, ..) => {
-                table.created_at_epoch = created_at_epoch;
-                table
-                    .created_at_cluster_version
-                    .clone_from(&created_at_cluster_version);
-                if let Some(source) = source {
-                    source.created_at_epoch = created_at_epoch;
-                    source.created_at_cluster_version = created_at_cluster_version;
-                }
-            }
-            StreamingJob::Index(index, _) => {
-                index.created_at_epoch = created_at_epoch;
-                index.created_at_cluster_version = created_at_cluster_version;
-            }
-            StreamingJob::Source(source) => {
-                source.created_at_epoch = created_at_epoch;
-                source.created_at_cluster_version = created_at_cluster_version;
-            }
-        }
-    }
-
-    pub fn mark_initialized(&mut self) {
-        let initialized_at_epoch = Some(Epoch::now().0);
-        let initialized_at_cluster_version = Some(current_cluster_version());
-        match self {
-            StreamingJob::MaterializedView(table) => {
-                table.initialized_at_epoch = initialized_at_epoch;
-                table.initialized_at_cluster_version = initialized_at_cluster_version;
-            }
-            StreamingJob::Sink(table, _) => {
-                table.initialized_at_epoch = initialized_at_epoch;
-                table.initialized_at_cluster_version = initialized_at_cluster_version;
-            }
-            StreamingJob::Table(source, table, ..) => {
-                table.initialized_at_epoch = initialized_at_epoch;
-                table
-                    .initialized_at_cluster_version
-                    .clone_from(&initialized_at_cluster_version);
-
-                if let Some(source) = source {
-                    source.initialized_at_epoch = initialized_at_epoch;
-                    source.initialized_at_cluster_version = initialized_at_cluster_version;
-                }
-            }
-            StreamingJob::Index(index, _) => {
-                index.initialized_at_epoch = initialized_at_epoch;
-                index.initialized_at_cluster_version = initialized_at_cluster_version;
-            }
-            StreamingJob::Source(source) => {
-                source.initialized_at_epoch = initialized_at_epoch;
-                source.initialized_at_cluster_version = initialized_at_cluster_version;
-            }
-        }
-    }
-}
-
 // TODO: basically we want to ensure that the `Table` persisted in the catalog is the same as the
 // one in the `Materialize` node in the actor. However, they are currently handled separately
 // and can be out of sync. Shall we directly copy the whole struct from the actor to the catalog
 // to avoid `set`ting each field separately?
 impl StreamingJob {
-    pub fn set_id(&mut self, id: u32) {
-        match self {
-            Self::MaterializedView(table) => table.id = id,
-            Self::Sink(sink, _) => sink.id = id,
-            Self::Table(_, table, ..) => table.id = id,
-            Self::Index(index, index_table) => {
-                index.id = id;
-                index.index_table_id = id;
-                index_table.id = id;
-            }
-            StreamingJob::Source(src) => {
-                src.id = id;
-            }
-        }
-    }
-
     /// Set the vnode count of the table.
     pub fn set_table_vnode_count(&mut self, vnode_count: usize) {
         match self {
@@ -314,21 +245,6 @@ impl StreamingJob {
         }
     }
 
-    // TODO: to be removed, pass all objects uniformly through `dependencies` field instead.
-    pub fn dependent_relations(&self) -> Vec<u32> {
-        match self {
-            StreamingJob::MaterializedView(table) => table.dependent_relations.clone(),
-            StreamingJob::Sink(_sink, _) => vec![], /* sink dependencies are now passed via `dependencies` field in `CreateSinkRequest` */
-            StreamingJob::Table(_, table, _) => table.dependent_relations.clone(), /* TODO(rc): record table dependencies via `dependencies` field */
-            StreamingJob::Index(index, index_table) => {
-                // TODO(rc): record index dependencies via `dependencies` field
-                assert_eq!(index.primary_table_id, index_table.dependent_relations[0]);
-                vec![]
-            }
-            StreamingJob::Source(_) => vec![],
-        }
-    }
-
     pub fn dependent_connection_ids(&self) -> MetaResult<HashSet<u32>> {
         match self {
             StreamingJob::Source(source) => Ok(get_referred_connection_ids_from_source(source)),
@@ -395,12 +311,26 @@ impl StreamingJob {
                     return Err(MetaError::permission_denied("source version is stale"));
                 }
             }
-            StreamingJob::MaterializedView(_)
-            | StreamingJob::Sink(_, _)
-            | StreamingJob::Index(_, _) => {
+            StreamingJob::MaterializedView(_) => {
+                // No version check for materialized view, since `ALTER MATERIALIZED VIEW AS QUERY`
+                // is a full rewrite.
+            }
+            StreamingJob::Sink(_, _) => {
+                // No version check for sink, since sink fragment altering is triggered along with Table
+            }
+            StreamingJob::Index(_, _) => {
                 bail_not_implemented!("schema change for {}", self.job_type_str())
             }
         }
         Ok(())
+    }
+
+    // Check whether we should notify the FE about the `CREATING` catalog of this job.
+    pub fn should_notify_creating(&self) -> bool {
+        self.is_materialized_view() || matches!(self.create_type(), CreateType::Background)
+    }
+
+    pub fn is_sink_into_table(&self) -> bool {
+        matches!(self, Self::Sink(_, Some(_)))
     }
 }

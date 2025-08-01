@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::{Ordering, max, min};
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 
@@ -21,6 +23,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_meta_model::StreamingParallelism;
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
@@ -28,17 +31,14 @@ use tracing::{debug, info, warn};
 
 use super::BarrierWorkerRuntimeInfoSnapshot;
 use crate::barrier::context::GlobalBarrierWorkerContextImpl;
-use crate::barrier::info::InflightDatabaseInfo;
+use crate::barrier::info::InflightStreamingJobInfo;
 use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
-use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{
-    ActorId, FragmentActorDispatchers, StreamActor, StreamActorWithDispatchers, StreamJobFragments,
-    TableParallelism,
-};
+use crate::model::{ActorId, StreamActor, StreamJobFragments, TableParallelism};
+use crate::stream::cdc::assign_cdc_table_snapshot_splits_pairs;
 use crate::stream::{
     JobParallelismTarget, JobReschedulePolicy, JobRescheduleTarget, JobResourceGroupTarget,
-    RescheduleOptions, SourceChange,
+    RescheduleOptions, SourceChange, StreamFragmentGraph,
 };
 use crate::{MetaResult, model};
 
@@ -74,22 +74,24 @@ impl GlobalBarrierWorkerContextImpl {
         Ok(())
     }
 
-    async fn list_background_mv_progress(&self) -> MetaResult<Vec<(String, StreamJobFragments)>> {
+    async fn list_background_job_progress(&self) -> MetaResult<Vec<(String, StreamJobFragments)>> {
         let mgr = &self.metadata_manager;
-        let mviews = mgr
+        let job_info = mgr
             .catalog_controller
-            .list_background_creating_mviews(false)
+            .list_background_creating_jobs(false)
             .await?;
 
-        try_join_all(mviews.into_iter().map(|mview| async move {
-            let table_id = TableId::new(mview.table_id as _);
-            let stream_job_fragments = mgr
-                .catalog_controller
-                .get_job_fragments_by_id(mview.table_id)
-                .await?;
-            assert_eq!(stream_job_fragments.stream_job_id(), table_id);
-            Ok((mview.definition, stream_job_fragments))
-        }))
+        try_join_all(
+            job_info
+                .into_iter()
+                .map(|(id, definition, _init_at)| async move {
+                    let table_id = TableId::new(id as _);
+                    let stream_job_fragments =
+                        mgr.catalog_controller.get_job_fragments_by_id(id).await?;
+                    assert_eq!(stream_job_fragments.stream_job_id(), table_id);
+                    Ok((definition, stream_job_fragments))
+                }),
+        )
         .await
         // If failed, enter recovery mode.
     }
@@ -100,7 +102,7 @@ impl GlobalBarrierWorkerContextImpl {
     async fn resolve_graph_info(
         &self,
         database_id: Option<DatabaseId>,
-    ) -> MetaResult<HashMap<DatabaseId, InflightDatabaseInfo>> {
+    ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, InflightStreamingJobInfo>>> {
         let database_id = database_id.map(|database_id| database_id.database_id as _);
         let all_actor_infos = self
             .metadata_manager
@@ -110,25 +112,141 @@ impl GlobalBarrierWorkerContextImpl {
 
         Ok(all_actor_infos
             .into_iter()
-            .map(|(loaded_database_id, actor_infos)| {
+            .map(|(loaded_database_id, job_fragment_infos)| {
                 if let Some(database_id) = database_id {
                     assert_eq!(database_id, loaded_database_id);
                 }
                 (
                     DatabaseId::new(loaded_database_id as _),
-                    InflightDatabaseInfo::new(actor_infos.into_iter().map(
-                        |(job_id, actor_infos)| {
+                    job_fragment_infos
+                        .into_iter()
+                        .map(|(job_id, fragment_infos)| {
+                            let job_id = TableId::new(job_id as _);
                             (
-                                TableId::new(job_id as _),
-                                actor_infos
-                                    .into_iter()
-                                    .map(|(fragment_id, info)| (fragment_id as _, info)),
+                                job_id,
+                                InflightStreamingJobInfo {
+                                    job_id,
+                                    fragment_infos: fragment_infos
+                                        .into_iter()
+                                        .map(|(fragment_id, info)| (fragment_id as _, info))
+                                        .collect(),
+                                },
                             )
-                        },
-                    )),
+                        })
+                        .collect(),
                 )
             })
             .collect())
+    }
+
+    #[expect(clippy::type_complexity)]
+    fn resolve_hummock_version_epochs(
+        background_jobs: &HashMap<TableId, (String, StreamJobFragments)>,
+        version: &HummockVersion,
+    ) -> MetaResult<(
+        HashMap<TableId, u64>,
+        HashMap<TableId, Vec<(Vec<u64>, u64)>>,
+    )> {
+        let table_committed_epoch: HashMap<_, _> = version
+            .state_table_info
+            .info()
+            .iter()
+            .map(|(table_id, info)| (*table_id, info.committed_epoch))
+            .collect();
+        let get_table_committed_epoch = |table_id| -> anyhow::Result<u64> {
+            Ok(*table_committed_epoch
+                .get(&table_id)
+                .ok_or_else(|| anyhow!("cannot get committed epoch on table {}.", table_id))?)
+        };
+        let mut min_downstream_committed_epochs = HashMap::new();
+        for (_, job) in background_jobs.values() {
+            let Ok(job_committed_epoch) = get_table_committed_epoch(job.stream_job_id) else {
+                // Question: should we get the committed epoch from any state tables in the job?
+                warn!(
+                    "background job {} has no committed epoch, skip resolving epochs",
+                    job.stream_job_id
+                );
+                continue;
+            };
+            if let (Some(snapshot_backfill_info), _) =
+                StreamFragmentGraph::collect_snapshot_backfill_info_impl(
+                    job.fragments()
+                        .map(|fragment| (&fragment.nodes, fragment.fragment_type_mask)),
+                )?
+            {
+                for (upstream_table, snapshot_epoch) in
+                    snapshot_backfill_info.upstream_mv_table_id_to_backfill_epoch
+                {
+                    let snapshot_epoch = snapshot_epoch.ok_or_else(|| {
+                        anyhow!(
+                            "recovered snapshot backfill job has not filled snapshot epoch: {:?}",
+                            job
+                        )
+                    })?;
+                    let pinned_epoch = max(snapshot_epoch, job_committed_epoch);
+                    match min_downstream_committed_epochs.entry(upstream_table) {
+                        Entry::Occupied(entry) => {
+                            let prev_min_epoch = entry.into_mut();
+                            *prev_min_epoch = min(*prev_min_epoch, pinned_epoch);
+                        }
+                        Entry::Vacant(entry) => {
+                            entry.insert(pinned_epoch);
+                        }
+                    }
+                }
+            }
+        }
+        let mut log_epochs = HashMap::new();
+        for (upstream_table_id, downstream_committed_epoch) in min_downstream_committed_epochs {
+            let upstream_committed_epoch = get_table_committed_epoch(upstream_table_id)?;
+            match upstream_committed_epoch.cmp(&downstream_committed_epoch) {
+                Ordering::Less => {
+                    return Err(anyhow!(
+                        "downstream epoch {} later than upstream epoch {} of table {}",
+                        downstream_committed_epoch,
+                        upstream_committed_epoch,
+                        upstream_table_id
+                    )
+                    .into());
+                }
+                Ordering::Equal => {
+                    continue;
+                }
+                Ordering::Greater => {
+                    if let Some(table_change_log) = version.table_change_log.get(&upstream_table_id)
+                    {
+                        let epochs = table_change_log
+                            .filter_epoch((downstream_committed_epoch, upstream_committed_epoch))
+                            .map(|epoch_log| {
+                                (
+                                    epoch_log.non_checkpoint_epochs.clone(),
+                                    epoch_log.checkpoint_epoch,
+                                )
+                            })
+                            .collect_vec();
+                        let first_epochs = epochs.first();
+                        if let Some((_, first_checkpoint_epoch)) = &first_epochs
+                            && *first_checkpoint_epoch == downstream_committed_epoch
+                        {
+                        } else {
+                            return Err(anyhow!(
+                                "resolved first log epoch {:?} on table {} not matched with downstream committed epoch {}",
+                                epochs, upstream_table_id, downstream_committed_epoch).into()
+                            );
+                        }
+                        log_epochs
+                            .try_insert(upstream_table_id, epochs)
+                            .expect("non-duplicated");
+                    } else {
+                        return Err(anyhow!(
+                            "upstream table {} on epoch {} has lagged downstream on epoch {} but no table change log",
+                            upstream_table_id, upstream_committed_epoch, downstream_committed_epoch).into()
+                        );
+                    }
+                }
+            }
+        }
+        Ok((table_committed_epoch, log_epochs))
     }
 
     pub(super) async fn reload_runtime_info_impl(
@@ -141,20 +259,20 @@ impl GlobalBarrierWorkerContextImpl {
                         .await
                         .context("clean dirty streaming jobs")?;
 
-                    // Mview progress needs to be recovered.
-                    tracing::info!("recovering mview progress");
+                    // Background job progress needs to be recovered.
+                    tracing::info!("recovering background job progress");
                     let background_jobs = {
                         let jobs = self
-                            .list_background_mv_progress()
+                            .list_background_job_progress()
                             .await
-                            .context("recover mview progress should not fail")?;
+                            .context("recover background job progress should not fail")?;
                         let mut background_jobs = HashMap::new();
                         for (definition, stream_job_fragments) in jobs {
                             if stream_job_fragments
                                 .tracking_progress_actor_ids()
                                 .is_empty()
                             {
-                                // If there's no tracking actor in the mview, we can finish the job directly.
+                                // If there's no tracking actor in the job, we can finish the job directly.
                                 self.metadata_manager
                                     .catalog_controller
                                     .finish_streaming_job(
@@ -174,7 +292,7 @@ impl GlobalBarrierWorkerContextImpl {
                         background_jobs
                     };
 
-                    tracing::info!("recovered mview progress");
+                    tracing::info!("recovered background job progress");
 
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
                     let _ = self.scheduled_barriers.pre_apply_drop_cancel(None);
@@ -253,25 +371,21 @@ impl GlobalBarrierWorkerContextImpl {
                     let info = info;
 
                     self.purge_state_table_from_hummock(
-                        &InflightFragmentInfo::existing_table_ids(
-                            info.values().flat_map(|database| database.fragment_infos()),
-                        )
-                        .collect(),
+                        &info
+                            .values()
+                            .flatten()
+                            .flat_map(|(_, job)| job.existing_table_ids())
+                            .collect(),
                     )
                     .await
                     .context("purge state table from hummock")?;
 
-                    let state_table_committed_epochs: HashMap<_, _> = self
+                    let (state_table_committed_epochs, state_table_log_epochs) = self
                         .hummock_manager
                         .on_current_version(|version| {
-                            version
-                                .state_table_info
-                                .info()
-                                .iter()
-                                .map(|(table_id, info)| (*table_id, info.committed_epoch))
-                                .collect()
+                            Self::resolve_hummock_version_epochs(&background_jobs, version)
                         })
-                        .await;
+                        .await?;
 
                     let subscription_infos = self
                         .metadata_manager
@@ -293,25 +407,23 @@ impl GlobalBarrierWorkerContextImpl {
                         warn!(error = %err.as_report(), "update actors failed");
                     })?;
 
-                    let stream_actor_dispatchers = self
+                    let fragment_relations = self
                         .metadata_manager
                         .catalog_controller
-                        .get_fragment_actor_dispatchers(
+                        .get_fragment_downstream_relations(
                             info.values()
-                                .flat_map(|database| database.fragment_infos())
+                                .flatten()
+                                .flat_map(|(_, job)| job.fragment_infos())
                                 .map(|fragment| fragment.fragment_id as _)
                                 .collect(),
                         )
                         .await?;
 
-                    let stream_actors =
-                        Self::fill_dispatchers(stream_actors, stream_actor_dispatchers);
-
                     let background_jobs = {
                         let jobs = self
-                            .list_background_mv_progress()
+                            .list_background_job_progress()
                             .await
-                            .context("recover mview progress should not fail")?;
+                            .context("recover background job progress should not fail")?;
                         let mut background_jobs = HashMap::new();
                         for (definition, stream_job_fragments) in jobs {
                             background_jobs
@@ -324,17 +436,38 @@ impl GlobalBarrierWorkerContextImpl {
                         background_jobs
                     };
 
+                    let database_infos = self
+                        .metadata_manager
+                        .catalog_controller
+                        .list_databases()
+                        .await?;
+
                     // get split assignments for all actors
                     let source_splits = self.source_manager.list_assignments().await;
+                    let cdc_table_backfill_actors = self
+                        .metadata_manager
+                        .catalog_controller
+                        .cdc_table_backfill_actor_ids()
+                        .await?;
+                    let cdc_table_snapshot_split_assignment =
+                        assign_cdc_table_snapshot_splits_pairs(
+                            cdc_table_backfill_actors,
+                            self.env.meta_store_ref(),
+                        )
+                        .await?;
                     Ok(BarrierWorkerRuntimeInfoSnapshot {
                         active_streaming_nodes,
-                        database_fragment_infos: info,
+                        database_job_infos: info,
                         state_table_committed_epochs,
+                        state_table_log_epochs,
                         subscription_infos,
                         stream_actors,
+                        fragment_relations,
                         source_splits,
                         background_jobs,
                         hummock_version_stats: self.hummock_manager.get_version_stats().await,
+                        database_infos,
+                        cdc_table_snapshot_split_assignment,
                     })
                 }
             }
@@ -349,13 +482,16 @@ impl GlobalBarrierWorkerContextImpl {
             .await
             .context("clean dirty streaming jobs")?;
 
-        // Mview progress needs to be recovered.
-        tracing::info!(?database_id, "recovering mview progress of database");
+        // Background job progress needs to be recovered.
+        tracing::info!(
+            ?database_id,
+            "recovering background job progress of database"
+        );
         let background_jobs = self
-            .list_background_mv_progress()
+            .list_background_job_progress()
             .await
-            .context("recover mview progress of database should not fail")?;
-        tracing::info!(?database_id, "recovered mview progress");
+            .context("recover background job progress of database should not fail")?;
+        tracing::info!(?database_id, "recovered background job progress");
 
         // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
         let _ = self
@@ -380,14 +516,14 @@ impl GlobalBarrierWorkerContextImpl {
             let jobs = background_jobs;
             let mut background_jobs = HashMap::new();
             for (definition, stream_job_fragments) in jobs {
-                if !info.contains_job(stream_job_fragments.stream_job_id()) {
+                if !info.contains_key(&stream_job_fragments.stream_job_id()) {
                     continue;
                 }
                 if stream_job_fragments
                     .tracking_progress_actor_ids()
                     .is_empty()
                 {
-                    // If there's no tracking actor in the mview, we can finish the job directly.
+                    // If there's no tracking actor in the job, we can finish the job directly.
                     self.metadata_manager
                         .catalog_controller
                         .finish_streaming_job(
@@ -407,17 +543,12 @@ impl GlobalBarrierWorkerContextImpl {
             background_jobs
         };
 
-        let state_table_committed_epochs: HashMap<_, _> = self
+        let (state_table_committed_epochs, state_table_log_epochs) = self
             .hummock_manager
             .on_current_version(|version| {
-                version
-                    .state_table_info
-                    .info()
-                    .iter()
-                    .map(|(table_id, info)| (*table_id, info.committed_epoch))
-                    .collect()
+                Self::resolve_hummock_version_epochs(&background_jobs, version)
             })
-            .await;
+            .await?;
 
         let subscription_infos = self
             .metadata_manager
@@ -436,11 +567,12 @@ impl GlobalBarrierWorkerContextImpl {
             mv_depended_subscriptions,
         };
 
-        let stream_actor_dispatchers = self
+        let fragment_relations = self
             .metadata_manager
             .catalog_controller
-            .get_fragment_actor_dispatchers(
-                info.fragment_infos()
+            .get_fragment_downstream_relations(
+                info.values()
+                    .flatten()
                     .map(|fragment| fragment.fragment_id as _)
                     .collect(),
             )
@@ -451,34 +583,30 @@ impl GlobalBarrierWorkerContextImpl {
             warn!(error = %err.as_report(), "update actors failed");
         })?;
 
-        let stream_actors = Self::fill_dispatchers(stream_actors, stream_actor_dispatchers);
-
         // get split assignments for all actors
         let source_splits = self.source_manager.list_assignments().await;
+
+        let cdc_table_backfill_actors = self
+            .metadata_manager
+            .catalog_controller
+            .cdc_table_backfill_actor_ids()
+            .await?;
+        let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits_pairs(
+            cdc_table_backfill_actors,
+            self.env.meta_store_ref(),
+        )
+        .await?;
         Ok(Some(DatabaseRuntimeInfoSnapshot {
-            database_fragment_info: info,
+            job_infos: info,
             state_table_committed_epochs,
+            state_table_log_epochs,
             subscription_info,
             stream_actors,
+            fragment_relations,
             source_splits,
             background_jobs,
+            cdc_table_snapshot_split_assignment,
         }))
-    }
-
-    fn fill_dispatchers(
-        actors: HashMap<ActorId, StreamActor>,
-        mut dispatchers: FragmentActorDispatchers,
-    ) -> HashMap<ActorId, StreamActorWithDispatchers> {
-        actors
-            .into_iter()
-            .map(|(actor_id, actor)| {
-                let dispatchers = dispatchers
-                    .get_mut(&(actor.fragment_id as _))
-                    .and_then(|dispatchers| dispatchers.remove(&(actor.actor_id as _)))
-                    .unwrap_or_default();
-                (actor_id, (actor, dispatchers))
-            })
-            .collect()
     }
 }
 
@@ -490,7 +618,7 @@ impl GlobalBarrierWorkerContextImpl {
     async fn migrate_actors(
         &self,
         active_nodes: &mut ActiveStreamingWorkerNodes,
-    ) -> MetaResult<HashMap<DatabaseId, InflightDatabaseInfo>> {
+    ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, InflightStreamingJobInfo>>> {
         let mgr = &self.metadata_manager;
 
         // all worker slots used by actors
@@ -741,9 +869,12 @@ impl GlobalBarrierWorkerContextImpl {
 
             let plan = self
                 .scale_controller
-                .generate_job_reschedule_plan(JobReschedulePolicy {
-                    targets: local_reschedule_targets,
-                })
+                .generate_job_reschedule_plan(
+                    JobReschedulePolicy {
+                        targets: local_reschedule_targets,
+                    },
+                    false,
+                )
                 .await?;
 
             // no need to update

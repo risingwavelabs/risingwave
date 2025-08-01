@@ -31,13 +31,13 @@ use super::SinkParam;
 use super::catalog::SinkFormatDesc;
 use crate::connector_common::KinesisCommon;
 use crate::dispatch_sink_formatter_str_key_impl;
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt, FormattedSink,
 };
-use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriterParam};
-
+use crate::sink::{Result, Sink, SinkError, SinkWriterParam};
 pub const KINESIS_SINK: &str = "kinesis";
 
 #[derive(Clone, Debug)]
@@ -48,6 +48,17 @@ pub struct KinesisSink {
     format_desc: SinkFormatDesc,
     db_name: String,
     sink_from_name: String,
+}
+
+impl EnforceSecret for KinesisSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            KinesisSinkConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 impl TryFrom<SinkParam> for KinesisSink {
@@ -72,7 +83,6 @@ impl TryFrom<SinkParam> for KinesisSink {
 const KINESIS_SINK_MAX_PENDING_CHUNK_NUM: usize = 64;
 
 impl Sink for KinesisSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = AsyncTruncateLogSinkerOf<KinesisSinkWriter>;
 
     const SINK_NAME: &'static str = KINESIS_SINK;
@@ -127,6 +137,13 @@ impl Sink for KinesisSink {
 pub struct KinesisSinkConfig {
     #[serde(flatten)]
     pub common: KinesisCommon,
+}
+
+impl EnforceSecret for KinesisSinkConfig {
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        KinesisCommon::enforce_one(prop)?;
+        Ok(())
+    }
 }
 
 impl KinesisSinkConfig {
@@ -203,6 +220,7 @@ mod opaque_type {
         impl TryFuture<Ok = (), Error = SinkError> + Unpin + Send + 'static;
 
     impl KinesisSinkPayloadWriter {
+        #[define_opaque(KinesisSinkPayloadWriterDeliveryFuture)]
         pub(super) fn finish(self) -> KinesisSinkPayloadWriterDeliveryFuture {
             // For reference to the behavior of `put_records`
             // https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/kinesis/client/put_records.html

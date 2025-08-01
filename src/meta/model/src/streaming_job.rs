@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
+use sea_orm::FromJsonQueryResult;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -29,6 +32,18 @@ pub struct Model {
     pub max_parallelism: i32,
     pub specific_resource_group: Option<String>,
 }
+
+/// This data structure contains an adjacency list of
+/// backfill nodes.
+/// Each edge represents a backfill order.
+/// For instance, given:
+/// `BackfillOrders[1] = [2, 3, 4]`
+/// It means that node 1 must be backfilled before nodes 2, 3, and 4.
+/// Concretely, these node ids are the fragment ids.
+/// This is because each fragment will only have 1 stream scan,
+/// and stream scan corresponds to a backfill node.
+#[derive(Clone, Debug, PartialEq, Eq, FromJsonQueryResult, Serialize, Deserialize, Default)]
+pub struct BackfillOrders(pub HashMap<u32, Vec<u32>>);
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {

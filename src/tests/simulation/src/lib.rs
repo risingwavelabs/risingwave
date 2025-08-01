@@ -28,5 +28,7 @@ pub mod nexmark;
 pub mod slt;
 pub mod utils;
 
+mod parse;
+
 risingwave_batch_executors::enable!();
 risingwave_expr_impl::enable!();

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(coverage, feature(coverage_attribute))]
+#![feature(coverage_attribute)]
 #![feature(iterator_try_collect)]
 
 use proc_macro::TokenStream;
@@ -24,7 +24,6 @@ mod generate;
 
 /// This attribute will be placed before any pb types, including messages and enums.
 /// See `prost/helpers/README.md` for more details.
-#[cfg_attr(coverage, coverage(off))]
 #[proc_macro_derive(AnyPB)]
 pub fn any_pb(input: TokenStream) -> TokenStream {
     // Parse the string representation
@@ -37,7 +36,6 @@ pub fn any_pb(input: TokenStream) -> TokenStream {
 }
 
 // Procedure macros can not be tested from the same crate.
-#[cfg_attr(coverage, coverage(off))]
 fn produce(ast: &DeriveInput) -> Result<TokenStream2> {
     let name = &ast.ident;
 
@@ -55,11 +53,10 @@ fn produce(ast: &DeriveInput) -> Result<TokenStream2> {
     };
 
     // Add a `Pb`-prefixed alias for all types.
+    // No need to add docs for this alias as rust-analyzer will forward the docs to the original type.
     let pb_alias = {
         let pb_name = format_ident!("Pb{name}");
-        let doc = format!("Alias for [`{name}`].");
         quote! {
-            #[doc = #doc]
             pub type #pb_name = #name;
         }
     };
@@ -70,7 +67,6 @@ fn produce(ast: &DeriveInput) -> Result<TokenStream2> {
     })
 }
 
-#[cfg_attr(coverage, coverage(off))]
 #[proc_macro_derive(Version)]
 pub fn version(input: TokenStream) -> TokenStream {
     fn version_inner(ast: &DeriveInput) -> syn::Result<TokenStream2> {

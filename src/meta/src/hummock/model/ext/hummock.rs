@@ -34,13 +34,13 @@ use sea_orm::sea_query::OnConflict;
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::model::CompactionGroup;
 use crate::model::{MetadataModelError, MetadataModelResult, Transactional};
-use crate::storage::MetaStoreError;
 
 pub type Transaction = sea_orm::DatabaseTransaction;
 
 impl From<sea_orm::DbErr> for MetadataModelError {
     fn from(err: sea_orm::DbErr) -> Self {
-        MetadataModelError::MetaStoreError(MetaStoreError::Internal(err.into()))
+        // TODO: a separate error variant
+        MetadataModelError::InternalError(err.into())
     }
 }
 

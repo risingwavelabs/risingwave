@@ -15,12 +15,15 @@
 use std::collections::BTreeMap;
 use std::hash::Hash;
 use std::io::Write;
+use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use async_nats::jetstream::consumer::DeliverPolicy;
 use async_nats::jetstream::{self};
 use aws_sdk_kinesis::Client as KinesisClient;
+use aws_sdk_kinesis::config::{AsyncSleep, SharedAsyncSleep, Sleep};
+use phf::{Set, phf_set};
 use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
 use pulsar::{Authentication, Pulsar, TokioExecutor};
 use rdkafka::ClientConfig;
@@ -35,6 +38,7 @@ use with_options::WithOptions;
 
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::deserialize_duration_from_string;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::sink::SinkError;
 use crate::source::nats::source::NatsOffset;
@@ -45,8 +49,8 @@ pub const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
 const AWS_MSK_IAM_AUTH: &str = "AWS_MSK_IAM";
 
 /// The environment variable to disable using default credential from environment.
-/// It's recommended to set this variable to `false` in cloud hosting environment.
-const DISABLE_DEFAULT_CREDENTIAL: &str = "DISABLE_DEFAULT_CREDENTIAL";
+/// It's recommended to set this variable to `true` in cloud hosting environment.
+pub const DISABLE_DEFAULT_CREDENTIAL: &str = "DISABLE_DEFAULT_CREDENTIAL";
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AwsPrivateLinkItem {
@@ -98,6 +102,19 @@ pub struct AwsAuthProps {
     pub profile: Option<String>,
     #[serde(rename = "aws.msk.signer_timeout_sec")]
     pub msk_signer_timeout_sec: Option<u64>,
+}
+
+impl EnforceSecret for AwsAuthProps {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "access_key",
+        "aws.credentials.access_key_id",
+        "s3.access.key",
+        "secret_key",
+        "aws.credentials.secret_access_key",
+        "s3.secret.key",
+        "session_token",
+        "aws.credentials.session_token",
+    };
 }
 
 impl AwsAuthProps {
@@ -179,11 +196,13 @@ pub struct KafkaConnectionProps {
     pub brokers: String,
 
     /// Security protocol used for RisingWave to communicate with Kafka brokers. Could be
-    /// PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
+    /// PLAINTEXT, SSL, `SASL_PLAINTEXT` or `SASL_SSL`.
     #[serde(rename = "properties.security.protocol")]
+    #[with_option(allow_alter_on_fly)]
     security_protocol: Option<String>,
 
     #[serde(rename = "properties.ssl.endpoint.identification.algorithm")]
+    #[with_option(allow_alter_on_fly)]
     ssl_endpoint_identification_algorithm: Option<String>,
 
     // For the properties below, please refer to [librdkafka](https://github.com/edenhill/librdkafka/blob/master/CONFIGURATION.md) for more information.
@@ -215,16 +234,19 @@ pub struct KafkaConnectionProps {
     #[serde(rename = "properties.ssl.key.password")]
     ssl_key_password: Option<String>,
 
-    /// SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and AWS_MSK_IAM.
+    /// SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and `AWS_MSK_IAM`.
     #[serde(rename = "properties.sasl.mechanism")]
+    #[with_option(allow_alter_on_fly)]
     sasl_mechanism: Option<String>,
 
     /// SASL username for SASL/PLAIN and SASL/SCRAM.
     #[serde(rename = "properties.sasl.username")]
+    #[with_option(allow_alter_on_fly)]
     sasl_username: Option<String>,
 
     /// SASL password for SASL/PLAIN and SASL/SCRAM.
     #[serde(rename = "properties.sasl.password")]
+    #[with_option(allow_alter_on_fly)]
     sasl_password: Option<String>,
 
     /// Kafka server's Kerberos principal name under SASL/GSSAPI, not including /hostname@REALM.
@@ -252,6 +274,14 @@ pub struct KafkaConnectionProps {
     sasl_oathbearer_config: Option<String>,
 }
 
+impl EnforceSecret for KafkaConnectionProps {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "properties.ssl.key.pem",
+        "properties.ssl.key.password",
+        "properties.sasl.password",
+    };
+}
+
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct KafkaCommon {
@@ -264,6 +294,7 @@ pub struct KafkaCommon {
         deserialize_with = "deserialize_duration_from_string",
         default = "default_kafka_sync_call_timeout"
     )]
+    #[with_option(allow_alter_on_fly)]
     pub sync_call_timeout: Duration,
 }
 
@@ -280,15 +311,20 @@ const fn default_kafka_sync_call_timeout() -> Duration {
     Duration::from_secs(5)
 }
 
+const fn default_socket_keepalive_enable() -> bool {
+    true
+}
+
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct RdKafkaPropertiesCommon {
     /// Maximum Kafka protocol request message size. Due to differing framing overhead between
     /// protocol versions the producer is unable to reliably enforce a strict max message limit at
-    /// produce time and may exceed the maximum size by one message in protocol ProduceRequests,
+    /// produce time and may exceed the maximum size by one message in protocol `ProduceRequests`,
     /// the broker will enforce the topic's max.message.bytes limit
     #[serde(rename = "properties.message.max.bytes")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub message_max_bytes: Option<usize>,
 
     /// Maximum Kafka protocol response message size. This serves as a safety precaution to avoid
@@ -297,20 +333,31 @@ pub struct RdKafkaPropertiesCommon {
     /// configuration property is explicitly set.
     #[serde(rename = "properties.receive.message.max.bytes")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub receive_message_max_bytes: Option<usize>,
 
     #[serde(rename = "properties.statistics.interval.ms")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub statistics_interval_ms: Option<usize>,
 
     /// Client identifier
     #[serde(rename = "properties.client.id")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub client_id: Option<String>,
 
     #[serde(rename = "properties.enable.ssl.certificate.verification")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub enable_ssl_certificate_verification: Option<bool>,
+
+    #[serde(
+        rename = "properties.socket.keepalive.enable",
+        default = "default_socket_keepalive_enable"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub socket_keepalive_enable: bool,
 }
 
 impl RdKafkaPropertiesCommon {
@@ -330,6 +377,10 @@ impl RdKafkaPropertiesCommon {
         if let Some(v) = self.enable_ssl_certificate_verification {
             c.set("enable.ssl.certificate.verification", v.to_string());
         }
+        c.set(
+            "socket.keepalive.enable",
+            self.socket_keepalive_enable.to_string(),
+        );
     }
 }
 
@@ -470,6 +521,12 @@ pub struct PulsarCommon {
     pub auth_token: Option<String>,
 }
 
+impl EnforceSecret for PulsarCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "pulsar.auth.token",
+    };
+}
+
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct PulsarOauthCommon {
     #[serde(rename = "oauth.issuer.url")]
@@ -499,38 +556,17 @@ impl PulsarCommon {
         aws_auth_props: &AwsAuthProps,
     ) -> ConnectorResult<Pulsar<TokioExecutor>> {
         let mut pulsar_builder = Pulsar::builder(&self.service_url, TokioExecutor);
-        let mut temp_file = None;
+        let mut _temp_file = None; // Keep temp file alive
+
         if let Some(oauth) = oauth.as_ref() {
-            let url = Url::parse(&oauth.credentials_url)?;
-            match url.scheme() {
-                "s3" => {
-                    let credentials = load_file_descriptor_from_s3(&url, aws_auth_props).await?;
-                    temp_file = Some(
-                        create_credential_temp_file(&credentials)
-                            .context("failed to create temp file for pulsar credentials")?,
-                    );
-                }
-                "file" => {}
-                _ => {
-                    bail!("invalid credentials_url, only file url and s3 url are supported",);
-                }
-            }
+            let (credentials_url, temp_file) = self
+                .resolve_pulsar_credentials_url(oauth, aws_auth_props)
+                .await?;
+            _temp_file = temp_file;
 
             let auth_params = OAuth2Params {
                 issuer_url: oauth.issuer_url.clone(),
-                credentials_url: if temp_file.is_none() {
-                    oauth.credentials_url.clone()
-                } else {
-                    let mut raw_path = temp_file
-                        .as_ref()
-                        .unwrap()
-                        .path()
-                        .to_str()
-                        .unwrap()
-                        .to_owned();
-                    raw_path.insert_str(0, "file://");
-                    raw_path
-                },
+                credentials_url,
                 audience: Some(oauth.audience.clone()),
                 scope: oauth.scope.clone(),
             };
@@ -545,11 +581,68 @@ impl PulsarCommon {
         }
 
         let res = pulsar_builder.build().await.map_err(|e| anyhow!(e))?;
-        drop(temp_file);
+        drop(_temp_file); // Explicitly drop temp file after client is built
         Ok(res)
+    }
+
+    pub(crate) async fn resolve_pulsar_credentials_url(
+        &self,
+        oauth: &PulsarOauthCommon,
+        aws_auth_props: &AwsAuthProps,
+    ) -> ConnectorResult<(String, Option<NamedTempFile>)> {
+        // Try parsing as URL first
+        if let Ok(url) = Url::parse(&oauth.credentials_url) {
+            return self
+                .handle_pulsar_credentials_url(&url, aws_auth_props)
+                .await;
+        }
+
+        // If not a valid URL, check if it's an absolute file path
+        let path = Path::new(&oauth.credentials_url);
+        if !path.is_absolute() {
+            bail!("credentials_url must be a valid URL (s3://, file://) or an absolute file path");
+        }
+
+        // Verify the file exists
+        if !tokio::fs::try_exists(&oauth.credentials_url)
+            .await
+            .unwrap_or(false)
+        {
+            bail!("credentials file does not exist: {}", oauth.credentials_url);
+        }
+
+        // Return absolute path with file:// prefix
+        Ok((format!("file://{}", oauth.credentials_url), None))
+    }
+
+    pub(crate) async fn handle_pulsar_credentials_url(
+        &self,
+        url: &Url,
+        aws_auth_props: &AwsAuthProps,
+    ) -> ConnectorResult<(String, Option<NamedTempFile>)> {
+        match url.scheme() {
+            "s3" => {
+                let credentials = load_file_descriptor_from_s3(url, aws_auth_props).await?;
+                let temp_file = create_credential_temp_file(&credentials)
+                    .context("failed to create temp file for pulsar credentials")?;
+
+                let temp_path = temp_file
+                    .path()
+                    .to_str()
+                    .context("temp file path is not valid UTF-8")?;
+
+                Ok((format!("file://{}", temp_path), Some(temp_file)))
+            }
+            "file" => Ok((url.to_string(), None)),
+            _ => bail!(
+                "invalid credentials_url scheme '{}', only file://, s3://, and absolute file paths are supported",
+                url.scheme()
+            ),
+        }
     }
 }
 
+#[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct KinesisCommon {
     #[serde(rename = "stream", alias = "kinesis.stream.name")]
@@ -580,6 +673,101 @@ pub struct KinesisCommon {
         alias = "kinesis.assumerole.external_id"
     )]
     pub assume_role_external_id: Option<String>,
+
+    // sdk options
+    #[serde(
+        rename = "kinesis.sdk.connect_timeout_ms",
+        default = "kinesis_default_connect_timeout_ms"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub sdk_connect_timeout_ms: u64,
+
+    #[serde(
+        rename = "kinesis.sdk.read_timeout_ms",
+        default = "kinesis_default_read_timeout_ms"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub sdk_read_timeout_ms: u64,
+
+    #[serde(
+        rename = "kinesis.sdk.operation_timeout_ms",
+        default = "kinesis_default_operation_timeout_ms"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub sdk_operation_timeout_ms: u64,
+
+    #[serde(
+        rename = "kinesis.sdk.operation_attempt_timeout_ms",
+        default = "kinesis_default_operation_attempt_timeout_ms"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub sdk_operation_attempt_timeout_ms: u64,
+
+    #[serde(
+        rename = "kinesis.sdk.max_retry_limit",
+        default = "kinesis_default_max_retry_limit"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub sdk_max_retry_limit: u32,
+
+    #[serde(
+        rename = "kinesis.sdk.init_backoff_ms",
+        default = "kinesis_default_init_backoff_ms"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub sdk_init_backoff_ms: u64,
+
+    #[serde(
+        rename = "kinesis.sdk.max_backoff_ms",
+        default = "kinesis_default_max_backoff_ms"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub sdk_max_backoff_ms: u64,
+}
+
+#[derive(Debug)]
+pub struct KinesisAsyncSleepImpl;
+
+impl AsyncSleep for KinesisAsyncSleepImpl {
+    fn sleep(&self, duration: Duration) -> Sleep {
+        Sleep::new(async move { tokio::time::sleep(duration).await })
+    }
+}
+
+const fn kinesis_default_connect_timeout_ms() -> u64 {
+    10000
+}
+
+const fn kinesis_default_read_timeout_ms() -> u64 {
+    10000
+}
+
+const fn kinesis_default_operation_timeout_ms() -> u64 {
+    10000
+}
+
+const fn kinesis_default_operation_attempt_timeout_ms() -> u64 {
+    10000
+}
+
+const fn kinesis_default_init_backoff_ms() -> u64 {
+    1000
+}
+
+const fn kinesis_default_max_backoff_ms() -> u64 {
+    20000
+}
+
+const fn kinesis_default_max_retry_limit() -> u32 {
+    3
+}
+
+impl EnforceSecret for KinesisCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "kinesis.credentials.access",
+        "kinesis.credentials.secret",
+        "kinesis.credentials.session_token",
+    };
 }
 
 impl KinesisCommon {
@@ -597,6 +785,26 @@ impl KinesisCommon {
         };
         let aws_config = config.build_config().await?;
         let mut builder = aws_sdk_kinesis::config::Builder::from(&aws_config);
+        {
+            // for timeout and retry config
+            let sleep_impl = SharedAsyncSleep::new(KinesisAsyncSleepImpl);
+            builder.set_sleep_impl(Some(sleep_impl));
+            let timeout_config = aws_smithy_types::timeout::TimeoutConfig::builder()
+                .connect_timeout(Duration::from_millis(self.sdk_connect_timeout_ms))
+                .read_timeout(Duration::from_millis(self.sdk_read_timeout_ms))
+                .operation_timeout(Duration::from_millis(self.sdk_operation_timeout_ms))
+                .operation_attempt_timeout(Duration::from_millis(
+                    self.sdk_operation_attempt_timeout_ms,
+                ))
+                .build();
+            builder.set_timeout_config(Some(timeout_config));
+
+            let retry_config = aws_smithy_types::retry::RetryConfig::standard()
+                .with_initial_backoff(Duration::from_millis(self.sdk_init_backoff_ms))
+                .with_max_backoff(Duration::from_millis(self.sdk_max_backoff_ms))
+                .with_max_attempts(self.sdk_max_retry_limit);
+            builder.set_retry_config(Some(retry_config));
+        }
         if let Some(endpoint) = &config.endpoint {
             builder = builder.endpoint_url(endpoint);
         }
@@ -636,6 +844,17 @@ pub struct NatsCommon {
     #[serde(rename = "max_message_size")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_message_size: Option<i32>,
+    #[serde(rename = "allow_create_stream", default)]
+    #[serde_as(as = "DisplayFromStr")]
+    pub allow_create_stream: bool,
+}
+
+impl EnforceSecret for NatsCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "password",
+        "jwt",
+        "nkey",
+    };
 }
 
 impl NatsCommon {
@@ -725,18 +944,19 @@ impl NatsCommon {
             NatsOffset::None => DeliverPolicy::All,
         };
 
-        let consumer = if let Ok(consumer) = stream.get_consumer(&name).await {
-            consumer
-        } else {
-            stream
-                .get_or_create_consumer(&name, {
-                    config.deliver_policy = deliver_policy;
-                    config.durable_name = Some(durable_consumer_name);
-                    config.filter_subjects =
-                        self.subject.split(',').map(|s| s.to_owned()).collect();
-                    config
-                })
-                .await?
+        let consumer = match stream.get_consumer(&name).await {
+            Ok(consumer) => consumer,
+            _ => {
+                stream
+                    .get_or_create_consumer(&name, {
+                        config.deliver_policy = deliver_policy;
+                        config.durable_name = Some(durable_consumer_name);
+                        config.filter_subjects =
+                            self.subject.split(',').map(|s| s.to_owned()).collect();
+                        config
+                    })
+                    .await?
+            }
         };
         Ok(consumer)
     }
@@ -744,20 +964,31 @@ impl NatsCommon {
     pub(crate) async fn build_or_get_stream(
         &self,
         jetstream: jetstream::Context,
-        stream: String,
+        stream_str: String,
     ) -> ConnectorResult<jetstream::stream::Stream> {
         let subjects: Vec<String> = self.subject.split(',').map(|s| s.to_owned()).collect();
-        if let Ok(mut stream_instance) = jetstream.get_stream(&stream).await {
+
+        // In `SourceEnumerator`, we may create a stream
+        // In `SourceReader`, the desired stream MUST exist
+        if let Ok(mut stream_instance) = jetstream.get_stream(&stream_str).await {
             tracing::info!(
                 "load existing nats stream ({:?}) with config {:?}",
-                stream,
+                stream_str,
                 stream_instance.info().await?
             );
             return Ok(stream_instance);
         }
 
+        if !self.allow_create_stream {
+            return Err(anyhow!(
+                "stream {} not found, set `allow_create_stream` to true to create a stream",
+                stream_str
+            )
+            .into());
+        }
+
         let mut config = jetstream::stream::Config {
-            name: stream.clone(),
+            name: stream_str.clone(),
             max_bytes: 1000000,
             subjects,
             ..Default::default()
@@ -779,7 +1010,7 @@ impl NatsCommon {
         }
         tracing::info!(
             "create nats stream ({:?}) with config {:?}",
-            &stream,
+            &stream_str,
             config
         );
         let stream = jetstream.get_or_create_stream(config).await?;
@@ -832,7 +1063,7 @@ pub(crate) fn load_private_key(
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct MongodbCommon {
-    /// The URL of MongoDB
+    /// The URL of `MongoDB`
     #[serde(rename = "mongodb.url")]
     pub connect_uri: String,
     /// The collection name where data should be written to or read from. For sinks, the format is
@@ -840,6 +1071,12 @@ pub struct MongodbCommon {
     /// for more information.
     #[serde(rename = "collection.name")]
     pub collection_name: String,
+}
+
+impl EnforceSecret for MongodbCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "mongodb.url"
+    };
 }
 
 impl MongodbCommon {

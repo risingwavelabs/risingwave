@@ -3,7 +3,7 @@ set sink_decouple = false;
 
 statement ok
 CREATE TABLE t7 (
-  v1 int primary key,
+  v1 int,
   v2 bigint,
   v3 varchar,
   d date,
@@ -11,6 +11,7 @@ CREATE TABLE t7 (
   ts timestamp,
   tz timestamptz,
   st struct<st1 int, st2 int>,
+  primary key(v1,v3),
 );
 
 statement ok
@@ -20,14 +21,39 @@ CREATE TABLE test_route (
   v3 varchar,
 );
 
+# Invalid field: foo, allowed fields: {"username", "url", "password"}
+statement error
+create connection es_conn_1 with (
+  type = 'elasticsearch',
+  foo = 'bar',
+  url = 'http://elasticsearch:9200',
+  username = 'elastic',
+  password = 'risingwave'
+);
+
+# please set the password when the username is set.
+statement error
+create connection es_conn_1 with (
+  type = 'elasticsearch',
+  url = 'http://elasticsearch:9200',
+  username = 'elastic'
+);
+
+
+statement ok
+create connection es_conn with (
+  type = 'elasticsearch',
+    url = 'http://elasticsearch:9200',
+    username = 'elastic',
+    password = 'risingwave',
+);
+
 statement ok
 CREATE SINK test_route_sink from test_route WITH (
     type = 'upsert',
     connector = 'elasticsearch',
     index = 'test_route',
-    url = 'http://elasticsearch:9200',
-    username = 'elastic',
-    password = 'risingwave',
+    connection = es_conn,
     routing_column = 'v3'
 );
 
@@ -73,6 +99,9 @@ FLUSH;
 
 statement ok
 INSERT INTO t7 VALUES (1, 50, '1-50', '2000-01-01', '00:00:00.123456', '2000-01-01 00:00:00.123456', '2000-01-01 00:00:00.123456Z',(1,1));
+
+statement ok
+update t7 set v2 = 55 where v1 = 2;
 
 statement ok
 FLUSH;

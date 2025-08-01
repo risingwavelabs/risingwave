@@ -219,16 +219,16 @@ impl HummockManager {
 
         // sanity check on monotonically increasing table committed epoch
         for (table_id, committed_epoch) in tables_to_commit {
-            if let Some(info) = current_version.state_table_info.info().get(table_id) {
-                if *committed_epoch <= info.committed_epoch {
-                    return Err(anyhow::anyhow!(
-                        "table {} Epoch {} <= committed_epoch {}",
-                        table_id,
-                        committed_epoch,
-                        info.committed_epoch,
-                    )
-                    .into());
-                }
+            if let Some(info) = current_version.state_table_info.info().get(table_id)
+                && *committed_epoch <= info.committed_epoch
+            {
+                return Err(anyhow::anyhow!(
+                    "table {} Epoch {} <= committed_epoch {}",
+                    table_id,
+                    committed_epoch,
+                    info.committed_epoch,
+                )
+                .into());
             }
         }
 
@@ -270,7 +270,10 @@ impl HummockManager {
             if compactor
                 .send_event(ResponseEvent::ValidationTask(ValidationTask {
                     sst_infos: sst_infos.into_iter().map(|sst| sst.into()).collect_vec(),
-                    sst_id_to_worker_id: sst_to_context.clone(),
+                    sst_id_to_worker_id: sst_to_context
+                        .iter()
+                        .map(|(object_id, worker_id)| (object_id.inner(), *worker_id))
+                        .collect(),
                 }))
                 .is_err()
             {
@@ -300,7 +303,7 @@ impl HummockManager {
             object_timestamps.iter().map(|(k, v)| (*k, *v)),
         )?;
         if self.env.opts.gc_history_retention_time_sec != 0 {
-            let ids = object_timestamps.iter().map(|(id, _)| *id).collect_vec();
+            let ids = object_timestamps.keys().copied().collect_vec();
             check_gc_history(&self.meta_store_ref().conn, ids).await?;
         }
         Ok(())
@@ -327,7 +330,7 @@ async fn check_gc_history(
     object_ids: impl IntoIterator<Item = HummockSstableObjectId>,
 ) -> Result<()> {
     let futures = object_ids.into_iter().map(|id| async move {
-        let id: risingwave_meta_model::HummockSstableObjectId = id.try_into().unwrap();
+        let id: risingwave_meta_model::HummockSstableObjectId = id.inner().try_into().unwrap();
         hummock_gc_history::Entity::find_by_id(id)
             .one(db)
             .await
@@ -345,7 +348,7 @@ async fn check_gc_history(
         "new SSTs are rejected because they have already been GCed"
     );
     Err(Error::InvalidSst(
-        expired_object_ids[0].object_id as HummockSstableObjectId,
+        (expired_object_ids[0].object_id as u64).into(),
     ))
 }
 

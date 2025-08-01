@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use sea_orm::prelude::DateTime;
+
 use super::*;
 
 impl CatalogController {
@@ -57,17 +59,20 @@ impl CatalogController {
             .collect())
     }
 
-    pub async fn list_background_creating_mviews(
+    pub async fn list_background_creating_jobs(
         &self,
         include_initial: bool,
-    ) -> MetaResult<Vec<table::Model>> {
+    ) -> MetaResult<Vec<(ObjectId, String, DateTime)>> {
         let inner = self.inner.read().await;
         let status_cond = if include_initial {
             streaming_job::Column::JobStatus.is_in([JobStatus::Initial, JobStatus::Creating])
         } else {
             streaming_job::Column::JobStatus.eq(JobStatus::Creating)
         };
-        let tables = Table::find()
+        let mut table_info: Vec<(ObjectId, String, DateTime)> = Table::find()
+            .select_only()
+            .columns([table::Column::TableId, table::Column::Definition])
+            .column(object::Column::InitializedAt)
             .join(JoinType::LeftJoin, table::Relation::Object1.def())
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
             .filter(
@@ -76,12 +81,30 @@ impl CatalogController {
                     .and(
                         streaming_job::Column::CreateType
                             .eq(CreateType::Background)
-                            .and(status_cond),
+                            .and(status_cond.clone()),
                     ),
             )
+            .into_tuple()
             .all(&inner.db)
             .await?;
-        Ok(tables)
+        let sink_info: Vec<(ObjectId, String, DateTime)> = Sink::find()
+            .select_only()
+            .columns([sink::Column::SinkId, sink::Column::Definition])
+            .column(object::Column::InitializedAt)
+            .join(JoinType::LeftJoin, sink::Relation::Object.def())
+            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
+            .filter(
+                streaming_job::Column::CreateType
+                    .eq(CreateType::Background)
+                    .and(status_cond),
+            )
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        table_info.extend(sink_info.into_iter());
+
+        Ok(table_info)
     }
 
     pub async fn list_databases(&self) -> MetaResult<Vec<PbDatabase>> {
@@ -102,6 +125,7 @@ impl CatalogController {
         inner.list_schemas().await
     }
 
+    /// [`Self::list_tables_by_type`] with all types.
     pub async fn list_all_state_tables(&self) -> MetaResult<Vec<PbTable>> {
         let inner = self.inner.read().await;
         inner.list_all_state_tables().await
@@ -154,6 +178,7 @@ impl CatalogController {
         Ok(view_ids)
     }
 
+    /// Use [`Self::list_all_state_tables`] to get all types.
     pub async fn list_tables_by_type(&self, table_type: TableType) -> MetaResult<Vec<PbTable>> {
         let inner = self.inner.read().await;
         let table_objs = Table::find()
@@ -219,6 +244,11 @@ impl CatalogController {
         Ok(source_ids)
     }
 
+    pub async fn list_indexes(&self) -> MetaResult<Vec<PbIndex>> {
+        let inner = self.inner.read().await;
+        inner.list_indexes().await
+    }
+
     pub async fn list_sinks(&self) -> MetaResult<Vec<PbSink>> {
         let inner = self.inner.read().await;
         inner.list_sinks().await
@@ -237,5 +267,10 @@ impl CatalogController {
     pub async fn list_users(&self) -> MetaResult<Vec<PbUserInfo>> {
         let inner = self.inner.read().await;
         inner.list_users().await
+    }
+
+    pub async fn list_functions(&self) -> MetaResult<Vec<PbFunction>> {
+        let inner = self.inner.read().await;
+        inner.list_functions().await
     }
 }

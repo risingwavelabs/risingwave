@@ -25,7 +25,7 @@ use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::sort_util::cmp_datum;
 use risingwave_expr::window_function::{FrameBound, RangeFrameBounds, RowsFrameBounds, StateKey};
 
-use super::over_partition::CacheKey;
+use super::range_cache::CacheKey;
 
 // -------------------------- ↓ PUBLIC INTERFACE ↓ --------------------------
 

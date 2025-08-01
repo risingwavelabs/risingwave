@@ -26,6 +26,8 @@ use thiserror::Error;
 use with_options::WithOptions;
 
 use crate::connector_common::{MqttCommon, MqttQualityOfService};
+use crate::enforce_secret::EnforceSecret;
+use crate::error::ConnectorResult;
 use crate::source::SourceProperties;
 use crate::source::mqtt::source::{MqttSplit, MqttSplitReader};
 
@@ -49,13 +51,22 @@ pub struct MqttProperties {
     /// The topic name to subscribe or publish to. When subscribing, it can be a wildcard topic. e.g /topic/#
     pub topic: String,
 
-    /// The quality of service to use when publishing messages. Defaults to at_most_once.
-    /// Could be at_most_once, at_least_once or exactly_once
+    /// The quality of service to use when publishing messages. Defaults to `at_most_once`.
+    /// Could be `at_most_once`, `at_least_once` or `exactly_once`
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub qos: Option<MqttQualityOfService>,
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
+}
+
+impl EnforceSecret for MqttProperties {
+    fn enforce_secret<'a>(prop_iter: impl Iterator<Item = &'a str>) -> ConnectorResult<()> {
+        for prop in prop_iter {
+            MqttCommon::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 impl SourceProperties for MqttProperties {

@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use criterion::async_executor::FuturesExecutor;
 use criterion::{Criterion, criterion_group, criterion_main};
-use foyer::{CacheHint, Engine, HybridCacheBuilder};
+use foyer::{CacheBuilder, Engine, Hint, HybridCacheBuilder, LargeEngineOptions};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
@@ -56,7 +56,7 @@ use risingwave_storage::monitor::{
 };
 
 pub async fn mock_sstable_store() -> SstableStoreRef {
-    let store = InMemObjectStore::new().monitored(
+    let store = InMemObjectStore::for_test().monitored(
         Arc::new(ObjectStoreMetrics::unused()),
         Arc::new(ObjectStoreConfig::default()),
     );
@@ -65,14 +65,14 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
     let meta_cache = HybridCacheBuilder::new()
         .memory(64 << 20)
         .with_shards(2)
-        .storage(Engine::Large)
+        .storage(Engine::Large(LargeEngineOptions::new()))
         .build()
         .await
         .unwrap();
     let block_cache = HybridCacheBuilder::new()
         .memory(128 << 20)
         .with_shards(2)
-        .storage(Engine::Large)
+        .storage(Engine::Large(LargeEngineOptions::new()))
         .build()
         .await
         .unwrap();
@@ -88,6 +88,8 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
 
         meta_cache,
         block_cache,
+        vector_meta_cache: CacheBuilder::new(1 << 10).build(),
+        vector_block_cache: CacheBuilder::new(1 << 10).build(),
     }))
 }
 
@@ -95,7 +97,7 @@ pub fn default_writer_opts() -> SstableWriterOptions {
     SstableWriterOptions {
         capacity_hint: None,
         tracker: None,
-        policy: CachePolicy::Fill(CacheHint::Normal),
+        policy: CachePolicy::Fill(Hint::Normal),
     }
 }
 
@@ -132,7 +134,7 @@ async fn build_table(
         SstableWriterOptions {
             capacity_hint: None,
             tracker: None,
-            policy: CachePolicy::Fill(CacheHint::Normal),
+            policy: CachePolicy::Fill(Hint::Normal),
         },
     );
     let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
@@ -183,7 +185,7 @@ async fn build_table_2(
         SstableWriterOptions {
             capacity_hint: None,
             tracker: None,
-            policy: CachePolicy::Fill(CacheHint::Normal),
+            policy: CachePolicy::Fill(Hint::Normal),
         },
     );
 
@@ -350,7 +352,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     });
     let level2 = vec![info1, info2];
     let read_options = Arc::new(SstableIteratorReadOptions {
-        cache_policy: CachePolicy::Fill(CacheHint::Normal),
+        cache_policy: CachePolicy::Fill(Hint::Normal),
         prefetch_for_large_query: false,
         must_iterated_end_user_key: None,
         max_preload_retry_times: 0,

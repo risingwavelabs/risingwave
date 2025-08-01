@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
@@ -44,7 +45,7 @@ pub(super) fn collect_resp_info(
     for resp in resps {
         let ssts_iter = resp.synced_sstables.into_iter().map(|local_sst| {
             let sst_info = local_sst.sst.expect("field not None");
-            sst_to_worker.insert(sst_info.object_id, resp.worker_id);
+            sst_to_worker.insert(sst_info.object_id.into(), resp.worker_id);
             LocalSstableInfo::new(
                 sst_info.into(),
                 from_prost_table_stats_map(local_sst.table_stats_map),
@@ -111,5 +112,15 @@ pub(super) fn is_valid_after_worker_err(
     node_to_collect: &mut NodeToCollect,
     worker_id: WorkerId,
 ) -> bool {
-    node_to_collect.remove(&worker_id).unwrap_or(true)
+    match node_to_collect.entry(worker_id) {
+        Entry::Occupied(entry) => {
+            if *entry.get() {
+                entry.remove();
+                true
+            } else {
+                false
+            }
+        }
+        Entry::Vacant(_) => true,
+    }
 }

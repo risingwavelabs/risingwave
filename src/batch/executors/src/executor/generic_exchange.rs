@@ -51,7 +51,7 @@ pub struct GenericExchangeExecutor<CS> {
     identity: String,
 
     /// Batch metrics.
-    /// None: Local mode don't record mertics.
+    /// None: Local mode don't record metrics.
     metrics: Option<BatchMetrics>,
 }
 
@@ -102,10 +102,10 @@ impl CreateSource for DefaultCreateSource {
             );
 
             let mask_failed_serving_worker = || {
-                if let Some(worker_node_manager) = context.worker_node_manager() {
-                    if let Some(worker) =
+                if let Some(worker_node_manager) = context.worker_node_manager()
+                    && let Some(worker) =
                         worker_node_manager
-                            .list_worker_nodes()
+                            .list_compute_nodes()
                             .iter()
                             .find(|worker| {
                                 worker
@@ -114,13 +114,12 @@ impl CreateSource for DefaultCreateSource {
                                     .is_some_and(|h| HostAddr::from(h) == peer_addr)
                                     && worker.property.as_ref().is_some_and(|p| p.is_serving)
                             })
-                    {
-                        let duration = Duration::from_secs(std::cmp::max(
-                            context.get_config().mask_worker_temporary_secs as u64,
-                            1,
-                        ));
-                        worker_node_manager.mask_worker_node(worker.id, duration);
-                    }
+                {
+                    let duration = Duration::from_secs(std::cmp::max(
+                        context.get_config().mask_worker_temporary_secs as u64,
+                        1,
+                    ));
+                    worker_node_manager.mask_worker_node(worker.id, duration);
                 }
             };
 
@@ -277,8 +276,8 @@ mod tests {
         let mut proto_sources = vec![];
         let mut source_creators = vec![];
         for _ in 0..2 {
-            let mut rng = rand::thread_rng();
-            let i = rng.gen_range(1..=100000);
+            let mut rng = rand::rng();
+            let i = rng.random_range(1..=100000);
             let chunk = DataChunk::new(vec![I32Array::from_iter([i]).into_ref()], 1);
             let chunks = vec![Some(chunk); 100];
             let fake_exchange_source = FakeExchangeSource::new(chunks);

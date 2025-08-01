@@ -98,14 +98,13 @@
             └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [projected_row_id(hidden), unnest, t._row_id(hidden)], stream_key: [], pk_columns: [projected_row_id], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(projected_row_id) }
-      └─StreamProject { exprs: [projected_row_id, Unnest($0), t._row_id] }
-        └─StreamTopN { order: [projected_row_id ASC], limit: 1, offset: 0 }
-          └─StreamExchange { dist: Single }
-            └─StreamGroupTopN { order: [projected_row_id ASC], limit: 1, offset: 0, group_key: [_vnode] }
-              └─StreamProject { exprs: [projected_row_id, Unnest($0), t._row_id, Vnode(t._row_id) as _vnode] }
-                └─StreamProjectSet { select_list: [Unnest($0), $1] }
-                  └─StreamTableScan { table: t, columns: [t.x, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [projected_row_id, Unnest($0), t._row_id] }
+      └─StreamTopN { order: [projected_row_id ASC], limit: 1, offset: 0 }
+        └─StreamExchange { dist: Single }
+          └─StreamGroupTopN { order: [projected_row_id ASC], limit: 1, offset: 0, group_key: [_vnode] }
+            └─StreamProject { exprs: [projected_row_id, Unnest($0), t._row_id, Vnode(t._row_id) as _vnode] }
+              └─StreamProjectSet { select_list: [Unnest($0), $1] }
+                └─StreamTableScan { table: t, columns: [t.x, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: issue-7812
   sql: |
     -- projected_row_id should be excluded from distinct

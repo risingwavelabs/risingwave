@@ -17,13 +17,14 @@
 // COPYING file in the root directory) and Apache 2.0 License
 // (found in the LICENSE.Apache file in the root directory).
 
-use crate::PlanRef;
+use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
+
+use super::prelude::*;
 use crate::optimizer::plan_node::{BatchIcebergScan, PlanAggCall};
-use crate::optimizer::rule::{BoxedRule, Rule};
 
 pub struct BatchIcebergCountStar {}
 
-impl Rule for BatchIcebergCountStar {
+impl Rule<Batch> for BatchIcebergCountStar {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let agg = plan.as_batch_simple_agg()?;
         if agg.core.group_key.is_empty()
@@ -31,6 +32,9 @@ impl Rule for BatchIcebergCountStar {
             && agg.agg_calls()[0].eq(&PlanAggCall::count_star())
         {
             let batch_iceberg = agg.core.input.as_batch_iceberg_scan()?;
+            if batch_iceberg.iceberg_scan_type() != IcebergScanType::DataScan {
+                return None;
+            }
             return Some(
                 BatchIcebergScan::new_count_star_with_batch_iceberg_scan(batch_iceberg).into(),
             );

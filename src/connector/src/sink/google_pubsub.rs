@@ -36,8 +36,9 @@ use super::log_store::DeliveryFutureManagerAddFuture;
 use super::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt, FormattedSink,
 };
-use super::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SinkWriterParam};
+use super::{Result, Sink, SinkError, SinkParam, SinkWriterParam};
 use crate::dispatch_sink_formatter_str_key_impl;
+use crate::enforce_secret::EnforceSecret;
 
 pub const PUBSUB_SINK: &str = "google_pubsub";
 const PUBSUB_SEND_FUTURE_BUFFER_MAX_SIZE: usize = 65536;
@@ -53,6 +54,7 @@ mod delivery_future {
     pub type GooglePubSubSinkDeliveryFuture =
         impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
 
+    #[define_opaque(GooglePubSubSinkDeliveryFuture)]
     pub(super) fn may_delivery_future(awaiter: Vec<Awaiter>) -> GooglePubSubSinkDeliveryFuture {
         try_join_all(awaiter.into_iter().map(|awaiter| {
             awaiter.get().map(|result| {
@@ -97,6 +99,12 @@ pub struct GooglePubSubConfig {
     pub credentials: Option<String>,
 }
 
+impl EnforceSecret for GooglePubSubConfig {
+    const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf::phf_set! {
+        "pubsub.credentials",
+    };
+}
+
 impl GooglePubSubConfig {
     fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
         serde_json::from_value::<GooglePubSubConfig>(serde_json::to_value(values).unwrap())
@@ -116,8 +124,17 @@ pub struct GooglePubSubSink {
     sink_from_name: String,
 }
 
+impl EnforceSecret for GooglePubSubSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            GooglePubSubConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
+}
 impl Sink for GooglePubSubSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = AsyncTruncateLogSinkerOf<GooglePubSubSinkWriter>;
 
     const SINK_NAME: &'static str = PUBSUB_SINK;

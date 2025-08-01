@@ -17,11 +17,13 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
+use risingwave_pb::user::alter_default_privilege_request::Operation as AlterDefaultPrivilegeOperation;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
+use crate::catalog::{DatabaseId, SchemaId};
 use crate::error::Result;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::{UserId, UserInfoVersion};
@@ -65,6 +67,15 @@ pub trait UserInfoWriter: Send + Sync {
         revoke_by: UserId,
         revoke_grant_option: bool,
         cascade: bool,
+    ) -> Result<()>;
+
+    async fn alter_default_privilege(
+        &self,
+        users: Vec<UserId>,
+        database_id: DatabaseId,
+        schemas: Vec<SchemaId>,
+        operation: AlterDefaultPrivilegeOperation,
+        granted_by: UserId,
     ) -> Result<()>;
 }
 
@@ -126,6 +137,20 @@ impl UserInfoWriter for UserInfoWriterImpl {
             )
             .await?;
         self.wait_version(version).await
+    }
+
+    async fn alter_default_privilege(
+        &self,
+        users: Vec<UserId>,
+        database_id: DatabaseId,
+        schemas: Vec<SchemaId>,
+        operation: AlterDefaultPrivilegeOperation,
+        granted_by: UserId,
+    ) -> Result<()> {
+        self.meta_client
+            .alter_default_privilege(users, database_id, schemas, operation, granted_by)
+            .await?;
+        Ok(())
     }
 }
 

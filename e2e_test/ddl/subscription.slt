@@ -23,6 +23,27 @@ statement ok
 create subscription if not exists ddl_subscription_mv from ddl_mv with(retention = '1D');
 
 statement ok
+create schema test_schema;
+
+statement ok
+create table test_schema.t1(v1 int, v2 int);
+
+statement ok
+create subscription test_schema.test_subscription from test_schema.t1 with(retention = '1d');
+
+statement ok
+declare test_cursor subscription cursor for test_schema.test_subscription full;
+
+statement ok
+drop subscription test_schema.test_subscription;
+
+statement ok
+drop table test_schema.t1;
+
+statement ok
+drop schema test_schema;
+
+statement ok
 drop subscription ddl_subscription_table;
 
 statement ok

@@ -53,7 +53,7 @@ impl StreamChunk {
         (op, row, visible)
     }
 
-    pub fn rows_with_holes(&self) -> impl Iterator<Item = Option<(Op, RowRef<'_>)>> {
+    pub fn rows_with_holes(&self) -> impl ExactSizeIterator<Item = Option<(Op, RowRef<'_>)>> {
         self.data_chunk().rows_with_holes().map(|row| {
             row.map(|row| {
                 (

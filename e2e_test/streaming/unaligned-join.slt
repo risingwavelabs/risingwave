@@ -11,6 +11,7 @@ statement ok
 create table fact(v0 int primary key, v1 int, v2 varchar, v3 varchar);
 
 # correspond to 1
+onlyif serial
 statement ok
 INSERT INTO fact
   SELECT
@@ -18,9 +19,10 @@ INSERT INTO fact
     1 as v1,
     'abcdefgakjandjkw' as v2,
     'jkb1ku1bu' as v3
-  FROM generate_series(1, 100000) t(x);
+  FROM generate_series(1, 200000) t(x);
 
 # correspond to 2
+onlyif serial
 statement ok
 INSERT INTO fact
   SELECT
@@ -28,7 +30,7 @@ INSERT INTO fact
     2 as v1,
     'abcdefgakjandjkw' as v2,
     'jkb1ku1bu' as v3
-  FROM generate_series(100001, 200000) t(x);
+  FROM generate_series(200001, 400000) t(x);
 
 statement ok
 create table dim(v1 int);

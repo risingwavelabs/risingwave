@@ -97,8 +97,11 @@ impl SourceReader {
             }
             ConnectorProperties::OpendalS3(prop) => {
                 list_interval_sec = get_list_interval_sec(prop.fs_common.refresh_interval_sec);
-                let lister: OpendalEnumerator<OpendalS3> =
-                    OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
+                let lister: OpendalEnumerator<OpendalS3> = OpendalEnumerator::new_s3_source(
+                    &prop.s3_properties,
+                    prop.assume_role,
+                    prop.fs_common.compression_format,
+                )?;
                 Ok(build_opendal_fs_list_stream(lister, list_interval_sec))
             }
             ConnectorProperties::Azblob(prop) => {
@@ -198,13 +201,12 @@ async fn build_opendal_fs_list_stream<Src: OpendalSource>(
     loop {
         let matcher = lister.get_matcher();
         let mut object_metadata_iter = lister.list().await?;
-
         while let Some(list_res) = object_metadata_iter.next().await {
             match list_res {
                 Ok(res) => {
                     if matcher
                         .as_ref()
-                        .map(|m| m.matches(&res.name))
+                        .map(|m| m.matches(&res.name) || m.to_string() == res.name)
                         .unwrap_or(true)
                     {
                         yield res

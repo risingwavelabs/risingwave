@@ -22,8 +22,7 @@ pub async fn extract_avro_table_schema(
     is_debezium: bool,
 ) -> Result<Vec<ColumnCatalog>> {
     let parser_config = SpecificParserConfig::new(info, with_properties)?;
-    try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_USERNAME);
-    try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_PASSWORD);
+    try_consume_schema_registry_config_from_options(format_encode_options);
     consume_aws_config_from_options(format_encode_options);
 
     let vec_column_desc = if is_debezium {

@@ -123,6 +123,115 @@ pub fn overlay_for(
     Ok(())
 }
 
+/// Replaces a subsequence of the given bytea with a new bytea value.
+///
+/// # Example
+///
+/// ```slt
+/// query T
+/// select overlay('\x616263646566'::bytea placing '\x9999'::bytea from 3);
+/// ----
+/// \x616299996566
+/// ```
+#[function("overlay(bytea, bytea, int4) -> bytea")]
+pub fn overlay_bytea(s: &[u8], new_sub_str: &[u8], start: i32) -> Result<Box<[u8]>> {
+    let count = new_sub_str
+        .len()
+        .try_into()
+        .map_err(|_| ExprError::NumericOutOfRange)?;
+    overlay_for_bytea(s, new_sub_str, start, count)
+}
+
+/// Replaces a range of bytes in a bytea value with another bytea.
+///
+/// ```slt
+/// statement error not positive
+/// select overlay('\x616263'::bytea placing '\x313233'::bytea from 0);
+///
+/// query T
+/// select overlay('\x616263'::bytea placing '\x313233'::bytea from 10);
+/// ----
+/// \x616263313233
+///
+/// query T
+/// select overlay('\x616263646566'::bytea placing '\x313233'::bytea from 4 for 2);
+/// ----
+/// \x61626331323366
+///
+/// query T
+/// select overlay('\x616263646566'::bytea placing '\x313233'::bytea from 4);
+/// ----
+/// \x616263313233
+///
+/// query T
+/// select overlay('\x616263646566'::bytea placing '\x313233'::bytea from 2 for 4);
+/// ----
+/// \x6131323366
+///
+/// query T
+/// select overlay('\x616263646566'::bytea placing '\x313233'::bytea from 2 for 7);
+/// ----
+/// \x61313233
+///
+/// query T
+/// select overlay('\x616263646566'::bytea placing '\x313233'::bytea from 4 for 0);
+/// ----
+/// \x616263313233646566
+///
+/// query T
+/// select overlay('\x616263646566'::bytea placing '\x313233'::bytea from 4 for -2);
+/// ----
+/// \x6162633132336263646566
+///
+/// query T
+/// select overlay('\x616263646566'::bytea placing '\x313233'::bytea from 4 for -1000);
+/// ----
+/// \x616263313233616263646566
+/// ```
+#[function("overlay(bytea, bytea, int4, int4) -> bytea")]
+pub fn overlay_for_bytea(
+    s: &[u8],
+    new_sub_str: &[u8],
+    start: i32,
+    count: i32,
+) -> Result<Box<[u8]>> {
+    if start <= 0 {
+        return Err(ExprError::InvalidParam {
+            name: "start",
+            reason: format!("{start} is not positive").into(),
+        });
+    }
+
+    // write the substring_bytea before the overlay.
+    let start_idx = (start - 1) as usize;
+    let mut result = Vec::with_capacity(s.len() + new_sub_str.len());
+    if start_idx >= s.len() {
+        result.extend_from_slice(s);
+    } else {
+        result.extend_from_slice(&s[..start_idx]);
+    }
+
+    // write the new substring_bytea.
+    result.extend_from_slice(new_sub_str);
+
+    if count < 0 {
+        // For negative `count`, which is rare in practice, we hand over to `substr_bytea`
+        let start_right = start
+            .checked_add(count)
+            .ok_or(ExprError::NumericOutOfRange)?;
+        result.extend_from_slice(&super::substr::substr_start_bytea(s, start_right));
+        return Ok(result.into_boxed_slice());
+    };
+
+    // write the substring_bytea after the overlay.
+    let count = count as usize;
+    let skip_end = start_idx.saturating_add(count);
+    if skip_end <= s.len() {
+        result.extend_from_slice(&s[skip_end..]);
+    }
+    Ok(result.into_boxed_slice())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,6 +265,99 @@ mod tests {
             }
             .unwrap();
             assert_eq!(writer, expected);
+        }
+    }
+
+    #[test]
+    fn test_overlay_bytea() {
+        // (input, replace, start, count, expected)
+        case(
+            b"\x61\x61\x61\x5f\x5f\x61\x61\x61",
+            b"\x58\x59",
+            4,
+            None,
+            b"\x61\x61\x61\x58\x59\x61\x61\x61",
+        );
+        // Place at end
+        case(
+            b"\x61\x61\x61",
+            b"\x58\x59",
+            4,
+            None,
+            b"\x61\x61\x61\x58\x59",
+        );
+        // Place at start
+        case(
+            b"\x61\x61\x61",
+            b"\x58\x59",
+            1,
+            Some(0),
+            b"\x58\x59\x61\x61\x61",
+        );
+        // Replace shorter string
+        case(
+            b"\x61\x61\x61\x5f\x61\x61\x61",
+            b"\x58\x59\x5A",
+            4,
+            Some(1),
+            b"\x61\x61\x61\x58\x59\x5A\x61\x61\x61",
+        );
+        case(
+            b"\x61\x61\x61\x61\x61\x61",
+            b"\x58\x59\x5A",
+            4,
+            Some(0),
+            b"\x61\x61\x61\x58\x59\x5A\x61\x61\x61",
+        );
+        // Replace longer string
+        case(
+            b"\x61\x61\x61\x5f\x5f\x5f\x61\x61\x61",
+            b"\x58",
+            4,
+            Some(3),
+            b"\x61\x61\x61\x58\x61\x61\x61",
+        );
+        // start too large
+        case(
+            b"\x61\x61\x61",
+            b"\x58\x59",
+            123,
+            None,
+            b"\x61\x61\x61\x58\x59",
+        );
+        // count too small or large
+        case(
+            b"\x61\x61\x61",
+            b"\x58",
+            4,
+            Some(-123),
+            b"\x61\x61\x61\x58\x61\x61\x61",
+        );
+        case(
+            b"\x61\x61\x61\x5f",
+            b"\x58",
+            4,
+            Some(123),
+            b"\x61\x61\x61\x58",
+        );
+        // very large start and count
+        case(
+            b"\x61\x61\x61",
+            b"\x58",
+            i32::MAX,
+            Some(i32::MAX),
+            b"\x61\x61\x61\x58",
+        );
+
+        #[track_caller]
+        fn case(s: &[u8], new_sub_str: &[u8], start: i32, count: Option<i32>, expected: &[u8]) {
+            let result: Box<[u8]> = match count {
+                None => overlay_bytea(s, new_sub_str, start),
+                Some(count) => overlay_for_bytea(s, new_sub_str, start, count),
+            }
+            .unwrap();
+            let expected_boxed: Box<[u8]> = expected.into();
+            assert_eq!(result, expected_boxed);
         }
     }
 }

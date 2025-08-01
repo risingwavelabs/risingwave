@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use risingwave_pb::catalog::PbTable;
+use risingwave_pb::catalog::subscription::PbSubscriptionState;
 use risingwave_pb::telemetry::PbTelemetryDatabaseObject;
-use sea_orm::DatabaseTransaction;
+use sea_orm::{ColumnTrait, DatabaseTransaction, EntityTrait, ModelTrait, QueryFilter};
 
 use super::*;
 impl CatalogController {
@@ -28,12 +29,14 @@ impl CatalogController {
     ) -> MetaResult<(ReleaseContext, NotificationVersion)> {
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
+
         let obj: PartialObject = Object::find_by_id(object_id)
             .into_partial_model()
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(object_type.as_str(), object_id))?;
         assert_eq!(obj.obj_type, object_type);
+        let drop_database = object_type == ObjectType::Database;
         let database_id = if object_type == ObjectType::Database {
             object_id
         } else {
@@ -55,7 +58,7 @@ impl CatalogController {
                     Default::default()
                 }
                 ObjectType::Table => {
-                    ensure_object_not_refer(object_type, object_id, &txn).await?;
+                    check_object_refer_for_drop(object_type, object_id, &txn).await?;
                     let indexes = get_referring_objects(object_id, &txn).await?;
                     for obj in indexes.iter().filter(|object| {
                         object.obj_type == ObjectType::Source || object.obj_type == ObjectType::Sink
@@ -69,7 +72,7 @@ impl CatalogController {
                     indexes
                 }
                 object_type @ (ObjectType::Source | ObjectType::Sink) => {
-                    ensure_object_not_refer(object_type, object_id, &txn).await?;
+                    check_object_refer_for_drop(object_type, object_id, &txn).await?;
                     report_drop_object(object_type, object_id, &txn).await;
                     vec![]
                 }
@@ -80,13 +83,12 @@ impl CatalogController {
                 | ObjectType::Connection
                 | ObjectType::Subscription
                 | ObjectType::Secret => {
-                    ensure_object_not_refer(object_type, object_id, &txn).await?;
+                    check_object_refer_for_drop(object_type, object_id, &txn).await?;
                     vec![]
                 }
             },
         };
         removed_objects.push(obj);
-
         let mut removed_object_ids: HashSet<_> =
             removed_objects.iter().map(|obj| obj.oid).collect();
 
@@ -100,14 +102,28 @@ impl CatalogController {
             .all(&txn)
             .await?;
         if !removed_incoming_sinks.is_empty() {
+            let incoming_sink_ids = removed_incoming_sinks
+                .into_iter()
+                .flat_map(|arr| arr.into_inner().into_iter())
+                .collect_vec();
+
+            if self.env.opts.protect_drop_table_with_incoming_sink {
+                let sink_names: Vec<String> = Sink::find()
+                    .select_only()
+                    .column(sink::Column::Name)
+                    .filter(sink::Column::SinkId.is_in(incoming_sink_ids.clone()))
+                    .into_tuple()
+                    .all(&txn)
+                    .await?;
+
+                return Err(MetaError::permission_denied(format!(
+                    "Table used by incoming sinks: {:?}, please drop them manually",
+                    sink_names
+                )));
+            }
+
             let removed_sink_objs: Vec<PartialObject> = Object::find()
-                .filter(
-                    object::Column::Oid.is_in(
-                        removed_incoming_sinks
-                            .into_iter()
-                            .flat_map(|arr| arr.into_inner().into_iter()),
-                    ),
-                )
+                .filter(object::Column::Oid.is_in(incoming_sink_ids))
                 .into_partial_model()
                 .all(&txn)
                 .await?;
@@ -132,6 +148,26 @@ impl CatalogController {
                         return Err(MetaError::permission_denied(format!(
                             "Found sink into table in dependency: {}, please drop it manually",
                             sink.name,
+                        )));
+                    }
+                }
+            }
+        }
+
+        // 1. Detect when an Iceberg table is part of the dependencies.
+        // 2. Drop database with iceberg tables in it is not supported.
+        if object_type != ObjectType::Table || drop_database {
+            for obj in &removed_objects {
+                // if the obj is iceberg engine table, bail out
+                if obj.obj_type == ObjectType::Table {
+                    let table = Table::find_by_id(obj.oid)
+                        .one(&txn)
+                        .await?
+                        .ok_or_else(|| MetaError::catalog_id_not_found("table", obj.oid))?;
+                    if matches!(table.engine, Some(table::Engine::Iceberg)) {
+                        return Err(MetaError::permission_denied(format!(
+                            "Found iceberg table in dependency: {}, please drop it manually",
+                            table.name,
                         )));
                     }
                 }
@@ -224,12 +260,12 @@ impl CatalogController {
 
         // TODO: Support drop cascade for cross-database query.
         for obj in removed_objects.values() {
-            if let Some(obj_database_id) = obj.database_id {
-                if obj_database_id != database_id {
-                    return Err(MetaError::permission_denied(format!(
-                        "Referenced by other objects in database {obj_database_id}, please drop them manually"
-                    )));
-                }
+            if let Some(obj_database_id) = obj.database_id
+                && obj_database_id != database_id
+            {
+                return Err(MetaError::permission_denied(format!(
+                    "Referenced by other objects in database {obj_database_id}, please drop them manually"
+                )));
             }
         }
 
@@ -315,17 +351,6 @@ impl CatalogController {
             }
         };
 
-        let fragment_mappings = removed_fragments
-            .iter()
-            .map(|fragment_id| PbFragmentWorkerSlotMapping {
-                fragment_id: *fragment_id as _,
-                mapping: None,
-            })
-            .collect();
-
-        self.notify_fragment_mapping(NotificationOperation::Delete, fragment_mappings)
-            .await;
-
         Ok((
             ReleaseContext {
                 database_id,
@@ -340,6 +365,34 @@ impl CatalogController {
             version,
         ))
     }
+
+    pub async fn try_abort_creating_subscription(
+        &self,
+        subscription_id: SubscriptionId,
+    ) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let subscription = Subscription::find_by_id(subscription_id).one(&txn).await?;
+        let Some(subscription) = subscription else {
+            tracing::warn!(
+                subscription_id,
+                "subscription not found when aborting creation, might be cleaned by recovery"
+            );
+            return Ok(());
+        };
+
+        if subscription.subscription_state == PbSubscriptionState::Created as i32 {
+            tracing::warn!(
+                subscription_id,
+                "subscription is already created when aborting creation"
+            );
+            return Ok(());
+        }
+
+        subscription.delete(&txn).await?;
+        Ok(())
+    }
 }
 
 async fn report_drop_object(
@@ -350,17 +403,23 @@ async fn report_drop_object(
     let connector_name = {
         match object_type {
             ObjectType::Sink => Sink::find_by_id(object_id)
+                .select_only()
+                .column(sink::Column::Properties)
+                .into_tuple::<Property>()
                 .one(txn)
                 .await
                 .ok()
                 .flatten()
-                .and_then(|sink| sink.properties.inner_ref().get("connector").cloned()),
+                .and_then(|properties| properties.inner_ref().get("connector").cloned()),
             ObjectType::Source => Source::find_by_id(object_id)
+                .select_only()
+                .column(source::Column::WithProperties)
+                .into_tuple::<Property>()
                 .one(txn)
                 .await
                 .ok()
                 .flatten()
-                .and_then(|source| source.with_properties.inner_ref().get("connector").cloned()),
+                .and_then(|properties| properties.inner_ref().get("connector").cloned()),
             _ => unreachable!(),
         }
     };

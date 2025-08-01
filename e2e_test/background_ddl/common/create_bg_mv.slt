@@ -1,5 +1,0 @@
-statement ok
-SET BACKGROUND_DDL=true;
-
-statement ok
-CREATE MATERIALIZED VIEW m1 as SELECT * FROM t;

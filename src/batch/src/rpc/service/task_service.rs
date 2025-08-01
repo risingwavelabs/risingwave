@@ -34,8 +34,6 @@ use crate::task::{
     TASK_STATUS_BUFFER_SIZE,
 };
 
-const LOCAL_EXECUTE_BUFFER_SIZE: usize = 64;
-
 #[derive(Clone)]
 pub struct BatchServiceImpl {
     mgr: Arc<BatchManager>,
@@ -56,7 +54,6 @@ impl TaskService for BatchServiceImpl {
     type CreateTaskStream = ReceiverStream<TaskInfoResponseResult>;
     type ExecuteStream = ReceiverStream<GetDataResponseResult>;
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn create_task(
         &self,
         request: Request<CreateTaskRequest>,
@@ -99,7 +96,6 @@ impl TaskService for BatchServiceImpl {
         }
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn cancel_task(
         &self,
         req: Request<CancelTaskRequest>,
@@ -111,7 +107,6 @@ impl TaskService for BatchServiceImpl {
         Ok(Response::new(CancelTaskResponse { status: None }))
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn execute(
         &self,
         req: Request<ExecuteRequest>,
@@ -122,7 +117,6 @@ impl TaskService for BatchServiceImpl {
         BatchServiceImpl::get_execute_stream(env, mgr, req).await
     }
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn fast_insert(
         &self,
         request: Request<FastInsertRequest>,
@@ -175,7 +169,7 @@ impl BatchServiceImpl {
         );
         let task = BatchTaskExecution::new(&task_id, plan, context, epoch, mgr.runtime())?;
         let task = Arc::new(task);
-        let (tx, rx) = tokio::sync::mpsc::channel(LOCAL_EXECUTE_BUFFER_SIZE);
+        let (tx, rx) = tokio::sync::mpsc::channel(mgr.config().developer.local_execute_buffer_size);
         if let Err(e) = task
             .clone()
             .async_execute(None, tracing_context, expr_context)

@@ -27,13 +27,8 @@ source ci/scripts/common.sh
 download_and_prepare_rw "$profile" common
 
 
-echo "--- Download artifacts"
-mkdir -p e2e_test/udf/wasm/target/wasm32-wasip1/release/
-buildkite-agent artifact download udf.wasm e2e_test/udf/wasm/target/wasm32-wasip1/release/
-buildkite-agent artifact download udf.jar ./
-
 echo "--- e2e, $mode, slow tests"
-python3 -m pip install --break-system-packages arrow-udf==0.3.0
+python3 -m pip install --break-system-packages -r e2e_test/udf/remote_python/requirements.txt
 RUST_LOG="info" \
 risedev ci-start "$mode"
 risedev slt -p 4566 -d dev './e2e_test/slow_tests/**/*.slt'

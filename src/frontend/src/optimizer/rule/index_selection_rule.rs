@@ -60,13 +60,12 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_sqlparser::ast::AsOf;
 
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::catalog::IndexCatalog;
 use crate::expr::{
     Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, to_conjunctions,
     to_disjunctions,
 };
-use crate::optimizer::PlanRef;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
@@ -89,7 +88,7 @@ const MAX_CONJUNCTION_SIZE: usize = 8;
 
 pub struct IndexSelectionRule {}
 
-impl Rule for IndexSelectionRule {
+impl Rule<Logical> for IndexSelectionRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let logical_scan: &LogicalScan = plan.as_logical_scan()?;
         let indexes = logical_scan.indexes();
@@ -108,10 +107,6 @@ impl Rule for IndexSelectionRule {
         }
 
         let mut final_plan: PlanRef = logical_scan.clone().into();
-        #[expect(
-            clippy::redundant_clone,
-            reason = "false positive https://github.com/rust-lang/rust-clippy/issues/10545"
-        )]
         let mut min_cost = primary_cost.clone();
 
         for index in indexes {
@@ -135,11 +130,11 @@ impl Rule for IndexSelectionRule {
             }
         }
 
-        if let Some((merge_index, merge_index_cost)) = self.index_merge_selection(logical_scan) {
-            if merge_index_cost.le(&min_cost) {
-                min_cost = merge_index_cost;
-                final_plan = merge_index;
-            }
+        if let Some((merge_index, merge_index_cost)) = self.index_merge_selection(logical_scan)
+            && merge_index_cost.le(&min_cost)
+        {
+            min_cost = merge_index_cost;
+            final_plan = merge_index;
         }
 
         if min_cost == primary_cost {
@@ -524,10 +519,10 @@ impl IndexSelectionRule {
         let mut result = vec![];
 
         for index in logical_scan.indexes() {
-            if column_index.is_some() {
+            if let Some(column_index) = column_index {
                 assert_eq!(conjunctions.len(), 1);
                 let p2s_mapping = index.primary_to_secondary_mapping();
-                match p2s_mapping.get(column_index.as_ref().unwrap()) {
+                match p2s_mapping.get(&column_index) {
                     None => continue, // not found, prune this index
                     Some(&idx) => {
                         if index.index_table.pk()[0].column_index != idx {
@@ -772,6 +767,7 @@ impl<'a> TableScanIoEstimator<'a> {
             DataType::Struct { .. } => 20,
             DataType::List { .. } => 20,
             DataType::Map(_) => 20,
+            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
         }
     }
 

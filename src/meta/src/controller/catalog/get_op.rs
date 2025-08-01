@@ -12,8 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::ColumnCatalog;
+
 use super::*;
-use crate::controller::utils::{get_database_resource_group, get_existing_job_resource_group};
+use crate::controller::utils::{
+    get_database_resource_group, get_existing_job_resource_group, get_table_columns,
+};
 
 impl CatalogController {
     pub async fn get_secret_by_id(&self, secret_id: SecretId) -> MetaResult<PbSecret> {
@@ -85,16 +89,56 @@ impl CatalogController {
             .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))
     }
 
-    pub async fn get_table_by_ids(&self, table_ids: Vec<TableId>) -> MetaResult<Vec<PbTable>> {
+    pub async fn get_table_by_id(&self, table_id: TableId) -> MetaResult<PbTable> {
+        let inner = self.inner.read().await;
+        let table_obj = Table::find_by_id(table_id)
+            .find_also_related(Object)
+            .one(&inner.db)
+            .await?;
+        if let Some((table, obj)) = table_obj {
+            Ok(ObjectModel(table, obj.unwrap()).into())
+        } else {
+            Err(MetaError::catalog_id_not_found("table", table_id))
+        }
+    }
+
+    pub async fn get_table_by_ids(
+        &self,
+        table_ids: Vec<TableId>,
+        include_dropped_table: bool,
+    ) -> MetaResult<Vec<PbTable>> {
         let inner = self.inner.read().await;
         let table_objs = Table::find()
             .find_also_related(Object)
-            .filter(table::Column::TableId.is_in(table_ids))
+            .filter(table::Column::TableId.is_in(table_ids.clone()))
             .all(&inner.db)
             .await?;
-        Ok(table_objs
+        let tables = table_objs
             .into_iter()
-            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into());
+        let tables = if include_dropped_table {
+            tables
+                .chain(inner.dropped_tables.iter().filter_map(|(id, t)| {
+                    if table_ids.contains(id) {
+                        Some(t.clone())
+                    } else {
+                        None
+                    }
+                }))
+                .collect()
+        } else {
+            tables.collect()
+        };
+        Ok(tables)
+    }
+
+    pub async fn get_table_columns(&self, id: TableId) -> MetaResult<Vec<ColumnCatalog>> {
+        let inner = self.inner.read().await;
+        Ok(get_table_columns(&inner.db, id)
+            .await?
+            .to_protobuf()
+            .into_iter()
+            .map(|col| col.into())
             .collect())
     }
 
@@ -108,6 +152,37 @@ impl CatalogController {
         Ok(sink_objs
             .into_iter()
             .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
+            .collect())
+    }
+
+    pub async fn get_sink_auto_refresh_schema_from(
+        &self,
+        table_id: TableId,
+    ) -> MetaResult<Vec<PbSink>> {
+        let inner = self.inner.read().await;
+        let sink_objs = Sink::find()
+            .find_also_related(Object)
+            .filter(sink::Column::AutoRefreshSchemaFromTable.eq(table_id))
+            .all(&inner.db)
+            .await?;
+        Ok(sink_objs
+            .into_iter()
+            .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
+            .collect())
+    }
+
+    pub async fn get_sink_state_table_ids(&self, sink_id: SinkId) -> MetaResult<Vec<TableId>> {
+        let inner = self.inner.read().await;
+        let tables: Vec<I32Array> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::StateTableIds)
+            .filter(fragment::Column::JobId.eq(sink_id))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        Ok(tables
+            .into_iter()
+            .flat_map(|ids| ids.into_inner().into_iter())
             .collect())
     }
 
@@ -369,5 +444,65 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
         Ok(job_id)
+    }
+
+    // Output: Vec<(table id, db name, schema name, table name, resource group)>
+    pub async fn list_table_objects(
+        &self,
+    ) -> MetaResult<Vec<(TableId, String, String, String, String)>> {
+        let inner = self.inner.read().await;
+        Ok(Object::find()
+            .select_only()
+            .join(JoinType::InnerJoin, object::Relation::Table.def())
+            .join(JoinType::InnerJoin, object::Relation::Database2.def())
+            .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+            .column(object::Column::Oid)
+            .column(database::Column::Name)
+            .column(schema::Column::Name)
+            .column(table::Column::Name)
+            .column(database::Column::ResourceGroup)
+            .into_tuple()
+            .all(&inner.db)
+            .await?)
+    }
+
+    // Output: Vec<(source id, db name, schema name, source name, resource group)>
+    pub async fn list_source_objects(
+        &self,
+    ) -> MetaResult<Vec<(TableId, String, String, String, String)>> {
+        let inner = self.inner.read().await;
+        Ok(Object::find()
+            .select_only()
+            .join(JoinType::InnerJoin, object::Relation::Source.def())
+            .join(JoinType::InnerJoin, object::Relation::Database2.def())
+            .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+            .column(object::Column::Oid)
+            .column(database::Column::Name)
+            .column(schema::Column::Name)
+            .column(source::Column::Name)
+            .column(database::Column::ResourceGroup)
+            .into_tuple()
+            .all(&inner.db)
+            .await?)
+    }
+
+    // Output: Vec<(sink id, db name, schema name, sink name, resource group)>
+    pub async fn list_sink_objects(
+        &self,
+    ) -> MetaResult<Vec<(TableId, String, String, String, String)>> {
+        let inner = self.inner.read().await;
+        Ok(Object::find()
+            .select_only()
+            .join(JoinType::InnerJoin, object::Relation::Sink.def())
+            .join(JoinType::InnerJoin, object::Relation::Database2.def())
+            .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+            .column(object::Column::Oid)
+            .column(database::Column::Name)
+            .column(schema::Column::Name)
+            .column(sink::Column::Name)
+            .column(database::Column::ResourceGroup)
+            .into_tuple()
+            .all(&inner.db)
+            .await?)
     }
 }

@@ -37,26 +37,23 @@ fn has_nested_flag_attribute(
     name: &'static str,
     flag: &'static str,
 ) -> bool {
-    if let Ok(meta) = attr.parse_meta() {
-        if let Some(ident) = meta.path().get_ident() {
-            if *ident == name {
-                if let syn::Meta::List(list) = meta {
-                    for nested in &list.nested {
-                        if let syn::NestedMeta::Meta(syn::Meta::Path(path)) = nested {
-                            let path = path
-                                .get_ident()
-                                .expect("Invalid attribute syntax! (no ident)")
-                                .to_string();
-                            if path == flag {
-                                return true;
-                            }
-                        }
-                    }
-                }
+    if let Ok(meta) = attr.parse_meta()
+        && let Some(ident) = meta.path().get_ident()
+        && *ident == name
+        && let syn::Meta::List(list) = meta
+    {
+        for nested in &list.nested {
+            if let syn::NestedMeta::Meta(syn::Meta::Path(path)) = nested
+                && let path = path
+                    .get_ident()
+                    .expect("Invalid attribute syntax! (no ident)")
+                    .to_string()
+                && path == flag
+            {
+                return true;
             }
         }
     }
-
     false
 }
 
@@ -89,34 +86,34 @@ pub fn extract_ignored_generics_list(list: &[syn::Attribute]) -> Vec<String> {
 pub fn extract_ignored_generics(attr: &syn::Attribute) -> Vec<String> {
     let mut collection = Vec::new();
 
-    if let Ok(meta) = attr.parse_meta() {
-        if let Some(ident) = meta.path().get_ident() {
-            if &ident.to_string() != "get_size" {
-                return collection;
-            }
-            if let syn::Meta::List(list) = meta {
-                for nested in &list.nested {
-                    if let syn::NestedMeta::Meta(nmeta) = nested {
-                        let ident = nmeta
-                            .path()
-                            .get_ident()
-                            .expect("Invalid attribute syntax! (no iden)");
-                        if &ident.to_string() != "ignore" {
-                            panic!(
-                                "Invalid attribute syntax! Unknown name {:?}",
-                                ident.to_string()
-                            );
-                        }
+    if let Ok(meta) = attr.parse_meta()
+        && let Some(ident) = meta.path().get_ident()
+    {
+        if &ident.to_string() != "get_size" {
+            return collection;
+        }
+        if let syn::Meta::List(list) = meta {
+            for nested in &list.nested {
+                if let syn::NestedMeta::Meta(nmeta) = nested {
+                    let ident = nmeta
+                        .path()
+                        .get_ident()
+                        .expect("Invalid attribute syntax! (no iden)");
+                    if &ident.to_string() != "ignore" {
+                        panic!(
+                            "Invalid attribute syntax! Unknown name {:?}",
+                            ident.to_string()
+                        );
+                    }
 
-                        if let syn::Meta::List(list) = nmeta {
-                            for nested in &list.nested {
-                                if let syn::NestedMeta::Meta(syn::Meta::Path(path)) = nested {
-                                    let path = path
-                                        .get_ident()
-                                        .expect("Invalid attribute syntax! (no ident)")
-                                        .to_string();
-                                    collection.push(path);
-                                }
+                    if let syn::Meta::List(list) = nmeta {
+                        for nested in &list.nested {
+                            if let syn::NestedMeta::Meta(syn::Meta::Path(path)) = nested {
+                                let path = path
+                                    .get_ident()
+                                    .expect("Invalid attribute syntax! (no ident)")
+                                    .to_string();
+                                collection.push(path);
                             }
                         }
                     }

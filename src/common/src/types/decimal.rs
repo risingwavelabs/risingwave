@@ -470,7 +470,7 @@ impl Decimal {
     /// Round to the left of the decimal point, for example `31.5` -> `30`.
     #[must_use]
     pub fn round_left_ties_away(&self, left: u32) -> Option<Self> {
-        let Self::Normalized(mut d) = self else {
+        let &Self::Normalized(mut d) = self else {
             return Some(*self);
         };
 
@@ -754,7 +754,9 @@ impl FromStr for Decimal {
             "nan" => Ok(Decimal::NaN),
             "inf" | "+inf" | "infinity" | "+infinity" => Ok(Decimal::PositiveInf),
             "-inf" | "-infinity" => Ok(Decimal::NegativeInf),
-            s => RustDecimal::from_str(s).map(Decimal::Normalized),
+            s => RustDecimal::from_str(s)
+                .or_else(|_| RustDecimal::from_scientific(s))
+                .map(Decimal::Normalized),
         }
     }
 }

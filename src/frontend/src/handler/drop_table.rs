@@ -36,7 +36,7 @@ pub async fn handle_drop_table(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
     let db_name = &session.database();
-    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
+    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, &table_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
 
@@ -89,7 +89,7 @@ pub async fn handle_drop_table(
                 .env()
                 .catalog_reader()
                 .read_guard()
-                .get_sink_by_name(
+                .get_created_sink_by_name(
                     db_name,
                     schema_path,
                     &(ICEBERG_SINK_PREFIX.to_owned() + &table_name),
@@ -126,48 +126,29 @@ pub async fn handle_drop_table(
             .await?;
 
             if let Some(either) = either {
-                let (catalog_type, iceberg_catalog, table_id) = match either {
+                let (iceberg_catalog, table_id) = match either {
                     Either::Left(iceberg_properties) => {
                         let catalog = iceberg_properties.create_catalog().await?;
                         let table_id = iceberg_properties
                             .common
                             .full_table_name()
                             .context("Unable to parse table name")?;
-                        let catalog_type = iceberg_properties.common.catalog_type().to_owned();
-                        (catalog_type, catalog, table_id)
+                        (catalog, table_id)
                     }
                     Either::Right(iceberg_config) => {
                         let catalog = iceberg_config.create_catalog().await?;
                         let table_id = iceberg_config
                             .full_table_name()
                             .context("Unable to parse table name")?;
-                        let catalog_type = iceberg_config.catalog_type().to_owned();
-                        (catalog_type, catalog, table_id)
+                        (catalog, table_id)
                     }
                 };
 
-                if let Ok(table) = iceberg_catalog
-                    .load_table(&table_id)
+                // For JNI catalog and storage catalog, drop table will purge the table as well.
+                iceberg_catalog
+                    .drop_table(&table_id)
                     .await
-                    .context("failed to load iceberg table")
-                {
-                    table
-                        .file_io()
-                        .remove_all(table.metadata().location())
-                        .await
-                        .context("failed to purge iceberg table")?;
-                } else {
-                    warn!(
-                        "Table {} with iceberg engine, but failed to load iceberg table. It might be the warehouse path has been cleared but fail before drop iceberg source",
-                        table_name
-                    );
-                }
-                if !catalog_type.eq_ignore_ascii_case("storage") {
-                    iceberg_catalog
-                        .drop_table(&table_id)
-                        .await
-                        .context("failed to drop iceberg table")?;
-                }
+                    .context("failed to drop iceberg table")?;
 
                 crate::handler::drop_source::handle_drop_source(
                     handler_args.clone(),

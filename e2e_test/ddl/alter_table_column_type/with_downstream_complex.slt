@@ -1,0 +1,31 @@
+statement ok
+set RW_IMPLICIT_FLUSH to true;
+
+statement ok
+create table my_table(v map(varchar, struct<a int, b struct<c int, d varchar>>[]));
+
+statement ok
+insert into my_table(v) values (map{'a': array[row(1, row(2, 'hello'))]});
+
+statement ok
+create materialized view mv3 as select (v['a'][1]).b.d from my_table;
+
+query T rowsort
+select * from mv3;
+----
+hello
+
+statement ok
+alter table my_table alter column v type map(varchar, struct<b struct<d varchar, e boolean>, f int>[]);
+
+statement ok
+insert into my_table(v) values (map{'a': array[row(row('world', true), 1)]});
+
+query T rowsort
+select * from mv3;
+----
+hello
+world
+
+statement ok
+drop table my_table cascade;

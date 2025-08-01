@@ -206,6 +206,7 @@ impl HummockManager {
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
             self.env.notification_manager(),
+            None,
             &self.metrics,
         );
         let mut new_version_delta = version.new_delta();
@@ -301,6 +302,7 @@ impl HummockManager {
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
             self.env.notification_manager(),
+            None,
             &self.metrics,
         );
         let mut new_version_delta = version.new_delta();
@@ -622,6 +624,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::Level0StopWriteThresholdMaxSize(c) => {
                 target.level0_stop_write_threshold_max_size = Some(*c);
             }
+            MutableConfig::EnableOptimizeL0IntervalSelection(c) => {
+                target.enable_optimize_l0_interval_selection = Some(*c);
+            }
         }
     }
 }
@@ -840,7 +845,7 @@ mod tests {
 
         // Test unregister_table_fragments
         compaction_group_manager
-            .unregister_table_fragments_vec(&[table_fragment_1.clone()])
+            .unregister_table_fragments_vec(std::slice::from_ref(&table_fragment_1))
             .await;
         assert_eq!(registered_number().await, 4);
 

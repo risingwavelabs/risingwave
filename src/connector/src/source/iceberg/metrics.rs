@@ -21,7 +21,7 @@ use risingwave_common::register_guarded_int_counter_vec_with_registry;
 
 #[derive(Clone)]
 pub struct IcebergScanMetrics {
-    pub iceberg_read_bytes: LabelGuardedIntCounterVec<1>,
+    pub iceberg_read_bytes: LabelGuardedIntCounterVec,
 }
 
 impl IcebergScanMetrics {

@@ -1,4 +1,9 @@
 # cycle check
+statement ok
+create table t_t(v int primary key);
+
+statement error Creating such a sink will result in circular dependency
+create sink t_s into t_t from t_t;
 
 statement ok
 create table t_a(v int primary key);
@@ -32,6 +37,9 @@ drop table t_b;
 
 statement ok
 drop table t_c;
+
+statement ok
+drop table t_t;
 
 # cycle check (with materialize view)
 

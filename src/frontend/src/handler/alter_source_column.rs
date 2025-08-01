@@ -14,7 +14,6 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::max_column_id;
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::source::{SourceEncode, SourceStruct, extract_source_struct};
 use risingwave_sqlparser::ast::{AlterSourceOperation, ObjectName};
 
@@ -38,7 +37,7 @@ pub async fn handle_alter_source_column(
     let session = handler_args.session.clone();
     let db_name = &session.database();
     let (schema_name, real_source_name) =
-        Binder::resolve_schema_qualified_name(db_name, source_name.clone())?;
+        Binder::resolve_schema_qualified_name(db_name, &source_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
 
@@ -87,7 +86,6 @@ pub async fn handle_alter_source_column(
         SourceEncode::Json | SourceEncode::Csv | SourceEncode::Bytes | SourceEncode::Parquet => {}
     }
 
-    let old_columns = catalog.columns.clone();
     let columns = &mut catalog.columns;
     match operation {
         AlterSourceOperation::AddColumn { column_def } => {
@@ -117,22 +115,8 @@ pub async fn handle_alter_source_column(
     let catalog_writer = session.catalog_writer()?;
     if catalog.info.is_shared() {
         let graph = generate_stream_graph_for_source(handler_args, catalog.clone())?;
-
-        // Calculate the mapping from the original columns to the new columns.
-        let col_index_mapping = ColIndexMapping::new(
-            old_columns
-                .iter()
-                .map(|old_c| {
-                    catalog
-                        .columns
-                        .iter()
-                        .position(|new_c| new_c.column_id() == old_c.column_id())
-                })
-                .collect(),
-            catalog.columns.len(),
-        );
         catalog_writer
-            .replace_source(catalog.to_prost(), graph, col_index_mapping)
+            .replace_source(catalog.to_prost(), graph)
             .await?
     } else {
         catalog_writer.alter_source(catalog.to_prost()).await?

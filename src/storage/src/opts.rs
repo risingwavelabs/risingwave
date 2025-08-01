@@ -90,11 +90,12 @@ pub struct StorageOpts {
     pub data_file_cache_reclaimers: usize,
     pub data_file_cache_recover_mode: foyer::RecoverMode,
     pub data_file_cache_recover_concurrency: usize,
-    pub data_file_cache_insert_rate_limit_mb: usize,
     pub data_file_cache_indexer_shards: usize,
     pub data_file_cache_compression: foyer::Compression,
     pub data_file_cache_flush_buffer_threshold_mb: usize,
+    pub data_file_cache_fifo_probation_ratio: f64,
     pub data_file_cache_runtime_config: foyer::RuntimeOptions,
+    pub data_file_cache_throttle: foyer::Throttle,
 
     pub cache_refill_data_refill_levels: Vec<u32>,
     pub cache_refill_timeout_ms: u64,
@@ -111,11 +112,20 @@ pub struct StorageOpts {
     pub meta_file_cache_reclaimers: usize,
     pub meta_file_cache_recover_mode: foyer::RecoverMode,
     pub meta_file_cache_recover_concurrency: usize,
-    pub meta_file_cache_insert_rate_limit_mb: usize,
     pub meta_file_cache_indexer_shards: usize,
     pub meta_file_cache_compression: foyer::Compression,
     pub meta_file_cache_flush_buffer_threshold_mb: usize,
+    pub meta_file_cache_fifo_probation_ratio: f64,
     pub meta_file_cache_runtime_config: foyer::RuntimeOptions,
+    pub meta_file_cache_throttle: foyer::Throttle,
+
+    pub vector_file_block_size_kb: usize,
+    pub vector_block_cache_capacity_mb: usize,
+    pub vector_block_cache_shard_num: usize,
+    pub vector_block_cache_eviction_config: EvictionConfig,
+    pub vector_meta_cache_capacity_mb: usize,
+    pub vector_meta_cache_shard_num: usize,
+    pub vector_meta_cache_eviction_config: EvictionConfig,
 
     /// The storage url for storing backups.
     pub backup_storage_url: String,
@@ -145,6 +155,26 @@ pub struct StorageOpts {
 
     pub object_store_config: ObjectStoreConfig,
     pub time_travel_version_cache_capacity: u64,
+
+    pub iceberg_compaction_target_file_size_mb: u32,
+    pub iceberg_compaction_enable_validate: bool,
+    pub iceberg_compaction_max_record_batch_rows: usize,
+    pub iceberg_compaction_write_parquet_max_row_group_rows: usize,
+    pub iceberg_compaction_min_size_per_partition_mb: u32,
+    pub iceberg_compaction_max_file_count_per_partition: u32,
+    pub iceberg_compaction_small_file_threshold_mb: u32,
+    pub iceberg_compaction_max_task_total_size_mb: u32,
+
+    /// The ratio of iceberg compaction max parallelism to the number of CPU cores
+    pub iceberg_compaction_task_parallelism_ratio: f32,
+    /// Whether to enable heuristic output parallelism in iceberg compaction.
+    pub iceberg_compaction_enable_heuristic_output_parallelism: bool,
+    /// Maximum number of concurrent file close operations
+    pub iceberg_compaction_max_concurrent_closes: usize,
+    /// Whether to enable dynamic size estimation for iceberg compaction.
+    pub iceberg_compaction_enable_dynamic_size_estimation: bool,
+    /// The smoothing factor for size estimation in iceberg compaction.(default: 0.3)
+    pub iceberg_compaction_size_estimation_smoothing_factor: f64,
 }
 
 impl Default for StorageOpts {
@@ -158,6 +188,19 @@ impl Default for StorageOpts {
 
 impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpts {
     fn from((c, p, s): (&RwConfig, &SystemParamsReader, &StorageMemoryConfig)) -> Self {
+        let mut data_file_cache_throttle = c.storage.data_file_cache.throttle.clone();
+        if data_file_cache_throttle.write_throughput.is_none() {
+            data_file_cache_throttle = data_file_cache_throttle.with_write_throughput(
+                c.storage.data_file_cache.insert_rate_limit_mb * 1024 * 1024,
+            );
+        }
+        let mut meta_file_cache_throttle = c.storage.meta_file_cache.throttle.clone();
+        if meta_file_cache_throttle.write_throughput.is_none() {
+            meta_file_cache_throttle = meta_file_cache_throttle.with_write_throughput(
+                c.storage.meta_file_cache.insert_rate_limit_mb * 1024 * 1024,
+            );
+        }
+
         Self {
             parallel_compact_size_mb: p.parallel_compact_size_mb(),
             sstable_size_mb: p.sstable_size_mb(),
@@ -196,11 +239,12 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             data_file_cache_reclaimers: c.storage.data_file_cache.reclaimers,
             data_file_cache_recover_mode: c.storage.data_file_cache.recover_mode,
             data_file_cache_recover_concurrency: c.storage.data_file_cache.recover_concurrency,
-            data_file_cache_insert_rate_limit_mb: c.storage.data_file_cache.insert_rate_limit_mb,
             data_file_cache_indexer_shards: c.storage.data_file_cache.indexer_shards,
             data_file_cache_compression: c.storage.data_file_cache.compression,
             data_file_cache_flush_buffer_threshold_mb: s.block_file_cache_flush_buffer_threshold_mb,
+            data_file_cache_fifo_probation_ratio: c.storage.data_file_cache.fifo_probation_ratio,
             data_file_cache_runtime_config: c.storage.data_file_cache.runtime_config.clone(),
+            data_file_cache_throttle,
             meta_file_cache_dir: c.storage.meta_file_cache.dir.clone(),
             meta_file_cache_capacity_mb: c.storage.meta_file_cache.capacity_mb,
             meta_file_cache_file_capacity_mb: c.storage.meta_file_cache.file_capacity_mb,
@@ -208,11 +252,12 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             meta_file_cache_reclaimers: c.storage.meta_file_cache.reclaimers,
             meta_file_cache_recover_mode: c.storage.meta_file_cache.recover_mode,
             meta_file_cache_recover_concurrency: c.storage.meta_file_cache.recover_concurrency,
-            meta_file_cache_insert_rate_limit_mb: c.storage.meta_file_cache.insert_rate_limit_mb,
             meta_file_cache_indexer_shards: c.storage.meta_file_cache.indexer_shards,
             meta_file_cache_compression: c.storage.meta_file_cache.compression,
             meta_file_cache_flush_buffer_threshold_mb: s.meta_file_cache_flush_buffer_threshold_mb,
+            meta_file_cache_fifo_probation_ratio: c.storage.meta_file_cache.fifo_probation_ratio,
             meta_file_cache_runtime_config: c.storage.meta_file_cache.runtime_config.clone(),
+            meta_file_cache_throttle,
             cache_refill_data_refill_levels: c.storage.cache_refill.data_refill_levels.clone(),
             cache_refill_timeout_ms: c.storage.cache_refill.timeout_ms,
             cache_refill_concurrency: c.storage.cache_refill.concurrency,
@@ -247,6 +292,51 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             time_travel_version_cache_capacity: c.storage.time_travel_version_cache_capacity,
             compactor_max_overlap_sst_count: c.storage.compactor_max_overlap_sst_count,
             compactor_max_preload_meta_file_count: c.storage.compactor_max_preload_meta_file_count,
+
+            iceberg_compaction_target_file_size_mb: c
+                .storage
+                .iceberg_compaction_target_file_size_mb,
+            iceberg_compaction_enable_validate: c.storage.iceberg_compaction_enable_validate,
+            iceberg_compaction_max_record_batch_rows: c
+                .storage
+                .iceberg_compaction_max_record_batch_rows,
+            iceberg_compaction_write_parquet_max_row_group_rows: c
+                .storage
+                .iceberg_compaction_write_parquet_max_row_group_rows,
+            iceberg_compaction_min_size_per_partition_mb: c
+                .storage
+                .iceberg_compaction_min_size_per_partition_mb,
+            iceberg_compaction_max_file_count_per_partition: c
+                .storage
+                .iceberg_compaction_max_file_count_per_partition,
+            iceberg_compaction_small_file_threshold_mb: c
+                .storage
+                .iceberg_compaction_small_file_threshold_mb,
+            iceberg_compaction_max_task_total_size_mb: c
+                .storage
+                .iceberg_compaction_max_task_total_size_mb,
+            iceberg_compaction_task_parallelism_ratio: c
+                .storage
+                .iceberg_compaction_task_parallelism_ratio,
+            iceberg_compaction_enable_heuristic_output_parallelism: c
+                .storage
+                .iceberg_compaction_enable_heuristic_output_parallelism,
+            iceberg_compaction_max_concurrent_closes: c
+                .storage
+                .iceberg_compaction_max_concurrent_closes,
+            iceberg_compaction_enable_dynamic_size_estimation: c
+                .storage
+                .iceberg_compaction_enable_dynamic_size_estimation,
+            iceberg_compaction_size_estimation_smoothing_factor: c
+                .storage
+                .iceberg_compaction_size_estimation_smoothing_factor,
+            vector_file_block_size_kb: c.storage.vector_file_block_size_kb,
+            vector_block_cache_capacity_mb: s.vector_block_cache_capacity_mb,
+            vector_block_cache_shard_num: s.vector_block_cache_shard_num,
+            vector_block_cache_eviction_config: s.vector_block_cache_eviction_config.clone(),
+            vector_meta_cache_capacity_mb: s.vector_meta_cache_capacity_mb,
+            vector_meta_cache_shard_num: s.vector_meta_cache_shard_num,
+            vector_meta_cache_eviction_config: s.vector_meta_cache_eviction_config.clone(),
         }
     }
 }

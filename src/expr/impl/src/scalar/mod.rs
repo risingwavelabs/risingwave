@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod ai_model;
 mod arithmetic_op;
 mod array;
 mod array_access;
 mod array_concat;
 mod array_contain;
 mod array_distinct;
+mod array_flatten;
 mod array_length;
 mod array_min_max;
 mod array_positions;
@@ -39,6 +41,7 @@ mod concat;
 mod concat_op;
 mod concat_ws;
 mod conjunction;
+mod date_bin;
 mod date_trunc;
 mod delay;
 mod encdec;
@@ -63,6 +66,7 @@ mod jsonb_set;
 mod length;
 mod lower;
 mod make_time;
+mod map_filter;
 mod md5;
 mod overlay;
 mod position;
@@ -86,7 +90,7 @@ pub use to_jsonb::*;
 mod encrypt;
 mod external;
 mod inet;
-mod test_license;
+mod license;
 mod to_timestamp;
 mod translate;
 mod trigonometric;
@@ -94,3 +98,4 @@ mod trim;
 mod trim_array;
 mod tumble;
 mod upper;
+mod vector;

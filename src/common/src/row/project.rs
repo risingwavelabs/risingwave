@@ -40,8 +40,10 @@ impl<R: Row> Row for Project<'_, R> {
 
     #[inline]
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        self.row
-            .datum_at_unchecked(*self.indices.get_unchecked(index))
+        unsafe {
+            self.row
+                .datum_at_unchecked(*self.indices.get_unchecked(index))
+        }
     }
 
     #[inline]

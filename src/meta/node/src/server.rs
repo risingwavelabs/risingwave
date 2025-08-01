@@ -25,10 +25,13 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::{report_scarf_enabled, report_to_scarf, telemetry_env_enabled};
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common_service::{MetricsManager, TracingExtractLayer};
+use risingwave_jni_core::jvm_runtime::register_jvm_builder;
 use risingwave_meta::MetaStoreBackend;
 use risingwave_meta::barrier::GlobalBarrierManager;
 use risingwave_meta::controller::catalog::CatalogController;
 use risingwave_meta::controller::cluster::ClusterController;
+use risingwave_meta::hummock::IcebergCompactorManager;
+use risingwave_meta::manager::iceberg_compaction::IcebergCompactionManager;
 use risingwave_meta::manager::{META_NODE_ID, MetadataManager};
 use risingwave_meta::rpc::ElectionClientRef;
 use risingwave_meta::rpc::election::dummy::DummyElectionClient;
@@ -43,8 +46,10 @@ use risingwave_meta_service::ddl_service::DdlServiceImpl;
 use risingwave_meta_service::event_log_service::EventLogServiceImpl;
 use risingwave_meta_service::health_service::HealthServiceImpl;
 use risingwave_meta_service::heartbeat_service::HeartbeatServiceImpl;
+use risingwave_meta_service::hosted_iceberg_catalog_service::HostedIcebergCatalogServiceImpl;
 use risingwave_meta_service::hummock_service::HummockServiceImpl;
 use risingwave_meta_service::meta_member_service::MetaMemberServiceImpl;
+use risingwave_meta_service::monitor_service::MonitorServiceImpl;
 use risingwave_meta_service::notification_service::NotificationServiceImpl;
 use risingwave_meta_service::scale_service::ScaleServiceImpl;
 use risingwave_meta_service::serving_service::ServingServiceImpl;
@@ -65,6 +70,7 @@ use risingwave_pb::meta::cluster_limit_service_server::ClusterLimitServiceServer
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::event_log_service_server::EventLogServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
+use risingwave_pb::meta::hosted_iceberg_catalog_service_server::HostedIcebergCatalogServiceServer;
 use risingwave_pb::meta::meta_member_service_server::MetaMemberServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
@@ -73,6 +79,7 @@ use risingwave_pb::meta::session_param_service_server::SessionParamServiceServer
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::meta::system_params_service_server::SystemParamsServiceServer;
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoServiceServer;
+use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use risingwave_rpc_client::ComputeClientPool;
 use sea_orm::{ConnectionTrait, DbBackend};
@@ -184,6 +191,8 @@ pub async fn rpc_serve_with_store(
     init_session_config: SessionConfig,
     shutdown: CancellationToken,
 ) -> MetaResult<()> {
+    register_jvm_builder();
+
     // TODO(shutdown): directly use cancellation token
     let (election_shutdown_tx, election_shutdown_rx) = watch::channel(());
 
@@ -344,10 +353,17 @@ pub async fn start_service_as_election_leader(
     let metadata_manager = MetadataManager::new(cluster_controller, catalog_controller);
 
     let serving_vnode_mapping = Arc::new(ServingVnodeMapping::default());
+    let max_serving_parallelism = env
+        .session_params_manager_impl_ref()
+        .get_params()
+        .await
+        .batch_parallelism()
+        .map(|p| p.get());
     serving::on_meta_start(
         env.notification_manager_ref(),
         &metadata_manager,
         serving_vnode_mapping.clone(),
+        max_serving_parallelism,
     )
     .await;
 
@@ -387,10 +403,12 @@ pub async fn start_service_as_election_leader(
     let prometheus_selector = opts.prometheus_selector.unwrap_or_default();
     let diagnose_command = Arc::new(risingwave_meta::manager::diagnose::DiagnoseCommand::new(
         metadata_manager.clone(),
+        env.await_tree_reg().clone(),
         hummock_manager.clone(),
         env.event_log_manager_ref(),
         prometheus_client.clone(),
         prometheus_selector.clone(),
+        opts.redact_sql_option_keywords.clone(),
     ));
 
     let trace_state = otlp_embedded::State::new(otlp_embedded::Config {
@@ -402,11 +420,13 @@ pub async fn start_service_as_election_leader(
     #[cfg(not(madsim))]
     let _dashboard_task = if let Some(ref dashboard_addr) = address_info.dashboard_addr {
         let dashboard_service = crate::dashboard::DashboardService {
+            await_tree_reg: env.await_tree_reg().clone(),
             dashboard_addr: *dashboard_addr,
             prometheus_client,
             prometheus_selector,
             metadata_manager: metadata_manager.clone(),
-            compute_clients: ComputeClientPool::new(1), // typically no need for plural clients
+            hummock_manager: hummock_manager.clone(),
+            compute_clients: ComputeClientPool::new(1, env.opts.compute_client_config.clone()), /* typically no need for plural clients */
             diagnose_command,
             trace_state,
         };
@@ -459,10 +479,36 @@ pub async fn start_service_as_election_leader(
     );
     tracing::info!("SourceManager started");
 
-    let (sink_manager, shutdown_handle) = SinkCoordinatorManager::start_worker();
+    let (iceberg_compaction_stat_tx, iceberg_compaction_stat_rx) =
+        tokio::sync::mpsc::unbounded_channel();
+    let (sink_manager, shutdown_handle) = SinkCoordinatorManager::start_worker(
+        env.meta_store_ref().conn.clone(),
+        hummock_manager.clone(),
+        metadata_manager.clone(),
+        iceberg_compaction_stat_tx,
+    );
     tracing::info!("SinkCoordinatorManager started");
     // TODO(shutdown): remove this as there's no need to gracefully shutdown some of these sub-tasks.
     let mut sub_tasks = vec![shutdown_handle];
+
+    let iceberg_compactor_manager = Arc::new(IcebergCompactorManager::new());
+
+    // TODO: introduce compactor event stream handler to handle iceberg compaction events.
+    let (iceberg_compaction_mgr, iceberg_compactor_event_rx) = IcebergCompactionManager::build(
+        env.clone(),
+        metadata_manager.clone(),
+        iceberg_compactor_manager.clone(),
+        meta_metrics.clone(),
+    );
+
+    sub_tasks.push(IcebergCompactionManager::compaction_stat_loop(
+        iceberg_compaction_mgr.clone(),
+        iceberg_compaction_stat_rx,
+    ));
+
+    sub_tasks.push(IcebergCompactionManager::gc_loop(
+        iceberg_compaction_mgr.clone(),
+    ));
 
     let scale_controller = Arc::new(ScaleController::new(
         &metadata_manager,
@@ -514,6 +560,7 @@ pub async fn start_service_as_election_leader(
         barrier_manager.clone(),
         sink_manager.clone(),
         meta_metrics.clone(),
+        iceberg_compaction_mgr.clone(),
     )
     .await;
 
@@ -540,6 +587,7 @@ pub async fn start_service_as_election_leader(
         hummock_manager.clone(),
         metadata_manager.clone(),
         backup_manager.clone(),
+        iceberg_compaction_mgr.clone(),
     );
 
     let health_srv = HealthServiceImpl::new();
@@ -555,6 +603,11 @@ pub async fn start_service_as_election_leader(
     let cloud_srv = CloudServiceImpl::new();
     let event_log_srv = EventLogServiceImpl::new(env.event_log_manager_ref());
     let cluster_limit_srv = ClusterLimitServiceImpl::new(env.clone(), metadata_manager.clone());
+    let hosted_iceberg_catalog_srv = HostedIcebergCatalogServiceImpl::new(env.clone());
+    let monitor_srv = MonitorServiceImpl {
+        metadata_manager: metadata_manager.clone(),
+        await_tree_reg: env.await_tree_reg().clone(),
+    };
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(prometheus_addr.to_string())
@@ -585,17 +638,21 @@ pub async fn start_service_as_election_leader(
         Some(backup_manager),
     ));
     sub_tasks.extend(HummockManager::compaction_event_loop(
-        hummock_manager,
+        hummock_manager.clone(),
         compactor_streams_change_rx,
     ));
-    sub_tasks.push(
-        serving::start_serving_vnode_mapping_worker(
-            env.notification_manager_ref(),
-            metadata_manager.clone(),
-            serving_vnode_mapping,
-        )
-        .await,
-    );
+
+    sub_tasks.extend(IcebergCompactionManager::iceberg_compaction_event_loop(
+        iceberg_compaction_mgr.clone(),
+        iceberg_compactor_event_rx,
+    ));
+
+    sub_tasks.push(serving::start_serving_vnode_mapping_worker(
+        env.notification_manager_ref(),
+        metadata_manager.clone(),
+        serving_vnode_mapping,
+        env.session_params_manager_impl_ref(),
+    ));
 
     {
         sub_tasks.push(ClusterController::start_heartbeat_checker(
@@ -618,7 +675,7 @@ pub async fn start_service_as_election_leader(
     let notification_mgr = env.notification_manager_ref();
     let stream_abort_handler = tokio::spawn(async move {
         let _ = abort_recv.await;
-        notification_mgr.abort_all().await;
+        notification_mgr.abort_all();
         compactor_manager.abort_all_compactors();
     });
     sub_tasks.push((stream_abort_handler, abort_sender));
@@ -682,7 +739,12 @@ pub async fn start_service_as_election_leader(
         .add_service(ServingServiceServer::new(serving_srv))
         .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
         .add_service(EventLogServiceServer::new(event_log_srv))
-        .add_service(ClusterLimitServiceServer::new(cluster_limit_srv));
+        .add_service(ClusterLimitServiceServer::new(cluster_limit_srv))
+        .add_service(HostedIcebergCatalogServiceServer::new(
+            hosted_iceberg_catalog_srv,
+        ))
+        .add_service(MonitorServiceServer::new(monitor_srv));
+
     #[cfg(not(madsim))] // `otlp-embedded` does not use madsim-patched tonic
     let server_builder = server_builder.add_service(TraceServiceServer::new(trace_srv));
 

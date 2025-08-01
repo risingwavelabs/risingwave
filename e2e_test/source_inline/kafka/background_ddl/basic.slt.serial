@@ -22,7 +22,6 @@ from
 );
 
 # Wait for the topic to create
-skipif in-memory
 sleep 5s
 
 ############## Create kafka source

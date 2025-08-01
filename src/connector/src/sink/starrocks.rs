@@ -22,12 +22,8 @@ use bytes::Bytes;
 use mysql_async::Opts;
 use mysql_async::prelude::Queryable;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
-use risingwave_pb::connector_service::SinkMetadata;
-use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
-use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use serde::Deserialize;
 use serde_derive::Serialize;
 use serde_json::Value;
@@ -43,10 +39,10 @@ use super::doris_starrocks_connector::{
 };
 use super::encoder::{JsonEncoder, RowEncoder};
 use super::{
-    SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkCommitCoordinator, SinkError,
-    SinkParam, SinkWriterMetrics,
+    SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkParam,
+    SinkWriterMetrics,
 };
-use crate::sink::coordinate::CoordinatedSinkWriter;
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
 use crate::sink::{Result, Sink, SinkWriter, SinkWriterParam};
 
@@ -57,6 +53,10 @@ const STARROCK_MYSQL_WAIT_TIMEOUT: usize = 28800;
 
 const fn _default_stream_load_http_timeout_ms() -> u64 {
     30 * 1000
+}
+
+const fn default_use_https() -> bool {
+    false
 }
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -82,6 +82,17 @@ pub struct StarrocksCommon {
     /// The `StarRocks` table you want to sink data to.
     #[serde(rename = "starrocks.table")]
     pub table: String,
+
+    /// Whether to use https to connect to the `StarRocks` server.
+    #[serde(rename = "starrocks.use_https")]
+    #[serde(default = "default_use_https")]
+    pub use_https: bool,
+}
+
+impl EnforceSecret for StarrocksCommon {
+    const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf::phf_set! {
+        "starrocks.password", "starrocks.user"
+    };
 }
 
 #[serde_as]
@@ -102,9 +113,10 @@ pub struct StarrocksConfig {
     /// to Starrocks at every n checkpoints by leveraging the
     /// [StreamLoad Transaction API](https://docs.starrocks.io/docs/loading/Stream_Load_transaction_interface/),
     /// also, in this time, the `sink_decouple` option should be enabled as well.
-    /// Defaults to 10 if commit_checkpoint_interval <= 0
+    /// Defaults to 10 if `commit_checkpoint_interval` <= 0
     #[serde(default = "default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub commit_checkpoint_interval: u64,
 
     /// Enable partial update
@@ -112,6 +124,12 @@ pub struct StarrocksConfig {
     pub partial_update: Option<String>,
 
     pub r#type: String, // accept "append-only" or "upsert"
+}
+
+impl EnforceSecret for StarrocksConfig {
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        StarrocksCommon::enforce_one(prop)
+    }
 }
 
 fn default_commit_checkpoint_interval() -> u64 {
@@ -142,11 +160,21 @@ impl StarrocksConfig {
 
 #[derive(Debug)]
 pub struct StarrocksSink {
-    param: SinkParam,
     pub config: StarrocksConfig,
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
+}
+
+impl EnforceSecret for StarrocksSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            StarrocksConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 impl StarrocksSink {
@@ -154,7 +182,6 @@ impl StarrocksSink {
         let pk_indices = param.downstream_pk.clone();
         let is_append_only = param.sink_type.is_append_only();
         Ok(Self {
-            param,
             config,
             schema,
             pk_indices,
@@ -252,13 +279,13 @@ impl StarrocksSink {
             risingwave_common::types::DataType::Map(_) => Err(SinkError::Starrocks(
                 "MAP is not supported for Starrocks sink.".to_owned(),
             )),
+            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
         }
     }
 }
 
 impl Sink for StarrocksSink {
-    type Coordinator = StarrocksSinkCommitter;
-    type LogSinker = DecoupleCheckpointLogSinkerOf<CoordinatedSinkWriter<StarrocksSinkWriter>>;
+    type LogSinker = DecoupleCheckpointLogSinkerOf<StarrocksSinkWriter>;
 
     const SINK_NAME: &'static str = STARROCKS_SINK;
 
@@ -301,13 +328,18 @@ impl Sink for StarrocksSink {
         Ok(())
     }
 
+    fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
+        StarrocksConfig::from_btreemap(config.clone())?;
+        Ok(())
+    }
+
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let commit_checkpoint_interval =
             NonZeroU64::new(self.config.commit_checkpoint_interval).expect(
                 "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
             );
 
-        let inner = StarrocksSinkWriter::new(
+        let writer = StarrocksSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
             self.pk_indices.clone(),
@@ -316,55 +348,12 @@ impl Sink for StarrocksSink {
         )?;
 
         let metrics = SinkWriterMetrics::new(&writer_param);
-        let writer = CoordinatedSinkWriter::new(
-            writer_param
-                .meta_client
-                .expect("should have meta client")
-                .sink_coordinate_client()
-                .await,
-            self.param.clone(),
-            writer_param.vnode_bitmap.ok_or_else(|| {
-                SinkError::Remote(anyhow!(
-                    "sink needs coordination and should not have singleton input"
-                ))
-            })?,
-            inner,
-        )
-        .await?;
 
         Ok(DecoupleCheckpointLogSinkerOf::new(
             writer,
             metrics,
             commit_checkpoint_interval,
         ))
-    }
-
-    fn is_coordinated_sink(&self) -> bool {
-        true
-    }
-
-    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
-        let header = HeaderBuilder::new()
-            .add_common_header()
-            .set_user_password(
-                self.config.common.user.clone(),
-                self.config.common.password.clone(),
-            )
-            .set_db(self.config.common.database.clone())
-            .set_table(self.config.common.table.clone())
-            .build();
-
-        let txn_request_builder = StarrocksTxnRequestBuilder::new(
-            format!(
-                "http://{}:{}",
-                self.config.common.host, self.config.common.http_port
-            ),
-            header,
-            self.config.stream_load_http_timeout_ms,
-        )?;
-        Ok(StarrocksSinkCommitter {
-            client: Arc::new(StarrocksTxnClient::new(txn_request_builder)),
-        })
     }
 }
 
@@ -425,11 +414,13 @@ impl StarrocksSinkWriter {
             .set_table(config.common.table.clone())
             .build();
 
-        let txn_request_builder = StarrocksTxnRequestBuilder::new(
-            format!("http://{}:{}", config.common.host, config.common.http_port),
-            header,
-            config.stream_load_http_timeout_ms,
-        )?;
+        let url = if config.common.use_https {
+            format!("https://{}:{}", config.common.host, config.common.http_port)
+        } else {
+            format!("http://{}:{}", config.common.host, config.common.http_port)
+        };
+        let txn_request_builder =
+            StarrocksTxnRequestBuilder::new(url, header, config.stream_load_http_timeout_ms)?;
 
         Ok(Self {
             config,
@@ -528,6 +519,26 @@ impl StarrocksSinkWriter {
             chrono::Utc::now().timestamp_micros()
         )
     }
+
+    async fn prepare_and_commit(&self, txn_label: String) -> Result<()> {
+        tracing::debug!(?txn_label, "prepare transaction");
+        let txn_label_res = self.txn_client.prepare(txn_label.clone()).await?;
+        if txn_label != txn_label_res {
+            return Err(SinkError::Starrocks(format!(
+                "label {} returned from prepare transaction {} differs from the current one",
+                txn_label, txn_label_res
+            )));
+        }
+        tracing::debug!(?txn_label, "commit transaction");
+        let txn_label_res = self.txn_client.commit(txn_label.clone()).await?;
+        if txn_label != txn_label_res {
+            return Err(SinkError::Starrocks(format!(
+                "label {} returned from commit transaction {} differs from the current one",
+                txn_label, txn_label_res
+            )));
+        }
+        Ok(())
+    }
 }
 
 impl Drop for StarrocksSinkWriter {
@@ -549,8 +560,6 @@ impl Drop for StarrocksSinkWriter {
 
 #[async_trait]
 impl SinkWriter for StarrocksSinkWriter {
-    type CommitMetadata = Option<SinkMetadata>;
-
     async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
         Ok(())
     }
@@ -563,16 +572,16 @@ impl SinkWriter for StarrocksSinkWriter {
             let txn_label = self.new_txn_label();
             tracing::debug!(?txn_label, "begin transaction");
             let txn_label_res = self.txn_client.begin(txn_label.clone()).await?;
-            assert_eq!(
-                txn_label, txn_label_res,
-                "label responding from StarRocks: {} differ from generated one: {}",
-                txn_label, txn_label_res
-            );
+            if txn_label != txn_label_res {
+                return Err(SinkError::Starrocks(format!(
+                    "label {} returned from StarRocks {} differs from generated one",
+                    txn_label, txn_label_res
+                )));
+            }
             self.curr_txn_label = Some(txn_label.clone());
         }
         if self.client.is_none() {
             let txn_label = self.curr_txn_label.clone();
-            assert!(txn_label.is_some(), "transaction label is none during load");
             self.client = Some(StarrocksClient::new(
                 self.txn_client.load(txn_label.unwrap()).await?,
             ));
@@ -584,49 +593,40 @@ impl SinkWriter for StarrocksSinkWriter {
         }
     }
 
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<Option<SinkMetadata>> {
-        if self.client.is_some() {
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
+        if let Some(client) = self.client.take() {
             // Here we finish the `/api/transaction/load` request when a barrier is received. Therefore,
             // one or more load requests should be made within one commit_checkpoint_interval period.
             // StarRocks will take care of merging those splits into a larger one during prepare transaction.
             // Thus, only one version will be produced when the transaction is committed. See Stream Load
             // transaction interface for more information.
-            let client = self
-                .client
-                .take()
-                .ok_or_else(|| SinkError::Starrocks("Can't find starrocks inserter".to_owned()))?;
             client.finish().await?;
         }
 
-        if is_checkpoint {
-            if self.curr_txn_label.is_some() {
-                let txn_label = self.curr_txn_label.take().unwrap();
-                tracing::debug!(?txn_label, "prepare transaction");
-                let txn_label_res = self.txn_client.prepare(txn_label.clone()).await?;
-                assert_eq!(
-                    txn_label, txn_label_res,
-                    "label responding from StarRocks differs from the current one"
-                );
-                Ok(Some(StarrocksWriteResult(Some(txn_label)).try_into()?))
-            } else {
-                // no data was written within previous epoch
-                Ok(Some(StarrocksWriteResult(None).try_into()?))
+        if is_checkpoint
+            && let Some(txn_label) = self.curr_txn_label.take()
+            && let Err(err) = self.prepare_and_commit(txn_label.clone()).await
+        {
+            match self.txn_client.rollback(txn_label.clone()).await {
+                Ok(_) => tracing::warn!(
+                    ?txn_label,
+                    "transaction is successfully rolled back due to commit failure"
+                ),
+                Err(err) => {
+                    tracing::warn!(?txn_label, error = ?err.as_report(), "Couldn't roll back transaction after commit failed")
+                }
             }
-        } else {
-            Ok(None)
-        }
-    }
 
-    async fn abort(&mut self) -> Result<()> {
-        if self.curr_txn_label.is_some() {
-            let txn_label = self.curr_txn_label.take().unwrap();
-            tracing::debug!(?txn_label, "rollback transaction");
-            self.txn_client.rollback(txn_label).await?;
+            return Err(err);
         }
         Ok(())
     }
 
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
+    async fn abort(&mut self) -> Result<()> {
+        if let Some(txn_label) = self.curr_txn_label.take() {
+            tracing::debug!(?txn_label, "rollback transaction");
+            self.txn_client.rollback(txn_label).await?;
+        }
         Ok(())
     }
 }
@@ -691,14 +691,23 @@ impl StarrocksSchemaClient {
 
     pub async fn get_pk_from_starrocks(&mut self) -> Result<(String, String)> {
         let query = format!(
-            "select table_model, primary_key from information_schema.tables_config where table_name = {:?} and table_schema = {:?};",
+            "select table_model, primary_key, sort_key from information_schema.tables_config where table_name = {:?} and table_schema = {:?};",
             self.table, self.db
         );
         let table_mode_pk: (String, String) = self
             .conn
-            .query_map(query, |(table_model, primary_key)| {
-                (table_model, primary_key)
-            })
+            .query_map(
+                query,
+                |(table_model, primary_key, sort_key): (String, String, String)| match table_model
+                    .as_str()
+                {
+                    // Get primary key of aggregate table from the sort_key field
+                    // https://docs.starrocks.io/docs/table_design/table_types/table_capabilities/
+                    // https://docs.starrocks.io/docs/sql-reference/information_schema/tables_config/
+                    "AGG_KEYS" => (table_model, sort_key),
+                    _ => (table_model, primary_key),
+                },
+            )
             .await
             .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?
             .first()
@@ -846,74 +855,5 @@ impl StarrocksTxnClient {
 
     pub async fn load(&self, label: String) -> Result<InserterInner> {
         self.request_builder.build_txn_inserter(label).await
-    }
-}
-
-struct StarrocksWriteResult(Option<String>);
-
-impl TryFrom<StarrocksWriteResult> for SinkMetadata {
-    type Error = SinkError;
-
-    fn try_from(value: StarrocksWriteResult) -> std::result::Result<Self, Self::Error> {
-        match value.0 {
-            Some(label) => {
-                let metadata = label.into_bytes();
-                Ok(SinkMetadata {
-                    metadata: Some(Serialized(SerializedMetadata { metadata })),
-                })
-            }
-            None => Ok(SinkMetadata { metadata: None }),
-        }
-    }
-}
-
-impl TryFrom<SinkMetadata> for StarrocksWriteResult {
-    type Error = SinkError;
-
-    fn try_from(value: SinkMetadata) -> std::result::Result<Self, Self::Error> {
-        if let Some(Serialized(v)) = value.metadata {
-            Ok(StarrocksWriteResult(Some(
-                String::from_utf8(v.metadata)
-                    .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?,
-            )))
-        } else {
-            Ok(StarrocksWriteResult(None))
-        }
-    }
-}
-
-pub struct StarrocksSinkCommitter {
-    client: Arc<StarrocksTxnClient>,
-}
-
-#[async_trait::async_trait]
-impl SinkCommitCoordinator for StarrocksSinkCommitter {
-    async fn init(&mut self) -> Result<()> {
-        tracing::info!("Starrocks commit coordinator inited.");
-        Ok(())
-    }
-
-    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
-        let write_results = metadata
-            .into_iter()
-            .map(TryFrom::try_from)
-            .collect::<Result<Vec<StarrocksWriteResult>>>()?;
-
-        let txn_labels = write_results
-            .into_iter()
-            .filter_map(|v| v.0)
-            .collect::<Vec<String>>();
-
-        tracing::debug!(?epoch, ?txn_labels, "commit transaction");
-
-        if !txn_labels.is_empty() {
-            futures::future::try_join_all(
-                txn_labels
-                    .into_iter()
-                    .map(|txn_label| self.client.commit(txn_label)),
-            )
-            .await?;
-        }
-        Ok(())
     }
 }

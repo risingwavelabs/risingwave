@@ -1,4 +1,4 @@
 query I
-select * from iceberg_t1_source where i1 = 100000;
+select * from iceberg_t_bench_source where i1 = 100000;
 ----
   100000 some long string of text another long string of text

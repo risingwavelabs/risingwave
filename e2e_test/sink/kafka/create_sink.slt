@@ -187,6 +187,11 @@ format plain encode json (
   force_append_only='true'
 ) key encode text ;
 
+query TT
+SHOW CREATE SINK sink_text_id;
+----
+public.sink_text_id CREATE SINK sink_text_id FROM t_kafka WITH (connector = 'kafka', properties.bootstrap.server = 'message_queue:29092', topic = 'test-rw-sink-text-key-id', primary_key = 'id') FORMAT PLAIN ENCODE JSON (force_append_only = 'true') KEY ENCODE TEXT
+
 statement error sink key encode unsupported: JSON, only TEXT and BYTES supported
 create sink sink_bytes_error as (
   select int8send(id) as id_bytes, * from t_kafka

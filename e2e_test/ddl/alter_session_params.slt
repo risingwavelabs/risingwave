@@ -38,11 +38,10 @@ set RW_STREAMING_ENABLE_DELTA_JOIN to false;
 statement ok
 alter system set rw_streaming_enable_delta_join to true;
 
-# Alter system won't change the current session's params.
 query T
 show RW_STREAMING_ENABLE_DELTA_JOIN;
 ----
-false
+true
 
 sleep 1s
 

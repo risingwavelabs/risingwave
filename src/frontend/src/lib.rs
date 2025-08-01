@@ -27,12 +27,11 @@
 #![feature(extend_one)]
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(result_flattening)]
 #![feature(error_generic_member_access)]
 #![feature(iterator_try_collect)]
 #![feature(used_with_arg)]
 #![feature(try_trait_v2)]
-#![feature(cell_update)]
+#![feature(never_type)]
 #![recursion_limit = "256"]
 
 #[cfg(test)]
@@ -130,7 +129,7 @@ pub struct FrontendOpts {
         long,
         alias = "health-check-listener-addr",
         env = "RW_HEALTH_CHECK_LISTENER_ADDR",
-        default_value = "127.0.0.1:6786"
+        default_value = "0.0.0.0:6786"
     )]
     pub frontend_rpc_listener_addr: String,
 
@@ -177,6 +176,13 @@ pub struct FrontendOpts {
     /// Usually the localhost + desired port.
     #[clap(long, env = "RW_WEBHOOK_LISTEN_ADDR", default_value = "0.0.0.0:4560")]
     pub webhook_listen_addr: String,
+
+    /// Address of the serverless backfill controller.
+    /// Needed if frontend receives a query like
+    /// CREATE MATERIALIZED VIEW ... WITH ( `cloud.serverless_backfill_enabled=true` )
+    /// Feature disabled by default.
+    #[clap(long, env = "RW_SBC_ADDR", default_value = "")]
+    pub serverless_backfill_controller_addr: String,
 }
 
 impl risingwave_common::opts::Opts for FrontendOpts {

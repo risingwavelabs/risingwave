@@ -27,12 +27,13 @@ use tokio_retry::Retry;
 use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use with_options::WithOptions;
 
+use super::SinkWriterParam;
 use super::encoder::{
     DateHandlingMode, JsonbHandlingMode, TimeHandlingMode, TimestamptzHandlingMode,
 };
 use super::utils::chunk_to_json;
-use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::connector_common::NatsCommon;
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
@@ -57,6 +58,17 @@ pub struct NatsSink {
     pub config: NatsConfig,
     schema: Schema,
     is_append_only: bool,
+}
+
+impl EnforceSecret for NatsSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            NatsCommon::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 // sink write
@@ -100,7 +112,6 @@ impl TryFrom<SinkParam> for NatsSink {
 }
 
 impl Sink for NatsSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = AsyncTruncateLogSinkerOf<NatsSinkWriter>;
 
     const SINK_NAME: &'static str = NATS_SINK;
@@ -153,6 +164,7 @@ impl NatsSinkWriter {
 impl AsyncTruncateSinkWriter for NatsSinkWriter {
     type DeliveryFuture = NatsSinkDeliveryFuture;
 
+    #[define_opaque(NatsSinkDeliveryFuture)]
     async fn write_chunk<'a>(
         &'a mut self,
         chunk: StreamChunk,

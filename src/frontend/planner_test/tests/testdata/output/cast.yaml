@@ -5,8 +5,7 @@
   batch_plan: |-
     BatchProject { exprs: [1:Int32] }
     └─BatchFilter { predicate: null:Boolean }
-      └─BatchSimpleAgg { aggs: [] }
-        └─BatchValues { rows: [[]] }
+      └─BatchValues { rows: [[]] }
 - name: implicit cast boolean (WHERE NULL)
   sql: |
     select 1 where NULL;

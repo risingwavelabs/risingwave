@@ -24,6 +24,7 @@ use serde_with::{DisplayFromStr, serde_as};
 pub use source::*;
 pub use split::*;
 
+use crate::enforce_secret::EnforceSecret;
 use crate::source::SourceProperties;
 
 pub const DATAGEN_CONNECTOR: &str = "datagen";
@@ -31,12 +32,12 @@ pub const DATAGEN_CONNECTOR: &str = "datagen";
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, with_options::WithOptions)]
 pub struct DatagenProperties {
-    /// split_num means data source partition
+    /// `split_num` means data source partition
     #[serde(rename = "datagen.split.num")]
     pub split_num: Option<String>,
 
-    /// default_rows_per_second =10
-    /// when the split_num = 3 and default_rows_per_second =10
+    /// `default_rows_per_second` =10
+    /// when the `split_num` = 3 and `default_rows_per_second` =10
     /// there will be three readers that generate respectively 4,3,3 message per second
     #[serde(
         rename = "datagen.rows.per.second",
@@ -52,10 +53,12 @@ pub struct DatagenProperties {
     /// 'fields.v1.end'='1000',
     /// 'fields.v2.kind'='random',
     /// datagen will create v1 by self-incrementing from 1 to 1000
-    /// datagen will create v2 by randomly generating from default_min to default_max
+    /// datagen will create v2 by randomly generating from `default_min` to `default_max`
     #[serde(flatten)]
     pub fields: HashMap<String, String>,
 }
+
+impl EnforceSecret for DatagenProperties {}
 
 impl SourceProperties for DatagenProperties {
     type Split = DatagenSplit;

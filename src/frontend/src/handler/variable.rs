@@ -21,7 +21,6 @@ use risingwave_common::session_config::{ConfigReporter, SESSION_CONFIG_LIST_SEP}
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::Fields;
 use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value};
-use risingwave_sqlparser::keywords::Keyword;
 
 use super::{RwPgResponse, RwPgResponseBuilderExt, fields_to_descriptors};
 use crate::error::Result;
@@ -46,7 +45,7 @@ pub fn handle_set(
     value: SetVariableValue,
 ) -> Result<RwPgResponse> {
     // Strip double and single quotes
-    let mut string_val = set_var_to_param_str(&value);
+    let string_val = set_var_to_param_str(&value);
 
     let mut status = ParameterStatus::default();
 
@@ -60,18 +59,6 @@ pub fn handle_set(
                 self.status.application_name = Some(new_val);
             }
         }
-    }
-
-    // special handle for streaming parallelism,
-    if name
-        .real_value()
-        .eq_ignore_ascii_case("streaming_parallelism")
-        && string_val
-            .as_ref()
-            .map(|val| val.eq_ignore_ascii_case(Keyword::ADAPTIVE.to_string().as_str()))
-            .unwrap_or(false)
-    {
-        string_val = None;
     }
 
     // Currently store the config variable simply as String -> ConfigEntry(String).
@@ -110,14 +97,11 @@ pub(super) fn handle_set_time_zone(
     Ok(PgResponse::empty_result(StatementType::SET_VARIABLE))
 }
 
-pub(super) async fn handle_show(
-    handler_args: HandlerArgs,
-    variable: Vec<Ident>,
-) -> Result<RwPgResponse> {
+pub(super) fn handle_show(handler_args: HandlerArgs, variable: Vec<Ident>) -> Result<RwPgResponse> {
     // TODO: Verify that the name used in `show` command is indeed always case-insensitive.
     let name = variable.iter().map(|e| e.real_value()).join(" ");
     if name.eq_ignore_ascii_case("PARAMETERS") {
-        handle_show_system_params(handler_args).await
+        handle_show_system_params(handler_args)
     } else if name.eq_ignore_ascii_case("ALL") {
         handle_show_all(handler_args.clone())
     } else {
@@ -145,13 +129,13 @@ fn handle_show_all(handler_args: HandlerArgs) -> Result<RwPgResponse> {
         .into())
 }
 
-async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<RwPgResponse> {
+fn handle_show_system_params(handler_args: HandlerArgs) -> Result<RwPgResponse> {
     let params = handler_args
         .session
         .env()
-        .meta_client()
-        .get_system_params()
-        .await?;
+        .system_params_manager()
+        .get_params()
+        .load();
     let rows = params
         .get_all()
         .into_iter()

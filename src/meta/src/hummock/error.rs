@@ -19,7 +19,6 @@ use sea_orm::DbErr;
 use thiserror::Error;
 
 use crate::model::MetadataModelError;
-use crate::storage::MetaStoreError;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -65,28 +64,9 @@ impl Error {
     }
 }
 
-impl From<MetaStoreError> for Error {
-    fn from(error: MetaStoreError) -> Self {
-        match error {
-            MetaStoreError::ItemNotFound(err) => anyhow::anyhow!(err).into(),
-            MetaStoreError::TransactionAbort() => {
-                // TODO: need more concrete error from meta store.
-                Error::Internal(anyhow::anyhow!("meta store transaction failed"))
-            }
-            // TODO: Currently MetaStoreError::Internal is equivalent to SqlError, which
-            // includes both retryable and non-retryable. Need to expand MetaStoreError::Internal
-            // to more detail meta_store errors.
-            MetaStoreError::Internal(err) => Error::MetaStore(err),
-        }
-    }
-}
-
 impl From<MetadataModelError> for Error {
     fn from(err: MetadataModelError) -> Self {
-        match err {
-            MetadataModelError::MetaStoreError(e) => e.into(),
-            e => anyhow::anyhow!(e).into(),
-        }
+        anyhow::anyhow!(err).into()
     }
 }
 

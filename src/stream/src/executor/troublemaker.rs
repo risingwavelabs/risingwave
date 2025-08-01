@@ -121,7 +121,7 @@ impl TroublemakerExecutor {
         vars: &'a mut Vars,
         record: Record<impl Row>,
     ) -> SmallVec<[(Op, OwnedRow); 2]> {
-        let record = if vars.met_delete_before && rand::thread_rng().gen_bool(0.5) {
+        let record = if vars.met_delete_before && rand::rng().random_bool(0.5) {
             // Change the `Op`.
             // Because we don't know the `append_only` property of the stream, we can't
             // generate `Delete` arbitrarily. So we just generate `Delete` after we saw
@@ -159,11 +159,11 @@ impl TroublemakerExecutor {
             .map(|(op, row)| {
                 let mut data = row.into_inner();
 
-                for (datum, gen) in data
+                for (datum, r#gen) in data
                     .iter_mut()
                     .zip_eq_fast(vars.field_generators.iter_mut())
                 {
-                    match rand::thread_rng().gen_range(0..4) {
+                    match rand::rng().random_range(0..4) {
                         0 | 1 => {
                             // don't change the value
                         }
@@ -171,9 +171,9 @@ impl TroublemakerExecutor {
                             *datum = None;
                         }
                         3 => {
-                            *datum = gen
+                            *datum = r#gen
                                 .as_mut()
-                                .and_then(|gen| gen.generate_datum(rand::random()))
+                                .and_then(|r#gen| r#gen.generate_datum(rand::random()))
                                 .or(datum.take());
                         }
                         _ => unreachable!(),

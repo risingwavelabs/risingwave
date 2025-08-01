@@ -23,7 +23,6 @@ from
 ############## Source from kafka (rate_limit = 0)
 
 # Wait for the topic to create
-skipif in-memory
 sleep 5s
 
 statement ok
@@ -38,7 +37,6 @@ flush;
 
 ############## Check data
 
-skipif in-memory
 sleep 3s
 
 ############## Create MV on source

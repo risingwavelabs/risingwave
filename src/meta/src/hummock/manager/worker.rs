@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use risingwave_hummock_sdk::HummockVersionId;
-use risingwave_pb::common::WorkerType;
 use sync_point::sync_point;
 use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
@@ -31,7 +30,7 @@ pub enum HummockManagerEvent {
 }
 
 impl HummockManager {
-    pub async fn start_worker(
+    pub fn start_worker(
         self: &HummockManagerRef,
         mut receiver: HummockManagerEventReceiver,
     ) -> JoinHandle<()> {
@@ -39,8 +38,7 @@ impl HummockManager {
             tokio::sync::mpsc::unbounded_channel();
         self.env
             .notification_manager()
-            .insert_local_sender(local_notification_tx)
-            .await;
+            .insert_local_sender(local_notification_tx);
         let hummock_manager = self.clone();
         tokio::spawn(async move {
             loop {
@@ -93,9 +91,6 @@ impl HummockManager {
 
     async fn handle_local_notification(&self, notification: LocalNotification) {
         if let LocalNotification::WorkerNodeDeleted(worker_node) = notification {
-            if worker_node.get_type().unwrap() == WorkerType::Compactor {
-                self.compactor_manager.remove_compactor(worker_node.id);
-            }
             self.release_contexts(vec![worker_node.id])
                 .await
                 .unwrap_or_else(|err| {

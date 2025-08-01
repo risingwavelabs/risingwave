@@ -165,6 +165,34 @@
         │     └─StreamTableScan { table: version1, columns: [version1.id1, version1.x1], stream_scan_type: UpstreamOnly, stream_key: [version1.id1], pk: [id1], dist: UpstreamHashShard(version1.id1) }
         └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(version2.id2) }
           └─StreamTableScan { table: version2, columns: [version2.id2, version2.x2], stream_scan_type: UpstreamOnly, stream_key: [version2.id2], pk: [id2], dist: UpstreamHashShard(version2.id2) }
+- name: multi-way temporal join with different keys
+  sql: |
+    create table stream(id1 int, id2 int, a1 int, b1 int);
+    create table version1(id1 int, x1 int, y2 int, primary key (id1));
+    create table version2(id2 int, x2 int, y2 int, primary key (id2));
+    create table version3(id3 int, x3 int, y3 int, primary key (id3));
+    select stream.id1, x1, stream.id2, x2, a1, b1, x3
+    from stream
+    join version1 FOR SYSTEM_TIME AS OF PROCTIME() on stream.id1 = version1.id1
+    join version2 FOR SYSTEM_TIME AS OF PROCTIME() on stream.id2 = version2.id2
+    join version3 FOR SYSTEM_TIME AS OF PROCTIME() on stream.id1 = version3.id3 where a1 < 10;
+  stream_plan: |-
+    StreamMaterialize { columns: [id1, x1, id2, x2, a1, b1, x3, stream._row_id(hidden), version3.id3(hidden)], stream_key: [stream._row_id, id1, id2], pk_columns: [stream._row_id, id1, id2], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(stream.id1, stream.id2, stream._row_id) }
+      └─StreamTemporalJoin { type: Inner, append_only: false, predicate: stream.id1 = version3.id3, nested_loop: false, output: [stream.id1, version1.x1, stream.id2, version2.x2, stream.a1, stream.b1, version3.x3, stream._row_id, version3.id3] }
+        ├─StreamExchange { dist: HashShard(stream.id1) }
+        │ └─StreamTemporalJoin { type: Inner, append_only: false, predicate: stream.id2 = version2.id2, nested_loop: false, output: [stream.id1, stream.id2, stream.a1, stream.b1, version1.x1, version2.x2, stream._row_id, version2.id2] }
+        │   ├─StreamExchange { dist: HashShard(stream.id2) }
+        │   │ └─StreamTemporalJoin { type: Inner, append_only: false, predicate: stream.id1 = version1.id1, nested_loop: false, output: [stream.id1, stream.id2, stream.a1, stream.b1, version1.x1, stream._row_id, version1.id1] }
+        │   │   ├─StreamExchange { dist: HashShard(stream.id1) }
+        │   │   │ └─StreamFilter { predicate: (stream.a1 < 10:Int32) }
+        │   │   │   └─StreamTableScan { table: stream, columns: [stream.id1, stream.id2, stream.a1, stream.b1, stream._row_id], stream_scan_type: ArrangementBackfill, stream_key: [stream._row_id], pk: [_row_id], dist: UpstreamHashShard(stream._row_id) }
+        │   │   └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(version1.id1) }
+        │   │     └─StreamTableScan { table: version1, columns: [version1.id1, version1.x1], stream_scan_type: UpstreamOnly, stream_key: [version1.id1], pk: [id1], dist: UpstreamHashShard(version1.id1) }
+        │   └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(version2.id2) }
+        │     └─StreamTableScan { table: version2, columns: [version2.id2, version2.x2], stream_scan_type: UpstreamOnly, stream_key: [version2.id2], pk: [id2], dist: UpstreamHashShard(version2.id2) }
+        └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(version3.id3) }
+          └─StreamTableScan { table: version3, columns: [version3.id3, version3.x3], stream_scan_type: UpstreamOnly, stream_key: [version3.id3], pk: [id3], dist: UpstreamHashShard(version3.id3) }
 - name: temporal join with an index (distribution key size = 1)
   sql: |
     create table stream(id1 int, a1 int, b1 int);

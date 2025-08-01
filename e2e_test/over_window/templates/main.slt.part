@@ -8,3 +8,5 @@ include ./agg_in_win_func/mod.slt.part
 include ./opt_agg_then_join/mod.slt.part
 include ./with_filter/mod.slt.part
 include ./no_effect_updates/mod.slt.part
+include ./odd_frames/mod.slt.part
+include ./ignore_nulls/mod.slt.part

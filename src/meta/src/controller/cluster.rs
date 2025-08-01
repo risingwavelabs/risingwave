@@ -172,9 +172,10 @@ impl ClusterController {
         let inner = self.inner.write().await;
         let worker = inner.activate_worker(worker_id).await?;
 
-        // Notify frontends of new compute node.
+        // Notify frontends of new compute node and frontend node.
         // Always notify because a running worker's property may have been changed.
-        if worker.r#type() == PbWorkerType::ComputeNode {
+        if worker.r#type() == PbWorkerType::ComputeNode || worker.r#type() == PbWorkerType::Frontend
+        {
             self.env
                 .notification_manager()
                 .notify_frontend(Operation::Add, Info::Node(worker.clone()))
@@ -182,8 +183,7 @@ impl ClusterController {
         }
         self.env
             .notification_manager()
-            .notify_local_subscribers(LocalNotification::WorkerNodeActivated(worker))
-            .await;
+            .notify_local_subscribers(LocalNotification::WorkerNodeActivated(worker));
 
         Ok(())
     }
@@ -191,13 +191,15 @@ impl ClusterController {
     pub async fn delete_worker(&self, host_address: HostAddress) -> MetaResult<WorkerNode> {
         let worker = self.inner.write().await.delete_worker(host_address).await?;
 
-        if worker.r#type() == PbWorkerType::ComputeNode {
+        if worker.r#type() == PbWorkerType::ComputeNode || worker.r#type() == PbWorkerType::Frontend
+        {
             self.env
                 .notification_manager()
                 .notify_frontend(Operation::Delete, Info::Node(worker.clone()))
                 .await;
-
-            self.update_compute_node_total_cpu_count().await?;
+            if worker.r#type() == PbWorkerType::ComputeNode {
+                self.update_compute_node_total_cpu_count().await?;
+            }
         }
 
         // Notify local subscribers.
@@ -205,8 +207,7 @@ impl ClusterController {
         // local notification.
         self.env
             .notification_manager()
-            .notify_local_subscribers(LocalNotification::WorkerNodeDeleted(worker.clone()))
-            .await;
+            .notify_local_subscribers(LocalNotification::WorkerNodeDeleted(worker.clone()));
 
         Ok(worker)
     }
@@ -304,13 +305,10 @@ impl ClusterController {
                                 WorkerType::Frontend
                                 | WorkerType::ComputeNode
                                 | WorkerType::Compactor
-                                | WorkerType::RiseCtl => {
-                                    cluster_controller
-                                        .env
-                                        .notification_manager()
-                                        .delete_sender(worker_type.into(), WorkerKey(host_addr))
-                                        .await
-                                }
+                                | WorkerType::RiseCtl => cluster_controller
+                                    .env
+                                    .notification_manager()
+                                    .delete_sender(worker_type.into(), WorkerKey(host_addr)),
                                 _ => {}
                             };
                         }
@@ -360,10 +358,7 @@ impl ClusterController {
         let (tx, rx) = unbounded_channel();
 
         // insert before release the read lock to ensure that we don't lose any update in between
-        self.env
-            .notification_manager()
-            .insert_local_sender(tx)
-            .await;
+        self.env.notification_manager().insert_local_sender(tx);
         drop(inner);
         Ok((worker_nodes, rx))
     }
@@ -428,9 +423,9 @@ pub struct StreamingClusterInfo {
 
 // Encapsulating the use of parallelism
 impl StreamingClusterInfo {
-    pub fn parallelism(&self, resource_group: String) -> usize {
+    pub fn parallelism(&self, resource_group: &str) -> usize {
         let available_worker_ids =
-            filter_workers_by_resource_group(&self.worker_nodes, resource_group.as_str());
+            filter_workers_by_resource_group(&self.worker_nodes, resource_group);
 
         self.worker_nodes
             .values()

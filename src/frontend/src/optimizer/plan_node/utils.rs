@@ -32,6 +32,7 @@ use risingwave_common::constants::log_store::v2::{
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::license::Feature;
 use risingwave_common::types::{DataType, Interval, ScalarImpl, Timestamptz};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range::{ScanRange, is_full_range};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
@@ -42,8 +43,7 @@ use risingwave_pb::plan_common::{PbAsOf, as_of};
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{self, GenericPlanRef, PhysicalPlanRef};
-use super::pretty_config;
-use crate::PlanRef;
+use super::{BatchPlanRef, StreamPlanRef, pretty_config};
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ColumnId, TableCatalog, TableId};
 use crate::error::{ErrorCode, Result};
@@ -177,7 +177,6 @@ impl TableCatalogBuilder {
             database_id: 0,
             associated_source_id: None,
             name: String::new(),
-            dependent_relations: vec![],
             columns: self.columns.clone(),
             pk: self.pk,
             stream_key: vec![],
@@ -220,6 +219,7 @@ impl TableCatalogBuilder {
             job_id: None,
             engine: Engine::Hummock,
             clean_watermark_index_in_pk: None, // TODO: fill this field
+            refreshable: false,                // Internal tables are not refreshable
         }
     }
 
@@ -300,8 +300,8 @@ pub struct IndicesDisplay<'a> {
 
 impl<'a> IndicesDisplay<'a> {
     /// Returns `None` means all
-    pub fn from_join<'b, PlanRef: GenericPlanRef>(
-        join: &'a generic::Join<PlanRef>,
+    pub fn from_join<'b>(
+        join: &'a generic::Join<impl GenericPlanRef>,
         input_schema: &'a Schema,
     ) -> Pretty<'b> {
         let col_num = join.internal_column_num();
@@ -326,8 +326,8 @@ impl<'a> IndicesDisplay<'a> {
     }
 }
 
-pub(crate) fn sum_affected_row(dml: PlanRef) -> Result<PlanRef> {
-    let dml = RequiredDist::single().enforce_if_not_satisfies(dml, &Order::any())?;
+pub(crate) fn sum_affected_row(dml: BatchPlanRef) -> Result<BatchPlanRef> {
+    let dml = RequiredDist::single().batch_enforce_if_not_satisfies(dml, &Order::any())?;
     // Accumulate the affected rows.
     let sum_agg = PlanAggCall {
         agg_type: PbAggKind::Sum.into(),
@@ -365,13 +365,13 @@ macro_rules! plan_node_name {
 pub(crate) use plan_node_name;
 
 pub fn infer_kv_log_store_table_catalog_inner(
-    input: &PlanRef,
+    input: &StreamPlanRef,
     columns: &[ColumnCatalog],
 ) -> TableCatalog {
     let mut table_catalog_builder = TableCatalogBuilder::default();
 
     let mut value_indices =
-        Vec::with_capacity(KV_LOG_STORE_PREDEFINED_COLUMNS.len() + columns.len());
+        Vec::with_capacity(KV_LOG_STORE_PREDEFINED_COLUMNS.len() + input.schema().fields().len());
 
     for (name, data_type) in KV_LOG_STORE_PREDEFINED_COLUMNS {
         let indice = table_catalog_builder.add_column(&Field::with_name(data_type, name));
@@ -386,9 +386,22 @@ pub fn infer_kv_log_store_table_catalog_inner(
 
     let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
 
-    let payload_indices = table_catalog_builder.extend_columns(columns);
-
-    value_indices.extend(payload_indices);
+    if columns.len() != input.schema().fields().len()
+        || columns
+            .iter()
+            .zip_eq_fast(input.schema().fields())
+            .any(|(c, f)| *c.data_type() != f.data_type())
+    {
+        tracing::warn!(
+            "sink schema different with upstream schema: sink columns: {:?}, input schema: {:?}.",
+            columns,
+            input.schema()
+        );
+    }
+    for field in input.schema().fields() {
+        let indice = table_catalog_builder.add_column(field);
+        value_indices.push(indice);
+    }
     table_catalog_builder.set_value_indices(value_indices);
 
     // Modify distribution key indices based on the pre-defined columns.
@@ -403,7 +416,7 @@ pub fn infer_kv_log_store_table_catalog_inner(
 }
 
 pub fn infer_synced_kv_log_store_table_catalog_inner(
-    input: &PlanRef,
+    input: &StreamPlanRef,
     columns: &[Field],
 ) -> TableCatalog {
     let mut table_catalog_builder = TableCatalogBuilder::default();
@@ -451,7 +464,7 @@ pub fn infer_synced_kv_log_store_table_catalog_inner(
 /// since that plan node maps to `backfill` executor, which supports recovery.
 /// Some other leaf nodes like `StreamValues` do not support recovery, and they
 /// cannot use background ddl.
-pub(crate) fn plan_can_use_background_ddl(plan: &PlanRef) -> bool {
+pub(crate) fn plan_can_use_background_ddl(plan: &StreamPlanRef) -> bool {
     if plan.inputs().is_empty() {
         if plan.as_stream_source_scan().is_some()
             || plan.as_stream_now().is_some()
@@ -461,6 +474,8 @@ pub(crate) fn plan_can_use_background_ddl(plan: &PlanRef) -> bool {
         } else if let Some(scan) = plan.as_stream_table_scan() {
             scan.stream_scan_type() == StreamScanType::Backfill
                 || scan.stream_scan_type() == StreamScanType::ArrangementBackfill
+                || scan.stream_scan_type() == StreamScanType::CrossDbSnapshotBackfill
+                || scan.stream_scan_type() == StreamScanType::SnapshotBackfill
         } else {
             false
         }
@@ -471,7 +486,7 @@ pub(crate) fn plan_can_use_background_ddl(plan: &PlanRef) -> bool {
 }
 
 pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
-    let Some(ref a) = a else {
+    let Some(a) = a else {
         return Ok(None);
     };
     Feature::TimeTravel
@@ -525,7 +540,7 @@ pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
         AsOf::ProcessTimeWithInterval((value, leading_field)) => {
             let interval = Interval::parse_with_fields(
                 value,
-                Some(crate::Binder::bind_date_time_field(leading_field.clone())),
+                Some(crate::Binder::bind_date_time_field(*leading_field)),
             )
             .map_err(|_| anyhow!("fail to parse interval"))?;
             let interval_sec = (interval.epoch_in_micros() / 1_000_000) as i64;

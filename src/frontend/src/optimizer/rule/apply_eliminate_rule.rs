@@ -17,9 +17,8 @@ use std::collections::HashMap;
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::{LogicalFilter, LogicalJoin, LogicalProject};
 use crate::optimizer::plan_visitor::PlanCorrelatedIdFinder;
 use crate::utils::Condition;
@@ -55,7 +54,7 @@ use crate::utils::Condition;
 ///  Domain       RHS
 /// ```
 pub struct ApplyEliminateRule {}
-impl Rule for ApplyEliminateRule {
+impl Rule<Logical> for ApplyEliminateRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
@@ -79,10 +78,10 @@ impl Rule for ApplyEliminateRule {
         // TODO: Do some transformation for IN, and try to remove DAG for it.
         let mut column_mapping = HashMap::new();
         on.conjunctions.iter().for_each(|expr| {
-            if let ExprImpl::FunctionCall(func_call) = expr {
-                if let Some((left, right, data_type)) = Self::check(func_call, apply_left_len) {
-                    column_mapping.insert(left, (right, data_type));
-                }
+            if let ExprImpl::FunctionCall(func_call) = expr
+                && let Some((left, right, data_type)) = Self::check(func_call, apply_left_len)
+            {
+                column_mapping.insert(left, (right, data_type));
             }
         });
         if column_mapping.len() == apply_left_len {

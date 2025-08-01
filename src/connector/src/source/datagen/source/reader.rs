@@ -105,7 +105,7 @@ impl SplitReader for DatagenSplitReader {
             // let name = column.name.clone();
             let data_type = column.data_type.clone();
 
-            let gen = if column.is_visible {
+            let r#gen = if column.is_visible {
                 FieldDesc::Visible(generator_from_data_type(
                     column.data_type,
                     &fields_option_map,
@@ -117,7 +117,7 @@ impl SplitReader for DatagenSplitReader {
             } else {
                 FieldDesc::Invisible
             };
-            fields_vec.push(gen);
+            fields_vec.push(r#gen);
             data_types.push(data_type);
             field_names.push(column.name);
         }
@@ -213,10 +213,7 @@ fn generator_from_data_type(
     offset: u64,
 ) -> Result<FieldGeneratorImpl> {
     let random_seed_key = format!("fields.{}.seed", name);
-    let random_seed: u64 = match fields_option_map
-        .get(&random_seed_key)
-        .map(|s| s.to_string())
-    {
+    let random_seed: u64 = match fields_option_map.get(&random_seed_key).cloned() {
         Some(seed) => {
             match seed.parse::<u64>() {
                 // we use given seed xor split_index to make sure every split has different
@@ -285,7 +282,7 @@ fn generator_from_data_type(
             let struct_fields = struct_type
                 .iter()
                 .map(|(field_name, data_type)| {
-                    let gen = generator_from_data_type(
+                    let r#gen = generator_from_data_type(
                         data_type.clone(),
                         fields_option_map,
                         &format!("{}.{}", name, field_name),
@@ -293,14 +290,14 @@ fn generator_from_data_type(
                         split_num,
                         offset,
                     )?;
-                    Ok((field_name.to_owned(), gen))
+                    Ok((field_name.to_owned(), r#gen))
                 })
                 .collect::<Result<_>>()?;
             FieldGeneratorImpl::with_struct_fields(struct_fields).map_err(Into::into)
         }
         DataType::List(datatype) => {
             let length_key = format!("fields.{}.length", name);
-            let length_value = fields_option_map.get(&length_key).map(|s| s.to_string());
+            let length_value = fields_option_map.get(&length_key).cloned();
             let generator = generator_from_data_type(
                 *datatype,
                 fields_option_map,
@@ -318,8 +315,8 @@ fn generator_from_data_type(
             {
                 let start_key = format!("fields.{}.start", name);
                 let end_key = format!("fields.{}.end", name);
-                let start_value = fields_option_map.get(&start_key).map(|s| s.to_string());
-                let end_value = fields_option_map.get(&end_key).map(|s| s.to_string());
+                let start_value = fields_option_map.get(&start_key).cloned();
+                let end_value = fields_option_map.get(&end_key).cloned();
                 FieldGeneratorImpl::with_number_sequence(
                     data_type,
                     start_value,
@@ -332,8 +329,8 @@ fn generator_from_data_type(
             } else {
                 let min_key = format!("fields.{}.min", name);
                 let max_key = format!("fields.{}.max", name);
-                let min_value = fields_option_map.get(&min_key).map(|s| s.to_string());
-                let max_value = fields_option_map.get(&max_key).map(|s| s.to_string());
+                let min_value = fields_option_map.get(&min_key).cloned();
+                let max_value = fields_option_map.get(&max_key).cloned();
                 FieldGeneratorImpl::with_number_random(data_type, min_value, max_value, random_seed)
                     .map_err(Into::into)
             }

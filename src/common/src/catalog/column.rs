@@ -204,7 +204,7 @@ impl ColumnDesc {
             additional_column_type: 0, // deprecated
             additional_column: Some(self.additional_column.clone()),
             version: self.version as i32,
-            nullable: self.nullable,
+            nullable: Some(self.nullable),
         }
     }
 
@@ -241,7 +241,7 @@ impl From<PbColumnDesc> for ColumnDesc {
             additional_column,
             version,
             system_column: None,
-            nullable: prost.nullable,
+            nullable: prost.nullable.unwrap_or(true),
         }
     }
 }
@@ -418,6 +418,10 @@ impl ColumnCatalog {
             )),
         ]
     }
+
+    pub fn is_row_id_column(&self) -> bool {
+        self.column_desc.column_id == ROW_ID_COLUMN_ID
+    }
 }
 
 impl From<PbColumnCatalog> for ColumnCatalog {
@@ -505,7 +509,7 @@ pub fn max_column_id(columns: &[ColumnCatalog]) -> ColumnId {
 }
 
 #[cfg(test)]
-pub mod tests {
+mod tests {
     use risingwave_pb::plan_common::PbColumnDesc;
 
     use crate::catalog::ColumnDesc;

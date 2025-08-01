@@ -71,13 +71,13 @@ pub fn get_or_create_local_table_stat<'a>(
         LocalTableMetrics {
             total_key_count: metrics
                 .version_stats
-                .with_label_values(&[&table_label, "total_key_count"]),
+                .with_label_values(&[table_label.as_str(), "total_key_count"]),
             total_key_size: metrics
                 .version_stats
-                .with_label_values(&[&table_label, "total_key_size"]),
+                .with_label_values(&[table_label.as_str(), "total_key_size"]),
             total_value_size: metrics
                 .version_stats
-                .with_label_values(&[&table_label, "total_value_size"]),
+                .with_label_values(&[table_label.as_str(), "total_value_size"]),
             write_throughput: metrics
                 .table_write_throughput
                 .with_label_values(&[&table_label]),
@@ -125,7 +125,7 @@ pub fn trigger_mv_stat(
 
         metrics
             .materialized_view_stats
-            .with_label_values(&[&mv_id.to_string(), "materialized_view_total_size"])
+            .with_label_values(&[mv_id.to_string().as_str(), "materialized_view_total_size"])
             .set(total_size);
     }
 }
@@ -206,11 +206,11 @@ pub fn trigger_sst_stat(
             .set(*compacting_task_count as _);
     }
 
-    if compacting_task_stat.is_empty() {
-        if let Some(levels) = current_version.levels.get(&compaction_group_id) {
-            let max_level = levels.levels.len();
-            remove_compacting_task_stat(metrics, compaction_group_id, max_level);
-        }
+    if compacting_task_stat.is_empty()
+        && let Some(levels) = current_version.levels.get(&compaction_group_id)
+    {
+        let max_level = levels.levels.len();
+        remove_compacting_task_stat(metrics, compaction_group_id, max_level);
     }
 
     {
@@ -294,20 +294,19 @@ pub fn trigger_sst_stat(
                 Ordering::Relaxed,
             )
             .is_ok()
+        && let Some(compact_status) = compact_status
     {
-        if let Some(compact_status) = compact_status {
-            for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
-                let sst_num = level_sst_cnt(idx);
-                let sst_size = level_sst_size(idx);
-                let compact_cnt = level_handler.pending_file_count();
-                tracing::info!(
-                    "Level {} has {} SSTs, the total size of which is {}KB, while {} of those are being compacted to bottom levels",
-                    idx,
-                    sst_num,
-                    sst_size,
-                    compact_cnt,
-                );
-            }
+        for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
+            let sst_num = level_sst_cnt(idx);
+            let sst_size = level_sst_size(idx);
+            let compact_cnt = level_handler.pending_file_count();
+            tracing::info!(
+                "Level {} has {} SSTs, the total size of which is {}KB, while {} of those are being compacted to bottom levels",
+                idx,
+                sst_num,
+                sst_size,
+                compact_cnt,
+            );
         }
     }
 }
@@ -485,6 +484,31 @@ pub fn trigger_gc_stat(
         .set(old_version_object_count as _);
     metrics.stale_object_size.set(stale_object_size as _);
     metrics.stale_object_count.set(stale_object_count as _);
+    // table change log
+    for (table_id, logs) in &checkpoint.version.table_change_log {
+        let object_count = logs
+            .iter()
+            .map(|l| l.old_value.len() + l.new_value.len())
+            .sum::<usize>();
+        let object_size = logs
+            .iter()
+            .map(|l| {
+                l.old_value
+                    .iter()
+                    .chain(l.new_value.iter())
+                    .map(|s| s.file_size as usize)
+                    .sum::<usize>()
+            })
+            .sum::<usize>();
+        metrics
+            .table_change_log_object_count
+            .with_label_values(&[&format!("{table_id}")])
+            .set(object_count as _);
+        metrics
+            .table_change_log_object_size
+            .with_label_values(&[&format!("{table_id}")])
+            .set(object_size as _);
+    }
 }
 
 // Triggers a report on compact_pending_bytes_needed

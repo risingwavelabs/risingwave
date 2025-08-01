@@ -4,3 +4,33 @@
   batch_plan: 'BatchValues { rows: [[1:Int32, 2:Int32]] }'
 - sql: select 'abc', 1, 1.4 as k from (select 1 as k, 2 from (select 1, 2 union all select 3, 4) union all select * from (select 3, 4) union all select 100, 200 from (select now(), now() - interval '1 hour'));
   batch_plan: 'BatchValues { rows: [[''abc'':Varchar, 1:Int32, 1.4:Decimal], [''abc'':Varchar, 1:Int32, 1.4:Decimal], [''abc'':Varchar, 1:Int32, 1.4:Decimal], [''abc'':Varchar, 1:Int32, 1.4:Decimal]] }'
+- sql: |
+    select id, value, openai_embedding('sk-test-key', 'text-embedding-3-small', value) as embedding
+    from (values (1, 'hello'), (2, 'world')) as t(id, value);
+  logical_plan: |-
+    LogicalProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, OpenaiEmbedding('sk-test-key':Varchar, 'text-embedding-3-small':Varchar, *VALUES*_0.column_1) as $expr1] }
+    └─LogicalValues { rows: [[1:Int32, 'hello':Varchar], [2:Int32, 'world':Varchar]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Varchar] } }
+  batch_plan: |-
+    BatchProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, OpenaiEmbedding('sk-test-key':Varchar, 'text-embedding-3-small':Varchar, *VALUES*_0.column_1) as $expr1] }
+    └─BatchValues { rows: [[1:Int32, 'hello':Varchar], [2:Int32, 'world':Varchar]] }
+  stream_plan: |-
+    StreamMaterialize { columns: [id, value, embedding, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, $expr1, _row_id] }
+      └─StreamMaterializedExprs { exprs: [OpenaiEmbedding('sk-test-key':Varchar, 'text-embedding-3-small':Varchar, *VALUES*_0.column_1) as $expr1] }
+        └─StreamValues { rows: [[1:Int32, 'hello':Varchar, 0:Int64], [2:Int32, 'world':Varchar, 1:Int64]] }
+- sql: |
+    select id, value, id + 1 as id_plus_one,
+           openai_embedding('sk-test-key', 'text-embedding-3-small', value) as embedding,
+           upper(value) as upper_value
+    from (values (1, 'hello'), (2, 'world')) as t(id, value);
+  logical_plan: |-
+    LogicalProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, (*VALUES*_0.column_0 + 1:Int32) as $expr1, OpenaiEmbedding('sk-test-key':Varchar, 'text-embedding-3-small':Varchar, *VALUES*_0.column_1) as $expr2, Upper(*VALUES*_0.column_1) as $expr3] }
+    └─LogicalValues { rows: [[1:Int32, 'hello':Varchar], [2:Int32, 'world':Varchar]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Varchar] } }
+  batch_plan: |-
+    BatchProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, (*VALUES*_0.column_0 + 1:Int32) as $expr1, OpenaiEmbedding('sk-test-key':Varchar, 'text-embedding-3-small':Varchar, *VALUES*_0.column_1) as $expr2, Upper(*VALUES*_0.column_1) as $expr3] }
+    └─BatchValues { rows: [[1:Int32, 'hello':Varchar], [2:Int32, 'world':Varchar]] }
+  stream_plan: |-
+    StreamMaterialize { columns: [id, value, id_plus_one, embedding, upper_value, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, (*VALUES*_0.column_0 + 1:Int32) as $expr2, $expr1, Upper(*VALUES*_0.column_1) as $expr3, _row_id] }
+      └─StreamMaterializedExprs { exprs: [OpenaiEmbedding('sk-test-key':Varchar, 'text-embedding-3-small':Varchar, *VALUES*_0.column_1) as $expr1] }
+        └─StreamValues { rows: [[1:Int32, 'hello':Varchar, 0:Int64], [2:Int32, 'world':Varchar, 1:Int64]] }

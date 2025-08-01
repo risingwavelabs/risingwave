@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Rule};
-use crate::optimizer::PlanRef;
+use super::prelude::{PlanRef, *};
 use crate::optimizer::plan_node::{LogicalApply, LogicalShare, PlanTreeNodeUnary};
 
 /// Eliminate `LogicalShare` for `LogicalApply`.
 pub struct ApplyShareEliminateRule {}
-impl Rule for ApplyShareEliminateRule {
+impl Rule<Logical> for ApplyShareEliminateRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =

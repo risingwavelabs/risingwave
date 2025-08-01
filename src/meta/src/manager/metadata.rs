@@ -25,7 +25,7 @@ use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
-use risingwave_pb::stream_plan::{PbDispatchStrategy, PbStreamScanType};
+use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamScanType};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::sync::oneshot;
 use tokio::time::{Instant, sleep};
@@ -61,7 +61,7 @@ pub struct ActiveStreamingWorkerNodes {
     worker_nodes: HashMap<WorkerId, WorkerNode>,
     rx: UnboundedReceiver<LocalNotification>,
     #[cfg_attr(not(debug_assertions), expect(dead_code))]
-    meta_manager: MetadataManager,
+    meta_manager: Option<MetadataManager>,
 }
 
 impl Debug for ActiveStreamingWorkerNodes {
@@ -73,11 +73,25 @@ impl Debug for ActiveStreamingWorkerNodes {
 }
 
 impl ActiveStreamingWorkerNodes {
-    pub(crate) fn uninitialized(meta_manager: MetadataManager) -> Self {
+    pub(crate) fn uninitialized() -> Self {
         Self {
             worker_nodes: Default::default(),
             rx: unbounded_channel().1,
-            meta_manager,
+            meta_manager: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(worker_nodes: HashMap<WorkerId, WorkerNode>) -> Self {
+        let (tx, rx) = unbounded_channel();
+        let _join_handle = tokio::spawn(async move {
+            let _tx = tx;
+            std::future::pending::<()>().await
+        });
+        Self {
+            worker_nodes,
+            rx,
+            meta_manager: None,
         }
     }
 
@@ -89,7 +103,7 @@ impl ActiveStreamingWorkerNodes {
         Ok(Self {
             worker_nodes: nodes.into_iter().map(|node| (node.id as _, node)).collect(),
             rx,
-            meta_manager,
+            meta_manager: Some(meta_manager),
         })
     }
 
@@ -120,7 +134,7 @@ impl ActiveStreamingWorkerNodes {
     }
 
     pub(crate) async fn changed(&mut self) -> ActiveStreamingWorkerChange {
-        let ret = loop {
+        loop {
             let notification = self
                 .rx
                 .recv()
@@ -201,20 +215,17 @@ impl ActiveStreamingWorkerNodes {
                     continue;
                 }
             }
-        };
-
-        ret
+        }
     }
 
     #[cfg(debug_assertions)]
     pub(crate) async fn validate_change(&self) {
         use risingwave_pb::common::WorkerNode;
         use thiserror_ext::AsReport;
-        match self
-            .meta_manager
-            .list_active_streaming_compute_nodes()
-            .await
-        {
+        let Some(meta_manager) = &self.meta_manager else {
+            return;
+        };
+        match meta_manager.list_active_streaming_compute_nodes().await {
             Ok(worker_nodes) => {
                 let ignore_irrelevant_info = |node: &WorkerNode| {
                     (
@@ -363,14 +374,14 @@ impl MetadataManager {
     }
 
     pub async fn list_background_creating_jobs(&self) -> MetaResult<Vec<TableId>> {
-        let tables = self
+        let jobs = self
             .catalog_controller
-            .list_background_creating_mviews(false)
+            .list_background_creating_jobs(false)
             .await?;
 
-        Ok(tables
+        Ok(jobs
             .into_iter()
-            .map(|table| TableId::from(table.table_id as u32))
+            .map(|(id, _, _)| TableId::from(id as u32))
             .collect())
     }
 
@@ -475,7 +486,7 @@ impl MetadataManager {
 
     pub async fn get_table_catalog_by_ids(&self, ids: Vec<u32>) -> MetaResult<Vec<PbTable>> {
         self.catalog_controller
-            .get_table_by_ids(ids.into_iter().map(|id| id as _).collect())
+            .get_table_by_ids(ids.into_iter().map(|id| id as _).collect(), false)
             .await
     }
 
@@ -483,6 +494,16 @@ impl MetadataManager {
         self.catalog_controller
             .get_sink_by_ids(ids.iter().map(|id| *id as _).collect())
             .await
+    }
+
+    pub async fn get_sink_state_table_ids(&self, sink_id: SinkId) -> MetaResult<Vec<TableId>> {
+        Ok(self
+            .catalog_controller
+            .get_sink_state_table_ids(sink_id)
+            .await?
+            .into_iter()
+            .map(|id| (id as u32).into())
+            .collect())
     }
 
     pub async fn get_table_catalog_by_cdc_table_id(
@@ -498,7 +519,7 @@ impl MetadataManager {
         &self,
         job_id: u32,
     ) -> MetaResult<(
-        Vec<(PbDispatchStrategy, Fragment)>,
+        Vec<(PbDispatcherType, Fragment)>,
         HashMap<ActorId, WorkerId>,
     )> {
         let (fragments, actors) = self
@@ -695,6 +716,18 @@ impl MetadataManager {
             .collect())
     }
 
+    pub async fn update_sink_props_by_sink_id(
+        &self,
+        sink_id: SinkId,
+        props: BTreeMap<String, String>,
+    ) -> MetaResult<HashMap<String, String>> {
+        let new_props = self
+            .catalog_controller
+            .update_sink_props_by_sink_id(sink_id, props)
+            .await?;
+        Ok(new_props)
+    }
+
     pub async fn update_fragment_rate_limit_by_fragment_id(
         &self,
         fragment_id: FragmentId,
@@ -710,6 +743,7 @@ impl MetadataManager {
             .collect())
     }
 
+    #[await_tree::instrument]
     pub async fn update_actor_splits_by_split_assignment(
         &self,
         split_assignment: &SplitAssignment,
@@ -799,6 +833,7 @@ impl MetadataManager {
 impl MetadataManager {
     /// Wait for job finishing notification in `TrackingJob::finish`.
     /// The progress is updated per barrier.
+    #[await_tree::instrument]
     pub(crate) async fn wait_streaming_job_finished(
         &self,
         database_id: DatabaseId,

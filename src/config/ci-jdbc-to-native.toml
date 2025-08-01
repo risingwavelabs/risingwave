@@ -12,7 +12,7 @@ in_flight_barrier_nums = 10
 
 [streaming.developer]
 stream_exchange_concurrent_barriers = 10
-switch_jdbc_pg_to_native = true
+stream_switch_jdbc_pg_to_native = true
 
 [storage]
 imm_merge_threshold = 2

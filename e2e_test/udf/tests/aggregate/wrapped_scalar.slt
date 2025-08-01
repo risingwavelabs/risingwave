@@ -1,0 +1,23 @@
+statement ok
+create function median(int[]) returns float language python as $$
+def median(values):
+    values.sort()
+    n = len(values)
+    if n % 2 == 0:
+        return (values[n // 2 - 1] + values[n // 2]) / 2
+    else:
+        return values[n // 2]
+$$;
+
+query F
+select aggregate:median(x) from (values (1), (2), (3), (4), (5)) as t(x);
+----
+3
+
+query F
+select aggregate:median(x) from (values (4), (3), (2), (1)) as t(x);
+----
+2.5
+
+statement ok
+drop function median;

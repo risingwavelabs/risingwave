@@ -10,6 +10,7 @@ from time import sleep
 import time
 from io import StringIO
 from minio import Minio
+import gzip
 from functools import partial
 
 def gen_data(file_num, item_num_per_file):
@@ -45,7 +46,7 @@ def format_csv(data, with_header):
         csv_files.append(ostream.getvalue())
     return csv_files
 
-def do_test(config, file_num, item_num_per_file, prefix, fmt, need_drop_table=True):
+def do_test(config, file_num, item_num_per_file, prefix, fmt, need_drop_table=True, dir="", compress=".gz"):
     conn = psycopg2.connect(
         host="localhost",
         port="4566",
@@ -72,23 +73,42 @@ def do_test(config, file_num, item_num_per_file, prefix, fmt, need_drop_table=Tr
             return ''
 
     # Execute a SELECT statement
-    cur.execute(f'''CREATE TABLE {_table()}(
-        id int,
-        name TEXT,
-        sex int,
-        mark int,
-    )
-    {_include_clause()}
-    WITH (
-        connector = 's3',
-        match_pattern = '{prefix}*.{fmt}',
-        s3.region_name = '{config['S3_REGION']}',
-        s3.bucket_name = '{config['S3_BUCKET']}',
-        s3.credentials.access = '{config['S3_ACCESS_KEY']}',
-        s3.credentials.secret = '{config['S3_SECRET_KEY']}',
-        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}',
-        refresh.interval.sec = 1
-    ) FORMAT PLAIN ENCODE {_encode()};''')
+    if fmt == 'json':
+        cur.execute(f'''CREATE TABLE {_table()}(
+            id int,
+            name TEXT,
+            sex int,
+            mark int,
+        )
+        {_include_clause()}
+        WITH (
+            connector = 's3',
+            match_pattern = '{dir}*.{fmt}{compress}',
+            s3.region_name = 'custom',
+            s3.bucket_name = 'hummock001',
+            s3.credentials.access = 'hummockadmin',
+            s3.credentials.secret = 'hummockadmin',
+            s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+            refresh.interval.sec = 1,
+        ) FORMAT PLAIN ENCODE {_encode()};''')
+    else:
+        cur.execute(f'''CREATE TABLE {_table()}(
+            id int,
+            name TEXT,
+            sex int,
+            mark int,
+        )
+        {_include_clause()}
+        WITH (
+            connector = 's3',
+            match_pattern =  '{dir}*.{fmt}',
+            s3.region_name = 'custom',
+            s3.bucket_name = 'hummock001',
+            s3.credentials.access = 'hummockadmin',
+            s3.credentials.secret = 'hummockadmin',
+            s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+            refresh.interval.sec = 1,
+        ) FORMAT PLAIN ENCODE {_encode()};''')
 
     total_rows = file_num * item_num_per_file
     MAX_RETRIES = 40
@@ -97,8 +117,8 @@ def do_test(config, file_num, item_num_per_file, prefix, fmt, need_drop_table=Tr
         result = cur.fetchone()
         if result[0] == total_rows:
             break
-        print(f"[retry {retry_no}] Now got {result[0]} rows in table, {total_rows} expected, wait 30s")
-        sleep(30)
+        print(f"[retry {retry_no}] Now got {result[0]} rows in table, {total_rows} expected, wait 10s")
+        sleep(10)
 
     stmt = f'select count(*), sum(id), sum(sex), sum(mark) from {_table()}'
     print(f'Execute {stmt}')
@@ -143,7 +163,7 @@ FORMATTER = {
     }
 
 
-def test_batch_read(config, file_num, item_num_per_file, prefix, fmt):
+def test_batch_read(config, file_num, item_num_per_file, prefix, fmt, dir = "", compress=".gz"):
     conn = psycopg2.connect(
         host="localhost",
         port="4566",
@@ -164,20 +184,38 @@ def test_batch_read(config, file_num, item_num_per_file, prefix, fmt):
             return f"CSV (delimiter = ',', without_header = {str('without' in fmt).lower()})"
 
     # Execute a SELECT statement
-    cur.execute(f'''CREATE SOURCE {_source()}(
-        id int,
-        name TEXT,
-        sex int,
-        mark int,
-    ) WITH (
-        connector = 's3',
-        match_pattern = '{prefix}*.{fmt}',
-        s3.region_name = '{config['S3_REGION']}',
-        s3.bucket_name = '{config['S3_BUCKET']}',
-        s3.credentials.access = '{config['S3_ACCESS_KEY']}',
-        s3.credentials.secret = '{config['S3_SECRET_KEY']}',
-        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
-    ) FORMAT PLAIN ENCODE {_encode()};''')
+    if fmt == 'json':
+        cur.execute(f'''CREATE SOURCE {_source()}(
+            id int,
+            name TEXT,
+            sex int,
+            mark int,
+        ) WITH (
+            connector = 's3',
+            match_pattern =  '{dir}*.{fmt}{compress}',
+            s3.region_name = 'custom',
+            s3.bucket_name = 'hummock001',
+            s3.credentials.access = 'hummockadmin',
+            s3.credentials.secret = 'hummockadmin',
+            s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+            refresh.interval.sec = 1
+        ) FORMAT PLAIN ENCODE {_encode()};''')
+    else:
+        cur.execute(f'''CREATE SOURCE {_source()}(
+            id int,
+            name TEXT,
+            sex int,
+            mark int,
+        ) WITH (
+            connector = 's3',
+            match_pattern =  '{dir}{prefix}*.{fmt}',
+            s3.region_name = 'custom',
+            s3.bucket_name = 'hummock001',
+            s3.credentials.access = 'hummockadmin',
+            s3.credentials.secret = 'hummockadmin',
+            s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+            refresh.interval.sec = 1
+        ) FORMAT PLAIN ENCODE {_encode()};''')
 
     total_rows = file_num * item_num_per_file
     MAX_RETRIES = 40
@@ -187,7 +225,7 @@ def test_batch_read(config, file_num, item_num_per_file, prefix, fmt):
         if result[0] == total_rows:
             break
         print(f"[retry {retry_no}] Now got {result[0]} rows in source, {total_rows} expected, wait 30s")
-        sleep(30)
+        sleep(10)
 
     stmt = f'select count(*), sum(id), sum(sex), sum(mark) from {_source()}'
     print(f'Execute {stmt}')
@@ -211,16 +249,16 @@ def test_batch_read(config, file_num, item_num_per_file, prefix, fmt):
     conn.close()
 
 
-def upload_to_s3_bucket(config, minio_client, run_id, files, start_bias):
+def upload_to_s3_bucket(config, minio_client, run_id, files, start_bias, dir):
     _local = lambda idx, start_bias: f"data_{idx + start_bias}.{fmt}"
-    _s3 = lambda idx, start_bias: f"{run_id}_data_{idx + start_bias}.{fmt}"
+    _s3 = lambda idx, start_bias: f"/{dir}/{run_id}_data_{idx + start_bias}.{fmt}"
     for idx, file_str in enumerate(files):
         with open(_local(idx, start_bias), "w") as f:
             f.write(file_str)
             os.fsync(f.fileno())
 
         minio_client.fput_object(
-            config["S3_BUCKET"], _s3(idx, start_bias), _local(idx, start_bias)
+            "hummock001", _s3(idx, start_bias), _local(idx, start_bias)
         )
 
 
@@ -240,6 +278,7 @@ def check_for_new_files(file_num, item_num_per_file, fmt):
         cur.execute(f"select count(*) from {_table()}")
         result = cur.fetchone()
         if result[0] == total_rows:
+            cur.execute(f'drop table {_table()};')
             return True
         print(
             f"[retry {retry_no}] Now got {result[0]} rows in table, {total_rows} expected, wait 10s"
@@ -249,8 +288,8 @@ def check_for_new_files(file_num, item_num_per_file, fmt):
 
 
 if __name__ == "__main__":
-    FILE_NUM = 4001
-    ITEM_NUM_PER_FILE = 2
+    FILE_NUM = 2000
+    ITEM_NUM_PER_FILE = 4
     data = gen_data(FILE_NUM, ITEM_NUM_PER_FILE)
 
     fmt = sys.argv[1]
@@ -259,26 +298,39 @@ if __name__ == "__main__":
 
     config = json.loads(os.environ["S3_SOURCE_TEST_CONF"])
     client = Minio(
-        config["S3_ENDPOINT"],
-        access_key=config["S3_ACCESS_KEY"],
-        secret_key=config["S3_SECRET_KEY"],
-        secure=True,
+        "127.0.0.1:9301",
+        "hummockadmin",
+        "hummockadmin",
+        secure=False,
     )
     run_id = str(random.randint(1000, 9999))
+
     _local = lambda idx: f'data_{idx}.{fmt}'
-    _s3 = lambda idx: f"{run_id}_data_{idx}.{fmt}"
+    if fmt == 'json':
+        _s3 = lambda idx: f"{run_id}_data_{idx}.{fmt}.gz"
+        for idx, file_str in enumerate(formatted_files):
+            with open(_local(idx), "w") as f:
+                with gzip.open(_local(idx) + '.gz', 'wb') as f_gz:
+                    f_gz.write(file_str.encode('utf-8'))
+                    os.fsync(f.fileno())
 
-    # put s3 files
-    for idx, file_str in enumerate(formatted_files):
-        with open(_local(idx), "w") as f:
-            f.write(file_str)
-            os.fsync(f.fileno())
+            client.fput_object(
+                "hummock001",
+                _s3(idx),
+                _local(idx) + '.gz'
+            )
+    else:
+        _s3 = lambda idx: f"{run_id}_data_{idx}.{fmt}"
+        for idx, file_str in enumerate(formatted_files):
+            with open(_local(idx), "w") as f:
+                f.write(file_str)
+                os.fsync(f.fileno())
 
-        client.fput_object(
-            config["S3_BUCKET"],
-            _s3(idx),
-            _local(idx)
-        )
+            client.fput_object(
+                "hummock001",
+                _s3(idx),
+                _local(idx)
+            )
 
     # do test
     print("Test streaming file source...\n")
@@ -286,6 +338,15 @@ if __name__ == "__main__":
 
     print("Test batch read file source...\n")
     test_batch_read(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id, fmt)
+
+    _s3 = lambda idx, start_bias: (
+        f"{run_id}_data_{idx + start_bias}.{fmt}"
+        if fmt != 'json' else
+        f"{run_id}_data_{idx}.{fmt}.gz"
+    )
+    # clean up s3 files
+    for idx, _ in enumerate(formatted_files):
+        client.remove_object("hummock001", _s3(idx, 0))
 
     # test file source handle incremental files
     data = gen_data(FILE_NUM, ITEM_NUM_PER_FILE)
@@ -295,18 +356,18 @@ if __name__ == "__main__":
     data_batch1 = data[:split_idx]
     data_batch2 = data[split_idx:]
     run_id = str(random.randint(1000, 9999))
-    print(f"S3 Source New File Test: run ID: {run_id} to buckek")
+    print(f"S3 Source New File Test: run ID: {run_id} to bucket")
 
     formatted_batch1 = FORMATTER[fmt](data_batch1)
-    upload_to_s3_bucket(config, client, run_id, formatted_batch1, 0)
+    upload_to_s3_bucket(config, client, run_id, formatted_batch1, 0, "test_incremental/")
+    _s3_incremental = lambda idx, start_bias: f"test_incremental/{run_id}_data_{idx + start_bias}.{fmt}"
 
     # config in do_test that fs source's list interval is 1s
     do_test(
-        config, len(data_batch1), ITEM_NUM_PER_FILE, run_id, fmt, need_drop_table=False
-    )
+        config, len(data_batch1), ITEM_NUM_PER_FILE, run_id, fmt, need_drop_table=False, dir="test_incremental/", compress="")
 
     formatted_batch2 = FORMATTER[fmt](data_batch2)
-    upload_to_s3_bucket(config, client, run_id, formatted_batch2, split_idx)
+    upload_to_s3_bucket(config, client, run_id, formatted_batch2, split_idx, "test_incremental/")
 
     success_flag = check_for_new_files(FILE_NUM, ITEM_NUM_PER_FILE, fmt)
     if success_flag:
@@ -314,8 +375,7 @@ if __name__ == "__main__":
     else:
         print("Test(add new file) fail")
 
-    _s3 = lambda idx, start_bias: f"{run_id}_data_{idx + start_bias}.{fmt}"
-
-    # clean up s3 files
+    _s3 = lambda idx, start_bias: f"test_incremental/{run_id}_data_{idx + start_bias}.{fmt}"
+    # clean up s3 files in test_incremental dir
     for idx, _ in enumerate(formatted_files):
-        client.remove_object(config["S3_BUCKET"], _s3(idx, 0))
+        client.remove_object("hummock001", _s3(idx, 0))

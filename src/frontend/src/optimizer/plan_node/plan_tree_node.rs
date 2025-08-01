@@ -14,10 +14,10 @@
 
 use smallvec::SmallVec;
 
-use super::PlanRef;
+use crate::optimizer::{ConventionMarker, PlanRef};
 use crate::utils::ColIndexMapping;
 
-/// The trait [`PlanNode`](super::PlanNode) really need about tree structure and used by optimizer
+/// The plan node trait of different conventions really need about tree structure and used by optimizer
 /// framework. every plan node should impl it.
 ///
 /// The trait [`PlanTreeNodeLeaf`], [`PlanTreeNodeUnary`] and [`PlanTreeNodeBinary`], is just
@@ -32,22 +32,22 @@ use crate::utils::ColIndexMapping;
 /// useful when implement rules and visitors. So we highly recommend not impl the [`PlanTreeNode`]
 /// trait directly, instead use these tree trait and impl [`PlanTreeNode`] use these helper
 /// macros.
-pub trait PlanTreeNode {
+pub trait PlanTreeNode<C: ConventionMarker> {
     /// Get input nodes of the plan.
-    fn inputs(&self) -> SmallVec<[PlanRef; 2]>;
+    fn inputs(&self) -> SmallVec<[PlanRef<C>; 2]>;
 
     /// Clone the node with a list of new inputs.
-    fn clone_with_inputs(&self, inputs: &[PlanRef]) -> PlanRef;
+    fn clone_with_inputs(&self, inputs: &[PlanRef<C>]) -> PlanRef<C>;
 }
 
 /// See [`PlanTreeNode`](super)
 pub trait PlanTreeNodeLeaf: Clone {}
 
 /// See [`PlanTreeNode`](super)
-pub trait PlanTreeNodeUnary {
-    fn input(&self) -> PlanRef;
+pub trait PlanTreeNodeUnary<C: ConventionMarker> {
+    fn input(&self) -> PlanRef<C>;
     #[must_use]
-    fn clone_with_input(&self, input: PlanRef) -> Self;
+    fn clone_with_input(&self, input: PlanRef<C>) -> Self;
 
     /// Rewrites the plan node according to the schema change of its input node during rewriting.
     ///
@@ -56,7 +56,7 @@ pub trait PlanTreeNodeUnary {
     #[must_use]
     fn rewrite_with_input(
         &self,
-        _input: PlanRef,
+        _input: PlanRef<C>,
         _input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping)
     where
@@ -67,12 +67,12 @@ pub trait PlanTreeNodeUnary {
 }
 
 /// See [`PlanTreeNode`](super)
-pub trait PlanTreeNodeBinary {
-    fn left(&self) -> PlanRef;
-    fn right(&self) -> PlanRef;
+pub trait PlanTreeNodeBinary<C: ConventionMarker> {
+    fn left(&self) -> PlanRef<C>;
+    fn right(&self) -> PlanRef<C>;
 
     #[must_use]
-    fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self;
+    fn clone_with_left_right(&self, left: PlanRef<C>, right: PlanRef<C>) -> Self;
 
     /// Rewrites the plan node according to the schema change of its input nodes during rewriting.
     ///
@@ -81,9 +81,9 @@ pub trait PlanTreeNodeBinary {
     #[must_use]
     fn rewrite_with_left_right(
         &self,
-        _left: PlanRef,
+        _left: PlanRef<C>,
         _left_col_change: ColIndexMapping,
-        _right: PlanRef,
+        _right: PlanRef<C>,
         _right_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping)
     where
@@ -94,17 +94,17 @@ pub trait PlanTreeNodeBinary {
 }
 
 macro_rules! impl_plan_tree_node_for_leaf {
-    ($leaf_node_type:ident) => {
-        impl crate::optimizer::plan_node::PlanTreeNode for $leaf_node_type {
-            fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
+    ($convention:ty, $leaf_node_type:ident) => {
+        impl crate::optimizer::plan_node::PlanTreeNode<$convention> for $leaf_node_type {
+            fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef<$convention>; 2]> {
                 smallvec::smallvec![]
             }
 
             /// Clone the node with a list of new inputs.
             fn clone_with_inputs(
                 &self,
-                inputs: &[crate::optimizer::PlanRef],
-            ) -> crate::optimizer::PlanRef {
+                inputs: &[crate::optimizer::PlanRef<$convention>],
+            ) -> crate::optimizer::PlanRef<$convention> {
                 assert_eq!(inputs.len(), 0);
                 self.clone().into()
             }
@@ -113,17 +113,17 @@ macro_rules! impl_plan_tree_node_for_leaf {
 }
 
 macro_rules! impl_plan_tree_node_for_unary {
-    ($unary_node_type:ident) => {
-        impl crate::optimizer::plan_node::PlanTreeNode for $unary_node_type {
-            fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
+    ($convention:ty, $unary_node_type:ident) => {
+        impl crate::optimizer::plan_node::PlanTreeNode<$convention> for $unary_node_type {
+            fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef<$convention>; 2]> {
                 smallvec::smallvec![self.input()]
             }
 
             /// Clone the node with a list of new inputs.
             fn clone_with_inputs(
                 &self,
-                inputs: &[crate::optimizer::PlanRef],
-            ) -> crate::optimizer::PlanRef {
+                inputs: &[crate::optimizer::PlanRef<$convention>],
+            ) -> crate::optimizer::PlanRef<$convention> {
                 assert_eq!(inputs.len(), 1);
                 self.clone_with_input(inputs[0].clone()).into()
             }
@@ -132,16 +132,16 @@ macro_rules! impl_plan_tree_node_for_unary {
 }
 
 macro_rules! impl_plan_tree_node_for_binary {
-    ($binary_node_type:ident) => {
-        impl crate::optimizer::plan_node::PlanTreeNode for $binary_node_type {
-            fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
+    ($convention:ty, $binary_node_type:ident) => {
+        impl crate::optimizer::plan_node::PlanTreeNode<$convention> for $binary_node_type {
+            fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef<$convention>; 2]> {
                 smallvec::smallvec![self.left(), self.right()]
             }
 
             fn clone_with_inputs(
                 &self,
-                inputs: &[crate::optimizer::PlanRef],
-            ) -> crate::optimizer::PlanRef {
+                inputs: &[crate::optimizer::PlanRef<$convention>],
+            ) -> crate::optimizer::PlanRef<$convention> {
                 assert_eq!(inputs.len(), 2);
                 self.clone_with_left_right(inputs[0].clone(), inputs[1].clone())
                     .into()

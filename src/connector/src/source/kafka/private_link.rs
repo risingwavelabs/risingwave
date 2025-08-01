@@ -61,11 +61,10 @@ pub(super) struct BrokerAddrRewriter {
 
 impl BrokerAddrRewriter {
     pub(super) fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
-        let rewrote_addr = match self.rewrite_map.get(&addr) {
+        match self.rewrite_map.get(&addr) {
             None => addr,
             Some(new_addr) => new_addr.clone(),
-        };
-        rewrote_addr
+        }
     }
 
     pub fn new(

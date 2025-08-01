@@ -12,16 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use async_trait::async_trait;
 use risingwave_common::bail;
-use rumqttc::Outgoing;
 use rumqttc::v5::{ConnectionError, Event, Incoming};
 use thiserror_ext::AsReport;
-use tokio::sync::RwLock;
 
 use super::MqttProperties;
 use super::source::MqttSplit;
@@ -29,11 +26,9 @@ use crate::error::ConnectorResult;
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 pub struct MqttSplitEnumerator {
-    #[expect(dead_code)]
     topic: String,
     #[expect(dead_code)]
     client: rumqttc::v5::AsyncClient,
-    topics: Arc<RwLock<HashSet<String>>>,
     connected: Arc<AtomicBool>,
     stopped: Arc<AtomicBool>,
 }
@@ -48,20 +43,7 @@ impl SplitEnumerator for MqttSplitEnumerator {
         context: SourceEnumeratorContextRef,
     ) -> ConnectorResult<MqttSplitEnumerator> {
         let (client, mut eventloop) = properties.common.build_client(context.info.source_id, 0)?;
-
         let topic = properties.topic.clone();
-        let mut topics = HashSet::new();
-        if !topic.contains('#') && !topic.contains('+') {
-            topics.insert(topic.clone());
-        }
-
-        client
-            .subscribe(topic.clone(), rumqttc::v5::mqttbytes::QoS::AtMostOnce)
-            .await?;
-
-        let cloned_client = client.clone();
-
-        let topics = Arc::new(RwLock::new(topics));
 
         let connected = Arc::new(AtomicBool::new(false));
         let connected_clone = connected.clone();
@@ -69,49 +51,29 @@ impl SplitEnumerator for MqttSplitEnumerator {
         let stopped = Arc::new(AtomicBool::new(false));
         let stopped_clone = stopped.clone();
 
-        let topics_clone = topics.clone();
         tokio::spawn(async move {
             while !stopped_clone.load(std::sync::atomic::Ordering::Relaxed) {
                 match eventloop.poll().await {
-                    Ok(Event::Outgoing(Outgoing::Subscribe(_))) => {
+                    Ok(Event::Incoming(Incoming::ConnAck(_))) => {
                         connected_clone.store(true, std::sync::atomic::Ordering::Relaxed);
                     }
-                    Ok(Event::Incoming(Incoming::Publish(p))) => {
-                        let topic = String::from_utf8_lossy(&p.topic).to_string();
-                        let exist = {
-                            let topics = topics_clone.read().await;
-                            topics.contains(&topic)
-                        };
-
-                        if !exist {
-                            let mut topics = topics_clone.write().await;
-                            topics.insert(topic);
-                        }
-                    }
-                    Ok(_) => {}
+                    Ok(_)
+                    | Err(ConnectionError::Timeout(_))
+                    | Err(ConnectionError::RequestsDone) => {}
                     Err(err) => {
-                        if let ConnectionError::Timeout(_) = err {
-                            continue;
-                        }
                         tracing::error!(
-                            "Failed to subscribe to topic {}: {}",
+                            "Failed to fetch splits to topic {}: {}",
                             topic,
                             err.as_report(),
                         );
-                        connected_clone.store(false, std::sync::atomic::Ordering::Relaxed);
-                        cloned_client
-                            .subscribe(topic.clone(), rumqttc::v5::mqttbytes::QoS::AtMostOnce)
-                            .await
-                            .unwrap();
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await
                     }
                 }
             }
         });
-
         Ok(Self {
-            client,
-            topics,
             topic: properties.topic,
+            client,
             connected,
             stopped,
         })
@@ -132,9 +94,7 @@ impl SplitEnumerator for MqttSplitEnumerator {
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             }
         }
-
-        let topics = self.topics.read().await;
-        Ok(topics.iter().cloned().map(MqttSplit::new).collect())
+        Ok(vec![MqttSplit::new(self.topic.clone())])
     }
 }
 

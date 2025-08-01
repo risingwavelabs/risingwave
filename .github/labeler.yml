@@ -19,11 +19,11 @@ labels:
   title: "^build.*"
 - label: "type/revert"
   title: "^revert.*"
-- label: "component/ci"
+- label: "A-ci"
   title: "^ci.*"
-- label: "component/test"
+- label: "A-test"
   title: "^test.*"
-- label: "component/doc"
+- label: "A-doc"
   title: "^doc.*"
 - label: "type/deprecate"
   title: "^deprecate.*"
@@ -54,6 +54,8 @@ labels:
 - label: "ci/run-e2e-iceberg-tests"
   files:
   - ".*iceberg.*"
+- label: "ci/run-e2e-iceberg-tests"
+  title: ".*iceberg.*"
 
 # S3 source tests
 - label: "ci/run-s3-source-tests"

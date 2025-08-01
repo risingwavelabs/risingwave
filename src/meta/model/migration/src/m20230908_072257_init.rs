@@ -38,11 +38,11 @@ impl MigrationTrait for Migration {
         );
 
         // In Mysql, The CHAR, VARCHAR and TEXT types are encoded in utf8_general_ci by default, which is not case sensitive but
-        // required in risingwave. Here we need to change the database collate to utf8_bin.
+        // required in risingwave. Here we need to change the database collate to utf8mb4_bin.
         if manager.get_database_backend() == DbBackend::MySql {
             manager
                 .get_connection()
-                .execute_unprepared("ALTER DATABASE COLLATE utf8_bin")
+                .execute_unprepared("ALTER DATABASE CHARACTER SET utf8mb4 COLLATE utf8mb4_bin")
                 .await
                 .expect("failed to set database collate");
         }
@@ -931,9 +931,18 @@ impl MigrationTrait for Migration {
                 true.into(),
                 true.into(),
             ])
+            .values_panic([
+                3.into(),
+                "rwadmin".into(),
+                true.into(),
+                true.into(),
+                true.into(),
+                true.into(),
+            ])
             .to_owned();
 
-        // Since User table is newly created, we assume that the initial user id of `root` is 1 and `postgres` is 2.
+        // Since the User table is newly created, we assume that the initial
+        // user id of `root` is 1, `postgres` is 2 and `rwadmin` is 3.
         let insert_objects = Query::insert()
             .into_table(Object::Table)
             .columns([
@@ -999,7 +1008,7 @@ impl MigrationTrait for Migration {
                     .get_connection()
                     .execute(Statement::from_string(
                         DatabaseBackend::Postgres,
-                        "SELECT setval('user_user_id_seq', 2)",
+                        "SELECT setval('user_user_id_seq', 3)",
                     ))
                     .await?;
             }

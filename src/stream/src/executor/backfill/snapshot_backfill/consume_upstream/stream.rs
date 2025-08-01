@@ -33,6 +33,8 @@ mod upstream_table_ext {
         VnodeStream<impl ChangeLogRowStream>;
     pub(super) type UpstreamTableSnapshotStreamFuture<'a, T> =
         BoxFuture<'a, StreamExecutorResult<UpstreamTableSnapshotStream<T>>>;
+
+    #[define_opaque(UpstreamTableSnapshotStream)]
     pub(super) fn create_upstream_table_snapshot_stream<T: UpstreamTable>(
         upstream_table: &T,
         snapshot_epoch: u64,
@@ -64,6 +66,7 @@ mod upstream_table_ext {
     pub(super) type UpstreamTableChangeLogStreamFuture<'a, T> =
         BoxFuture<'a, StreamExecutorResult<UpstreamTableChangeLogStream<T>>>;
 
+    #[define_opaque(UpstreamTableChangeLogStreamFuture)]
     pub(super) fn create_upstream_table_change_log_stream<T: UpstreamTable>(
         upstream_table: &T,
         epoch: u64,
@@ -182,7 +185,7 @@ impl<T: UpstreamTable> ConsumeUpstreamStream<'_, T> {
             }
             ConsumeUpstreamStreamState::ConsumingSnapshotStream {
                 stream,
-                ref snapshot_epoch,
+                snapshot_epoch,
                 ..
             } => {
                 stream
@@ -191,8 +194,10 @@ impl<T: UpstreamTable> ConsumeUpstreamStream<'_, T> {
                     })
                     .await?;
             }
-            ConsumeUpstreamStreamState::ConsumingChangeLogStream {
-                stream, ref epoch, ..
+            &mut ConsumeUpstreamStreamState::ConsumingChangeLogStream {
+                ref mut stream,
+                ref epoch,
+                ..
             } => {
                 stream
                     .for_vnode_pk_progress(|vnode, row_count, pk_progress| {
@@ -200,11 +205,11 @@ impl<T: UpstreamTable> ConsumeUpstreamStream<'_, T> {
                     })
                     .await?;
             }
-            ConsumeUpstreamStreamState::CreatingChangeLogStream {
+            &mut ConsumeUpstreamStreamState::CreatingChangeLogStream {
                 ref prev_epoch_finished_vnodes,
                 ..
             }
-            | ConsumeUpstreamStreamState::ResolvingNextEpoch {
+            | &mut ConsumeUpstreamStreamState::ResolvingNextEpoch {
                 ref prev_epoch_finished_vnodes,
                 ..
             } => {

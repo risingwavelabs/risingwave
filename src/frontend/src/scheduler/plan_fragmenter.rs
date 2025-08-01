@@ -39,6 +39,7 @@ use risingwave_connector::source::filesystem::opendal_source::{
 };
 use risingwave_connector::source::iceberg::IcebergSplitEnumerator;
 use risingwave_connector::source::kafka::KafkaSplitEnumerator;
+use risingwave_connector::source::prelude::DatagenSplitEnumerator;
 use risingwave_connector::source::reader::reader::build_opendal_fs_list_for_batch;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SplitEnumerator, SplitImpl,
@@ -56,11 +57,11 @@ use super::SchedulerError;
 use crate::catalog::TableId;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::error::RwError;
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
 use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
 use crate::optimizer::plan_node::{
-    BatchIcebergScan, BatchKafkaScan, BatchSource, PlanNodeId, PlanNodeType,
+    BatchIcebergScan, BatchKafkaScan, BatchPlanRef as PlanRef, BatchSource, PlanNodeId,
+    PlanNodeType,
 };
 use crate::optimizer::property::Distribution;
 use crate::scheduler::SchedulerResult;
@@ -342,9 +343,21 @@ impl SourceScanInfo {
 
                 Ok(SourceScanInfo::Complete(split_info))
             }
+            (ConnectorProperties::Datagen(prop), SourceFetchParameters::Empty) => {
+                let mut datagen_enumerator =
+                    DatagenSplitEnumerator::new(*prop, SourceEnumeratorContext::dummy().into())
+                        .await?;
+                let split_info = datagen_enumerator.list_splits().await?;
+                let res = split_info.into_iter().map(SplitImpl::Datagen).collect_vec();
+
+                Ok(SourceScanInfo::Complete(res))
+            }
             (ConnectorProperties::OpendalS3(prop), SourceFetchParameters::Empty) => {
-                let lister: OpendalEnumerator<OpendalS3> =
-                    OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
+                let lister: OpendalEnumerator<OpendalS3> = OpendalEnumerator::new_s3_source(
+                    &prop.s3_properties,
+                    prop.assume_role,
+                    prop.fs_common.compression_format,
+                )?;
                 let stream = build_opendal_fs_list_for_batch(lister);
 
                 let batch_res: Vec<_> = stream.try_collect().await?;
@@ -398,8 +411,10 @@ impl SourceScanInfo {
 
                 Ok(SourceScanInfo::Complete(split_info))
             }
-            _ => Err(SchedulerError::Internal(anyhow!(
-                "Unsupported to query directly from this source"
+            (connector, _) => Err(SchedulerError::Internal(anyhow!(
+                "Unsupported to query directly from this {} source, \
+                 please create a table or streaming job from it",
+                connector.kind()
             ))),
         }
     }

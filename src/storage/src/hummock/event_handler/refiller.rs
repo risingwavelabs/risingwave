@@ -28,6 +28,7 @@ use prometheus::{
     Histogram, HistogramVec, IntGauge, Registry, register_histogram_vec_with_registry,
     register_int_counter_vec_with_registry, register_int_gauge_with_registry,
 };
+use risingwave_common::license::Feature;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::{HummockSstableObjectId, KeyComparator};
@@ -200,13 +201,21 @@ pub struct CacheRefillConfig {
 
 impl CacheRefillConfig {
     pub fn from_storage_opts(options: &StorageOpts) -> Self {
-        Self {
-            timeout: Duration::from_millis(options.cache_refill_timeout_ms),
-            data_refill_levels: options
+        let data_refill_levels = match Feature::ElasticDiskCache.check_available() {
+            Ok(_) => options
                 .cache_refill_data_refill_levels
                 .iter()
                 .copied()
                 .collect(),
+            Err(e) => {
+                tracing::warn!(error = %e.as_report(), "ElasticDiskCache is not available.");
+                HashSet::new()
+            }
+        };
+
+        Self {
+            timeout: Duration::from_millis(options.cache_refill_timeout_ms),
+            data_refill_levels,
             concurrency: options.cache_refill_concurrency,
             unit: options.cache_refill_unit,
             threshold: options.cache_refill_threshold,
@@ -449,20 +458,26 @@ impl CacheRefillTask {
         res
     }
 
+    /// Data cache refill entry point.
     async fn data_cache_refill(
         context: &CacheRefillContext,
         delta: &SstDeltaInfo,
         holders: Vec<TableHolder>,
     ) {
-        // return if data file cache is disabled
-        let Some(filter) = context.sstable_store.data_recent_filter() else {
+        // Skip data cache refill if data disk cache is not enabled.
+        if !context.sstable_store.block_cache().is_hybrid() {
             return;
-        };
+        }
 
         // return if no data to refill
         if delta.insert_sst_infos.is_empty() || delta.delete_sst_object_ids.is_empty() {
             return;
         }
+
+        // return if data file cache is disabled
+        let Some(filter) = context.sstable_store.data_recent_filter() else {
+            return;
+        };
 
         // return if recent filter miss
         if !context
@@ -598,7 +613,7 @@ impl CacheRefillTask {
 
             let mut writer = sstable_store.block_cache().storage_writer(key);
 
-            if writer.pick() {
+            if writer.pick().admitted() {
                 admits += 1;
             }
 

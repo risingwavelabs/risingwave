@@ -12,8 +12,40 @@ Refer to the [RisingWave Developer Guide](https://risingwavelabs.github.io/risin
 >
 > Usually you will just need to run either batch tests or streaming tests. Other tests may need to be run under some specific settings, e.g., ddl tests need to be run on a fresh instance, and database tests need to first create a database and then connect to that database to run tests.
 >
-> You will never want to run all tests using `./e2e_test/**/*.slt`. You may refer to the [ci script](../ci/scripts/e2e-test-serial.sh) to see how to run all tests.
+> You will never want to run all tests using `./e2e_test/**/*.slt`. You may refer to the [ci script](../ci/scripts/e2e-test-parallel.sh) to see how to run all tests.
 
 ## How to test connectors
 
 See the [connector development guide](http://risingwavelabs.github.io/risingwave/connector/intro.html#end-to-end-tests).
+
+
+## Environment variables in SLT
+
+If you run `risedev slt` the following environment variables are set:
+
+```sh
+SLT_HOST = "${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS}"
+SLT_PORT = "${RISEDEV_RW_FRONTEND_PORT}"
+SLT_DB = "dev"
+```
+
+## SLT Coverage Check
+
+The `check_slt_coverage.py` script provides a basic assessment of SLT coverage, i.e., whether all SLT files are referenced by CI scripts under `ci/scripts`.
+
+### Usage
+
+```bash
+python3 e2e_test/check_slt_coverage.py -d                   # show directory-level analysis
+python3 e2e_test/check_slt_coverage.py -d -o output.json    # save detailed results to file
+
+python3 e2e_test/check_slt_coverage.py --help               # for more options
+```
+
+### Coverage Ignore File
+
+The `e2e_test/.coverageignore` file uses gitignore-like syntax to specify patterns for files that should be excluded from coverage analysis. This is useful for:
+
+- Test files that are manually executed
+- Template files that generate other test files
+- Tests only meant for local development

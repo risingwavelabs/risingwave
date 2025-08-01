@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use thiserror_ext::AsReport as _;
 
-use super::plan_node::RewriteExprsRecursive;
+use super::plan_node::{ConventionMarker, Logical, LogicalPlanRef};
 use super::plan_visitor::has_logical_max_one_row;
 use crate::error::Result;
 use crate::expr::NowProcTimeFinder;
@@ -35,12 +35,12 @@ use crate::optimizer::rule::*;
 use crate::utils::Condition;
 use crate::{Explain, OptimizerContextRef};
 
-impl PlanRef {
+impl<C: ConventionMarker> PlanRef<C> {
     fn optimize_by_rules_inner(
         self,
-        heuristic_optimizer: &mut HeuristicOptimizer<'_>,
+        heuristic_optimizer: &mut HeuristicOptimizer<'_, C>,
         stage_name: &str,
-    ) -> Result<PlanRef> {
+    ) -> Result<PlanRef<C>> {
         let ctx = self.ctx();
 
         let result = heuristic_optimizer.optimize(self);
@@ -65,8 +65,8 @@ impl PlanRef {
             stage_name,
             rules,
             apply_order,
-        }: &OptimizationStage,
-    ) -> Result<PlanRef> {
+        }: &OptimizationStage<C>,
+    ) -> Result<PlanRef<C>> {
         self.optimize_by_rules_inner(&mut HeuristicOptimizer::new(apply_order, rules), stage_name)
     }
 
@@ -76,8 +76,8 @@ impl PlanRef {
             stage_name,
             rules,
             apply_order,
-        }: &OptimizationStage,
-    ) -> Result<PlanRef> {
+        }: &OptimizationStage<C>,
+    ) -> Result<PlanRef<C>> {
         loop {
             let mut heuristic_optimizer = HeuristicOptimizer::new(apply_order, rules);
             self = self.optimize_by_rules_inner(&mut heuristic_optimizer, stage_name)?;
@@ -88,14 +88,14 @@ impl PlanRef {
     }
 }
 
-pub struct OptimizationStage {
+pub struct OptimizationStage<C: ConventionMarker = Logical> {
     stage_name: String,
-    rules: Vec<BoxedRule>,
+    rules: Vec<BoxedRule<C>>,
     apply_order: ApplyOrder,
 }
 
-impl OptimizationStage {
-    pub fn new<S>(name: S, rules: Vec<BoxedRule>, apply_order: ApplyOrder) -> Self
+impl<C: ConventionMarker> OptimizationStage<C> {
+    pub fn new<S>(name: S, rules: Vec<BoxedRule<C>>, apply_order: ApplyOrder) -> Self
     where
         S: Into<String>,
     {
@@ -110,6 +110,8 @@ impl OptimizationStage {
 use std::sync::LazyLock;
 
 use risingwave_sqlparser::ast::ExplainFormat;
+
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 
 pub struct LogicalOptimizer {}
 
@@ -135,6 +137,10 @@ static TABLE_FUNCTION_CONVERT: LazyLock<OptimizationStage> = LazyLock::new(|| {
         vec![
             // Apply file scan rule first
             TableFunctionToFileScanRule::create(),
+            // Apply internal backfill progress rule first
+            TableFunctionToInternalBackfillProgressRule::create(),
+            // Apply internal source backfill progress rule next
+            TableFunctionToInternalSourceBackfillProgressRule::create(),
             // Apply postgres query rule next
             TableFunctionToPostgresQueryRule::create(),
             // Apply mysql query rule next
@@ -169,6 +175,24 @@ static TABLE_FUNCTION_TO_MYSQL_QUERY: LazyLock<OptimizationStage> = LazyLock::ne
         ApplyOrder::TopDown,
     )
 });
+
+static TABLE_FUNCTION_TO_INTERNAL_BACKFILL_PROGRESS: LazyLock<OptimizationStage> =
+    LazyLock::new(|| {
+        OptimizationStage::new(
+            "Table Function To Internal Backfill Progress",
+            vec![TableFunctionToInternalBackfillProgressRule::create()],
+            ApplyOrder::TopDown,
+        )
+    });
+
+static TABLE_FUNCTION_TO_INTERNAL_SOURCE_BACKFILL_PROGRESS: LazyLock<OptimizationStage> =
+    LazyLock::new(|| {
+        OptimizationStage::new(
+            "Table Function To Internal Source Backfill Progress",
+            vec![TableFunctionToInternalSourceBackfillProgressRule::create()],
+            ApplyOrder::TopDown,
+        )
+    });
 
 static VALUES_EXTRACT_PROJECT: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
@@ -327,6 +351,14 @@ static JOIN_COMMUTE: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
+static CONSTANT_OUTPUT_REMOVE: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Constant Output Operator Remove",
+        vec![EmptyAggRemoveRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
 static PROJECT_REMOVE: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Project Remove",
@@ -471,10 +503,10 @@ static REWRITE_SOURCE_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::new(|| 
 
 impl LogicalOptimizer {
     pub fn predicate_pushdown(
-        plan: PlanRef,
+        plan: LogicalPlanRef,
         explain_trace: bool,
         ctx: &OptimizerContextRef,
-    ) -> PlanRef {
+    ) -> LogicalPlanRef {
         let plan = plan.predicate_pushdown(
             Condition::true_cond(),
             &mut PredicatePushdownContext::new(plan.clone()),
@@ -487,11 +519,11 @@ impl LogicalOptimizer {
     }
 
     pub fn subquery_unnesting(
-        mut plan: PlanRef,
+        mut plan: LogicalPlanRef,
         enable_share_plan: bool,
         explain_trace: bool,
         ctx: &OptimizerContextRef,
-    ) -> Result<PlanRef> {
+    ) -> Result<LogicalPlanRef> {
         // Bail our if no apply operators.
         if !has_logical_apply(plan.clone()) {
             return Ok(plan);
@@ -521,10 +553,10 @@ impl LogicalOptimizer {
     }
 
     pub fn column_pruning(
-        mut plan: PlanRef,
+        mut plan: LogicalPlanRef,
         explain_trace: bool,
         ctx: &OptimizerContextRef,
-    ) -> PlanRef {
+    ) -> LogicalPlanRef {
         let required_cols = (0..plan.schema().len()).collect_vec();
         let mut column_pruning_ctx = ColumnPruningContext::new(plan.clone());
         plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
@@ -546,7 +578,7 @@ impl LogicalOptimizer {
         plan
     }
 
-    pub fn inline_now_proc_time(plan: PlanRef, ctx: &OptimizerContextRef) -> PlanRef {
+    pub fn inline_now_proc_time(plan: LogicalPlanRef, ctx: &OptimizerContextRef) -> LogicalPlanRef {
         // If now() and proctime() are not found, bail out.
         let mut v = NowProcTimeFinder::default();
         plan.visit_exprs_recursive(&mut v);
@@ -565,7 +597,9 @@ impl LogicalOptimizer {
         plan
     }
 
-    pub fn gen_optimized_logical_plan_for_stream(mut plan: PlanRef) -> Result<PlanRef> {
+    pub fn gen_optimized_logical_plan_for_stream(
+        mut plan: LogicalPlanRef,
+    ) -> Result<LogicalPlanRef> {
         let ctx = plan.ctx();
         let explain_trace = ctx.is_explain_trace();
 
@@ -576,6 +610,8 @@ impl LogicalOptimizer {
 
         // Convert grouping sets at first because other agg rule can't handle grouping sets.
         plan = plan.optimize_by_rules(&GROUPING_SETS)?;
+        // Remove nodes with constant output.
+        plan = plan.optimize_by_rules(&CONSTANT_OUTPUT_REMOVE)?;
         // Remove project to make common sub-plan sharing easier.
         plan = plan.optimize_by_rules(&PROJECT_REMOVE)?;
 
@@ -679,6 +715,7 @@ impl LogicalOptimizer {
         plan = Self::column_pruning(plan, explain_trace, &ctx);
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
+        plan = plan.optimize_by_rules(&CONSTANT_OUTPUT_REMOVE)?;
         plan = plan.optimize_by_rules(&PROJECT_REMOVE)?;
 
         plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT)?;
@@ -709,7 +746,9 @@ impl LogicalOptimizer {
         Ok(plan)
     }
 
-    pub fn gen_optimized_logical_plan_for_batch(mut plan: PlanRef) -> Result<PlanRef> {
+    pub fn gen_optimized_logical_plan_for_batch(
+        mut plan: LogicalPlanRef,
+    ) -> Result<LogicalPlanRef> {
         let ctx = plan.ctx();
         let explain_trace = ctx.is_explain_trace();
 
@@ -734,6 +773,8 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_FILE_SCAN)?;
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_POSTGRES_QUERY)?;
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_MYSQL_QUERY)?;
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_BACKFILL_PROGRESS)?;
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_SOURCE_BACKFILL_PROGRESS)?;
         // In order to unnest a table function, we need to convert it into a `project_set` first.
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_CONVERT)?;
 
@@ -793,6 +834,7 @@ impl LogicalOptimizer {
             plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
         }
 
+        plan = plan.optimize_by_rules(&CONSTANT_OUTPUT_REMOVE)?;
         plan = plan.optimize_by_rules(&PROJECT_REMOVE)?;
 
         plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT)?;

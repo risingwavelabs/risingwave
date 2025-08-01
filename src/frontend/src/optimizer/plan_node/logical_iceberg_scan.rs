@@ -20,8 +20,8 @@ use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 use super::generic::GenericPlanRef;
 use super::utils::{Distill, childless_record};
 use super::{
-    ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef, PredicatePushdown,
-    ToBatch, ToStream, generic,
+    ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, LogicalProject, PlanBase,
+    PredicatePushdown, ToBatch, ToStream, generic,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::Result;
@@ -64,10 +64,19 @@ impl LogicalIcebergScan {
     pub fn clone_with_required_cols(&self, required_cols: &[usize]) -> Self {
         assert!(!required_cols.is_empty());
         let mut core = self.core.clone();
+        let mut has_row_id = false;
         core.column_catalog = required_cols
             .iter()
-            .map(|idx| core.column_catalog[*idx].clone())
+            .map(|idx| {
+                if Some(*idx) == core.row_id_index {
+                    has_row_id = true;
+                }
+                core.column_catalog[*idx].clone()
+            })
             .collect();
+        if !has_row_id {
+            core.row_id_index = None;
+        }
         let base = PlanBase::new_logical_with_core(&core);
 
         LogicalIcebergScan {
@@ -78,7 +87,7 @@ impl LogicalIcebergScan {
     }
 }
 
-impl_plan_tree_node_for_leaf! {LogicalIcebergScan}
+impl_plan_tree_node_for_leaf! { Logical, LogicalIcebergScan}
 impl Distill for LogicalIcebergScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let fields = if let Some(catalog) = self.source_catalog() {
@@ -108,7 +117,7 @@ impl ColPrunable for LogicalIcebergScan {
     }
 }
 
-impl ExprRewritable for LogicalIcebergScan {}
+impl ExprRewritable<Logical> for LogicalIcebergScan {}
 
 impl ExprVisitable for LogicalIcebergScan {}
 
@@ -124,14 +133,17 @@ impl PredicatePushdown for LogicalIcebergScan {
 }
 
 impl ToBatch for LogicalIcebergScan {
-    fn to_batch(&self) -> Result<PlanRef> {
-        let plan: PlanRef = BatchIcebergScan::new(self.core.clone(), self.iceberg_scan_type).into();
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
+        let plan = BatchIcebergScan::new(self.core.clone(), self.iceberg_scan_type).into();
         Ok(plan)
     }
 }
 
 impl ToStream for LogicalIcebergScan {
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(
+        &self,
+        _ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         unreachable!()
     }
 

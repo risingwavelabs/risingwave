@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -e
+
 if [ -z "$(which cargo-binstall)" ] && [ -z "$RISINGWAVE_CI" ]; then
     echo "Installing cargo-binstall..."
     curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
@@ -18,12 +20,23 @@ if [ -z "$RISEDEV_CMD" ]; then
     export RISEDEV_CMD="$0"
 fi
 
-if [ $# -eq 0 ] || [ "$1" == "-h" ] || [ "$1" ==  "--help" ]; then
+if [ $# -eq 0 ] || [ "$1" == "-h" ] || [ "$1" == "--help" ]; then
     cargo make --list-all-steps --hide-uninteresting
     exit 0
 fi
 
-cargo make --allow-private configure-if-not-configured
+cargo make --silent --allow-private configure-if-not-configured
+
+# WORKAROUND: `cargo make` does not handle SIGINT and will exit without waiting for the child processes
+# to finish. This can be confusing and not friendly for users.
+# Here we trap SIGINT to an empty command to ignore it, so that the consecutive `cargo make` will also
+# ignore SIGINT. However, all child processes spawned by `cargo make` can still receive and handle SIGINT.
+# As a result, `cargo make` will behave similar to `bash`.
+# To test this, run `risedev psql`, press ^C, and compare the behavior with `cargo make psql`.
+if [ "$1" == "psql" ] || [[ "$1" == slt* ]]; then
+    trap '' INT
+fi
+
 # We marked many tasks as private, so we can have a more concise output when listing all tasks.
 # But we allow private tasks to be executed.
 cargo make --allow-private "$@"

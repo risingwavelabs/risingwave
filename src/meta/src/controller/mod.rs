@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
+use risingwave_common::bail;
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::{
@@ -25,7 +26,6 @@ use risingwave_meta_model::{
 use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
 use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
-use risingwave_pb::catalog::subscription::PbSubscriptionState;
 use risingwave_pb::catalog::table::{PbEngine, PbOptionalAssociatedSourceId, PbTableType};
 use risingwave_pb::catalog::{
     PbConnection, PbCreateType, PbDatabase, PbFunction, PbHandleConflictBehavior, PbIndex,
@@ -66,7 +66,7 @@ pub struct SqlMetaStore {
 
 impl SqlMetaStore {
     /// Connect to the SQL meta store based on the given configuration.
-    pub async fn connect(backend: MetaStoreBackend) -> Result<Self, sea_orm::DbErr> {
+    pub async fn connect(backend: MetaStoreBackend) -> MetaResult<Self> {
         const MAX_DURATION: Duration = Duration::new(u64::MAX / 4, 0);
 
         #[easy_ext::ext]
@@ -117,6 +117,11 @@ impl SqlMetaStore {
                     .acquire_timeout(Duration::from_secs(config.acquire_timeout_sec));
 
                 if DbBackend::Sqlite.is_prefix_of(&endpoint) {
+                    if endpoint.contains(":memory:") || endpoint.contains("mode=memory") {
+                        bail!(
+                            "use the `mem` backend instead of specifying a URL of in-memory SQLite"
+                        );
+                    }
                     options.sqlite_common();
                 }
 
@@ -175,6 +180,8 @@ impl From<ObjectModel<database::Model>> for PbDatabase {
             name: value.0.name,
             owner: value.1.owner_id as _,
             resource_group: value.0.resource_group.clone(),
+            barrier_interval_ms: value.0.barrier_interval_ms.map(|v| v as u32),
+            checkpoint_frequency: value.0.checkpoint_frequency.map(|v| v as u64),
         }
     }
 }
@@ -212,7 +219,6 @@ impl From<ObjectModel<table::Model>> for PbTable {
             name: value.0.name,
             columns: value.0.columns.to_protobuf(),
             pk: value.0.pk.to_protobuf(),
-            dependent_relations: vec![], // todo: deprecate it.
             table_type: PbTableType::from(value.0.table_type) as _,
             distribution_key: value.0.distribution_key.0,
             stream_key: value.0.stream_key.0,
@@ -260,6 +266,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             job_id: value.0.belongs_to_job_id.map(|id| id as _),
             engine: value.0.engine.map(|engine| PbEngine::from(engine) as i32),
             clean_watermark_index_in_pk: value.0.clean_watermark_index_in_pk,
+            refreshable: value.0.refreshable,
         }
     }
 }
@@ -310,7 +317,6 @@ impl From<ObjectModel<sink::Model>> for PbSink {
         if let Some(secret_ref) = value.0.secret_ref {
             secret_ref_map = secret_ref.to_protobuf();
         }
-        #[allow(deprecated)] // for `dependent_relations`
         Self {
             id: value.0.sink_id as _,
             schema_id: value.1.schema_id.unwrap() as _,
@@ -318,7 +324,6 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             name: value.0.name,
             columns: value.0.columns.to_protobuf(),
             plan_pk: value.0.plan_pk.to_protobuf(),
-            dependent_relations: vec![],
             distribution_key: value.0.distribution_key.0,
             downstream_pk: value.0.downstream_pk.0,
             sink_type: PbSinkType::from(value.0.sink_type) as _,
@@ -346,6 +351,10 @@ impl From<ObjectModel<sink::Model>> for PbSink {
                 .original_target_columns
                 .map(|cols| cols.to_protobuf())
                 .unwrap_or_default(),
+            auto_refresh_schema_from_table: value
+                .0
+                .auto_refresh_schema_from_table
+                .map(|id| id as _),
         }
     }
 }
@@ -369,7 +378,7 @@ impl From<ObjectModel<subscription::Model>> for PbSubscription {
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             dependent_table_id: value.0.dependent_table_id as _,
-            subscription_state: PbSubscriptionState::Init as _,
+            subscription_state: value.0.subscription_state as _,
         }
     }
 }
@@ -414,7 +423,6 @@ impl From<ObjectModel<view::Model>> for PbView {
             owner: value.1.owner_id as _,
             properties: value.0.properties.0,
             sql: value.0.definition,
-            dependent_relations: vec![], // todo: deprecate it.
             columns: value.0.columns.to_protobuf(),
         }
     }

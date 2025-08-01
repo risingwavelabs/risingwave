@@ -64,28 +64,28 @@ pub struct MetaMetrics {
     // ********************************** Barrier ************************************
     /// The duration from barrier injection to commit
     /// It is the sum of inflight-latency, sync-latency and wait-commit-latency
-    pub barrier_latency: LabelGuardedHistogramVec<1>,
+    pub barrier_latency: LabelGuardedHistogramVec,
     /// The duration from barrier complete to commit
     pub barrier_wait_commit_latency: Histogram,
     /// Latency between each barrier send
-    pub barrier_send_latency: LabelGuardedHistogramVec<1>,
+    pub barrier_send_latency: LabelGuardedHistogramVec,
     /// The number of all barriers. It is the sum of barriers that are in-flight or completed but
     /// waiting for other barriers
-    pub all_barrier_nums: LabelGuardedIntGaugeVec<1>,
+    pub all_barrier_nums: LabelGuardedIntGaugeVec,
     /// The number of in-flight barriers
-    pub in_flight_barrier_nums: LabelGuardedIntGaugeVec<1>,
+    pub in_flight_barrier_nums: LabelGuardedIntGaugeVec,
     /// The timestamp (UNIX epoch seconds) of the last committed barrier's epoch time.
     pub last_committed_barrier_time: IntGaugeVec,
 
     // ********************************** Snapshot Backfill ***************************
     /// The barrier latency in second of `table_id` and snapshto backfill `barrier_type`
-    pub snapshot_backfill_barrier_latency: LabelGuardedHistogramVec<2>, // (table_id, barrier_type)
+    pub snapshot_backfill_barrier_latency: LabelGuardedHistogramVec, // (table_id, barrier_type)
     /// The latency of commit epoch of `table_id`
-    pub snapshot_backfill_wait_commit_latency: LabelGuardedHistogramVec<1>, // (table_id, )
+    pub snapshot_backfill_wait_commit_latency: LabelGuardedHistogramVec, // (table_id, )
     /// The lags between the upstream epoch and the downstream epoch.
-    pub snapshot_backfill_lag: LabelGuardedIntGaugeVec<1>, // (table_id, )
+    pub snapshot_backfill_lag: LabelGuardedIntGaugeVec, // (table_id, )
     /// The number of inflight barriers of `table_id`
-    pub snapshot_backfill_inflight_barrier_num: LabelGuardedIntGaugeVec<1>, // (table_id, _)
+    pub snapshot_backfill_inflight_barrier_num: LabelGuardedIntGaugeVec, // (table_id, _)
 
     // ********************************** Recovery ************************************
     pub recovery_failure_cnt: IntCounterVec,
@@ -144,6 +144,10 @@ pub struct MetaMetrics {
     pub total_object_count: IntGauge,
     /// Total size of objects that includes dangling objects.
     pub total_object_size: IntGauge,
+    /// Number of objects per table change log.
+    pub table_change_log_object_count: IntGaugeVec,
+    /// Size of objects per table change log.
+    pub table_change_log_object_size: IntGaugeVec,
     /// The number of hummock version delta log.
     pub delta_log_count: IntGauge,
     /// latency of version checkpoint
@@ -179,16 +183,18 @@ pub struct MetaMetrics {
 
     // ********************************** Source ************************************
     /// supervisor for which source is still up.
-    pub source_is_up: LabelGuardedIntGaugeVec<2>,
+    pub source_is_up: LabelGuardedIntGaugeVec,
     pub source_enumerator_metrics: Arc<SourceEnumeratorMetrics>,
 
     // ********************************** Fragment ************************************
-    /// A dummpy gauge metrics with its label to be the mapping from actor id to fragment id
+    /// A dummy gauge metrics with its label to be the mapping from actor id to fragment id
     pub actor_info: IntGaugeVec,
-    /// A dummpy gauge metrics with its label to be the mapping from table id to actor id
+    /// A dummy gauge metrics with its label to be the mapping from table id to actor id
     pub table_info: IntGaugeVec,
     /// A dummy gauge metrics with its label to be the mapping from actor id to sink id
     pub sink_info: IntGaugeVec,
+    /// A dummy gauge metrics with its label to be relation info
+    pub relation_info: IntGaugeVec,
 
     /// Write throughput of commit epoch for each stable
     pub table_write_throughput: IntCounterVec,
@@ -197,9 +203,9 @@ pub struct MetaMetrics {
     pub merge_compaction_group_count: IntCounterVec,
 
     // ********************************** Auto Schema Change ************************************
-    pub auto_schema_change_failure_cnt: LabelGuardedIntCounterVec<2>,
-    pub auto_schema_change_success_cnt: LabelGuardedIntCounterVec<2>,
-    pub auto_schema_change_latency: LabelGuardedHistogramVec<2>,
+    pub auto_schema_change_failure_cnt: LabelGuardedIntCounterVec,
+    pub auto_schema_change_success_cnt: LabelGuardedIntCounterVec,
+    pub auto_schema_change_latency: LabelGuardedHistogramVec,
 
     pub time_travel_version_replay_latency: Histogram,
 
@@ -491,6 +497,22 @@ impl MetaMetrics {
             registry
         ).unwrap();
 
+        let table_change_log_object_count = register_int_gauge_vec_with_registry!(
+            "storage_table_change_log_object_count",
+            "per table change log object count",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
+        let table_change_log_object_size = register_int_gauge_vec_with_registry!(
+            "storage_table_change_log_object_size",
+            "per table change log object size",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
         let time_travel_object_count = register_int_gauge_with_registry!(
             "storage_time_travel_object_count",
             "total number of objects that is referenced by time travel.",
@@ -648,6 +670,14 @@ impl MetaMetrics {
             "sink_info",
             "Mapping from actor id to (actor id, sink name)",
             &["actor_id", "sink_id", "sink_name",],
+            registry
+        )
+        .unwrap();
+
+        let relation_info = register_int_gauge_vec_with_registry!(
+            "relation_info",
+            "Information of the database relation (table/source/sink)",
+            &["id", "database", "schema", "name", "resource_group", "type"],
             registry
         )
         .unwrap();
@@ -821,6 +851,8 @@ impl MetaMetrics {
             current_version_object_size,
             total_object_count,
             total_object_size,
+            table_change_log_object_count,
+            table_change_log_object_size,
             delta_log_count,
             version_checkpoint_latency,
             current_version_id,
@@ -845,6 +877,7 @@ impl MetaMetrics {
             actor_info,
             table_info,
             sink_info,
+            relation_info,
             l0_compact_level_count,
             compact_task_size,
             compact_task_file_count,
@@ -927,7 +960,7 @@ pub fn start_worker_info_monitor(
                     let role = if m.is_leader { "leader" } else { "follower" };
                     meta_metrics
                         .meta_type
-                        .with_label_values(&[&m.id, role])
+                        .with_label_values(&[m.id.as_str(), role])
                         .set(1);
                 });
             }
@@ -1056,6 +1089,79 @@ pub async fn refresh_fragment_info_metrics(
     }
 }
 
+pub async fn refresh_relation_info_metrics(
+    catalog_controller: &CatalogControllerRef,
+    meta_metrics: Arc<MetaMetrics>,
+) {
+    let table_objects = match catalog_controller.list_table_objects().await {
+        Ok(table_objects) => table_objects,
+        Err(err) => {
+            tracing::warn!(error=%err.as_report(), "fail to get table objects");
+            return;
+        }
+    };
+
+    let source_objects = match catalog_controller.list_source_objects().await {
+        Ok(source_objects) => source_objects,
+        Err(err) => {
+            tracing::warn!(error=%err.as_report(), "fail to get source objects");
+            return;
+        }
+    };
+
+    let sink_objects = match catalog_controller.list_sink_objects().await {
+        Ok(sink_objects) => sink_objects,
+        Err(err) => {
+            tracing::warn!(error=%err.as_report(), "fail to get sink objects");
+            return;
+        }
+    };
+
+    meta_metrics.relation_info.reset();
+
+    for (id, db, schema, name, resource_group) in table_objects {
+        meta_metrics
+            .relation_info
+            .with_label_values(&[
+                &id.to_string(),
+                &db,
+                &schema,
+                &name,
+                &resource_group,
+                &"table".to_owned(),
+            ])
+            .set(1);
+    }
+
+    for (id, db, schema, name, resource_group) in source_objects {
+        meta_metrics
+            .relation_info
+            .with_label_values(&[
+                &id.to_string(),
+                &db,
+                &schema,
+                &name,
+                &resource_group,
+                &"source".to_owned(),
+            ])
+            .set(1);
+    }
+
+    for (id, db, schema, name, resource_group) in sink_objects {
+        meta_metrics
+            .relation_info
+            .with_label_values(&[
+                &id.to_string(),
+                &db,
+                &schema,
+                &name,
+                &resource_group,
+                &"sink".to_owned(),
+            ])
+            .set(1);
+    }
+}
+
 pub fn start_fragment_info_monitor(
     metadata_manager: MetadataManager,
     hummock_manager: HummockManagerRef,
@@ -1083,6 +1189,12 @@ pub fn start_fragment_info_monitor(
                 &metadata_manager.catalog_controller,
                 &metadata_manager.cluster_controller,
                 &hummock_manager,
+                meta_metrics.clone(),
+            )
+            .await;
+
+            refresh_relation_info_metrics(
+                &metadata_manager.catalog_controller,
                 meta_metrics.clone(),
             )
             .await;

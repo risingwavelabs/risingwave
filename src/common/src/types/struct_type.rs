@@ -23,20 +23,31 @@ use itertools::{Itertools, repeat_n};
 use super::DataType;
 use crate::catalog::ColumnId;
 use crate::util::iter_util::ZipEqFast;
+use crate::util::quote_ident::QuoteIdent;
 
 /// A cheaply cloneable struct type.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct StructType(Arc<StructTypeInner>);
 
 impl Debug for StructType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StructType")
-            .field("fields", &self.0.fields)
-            .finish()
+        let alternate = f.alternate();
+
+        let mut d = f.debug_struct("StructType");
+        d.field("fields", &self.0.fields);
+        if let Some(ids) = &self.0.field_ids
+        // TODO: This is for making `EXPLAIN` output more concise, but it hurts the readability
+        // for testing and debugging. Avoid using `Debug` repr in `EXPLAIN` output instead.
+            && alternate
+        {
+            d.field("field_ids", ids);
+        }
+        d.finish()
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, educe::Educe)]
+#[educe(PartialEq, Eq, Hash)] // ignore ids for backward compatibility
 struct StructTypeInner {
     /// The name and data type of each field.
     ///
@@ -47,9 +58,11 @@ struct StructTypeInner {
     ///
     /// Only present if this data type is persisted within a table schema (`ColumnDesc`)
     /// in a new version of the catalog that supports nested-schema evolution.
+    #[educe(PartialEq(ignore), Hash(ignore))]
     field_ids: Option<Box<[ColumnId]>>,
 
     /// Whether the fields are unnamed.
+    #[educe(PartialEq(ignore), Hash(ignore))]
     is_unnamed: bool,
 }
 
@@ -104,6 +117,13 @@ impl StructType {
         Self(Arc::new(inner))
     }
 
+    /// Whether the struct type has field ids.
+    ///
+    /// Note that this does not recursively check whether composite fields have ids.
+    pub fn has_ids(&self) -> bool {
+        self.0.field_ids.is_some()
+    }
+
     /// Whether the fields are unnamed.
     pub fn is_unnamed(&self) -> bool {
         self.0.is_unnamed
@@ -131,6 +151,11 @@ impl StructType {
         self.0.fields.iter().map(|(_, ty)| ty)
     }
 
+    /// Gets the type of a field by index.
+    pub fn type_at(&self, index: usize) -> &DataType {
+        &self.0.fields[index].1
+    }
+
     /// Gets an iterator over the fields.
     ///
     /// If fields are unnamed, the field names will be `f1`, `f2`, etc.
@@ -146,6 +171,14 @@ impl StructType {
         self.0.field_ids.as_ref().map(|ids| ids.iter().copied())
     }
 
+    /// Gets the field id at the given index.
+    ///
+    /// Returns `None` if they are not present. See documentation on the field `field_ids`
+    /// for the cases.
+    pub fn id_at(&self, index: usize) -> Option<ColumnId> {
+        self.0.field_ids.as_ref().map(|ids| ids[index])
+    }
+
     /// Get an iterator over the field ids, or a sequence of placeholder ids if they are not present.
     pub fn ids_or_placeholder(&self) -> impl ExactSizeIterator<Item = ColumnId> + '_ {
         match self.ids() {
@@ -154,7 +187,7 @@ impl StructType {
         }
     }
 
-    /// Compares the datatype with another, ignoring nested field names and metadata.
+    /// Compares the datatype with another, ignoring nested field names and ids.
     pub fn equals_datatype(&self, other: &StructType) -> bool {
         if self.len() != other.len() {
             return false;
@@ -176,7 +209,7 @@ impl Display for StructType {
                 f,
                 "struct<{}>",
                 self.iter()
-                    .map(|(name, ty)| format!("{} {}", name, ty))
+                    .map(|(name, ty)| format!("{} {}", QuoteIdent(name), ty))
                     .join(", ")
             )
         }

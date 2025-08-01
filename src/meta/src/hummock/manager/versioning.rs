@@ -25,14 +25,15 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockSstableId, HummockSstableObjectId, HummockVersionId,
+    CompactionGroupId, HummockContextId, HummockObjectId, HummockSstableId, HummockSstableObjectId,
+    HummockVersionId, get_stale_object_ids,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats, TableStats};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
-use super::check_cg_write_limit;
+use super::GroupStateValidator;
 use crate::MetaResult;
 use crate::hummock::HummockManager;
 use crate::hummock::error::Result;
@@ -87,15 +88,19 @@ impl Versioning {
     pub fn get_tracked_object_ids(
         &self,
         min_pinned_version_id: HummockVersionId,
-    ) -> HashSet<HummockSstableObjectId> {
+    ) -> HashSet<HummockObjectId> {
         // object ids in checkpoint version
-        let mut tracked_object_ids = self.checkpoint.version.get_object_ids();
+        let mut tracked_object_ids = self
+            .checkpoint
+            .version
+            .get_object_ids(false)
+            .collect::<HashSet<_>>();
         // add object ids added between checkpoint version and current version
         for (_, delta) in self.hummock_version_deltas.range((
             Excluded(self.checkpoint.version.id),
             Included(self.current_version.id),
         )) {
-            tracked_object_ids.extend(delta.newly_added_object_ids());
+            tracked_object_ids.extend(delta.newly_added_object_ids(false));
         }
         // add stale object ids before the checkpoint version
         tracked_object_ids.extend(
@@ -103,8 +108,7 @@ impl Versioning {
                 .stale_objects
                 .iter()
                 .filter(|(version_id, _)| **version_id >= min_pinned_version_id)
-                .flat_map(|(_, objects)| objects.id.iter())
-                .cloned(),
+                .flat_map(|(_, objects)| get_stale_object_ids(objects)),
         );
         tracked_object_ids
     }
@@ -163,7 +167,6 @@ impl HummockManager {
     }
 
     /// Get version deltas from meta store
-    #[cfg_attr(coverage, coverage(off))]
     pub async fn list_version_deltas(
         &self,
         start_id: HummockVersionId,
@@ -259,6 +262,7 @@ impl HummockManager {
                 &mut versioning.current_version,
                 &mut versioning.hummock_version_deltas,
                 self.env.notification_manager(),
+                None,
                 &self.metrics,
             );
             let mut new_version_delta = version.new_delta();
@@ -289,8 +293,12 @@ pub(super) fn calc_new_write_limits(
             Some(levels) => levels,
         };
 
-        let write_limit_type = check_cg_write_limit(levels, config.compaction_config.as_ref());
-        if write_limit_type.is_write_stop() {
+        let group_state = GroupStateValidator::check_single_group_write_stop(
+            levels,
+            config.compaction_config.as_ref(),
+        );
+
+        if group_state.is_write_stop() {
             new_write_limits.insert(
                 *id,
                 WriteLimit {
@@ -300,7 +308,7 @@ pub(super) fn calc_new_write_limits(
                         .iter()
                         .map(|table_id| table_id.table_id)
                         .collect(),
-                    reason: write_limit_type.as_str().to_owned(),
+                    reason: group_state.reason().unwrap().to_owned(),
                 },
             );
             continue;
@@ -341,7 +349,7 @@ fn estimate_table_stats(sst: &SstableInfo) -> HashMap<u32, TableStats> {
     if estimated_total_key_size > sst.uncompressed_file_size {
         estimated_total_key_size = sst.uncompressed_file_size / 2;
         tracing::warn!(
-            sst.sst_id,
+            %sst.sst_id,
             "Calculated estimated_total_key_size {} > uncompressed_file_size {}. Use uncompressed_file_size/2 as estimated_total_key_size instead.",
             estimated_total_key_size,
             sst.uncompressed_file_size
@@ -549,6 +557,7 @@ mod tests {
             }
             .into(),
         ]);
+        version.levels.get_mut(&1).unwrap().l0.total_file_size += 200;
         let new_write_limits =
             calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
         assert_eq!(

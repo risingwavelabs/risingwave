@@ -82,6 +82,23 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 writeln!(env, r#"RISEDEV_SCHEMA_REGISTRY_URL="{url}""#,).unwrap();
                 writeln!(env, r#"RPK_REGISTRY_HOSTS="{url}""#).unwrap();
             }
+            ServiceConfig::Pulsar(c) => {
+                // These 2 names are NOT defined by Pulsar, but by us.
+                // The `pulsar-admin` CLI uses a `PULSAR_CLIENT_CONF` file with `brokerServiceUrl` and `webServiceUrl`
+                // It may be used by our upcoming `PulsarCat` #21401
+                writeln!(
+                    env,
+                    r#"PULSAR_BROKER_URL="pulsar://{}:{}""#,
+                    c.address, c.broker_port
+                )
+                .unwrap();
+                writeln!(
+                    env,
+                    r#"PULSAR_HTTP_URL="http://{}:{}""#,
+                    c.address, c.http_port
+                )
+                .unwrap();
+            }
             ServiceConfig::MySql(c) if c.application != Application::Metastore => {
                 let host = &c.address;
                 let port = &c.port;

@@ -17,15 +17,29 @@ mod rpc;
 pub mod server;
 mod telemetry;
 
-use clap::Parser;
-use risingwave_common::config::{
-    AsyncStackTraceOption, CompactorMode, MetricLevel, OverrideConfig,
-};
+use clap::{Parser, ValueEnum};
+use risingwave_common::config::{AsyncStackTraceOption, MetricLevel, OverrideConfig};
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 
 use crate::server::{compactor_serve, shared_compactor_serve};
+
+#[derive(Debug, Default, Clone, Copy, ValueEnum)]
+pub enum CompactorMode {
+    #[default]
+    #[clap(alias = "dedicated")]
+    Dedicated,
+
+    #[clap(alias = "shared")]
+    Shared,
+
+    #[clap(alias = "dedicated_iceberg")]
+    DedicatedIceberg,
+
+    #[clap(alias = "shared_iceberg")]
+    SharedIceberg,
+}
 
 /// Command-line arguments for compactor-node.
 #[derive(Parser, Clone, Debug, OverrideConfig)]
@@ -147,8 +161,45 @@ pub fn start(
                 .unwrap();
             tracing::info!(" address is {}", advertise_addr);
 
-            compactor_serve(listen_addr, advertise_addr, opts, shutdown).await;
+            compactor_serve(
+                listen_addr,
+                advertise_addr,
+                opts,
+                shutdown,
+                CompactorMode::Dedicated,
+            )
+            .await;
         }),
+
+        Some(CompactorMode::DedicatedIceberg) => Box::pin(async move {
+            tracing::info!("Iceberg Compactor node options: {:?}", opts);
+            tracing::info!("meta address: {}", opts.meta_address.clone());
+
+            let listen_addr = opts.listen_addr.parse().unwrap();
+
+            let advertise_addr = opts
+                .advertise_addr
+                .as_ref()
+                .unwrap_or_else(|| {
+                    tracing::warn!("advertise addr is not specified, defaulting to listen address");
+                    &opts.listen_addr
+                })
+                .parse()
+                .unwrap();
+            tracing::info!(" address is {}", advertise_addr);
+
+            compactor_serve(
+                listen_addr,
+                advertise_addr,
+                opts,
+                shutdown,
+                CompactorMode::DedicatedIceberg,
+            )
+            .await;
+        }),
+        Some(CompactorMode::SharedIceberg) => {
+            unimplemented!("Shared iceberg compactor is not supported yet");
+        }
     }
 }
 

@@ -6,6 +6,7 @@ import "backup_service.proto";
 import "catalog.proto";
 import "common.proto";
 import "hummock.proto";
+import "secret.proto";
 import "source.proto";
 import "stream_plan.proto";
 import "user.proto";
@@ -177,6 +178,15 @@ message ResumeRequest {}
 
 message ResumeResponse {}
 
+message RefreshRequest {
+  uint32 table_id = 1;
+  uint32 associated_source_id = 2;
+}
+
+message RefreshResponse {
+  common.Status status = 1;
+}
+
 message CancelCreatingJobsRequest {
   message CreatingJobInfo {
     uint32 database_id = 1;
@@ -224,6 +234,14 @@ message ListTableFragmentsResponse {
   map<uint32, TableFragmentInfo> table_fragments = 1;
 }
 
+message GetFragmentByIdRequest {
+  uint32 fragment_id = 1;
+}
+
+message GetFragmentByIdResponse {
+  FragmentDistribution distribution = 1;
+}
+
 message ListStreamingJobStatesRequest {}
 
 message ListStreamingJobStatesResponse {
@@ -234,24 +252,37 @@ message ListStreamingJobStatesResponse {
     uint32 max_parallelism = 4;
     string name = 5;
     string resource_group = 6;
+    uint32 database_id = 7;
+    uint32 schema_id = 8;
   }
   repeated StreamingJobState states = 1;
 }
 
 message ListFragmentDistributionRequest {}
 
+message FragmentDistribution {
+  uint32 fragment_id = 1;
+  uint32 table_id = 2;
+  TableFragments.Fragment.FragmentDistributionType distribution_type = 3;
+  repeated uint32 state_table_ids = 4;
+  repeated uint32 upstream_fragment_ids = 5;
+  uint32 fragment_type_mask = 6;
+  uint32 parallelism = 7;
+  uint32 vnode_count = 8;
+  stream_plan.StreamNode node = 9;
+}
+
 message ListFragmentDistributionResponse {
-  message FragmentDistribution {
-    uint32 fragment_id = 1;
-    uint32 table_id = 2;
-    TableFragments.Fragment.FragmentDistributionType distribution_type = 3;
-    repeated uint32 state_table_ids = 4;
-    repeated uint32 upstream_fragment_ids = 5;
-    uint32 fragment_type_mask = 6;
-    uint32 parallelism = 7;
-    uint32 vnode_count = 8;
-    stream_plan.StreamNode node = 9;
-  }
+  repeated FragmentDistribution distributions = 1;
+}
+
+// List fragments containing stream scans, and corresponding
+// to a streaming job in creation.
+message ListCreatingFragmentDistributionRequest {}
+
+// List fragments containing stream scans, and corresponding
+// to a streaming job in creation.
+message ListCreatingFragmentDistributionResponse {
   repeated FragmentDistribution distributions = 1;
 }
 
@@ -323,20 +354,42 @@ message RecoverRequest {}
 
 message RecoverResponse {}
 
+message AlterConnectorPropsRequest {
+  enum AlterConnectorPropsObject {
+    UNSPECIFIED = 0;
+    SOURCE = 1;
+    SINK = 2;
+    CONNECTION = 3;
+  }
+
+  uint32 object_id = 1;
+  map<string, string> changed_props = 2;
+  map<string, secret.SecretRef> changed_secret_refs = 3;
+  optional uint32 connector_conn_ref = 4;
+  AlterConnectorPropsObject object_type = 5;
+}
+
+message AlterConnectorPropsResponse {}
+
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
   rpc Pause(PauseRequest) returns (PauseResponse);
   rpc Resume(ResumeRequest) returns (ResumeResponse);
+  rpc Refresh(RefreshRequest) returns (RefreshResponse);
   rpc CancelCreatingJobs(CancelCreatingJobsRequest) returns (CancelCreatingJobsResponse);
   rpc ListTableFragments(ListTableFragmentsRequest) returns (ListTableFragmentsResponse);
   rpc ListStreamingJobStates(ListStreamingJobStatesRequest) returns (ListStreamingJobStatesResponse);
   rpc ListFragmentDistribution(ListFragmentDistributionRequest) returns (ListFragmentDistributionResponse);
+  rpc ListCreatingFragmentDistribution(ListCreatingFragmentDistributionRequest) returns (ListCreatingFragmentDistributionResponse);
   rpc ListActorStates(ListActorStatesRequest) returns (ListActorStatesResponse);
   rpc ListActorSplits(ListActorSplitsRequest) returns (ListActorSplitsResponse);
   rpc ListObjectDependencies(ListObjectDependenciesRequest) returns (ListObjectDependenciesResponse);
   rpc ApplyThrottle(ApplyThrottleRequest) returns (ApplyThrottleResponse);
   rpc Recover(RecoverRequest) returns (RecoverResponse);
   rpc ListRateLimits(ListRateLimitsRequest) returns (ListRateLimitsResponse);
+  rpc AlterConnectorProps(AlterConnectorPropsRequest) returns (AlterConnectorPropsResponse);
+  rpc GetFragmentById(GetFragmentByIdRequest) returns (GetFragmentByIdResponse);
+  rpc SetSyncLogStoreAligned(SetSyncLogStoreAlignedRequest) returns (SetSyncLogStoreAlignedResponse);
 }
 
 // Below for cluster service.
@@ -674,6 +727,7 @@ message SystemParams {
   optional uint64 time_travel_retention_ms = 18;
   optional string adaptive_parallelism_strategy = 19;
   optional bool per_database_isolation = 20;
+  optional bool enforce_secret = 21;
 }
 
 message GetSystemParamsRequest {}
@@ -785,6 +839,38 @@ message EventLog {
     string connector = 3;
     string error = 4;
   }
+  message EventRecovery {
+    message GlobalRecoveryStart {
+      string reason = 1;
+    }
+    message GlobalRecoverySuccess {
+      string reason = 1;
+      float duration_secs = 2;
+      repeated uint32 running_database_ids = 3;
+      repeated uint32 recovering_database_ids = 4;
+    }
+    message GlobalRecoveryFailure {
+      string reason = 1;
+      string error = 2;
+    }
+    message DatabaseRecoveryStart {
+      uint32 database_id = 1;
+    }
+    message DatabaseRecoveryFailure {
+      uint32 database_id = 1;
+    }
+    message DatabaseRecoverySuccess {
+      uint32 database_id = 1;
+    }
+    oneof recovery_event {
+      GlobalRecoveryStart global_start = 1;
+      GlobalRecoverySuccess global_success = 2;
+      GlobalRecoveryFailure global_failure = 3;
+      DatabaseRecoveryStart database_start = 4;
+      DatabaseRecoveryFailure database_failure = 5;
+      DatabaseRecoverySuccess database_success = 6;
+    }
+  }
   // Event logs identifier, which should be populated by event log service.
   optional string unique_id = 1;
   // Processing time, which should be populated by event log service.
@@ -799,6 +885,7 @@ message EventLog {
     EventLog.EventWorkerNodePanic worker_node_panic = 9;
     EventLog.EventAutoSchemaChangeFail auto_schema_change_fail = 10;
     EventLog.EventSinkFail sink_fail = 11;
+    EventRecovery recovery = 12;
   }
 }
 
@@ -886,3 +973,28 @@ message ListRateLimitsResponse {
   }
   repeated RateLimitInfo rate_limits = 1;
 }
+
+service HostedIcebergCatalogService {
+  rpc ListIcebergTables(ListIcebergTablesRequest) returns (ListIcebergTablesResponse);
+}
+
+message ListIcebergTablesRequest {}
+
+message ListIcebergTablesResponse {
+  message IcebergTable {
+    string catalog_name = 1;
+    string table_namespace = 2;
+    string table_name = 3;
+    optional string metadata_location = 4;
+    optional string previous_metadata_location = 5;
+    optional string iceberg_type = 6;
+  }
+  repeated IcebergTable iceberg_tables = 1;
+}
+
+message SetSyncLogStoreAlignedRequest {
+  uint32 job_id = 1;
+  bool aligned = 2;
+}
+
+message SetSyncLogStoreAlignedResponse {}

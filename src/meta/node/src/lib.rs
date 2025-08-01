@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #![feature(let_chains)]
-#![cfg_attr(coverage, feature(coverage_attribute))]
+#![feature(coverage_attribute)]
 
 mod server;
 
@@ -78,6 +78,11 @@ pub struct MetaNodeOpts {
     /// Database of sql backend, required when meta backend set to MySQL or PostgreSQL.
     #[clap(long, hide = true, env = "RW_SQL_DATABASE", default_value = "")]
     pub sql_database: String,
+
+    /// Params for the URL connection, such as `sslmode=disable`.
+    /// Example: `param1=value1&param2=value2`
+    #[clap(long, hide = true, env = "RW_SQL_URL_PARAMS")]
+    pub sql_url_params: Option<String>,
 
     /// The HTTP REST-API address of the Prometheus instance associated to this cluster.
     /// This address is used to serve `PromQL` queries to Prometheus.
@@ -211,6 +216,7 @@ impl risingwave_common::opts::Opts for MetaNodeOpts {
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use risingwave_common::config::{MetaBackend, RwConfig, load_config};
 use tracing::info;
@@ -233,13 +239,18 @@ pub fn start(
         let prometheus_addr = opts.prometheus_listener_addr.map(|x| x.parse().unwrap());
         let meta_store_config = config.meta.meta_store_config.clone();
         let backend = match config.meta.backend {
-            MetaBackend::Mem => MetaStoreBackend::Mem,
+            MetaBackend::Mem => {
+                if opts.sql_endpoint.is_some() {
+                    tracing::warn!("`--sql-endpoint` is ignored when using `mem` backend");
+                }
+                MetaStoreBackend::Mem
+            }
             MetaBackend::Sql => MetaStoreBackend::Sql {
                 endpoint: opts
                     .sql_endpoint
                     .expect("sql endpoint is required")
                     .expose_secret()
-                    .to_string(),
+                    .clone(),
                 config: meta_store_config,
             },
             MetaBackend::Sqlite => MetaStoreBackend::Sql {
@@ -253,25 +264,39 @@ pub fn start(
             },
             MetaBackend::Postgres => MetaStoreBackend::Sql {
                 endpoint: format!(
-                    "postgres://{}:{}@{}/{}",
+                    "postgres://{}:{}@{}/{}{}",
                     opts.sql_username,
                     opts.sql_password.expose_secret(),
                     opts.sql_endpoint
                         .expect("sql endpoint is required")
                         .expose_secret(),
-                    opts.sql_database
+                    opts.sql_database,
+                    if let Some(params) = &opts.sql_url_params
+                        && !params.is_empty()
+                    {
+                        format!("?{}", params)
+                    } else {
+                        "".to_owned()
+                    }
                 ),
                 config: meta_store_config,
             },
             MetaBackend::Mysql => MetaStoreBackend::Sql {
                 endpoint: format!(
-                    "mysql://{}:{}@{}/{}",
+                    "mysql://{}:{}@{}/{}{}",
                     opts.sql_username,
                     opts.sql_password.expose_secret(),
                     opts.sql_endpoint
                         .expect("sql endpoint is required")
                         .expose_secret(),
-                    opts.sql_database
+                    opts.sql_database,
+                    if let Some(params) = &opts.sql_url_params
+                        && !params.is_empty()
+                    {
+                        format!("?{}", params)
+                    } else {
+                        "".to_owned()
+                    }
                 ),
                 config: meta_store_config,
             },
@@ -386,6 +411,18 @@ pub fn start(
                     .meta
                     .developer
                     .hummock_time_travel_filter_out_objects_batch_size,
+                hummock_time_travel_filter_out_objects_v1: config
+                    .meta
+                    .developer
+                    .hummock_time_travel_filter_out_objects_v1,
+                hummock_time_travel_filter_out_objects_list_version_batch_size: config
+                    .meta
+                    .developer
+                    .hummock_time_travel_filter_out_objects_list_version_batch_size,
+                hummock_time_travel_filter_out_objects_list_delta_batch_size: config
+                    .meta
+                    .developer
+                    .hummock_time_travel_filter_out_objects_list_delta_batch_size,
                 min_delta_log_num_for_hummock_version_checkpoint: config
                     .meta
                     .min_delta_log_num_for_hummock_version_checkpoint,
@@ -397,6 +434,9 @@ pub fn start(
                 enable_committed_sst_sanity_check: config.meta.enable_committed_sst_sanity_check,
                 periodic_compaction_interval_sec: config.meta.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: config.meta.node_num_monitor_interval_sec,
+                protect_drop_table_with_incoming_sink: config
+                    .meta
+                    .protect_drop_table_with_incoming_sink,
                 prometheus_endpoint: opts.prometheus_endpoint,
                 prometheus_selector: opts.prometheus_selector,
                 vpc_id: opts.vpc_id,
@@ -418,6 +458,9 @@ pub fn start(
                 periodic_scheduling_compaction_group_merge_interval_sec: config
                     .meta
                     .periodic_scheduling_compaction_group_merge_interval_sec,
+                compaction_group_merge_dimension_threshold: config
+                    .meta
+                    .compaction_group_merge_dimension_threshold,
                 table_high_write_throughput_threshold: config
                     .meta
                     .table_high_write_throughput_threshold,
@@ -484,6 +527,25 @@ pub fn start(
                     .developer
                     .actor_cnt_per_worker_parallelism_soft_limit,
                 license_key_path: opts.license_key_path,
+                compute_client_config: config.meta.developer.compute_client_config.clone(),
+                stream_client_config: config.meta.developer.stream_client_config.clone(),
+                frontend_client_config: config.meta.developer.frontend_client_config.clone(),
+                redact_sql_option_keywords: Arc::new(
+                    config
+                        .batch
+                        .redact_sql_option_keywords
+                        .into_iter()
+                        .collect(),
+                ),
+                cdc_table_split_init_sleep_interval_splits: config
+                    .meta
+                    .cdc_table_split_init_sleep_interval_splits,
+                cdc_table_split_init_sleep_duration_millis: config
+                    .meta
+                    .cdc_table_split_init_sleep_duration_millis,
+                cdc_table_split_init_insert_batch_size: config
+                    .meta
+                    .cdc_table_split_init_insert_batch_size,
             },
             config.system.into_init_system_params(),
             Default::default(),

@@ -24,11 +24,13 @@ use pgwire::pg_response::StatementType::{self, ABORT, BEGIN, COMMIT, ROLLBACK, S
 use pgwire::pg_response::{PgResponse, PgResponseBuilder, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, Row};
+use risingwave_common::catalog::AlterDatabaseParam;
 use risingwave_common::types::Fields;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_pb::meta::PbThrottleTarget;
 use risingwave_sqlparser::ast::*;
+use thiserror_ext::AsReport;
 use util::get_table_catalog_by_table_name;
 
 use self::util::{DataChunkToRowSetAdapter, SourceSchemaCompatExt};
@@ -40,14 +42,19 @@ use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
+mod alter_database_param;
+mod alter_mv;
 mod alter_owner;
 mod alter_parallelism;
 mod alter_rename;
 mod alter_resource_group;
 mod alter_secret;
 mod alter_set_schema;
+mod alter_sink_props;
 mod alter_source_column;
+mod alter_source_props;
 mod alter_source_with_sr;
+mod alter_streaming_enable_unaligned_join;
 mod alter_streaming_rate_limit;
 mod alter_swap_rename;
 mod alter_system;
@@ -96,14 +103,17 @@ pub mod extended_handle;
 pub mod fetch_cursor;
 mod flush;
 pub mod handle_privilege;
-mod kill_process;
+pub mod kill_process;
+mod prepared_statement;
 pub mod privilege;
 pub mod query;
 mod recover;
+mod refresh;
 pub mod show;
 mod transaction;
 mod use_db;
 pub mod util;
+pub mod vacuum;
 pub mod variable;
 mod wait;
 
@@ -265,14 +275,23 @@ pub async fn handle(
             analyze,
             options,
         } => explain::handle_explain(handler_args, *statement, options, analyze).await,
-        Statement::ExplainAnalyzeStreamJob { target } => {
-            explain_analyze_stream_job::handle_explain_analyze_stream_job(handler_args, target)
-                .await
+        Statement::ExplainAnalyzeStreamJob {
+            target,
+            duration_secs,
+        } => {
+            explain_analyze_stream_job::handle_explain_analyze_stream_job(
+                handler_args,
+                target,
+                duration_secs,
+            )
+            .await
         }
         Statement::CreateSource { stmt } => {
             create_source::handle_create_source(handler_args, stmt).await
         }
-        Statement::CreateSink { stmt } => create_sink::handle_create_sink(handler_args, stmt).await,
+        Statement::CreateSink { stmt } => {
+            create_sink::handle_create_sink(handler_args, stmt, false).await
+        }
         Statement::CreateSubscription { stmt } => {
             create_subscription::handle_create_subscription(handler_args, stmt).await
         }
@@ -414,6 +433,8 @@ pub async fn handle(
             if_not_exists,
             owner,
             resource_group,
+            barrier_interval_ms,
+            checkpoint_frequency,
         } => {
             create_database::handle_create_database(
                 handler_args,
@@ -421,6 +442,8 @@ pub async fn handle(
                 if_not_exists,
                 owner,
                 resource_group,
+                barrier_interval_ms,
+                checkpoint_frequency,
             )
             .await
         }
@@ -449,7 +472,15 @@ pub async fn handle(
         Statement::Revoke { .. } => {
             handle_privilege::handle_revoke_privilege(handler_args, stmt).await
         }
-        Statement::Describe { name } => describe::handle_describe(handler_args, name),
+        Statement::Describe { name, kind } => match kind {
+            DescribeKind::Fragments => {
+                describe::handle_describe_fragments(handler_args, name).await
+            }
+            DescribeKind::Plain => describe::handle_describe(handler_args, name),
+        },
+        Statement::DescribeFragment { fragment_id } => {
+            describe::handle_describe_fragment(handler_args, fragment_id).await
+        }
         Statement::Discard(..) => discard::handle_discard(handler_args),
         Statement::ShowObjects {
             object: show_object,
@@ -467,8 +498,7 @@ pub async fn handle(
             if_exists,
             drop_mode,
         }) => {
-            let mut cascade = false;
-            if let AstOption::Some(DropMode::Cascade) = drop_mode {
+            let cascade = if let AstOption::Some(DropMode::Cascade) = drop_mode {
                 match object_type {
                     ObjectType::MaterializedView
                     | ObjectType::View
@@ -477,16 +507,14 @@ pub async fn handle(
                     | ObjectType::Subscription
                     | ObjectType::Index
                     | ObjectType::Table
-                    | ObjectType::Schema => {
-                        cascade = true;
-                    }
-                    ObjectType::Database
-                    | ObjectType::User
-                    | ObjectType::Connection
-                    | ObjectType::Secret => {
+                    | ObjectType::Schema
+                    | ObjectType::Connection => true,
+                    ObjectType::Database | ObjectType::User | ObjectType::Secret => {
                         bail_not_implemented!("DROP CASCADE");
                     }
-                };
+                }
+            } else {
+                false
             };
             match object_type {
                 ObjectType::Table => {
@@ -517,38 +545,26 @@ pub async fn handle(
                     .await
                 }
                 ObjectType::Database => {
-                    drop_database::handle_drop_database(
-                        handler_args,
-                        object_name,
-                        if_exists,
-                        drop_mode.into(),
-                    )
-                    .await
+                    drop_database::handle_drop_database(handler_args, object_name, if_exists).await
                 }
                 ObjectType::Schema => {
-                    drop_schema::handle_drop_schema(
-                        handler_args,
-                        object_name,
-                        if_exists,
-                        drop_mode.into(),
-                    )
-                    .await
+                    drop_schema::handle_drop_schema(handler_args, object_name, if_exists, cascade)
+                        .await
                 }
                 ObjectType::User => {
-                    drop_user::handle_drop_user(
-                        handler_args,
-                        object_name,
-                        if_exists,
-                        drop_mode.into(),
-                    )
-                    .await
+                    drop_user::handle_drop_user(handler_args, object_name, if_exists).await
                 }
                 ObjectType::View => {
                     drop_view::handle_drop_view(handler_args, object_name, if_exists, cascade).await
                 }
                 ObjectType::Connection => {
-                    drop_connection::handle_drop_connection(handler_args, object_name, if_exists)
-                        .await
+                    drop_connection::handle_drop_connection(
+                        handler_args,
+                        object_name,
+                        if_exists,
+                        cascade,
+                    )
+                    .await
                 }
                 ObjectType::Secret => {
                     drop_secret::handle_drop_secret(handler_args, object_name, if_exists).await
@@ -617,8 +633,8 @@ pub async fn handle(
                 let x = variable::set_var_to_param_str(&value);
                 let res = use_db::handle_use_db(
                     handler_args,
-                    ObjectName::from(vec![Ident::new_unchecked(
-                        x.unwrap_or("default".to_owned()),
+                    ObjectName::from(vec![Ident::from_real_value(
+                        x.as_deref().unwrap_or("default"),
                     )]),
                 )?;
                 let mut builder = RwPgResponse::builder(StatementType::SET_VARIABLE);
@@ -632,7 +648,7 @@ pub async fn handle(
         Statement::SetTimeZone { local: _, value } => {
             variable::handle_set_time_zone(handler_args, value)
         }
-        Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable).await,
+        Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable),
         Statement::CreateIndex {
             name,
             table_name,
@@ -667,6 +683,74 @@ pub async fn handle(
                     name,
                     new_owner_name,
                     StatementType::ALTER_DATABASE,
+                )
+                .await
+            }
+            AlterDatabaseOperation::SetParam(config_param) => {
+                let ConfigParam { param, value } = config_param;
+
+                let database_param = match param.real_value().to_uppercase().as_str() {
+                    "BARRIER_INTERVAL_MS" => {
+                        let barrier_interval_ms = match value {
+                            SetVariableValue::Default => None,
+                            SetVariableValue::Single(SetVariableValueSingle::Literal(
+                                Value::Number(num),
+                            )) => {
+                                let num = num.parse::<u32>().map_err(|e| {
+                                    ErrorCode::InvalidInputSyntax(format!(
+                                        "barrier_interval_ms must be a u32 integer: {}",
+                                        e.as_report()
+                                    ))
+                                })?;
+                                Some(num)
+                            }
+                            _ => {
+                                return Err(ErrorCode::InvalidInputSyntax(
+                                    "barrier_interval_ms must be a u32 integer or DEFAULT"
+                                        .to_owned(),
+                                )
+                                .into());
+                            }
+                        };
+                        AlterDatabaseParam::BarrierIntervalMs(barrier_interval_ms)
+                    }
+                    "CHECKPOINT_FREQUENCY" => {
+                        let checkpoint_frequency = match value {
+                            SetVariableValue::Default => None,
+                            SetVariableValue::Single(SetVariableValueSingle::Literal(
+                                Value::Number(num),
+                            )) => {
+                                let num = num.parse::<u64>().map_err(|e| {
+                                    ErrorCode::InvalidInputSyntax(format!(
+                                        "checkpoint_frequency must be a u64 integer: {}",
+                                        e.as_report()
+                                    ))
+                                })?;
+                                Some(num)
+                            }
+                            _ => {
+                                return Err(ErrorCode::InvalidInputSyntax(
+                                    "checkpoint_frequency must be a u64 integer or DEFAULT"
+                                        .to_owned(),
+                                )
+                                .into());
+                            }
+                        };
+                        AlterDatabaseParam::CheckpointFrequency(checkpoint_frequency)
+                    }
+                    _ => {
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "Unsupported database config parameter: {}",
+                            param.real_value()
+                        ))
+                        .into());
+                    }
+                };
+
+                alter_database_param::handle_alter_database_param(
+                    handler_args,
+                    name,
+                    database_param,
                 )
                 .await
             }
@@ -776,6 +860,15 @@ pub async fn handle(
                     name,
                     target_table,
                     StatementType::ALTER_TABLE,
+                )
+                .await
+            }
+            AlterTableOperation::AlterConnectorProps { alter_props } => {
+                // If exists a associated source, it should be of the same name.
+                crate::handler::alter_source_props::handle_alter_table_connector_props(
+                    handler_args,
+                    name,
+                    alter_props,
                 )
                 .await
             }
@@ -904,9 +997,31 @@ pub async fn handle(
                     )
                     .await
                 }
+                AlterViewOperation::SetStreamingEnableUnalignedJoin { enable } => {
+                    if !materialized {
+                        bail!(
+                            "ALTER VIEW SET STREAMING_ENABLE_UNALIGNED_JOIN is not supported. Only supported for materialized views"
+                        );
+                    }
+                    alter_streaming_enable_unaligned_join::handle_alter_streaming_enable_unaligned_join(handler_args, name, enable).await
+                }
+                AlterViewOperation::AsQuery { query } => {
+                    if !materialized {
+                        bail_not_implemented!("ALTER VIEW AS QUERY");
+                    }
+                    // `ALTER MATERIALIZED VIEW AS QUERY` is only available in development build now.
+                    if !cfg!(debug_assertions) {
+                        bail_not_implemented!("ALTER MATERIALIZED VIEW AS QUERY");
+                    }
+                    alter_mv::handle_alter_mv(handler_args, name, query).await
+                }
             }
         }
+
         Statement::AlterSink { name, operation } => match operation {
+            AlterSinkOperation::AlterConnectorProps {
+                alter_props: changed_props,
+            } => alter_sink_props::handle_alter_sink_props(handler_args, name, changed_props).await,
             AlterSinkOperation::RenameSink { sink_name } => {
                 alter_rename::handle_rename_sink(handler_args, name, sink_name).await
             }
@@ -960,6 +1075,14 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterSinkOperation::SetStreamingEnableUnalignedJoin { enable } => {
+                alter_streaming_enable_unaligned_join::handle_alter_streaming_enable_unaligned_join(
+                    handler_args,
+                    name,
+                    enable,
+                )
+                .await
+            }
         },
         Statement::AlterSubscription { name, operation } => match operation {
             AlterSubscriptionOperation::RenameSubscription { subscription_name } => {
@@ -998,6 +1121,14 @@ pub async fn handle(
             }
         },
         Statement::AlterSource { name, operation } => match operation {
+            AlterSourceOperation::AlterConnectorProps { alter_props } => {
+                alter_source_props::handle_alter_source_connector_props(
+                    handler_args,
+                    name,
+                    alter_props,
+                )
+                .await
+            }
             AlterSourceOperation::RenameSource { source_name } => {
                 alter_rename::handle_rename_source(handler_args, name, source_name).await
             }
@@ -1120,6 +1251,9 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterDefaultPrivileges { .. } => {
+            handle_privilege::handle_alter_default_privileges(handler_args, stmt).await
+        }
         Statement::StartTransaction { modes } => {
             transaction::handle_begin(handler_args, START_TRANSACTION, modes).await
         }
@@ -1137,13 +1271,25 @@ pub async fn handle(
             session,
         } => transaction::handle_set(handler_args, modes, snapshot, session).await,
         Statement::CancelJobs(jobs) => handle_cancel(handler_args, jobs).await,
-        Statement::Kill(process_id) => handle_kill(handler_args, process_id).await,
+        Statement::Kill(worker_process_id) => handle_kill(handler_args, worker_process_id).await,
         Statement::Comment {
             object_type,
             object_name,
             comment,
         } => comment::handle_comment(handler_args, object_type, object_name, comment).await,
         Statement::Use { db_name } => use_db::handle_use_db(handler_args, db_name),
+        Statement::Prepare {
+            name,
+            data_types,
+            statement,
+        } => prepared_statement::handle_prepare(name, data_types, statement).await,
+        Statement::Deallocate { name, prepare } => {
+            prepared_statement::handle_deallocate(name, prepare).await
+        }
+        Statement::Vacuum { object_name } => vacuum::handle_vacuum(handler_args, object_name).await,
+        Statement::Refresh { table_name } => {
+            refresh::handle_refresh(handler_args, table_name).await
+        }
         _ => bail_not_implemented!("Unhandled statement: {}", stmt),
     }
 }

@@ -25,6 +25,8 @@ pub use source::KinesisMeta;
 use with_options::WithOptions;
 
 use crate::connector_common::KinesisCommon;
+use crate::enforce_secret::EnforceSecret;
+use crate::error::ConnectorError;
 use crate::source::SourceProperties;
 use crate::source::kinesis::source::reader::KinesisSplitReader;
 use crate::source::kinesis::split::KinesisSplit;
@@ -46,15 +48,59 @@ pub struct KinesisProperties {
     pub common: KinesisCommon,
 
     #[serde(flatten)]
+    pub reader_config: KinesisReaderConfig,
+
+    #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
 }
 
+const fn kinesis_reader_default_eof_retry_interval_ms() -> u64 {
+    1000
+}
+
+const fn kinesis_reader_default_error_retry_interval_ms() -> u64 {
+    200
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
+pub struct KinesisReaderConfig {
+    #[serde(
+        rename = "kinesis.reader.eof_retry_interval_ms",
+        default = "kinesis_reader_default_eof_retry_interval_ms"
+    )]
+    pub eof_retry_interval_ms: u64,
+
+    #[serde(
+        rename = "kinesis.reader.error_retry_interval_ms",
+        default = "kinesis_reader_default_error_retry_interval_ms"
+    )]
+    pub error_retry_interval_ms: u64,
+}
+
+impl Default for KinesisReaderConfig {
+    fn default() -> Self {
+        Self {
+            eof_retry_interval_ms: kinesis_reader_default_eof_retry_interval_ms(),
+            error_retry_interval_ms: kinesis_reader_default_error_retry_interval_ms(),
+        }
+    }
+}
 impl SourceProperties for KinesisProperties {
     type Split = KinesisSplit;
     type SplitEnumerator = KinesisSplitEnumerator;
     type SplitReader = KinesisSplitReader;
 
     const SOURCE_NAME: &'static str = KINESIS_CONNECTOR;
+}
+
+impl EnforceSecret for KinesisProperties {
+    fn enforce_secret<'a>(prop_iter: impl Iterator<Item = &'a str>) -> Result<(), ConnectorError> {
+        for prop in prop_iter {
+            KinesisCommon::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 impl crate::source::UnknownFields for KinesisProperties {
@@ -65,9 +111,11 @@ impl crate::source::UnknownFields for KinesisProperties {
 
 #[cfg(test)]
 mod test {
-    use maplit::hashmap;
+    use maplit::{btreemap, hashmap};
 
     use super::*;
+    use crate::WithOptionsSecResolved;
+    use crate::source::ConnectorProperties;
 
     #[test]
     fn test_parse_kinesis_timestamp_offset() {
@@ -81,5 +129,49 @@ mod test {
         let kinesis_props: KinesisProperties =
             serde_json::from_value(serde_json::to_value(props).unwrap()).unwrap();
         assert_eq!(kinesis_props.start_timestamp_millis, Some(123456789));
+    }
+
+    #[test]
+    fn test_kinesis_props() {
+        let with_options = btreemap! {
+            "connector".to_owned() => "kinesis".to_owned(),
+            "scan.startup.mode".to_owned() => "latest".to_owned(),
+            "stream".to_owned() => "sample_stream".to_owned(),
+            "aws.region".to_owned() => "us-east-1".to_owned(),
+            "endpoint".to_owned() => "https://kinesis.us-east-1.amazonaws.com".to_owned(),
+            "aws.credentials.access_key_id".to_owned() => "access_key".to_owned(),
+            "aws.credentials.secret_access_key".to_owned() => "secret_key".to_owned(),
+        };
+        let connector_props = ConnectorProperties::extract(
+            WithOptionsSecResolved::without_secrets(with_options),
+            true,
+        )
+        .unwrap();
+        let ConnectorProperties::Kinesis(kinesis_props) = connector_props else {
+            panic!()
+        };
+
+        assert_eq!(kinesis_props.common.sdk_connect_timeout_ms, 10000);
+
+        let with_options = btreemap! {
+            "connector".to_owned() => "kinesis".to_owned(),
+            "scan.startup.mode".to_owned() => "latest".to_owned(),
+            "stream".to_owned() => "sample_stream".to_owned(),
+            "aws.region".to_owned() => "us-east-1".to_owned(),
+            "endpoint".to_owned() => "https://kinesis.us-east-1.amazonaws.com".to_owned(),
+            "aws.credentials.access_key_id".to_owned() => "access_key".to_owned(),
+            "aws.credentials.secret_access_key".to_owned() => "secret_key".to_owned(),
+            "kinesis.sdk.connect_timeout_ms".to_owned() => "20000".to_owned(),
+        };
+        let connector_props = ConnectorProperties::extract(
+            WithOptionsSecResolved::without_secrets(with_options),
+            true,
+        )
+        .unwrap();
+        let ConnectorProperties::Kinesis(kinesis_props) = connector_props else {
+            panic!()
+        };
+
+        assert_eq!(kinesis_props.common.sdk_connect_timeout_ms, 20000);
     }
 }

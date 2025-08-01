@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::cmp::max;
-use std::collections::BTreeMap;
 
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
@@ -21,7 +20,8 @@ use risingwave_common::types::{DataType, Scalar};
 
 use super::utils::impl_distill_by_unit;
 use super::{
-    ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream,
+    ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, PlanBase, PredicatePushdown,
+    ToBatch, ToStream,
 };
 use crate::Explain;
 use crate::error::Result;
@@ -75,12 +75,12 @@ impl LogicalUnion {
     }
 }
 
-impl PlanTreeNode for LogicalUnion {
-    fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
+impl PlanTreeNode<Logical> for LogicalUnion {
+    fn inputs(&self) -> smallvec::SmallVec<[PlanRef; 2]> {
         self.core.inputs.clone().into_iter().collect()
     }
 
-    fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> PlanRef {
+    fn clone_with_inputs(&self, inputs: &[PlanRef]) -> PlanRef {
         Self::new_with_source_col(self.all(), inputs.to_vec(), self.core.source_col).into()
     }
 }
@@ -98,7 +98,7 @@ impl ColPrunable for LogicalUnion {
     }
 }
 
-impl ExprRewritable for LogicalUnion {}
+impl ExprRewritable<Logical> for LogicalUnion {}
 
 impl ExprVisitable for LogicalUnion {}
 
@@ -118,7 +118,7 @@ impl PredicatePushdown for LogicalUnion {
 }
 
 impl ToBatch for LogicalUnion {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         let new_inputs = self
             .inputs()
             .iter()
@@ -146,7 +146,10 @@ impl ToBatch for LogicalUnion {
 }
 
 impl ToStream for LogicalUnion {
-    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(
+        &self,
+        ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         // TODO: use round robin distribution instead of using hash distribution of all inputs.
         let dist = RequiredDist::hash_shard(self.base.stream_key().unwrap_or_else(|| {
             panic!(
@@ -159,22 +162,21 @@ impl ToStream for LogicalUnion {
             .iter()
             .map(|input| input.to_stream_with_dist_required(&dist, ctx))
             .collect();
-        let new_logical = generic::Union {
-            all: true,
-            inputs: new_inputs?,
-            ..self.core
-        };
+        let core = self.core.clone_with_inputs(new_inputs?);
         assert!(
             self.all(),
             "After UnionToDistinctRule, union should become union all"
         );
-        Ok(StreamUnion::new(new_logical).into())
+        Ok(StreamUnion::new(core).into())
     }
 
     fn logical_rewrite_for_stream(
         &self,
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
+        type FixedState = std::hash::BuildHasherDefault<std::hash::DefaultHasher>;
+        type TypeMap<T> = std::collections::HashMap<DataType, T, FixedState>;
+
         let original_schema = self.base.schema().clone();
         let original_schema_len = original_schema.len();
         let mut rewrites = vec![];
@@ -236,9 +238,9 @@ impl ToStream for LogicalUnion {
             // If all inputs have the same stream key column types, we have a small merged_stream_key. Otherwise, we will have a large merged_stream_key.
 
             let (merged_stream_key_types, types_offset) = {
-                let mut max_types_counter = BTreeMap::default();
+                let mut max_types_counter = TypeMap::default();
                 for (new_input, _) in &rewrites {
-                    let mut types_counter = BTreeMap::default();
+                    let mut types_counter = TypeMap::default();
                     for x in new_input.expect_stream_key() {
                         types_counter
                             .entry(new_input.schema().fields[*x].data_type())
@@ -254,7 +256,7 @@ impl ToStream for LogicalUnion {
                 }
 
                 let mut merged_stream_key_types = vec![];
-                let mut types_offset = BTreeMap::default();
+                let mut types_offset = TypeMap::default();
                 let mut offset = 0;
                 for (key, val) in max_types_counter {
                     let _ = types_offset.insert(key.clone(), offset);
@@ -288,7 +290,7 @@ impl ToStream for LogicalUnion {
                         .collect_vec();
                     // merged_stream_key
                     let mut input_stream_keys = input_stream_key_nulls.clone();
-                    let mut types_counter = BTreeMap::default();
+                    let mut types_counter = TypeMap::default();
                     for stream_key_idx in new_input.expect_stream_key() {
                         let data_type =
                             new_input.schema().fields[*stream_key_idx].data_type.clone();

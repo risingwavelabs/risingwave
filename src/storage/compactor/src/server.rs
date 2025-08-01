@@ -30,6 +30,7 @@ use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::{MetricsManager, ObserverManager};
+use risingwave_jni_core::jvm_runtime::register_jvm_builder;
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
 use risingwave_pb::common::WorkerType;
@@ -45,7 +46,7 @@ use risingwave_storage::hummock::compactor::{
 };
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::utils::HummockMemoryCollector;
-use risingwave_storage::hummock::{MemoryLimiter, SstableObjectIdManager, SstableStore};
+use risingwave_storage::hummock::{MemoryLimiter, ObjectIdManager, SstableStore};
 use risingwave_storage::monitor::{
     CompactorMetrics, GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS, monitor_cache,
 };
@@ -54,9 +55,9 @@ use tokio::sync::mpsc;
 use tracing::info;
 
 use super::compactor_observer::observer_manager::CompactorObserverNode;
-use crate::CompactorOpts;
 use crate::rpc::{CompactorServiceImpl, MonitorServiceImpl};
 use crate::telemetry::CompactorTelemetryCreator;
+use crate::{CompactorMode, CompactorOpts};
 
 pub async fn prepare_start_parameters(
     compactor_opts: &CompactorOpts,
@@ -86,16 +87,15 @@ pub async fn prepare_start_parameters(
         * config.storage.compactor_memory_available_proportion)
         as usize;
     let meta_cache_capacity_bytes = compactor_opts.compactor_meta_cache_memory_bytes;
-    let compactor_memory_limit_bytes = match config.storage.compactor_memory_limit_mb {
+    let mut compactor_memory_limit_bytes = match config.storage.compactor_memory_limit_mb {
         Some(compactor_memory_limit_mb) => compactor_memory_limit_mb * (1 << 20),
-        None => {
-            non_reserved_memory_bytes
-        }
-    }
-    .checked_sub(compactor_opts.compactor_meta_cache_memory_bytes).unwrap_or_else(|| {
+        None => non_reserved_memory_bytes,
+    };
+
+    compactor_memory_limit_bytes = compactor_memory_limit_bytes.checked_sub(compactor_opts.compactor_meta_cache_memory_bytes).unwrap_or_else(|| {
         panic!(
-            "compactor_total_memory_bytes {} is too small to hold compactor_meta_cache_memory_bytes {}",
-            meta_cache_capacity_bytes,
+            "compactor_memory_limit_bytes{} is too small to hold compactor_meta_cache_memory_bytes {}",
+            compactor_memory_limit_bytes,
             meta_cache_capacity_bytes
         );
     });
@@ -186,6 +186,7 @@ pub async fn compactor_serve(
     advertise_addr: HostAddr,
     opts: CompactorOpts,
     shutdown: CancellationToken,
+    compactor_mode: CompactorMode,
 ) {
     let config = load_config(&opts.config_path, &opts);
     info!("Starting compactor node",);
@@ -195,7 +196,6 @@ pub async fn compactor_serve(
         if cfg!(debug_assertions) { "on" } else { "off" }
     );
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
-
     // Register to the cluster.
     let (meta_client, system_params_reader) = MetaClient::register_new(
         opts.meta_address.clone(),
@@ -243,7 +243,7 @@ pub async fn compactor_serve(
     // limited at first.
     let _observer_join_handle = observer_manager.start().await;
 
-    let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
+    let object_id_manager = Arc::new(ObjectIdManager::new(
         hummock_meta_client.clone(),
         storage_opts.sstable_id_remote_fetch_number,
     ));
@@ -269,12 +269,24 @@ pub async fn compactor_serve(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
         ),
-        risingwave_storage::hummock::compactor::start_compactor(
-            compactor_context.clone(),
-            hummock_meta_client.clone(),
-            sstable_object_id_manager.clone(),
-            compaction_catalog_manager_ref,
-        ),
+        match compactor_mode {
+            CompactorMode::Dedicated => risingwave_storage::hummock::compactor::start_compactor(
+                compactor_context.clone(),
+                hummock_meta_client.clone(),
+                object_id_manager.clone(),
+                compaction_catalog_manager_ref,
+            ),
+            CompactorMode::Shared => unreachable!(),
+            CompactorMode::DedicatedIceberg => {
+                register_jvm_builder();
+
+                risingwave_storage::hummock::compactor::start_iceberg_compactor(
+                    compactor_context.clone(),
+                    hummock_meta_client.clone(),
+                )
+            }
+            CompactorMode::SharedIceberg => unreachable!(),
+        },
     ];
 
     let telemetry_manager = TelemetryManager::new(

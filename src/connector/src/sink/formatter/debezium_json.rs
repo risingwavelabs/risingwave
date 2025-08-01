@@ -315,6 +315,7 @@ pub(crate) fn field_to_json(field: &Field) -> Value {
         risingwave_common::types::DataType::Struct(_) => ("string", ""),
         risingwave_common::types::DataType::List { .. } => ("string", ""),
         risingwave_common::types::DataType::Map(_) => ("string", ""),
+        risingwave_common::types::DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
     };
 
     if name.is_empty() {

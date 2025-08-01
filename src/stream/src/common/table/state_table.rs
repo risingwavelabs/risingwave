@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use either::Either;
-use foyer::CacheHint;
+use foyer::Hint;
 use futures::{Stream, StreamExt, TryStreamExt, pin_mut};
 use futures_async_stream::for_await;
 use itertools::{Itertools, izip};
@@ -79,7 +79,7 @@ const WATERMARK_CACHE_ENTRIES: usize = 16;
 macro_rules! insane_mode_discard_point {
     () => {{
         use rand::Rng;
-        if crate::consistency::insane() && rand::thread_rng().gen_bool(0.3) {
+        if crate::consistency::insane() && rand::rng().random_bool(0.3) {
             return;
         }
     }};
@@ -106,11 +106,14 @@ pub struct StateTableInner<
     /// State store for accessing snapshot data
     store: S,
 
+    /// Current epoch
+    epoch: Option<EpochPair>,
+
     /// Used for serializing and deserializing the primary key.
     pk_serde: OrderedRowSerde,
 
     /// Row deserializer with value encoding
-    row_serde: SD,
+    row_serde: Arc<SD>,
 
     /// Indices of primary key.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
@@ -186,6 +189,7 @@ where
     /// and otherwise, deadlock can be likely to happen.
     pub async fn init_epoch(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.local_store.init(InitOptions::new(epoch)).await?;
+        assert_eq!(None, self.epoch.replace(epoch), "should not init for twice");
         Ok(())
     }
 
@@ -206,7 +210,7 @@ where
 }
 
 fn consistent_old_value_op(
-    row_serde: impl ValueRowSerde,
+    row_serde: Arc<impl ValueRowSerde>,
     is_log_store: bool,
 ) -> OpConsistencyLevel {
     OpConsistencyLevel::ConsistentOldValue {
@@ -394,23 +398,19 @@ where
         };
         let prefix_hint_len = table_catalog.read_prefix_len_hint as usize;
 
-        let make_row_serde = || {
-            SD::new(
-                Arc::from_iter(table_catalog.value_indices.iter().map(|val| *val as usize)),
-                Arc::from(table_columns.clone().into_boxed_slice()),
-            )
-        };
+        let row_serde = Arc::new(SD::new(
+            Arc::from_iter(table_catalog.value_indices.iter().map(|val| *val as usize)),
+            Arc::from(table_columns.clone().into_boxed_slice()),
+        ));
 
         let state_table_op_consistency_level = op_consistency_level;
         let op_consistency_level = match op_consistency_level {
             StateTableOpConsistencyLevel::Inconsistent => OpConsistencyLevel::Inconsistent,
             StateTableOpConsistencyLevel::ConsistentOldValue => {
-                let row_serde = make_row_serde();
-                consistent_old_value_op(row_serde, false)
+                consistent_old_value_op(row_serde.clone(), false)
             }
             StateTableOpConsistencyLevel::LogStoreEnabled => {
-                let row_serde = make_row_serde();
-                consistent_old_value_op(row_serde, true)
+                consistent_old_value_op(row_serde.clone(), true)
             }
         };
 
@@ -428,11 +428,10 @@ where
                 op_consistency_level,
                 table_option,
                 distribution.vnodes().clone(),
+                true,
             )
         };
         let local_state_store = store.new_local(new_local_options).await;
-
-        let row_serde = make_row_serde();
 
         // If state table has versioning, that means it supports
         // Schema change. In that case, the row encoding should be column aware as well.
@@ -518,6 +517,7 @@ where
             table_id,
             local_store: local_state_store,
             store,
+            epoch: None,
             pk_serde,
             row_serde,
             pk_indices,
@@ -543,11 +543,6 @@ where
 
     pub fn table_id(&self) -> u32 {
         self.table_id.table_id
-    }
-
-    /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
-    pub fn epoch(&self) -> u64 {
-        self.local_store.epoch()
     }
 
     /// Get the vnode value with given (prefix of) primary key
@@ -591,10 +586,6 @@ where
         &self.value_indices
     }
 
-    fn is_dirty(&self) -> bool {
-        self.local_store.is_dirty() || self.pending_watermark.is_some()
-    }
-
     pub fn is_consistent_op(&self) -> bool {
         matches!(
             self.op_consistency_level,
@@ -636,10 +627,13 @@ where
 {
     /// Get a single row from state table.
     pub async fn get_row(&self, pk: impl Row) -> StreamExecutorResult<Option<OwnedRow>> {
-        let encoded_row: Option<Bytes> = self.get_encoded_row(pk).await?;
-        match encoded_row {
-            Some(encoded_row) => {
-                let row = self.row_serde.deserialize(&encoded_row)?;
+        // TODO: avoid clone when `on_key_value_fn` can be non-static
+        let row_serde = self.row_serde.clone();
+        let row = self
+            .get_inner(pk, move |_, value| Ok(row_serde.deserialize(value)?))
+            .await?;
+        match row {
+            Some(row) => {
                 if IS_REPLICATED {
                     // If the table is replicated, we need to deserialize the row with the output
                     // indices.
@@ -655,6 +649,15 @@ where
 
     /// Get a raw encoded row from state table.
     pub async fn get_encoded_row(&self, pk: impl Row) -> StreamExecutorResult<Option<Bytes>> {
+        self.get_inner(pk, |_, value| Ok(Bytes::copy_from_slice(value)))
+            .await
+    }
+
+    async fn get_inner<O: Send + 'static>(
+        &self,
+        pk: impl Row,
+        on_key_value_fn: impl risingwave_storage::store::KeyValueFn<O>,
+    ) -> StreamExecutorResult<Option<O>> {
         assert!(pk.len() <= self.pk_indices.len());
 
         let serialized_pk =
@@ -675,13 +678,12 @@ where
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
-            table_id: self.table_id,
-            cache_policy: CachePolicy::Fill(CacheHint::Normal),
+            cache_policy: CachePolicy::Fill(Hint::Normal),
             ..Default::default()
         };
 
         self.local_store
-            .get(serialized_pk, read_options)
+            .on_key_value(serialized_pk, read_options, on_key_value_fn)
             .await
             .map_err(Into::into)
     }
@@ -753,10 +755,6 @@ where
         &mut self,
         new_vnodes: Arc<Bitmap>,
     ) -> StreamExecutorResult<(Arc<Bitmap>, bool)> {
-        assert!(
-            !self.inner.is_dirty(),
-            "vnode bitmap should only be updated when state table is clean"
-        );
         let prev_vnodes = self
             .inner
             .local_store
@@ -813,8 +811,8 @@ where
                     self.table_id(),
                     vnode,
                     &key,
-                    prev.debug_fmt(&self.row_serde),
-                    new.debug_fmt(&self.row_serde),
+                    prev.debug_fmt(&*self.row_serde),
+                    new.debug_fmt(&*self.row_serde),
                 )
             }
         }
@@ -890,7 +888,8 @@ where
         let new_pk = (&new_value).project(self.pk_indices());
         debug_assert!(
             Row::eq(&old_pk, new_pk),
-            "pk should not change: {old_pk:?} vs {new_pk:?}",
+            "pk should not change: {old_pk:?} vs {new_pk:?}. {}",
+            self.table_id
         );
 
         let new_key_bytes =
@@ -930,9 +929,11 @@ where
             .compute_chunk_vnode(&chunk, &self.pk_indices);
 
         let values = if let Some(ref value_indices) = self.value_indices {
-            chunk.project(value_indices).serialize_with(&self.row_serde)
+            chunk
+                .project(value_indices)
+                .serialize_with(&*self.row_serde)
         } else {
-            chunk.serialize_with(&self.row_serde)
+            chunk.serialize_with(&*self.row_serde)
         };
 
         // TODO(kwannoel): Seems like we are doing vis check twice here.
@@ -1060,7 +1061,10 @@ where
     ) -> StreamExecutorResult<StateTablePostCommit<'_, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>>
     {
         assert!(!self.on_post_commit);
-        assert_eq!(self.epoch(), new_epoch.prev);
+        assert_eq!(
+            self.epoch.expect("should only be called after init").curr,
+            new_epoch.prev
+        );
         let switch_op_consistency_level = switch_consistent_op.map(|new_consistency_level| {
             assert_ne!(self.op_consistency_level, new_consistency_level);
             self.op_consistency_level = new_consistency_level;
@@ -1076,18 +1080,15 @@ where
         });
         trace!(
             table_id = %self.table_id,
-            epoch = ?self.epoch(),
+            epoch = ?self.epoch,
             "commit state table"
         );
 
-        let mut table_watermarks = None;
-        if self.is_dirty() {
-            self.local_store
-                .flush()
-                .instrument(tracing::info_span!("state_table_flush"))
-                .await?;
-            table_watermarks = self.commit_pending_watermark();
-        }
+        self.local_store
+            .flush()
+            .instrument(tracing::info_span!("state_table_flush"))
+            .await?;
+        let table_watermarks = self.commit_pending_watermark();
         self.local_store.seal_current_epoch(
             new_epoch.curr,
             SealCurrentEpochOptions {
@@ -1095,53 +1096,55 @@ where
                 switch_op_consistency_level,
             },
         );
+        self.epoch = Some(new_epoch);
 
         // Refresh watermark cache if it is out of sync.
-        if USE_WATERMARK_CACHE && !self.watermark_cache.is_synced() {
-            if let Some(ref watermark) = self.committed_watermark {
-                let range: (Bound<Once<Datum>>, Bound<Once<Datum>>) =
-                    (Included(once(Some(watermark.clone()))), Unbounded);
-                // NOTE(kwannoel): We buffer `pks` before inserting into watermark cache
-                // because we can't hold an immutable ref (via `iter_key_and_val_with_pk_range`)
-                // and a mutable ref (via `self.watermark_cache.insert`) at the same time.
-                // TODO(kwannoel): We can optimize it with:
-                // 1. Either use `RefCell`.
-                // 2. Or pass in a direct reference to LocalStateStore,
-                //    instead of referencing it indirectly from `self`.
-                //    Similar to how we do for pk_indices.
-                let mut pks = Vec::with_capacity(self.watermark_cache.capacity());
-                {
-                    let mut streams = vec![];
-                    for vnode in self.vnodes().iter_vnodes() {
-                        let stream = self
-                            .iter_keyed_row_with_vnode(vnode, &range, PrefetchOptions::default())
-                            .await?;
-                        streams.push(Box::pin(stream));
+        if USE_WATERMARK_CACHE
+            && !self.watermark_cache.is_synced()
+            && let Some(ref watermark) = self.committed_watermark
+        {
+            let range: (Bound<Once<Datum>>, Bound<Once<Datum>>) =
+                (Included(once(Some(watermark.clone()))), Unbounded);
+            // NOTE(kwannoel): We buffer `pks` before inserting into watermark cache
+            // because we can't hold an immutable ref (via `iter_key_and_val_with_pk_range`)
+            // and a mutable ref (via `self.watermark_cache.insert`) at the same time.
+            // TODO(kwannoel): We can optimize it with:
+            // 1. Either use `RefCell`.
+            // 2. Or pass in a direct reference to LocalStateStore,
+            //    instead of referencing it indirectly from `self`.
+            //    Similar to how we do for pk_indices.
+            let mut pks = Vec::with_capacity(self.watermark_cache.capacity());
+            {
+                let mut streams = vec![];
+                for vnode in self.vnodes().iter_vnodes() {
+                    let stream = self
+                        .iter_keyed_row_with_vnode(vnode, &range, PrefetchOptions::default())
+                        .await?;
+                    streams.push(Box::pin(stream));
+                }
+                let merged_stream = merge_sort(streams);
+                pin_mut!(merged_stream);
+
+                #[for_await]
+                for entry in merged_stream.take(self.watermark_cache.capacity()) {
+                    let keyed_row = entry?;
+                    let pk = self.pk_serde.deserialize(keyed_row.key())?;
+                    // watermark column should be part of the pk
+                    if !pk.is_null_at(self.clean_watermark_index_in_pk.unwrap_or(0) as usize) {
+                        pks.push(pk);
                     }
-                    let merged_stream = merge_sort(streams);
-                    pin_mut!(merged_stream);
-
-                    #[for_await]
-                    for entry in merged_stream.take(self.watermark_cache.capacity()) {
-                        let keyed_row = entry?;
-                        let pk = self.pk_serde.deserialize(keyed_row.key())?;
-                        // watermark column should be part of the pk
-                        if !pk.is_null_at(self.clean_watermark_index_in_pk.unwrap_or(0) as usize) {
-                            pks.push(pk);
-                        }
-                    }
                 }
+            }
 
-                let mut filler = self.watermark_cache.begin_syncing();
-                for pk in pks {
-                    filler.insert_unchecked(DefaultOrdered(pk), ());
-                }
-                filler.finish();
+            let mut filler = self.watermark_cache.begin_syncing();
+            for pk in pks {
+                filler.insert_unchecked(DefaultOrdered(pk), ());
+            }
+            filler.finish();
 
-                let n_cache_entries = self.watermark_cache.len();
-                if n_cache_entries < self.watermark_cache.capacity() {
-                    self.watermark_cache.set_table_row_count(n_cache_entries);
-                }
+            let n_cache_entries = self.watermark_cache.len();
+            if n_cache_entries < self.watermark_cache.capacity() {
+                self.watermark_cache.set_table_row_count(n_cache_entries);
             }
         }
 
@@ -1153,18 +1156,18 @@ where
     fn commit_pending_watermark(
         &mut self,
     ) -> Option<(WatermarkDirection, Vec<VnodeWatermark>, WatermarkSerdeType)> {
-        let watermark = self.pending_watermark.take();
-        watermark.as_ref().inspect(|watermark| {
-            trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
-        });
+        let watermark = self.pending_watermark.take()?;
+        trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
 
-        let watermark_serializer = if self.pk_indices().is_empty() {
-            None
-        } else {
+        assert!(
+            !self.pk_indices().is_empty(),
+            "see pending watermark on empty pk"
+        );
+        let watermark_serializer = {
             match self.clean_watermark_index_in_pk {
-                None => Some(self.pk_serde.index(0)),
+                None => self.pk_serde.index(0),
                 Some(clean_watermark_index_in_pk) => {
-                    Some(self.pk_serde.index(clean_watermark_index_in_pk as usize))
+                    self.pk_serde.index(clean_watermark_index_in_pk as usize)
                 }
             }
         };
@@ -1177,8 +1180,8 @@ where
             },
         };
 
-        let should_clean_watermark = match watermark {
-            Some(ref watermark) => {
+        let should_clean_watermark = {
+            {
                 if USE_WATERMARK_CACHE && self.watermark_cache.is_synced() {
                     if let Some(key) = self.watermark_cache.lowest_key() {
                         watermark.as_scalar_ref_impl().default_cmp(&key).is_ge()
@@ -1196,53 +1199,42 @@ where
                     true
                 }
             }
-            None => false,
         };
 
-        let watermark_suffix = watermark.as_ref().map(|watermark| {
-            serialize_pk(
-                row::once(Some(watermark.clone())),
-                watermark_serializer.as_ref().unwrap(),
-            )
-        });
-
-        let mut seal_watermark: Option<(WatermarkDirection, VnodeWatermark, WatermarkSerdeType)> =
-            None;
+        let watermark_suffix =
+            serialize_pk(row::once(Some(watermark.clone())), &watermark_serializer);
 
         // Compute Delete Ranges
-        if should_clean_watermark && let Some(watermark_suffix) = watermark_suffix {
+        let seal_watermark = if should_clean_watermark {
             trace!(table_id = %self.table_id, watermark = ?watermark_suffix, vnodes = ?{
                 self.vnodes().iter_vnodes().collect_vec()
             }, "delete range");
 
-            let order_type = watermark_serializer
-                .as_ref()
-                .unwrap()
-                .get_order_types()
-                .get(0)
-                .unwrap();
+            let order_type = watermark_serializer.get_order_types().get(0).unwrap();
 
             if order_type.is_ascending() {
-                seal_watermark = Some((
+                Some((
                     WatermarkDirection::Ascending,
                     VnodeWatermark::new(
                         self.vnodes().clone(),
                         Bytes::copy_from_slice(watermark_suffix.as_ref()),
                     ),
                     watermark_type,
-                ));
+                ))
             } else {
-                seal_watermark = Some((
+                Some((
                     WatermarkDirection::Descending,
                     VnodeWatermark::new(
                         self.vnodes().clone(),
                         Bytes::copy_from_slice(watermark_suffix.as_ref()),
                     ),
                     watermark_type,
-                ));
+                ))
             }
-        }
-        self.committed_watermark = watermark;
+        } else {
+            None
+        };
+        self.committed_watermark = Some(watermark);
 
         // Clear the watermark cache and force a resync.
         // TODO(kwannoel): This can be further optimized:
@@ -1292,7 +1284,7 @@ where
         Ok(deserialize_keyed_row_stream::<'_, ()>(
             self.iter_kv_with_pk_range(pk_range, vnode, prefetch_options)
                 .await?,
-            &self.row_serde,
+            &*self.row_serde,
         )
         .map_ok(|(_, row)| row))
     }
@@ -1306,7 +1298,7 @@ where
         Ok(deserialize_keyed_row_stream(
             self.iter_kv_with_pk_range(pk_range, vnode, prefetch_options)
                 .await?,
-            &self.row_serde,
+            &*self.row_serde,
         )
         .map_ok(|(key, row)| KeyedRow::new(TableKey(key), row)))
     }
@@ -1333,10 +1325,8 @@ where
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
-            table_id: self.table_id,
             prefetch_options,
-            cache_policy: CachePolicy::Fill(CacheHint::Normal),
-            ..Default::default()
+            cache_policy: CachePolicy::Fill(Hint::Normal),
         };
 
         Ok(self.local_store.iter(table_key_range, read_options).await?)
@@ -1351,10 +1341,8 @@ where
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
-            table_id: self.table_id,
             prefetch_options,
-            cache_policy: CachePolicy::Fill(CacheHint::Normal),
-            ..Default::default()
+            cache_policy: CachePolicy::Fill(Hint::Normal),
         };
 
         Ok(self
@@ -1375,6 +1363,34 @@ where
         let stream = self.iter_with_prefix_inner::</* REVERSE */ false, ()>(pk_prefix, sub_range, prefetch_options)
             .await?;
         Ok(stream.map_ok(|(_, row)| row))
+    }
+
+    /// Get the row from a state table with only 1 row.
+    pub async fn get_from_one_row_table(&self) -> StreamExecutorResult<Option<OwnedRow>> {
+        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
+        let stream = self
+            .iter_with_prefix(row::empty(), sub_range, Default::default())
+            .await?;
+        pin_mut!(stream);
+
+        if let Some(res) = stream.next().await {
+            let value = res?.into_owned_row();
+            assert!(stream.next().await.is_none());
+            Ok(Some(value))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Get the row from a state table with only 1 row, and the row has only 1 col.
+    ///
+    /// `None` can mean either the row is never persisted, or is a persisted `NULL`,
+    /// which does not matter in the use case.
+    pub async fn get_from_one_value_table(&self) -> StreamExecutorResult<Option<ScalarImpl>> {
+        Ok(self
+            .get_from_one_row_table()
+            .await?
+            .and_then(|row| row[0].clone()))
     }
 
     pub async fn iter_keyed_row_with_prefix(
@@ -1456,7 +1472,7 @@ where
                     prefetch_options,
                 )
                 .await?,
-                &self.row_serde,
+                &*self.row_serde,
             ))
         } else {
             futures::future::Either::Right(deserialize_keyed_row_stream(
@@ -1466,7 +1482,7 @@ where
                     prefetch_options,
                 )
                 .await?,
-                &self.row_serde,
+                &*self.row_serde,
             ))
         })
     }
@@ -1520,7 +1536,7 @@ where
                     },
                 )
                 .await?,
-            &self.row_serde,
+            &*self.row_serde,
         )
         .map_err(Into::into))
     }

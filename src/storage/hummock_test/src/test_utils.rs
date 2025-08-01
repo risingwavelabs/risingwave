@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -22,13 +23,17 @@ use risingwave_common_service::ObserverManager;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::TableKey;
 pub use risingwave_hummock_sdk::key::{gen_key_from_bytes, gen_key_from_str};
+use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
 use risingwave_meta::controller::cluster::ClusterControllerRef;
 use risingwave_meta::hummock::test_utils::{
     register_table_ids_to_compaction_group, setup_compute_env,
 };
-use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
+use risingwave_meta::hummock::{
+    CommitEpochInfo, HummockManagerRef, MockHummockMetaClient, NewTableFragmentInfo,
+};
 use risingwave_meta::manager::MetaSrvEnv;
 use risingwave_pb::catalog::{PbTable, Table};
+use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::compaction_catalog_manager::{
     CompactionCatalogManager, CompactionCatalogManagerRef,
@@ -96,7 +101,6 @@ pub trait TestIngestBatch: LocalStateStore {
     async fn ingest_batch(
         &mut self,
         kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
-        write_options: WriteOptions,
     ) -> StorageResult<usize>;
 }
 
@@ -105,9 +109,7 @@ impl<S: LocalStateStore> TestIngestBatch for S {
     async fn ingest_batch(
         &mut self,
         kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
-        write_options: WriteOptions,
     ) -> StorageResult<usize> {
-        assert_eq!(self.epoch(), write_options.epoch);
         for (key, value) in kv_pairs {
             match value.user_value {
                 None => self.delete(key, Bytes::new())?,
@@ -227,6 +229,31 @@ impl HummockTestEnv {
         )
         .await;
         self.wait_version_sync().await;
+    }
+
+    pub async fn register_vector_index(
+        &self,
+        table_id: TableId,
+        init_epoch: u64,
+        init_config: PbVectorIndexInit,
+    ) {
+        self.manager
+            .commit_epoch(CommitEpochInfo {
+                sstables: vec![],
+                new_table_watermarks: Default::default(),
+                sst_to_context: Default::default(),
+                new_table_fragment_infos: vec![NewTableFragmentInfo {
+                    table_ids: HashSet::from_iter([table_id]),
+                }],
+                change_log_delta: Default::default(),
+                vector_index_delta: HashMap::from_iter([(
+                    table_id,
+                    VectorIndexDelta::Init(init_config),
+                )]),
+                tables_to_commit: HashMap::from_iter([(table_id, init_epoch)]),
+            })
+            .await
+            .unwrap();
     }
 
     pub async fn register_table(&self, table: PbTable) {

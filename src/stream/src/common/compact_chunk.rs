@@ -130,28 +130,28 @@ impl<'a, 'b> RowOpMap<'a, 'b> {
                 e.insert(RowOp::Insert(v));
             }
             Entry::Occupied(mut e) => match e.get() {
-                RowOp::Delete(ref old_v) => {
+                RowOp::Delete(old_v) => {
                     e.insert(RowOp::Update((*old_v, v)));
                 }
                 RowOp::Insert(_) => {
-                    if self.warn_for_inconsistent_stream {
-                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                            tracing::warn!(
-                                suppressed_count,
-                                "double insert for the same pk, breaking the sink's pk constraint"
-                            );
-                        }
+                    if self.warn_for_inconsistent_stream
+                        && let Ok(suppressed_count) = LOG_SUPPERSSER.check()
+                    {
+                        tracing::warn!(
+                            suppressed_count,
+                            "double insert for the same pk, breaking the sink's pk constraint"
+                        );
                     }
                     e.insert(RowOp::Insert(v));
                 }
-                RowOp::Update((ref old_v, _)) => {
-                    if self.warn_for_inconsistent_stream {
-                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                            tracing::warn!(
-                                suppressed_count,
-                                "double insert for the same pk, breaking the sink's pk constraint"
-                            );
-                        }
+                RowOp::Update((old_v, _)) => {
+                    if self.warn_for_inconsistent_stream
+                        && let Ok(suppressed_count) = LOG_SUPPERSSER.check()
+                    {
+                        tracing::warn!(
+                            suppressed_count,
+                            "double insert for the same pk, breaking the sink's pk constraint"
+                        );
                     }
                     e.insert(RowOp::Update((*old_v, v)));
                 }
@@ -169,14 +169,14 @@ impl<'a, 'b> RowOpMap<'a, 'b> {
                 RowOp::Insert(_) => {
                     e.remove();
                 }
-                RowOp::Update((ref prev, _)) => {
+                RowOp::Update((prev, _)) => {
                     e.insert(RowOp::Delete(*prev));
                 }
                 RowOp::Delete(_) => {
-                    if self.warn_for_inconsistent_stream {
-                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                            tracing::warn!(suppressed_count, "double delete for the same pk");
-                        }
+                    if self.warn_for_inconsistent_stream
+                        && let Ok(suppressed_count) = LOG_SUPPERSSER.check()
+                    {
+                        tracing::warn!(suppressed_count, "double delete for the same pk");
                     }
                     e.insert(RowOp::Delete(v));
                 }

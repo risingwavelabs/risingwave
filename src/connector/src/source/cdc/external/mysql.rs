@@ -17,16 +17,16 @@ use std::collections::HashMap;
 use anyhow::{Context, anyhow};
 use chrono::{DateTime, NaiveDateTime};
 use futures::stream::BoxStream;
-use futures::{StreamExt, pin_mut};
+use futures::{StreamExt, pin_mut, stream};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use mysql_async::prelude::*;
 use mysql_common::params::Params;
 use mysql_common::value::Value;
 use risingwave_common::bail;
-use risingwave_common::catalog::{CDC_OFFSET_COLUMN_NAME, ColumnDesc, ColumnId, Schema};
+use risingwave_common::catalog::{CDC_OFFSET_COLUMN_NAME, ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Decimal, F32, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, Decimal, F32, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use sea_schema::mysql::def::{ColumnDefault, ColumnKey, ColumnType};
 use sea_schema::mysql::discovery::SchemaDiscovery;
@@ -38,9 +38,10 @@ use sqlx::mysql::MySqlConnectOptions;
 use thiserror_ext::AsReport;
 
 use crate::error::{ConnectorError, ConnectorResult};
+use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
-    CdcOffset, CdcOffsetParseFunc, DebeziumOffset, ExternalTableConfig, ExternalTableReader,
-    SchemaTableName, SslMode, mysql_row_to_owned_row,
+    CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, DebeziumOffset,
+    ExternalTableConfig, ExternalTableReader, SchemaTableName, SslMode, mysql_row_to_owned_row,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -115,65 +116,17 @@ impl MySqlExternalTable {
             // column name in mysql is case-insensitive, convert to lowercase
             let col_name = col.name.to_lowercase();
             let column_desc = if let Some(default) = col.default {
-                let snapshot_value = match default {
-                    ColumnDefault::Null => None,
-                    ColumnDefault::Int(val) => match data_type {
-                        DataType::Int16 => Some(ScalarImpl::Int16(val as _)),
-                        DataType::Int32 => Some(ScalarImpl::Int32(val as _)),
-                        DataType::Int64 => Some(ScalarImpl::Int64(val)),
-                        DataType::Varchar => {
-                            // should be the Enum type which is mapped to Varchar
-                            Some(ScalarImpl::from(val.to_string()))
-                        }
-                        _ => {
-                            tracing::error!(
-                                column = col_name,
-                                ?data_type,
-                                default_val = val,
-                                "unexpected default value type for column, set default to null"
-                            );
-                            None
-                        }
-                    },
-                    ColumnDefault::Real(val) => match data_type {
-                        DataType::Float32 => Some(ScalarImpl::Float32(F32::from(val as f32))),
-                        DataType::Float64 => Some(ScalarImpl::Float64(val.into())),
-                        DataType::Decimal => Some(ScalarImpl::Decimal(
-                            Decimal::try_from(val).map_err(|err| {
-                                anyhow!("failed to convert default value to decimal").context(err)
-                            })?,
-                        )),
-                        _ => {
-                            tracing::error!(
-                                column = col_name,
-                                ?data_type,
-                                default_val = val,
-                                "unexpected default value type for column, set default to null"
-                            );
-                            None
-                        }
-                    },
-                    ColumnDefault::String(mut val) => {
-                        // mysql timestamp is mapped to timestamptz, we use UTC timezone to
-                        // interpret its value
-                        if data_type == DataType::Timestamptz {
-                            val = timestamp_val_to_timestamptz(val.as_str())?;
-                        }
-                        match ScalarImpl::from_text(val.as_str(), &data_type) {
-                            Ok(scalar) => Some(scalar),
-                            Err(err) => {
-                                tracing::warn!(error=%err.as_report(), "failed to parse mysql default value expression, only constant is supported");
-                                None
-                            }
-                        }
-                    }
-                    ColumnDefault::CurrentTimestamp | ColumnDefault::CustomExpr(_) => {
+                let snapshot_value = derive_default_value(default.clone(), &data_type)
+                    .unwrap_or_else(|e| {
                         tracing::warn!(
-                            "MySQL CURRENT_TIMESTAMP and custom expression default value not supported"
+                            column = col_name,
+                            ?default,
+                            %data_type,
+                            error = %e.as_report(),
+                            "failed to derive column default value, fallback to `NULL`",
                         );
                         None
-                    }
-                };
+                    });
 
                 ColumnDesc::named_with_default_value(
                     col_name.clone(),
@@ -208,6 +161,44 @@ impl MySqlExternalTable {
     pub fn pk_names(&self) -> &Vec<String> {
         &self.pk_names
     }
+}
+
+fn derive_default_value(default: ColumnDefault, data_type: &DataType) -> ConnectorResult<Datum> {
+    let datum = match default {
+        ColumnDefault::Null => None,
+        ColumnDefault::Int(val) => match data_type {
+            DataType::Int16 => Some(ScalarImpl::Int16(val as _)),
+            DataType::Int32 => Some(ScalarImpl::Int32(val as _)),
+            DataType::Int64 => Some(ScalarImpl::Int64(val)),
+            DataType::Varchar => {
+                // should be the Enum type which is mapped to Varchar
+                Some(ScalarImpl::from(val.to_string()))
+            }
+            _ => bail!("unexpected default value type for integer"),
+        },
+        ColumnDefault::Real(val) => match data_type {
+            DataType::Float32 => Some(ScalarImpl::Float32(F32::from(val as f32))),
+            DataType::Float64 => Some(ScalarImpl::Float64(val.into())),
+            DataType::Decimal => Some(ScalarImpl::Decimal(
+                Decimal::try_from(val).context("failed to convert default value to decimal")?,
+            )),
+            _ => bail!("unexpected default value type for real"),
+        },
+        ColumnDefault::String(mut val) => {
+            // mysql timestamp is mapped to timestamptz, we use UTC timezone to
+            // interpret its value
+            if data_type == &DataType::Timestamptz {
+                val = timestamp_val_to_timestamptz(val.as_str())?;
+            }
+            Some(ScalarImpl::from_text(val.as_str(), data_type).map_err(|e| anyhow!(e)).context(
+                "failed to parse mysql default value expression, only constant is supported",
+            )?)
+        }
+        ColumnDefault::CurrentTimestamp | ColumnDefault::CustomExpr(_) => {
+            bail!("MySQL CURRENT_TIMESTAMP and custom expression default value not supported")
+        }
+    };
+    Ok(datum)
 }
 
 pub fn timestamp_val_to_timestamptz(value_text: &str) -> ConnectorResult<String> {
@@ -354,13 +345,12 @@ pub fn mysql_type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType>
 pub struct MySqlExternalTableReader {
     rw_schema: Schema,
     field_names: String,
-    // use mutex to provide shared mutable access to the connection
-    conn: tokio::sync::Mutex<mysql_async::Conn>,
+    pool: mysql_async::Pool,
 }
 
 impl ExternalTableReader for MySqlExternalTableReader {
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
-        let mut conn = self.conn.lock().await;
+        let mut conn = self.pool.get_conn().await?;
 
         let sql = "SHOW MASTER STATUS".to_owned();
         let mut rs = conn.query::<mysql_async::Row, _>(sql).await?;
@@ -369,7 +359,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
             .exactly_one()
             .ok()
             .context("expect exactly one row when reading binlog offset")?;
-
+        drop(conn);
         Ok(CdcOffset::MySql(MySqlOffset {
             filename: row.take("File").unwrap(),
             position: row.take("Position").unwrap(),
@@ -385,10 +375,32 @@ impl ExternalTableReader for MySqlExternalTableReader {
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
         self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
     }
+
+    async fn disconnect(self) -> ConnectorResult<()> {
+        self.pool.disconnect().await.map_err(|e| e.into())
+    }
+
+    fn get_parallel_cdc_splits(
+        &self,
+        _options: CdcTableSnapshotSplitOption,
+    ) -> BoxStream<'_, ConnectorResult<CdcTableSnapshotSplit>> {
+        // TODO(zw): feat: impl
+        stream::empty::<ConnectorResult<CdcTableSnapshotSplit>>().boxed()
+    }
+
+    fn split_snapshot_read(
+        &self,
+        _table_name: SchemaTableName,
+        _left: OwnedRow,
+        _right: OwnedRow,
+        _split_columns: Vec<Field>,
+    ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
+        todo!("implement MySQL CDC parallelized backfill")
+    }
 }
 
 impl MySqlExternalTableReader {
-    pub async fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
+    pub fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
         let mut opts_builder = mysql_async::OptsBuilder::default()
             .user(Some(config.username))
             .pass(Some(config.password))
@@ -406,8 +418,7 @@ impl MySqlExternalTableReader {
                 opts_builder.ssl_opts(Some(ssl_without_verify))
             }
         };
-
-        let conn = mysql_async::Conn::new(mysql_async::Opts::from(opts_builder)).await?;
+        let pool = mysql_async::Pool::new(opts_builder);
 
         let field_names = rw_schema
             .fields
@@ -419,7 +430,7 @@ impl MySqlExternalTableReader {
         Ok(Self {
             rw_schema,
             field_names,
-            conn: tokio::sync::Mutex::new(conn),
+            pool,
         })
     }
 
@@ -466,19 +477,17 @@ impl MySqlExternalTableReader {
             )
         };
 
-        let mut conn = self.conn.lock().await;
-
+        let mut conn = self.pool.get_conn().await?;
         // Set session timezone to UTC
         conn.exec_drop("SET time_zone = \"+00:00\"", ()).await?;
 
         if start_pk_row.is_none() {
-            let rs_stream = sql.stream::<mysql_async::Row, _>(&mut *conn).await?;
+            let rs_stream = sql.stream::<mysql_async::Row, _>(&mut conn).await?;
             let row_stream = rs_stream.map(|row| {
                 // convert mysql row into OwnedRow
                 let mut row = row?;
                 Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
             });
-
             pin_mut!(row_stream);
             #[for_await]
             for row in row_stream {
@@ -523,7 +532,7 @@ impl MySqlExternalTableReader {
             tracing::debug!("snapshot read params: {:?}", &params);
             let rs_stream = sql
                 .with(Params::from(params))
-                .stream::<mysql_async::Row, _>(&mut *conn)
+                .stream::<mysql_async::Row, _>(&mut conn)
                 .await?;
 
             let row_stream = rs_stream.map(|row| {
@@ -531,7 +540,6 @@ impl MySqlExternalTableReader {
                 let mut row = row?;
                 Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
             });
-
             pin_mut!(row_stream);
             #[for_await]
             for row in row_stream {
@@ -539,6 +547,7 @@ impl MySqlExternalTableReader {
                 yield row;
             }
         };
+        drop(conn);
     }
 
     // mysql cannot leverage the given key to narrow down the range of scan,
@@ -686,9 +695,7 @@ mod tests {
         let config =
             serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
                 .unwrap();
-        let reader = MySqlExternalTableReader::new(config, rw_schema)
-            .await
-            .unwrap();
+        let reader = MySqlExternalTableReader::new(config, rw_schema).unwrap();
         let offset = reader.current_cdc_offset().await.unwrap();
         println!("BinlogOffset: {:?}", offset);
 

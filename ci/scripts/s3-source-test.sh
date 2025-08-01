@@ -32,7 +32,7 @@ echo "--- starting risingwave cluster with connector node"
 risedev ci-start ci-1cn-1fe
 
 echo "--- Run test"
-python3 -m pip install --break-system-packages minio psycopg2-binary opendal pandas
+python3 -m pip install --break-system-packages -r e2e_test/s3/requirements.txt
 if [[ -v format_type ]]; then
   python3 e2e_test/s3/"$script" "$format_type"
 else

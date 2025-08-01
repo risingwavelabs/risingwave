@@ -81,7 +81,7 @@ fn generate_series_timestamptz_impl(
     start: Timestamptz,
     stop: Timestamptz,
     step: Interval,
-) -> Result<impl Iterator<Item = Timestamptz>> {
+) -> Result<impl Iterator<Item = Timestamptz> + use<>> {
     let time_zone =
         Timestamptz::lookup_time_zone(time_zone).map_err(crate::scalar::time_zone_err)?;
     range_generic::<_, _, _, true>(start, stop, step, time_zone)

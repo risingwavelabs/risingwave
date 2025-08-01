@@ -21,7 +21,7 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::time::Duration;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use foyer::{Engine, HybridCacheBuilder};
+use foyer::{CacheBuilder, Engine, HybridCacheBuilder, LargeEngineOptions};
 use rand::random;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
@@ -146,14 +146,14 @@ async fn generate_sstable_store(object_store: Arc<ObjectStoreImpl>) -> Arc<Sstab
     let meta_cache = HybridCacheBuilder::new()
         .memory(64 << 20)
         .with_shards(2)
-        .storage(Engine::Large)
+        .storage(Engine::Large(LargeEngineOptions::new()))
         .build()
         .await
         .unwrap();
     let block_cache = HybridCacheBuilder::new()
         .memory(128 << 20)
         .with_shards(2)
-        .storage(Engine::Large)
+        .storage(Engine::Large(LargeEngineOptions::new()))
         .build()
         .await
         .unwrap();
@@ -167,6 +167,8 @@ async fn generate_sstable_store(object_store: Arc<ObjectStoreImpl>) -> Arc<Sstab
         use_new_object_prefix_strategy: true,
         meta_cache,
         block_cache,
+        vector_meta_cache: CacheBuilder::new(1 << 10).build(),
+        vector_block_cache: CacheBuilder::new(1 << 10).build(),
     }))
 }
 
@@ -262,7 +264,7 @@ fn bench_table_scan(c: &mut Criterion) {
         .build()
         .unwrap();
 
-    let store = InMemObjectStore::new().monitored(
+    let store = InMemObjectStore::for_test().monitored(
         Arc::new(ObjectStoreMetrics::unused()),
         Arc::new(ObjectStoreConfig::default()),
     );

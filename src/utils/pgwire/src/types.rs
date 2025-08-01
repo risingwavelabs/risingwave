@@ -49,6 +49,14 @@ impl Row {
     pub fn take(self) -> Vec<Option<Bytes>> {
         self.0
     }
+
+    pub fn project(&mut self, indices: &[usize]) -> Row {
+        let mut new_row = Vec::with_capacity(indices.len());
+        for i in indices {
+            new_row.push(self.0[*i].take());
+        }
+        Row(new_row)
+    }
 }
 
 impl Index<usize> for Row {

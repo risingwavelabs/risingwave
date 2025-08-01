@@ -14,7 +14,7 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::is_system_schema;
-use risingwave_sqlparser::ast::{DropMode, ObjectName};
+use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
@@ -25,7 +25,7 @@ pub async fn handle_drop_schema(
     handler_args: HandlerArgs,
     schema_name: ObjectName,
     if_exist: bool,
-    mode: Option<DropMode>,
+    cascade: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let catalog_reader = session.env().catalog_reader();
@@ -61,7 +61,6 @@ pub async fn handle_drop_schema(
 
     // Note: we don't check if the schema is empty here when drop mode is cascade.
     // The check is done in meta `ensure_schema_empty`.
-    let cascade = matches!(mode, Some(DropMode::Cascade));
 
     session.check_privilege_for_drop_alter_db_schema(&schema)?;
 

@@ -27,6 +27,7 @@ create sink s_many_data_type from t_many_data_type_rw with (
   sqlserver.user = 'SA',
   sqlserver.password = 'SomeTestOnly@SA',
   sqlserver.database = 'SinkTest',
+  sqlserver.schema = 'test_schema',
   sqlserver.table = 't_many_data_type',
   primary_key = 'k1,k2',
 );

@@ -43,7 +43,6 @@ pub struct ListArrayBuilder {
     bitmap: BitmapBuilder,
     offsets: Vec<u32>,
     value: Box<ArrayBuilderImpl>,
-    len: usize,
 }
 
 impl ArrayBuilder for ListArrayBuilder {
@@ -74,7 +73,6 @@ impl ArrayBuilder for ListArrayBuilder {
             bitmap: BitmapBuilder::with_capacity(capacity),
             offsets,
             value: Box::new(value_type.create_array_builder(capacity)),
-            len: 0,
         }
     }
 
@@ -102,7 +100,6 @@ impl ArrayBuilder for ListArrayBuilder {
                 }
             }
         }
-        self.len += n;
     }
 
     fn append_array(&mut self, other: &ListArray) {
@@ -111,14 +108,12 @@ impl ArrayBuilder for ListArrayBuilder {
         self.offsets
             .append(&mut other.offsets[1..].iter().map(|o| *o + last).collect());
         self.value.append_array(&other.value);
-        self.len += other.len();
     }
 
     fn pop(&mut self) -> Option<()> {
         self.bitmap.pop()?;
         let start = self.offsets.pop().unwrap();
         let end = *self.offsets.last().unwrap();
-        self.len -= 1;
         for _ in end..start {
             self.value.pop().unwrap();
         }
@@ -144,7 +139,6 @@ impl ListArrayBuilder {
         let last = *self.offsets.last().unwrap();
         self.offsets
             .push(last.checked_add(row.len() as u32).expect("offset overflow"));
-        self.len += 1;
         for v in row.iter() {
             self.value.append(v);
         }
@@ -181,10 +175,12 @@ impl Array for ListArray {
     type RefItem<'a> = ListRef<'a>;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
-        ListRef {
-            array: &self.value,
-            start: *self.offsets.get_unchecked(idx),
-            end: *self.offsets.get_unchecked(idx + 1),
+        unsafe {
+            ListRef {
+                array: &self.value,
+                start: *self.offsets.get_unchecked(idx),
+                end: *self.offsets.get_unchecked(idx + 1),
+            }
         }
     }
 
@@ -201,6 +197,7 @@ impl Array for ListArray {
                 offsets: self.offsets.to_vec(),
                 value: Some(Box::new(value)),
                 value_type: Some(self.value.data_type().to_protobuf()),
+                elem_size: None,
             })),
             null_bitmap: Some(self.bitmap.to_protobuf()),
             values: vec![],
@@ -252,7 +249,8 @@ impl ListArray {
         );
         debug_assert!(
             (array.array_type == PbArrayType::List as i32)
-                || (array.array_type == PbArrayType::Map as i32),
+                || (array.array_type == PbArrayType::Map as i32)
+                || (array.array_type == PbArrayType::Vector as i32),
             "invalid array type for list: {}",
             array.array_type
         );
@@ -588,14 +586,14 @@ impl<'a> ListRef<'a> {
         ListValue::new(builder.finish())
     }
 
+    pub fn as_primitive_slice<T: PrimitiveArrayItemType>(self) -> Option<&'a [T]> {
+        T::try_into_array_ref(self.array)
+            .map(|prim_arr| &prim_arr.as_slice()[self.start as usize..self.end as usize])
+    }
+
     /// Returns a slice if the list is of type `int64[]`.
     pub fn as_i64_slice(&self) -> Option<&[i64]> {
-        match &self.array {
-            ArrayImpl::Int64(array) => {
-                Some(&array.as_slice()[self.start as usize..self.end as usize])
-            }
-            _ => None,
-        }
+        self.as_primitive_slice()
     }
 
     /// # Panics
@@ -649,7 +647,7 @@ impl Row for ListRef<'_> {
     }
 
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        self.array.value_at_unchecked(self.start as usize + index)
+        unsafe { self.array.value_at_unchecked(self.start as usize + index) }
     }
 
     fn len(&self) -> usize {
@@ -753,13 +751,14 @@ impl ListValue {
                 }
                 self.skip_whitespace();
                 if self.try_consume('}') {
-                    return Ok(ListValue::empty(self.data_type.as_list()));
+                    return Ok(ListValue::empty(self.data_type.as_list_element_type()));
                 }
-                let mut builder = ArrayBuilderImpl::with_type(0, self.data_type.as_list().clone());
+                let mut builder =
+                    ArrayBuilderImpl::with_type(0, self.data_type.as_list_element_type().clone());
                 loop {
                     let mut parser = Self {
                         input: self.input,
-                        data_type: self.data_type.as_list(),
+                        data_type: self.data_type.as_list_element_type(),
                     };
                     builder.append(parser.parse()?);
                     self.input = parser.input;

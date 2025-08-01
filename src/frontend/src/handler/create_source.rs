@@ -32,9 +32,9 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::parser::additional_columns::{
     build_additional_column_desc, get_supported_additional_columns,
     source_add_partition_offset_cols,
@@ -46,12 +46,15 @@ use risingwave_connector::parser::{
 };
 use risingwave_connector::schema::AWS_GLUE_SCHEMA_ARN_KEY;
 use risingwave_connector::schema::schema_registry::{
-    SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME, SchemaRegistryAuth, name_strategy_from_str,
+    SCHEMA_REGISTRY_BACKOFF_DURATION_KEY, SCHEMA_REGISTRY_BACKOFF_FACTOR_KEY,
+    SCHEMA_REGISTRY_MAX_DELAY_KEY, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_RETRIES_MAX_KEY,
+    SCHEMA_REGISTRY_USERNAME, SchemaRegistryConfig, name_strategy_from_str,
 };
 use risingwave_connector::source::cdc::{
-    CDC_AUTO_SCHEMA_CHANGE_KEY, CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY,
-    CDC_TRANSACTIONAL_KEY, CDC_WAIT_FOR_STREAMING_START_TIMEOUT, CITUS_CDC_CONNECTOR,
-    MONGODB_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR,
+    CDC_MONGODB_STRONG_SCHEMA_KEY, CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL,
+    CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY, CDC_WAIT_FOR_STREAMING_START_TIMEOUT,
+    CITUS_CDC_CONNECTOR, MONGODB_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
+    SQL_SERVER_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
@@ -63,6 +66,7 @@ use risingwave_connector::source::{
     OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR,
 };
 pub use risingwave_connector::source::{UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR};
+use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithPropertiesExt};
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
@@ -70,8 +74,8 @@ use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
-    AstString, ColumnDef, CreateSourceStatement, Encode, Format, FormatEncodeOptions, ObjectName,
-    ProtobufSchema, SourceWatermark, TableConstraint, get_delimiter,
+    AstString, ColumnDef, ColumnOption, CreateSourceStatement, Encode, Format, FormatEncodeOptions,
+    ObjectName, SourceWatermark, SqlOptionValue, TableConstraint, Value, get_delimiter,
 };
 use risingwave_sqlparser::parser::{IncludeOption, IncludeOptionItem};
 use thiserror_ext::AsReport;
@@ -107,10 +111,12 @@ pub use external_schema::{
 };
 mod validate;
 pub use validate::validate_compatibility;
-use validate::{ALLOWED_CONNECTION_CONNECTOR, ALLOWED_CONNECTION_SCHEMA_REGISTRY};
+use validate::{SOURCE_ALLOWED_CONNECTION_CONNECTOR, SOURCE_ALLOWED_CONNECTION_SCHEMA_REGISTRY};
 mod additional_column;
 use additional_column::check_and_add_timestamp_column;
 pub use additional_column::handle_addition_columns;
+
+use crate::stream_fragmenter::GraphJobType;
 
 fn non_generated_sql_columns(columns: &[ColumnDef]) -> Vec<ColumnDef> {
     columns
@@ -125,6 +131,23 @@ fn try_consume_string_from_options(
     key: &str,
 ) -> Option<AstString> {
     format_encode_options.remove(key).map(AstString)
+}
+
+fn try_consume_schema_registry_config_from_options(
+    format_encode_options: &mut BTreeMap<String, String>,
+) {
+    [
+        SCHEMA_REGISTRY_USERNAME,
+        SCHEMA_REGISTRY_PASSWORD,
+        SCHEMA_REGISTRY_MAX_DELAY_KEY,
+        SCHEMA_REGISTRY_BACKOFF_DURATION_KEY,
+        SCHEMA_REGISTRY_BACKOFF_FACTOR_KEY,
+        SCHEMA_REGISTRY_RETRIES_MAX_KEY,
+    ]
+    .iter()
+    .for_each(|key| {
+        try_consume_string_from_options(format_encode_options, key);
+    });
 }
 
 fn consume_string_from_options(
@@ -314,8 +337,67 @@ pub(crate) fn bind_all_columns(
             )));
         }
         let non_generated_sql_defined_columns = non_generated_sql_columns(col_defs_from_sql);
+
         match (&format_encode.format, &format_encode.row_encode) {
             (Format::DebeziumMongo, Encode::Json) => {
+                let strong_schema = format_encode
+                    .row_options
+                    .iter()
+                    .find(|k| k.name.real_value().to_lowercase() == CDC_MONGODB_STRONG_SCHEMA_KEY)
+                    .map(|k| matches!(k.value, SqlOptionValue::Value(Value::Boolean(true))))
+                    .unwrap_or(false);
+
+                // strong schema requires a '_id' column at the first position with a specific type
+                if strong_schema {
+                    let (_, id_column) = non_generated_sql_defined_columns
+                        .iter()
+                        .enumerate()
+                        .find(|(idx, col)| *idx == 0 && col.name.real_value() == "_id")
+                        .ok_or_else(|| {
+                            RwError::from(ProtocolError(
+                                "The `_id` column of the source with row format DebeziumMongoJson must be defined as the first column in SQL".to_owned(),
+                            ))
+                        })?;
+
+                    let id_data_type = bind_data_type(id_column.data_type.as_ref().unwrap())?;
+                    if !matches!(
+                        id_data_type,
+                        DataType::Varchar | DataType::Int32 | DataType::Int64 | DataType::Jsonb
+                    ) {
+                        return Err(RwError::from(ProtocolError(
+                            "the `_id` column of the source with row format DebeziumMongoJson must be [Jsonb | Varchar | Int32 | Int64]".to_owned(),
+                        )));
+                    }
+
+                    let mut columns = Vec::with_capacity(non_generated_sql_defined_columns.len());
+                    columns.push(
+                        // id column
+                        ColumnCatalog {
+                            column_desc: ColumnDesc::named("_id", 0.into(), id_data_type),
+                            is_hidden: false,
+                        },
+                    );
+
+                    // bind rest of the columns
+                    for (idx, col) in non_generated_sql_defined_columns
+                        .into_iter()
+                        // skip the first column
+                        .skip(1)
+                        .enumerate()
+                    {
+                        columns.push(ColumnCatalog {
+                            column_desc: ColumnDesc::named(
+                                col.name.real_value(),
+                                (idx as i32).into(),
+                                bind_data_type(col.data_type.as_ref().unwrap())?,
+                            ),
+                            is_hidden: false,
+                        });
+                    }
+
+                    return Ok(columns);
+                }
+
                 let mut columns = vec![
                     ColumnCatalog {
                         column_desc: ColumnDesc::named("_id", 0.into(), DataType::Varchar),
@@ -326,6 +408,7 @@ pub(crate) fn bind_all_columns(
                         is_hidden: false,
                     },
                 ];
+
                 if non_generated_sql_defined_columns.len() != 2
                     || non_generated_sql_defined_columns[0].name.real_value() != columns[0].name()
                     || non_generated_sql_defined_columns[1].name.real_value() != columns[1].name()
@@ -599,7 +682,7 @@ pub(super) fn bind_source_watermark(
             let col_name = source_watermark.column.real_value();
             let watermark_idx = binder.get_column_binding_index(name.clone(), &col_name)?;
 
-            let expr = binder.bind_expr(source_watermark.expr)?;
+            let expr = binder.bind_expr(&source_watermark.expr)?;
             let watermark_col_type = column_catalogs[watermark_idx].data_type();
             let watermark_expr_type = &expr.return_type();
             if watermark_col_type != watermark_expr_type {
@@ -655,10 +738,13 @@ pub fn bind_connector_props(
         ))));
     }
     if is_create_source && create_cdc_source_job {
-        if let Some(value) = with_properties.get(CDC_AUTO_SCHEMA_CHANGE_KEY)
-            && value
-                .parse::<bool>()
-                .map_err(|_| anyhow!("invalid value of '{}' option", CDC_AUTO_SCHEMA_CHANGE_KEY))?
+        if let Some(value) = with_properties.get(AUTO_SCHEMA_CHANGE_KEY)
+            && value.parse::<bool>().map_err(|_| {
+                ErrorCode::InvalidInputSyntax(format!(
+                    "invalid value of '{}' option",
+                    AUTO_SCHEMA_CHANGE_KEY
+                ))
+            })?
         {
             Feature::CdcAutoSchemaChange
                 .check_available()
@@ -688,7 +774,7 @@ pub fn bind_connector_props(
         // group (that is, different from any other server id being used by any master or slave)
         with_properties
             .entry("server.id".to_owned())
-            .or_insert(rand::thread_rng().gen_range(1..u32::MAX).to_string());
+            .or_insert(rand::rng().random_range(1..u32::MAX).to_string());
     }
     Ok(with_properties)
 }
@@ -717,6 +803,8 @@ pub enum SqlColumnStrategy {
     Ignore,
 }
 
+/// Entrypoint for binding source connector.
+/// Common logic shared by `CREATE SOURCE` and `CREATE TABLE`.
 #[allow(clippy::too_many_arguments)]
 pub async fn bind_create_source_or_table_with_connector(
     handler_args: HandlerArgs,
@@ -737,7 +825,7 @@ pub async fn bind_create_source_or_table_with_connector(
 ) -> Result<SourceCatalog> {
     let session = &handler_args.session;
     let db_name: &str = &session.database();
-    let (schema_name, source_name) = Binder::resolve_schema_qualified_name(db_name, full_name)?;
+    let (schema_name, source_name) = Binder::resolve_schema_qualified_name(db_name, &full_name)?;
     let (database_id, schema_id) =
         session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
@@ -749,6 +837,7 @@ pub async fn bind_create_source_or_table_with_connector(
         )
         .into());
     }
+
     if is_create_source {
         match format_encode.format {
             Format::Upsert
@@ -771,6 +860,16 @@ pub async fn bind_create_source_or_table_with_connector(
 
     let sql_pk_names = bind_sql_pk_names(sql_columns_defs, bind_table_constraints(&constraints)?)?;
 
+    // FIXME: ideally we can support it, but current way of handling iceberg additional columns are problematic.
+    // They are treated as normal user columns, so they will be lost if we allow user to specify columns.
+    // See `extract_iceberg_columns`
+    if with_properties.is_iceberg_connector() && !sql_columns_defs.is_empty() {
+        return Err(RwError::from(InvalidInputSyntax(
+            r#"Schema is automatically inferred for iceberg source and should not be specified
+
+HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<columns>) WITH (...)`."#.to_owned(),
+        )));
+    }
     let columns_from_sql = bind_sql_columns(sql_columns_defs, false)?;
 
     let mut columns = bind_all_columns(
@@ -822,17 +921,35 @@ pub async fn bind_create_source_or_table_with_connector(
     let mut with_properties = with_properties;
     resolve_privatelink_in_with_option(&mut with_properties)?;
 
+    // check the system parameter `enforce_secret`
+    if session
+        .env()
+        .system_params_manager()
+        .get_params()
+        .load()
+        .enforce_secret()
+        && Feature::SecretManagement.check_available().is_ok()
+    {
+        // check enforce using secret for some props on cloud
+        ConnectorProperties::enforce_secret_source(&with_properties)?;
+    }
+
     let (with_properties, connection_type, connector_conn_ref) =
         resolve_connection_ref_and_secret_ref(
             with_properties,
             session,
-            TelemetryDatabaseObject::Source,
+            Some(TelemetryDatabaseObject::Source),
         )?;
-    ensure_connection_type_allowed(connection_type, &ALLOWED_CONNECTION_CONNECTOR)?;
+    ensure_connection_type_allowed(connection_type, &SOURCE_ALLOWED_CONNECTION_CONNECTOR)?;
 
     // if not using connection, we don't need to check connector match connection type
     if !matches!(connection_type, PbConnectionType::Unspecified) {
-        let connector = with_properties.get_connector().unwrap();
+        let Some(connector) = with_properties.get_connector() else {
+            return Err(RwError::from(ProtocolError(format!(
+                "missing field '{}' in WITH clause",
+                UPSTREAM_SOURCE_KEY
+            ))));
+        };
         check_connector_match_connection_type(connector.as_str(), &connection_type)?;
     }
 
@@ -864,24 +981,20 @@ pub async fn bind_create_source_or_table_with_connector(
     }
 
     // XXX: why do we use col_id_gen here? It doesn't seem to be very necessary.
-    // XXX: should we also change the col id for struct fields?
     for c in &mut columns {
-        c.column_desc.column_id = col_id_gen.generate(&*c)?;
+        let original_data_type = c.data_type().clone();
+        col_id_gen.generate(c)?;
+        // TODO: Now we restore the data type for `CREATE SOURCE`, so that keep the nested field id unset.
+        //       This behavior is inconsistent with `CREATE TABLE`, and should be fixed once we refactor
+        //       `ALTER SOURCE` to also use `ColumnIdGenerator` in the future.
+        if is_create_source {
+            c.column_desc.data_type = original_data_type;
+        }
     }
     debug_assert_column_ids_distinct(&columns);
 
-    let must_need_pk = if is_create_source {
-        with_properties.connector_need_pk()
-    } else {
-        // For those connectors that do not need generate a `row_id`` column in the source schema such as iceberg.
-        // But in such case, we can not create mv or table on the source because there is not a pk.
-        assert!(with_properties.connector_need_pk());
-
-        true
-    };
-
     let (mut columns, pk_col_ids, row_id_index) =
-        bind_pk_and_row_id_on_relation(columns, pk_names, must_need_pk)?;
+        bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
 
     let watermark_descs =
         bind_source_watermark(session, source_name.clone(), source_watermarks, &columns)?;
@@ -893,7 +1006,7 @@ pub async fn bind_create_source_or_table_with_connector(
         source_name.clone(),
         &mut columns,
         // TODO(st1page): pass the ref
-        sql_columns_defs.to_vec(),
+        sql_columns_defs,
         &pk_col_ids,
     )?;
     check_format_encode(&with_properties, row_id_index, &columns)?;
@@ -965,6 +1078,16 @@ pub async fn handle_create_source(
     .await?;
     let mut col_id_gen = ColumnIdGenerator::new_initial();
 
+    if stmt.columns.iter().any(|col| {
+        col.options
+            .iter()
+            .any(|def| matches!(def.option, ColumnOption::NotNull))
+    }) {
+        return Err(RwError::from(InvalidInputSyntax(
+            "NOT NULL constraint is not supported in source schema".to_owned(),
+        )));
+    }
+
     let source_catalog = bind_create_source_or_table_with_connector(
         handler_args.clone(),
         stmt.source_name,
@@ -999,10 +1122,14 @@ pub async fn handle_create_source(
 
     if create_source_type.is_shared() {
         let graph = generate_stream_graph_for_source(handler_args, source_catalog)?;
-        catalog_writer.create_source(source, Some(graph)).await?;
+        catalog_writer
+            .create_source(source, Some(graph), stmt.if_not_exists)
+            .await?;
     } else {
         // For other sources we don't create a streaming job
-        catalog_writer.create_source(source, None).await?;
+        catalog_writer
+            .create_source(source, None, stmt.if_not_exists)
+            .await?;
     }
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SOURCE))
@@ -1021,7 +1148,7 @@ pub(super) fn generate_stream_graph_for_source(
     )?;
 
     let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
-    let graph = build_graph(stream_plan)?;
+    let graph = build_graph(stream_plan, Some(GraphJobType::Source))?;
     Ok(graph)
 }
 
@@ -1076,6 +1203,7 @@ pub mod tests {
             ("address", DataType::Varchar),
             ("zipcode", DataType::Varchar),
         ])
+        // .with_ids([5, 6].map(ColumnId::new))
         .into();
         let expected_columns = maplit::hashmap! {
             ROW_ID_COLUMN_NAME => DataType::Serial,
@@ -1084,9 +1212,11 @@ pub mod tests {
             "rate" => DataType::Float32,
             "country" => StructType::new(
                 vec![("address", DataType::Varchar),("city", city_type),("zipcode", DataType::Varchar)],
-            ).into(),
+            )
+            // .with_ids([3, 4, 7].map(ColumnId::new))
+            .into(),
         };
-        assert_eq!(columns, expected_columns);
+        assert_eq!(columns, expected_columns, "{columns:#?}");
     }
 
     #[tokio::test]

@@ -41,13 +41,13 @@ const LOG_COUNT_BITS: u8 = 6;
 const BIAS_CORRECTION: f64 = 0.7213 / (1. + (1.079 / NUM_OF_REGISTERS as f64));
 
 /// Count the approximate number of unique non-null values.
-#[build_aggregate("approx_count_distinct(*) -> int8", state = "int8")]
+#[build_aggregate("approx_count_distinct(any) -> int8", state = "int8")]
 fn build_updatable(_agg: &AggCall) -> Result<Box<dyn AggregateFunction>> {
     Ok(Box::new(UpdatableApproxCountDistinct))
 }
 
 /// Count the approximate number of unique non-null values.
-#[build_aggregate("approx_count_distinct(*) -> int8", state = "int8[]", append_only)]
+#[build_aggregate("approx_count_distinct(any) -> int8", state = "int8[]", append_only)]
 fn build_append_only(_agg: &AggCall) -> Result<Box<dyn AggregateFunction>> {
     Ok(Box::new(AppendOnlyApproxCountDistinct))
 }
@@ -212,7 +212,7 @@ impl AggregateFunction for AppendOnlyApproxCountDistinct {
 /// The estimation error for `HyperLogLog` is 1.04/sqrt(num of registers). With 2^16 registers this
 /// is ~1/256, or about 0.4%. The memory usage for the default choice of parameters is about
 /// (1024 + 24) bits * 2^16 buckets, which is about 8.58 MB.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Registers<B: Bucket> {
     registers: Box<[B]>,
     // FIXME: Currently we only store the count result (i64) as the state of updatable register.
@@ -223,7 +223,7 @@ struct Registers<B: Bucket> {
 type UpdatableRegisters = Registers<UpdatableBucket>;
 type AppendOnlyRegisters = Registers<AppendOnlyBucket>;
 
-trait Bucket: Debug + Default + Clone + EstimateSize + Send + Sync + 'static {
+trait Bucket: Debug + Default + Clone + EstimateSize + Send + Sync + PartialEq + Eq + 'static {
     /// Increments or decrements the bucket at `index` depending on the state of `retract`.
     /// Returns an Error if `index` is invalid or if inserting will cause an overflow in the bucket.
     fn update(&mut self, index: u8, retract: bool) -> Result<()>;
@@ -298,7 +298,7 @@ impl<B: Bucket> Registers<B> {
             if zero_registers == 0.0 {
                 raw_estimate
             } else {
-                m * (m.log2() - (zero_registers.log2()))
+                m * (m.ln() - (zero_registers.ln()))
             }
         } else {
             raw_estimate
@@ -334,14 +334,22 @@ mod tests {
     use risingwave_common::array::{Array, DataChunk, I32Array, StreamChunk};
     use risingwave_expr::aggregate::{AggCall, build_append_only};
 
+    use crate::aggregate::approx_count_distinct::AppendOnlyRegisters;
+
     #[test]
-    fn test() {
+    fn test_append_only() {
         let approx_count_distinct = build_append_only(&AggCall::from_pretty(
             "(approx_count_distinct:int8 $0:int4)",
         ))
         .unwrap();
 
-        for range in [0..20000, 20000..30000, 30000..35000] {
+        for range in [
+            0..100,
+            0..20000,
+            20000..30000,
+            30000..35000,
+            1000000..3000000,
+        ] {
             let col = I32Array::from_iter(range.clone()).into_ref();
             let input = StreamChunk::from(DataChunk::new(vec![col], range.len()));
             let mut state = approx_count_distinct.create_state().unwrap();
@@ -358,12 +366,18 @@ mod tests {
                 .unwrap()
                 .into_int64() as usize;
             let actual = range.len();
-            // FIXME: the error is too large?
-            // assert!((actual as f32 * 0.9..actual as f32 * 1.1).contains(&(count as f32)));
-            let expected_range = actual as f32 * 0.5..actual as f32 * 1.5;
-            if !expected_range.contains(&(count as f32)) {
-                panic!("approximate count {} not in {:?}", count, expected_range);
-            }
+
+            let state_encoded = approx_count_distinct.encode_state(&state).unwrap();
+            let state_decoded = approx_count_distinct.decode_state(state_encoded).unwrap();
+            assert_eq!(
+                state.downcast_ref::<AppendOnlyRegisters>(),
+                state_decoded.downcast_ref::<AppendOnlyRegisters>()
+            );
+
+            // When the register number is 65536, the standard deviation is 0.406%.
+            // There is a 99.7% probability that the actual count is within 3 standard deviations.
+            // So this is expected to be a flaky test with 0.3% probability to fail.
+            assert!((actual as f32 * 0.988..actual as f32 * 1.012).contains(&(count as f32)));
         }
     }
 }

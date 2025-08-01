@@ -25,7 +25,7 @@ pub trait OverlapInfo: Debug {
     fn check_overlap(&self, a: &SstableInfo) -> bool;
     fn check_multiple_overlap(&self, others: &[SstableInfo]) -> Range<usize>;
     fn check_multiple_include(&self, others: &[SstableInfo]) -> Range<usize>;
-    fn update(&mut self, table: &SstableInfo);
+    fn update(&mut self, range: &KeyRange);
 }
 
 pub trait OverlapStrategy: Send + Sync {
@@ -37,7 +37,7 @@ pub trait OverlapStrategy: Send + Sync {
     ) -> Vec<SstableInfo> {
         let mut info = self.create_overlap_info();
         for table in tables {
-            info.update(table);
+            info.update(&table.key_range);
         }
         let range = info.check_multiple_overlap(others);
         if range.is_empty() {
@@ -46,18 +46,16 @@ pub trait OverlapStrategy: Send + Sync {
             others[range].to_vec()
         }
     }
-    fn check_overlap_with_tables(
+    fn check_overlap_with_range(
         &self,
-        tables: &[SstableInfo],
+        range: &KeyRange,
         others: &[SstableInfo],
     ) -> Vec<SstableInfo> {
-        if tables.is_empty() || others.is_empty() {
+        if others.is_empty() {
             return vec![];
         }
         let mut info = self.create_overlap_info();
-        for table in tables {
-            info.update(table);
-        }
+        info.update(range);
         others
             .iter()
             .filter(|table| info.check_overlap(table))
@@ -126,8 +124,8 @@ impl OverlapInfo for RangeOverlapInfo {
         }
     }
 
-    fn update(&mut self, table: &SstableInfo) {
-        let other = &table.key_range;
+    fn update(&mut self, range: &KeyRange) {
+        let other = range;
         if let Some(range) = self.target_range.as_mut() {
             range.full_key_extend(other);
             return;

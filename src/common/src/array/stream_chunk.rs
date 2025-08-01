@@ -254,17 +254,17 @@ impl StreamChunk {
     }
 
     /// Returns a table-like text representation of the `StreamChunk`.
-    pub fn to_pretty(&self) -> impl Display {
+    pub fn to_pretty(&self) -> impl Display + use<> {
         self.to_pretty_inner(None)
     }
 
     /// Returns a table-like text representation of the `StreamChunk` with a header of column names
     /// from the given `schema`.
-    pub fn to_pretty_with_schema(&self, schema: &Schema) -> impl Display {
+    pub fn to_pretty_with_schema(&self, schema: &Schema) -> impl Display + use<> {
         self.to_pretty_inner(Some(schema))
     }
 
-    fn to_pretty_inner(&self, schema: Option<&Schema>) -> impl Display {
+    fn to_pretty_inner(&self, schema: Option<&Schema>) -> impl Display + use<> {
         use comfy_table::{Cell, CellAlignment, Table};
 
         if self.cardinality() == 0 {
@@ -746,7 +746,7 @@ impl StreamChunk {
             let mut rng = SmallRng::from_seed([0; 32]);
             let mut ops = vec![];
             for _ in 0..chunk_size {
-                ops.push(if rng.gen_bool(inserts_percent) {
+                ops.push(if rng.random_bool(inserts_percent) {
                     Op::Insert
                 } else {
                     Op::Delete

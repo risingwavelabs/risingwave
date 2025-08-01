@@ -125,12 +125,15 @@ where
 }
 
 impl<T: MetricVecBuilder> RelabeledMetricVec<MetricVec<T>> {
-    pub fn with_label_values(&self, vals: &[&str]) -> T::M {
+    pub fn with_label_values<V: AsRef<str> + std::fmt::Debug>(&self, vals: &[V]) -> T::M {
         if self.metric_level > self.relabel_threshold {
             // relabel first n labels to empty string
-            let mut relabeled_vals = vals.to_vec();
+            let mut relabeled_vals = vals
+                .iter()
+                .map(|v| v.as_ref().to_owned())
+                .collect::<Vec<_>>();
             for label in relabeled_vals.iter_mut().take(self.relabel_num) {
-                *label = "";
+                *label = String::new();
             }
             return self.metric.with_label_values(&relabeled_vals);
         }
@@ -138,13 +141,19 @@ impl<T: MetricVecBuilder> RelabeledMetricVec<MetricVec<T>> {
     }
 }
 
-impl<T: MetricVecBuilder, const N: usize> RelabeledMetricVec<LabelGuardedMetricVec<T, N>> {
-    pub fn with_guarded_label_values(&self, vals: &[&str; N]) -> LabelGuardedMetric<T::M, N> {
+impl<T: MetricVecBuilder> RelabeledMetricVec<LabelGuardedMetricVec<T>> {
+    pub fn with_guarded_label_values<V: AsRef<str> + std::fmt::Debug>(
+        &self,
+        vals: &[V],
+    ) -> LabelGuardedMetric<T::M> {
         if self.metric_level > self.relabel_threshold {
             // relabel first n labels to empty string
-            let mut relabeled_vals = *vals;
+            let mut relabeled_vals = vals
+                .iter()
+                .map(|v| v.as_ref().to_owned())
+                .collect::<Vec<_>>();
             for label in relabeled_vals.iter_mut().take(self.relabel_num) {
-                *label = "";
+                *label = String::new();
             }
             return self.metric.with_guarded_label_values(&relabeled_vals);
         }
@@ -165,13 +174,10 @@ impl<T: Collector> Collector for RelabeledMetricVec<T> {
 pub type RelabeledCounterVec = RelabeledMetricVec<IntCounterVec>;
 pub type RelabeledHistogramVec = RelabeledMetricVec<HistogramVec>;
 
-pub type RelabeledGuardedHistogramVec<const N: usize> =
-    RelabeledMetricVec<LabelGuardedHistogramVec<N>>;
-pub type RelabeledGuardedIntCounterVec<const N: usize> =
-    RelabeledMetricVec<LabelGuardedIntCounterVec<N>>;
+pub type RelabeledGuardedHistogramVec = RelabeledMetricVec<LabelGuardedHistogramVec>;
+pub type RelabeledGuardedIntCounterVec = RelabeledMetricVec<LabelGuardedIntCounterVec>;
 
 /// CAUTION! Relabelling a Gauge might cause expected result!
 ///
 /// See [`RelabeledMetricVec`] for details.
-pub type RelabeledGuardedIntGaugeVec<const N: usize> =
-    RelabeledMetricVec<LabelGuardedIntGaugeVec<N>>;
+pub type RelabeledGuardedIntGaugeVec = RelabeledMetricVec<LabelGuardedIntGaugeVec>;

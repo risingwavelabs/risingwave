@@ -169,7 +169,7 @@ where
                 self.managed_state
                     .init_topn_cache(Some(group_key), &mut topn_cache)
                     .await?;
-                self.caches.push(group_cache_key.clone(), topn_cache);
+                self.caches.put(group_cache_key.clone(), topn_cache);
             }
 
             let mut cache = self.caches.get_mut(group_cache_key).unwrap();

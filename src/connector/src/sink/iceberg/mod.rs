@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod compaction;
+pub mod exactly_once_util;
 mod prometheus;
-
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::num::NonZeroU64;
@@ -24,9 +23,11 @@ use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
+use await_tree::InstrumentAwait;
 use iceberg::arrow::{arrow_schema_to_schema, schema_to_arrow_schema};
 use iceberg::spec::{
-    DataFile, SerializedDataFile, Transform, UnboundPartitionField, UnboundPartitionSpec,
+    DataFile, MAIN_BRANCH, SerializedDataFile, Transform, UnboundPartitionField,
+    UnboundPartitionSpec,
 };
 use iceberg::table::Table;
 use iceberg::transaction::Transaction;
@@ -67,11 +68,12 @@ use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
+use sea_orm::DatabaseConnection;
 use serde_derive::Deserialize;
 use serde_json::from_value;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc::UnboundedSender;
 use tokio_retry::Retry;
 use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tracing::warn;
@@ -79,23 +81,36 @@ use url::Url;
 use uuid::Uuid;
 use with_options::WithOptions;
 
-use super::decouple_checkpoint_log_sink::{
-    DecoupleCheckpointLogSinkerOf, default_commit_checkpoint_interval,
-};
+use super::decouple_checkpoint_log_sink::default_commit_checkpoint_interval;
 use super::{
     GLOBAL_SINK_METRICS, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink,
-    SinkError, SinkWriterMetrics, SinkWriterParam,
+    SinkCommittedEpochSubscriber, SinkError, SinkWriterParam,
 };
-use crate::connector_common::IcebergCommon;
-use crate::sink::coordinate::CoordinatedSinkWriter;
+use crate::connector_common::{IcebergCommon, IcebergSinkCompactionUpdate};
+use crate::enforce_secret::EnforceSecret;
+use crate::sink::catalog::SinkId;
+use crate::sink::coordinate::CoordinatedLogSinker;
+use crate::sink::iceberg::exactly_once_util::*;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
 
 pub const ICEBERG_SINK: &str = "iceberg";
+pub const ICEBERG_COW_BRANCH: &str = "ingestion";
+pub const ICEBERG_WRITE_MODE_MERGE_ON_READ: &str = "merge-on-read";
+pub const ICEBERG_WRITE_MODE_COPY_ON_WRITE: &str = "copy-on-write";
+
+pub const ENABLE_COMPACTION: &str = "enable_compaction";
+pub const COMPACTION_INTERVAL_SEC: &str = "compaction_interval_sec";
+pub const ENABLE_SNAPSHOT_EXPIRATION: &str = "enable_snapshot_expiration";
+pub const WRITE_MODE: &str = "write_mode";
 
 fn default_commit_retry_num() -> u32 {
     8
+}
+
+fn default_iceberg_write_mode() -> String {
+    ICEBERG_WRITE_MODE_MERGE_ON_READ.to_owned()
 }
 
 #[serde_as]
@@ -126,17 +141,57 @@ pub struct IcebergConfig {
     /// Commit every n(>0) checkpoints, default is 10.
     #[serde(default = "default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub commit_checkpoint_interval: u64,
 
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,
 
+    /// Whether it is `exactly_once`, the default is not.
+    #[serde(default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub is_exactly_once: Option<bool>,
     // Retry commit num when iceberg commit fail. default is 8.
     // # TODO
     // Iceberg table may store the retry commit num in table meta.
     // We should try to find and use that as default commit retry num first.
     #[serde(default = "default_commit_retry_num")]
     pub commit_retry_num: u32,
+
+    /// Whether to enable iceberg compaction.
+    #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    #[with_option(allow_alter_on_fly)]
+    pub enable_compaction: bool,
+
+    /// The interval of iceberg compaction
+    #[serde(default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub compaction_interval_sec: Option<u64>,
+
+    /// Whether to enable iceberg expired snapshots.
+    #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    #[with_option(allow_alter_on_fly)]
+    pub enable_snapshot_expiration: bool,
+
+    /// The iceberg write mode, can be `merge-on-read` or `copy-on-write`.
+    #[serde(default = "default_iceberg_write_mode")]
+    pub write_mode: String,
+}
+
+impl EnforceSecret for IcebergConfig {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            IcebergCommon::enforce_one(prop)?;
+        }
+        Ok(())
+    }
+
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        IcebergCommon::enforce_one(prop)
+    }
 }
 
 impl IcebergConfig {
@@ -178,8 +233,9 @@ impl IcebergConfig {
                     && k != &"catalog.uri"
                     && k != &"catalog.type"
                     && k != &"catalog.name"
+                    && k != &"catalog.header"
             })
-            .map(|(k, v)| (k[8..].to_string(), v.to_string()))
+            .map(|(k, v)| (k[8..].to_string(), v.clone()))
             .collect();
 
         if config.commit_checkpoint_interval == 0 {
@@ -212,6 +268,15 @@ impl IcebergConfig {
     pub fn full_table_name(&self) -> Result<TableIdent> {
         self.common.full_table_name().map_err(Into::into)
     }
+
+    pub fn catalog_name(&self) -> String {
+        self.common.catalog_name()
+    }
+
+    pub fn compaction_interval_sec(&self) -> u64 {
+        // default to 1 hour
+        self.compaction_interval_sec.unwrap_or(3600)
+    }
 }
 
 pub struct IcebergSink {
@@ -219,6 +284,17 @@ pub struct IcebergSink {
     param: SinkParam,
     // In upsert mode, it never be None and empty.
     unique_column_ids: Option<Vec<usize>>,
+}
+
+impl EnforceSecret for IcebergSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            IcebergConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 impl TryFrom<SinkParam> for IcebergSink {
@@ -315,8 +391,9 @@ impl IcebergSink {
                 names.push(self.config.common.table_name.clone());
                 match &self.config.common.warehouse_path {
                     Some(warehouse_path) => {
+                        let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
                         let url = Url::parse(warehouse_path);
-                        if url.is_err() {
+                        if url.is_err() || is_s3_tables {
                             // For rest catalog, the warehouse_path could be a warehouse name.
                             // In this case, we should specify the location when creating a table.
                             if self.config.common.catalog_type() == "rest"
@@ -337,50 +414,18 @@ impl IcebergSink {
             };
 
             let partition_spec = match &self.config.partition_by {
-                Some(partition_field) => {
+                Some(partition_by) => {
                     let mut partition_fields = Vec::<UnboundPartitionField>::new();
-                    // captures column, transform(column), transform(n,column), transform(n, column)
-                    let re = Regex::new(
-                        r"(?<transform>\w+)(\(((?<n>\d+)?(?:,|(,\s)))?(?<field>\w+)\))?",
-                    )
-                    .unwrap();
-                    if !re.is_match(partition_field) {
-                        bail!(format!(
-                            "Invalid partition fields: {}\nHINT: Supported formats are column, transform(column), transform(n,column), transform(n, column)",
-                            partition_field
-                        ))
-                    }
-                    let caps = re.captures_iter(partition_field);
-                    for (i, mat) in caps.enumerate() {
-                        let (column, transform) =
-                            if mat.name("n").is_none() && mat.name("field").is_none() {
-                                (&mat["transform"], Transform::Identity)
-                            } else {
-                                let mut func = mat["transform"].to_owned();
-                                if func == "bucket" || func == "truncate" {
-                                    let n = &mat
-                                        .name("n")
-                                        .ok_or_else(|| {
-                                            SinkError::Iceberg(anyhow!(
-                                                "The `n` must be set with `bucket` and `truncate`"
-                                            ))
-                                        })?
-                                        .as_str();
-                                    func = format!("{func}[{n}]");
-                                }
-                                (
-                                    &mat["field"],
-                                    Transform::from_str(&func)
-                                        .map_err(|e| SinkError::Iceberg(anyhow!(e)))?,
-                                )
-                            };
-
-                        match iceberg_schema.field_id_by_name(column) {
+                    for (i, (column, transform)) in parse_partition_by_exprs(partition_by.clone())?
+                        .into_iter()
+                        .enumerate()
+                    {
+                        match iceberg_schema.field_id_by_name(&column) {
                             Some(id) => partition_fields.push(
                                 UnboundPartitionField::builder()
                                     .source_id(id)
                                     .transform(transform)
-                                    .name(column.to_owned())
+                                    .name(format!("_p_{}", column))
                                     .field_id(i as i32)
                                     .build(),
                             ),
@@ -463,7 +508,7 @@ impl IcebergSink {
 
 impl Sink for IcebergSink {
     type Coordinator = IcebergSinkCommitter;
-    type LogSinker = DecoupleCheckpointLogSinkerOf<CoordinatedSinkWriter<IcebergSinkWriter>>;
+    type LogSinker = CoordinatedLogSinker<IcebergSinkWriter>;
 
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
@@ -476,7 +521,31 @@ impl Sink for IcebergSink {
                 .check_available()
                 .map_err(|e| anyhow::anyhow!(e))?;
         }
+        if self.config.enable_compaction {
+            risingwave_common::license::Feature::IcebergCompaction
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
+
         let _ = self.create_and_validate_table().await?;
+        Ok(())
+    }
+
+    fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
+        let iceberg_config = IcebergConfig::from_btreemap(config.clone())?;
+
+        if let Some(compaction_interval) = iceberg_config.compaction_interval_sec {
+            if iceberg_config.enable_compaction {
+                if compaction_interval == 0 {
+                    bail!(
+                        "`compaction_interval_sec` must be greater than 0 when `enable_compaction` is true"
+                    );
+                }
+            } else {
+                bail!("`compaction_interval_sec` can only be set when `enable_compaction` is true");
+            }
+        }
+
         Ok(())
     }
 
@@ -488,51 +557,58 @@ impl Sink for IcebergSink {
             IcebergSinkWriter::new_append_only(table, &writer_param).await?
         };
 
-        let metrics = SinkWriterMetrics::new(&writer_param);
-        let writer = CoordinatedSinkWriter::new(
-            writer_param
-                .meta_client
-                .expect("should have meta client")
-                .sink_coordinate_client()
-                .await,
-            self.param.clone(),
-            writer_param.vnode_bitmap.ok_or_else(|| {
-                SinkError::Remote(anyhow!(
-                    "sink needs coordination and should not have singleton input"
-                ))
-            })?,
-            inner,
-        )
-        .await?;
-
         let commit_checkpoint_interval =
             NonZeroU64::new(self.config.commit_checkpoint_interval).expect(
                 "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
             );
-
-        Ok(DecoupleCheckpointLogSinkerOf::new(
-            writer,
-            metrics,
+        let writer = CoordinatedLogSinker::new(
+            &writer_param,
+            self.param.clone(),
+            inner,
             commit_checkpoint_interval,
-        ))
+        )
+        .await?;
+
+        Ok(writer)
     }
 
     fn is_coordinated_sink(&self) -> bool {
         true
     }
 
-    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
+    async fn new_coordinator(
+        &self,
+        db: DatabaseConnection,
+        iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
+    ) -> Result<Self::Coordinator> {
         let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
-        // FIXME(Dylan): Disable EMR serverless compaction for now.
         Ok(IcebergSinkCommitter {
             catalog,
             table,
-            commit_notifier: None,
-            _compact_task_guard: None,
+            is_exactly_once: self.config.is_exactly_once.unwrap_or_default(),
+            last_commit_epoch: 0,
+            sink_id: self.param.sink_id.sink_id(),
+            config: self.config.clone(),
+            param: self.param.clone(),
+            db,
             commit_retry_num: self.config.commit_retry_num,
+            committed_epoch_subscriber: None,
+            iceberg_compact_stat_sender,
         })
     }
+}
+
+/// None means no project.
+/// Prepare represent the extra partition column idx.
+/// Done represents the project idx vec.
+///
+/// The `ProjectIdxVec` will be late-evaluated. When we encounter the Prepare state first, we will use the data chunk schema
+/// to create the project idx vec.
+enum ProjectIdxVec {
+    None,
+    Prepare(usize),
+    Done(Vec<usize>),
 }
 
 pub struct IcebergSinkWriter {
@@ -542,6 +618,9 @@ pub struct IcebergSinkWriter {
     metrics: IcebergWriterMetrics,
     // State of iceberg table for this writer
     table: Table,
+    // For chunk with extra partition column, we should remove this column before write.
+    // This project index vec is used to avoid create project idx each time.
+    project_idx_vec: ProjectIdxVec,
 }
 
 #[allow(clippy::type_complexity)]
@@ -618,9 +697,9 @@ pub struct IcebergWriterMetrics {
     // They are actually used in `PrometheusWriterBuilder`:
     //     WriterMetrics::new(write_qps.deref().clone(), write_latency.deref().clone())
     // We keep them here to let the guard cleans the labels from metrics registry when dropped
-    _write_qps: LabelGuardedIntCounter<3>,
-    _write_latency: LabelGuardedHistogram<3>,
-    write_bytes: LabelGuardedIntCounter<3>,
+    _write_qps: LabelGuardedIntCounter,
+    _write_latency: LabelGuardedHistogram,
+    write_bytes: LabelGuardedIntCounter,
 }
 
 impl IcebergSinkWriter {
@@ -660,8 +739,17 @@ impl IcebergSinkWriter {
         // To avoid duplicate file name, each time the sink created will generate a unique uuid as file name suffix.
         let unique_uuid_suffix = Uuid::now_v7();
 
+        let parquet_writer_properties = WriterProperties::builder()
+            .set_max_row_group_size(
+                writer_param
+                    .streaming_config
+                    .developer
+                    .iceberg_sink_write_parquet_max_row_group_rows,
+            )
+            .build();
+
         let parquet_writer_builder = ParquetWriterBuilder::new(
-            WriterProperties::new(),
+            parquet_writer_properties,
             schema.clone(),
             table.file_io().clone(),
             DefaultLocationGenerator::new(table.metadata().clone())
@@ -672,12 +760,9 @@ impl IcebergSinkWriter {
                 iceberg::spec::DataFileFormat::Parquet,
             ),
         );
-        let data_file_builder = DataFileWriterBuilder::new(parquet_writer_builder, None);
-        if let Some(_extra_partition_col_idx) = extra_partition_col_idx {
-            Err(SinkError::Iceberg(anyhow!(
-                "Extra partition column is not supported in append-only mode"
-            )))
-        } else if partition_spec.fields().is_empty() {
+        let data_file_builder =
+            DataFileWriterBuilder::new(parquet_writer_builder, None, partition_spec.spec_id());
+        if partition_spec.fields().is_empty() {
             let writer_builder = MonitoredGeneralWriterBuilder::new(
                 data_file_builder,
                 write_qps.clone(),
@@ -705,6 +790,13 @@ impl IcebergSinkWriter {
                     writer_builder,
                 },
                 table,
+                project_idx_vec: {
+                    if let Some(extra_partition_col_idx) = extra_partition_col_idx {
+                        ProjectIdxVec::Prepare(*extra_partition_col_idx)
+                    } else {
+                        ProjectIdxVec::None
+                    }
+                },
             })
         } else {
             let partition_builder = MonitoredGeneralWriterBuilder::new(
@@ -739,6 +831,13 @@ impl IcebergSinkWriter {
                     writer_builder: partition_builder,
                 },
                 table,
+                project_idx_vec: {
+                    if let Some(extra_partition_col_idx) = extra_partition_col_idx {
+                        ProjectIdxVec::Prepare(*extra_partition_col_idx)
+                    } else {
+                        ProjectIdxVec::None
+                    }
+                },
             })
         }
     }
@@ -788,9 +887,18 @@ impl IcebergSinkWriter {
         // To avoid duplicate file name, each time the sink created will generate a unique uuid as file name suffix.
         let unique_uuid_suffix = Uuid::now_v7();
 
+        let parquet_writer_properties = WriterProperties::builder()
+            .set_max_row_group_size(
+                writer_param
+                    .streaming_config
+                    .developer
+                    .iceberg_sink_write_parquet_max_row_group_rows,
+            )
+            .build();
+
         let data_file_builder = {
             let parquet_writer_builder = ParquetWriterBuilder::new(
-                WriterProperties::new(),
+                parquet_writer_properties.clone(),
                 schema.clone(),
                 table.file_io().clone(),
                 DefaultLocationGenerator::new(table.metadata().clone())
@@ -801,11 +909,15 @@ impl IcebergSinkWriter {
                     iceberg::spec::DataFileFormat::Parquet,
                 ),
             );
-            DataFileWriterBuilder::new(parquet_writer_builder.clone(), None)
+            DataFileWriterBuilder::new(
+                parquet_writer_builder.clone(),
+                None,
+                partition_spec.spec_id(),
+            )
         };
         let position_delete_builder = {
             let parquet_writer_builder = ParquetWriterBuilder::new(
-                WriterProperties::new(),
+                parquet_writer_properties.clone(),
                 POSITION_DELETE_SCHEMA.clone(),
                 table.file_io().clone(),
                 DefaultLocationGenerator::new(table.metadata().clone())
@@ -817,7 +929,15 @@ impl IcebergSinkWriter {
                 ),
             );
             MonitoredPositionDeleteWriterBuilder::new(
-                SortPositionDeleteWriterBuilder::new(parquet_writer_builder.clone(), 1024, None),
+                SortPositionDeleteWriterBuilder::new(
+                    parquet_writer_builder.clone(),
+                    writer_param
+                        .streaming_config
+                        .developer
+                        .iceberg_sink_positional_delete_cache_size,
+                    None,
+                    None,
+                ),
                 position_delete_cache_num,
             )
         };
@@ -826,10 +946,11 @@ impl IcebergSinkWriter {
                 unique_column_ids.clone(),
                 table.metadata().current_schema().clone(),
                 None,
+                partition_spec.spec_id(),
             )
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
             let parquet_writer_builder = ParquetWriterBuilder::new(
-                WriterProperties::new(),
+                parquet_writer_properties.clone(),
                 Arc::new(
                     arrow_schema_to_schema(config.projected_arrow_schema_ref())
                         .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
@@ -852,11 +973,7 @@ impl IcebergSinkWriter {
             equality_delete_builder,
             unique_column_ids,
         );
-        if let Some(_extra_partition_col_idx) = extra_partition_col_idx {
-            Err(SinkError::Iceberg(anyhow!(
-                "Extra partition column is not supported in upsert mode"
-            )))
-        } else if partition_spec.fields().is_empty() {
+        if partition_spec.fields().is_empty() {
             let writer_builder = MonitoredGeneralWriterBuilder::new(
                 delta_builder,
                 write_qps.clone(),
@@ -894,6 +1011,13 @@ impl IcebergSinkWriter {
                     writer: inner_writer,
                     writer_builder,
                     arrow_schema_with_op_column: schema_with_extra_op_column,
+                },
+                project_idx_vec: {
+                    if let Some(extra_partition_col_idx) = extra_partition_col_idx {
+                        ProjectIdxVec::Prepare(*extra_partition_col_idx)
+                    } else {
+                        ProjectIdxVec::None
+                    }
                 },
             })
         } else {
@@ -939,6 +1063,13 @@ impl IcebergSinkWriter {
                     writer: inner_writer,
                     writer_builder: partition_builder,
                     arrow_schema_with_op_column: schema_with_extra_op_column,
+                },
+                project_idx_vec: {
+                    if let Some(extra_partition_col_idx) = extra_partition_col_idx {
+                        ProjectIdxVec::Prepare(*extra_partition_col_idx)
+                    } else {
+                        ProjectIdxVec::None
+                    }
                 },
             })
         }
@@ -1021,6 +1152,25 @@ impl SinkWriter for IcebergSinkWriter {
 
         // Process the chunk.
         let (mut chunk, ops) = chunk.compact().into_parts();
+        match &self.project_idx_vec {
+            ProjectIdxVec::None => {}
+            ProjectIdxVec::Prepare(idx) => {
+                if *idx >= chunk.columns().len() {
+                    return Err(SinkError::Iceberg(anyhow!(
+                        "invalid extra partition column index {}",
+                        idx
+                    )));
+                }
+                let project_idx_vec = (0..*idx)
+                    .chain(*idx + 1..chunk.columns().len())
+                    .collect_vec();
+                chunk = chunk.project(&project_idx_vec);
+                self.project_idx_vec = ProjectIdxVec::Done(project_idx_vec);
+            }
+            ProjectIdxVec::Done(idx_vec) => {
+                chunk = chunk.project(idx_vec);
+            }
+        }
         if ops.is_empty() {
             return Ok(());
         }
@@ -1065,6 +1215,7 @@ impl SinkWriter for IcebergSinkWriter {
         let writer = self.writer.get_writer().unwrap();
         writer
             .write(batch)
+            .instrument_await("iceberg_write")
             .await
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
         self.metrics.write_bytes.inc_by(write_batch_size as _);
@@ -1084,17 +1235,21 @@ impl SinkWriter for IcebergSinkWriter {
                 writer,
                 writer_builder,
             } => {
-                let close_result = if let Some(mut writer) = writer.take() {
-                    Some(writer.close().await)
-                } else {
-                    None
+                let close_result = match writer.take() {
+                    Some(mut writer) => {
+                        Some(writer.close().instrument_await("iceberg_close").await)
+                    }
+                    _ => None,
                 };
-                if let Ok(new_writer) = writer_builder.clone().build().await {
-                    *writer = Some(Box::new(new_writer));
-                } else {
-                    // In this case, the writer is closed and we can't build a new writer. But we can't return the error
-                    // here because current writer may close successfully. So we just log the error.
-                    warn!("Failed to build new writer after close");
+                match writer_builder.clone().build().await {
+                    Ok(new_writer) => {
+                        *writer = Some(Box::new(new_writer));
+                    }
+                    _ => {
+                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
+                        // here because current writer may close successfully. So we just log the error.
+                        warn!("Failed to build new writer after close");
+                    }
                 }
                 close_result
             }
@@ -1102,17 +1257,21 @@ impl SinkWriter for IcebergSinkWriter {
                 writer,
                 writer_builder,
             } => {
-                let close_result = if let Some(mut writer) = writer.take() {
-                    Some(writer.close().await)
-                } else {
-                    None
+                let close_result = match writer.take() {
+                    Some(mut writer) => {
+                        Some(writer.close().instrument_await("iceberg_close").await)
+                    }
+                    _ => None,
                 };
-                if let Ok(new_writer) = writer_builder.clone().build().await {
-                    *writer = Some(Box::new(new_writer));
-                } else {
-                    // In this case, the writer is closed and we can't build a new writer. But we can't return the error
-                    // here because current writer may close successfully. So we just log the error.
-                    warn!("Failed to build new writer after close");
+                match writer_builder.clone().build().await {
+                    Ok(new_writer) => {
+                        *writer = Some(Box::new(new_writer));
+                    }
+                    _ => {
+                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
+                        // here because current writer may close successfully. So we just log the error.
+                        warn!("Failed to build new writer after close");
+                    }
                 }
                 close_result
             }
@@ -1121,17 +1280,21 @@ impl SinkWriter for IcebergSinkWriter {
                 writer_builder,
                 ..
             } => {
-                let close_result = if let Some(mut writer) = writer.take() {
-                    Some(writer.close().await)
-                } else {
-                    None
+                let close_result = match writer.take() {
+                    Some(mut writer) => {
+                        Some(writer.close().instrument_await("iceberg_close").await)
+                    }
+                    _ => None,
                 };
-                if let Ok(new_writer) = writer_builder.clone().build().await {
-                    *writer = Some(Box::new(new_writer));
-                } else {
-                    // In this case, the writer is closed and we can't build a new writer. But we can't return the error
-                    // here because current writer may close successfully. So we just log the error.
-                    warn!("Failed to build new writer after close");
+                match writer_builder.clone().build().await {
+                    Ok(new_writer) => {
+                        *writer = Some(Box::new(new_writer));
+                    }
+                    _ => {
+                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
+                        // here because current writer may close successfully. So we just log the error.
+                        warn!("Failed to build new writer after close");
+                    }
                 }
                 close_result
             }
@@ -1140,17 +1303,21 @@ impl SinkWriter for IcebergSinkWriter {
                 writer_builder,
                 ..
             } => {
-                let close_result = if let Some(mut writer) = writer.take() {
-                    Some(writer.close().await)
-                } else {
-                    None
+                let close_result = match writer.take() {
+                    Some(mut writer) => {
+                        Some(writer.close().instrument_await("iceberg_close").await)
+                    }
+                    _ => None,
                 };
-                if let Ok(new_writer) = writer_builder.clone().build().await {
-                    *writer = Some(Box::new(new_writer));
-                } else {
-                    // In this case, the writer is closed and we can't build a new writer. But we can't return the error
-                    // here because current writer may close successfully. So we just log the error.
-                    warn!("Failed to build new writer after close");
+                match writer_builder.clone().build().await {
+                    Ok(new_writer) => {
+                        *writer = Some(Box::new(new_writer));
+                    }
+                    _ => {
+                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
+                        // here because current writer may close successfully. So we just log the error.
+                        warn!("Failed to build new writer after close");
+                    }
                 }
                 close_result
             }
@@ -1189,7 +1356,7 @@ const SCHEMA_ID: &str = "schema_id";
 const PARTITION_SPEC_ID: &str = "partition_spec_id";
 const DATA_FILES: &str = "data_files";
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct IcebergCommitResult {
     schema_id: i32,
     partition_spec_id: i32,
@@ -1249,6 +1416,55 @@ impl IcebergCommitResult {
             bail!("Can't create iceberg sink write result from empty data!")
         }
     }
+
+    fn try_from_sealized_bytes(value: Vec<u8>) -> Result<Self> {
+        let mut values = if let serde_json::Value::Object(value) =
+            serde_json::from_slice::<serde_json::Value>(&value)
+                .context("Can't parse iceberg sink metadata")?
+        {
+            value
+        } else {
+            bail!("iceberg sink metadata should be an object");
+        };
+
+        let schema_id;
+        if let Some(serde_json::Value::Number(value)) = values.remove(SCHEMA_ID) {
+            schema_id = value
+                .as_u64()
+                .ok_or_else(|| anyhow!("schema_id should be a u64"))?;
+        } else {
+            bail!("iceberg sink metadata should have schema_id");
+        }
+
+        let partition_spec_id;
+        if let Some(serde_json::Value::Number(value)) = values.remove(PARTITION_SPEC_ID) {
+            partition_spec_id = value
+                .as_u64()
+                .ok_or_else(|| anyhow!("partition_spec_id should be a u64"))?;
+        } else {
+            bail!("iceberg sink metadata should have partition_spec_id");
+        }
+
+        let data_files: Vec<SerializedDataFile>;
+        if let serde_json::Value::Array(values) = values
+            .remove(DATA_FILES)
+            .ok_or_else(|| anyhow!("iceberg sink metadata should have data_files object"))?
+        {
+            data_files = values
+                .into_iter()
+                .map(from_value::<SerializedDataFile>)
+                .collect::<std::result::Result<_, _>>()
+                .unwrap();
+        } else {
+            bail!("iceberg sink metadata should have data_files object");
+        }
+
+        Ok(Self {
+            schema_id: schema_id as i32,
+            partition_spec_id: partition_spec_id as i32,
+            data_files,
+        })
+    }
 }
 
 impl<'a> TryFrom<&'a IcebergCommitResult> for SinkMetadata {
@@ -1287,12 +1503,48 @@ impl<'a> TryFrom<&'a IcebergCommitResult> for SinkMetadata {
     }
 }
 
+impl TryFrom<IcebergCommitResult> for Vec<u8> {
+    type Error = SinkError;
+
+    fn try_from(value: IcebergCommitResult) -> std::result::Result<Vec<u8>, Self::Error> {
+        let json_data_files = serde_json::Value::Array(
+            value
+                .data_files
+                .iter()
+                .map(serde_json::to_value)
+                .collect::<std::result::Result<Vec<serde_json::Value>, _>>()
+                .context("Can't serialize data files to json")?,
+        );
+        let json_value = serde_json::Value::Object(
+            vec![
+                (
+                    SCHEMA_ID.to_owned(),
+                    serde_json::Value::Number(value.schema_id.into()),
+                ),
+                (
+                    PARTITION_SPEC_ID.to_owned(),
+                    serde_json::Value::Number(value.partition_spec_id.into()),
+                ),
+                (DATA_FILES.to_owned(), json_data_files),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        Ok(serde_json::to_vec(&json_value).context("Can't serialize iceberg sink metadata")?)
+    }
+}
 pub struct IcebergSinkCommitter {
     catalog: Arc<dyn Catalog>,
     table: Table,
-    commit_notifier: Option<mpsc::UnboundedSender<()>>,
+    pub last_commit_epoch: u64,
+    pub(crate) is_exactly_once: bool,
+    pub(crate) sink_id: u32,
+    pub(crate) config: IcebergConfig,
+    pub(crate) param: SinkParam,
+    pub(crate) db: DatabaseConnection,
+    pub(crate) committed_epoch_subscriber: Option<SinkCommittedEpochSubscriber>,
     commit_retry_num: u32,
-    _compact_task_guard: Option<oneshot::Sender<()>>,
+    pub(crate) iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
 }
 
 impl IcebergSinkCommitter {
@@ -1328,14 +1580,86 @@ impl IcebergSinkCommitter {
 
 #[async_trait::async_trait]
 impl SinkCommitCoordinator for IcebergSinkCommitter {
-    async fn init(&mut self) -> Result<()> {
+    async fn init(&mut self, subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
+        if self.is_exactly_once {
+            self.committed_epoch_subscriber = Some(subscriber);
+            tracing::info!(
+                "Sink id = {}: iceberg sink coordinator initing.",
+                self.param.sink_id.sink_id()
+            );
+            if iceberg_sink_has_pre_commit_metadata(&self.db, self.param.sink_id.sink_id()).await? {
+                let ordered_metadata_list_by_end_epoch =
+                    get_pre_commit_info_by_sink_id(&self.db, self.param.sink_id.sink_id()).await?;
+
+                let mut last_recommit_epoch = 0;
+                for (end_epoch, sealized_bytes, snapshot_id, committed) in
+                    ordered_metadata_list_by_end_epoch
+                {
+                    let write_results_bytes = deserialize_metadata(sealized_bytes);
+                    let mut write_results = vec![];
+
+                    for each in write_results_bytes {
+                        let write_result = IcebergCommitResult::try_from_sealized_bytes(each)?;
+                        write_results.push(write_result);
+                    }
+
+                    match (
+                        committed,
+                        self.is_snapshot_id_in_iceberg(&self.config, snapshot_id)
+                            .await?,
+                    ) {
+                        (true, _) => {
+                            tracing::info!(
+                                "Sink id = {}: all data in log store has been written into external sink, do nothing when recovery.",
+                                self.param.sink_id.sink_id()
+                            );
+                        }
+                        (false, true) => {
+                            // skip
+                            tracing::info!(
+                                "Sink id = {}: all pre-commit files have been successfully committed into iceberg and do not need to be committed again, mark it as committed.",
+                                self.param.sink_id.sink_id()
+                            );
+                            mark_row_is_committed_by_sink_id_and_end_epoch(
+                                &self.db,
+                                self.sink_id,
+                                end_epoch,
+                            )
+                            .await?;
+                        }
+                        (false, false) => {
+                            tracing::info!(
+                                "Sink id = {}: there are files that were not successfully committed; re-commit these files.",
+                                self.param.sink_id.sink_id()
+                            );
+                            self.re_commit(end_epoch, write_results, snapshot_id)
+                                .await?;
+                        }
+                    }
+
+                    last_recommit_epoch = end_epoch;
+                }
+                tracing::info!(
+                    "Sink id = {}: iceberg commit coordinator inited.",
+                    self.param.sink_id.sink_id()
+                );
+                return Ok(Some(last_recommit_epoch));
+            } else {
+                tracing::info!(
+                    "Sink id = {}: init iceberg coodinator, and system table is empty.",
+                    self.param.sink_id.sink_id()
+                );
+                return Ok(None);
+            }
+        }
+
         tracing::info!("Iceberg commit coordinator inited.");
-        Ok(())
+        return Ok(None);
     }
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
         tracing::info!("Starting iceberg commit in epoch {epoch}.");
-        let write_results = metadata
+        let write_results: Vec<IcebergCommitResult> = metadata
             .iter()
             .map(IcebergCommitResult::try_from)
             .collect::<Result<Vec<IcebergCommitResult>>>()?;
@@ -1345,6 +1669,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             tracing::debug!(?epoch, "no data to commit");
             return Ok(());
         }
+
         // guarantee that all write results has same schema_id and partition_spec_id
         if write_results
             .iter()
@@ -1358,6 +1683,81 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             )));
         }
 
+        if self.is_exactly_once {
+            assert!(self.committed_epoch_subscriber.is_some());
+            match self.committed_epoch_subscriber.clone() {
+                Some(committed_epoch_subscriber) => {
+                    // Get the latest committed_epoch and the receiver
+                    let (committed_epoch, mut rw_futures_utilrx) =
+                        committed_epoch_subscriber(self.param.sink_id).await?;
+                    // The exactly once commit process needs to start after the data corresponding to the current epoch is persisted in the log store.
+                    if committed_epoch >= epoch {
+                        self.commit_iceberg_inner(epoch, write_results, None)
+                            .await?;
+                    } else {
+                        tracing::info!(
+                            "Waiting for the committed epoch to rise. Current: {}, Waiting for: {}",
+                            committed_epoch,
+                            epoch
+                        );
+                        while let Some(next_committed_epoch) = rw_futures_utilrx.recv().await {
+                            tracing::info!(
+                                "Received next committed epoch: {}",
+                                next_committed_epoch
+                            );
+                            // If next_epoch meets the condition, execute commit immediately
+                            if next_committed_epoch >= epoch {
+                                self.commit_iceberg_inner(epoch, write_results, None)
+                                    .await?;
+                                break;
+                            }
+                        }
+                    }
+                }
+                None => unreachable!(
+                    "Exactly once sink must wait epoch before committing, committed_epoch_subscriber is not initialized."
+                ),
+            }
+        } else {
+            self.commit_iceberg_inner(epoch, write_results, None)
+                .await?;
+        }
+
+        Ok(())
+    }
+}
+
+/// Methods Required to Achieve Exactly Once Semantics
+impl IcebergSinkCommitter {
+    async fn re_commit(
+        &mut self,
+        epoch: u64,
+        write_results: Vec<IcebergCommitResult>,
+        snapshot_id: i64,
+    ) -> Result<()> {
+        tracing::info!("Starting iceberg re commit in epoch {epoch}.");
+
+        // Skip if no data to commit
+        if write_results.is_empty() || write_results.iter().all(|r| r.data_files.is_empty()) {
+            tracing::debug!(?epoch, "no data to commit");
+            return Ok(());
+        }
+        self.commit_iceberg_inner(epoch, write_results, Some(snapshot_id))
+            .await?;
+        Ok(())
+    }
+
+    async fn commit_iceberg_inner(
+        &mut self,
+        epoch: u64,
+        write_results: Vec<IcebergCommitResult>,
+        snapshot_id: Option<i64>,
+    ) -> Result<()> {
+        // If the provided `snapshot_id`` is not None, it indicates that this commit is a re commit
+        // occurring during the recovery phase. In this case, we need to use the `snapshot_id`
+        // that was previously persisted in the system table to commit.
+        let is_first_commit = snapshot_id.is_none();
+        self.last_commit_epoch = epoch;
         let expect_schema_id = write_results[0].schema_id;
         let expect_partition_spec_id = write_results[0].partition_spec_id;
 
@@ -1391,16 +1791,43 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             .partition_type(schema)
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
+        let txn = Transaction::new(&self.table);
+        // Only generate new snapshot id when first commit.
+        let snapshot_id = match snapshot_id {
+            Some(previous_snapshot_id) => previous_snapshot_id,
+            None => txn.generate_unique_snapshot_id(),
+        };
+        if self.is_exactly_once && is_first_commit {
+            // persist pre commit metadata and snapshot id in system table.
+            let mut pre_commit_metadata_bytes = Vec::new();
+            for each_parallelism_write_result in write_results.clone() {
+                let each_parallelism_write_result_bytes: Vec<u8> =
+                    each_parallelism_write_result.try_into()?;
+                pre_commit_metadata_bytes.push(each_parallelism_write_result_bytes);
+            }
+
+            let pre_commit_metadata_bytes: Vec<u8> = serialize_metadata(pre_commit_metadata_bytes);
+
+            persist_pre_commit_metadata(
+                self.sink_id,
+                self.db.clone(),
+                self.last_commit_epoch,
+                epoch,
+                pre_commit_metadata_bytes,
+                snapshot_id,
+            )
+            .await?;
+        }
+
         let data_files = write_results
             .into_iter()
             .flat_map(|r| {
                 r.data_files.into_iter().map(|f| {
-                    f.try_into(&partition_type, schema)
+                    f.try_into(expect_partition_spec_id, &partition_type, schema)
                         .map_err(|err| SinkError::Iceberg(anyhow!(err)))
                 })
             })
             .collect::<Result<Vec<DataFile>>>()?;
-
         // # TODO:
         // This retry behavior should be revert and do in iceberg-rust when it supports retry(Track in: https://github.com/apache/iceberg-rust/issues/964)
         // because retry logic involved reapply the commit metadata.
@@ -1421,8 +1848,12 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             .await?;
             let txn = Transaction::new(&table);
             let mut append_action = txn
-                .fast_append(None, None, vec![])
-                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+                .fast_append(Some(snapshot_id), None, vec![])
+                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?
+                .with_to_branch(commit_branch(
+                    self.config.r#type.as_str(),
+                    self.config.write_mode.as_str(),
+                ));
             append_action
                 .add_data_files(data_files.clone())
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
@@ -1438,13 +1869,50 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
         .await?;
         self.table = table;
 
-        if let Some(commit_notifier) = &mut self.commit_notifier {
-            if commit_notifier.send(()).is_err() {
-                warn!("failed to notify commit");
-            }
-        }
         tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
+
+        if self.is_exactly_once {
+            mark_row_is_committed_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch).await?;
+            tracing::info!(
+                "Sink id = {}: succeeded mark pre commit metadata in epoch {} to deleted.",
+                self.sink_id,
+                epoch
+            );
+
+            delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch).await?;
+        }
+        if let Some(iceberg_compact_stat_sender) = &self.iceberg_compact_stat_sender
+            && self.config.enable_compaction
+            && iceberg_compact_stat_sender
+                .send(IcebergSinkCompactionUpdate {
+                    sink_id: SinkId::new(self.sink_id),
+                    compaction_interval: self.config.compaction_interval_sec(),
+                })
+                .is_err()
+        {
+            warn!("failed to send iceberg compaction stats");
+        }
+
         Ok(())
+    }
+
+    /// During pre-commit metadata, we record the `snapshot_id` corresponding to each batch of files.
+    /// Therefore, the logic for checking whether all files in this batch are present in Iceberg
+    /// has been changed to verifying if their corresponding `snapshot_id` exists in Iceberg.
+    async fn is_snapshot_id_in_iceberg(
+        &self,
+        iceberg_config: &IcebergConfig,
+        snapshot_id: i64,
+    ) -> Result<bool> {
+        let iceberg_common = iceberg_config.common.clone();
+        let table = iceberg_common
+            .load_table(&iceberg_config.java_catalog_props)
+            .await?;
+        if table.metadata().snapshot_by_id(snapshot_id).is_some() {
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 }
 
@@ -1549,10 +2017,7 @@ fn check_compatibility(
 }
 
 /// Try to match our schema with iceberg schema.
-pub fn try_matches_arrow_schema(
-    rw_schema: &Schema,
-    arrow_schema: &ArrowSchema,
-) -> anyhow::Result<()> {
+pub fn try_matches_arrow_schema(rw_schema: &Schema, arrow_schema: &ArrowSchema) -> Result<()> {
     if rw_schema.fields.len() != arrow_schema.fields().len() {
         bail!(
             "Schema length mismatch, risingwave is {}, and iceberg is {}",
@@ -1572,6 +2037,64 @@ pub fn try_matches_arrow_schema(
     Ok(())
 }
 
+pub fn serialize_metadata(metadata: Vec<Vec<u8>>) -> Vec<u8> {
+    serde_json::to_vec(&metadata).unwrap()
+}
+
+pub fn deserialize_metadata(bytes: Vec<u8>) -> Vec<Vec<u8>> {
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+pub fn parse_partition_by_exprs(
+    expr: String,
+) -> std::result::Result<Vec<(String, Transform)>, anyhow::Error> {
+    // captures column, transform(column), transform(n,column), transform(n, column)
+    let re = Regex::new(r"(?<transform>\w+)(\(((?<n>\d+)?(?:,|(,\s)))?(?<field>\w+)\))?").unwrap();
+    if !re.is_match(&expr) {
+        bail!(format!(
+            "Invalid partition fields: {}\nHINT: Supported formats are column, transform(column), transform(n,column), transform(n, column)",
+            expr
+        ))
+    }
+    let caps = re.captures_iter(&expr);
+
+    let mut partition_columns = vec![];
+
+    for mat in caps {
+        let (column, transform) = if mat.name("n").is_none() && mat.name("field").is_none() {
+            (&mat["transform"], Transform::Identity)
+        } else {
+            let mut func = mat["transform"].to_owned();
+            if func == "bucket" || func == "truncate" {
+                let n = &mat
+                    .name("n")
+                    .ok_or_else(|| anyhow!("The `n` must be set with `bucket` and `truncate`"))?
+                    .as_str();
+                func = format!("{func}[{n}]");
+            }
+            (
+                &mat["field"],
+                Transform::from_str(&func)
+                    .with_context(|| format!("invalid transform function {}", func))?,
+            )
+        };
+        partition_columns.push((column.to_owned(), transform));
+    }
+    Ok(partition_columns)
+}
+
+pub fn commit_branch(sink_type: &str, write_mode: &str) -> String {
+    if should_enable_iceberg_cow(sink_type, write_mode) {
+        ICEBERG_COW_BRANCH.to_owned()
+    } else {
+        MAIN_BRANCH.to_owned()
+    }
+}
+
+pub fn should_enable_iceberg_cow(sink_type: &str, write_mode: &str) -> bool {
+    sink_type == SINK_TYPE_UPSERT && write_mode == ICEBERG_WRITE_MODE_COPY_ON_WRITE
+}
+
 #[cfg(test)]
 mod test {
     use std::collections::BTreeMap;
@@ -1582,7 +2105,9 @@ mod test {
 
     use crate::connector_common::IcebergCommon;
     use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
-    use crate::sink::iceberg::IcebergConfig;
+    use crate::sink::iceberg::{ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergConfig};
+
+    pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
 
     #[test]
     fn test_compatible_arrow_schema() {
@@ -1771,6 +2296,9 @@ mod test {
             ("catalog.jdbc.password", "123456"),
             ("database.name", "demo_db"),
             ("table.name", "demo_table"),
+            ("enable_compaction", "true"),
+            ("compaction_interval_sec", "1800"),
+            ("enable_snapshot_expiration", "true"),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_owned(), v.to_owned()))
@@ -1798,6 +2326,14 @@ mod test {
                 scope: None,
                 token: None,
                 enable_config_load: None,
+                rest_signing_name: None,
+                rest_signing_region: None,
+                rest_sigv4_enabled: None,
+                hosted_catalog: None,
+                azblob_account_name: None,
+                azblob_account_key: None,
+                azblob_endpoint_url: None,
+                header: None,
             },
             r#type: "upsert".to_owned(),
             force_append_only: false,
@@ -1809,7 +2345,12 @@ mod test {
                 .collect(),
             commit_checkpoint_interval: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
             create_table_if_not_exists: false,
+            is_exactly_once: None,
             commit_retry_num: 8,
+            enable_compaction: true,
+            compaction_interval_sec: Some(DEFAULT_ICEBERG_COMPACTION_INTERVAL / 2),
+            enable_snapshot_expiration: true,
+            write_mode: ICEBERG_WRITE_MODE_MERGE_ON_READ.to_owned(),
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);

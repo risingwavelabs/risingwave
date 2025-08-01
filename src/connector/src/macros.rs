@@ -55,9 +55,10 @@ macro_rules! for_all_connections {
     ($macro:path $(, $extra_args:tt)*) => {
         $macro! {
             {
-                { Kafka, $crate::connector_common::KafkaConnection, risingwave_pb::catalog::connection_params::PbConnectionType },
-                { Iceberg, $crate::connector_common::IcebergConnection, risingwave_pb::catalog::connection_params::PbConnectionType },
-                { SchemaRegistry, $crate::connector_common::ConfluentSchemaRegistryConnection, risingwave_pb::catalog::connection_params::PbConnectionType }
+                { Kafka, $crate::connector_common::KafkaConnection, risingwave_pb::catalog::connection_params::PbConnectionType, "kafka"},
+                { Iceberg, $crate::connector_common::IcebergConnection, risingwave_pb::catalog::connection_params::PbConnectionType, "iceberg"},
+                { SchemaRegistry, $crate::connector_common::ConfluentSchemaRegistryConnection, risingwave_pb::catalog::connection_params::PbConnectionType, "schema_registry"},
+                { Elasticsearch, $crate::connector_common::ElasticsearchConnection, risingwave_pb::catalog::connection_params::PbConnectionType, "elasticsearch"}
             }
             $(,$extra_args)*
         }
@@ -230,7 +231,19 @@ macro_rules! dispatch_split_impl {
 
 #[macro_export]
 macro_rules! impl_connection {
-    ({$({ $variant_name:ident, $connection_type:ty, $pb_connection_path:path }),*}) => {
+    ({$({ $variant_name:ident, $connection_type:ty, $pb_connection_path:path, $connection_type_name:literal }),*}) => {
+        // impl the connection name for all connections
+        pub fn connection_name_to_prop_type_name(connection_name: &str) -> Option<&'static str> {
+            match connection_name {
+                $(
+                    $connection_type_name => Some(
+                        std::any::type_name::<$connection_type>()
+                    ),
+                )*
+                _ => None,
+            }
+        }
+
         pub fn build_connection(
             pb_connection_type: risingwave_pb::catalog::connection_params::PbConnectionType,
             value_secret_filled: std::collections::BTreeMap<String, String>
@@ -240,6 +253,20 @@ macro_rules! impl_connection {
                     <$pb_connection_path>::$variant_name => {
                         let c: Box<$connection_type> = serde_json::from_value(json!(value_secret_filled)).map_err($crate::error::ConnectorError::from)?;
                         Ok(c)
+                    },
+                )*
+                risingwave_pb::catalog::connection_params::PbConnectionType::Unspecified => unreachable!(),
+            }
+        }
+
+        pub fn enforce_secret_connection<'a>(
+            pb_connection_type: &risingwave_pb::catalog::connection_params::PbConnectionType,
+            prop_iter: impl Iterator<Item = &'a str>,
+        ) -> $crate::error::ConnectorResult<()> {
+            match pb_connection_type {
+                $(
+                    <$pb_connection_path>::$variant_name => {
+                        <$connection_type>::enforce_secret(prop_iter)
                     },
                 )*
                 risingwave_pb::catalog::connection_params::PbConnectionType::Unspecified => unreachable!(),
@@ -298,6 +325,16 @@ macro_rules! impl_connector_properties {
             $(
                 $variant_name(Box<$prop_name>),
             )*
+        }
+
+        impl ConnectorProperties {
+            pub fn kind(&self) -> &'static str {
+                match self {
+                    $(
+                        ConnectorProperties::$variant_name(_) => stringify!($variant_name),
+                    )*
+                }
+            }
         }
 
         $(

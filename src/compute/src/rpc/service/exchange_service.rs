@@ -48,7 +48,6 @@ impl ExchangeService for ExchangeServiceImpl {
     type GetDataStream = BatchDataStream;
     type GetStreamStream = StreamDataStream;
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn get_data(
         &self,
         request: Request<GetDataRequest>,
@@ -74,6 +73,7 @@ impl ExchangeService for ExchangeServiceImpl {
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 
+    #[define_opaque(StreamDataStream)]
     async fn get_stream(
         &self,
         request: Request<Streaming<GetStreamRequest>>,
@@ -175,6 +175,13 @@ impl ExchangeServiceImpl {
                     permits.add_permits(permits_to_add);
                 }
                 Either::Right(MessageWithPermits { message, permits }) => {
+                    let message = match message {
+                        DispatcherMessageBatch::Chunk(chunk) => {
+                            DispatcherMessageBatch::Chunk(chunk.compact())
+                        }
+                        msg @ (DispatcherMessageBatch::Watermark(_)
+                        | DispatcherMessageBatch::BarrierBatch(_)) => msg,
+                    };
                     let proto = message.to_protobuf();
                     // forward the acquired permit to the downstream
                     let response = GetStreamResponse {

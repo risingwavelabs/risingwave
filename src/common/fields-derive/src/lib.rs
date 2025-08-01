@@ -22,13 +22,13 @@ pub fn fields(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
 }
 
 fn inner(tokens: TokenStream) -> TokenStream {
-    match gen(tokens) {
+    match r#gen(tokens) {
         Ok(tokens) => tokens,
         Err(err) => err.to_compile_error(),
     }
 }
 
-fn gen(tokens: TokenStream) -> Result<TokenStream> {
+fn r#gen(tokens: TokenStream) -> Result<TokenStream> {
     let input: DeriveInput = syn::parse2(tokens)?;
 
     let ident = &input.ident;
@@ -47,13 +47,13 @@ fn gen(tokens: TokenStream) -> Result<TokenStream> {
     };
 
     let style = get_style(&input);
-    if let Some(style) = &style {
-        if !["Title Case", "TITLE CASE", "snake_case"].contains(&style.value().as_str()) {
-            return Err(syn::Error::new_spanned(
-                style,
-                "only `Title Case`, `TITLE CASE`, and `snake_case` are supported",
-            ));
-        }
+    if let Some(style) = &style
+        && !["Title Case", "TITLE CASE", "snake_case"].contains(&style.value().as_str())
+    {
+        return Err(syn::Error::new_spanned(
+            style,
+            "only `Title Case`, `TITLE CASE`, and `snake_case` are supported",
+        ));
     }
 
     let fields_rw: Vec<TokenStream> = struct_
@@ -204,7 +204,7 @@ mod tests {
     fn do_test(code: &str, expected_path: &str) {
         let input: TokenStream = str::parse(code).unwrap();
 
-        let output = super::gen(input).unwrap();
+        let output = super::r#gen(input).unwrap();
 
         let output = pretty_print(output);
 

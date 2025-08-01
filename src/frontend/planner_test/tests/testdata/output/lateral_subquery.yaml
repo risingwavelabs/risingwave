@@ -183,22 +183,22 @@
     └─StreamProject { exprs: [array_agg(t1.n order_by($expr1 ASC))] }
       └─StreamSimpleAgg { aggs: [array_agg(t1.n order_by($expr1 ASC)), count] }
         └─StreamExchange { dist: Single }
-          └─StreamProject { exprs: [t1.n, (projected_row_id + 1:Int64) as $expr1, t1._row_id, t2.p, t2.p, t2.d, t2.d, projected_row_id, t1.id, t2._row_id] }
-            └─StreamHashJoin { type: Inner, predicate: t2.p IS NOT DISTINCT FROM t2.p AND t2.p IS NOT DISTINCT FROM t2.p AND t2.d IS NOT DISTINCT FROM t2.d AND t2.d IS NOT DISTINCT FROM t2.d, output: [t1.n, t1.id, projected_row_id, t2.p, t2.p, t2.d, t2.d, Unnest(Case(($1 <> '':Varchar), ArrayAppend(StringToArray(Trim($1, ',':Varchar), ',':Varchar), $3), Array($3))), t2.p, t2.d, t1._row_id, t2._row_id] }
+          └─StreamProject { exprs: [t1.n, (projected_row_id + 1:Int64) as $expr1, t1._row_id, t2.p, t2.d, projected_row_id, t1.id, t2._row_id] }
+            └─StreamHashJoin { type: Inner, predicate: t2.p IS NOT DISTINCT FROM t2.p AND t2.d IS NOT DISTINCT FROM t2.d, output: [t1.n, t1.id, projected_row_id, t2.p, t2.d, Unnest(Case(($0 <> '':Varchar), ArrayAppend(StringToArray(Trim($0, ',':Varchar), ',':Varchar), $1), Array($1))), t2.p, t2.d, t1._row_id, t2._row_id] }
               ├─StreamExchange { dist: HashShard(t2.p, t2.d) }
-              │ └─StreamHashJoin { type: Inner, predicate: t1.id = Unnest(Case(($1 <> '':Varchar), ArrayAppend(StringToArray(Trim($1, ',':Varchar), ',':Varchar), $3), Array($3))), output: [t1.n, t1.id, projected_row_id, t2.p, t2.p, t2.d, t2.d, Unnest(Case(($1 <> '':Varchar), ArrayAppend(StringToArray(Trim($1, ',':Varchar), ',':Varchar), $3), Array($3))), t1._row_id] }
+              │ └─StreamHashJoin { type: Inner, predicate: t1.id = Unnest(Case(($0 <> '':Varchar), ArrayAppend(StringToArray(Trim($0, ',':Varchar), ',':Varchar), $1), Array($1))), output: [t1.n, t1.id, projected_row_id, t2.p, t2.d, Unnest(Case(($0 <> '':Varchar), ArrayAppend(StringToArray(Trim($0, ',':Varchar), ',':Varchar), $1), Array($1))), t1._row_id] }
               │   ├─StreamExchange { dist: HashShard(t1.id) }
               │   │ └─StreamProject { exprs: [t1.n, t1.id, t1._row_id] }
               │   │   └─StreamFilter { predicate: (t1.c = 'abc':Varchar) }
               │   │     └─StreamTableScan { table: t1, columns: [t1.n, t1.id, t1._row_id, t1.c], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
-              │   └─StreamExchange { dist: HashShard(Unnest(Case(($1 <> '':Varchar), ArrayAppend(StringToArray(Trim($1, ',':Varchar), ',':Varchar), $3), Array($3)))) }
-              │     └─StreamProjectSet { select_list: [$0, $1, $2, $3, Unnest(Case(($1 <> '':Varchar), ArrayAppend(StringToArray(Trim($1, ',':Varchar), ',':Varchar), $3), Array($3)))] }
-              │       └─StreamProject { exprs: [t2.p, t2.p, t2.d, t2.d], noop_update_hint: true }
-              │         └─StreamHashAgg { group_key: [t2.p, t2.p, t2.d, t2.d], aggs: [count] }
-              │           └─StreamExchange { dist: HashShard(t2.p, t2.p, t2.d, t2.d) }
-              │             └─StreamProject { exprs: [t2.p, t2.p, t2.d, t2.d, t2._row_id] }
+              │   └─StreamExchange { dist: HashShard(Unnest(Case(($0 <> '':Varchar), ArrayAppend(StringToArray(Trim($0, ',':Varchar), ',':Varchar), $1), Array($1)))) }
+              │     └─StreamProjectSet { select_list: [$0, $1, Unnest(Case(($0 <> '':Varchar), ArrayAppend(StringToArray(Trim($0, ',':Varchar), ',':Varchar), $1), Array($1)))] }
+              │       └─StreamProject { exprs: [t2.p, t2.d], noop_update_hint: true }
+              │         └─StreamHashAgg { group_key: [t2.p, t2.d], aggs: [count] }
+              │           └─StreamExchange { dist: HashShard(t2.p, t2.d) }
+              │             └─StreamProject { exprs: [t2.p, t2.d, t2._row_id] }
               │               └─StreamFilter { predicate: (t2.c = 'abc':Varchar) }
-              │                 └─StreamTableScan { table: t2, columns: [t2.p, t2.p, t2.d, t2.d, t2._row_id, t2.c], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+              │                 └─StreamTableScan { table: t2, columns: [t2.p, t2.d, t2._row_id, t2.c], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
               └─StreamExchange { dist: HashShard(t2.p, t2.d) }
                 └─StreamProject { exprs: [t2.p, t2.d, t2._row_id] }
                   └─StreamFilter { predicate: (t2.c = 'abc':Varchar) }
@@ -217,28 +217,28 @@
       WHERE t.c1 = o.c1 AND t.c4 >= o.c5 AND t.c4 :: date = o.c5 :: date
     ) AS b ON TRUE;
   stream_plan: |-
-    StreamMaterialize { columns: [c5, c6, c7, c8, c1, v1, v2, t2._row_id(hidden), t2.c7(hidden), t2.c7#1(hidden), t2.c8(hidden), t2.c7#2(hidden), t2.c7#3(hidden), t2.c8#1(hidden), t2.c1(hidden), t2.c5(hidden), t2.c5#1(hidden)], stream_key: [t2._row_id, c7, c8, c1, c5], pk_columns: [t2._row_id, c7, c8, c1, c5], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [c5, c6, c7, c8, c1, v1, v2, t2._row_id(hidden), t2.c7(hidden), t2.c8(hidden), t2.c7#1(hidden), t2.c8#1(hidden), t2.c5(hidden), t2.c1(hidden)], stream_key: [t2._row_id, c7, c8, c5, c1], pk_columns: [t2._row_id, c7, c8, c5, c1], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(t2.c5, t2.c7, t2.c8, t2.c1, t2._row_id) }
-      └─StreamHashJoin { type: LeftOuter, predicate: t2.c7 IS NOT DISTINCT FROM t2.c7 AND t2.c7 IS NOT DISTINCT FROM t2.c7 AND t2.c8 IS NOT DISTINCT FROM t2.c8 AND t2.c7 IS NOT DISTINCT FROM t2.c7 AND t2.c7 IS NOT DISTINCT FROM t2.c7 AND t2.c8 IS NOT DISTINCT FROM t2.c8 AND t2.c1 IS NOT DISTINCT FROM t2.c1 AND t2.c5 IS NOT DISTINCT FROM t2.c5 AND t2.c5 IS NOT DISTINCT FROM t2.c5, output: [t2.c5, t2.c6, t2.c7, t2.c8, t2.c1, sum($expr4) filter(((t2.c7 * t1.c3) <= (t2.c7 * t2.c8))), sum(t1.c2) filter(((t2.c7 * t1.c3) <= (t2.c7 * t2.c8))), t2._row_id, t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5] }
-        ├─StreamExchange { dist: HashShard(t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5) }
+      └─StreamHashJoin { type: LeftOuter, predicate: t2.c7 IS NOT DISTINCT FROM t2.c7 AND t2.c8 IS NOT DISTINCT FROM t2.c8 AND t2.c7 IS NOT DISTINCT FROM t2.c7 AND t2.c8 IS NOT DISTINCT FROM t2.c8 AND t2.c5 IS NOT DISTINCT FROM t2.c5 AND t2.c1 IS NOT DISTINCT FROM t2.c1, output: [t2.c5, t2.c6, t2.c7, t2.c8, t2.c1, sum($expr4) filter(((t2.c7 * t1.c3) <= (t2.c7 * t2.c8))), sum(t1.c2) filter(((t2.c7 * t1.c3) <= (t2.c7 * t2.c8))), t2._row_id, t2.c7, t2.c8, t2.c7, t2.c8, t2.c5, t2.c1] }
+        ├─StreamExchange { dist: HashShard(t2.c7, t2.c8, t2.c7, t2.c8, t2.c5, t2.c1) }
         │ └─StreamTableScan { table: t2, columns: [t2.c5, t2.c6, t2.c7, t2.c8, t2.c1, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
-        └─StreamProject { exprs: [t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5, sum($expr4) filter(((t2.c7 * t1.c3) <= (t2.c7 * t2.c8))), sum(t1.c2) filter(((t2.c7 * t1.c3) <= (t2.c7 * t2.c8)))] }
-          └─StreamHashAgg { group_key: [t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5], aggs: [sum($expr4) filter(((t2.c7 * t1.c3) <= (t2.c7 * t2.c8))), sum(t1.c2) filter(((t2.c7 * t1.c3) <= (t2.c7 * t2.c8))), count] }
-            └─StreamHashJoin { type: LeftOuter, predicate: t2.c7 IS NOT DISTINCT FROM t2.c7 AND t2.c7 IS NOT DISTINCT FROM t2.c7 AND t2.c8 IS NOT DISTINCT FROM t2.c8 AND t2.c7 IS NOT DISTINCT FROM t2.c7 AND t2.c7 IS NOT DISTINCT FROM t2.c7 AND t2.c8 IS NOT DISTINCT FROM t2.c8 AND t2.c1 IS NOT DISTINCT FROM t2.c1 AND t2.c5 IS NOT DISTINCT FROM t2.c5 AND t2.c5 IS NOT DISTINCT FROM t2.c5, output: [t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5, t1.c3, $expr4, t1.c2, t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5, t1._row_id, $expr1] }
-              ├─StreamExchange { dist: HashShard(t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5) }
-              │ └─StreamProject { exprs: [t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5], noop_update_hint: true }
-              │   └─StreamHashAgg { group_key: [t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5], aggs: [count] }
-              │     └─StreamExchange { dist: HashShard(t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5) }
-              │       └─StreamTableScan { table: t2, columns: [t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
-              └─StreamExchange { dist: HashShard(t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5) }
-                └─StreamProject { exprs: [t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5, t1.c3, (t1.c2::Decimal * t1.c3) as $expr4, t1.c2, t1._row_id, $expr1] }
+        └─StreamProject { exprs: [t2.c7, t2.c8, t2.c7, t2.c8, t2.c5, t2.c1, sum($expr4) filter(((t2.c7 * t1.c3) <= (t2.c7 * t2.c8))), sum(t1.c2) filter(((t2.c7 * t1.c3) <= (t2.c7 * t2.c8)))] }
+          └─StreamHashAgg { group_key: [t2.c7, t2.c8, t2.c7, t2.c8, t2.c5, t2.c1], aggs: [sum($expr4) filter(((t2.c7 * t1.c3) <= (t2.c7 * t2.c8))), sum(t1.c2) filter(((t2.c7 * t1.c3) <= (t2.c7 * t2.c8))), count] }
+            └─StreamHashJoin { type: LeftOuter, predicate: t2.c7 IS NOT DISTINCT FROM t2.c7 AND t2.c8 IS NOT DISTINCT FROM t2.c8 AND t2.c7 IS NOT DISTINCT FROM t2.c7 AND t2.c8 IS NOT DISTINCT FROM t2.c8 AND t2.c5 IS NOT DISTINCT FROM t2.c5 AND t2.c1 IS NOT DISTINCT FROM t2.c1, output: [t2.c7, t2.c8, t2.c7, t2.c8, t2.c5, t2.c1, t1.c3, $expr4, t1.c2, t2.c7, t2.c8, t2.c7, t2.c8, t2.c5, t2.c1, t1._row_id, $expr1] }
+              ├─StreamExchange { dist: HashShard(t2.c7, t2.c8, t2.c7, t2.c8, t2.c5, t2.c1) }
+              │ └─StreamProject { exprs: [t2.c7, t2.c8, t2.c7, t2.c8, t2.c5, t2.c1], noop_update_hint: true }
+              │   └─StreamHashAgg { group_key: [t2.c7, t2.c8, t2.c7, t2.c8, t2.c5, t2.c1], aggs: [count] }
+              │     └─StreamExchange { dist: HashShard(t2.c7, t2.c8, t2.c7, t2.c8, t2.c5, t2.c1) }
+              │       └─StreamTableScan { table: t2, columns: [t2.c7, t2.c8, t2.c7, t2.c8, t2.c5, t2.c1, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+              └─StreamExchange { dist: HashShard(t2.c7, t2.c8, t2.c7, t2.c8, t2.c5, t2.c1) }
+                └─StreamProject { exprs: [t2.c7, t2.c8, t2.c7, t2.c8, t2.c5, t2.c1, t1.c3, (t1.c2::Decimal * t1.c3) as $expr4, t1.c2, t1._row_id, $expr1] }
                   └─StreamFilter { predicate: (t2.c5 <= $expr2) }
                     └─StreamHashJoin { type: Inner, predicate: t2.c1 = t1.c1 AND $expr1 = $expr3, output: all }
                       ├─StreamExchange { dist: HashShard(t2.c1, $expr1) }
-                      │ └─StreamProject { exprs: [t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5, AtTimeZone(t2.c5, 'UTC':Varchar)::Date as $expr1], noop_update_hint: true }
-                      │   └─StreamHashAgg { group_key: [t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5], aggs: [count] }
-                      │     └─StreamExchange { dist: HashShard(t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5) }
-                      │       └─StreamTableScan { table: t2, columns: [t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+                      │ └─StreamProject { exprs: [t2.c7, t2.c8, t2.c7, t2.c8, t2.c5, t2.c1, AtTimeZone(t2.c5, 'UTC':Varchar)::Date as $expr1], noop_update_hint: true }
+                      │   └─StreamHashAgg { group_key: [t2.c7, t2.c8, t2.c7, t2.c8, t2.c5, t2.c1], aggs: [count] }
+                      │     └─StreamExchange { dist: HashShard(t2.c7, t2.c8, t2.c7, t2.c8, t2.c5, t2.c1) }
+                      │       └─StreamTableScan { table: t2, columns: [t2.c7, t2.c8, t2.c7, t2.c8, t2.c5, t2.c1, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
                       └─StreamExchange { dist: HashShard(t1.c1, $expr3) }
                         └─StreamProject { exprs: [t1.c1, t1.c2, t1.c3, AtTimeZone(t1.c4, 'UTC':Varchar) as $expr2, t1.c4::Date as $expr3, t1._row_id] }
                           └─StreamTableScan { table: t1, columns: [t1.c1, t1.c2, t1.c3, t1.c4, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
@@ -257,17 +257,17 @@
     )d on true;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: 1:Int32 IS NOT DISTINCT FROM 1:Int32 AND '2024-06-20 19:01:00+00:00':Timestamptz IS NOT DISTINCT FROM '2024-06-20 19:01:00+00:00':Timestamptz, output: ['2024-06-20 19:01:00+00:00':Timestamptz, r.ts, r.src_id, r.dev_id] }
-      ├─BatchExchange { order: [], dist: HashShard(1:Int32, '2024-06-20 19:01:00+00:00':Timestamptz) }
+    └─BatchHashJoin { type: Inner, predicate: '2024-06-20 19:01:00+00:00':Timestamptz IS NOT DISTINCT FROM '2024-06-20 19:01:00+00:00':Timestamptz AND 1:Int32 IS NOT DISTINCT FROM 1:Int32, output: ['2024-06-20 19:01:00+00:00':Timestamptz, r.ts, r.src_id, r.dev_id] }
+      ├─BatchExchange { order: [], dist: HashShard('2024-06-20 19:01:00+00:00':Timestamptz, 1:Int32) }
       │ └─BatchValues { rows: [['2024-06-20 19:01:00+00:00':Timestamptz, 1:Int32]] }
-      └─BatchExchange { order: [], dist: HashShard(1:Int32, '2024-06-20 19:01:00+00:00':Timestamptz) }
-        └─BatchGroupTopN { order: [r.src_id ASC, r.dev_id ASC, r.ts DESC], limit: 1, offset: 0, group_key: [1:Int32, '2024-06-20 19:01:00+00:00':Timestamptz, r.src_id, r.dev_id] }
-          └─BatchExchange { order: [], dist: HashShard(1:Int32, '2024-06-20 19:01:00+00:00':Timestamptz, r.src_id, r.dev_id) }
+      └─BatchExchange { order: [], dist: HashShard('2024-06-20 19:01:00+00:00':Timestamptz, 1:Int32) }
+        └─BatchGroupTopN { order: [r.src_id ASC, r.dev_id ASC, r.ts DESC], limit: 1, offset: 0, group_key: ['2024-06-20 19:01:00+00:00':Timestamptz, 1:Int32, r.src_id, r.dev_id] }
+          └─BatchExchange { order: [], dist: HashShard('2024-06-20 19:01:00+00:00':Timestamptz, 1:Int32, r.src_id, r.dev_id) }
             └─BatchHashJoin { type: Inner, predicate: 1:Int32 = r.src_id AND (r.ts <= '2024-06-20 19:01:00+00:00':Timestamptz), output: all }
               ├─BatchExchange { order: [], dist: HashShard(1:Int32) }
-              │ └─BatchHashAgg { group_key: [1:Int32, '2024-06-20 19:01:00+00:00':Timestamptz], aggs: [] }
-              │   └─BatchExchange { order: [], dist: HashShard(1:Int32, '2024-06-20 19:01:00+00:00':Timestamptz) }
-              │     └─BatchValues { rows: [[1:Int32, '2024-06-20 19:01:00+00:00':Timestamptz]] }
+              │ └─BatchHashAgg { group_key: ['2024-06-20 19:01:00+00:00':Timestamptz, 1:Int32], aggs: [] }
+              │   └─BatchExchange { order: [], dist: HashShard('2024-06-20 19:01:00+00:00':Timestamptz, 1:Int32) }
+              │     └─BatchValues { rows: [['2024-06-20 19:01:00+00:00':Timestamptz, 1:Int32]] }
               └─BatchExchange { order: [], dist: HashShard(r.src_id) }
                 └─BatchScan { table: r, columns: [r.ts, r.src_id, r.dev_id], distribution: SomeShard }
 - name: lateral join with CTE
@@ -285,3 +285,136 @@
       └─BatchExchange { order: [], dist: HashShard(t2.y) }
         └─BatchFilter { predicate: IsNotNull(t2.y) }
           └─BatchScan { table: t2, columns: [t2.x, t2.y], distribution: SomeShard }
+- name: use lateral join to express asof join
+  sql: |
+    create table t1 (
+      price_at date,
+      qid varchar,
+      price float,
+      currency varchar,
+    );
+    create table t2 (
+      ex_date date,
+      qid varchar,
+      factor float,
+    );
+    create table t3 (
+      price_at date,
+      qid varchar
+    );
+    SELECT
+        *
+    FROM t1
+    LEFT JOIN LATERAL (
+        SELECT
+            t2.ex_date,
+            t2.factor
+        FROM (
+          select * from t2
+        ) t2
+        WHERE
+            t1.qid = t2.qid
+            AND t1.price_at IN (
+                SELECT MAX(t3.price_at) AS price_at from t3
+                WHERE
+                    t3.price_at < t2.ex_date
+                    AND t3.qid = t2.qid
+            )
+        ORDER BY t2.ex_date
+        LIMIT 1
+    ) t2 ON TRUE;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: LeftOuter, predicate: t1.price_at IS NOT DISTINCT FROM t1.price_at AND t1.qid IS NOT DISTINCT FROM t1.qid, output: [t1.price_at, t1.qid, t1.price, t1.currency, t2.ex_date, t2.factor] }
+      ├─BatchExchange { order: [], dist: HashShard(t1.price_at, t1.qid) }
+      │ └─BatchScan { table: t1, columns: [t1.price_at, t1.qid, t1.price, t1.currency], distribution: SomeShard }
+      └─BatchProject { exprs: [t1.price_at, t1.qid, t2.ex_date, t2.factor] }
+        └─BatchGroupTopN { order: [t2.ex_date ASC], limit: 1, offset: 0, group_key: [t1.price_at, t1.qid] }
+          └─BatchExchange { order: [], dist: HashShard(t1.price_at, t1.qid) }
+            └─BatchProject { exprs: [t1.price_at, t1.qid, t2.ex_date, t2.factor, t2.ex_date] }
+              └─BatchHashJoin { type: LeftSemi, predicate: t1.price_at = max(t3.price_at) AND t2.ex_date IS NOT DISTINCT FROM t2.ex_date AND t2.qid IS NOT DISTINCT FROM t2.qid AND t1.price_at IS NOT DISTINCT FROM t1.price_at AND t1.qid IS NOT DISTINCT FROM internal_last_seen_value(t1.qid), output: [t1.price_at, t1.qid, t2.ex_date, t2.factor] }
+                ├─BatchExchange { order: [], dist: HashShard(t2.qid) }
+                │ └─BatchHashJoin { type: Inner, predicate: t1.qid = t2.qid, output: all }
+                │   ├─BatchExchange { order: [], dist: HashShard(t1.qid) }
+                │   │ └─BatchHashAgg { group_key: [t1.price_at, t1.qid], aggs: [] }
+                │   │   └─BatchExchange { order: [], dist: HashShard(t1.price_at, t1.qid) }
+                │   │     └─BatchScan { table: t1, columns: [t1.price_at, t1.qid], distribution: SomeShard }
+                │   └─BatchExchange { order: [], dist: HashShard(t2.qid) }
+                │     └─BatchScan { table: t2, columns: [t2.ex_date, t2.qid, t2.factor], distribution: SomeShard }
+                └─BatchHashAgg { group_key: [t1.price_at, internal_last_seen_value(t1.qid), t2.ex_date, t2.qid], aggs: [max(t3.price_at)] }
+                  └─BatchHashJoin { type: LeftOuter, predicate: t2.ex_date IS NOT DISTINCT FROM t2.ex_date AND t2.qid IS NOT DISTINCT FROM t2.qid AND t1.price_at IS NOT DISTINCT FROM t1.price_at AND internal_last_seen_value(t1.qid) IS NOT DISTINCT FROM internal_last_seen_value(t1.qid), output: [t1.price_at, internal_last_seen_value(t1.qid), t2.ex_date, t2.qid, t3.price_at] }
+                    ├─BatchExchange { order: [], dist: HashShard(t2.qid) }
+                    │ └─BatchHashAgg { group_key: [t1.price_at, t2.ex_date, t2.qid], aggs: [internal_last_seen_value(t1.qid)] }
+                    │   └─BatchExchange { order: [], dist: HashShard(t1.price_at, t2.ex_date, t2.qid) }
+                    │     └─BatchHashJoin { type: Inner, predicate: t1.qid = t2.qid, output: all }
+                    │       ├─BatchExchange { order: [], dist: HashShard(t1.qid) }
+                    │       │ └─BatchHashAgg { group_key: [t1.price_at, t1.qid], aggs: [] }
+                    │       │   └─BatchExchange { order: [], dist: HashShard(t1.price_at, t1.qid) }
+                    │       │     └─BatchScan { table: t1, columns: [t1.price_at, t1.qid], distribution: SomeShard }
+                    │       └─BatchExchange { order: [], dist: HashShard(t2.qid) }
+                    │         └─BatchScan { table: t2, columns: [t2.ex_date, t2.qid], distribution: SomeShard }
+                    └─BatchHashJoin { type: Inner, predicate: t2.qid = t3.qid AND (t3.price_at < t2.ex_date), output: [t1.price_at, internal_last_seen_value(t1.qid), t2.ex_date, t2.qid, t3.price_at] }
+                      ├─BatchExchange { order: [], dist: HashShard(t2.qid) }
+                      │ └─BatchHashAgg { group_key: [t1.price_at, t2.ex_date, t2.qid], aggs: [internal_last_seen_value(t1.qid)] }
+                      │   └─BatchExchange { order: [], dist: HashShard(t1.price_at, t2.ex_date, t2.qid) }
+                      │     └─BatchHashJoin { type: Inner, predicate: t1.qid = t2.qid, output: all }
+                      │       ├─BatchExchange { order: [], dist: HashShard(t1.qid) }
+                      │       │ └─BatchHashAgg { group_key: [t1.price_at, t1.qid], aggs: [] }
+                      │       │   └─BatchExchange { order: [], dist: HashShard(t1.price_at, t1.qid) }
+                      │       │     └─BatchScan { table: t1, columns: [t1.price_at, t1.qid], distribution: SomeShard }
+                      │       └─BatchExchange { order: [], dist: HashShard(t2.qid) }
+                      │         └─BatchScan { table: t2, columns: [t2.ex_date, t2.qid], distribution: SomeShard }
+                      └─BatchExchange { order: [], dist: HashShard(t3.qid) }
+                        └─BatchScan { table: t3, columns: [t3.price_at, t3.qid], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [price_at, qid, price, currency, ex_date, factor, t1._row_id(hidden), t1.price_at(hidden), t1.qid(hidden)], stream_key: [t1._row_id, price_at, qid], pk_columns: [t1._row_id, price_at, qid], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(t1.price_at, t1.qid, t1._row_id) }
+      └─StreamHashJoin { type: LeftOuter, predicate: t1.price_at IS NOT DISTINCT FROM t1.price_at AND t1.qid IS NOT DISTINCT FROM t1.qid, output: [t1.price_at, t1.qid, t1.price, t1.currency, t2.ex_date, t2.factor, t1._row_id, t1.price_at, t1.qid] }
+        ├─StreamExchange { dist: HashShard(t1.price_at, t1.qid) }
+        │ └─StreamTableScan { table: t1, columns: [t1.price_at, t1.qid, t1.price, t1.currency, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamProject { exprs: [t1.price_at, t1.qid, t2.ex_date, t2.factor] }
+          └─StreamGroupTopN { order: [t2.ex_date ASC], limit: 1, offset: 0, group_key: [t1.price_at, t1.qid] }
+            └─StreamExchange { dist: HashShard(t1.price_at, t1.qid) }
+              └─StreamProject { exprs: [t1.price_at, t1.qid, t2.ex_date, t2.factor, t2.ex_date, t2._row_id, t2.qid] }
+                └─StreamHashJoin { type: LeftSemi, predicate: t1.price_at = max(t3.price_at) AND t2.ex_date IS NOT DISTINCT FROM t2.ex_date AND t2.qid IS NOT DISTINCT FROM t2.qid AND t1.price_at IS NOT DISTINCT FROM t1.price_at AND t1.qid IS NOT DISTINCT FROM internal_last_seen_value(t1.qid), output: [t1.price_at, t1.qid, t2.ex_date, t2.factor, t2._row_id, t2.qid] }
+                  ├─StreamExchange { dist: HashShard(t2.qid) }
+                  │ └─StreamHashJoin { type: Inner, predicate: t1.qid = t2.qid, output: all }
+                  │   ├─StreamExchange { dist: HashShard(t1.qid) }
+                  │   │ └─StreamProject { exprs: [t1.price_at, t1.qid], noop_update_hint: true }
+                  │   │   └─StreamHashAgg { group_key: [t1.price_at, t1.qid], aggs: [count] }
+                  │   │     └─StreamExchange { dist: HashShard(t1.price_at, t1.qid) }
+                  │   │       └─StreamTableScan { table: t1, columns: [t1.price_at, t1.qid, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+                  │   └─StreamExchange { dist: HashShard(t2.qid) }
+                  │     └─StreamTableScan { table: t2, columns: [t2.ex_date, t2.qid, t2.factor, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+                  └─StreamProject { exprs: [t1.price_at, internal_last_seen_value(t1.qid), t2.ex_date, t2.qid, max(t3.price_at)] }
+                    └─StreamHashAgg { group_key: [t1.price_at, internal_last_seen_value(t1.qid), t2.ex_date, t2.qid], aggs: [max(t3.price_at), count] }
+                      └─StreamHashJoin { type: LeftOuter, predicate: t2.ex_date IS NOT DISTINCT FROM t2.ex_date AND t2.qid IS NOT DISTINCT FROM t2.qid AND t1.price_at IS NOT DISTINCT FROM t1.price_at AND internal_last_seen_value(t1.qid) IS NOT DISTINCT FROM internal_last_seen_value(t1.qid), output: [t1.price_at, internal_last_seen_value(t1.qid), t2.ex_date, t2.qid, t3.price_at, t1.price_at, t2.ex_date, t2.qid, t3._row_id] }
+                        ├─StreamExchange { dist: HashShard(t2.qid) }
+                        │ └─StreamProject { exprs: [t1.price_at, t2.ex_date, t2.qid, internal_last_seen_value(t1.qid)] }
+                        │   └─StreamHashAgg { group_key: [t1.price_at, t2.ex_date, t2.qid], aggs: [internal_last_seen_value(t1.qid), count] }
+                        │     └─StreamExchange { dist: HashShard(t1.price_at, t2.ex_date, t2.qid) }
+                        │       └─StreamHashJoin { type: Inner, predicate: t1.qid = t2.qid, output: all }
+                        │         ├─StreamExchange { dist: HashShard(t1.qid) }
+                        │         │ └─StreamProject { exprs: [t1.price_at, t1.qid], noop_update_hint: true }
+                        │         │   └─StreamHashAgg { group_key: [t1.price_at, t1.qid], aggs: [count] }
+                        │         │     └─StreamExchange { dist: HashShard(t1.price_at, t1.qid) }
+                        │         │       └─StreamTableScan { table: t1, columns: [t1.price_at, t1.qid, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+                        │         └─StreamExchange { dist: HashShard(t2.qid) }
+                        │           └─StreamTableScan { table: t2, columns: [t2.ex_date, t2.qid, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+                        └─StreamProject { exprs: [t1.price_at, internal_last_seen_value(t1.qid), t2.ex_date, t2.qid, t3.price_at, t3._row_id] }
+                          └─StreamFilter { predicate: (t3.price_at < t2.ex_date) }
+                            └─StreamHashJoin { type: Inner, predicate: t2.qid = t3.qid, output: all }
+                              ├─StreamExchange { dist: HashShard(t2.qid) }
+                              │ └─StreamProject { exprs: [t1.price_at, t2.ex_date, t2.qid, internal_last_seen_value(t1.qid)] }
+                              │   └─StreamHashAgg { group_key: [t1.price_at, t2.ex_date, t2.qid], aggs: [internal_last_seen_value(t1.qid), count] }
+                              │     └─StreamExchange { dist: HashShard(t1.price_at, t2.ex_date, t2.qid) }
+                              │       └─StreamHashJoin { type: Inner, predicate: t1.qid = t2.qid, output: all }
+                              │         ├─StreamExchange { dist: HashShard(t1.qid) }
+                              │         │ └─StreamProject { exprs: [t1.price_at, t1.qid], noop_update_hint: true }
+                              │         │   └─StreamHashAgg { group_key: [t1.price_at, t1.qid], aggs: [count] }
+                              │         │     └─StreamExchange { dist: HashShard(t1.price_at, t1.qid) }
+                              │         │       └─StreamTableScan { table: t1, columns: [t1.price_at, t1.qid, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+                              │         └─StreamExchange { dist: HashShard(t2.qid) }
+                              │           └─StreamTableScan { table: t2, columns: [t2.ex_date, t2.qid, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+                              └─StreamExchange { dist: HashShard(t3.qid) }
+                                └─StreamTableScan { table: t3, columns: [t3.price_at, t3.qid, t3._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t3._row_id], pk: [_row_id], dist: UpstreamHashShard(t3._row_id) }

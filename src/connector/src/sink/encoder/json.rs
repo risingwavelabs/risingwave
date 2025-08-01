@@ -18,7 +18,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use base64::Engine as _;
 use base64::engine::general_purpose;
-use chrono::{Datelike, NaiveDateTime, Timelike};
+use chrono::{DateTime, Datelike, Timelike};
 use indexmap::IndexMap;
 use itertools::Itertools;
 use risingwave_common::array::{ArrayError, ArrayResult};
@@ -272,7 +272,7 @@ fn datum_to_json_object(
         (DataType::Date, ScalarRefImpl::Date(v)) => match config.date_handling_mode {
             DateHandlingMode::FromCe => json!(v.0.num_days_from_ce()),
             DateHandlingMode::FromEpoch => {
-                let duration = v.0 - NaiveDateTime::UNIX_EPOCH.date();
+                let duration = v.0 - DateTime::UNIX_EPOCH.date_naive();
                 json!(duration.num_days())
             }
             DateHandlingMode::String => {
@@ -404,6 +404,7 @@ pub(crate) fn schema_type_mapping(rw_type: &DataType) -> &'static str {
         DataType::Serial => "string",
         DataType::Int256 => "string",
         DataType::Map(_) => "map",
+        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
     }
 }
 

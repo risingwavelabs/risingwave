@@ -256,7 +256,9 @@ where
                 .try_next()
                 .instrument(span.clone())
                 .instrument_await(
-                    last_epoch.map_or("Epoch <initial>".into(), |e| format!("Epoch {}", e.curr)),
+                    last_epoch.map_or(await_tree::span!("Epoch <initial>"), |e| {
+                        await_tree::span!("Epoch {}", e.curr)
+                    }),
                 )
                 .await
             {

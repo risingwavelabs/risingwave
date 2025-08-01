@@ -245,7 +245,7 @@ impl RemoteTableAccessor {
 #[async_trait::async_trait]
 impl StateTableAccessor for RemoteTableAccessor {
     async fn get_tables(&self, table_ids: &[u32]) -> RpcResult<HashMap<u32, Table>> {
-        self.meta_client.get_tables(table_ids).await
+        self.meta_client.get_tables(table_ids, true).await
     }
 }
 
@@ -644,7 +644,6 @@ mod tests {
                 },
             ],
             stream_key: vec![0],
-            dependent_relations: vec![],
             distribution_key: (0..column_count as i32).collect_vec(),
             optional_associated_source_id: None,
             append_only: false,
@@ -678,6 +677,7 @@ mod tests {
             job_id: None,
             engine: Some(PbEngine::Hummock as i32),
             clean_watermark_index_in_pk: None,
+            refreshable: false,
         }
     }
 

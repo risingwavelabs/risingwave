@@ -18,7 +18,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
 use super::utils::impl_distill_by_unit;
-use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode, generic};
+use super::{ExprRewritable, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, generic};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef};
 use crate::optimizer::plan_node::PlanBase;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -69,7 +69,7 @@ impl StreamFilter {
     }
 }
 
-impl PlanTreeNodeUnary for StreamFilter {
+impl PlanTreeNodeUnary<Stream> for StreamFilter {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -81,7 +81,7 @@ impl PlanTreeNodeUnary for StreamFilter {
     }
 }
 
-impl_plan_tree_node_for_unary! { StreamFilter }
+impl_plan_tree_node_for_unary! { Stream, StreamFilter }
 impl_distill_by_unit!(StreamFilter, core, "StreamFilter");
 
 impl StreamNode for StreamFilter {
@@ -92,7 +92,7 @@ impl StreamNode for StreamFilter {
     }
 }
 
-impl ExprRewritable for StreamFilter {
+impl ExprRewritable<Stream> for StreamFilter {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

@@ -155,6 +155,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
 
     let schema_rows = schema
         .iter_source_with_acl(current_user)
+        .filter(|source| source.associated_table_id.is_none())
         .flat_map(|source| {
             source
                 .columns

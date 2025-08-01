@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::vec;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
+use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, SchemaId, TableId};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_pb::catalog::PbTable;
@@ -36,8 +36,8 @@ use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ExprContext, Field};
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, FragmentTypeFlag,
-    MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamContext,
+    AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, MaterializeNode,
+    PbDispatchOutputMapping, ProjectNode, SimpleAggNode, SourceNode, StreamContext,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource, agg_call_state,
 };
 
@@ -233,7 +233,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Hash as i32,
                 dist_key_indices: vec![0],
-                output_indices: vec![0, 1, 2],
+                output_mapping: PbDispatchOutputMapping::simple(vec![0, 1, 2]).into(),
             }),
         }))),
         fields: vec![
@@ -292,7 +292,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     fragments.push(StreamFragment {
         fragment_id: 1,
         node: Some(simple_agg_node),
-        fragment_type_mask: FragmentTypeFlag::FragmentUnspecified as u32,
+        fragment_type_mask: 0,
         requires_singleton: false,
         table_ids_cnt: 0,
         upstream_table_ids: vec![],
@@ -365,8 +365,9 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         input: vec![project_node],
         stream_key: vec![],
         node_body: Some(NodeBody::Materialize(Box::new(MaterializeNode {
-            table_id: 1,
-            table: Some(make_materialize_table(888)),
+            // `table_id` and `table` are left empty when generated from frontend.
+            table_id: TableId::placeholder().table_id(),
+            table: None,
             column_orders: vec![make_column_order(1), make_column_order(2)],
         }))),
         fields: vec![], // TODO: fill this later
@@ -393,7 +394,7 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
             dispatch_strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Simple as i32,
                 dist_key_indices: vec![],
-                output_indices: vec![],
+                output_mapping: PbDispatchOutputMapping::identical(0).into(), /* dummy length as it's not used */
             }),
             link_id: 4,
             upstream_id: 1,
@@ -403,7 +404,7 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
             dispatch_strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Hash as i32,
                 dist_key_indices: vec![0],
-                output_indices: vec![],
+                output_mapping: PbDispatchOutputMapping::identical(0).into(), /* dummy length as it's not used */
             }),
             link_id: 1,
             upstream_id: 2,
@@ -422,6 +423,7 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
         table_ids_cnt: 3,
         parallelism: None,
         max_parallelism: VirtualNode::COUNT_FOR_TEST as _,
+        backfill_order: Default::default(),
     }
 }
 
@@ -473,10 +475,21 @@ async fn test_graph_builder() -> MetaResult<()> {
     )?;
     let ActorGraphBuildResult {
         graph,
-        actor_upstreams,
-        actor_dispatchers,
+        upstream_fragment_downstreams,
+        downstream_fragment_relations,
         ..
     } = actor_graph_builder.generate_graph(&env, &job, expr_context)?;
+
+    let new_fragment_relation = || {
+        upstream_fragment_downstreams
+            .iter()
+            .chain(downstream_fragment_relations.iter())
+            .flat_map(|(fragment_id, downstreams)| {
+                downstreams
+                    .iter()
+                    .map(|relation| (*fragment_id, relation.downstream_fragment_id))
+            })
+    };
 
     let stream_job_fragments = StreamJobFragments::for_test(TableId::default(), graph);
     let actors = stream_job_fragments.actors();
@@ -486,40 +499,6 @@ async fn test_graph_builder() -> MetaResult<()> {
     assert_eq!(mview_actor_ids, vec![1]);
     assert_eq!(internal_tables.len(), 3);
 
-    let mut expected_downstream = HashMap::new();
-    expected_downstream.insert(1, vec![]);
-    expected_downstream.insert(2, vec![1]);
-    expected_downstream.insert(3, vec![1]);
-    expected_downstream.insert(4, vec![1]);
-    expected_downstream.insert(5, vec![1]);
-    expected_downstream.insert(6, vec![2, 3, 4, 5]);
-    expected_downstream.insert(7, vec![2, 3, 4, 5]);
-    expected_downstream.insert(8, vec![2, 3, 4, 5]);
-    expected_downstream.insert(9, vec![2, 3, 4, 5]);
-
-    let mut expected_upstream = HashMap::new();
-    expected_upstream.insert(1, vec![2, 3, 4, 5]);
-    expected_upstream.insert(2, vec![6, 7, 8, 9]);
-    expected_upstream.insert(3, vec![6, 7, 8, 9]);
-    expected_upstream.insert(4, vec![6, 7, 8, 9]);
-    expected_upstream.insert(5, vec![6, 7, 8, 9]);
-    expected_upstream.insert(6, vec![]);
-    expected_upstream.insert(7, vec![]);
-    expected_upstream.insert(8, vec![]);
-    expected_upstream.insert(9, vec![]);
-
-    for actor in actors {
-        assert_eq!(
-            expected_downstream.get(&actor.actor_id).unwrap(),
-            actor_dispatchers
-                .get(&actor.fragment_id)
-                .unwrap()
-                .get(&actor.actor_id)
-                .unwrap()
-                .first()
-                .map_or(&vec![], |d| d.get_downstream_actor_id()),
-        );
-    }
     for fragment in stream_job_fragments.fragments() {
         let mut node = &fragment.nodes;
         while !node.get_input().is_empty() {
@@ -527,24 +506,12 @@ async fn test_graph_builder() -> MetaResult<()> {
         }
         match node.get_node_body().unwrap() {
             NodeBody::Merge(merge_node) => {
-                for actor in &fragment.actors {
-                    assert_eq!(
-                        expected_upstream
-                            .get(&actor.actor_id)
-                            .unwrap()
-                            .iter()
-                            .collect::<HashSet<_>>(),
-                        actor_upstreams
-                            .get(&actor.fragment_id)
-                            .unwrap()
-                            .get(&actor.actor_id)
-                            .unwrap()
-                            .get(&merge_node.upstream_fragment_id)
-                            .unwrap()
-                            .iter()
-                            .collect::<HashSet<_>>(),
-                    );
-                }
+                assert!(
+                    new_fragment_relation().any(|(upstream_fragment_id, fragment_id)| {
+                        upstream_fragment_id == merge_node.upstream_fragment_id
+                            && fragment_id == fragment.fragment_id
+                    })
+                );
             }
             NodeBody::Source(_) => {
                 // check nothing.

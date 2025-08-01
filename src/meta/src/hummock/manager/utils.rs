@@ -54,12 +54,12 @@ macro_rules! commit_multi_var_with_provided_txn {
     };
 }
 
-use risingwave_hummock_sdk::SstObjectIdRange;
+use risingwave_hummock_sdk::ObjectIdRange;
 pub(crate) use {commit_multi_var, commit_multi_var_with_provided_txn};
 
 use crate::hummock::HummockManager;
 use crate::hummock::error::Result;
-use crate::hummock::sequence::next_sstable_object_id;
+use crate::hummock::sequence::next_raw_object_id;
 
 impl HummockManager {
     #[cfg(test)]
@@ -111,8 +111,8 @@ impl HummockManager {
         );
     }
 
-    pub async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
-        let start_id = next_sstable_object_id(&self.env, number).await?;
-        Ok(SstObjectIdRange::new(start_id, start_id + number as u64))
+    pub async fn get_new_object_ids(&self, number: u32) -> Result<ObjectIdRange> {
+        let start_id = next_raw_object_id(&self.env, number).await?;
+        Ok(ObjectIdRange::new(start_id, start_id + number as u64))
     }
 }

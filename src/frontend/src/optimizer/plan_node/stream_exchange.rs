@@ -14,11 +14,13 @@
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode};
+use risingwave_pb::stream_plan::{
+    DispatchStrategy, DispatcherType, ExchangeNode, PbDispatchOutputMapping,
+};
 
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record, plan_node_name};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{
     Distribution, DistributionDisplay, MonotonicityMap, RequiredDist,
@@ -103,7 +105,7 @@ impl Distill for StreamExchange {
     }
 }
 
-impl PlanTreeNodeUnary for StreamExchange {
+impl PlanTreeNodeUnary<Stream> for StreamExchange {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -116,16 +118,18 @@ impl PlanTreeNodeUnary for StreamExchange {
         }
     }
 }
-impl_plan_tree_node_for_unary! {StreamExchange}
+impl_plan_tree_node_for_unary! { Stream, StreamExchange}
 
 impl StreamNode for StreamExchange {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> NodeBody {
+        let output_mapping = PbDispatchOutputMapping::identical(self.schema().len()).into();
+
         NodeBody::Exchange(Box::new(ExchangeNode {
             strategy: if self.no_shuffle {
                 Some(DispatchStrategy {
                     r#type: DispatcherType::NoShuffle as i32,
                     dist_key_indices: vec![],
-                    output_indices: (0..self.schema().len() as u32).collect(),
+                    output_mapping,
                 })
             } else {
                 Some(DispatchStrategy {
@@ -141,13 +145,13 @@ impl StreamNode for StreamExchange {
                         }
                         _ => vec![],
                     },
-                    output_indices: (0..self.schema().len() as u32).collect(),
+                    output_mapping,
                 })
             },
         }))
     }
 }
 
-impl ExprRewritable for StreamExchange {}
+impl ExprRewritable<Stream> for StreamExchange {}
 
 impl ExprVisitable for StreamExchange {}

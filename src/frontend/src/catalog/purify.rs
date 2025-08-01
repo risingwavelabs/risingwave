@@ -21,6 +21,7 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_sqlparser::ast::*;
 
 use crate::error::Result;
+use crate::session::current;
 use crate::utils::data_type::DataTypeToAst as _;
 
 mod pk_column {
@@ -55,6 +56,15 @@ pub fn try_purify_table_source_create_sql_ast(
     row_id_index: Option<usize>,
     pk_column_ids: &[impl PkColumn],
 ) -> Result<Statement> {
+    if let Some(config) = current::config()
+        && config.read().disable_purify_definition()
+    {
+        current::notice_to_user(
+            "purifying definition is disabled via session config, results may be inaccurate",
+        );
+        return Ok(base);
+    }
+
     let (Statement::CreateTable {
         columns: column_defs,
         constraints,
@@ -97,7 +107,7 @@ pub fn try_purify_table_source_create_sql_ast(
 
             // Generate a new `ColumnDef` from the catalog.
             ColumnDef {
-                name: column.name().into(),
+                name: Ident::from_real_value(column.name()),
                 data_type: Some(column.data_type().to_ast()),
                 collation: None,
                 options: Vec::new(), // pk will be specified with table constraints
@@ -159,7 +169,14 @@ pub fn try_purify_table_source_create_sql_ast(
                     column.name()
                 );
             }
-            pk_columns.push(column.name().into());
+            // Find the name in `Ident` form from `column_defs` to preserve quote style best.
+            let name_ident = column_defs
+                .iter()
+                .find(|c| c.name.real_value() == column.name())
+                .unwrap()
+                .name
+                .clone();
+            pk_columns.push(name_ident);
         }
 
         let pk_constraint = TableConstraint::Unique {

@@ -140,6 +140,12 @@ where
         self.inner().barrier_interval_ms.unwrap()
     }
 
+    fn enforce_secret(&self) -> bool {
+        self.inner()
+            .enforce_secret
+            .unwrap_or_else(default::enforce_secret)
+    }
+
     fn checkpoint_frequency(&self) -> u64 {
         self.inner().checkpoint_frequency.unwrap()
     }

@@ -121,8 +121,10 @@ where
             tokio::select! {
                 _ = interval.tick() => {},
                 event = event_rx.recv(), if enable_event_report => {
-                    debug_assert!(event.is_some());
-                    event_stash.push(event.unwrap());
+                    if let Some(event) = event {
+                        // handle None event in case of the close channel
+                        event_stash.push(event);
+                    }
                     if event_stash.len() >= TELEMETRY_EVENT_REPORT_STASH_SIZE {
                         do_telemetry_event_report(&mut event_stash).await;
                     }

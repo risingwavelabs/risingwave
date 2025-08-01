@@ -1,0 +1,9 @@
+statement ok
+set streaming_use_snapshot_backfill=true;
+
+include ./backfill_order_control.slt.part
+
+statement ok
+set streaming_use_snapshot_backfill=false;
+
+include ./backfill_order_control.slt.part

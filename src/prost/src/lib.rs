@@ -27,12 +27,14 @@
 
 use std::str::FromStr;
 
+use event_recovery::RecoveryEvent;
 use plan_common::AdditionalColumn;
 pub use prost::Message;
 use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
 use crate::common::WorkerType;
+use crate::meta::event_log::event_recovery;
 use crate::stream_plan::PbStreamScanType;
 
 #[rustfmt::skip]
@@ -96,6 +98,9 @@ pub mod monitor_service;
 #[cfg_attr(madsim, path = "sim/backup_service.rs")]
 pub mod backup_service;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/serverless_backfill_controller.rs")]
+pub mod serverless_backfill_controller;
+#[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/frontend_service.rs")]
 pub mod frontend_service;
 #[rustfmt::skip]
@@ -107,6 +112,9 @@ pub mod health;
 #[rustfmt::skip]
 #[path = "sim/telemetry.rs"]
 pub mod telemetry;
+#[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/iceberg_compaction.rs")]
+pub mod iceberg_compaction;
 
 #[rustfmt::skip]
 #[path = "sim/secret.rs"]
@@ -181,6 +189,9 @@ pub mod telemetry_serde;
 #[rustfmt::skip]
 #[path = "secret.serde.rs"]
 pub mod secret_serde;
+#[rustfmt::skip]
+#[path = "serverless_backfill_controller.serde.rs"]
+pub mod serverless_backfill_controller_serde;
 
 #[derive(Clone, PartialEq, Eq, Debug, Error)]
 #[error("field `{0}` not found")]
@@ -218,12 +229,36 @@ impl stream_plan::MaterializeNode {
             .collect()
     }
 
-    pub fn column_ids(&self) -> Vec<i32> {
+    pub fn column_descs(&self) -> Vec<plan_common::PbColumnDesc> {
         self.get_table()
             .unwrap()
             .columns
             .iter()
-            .map(|c| c.get_column_desc().unwrap().column_id)
+            .map(|c| c.get_column_desc().unwrap().clone())
+            .collect()
+    }
+}
+
+impl stream_plan::StreamScanNode {
+    /// See [`Self::upstream_column_ids`].
+    pub fn upstream_columns(&self) -> Vec<plan_common::PbColumnDesc> {
+        self.upstream_column_ids
+            .iter()
+            .map(|id| {
+                (self.table_desc.as_ref().unwrap().columns.iter())
+                    .find(|c| c.column_id == *id)
+                    .unwrap()
+                    .clone()
+            })
+            .collect()
+    }
+}
+
+impl stream_plan::SourceBackfillNode {
+    pub fn column_descs(&self) -> Vec<plan_common::PbColumnDesc> {
+        self.columns
+            .iter()
+            .map(|c| c.column_desc.as_ref().unwrap().clone())
             .collect()
     }
 }
@@ -254,13 +289,13 @@ impl common::WorkerNode {
 }
 
 impl stream_plan::SourceNode {
-    pub fn column_ids(&self) -> Option<Vec<i32>> {
+    pub fn column_descs(&self) -> Option<Vec<plan_common::PbColumnDesc>> {
         Some(
             self.source_inner
                 .as_ref()?
                 .columns
                 .iter()
-                .map(|c| c.get_column_desc().unwrap().column_id)
+                .map(|c| c.get_column_desc().unwrap().clone())
                 .collect(),
         )
     }
@@ -288,6 +323,78 @@ impl common::ActorLocation {
     }
 }
 
+impl meta::event_log::EventRecovery {
+    pub fn event_type(&self) -> &str {
+        match self.recovery_event.as_ref() {
+            Some(RecoveryEvent::DatabaseStart(_)) => "DATABASE_RECOVERY_START",
+            Some(RecoveryEvent::DatabaseSuccess(_)) => "DATABASE_RECOVERY_SUCCESS",
+            Some(RecoveryEvent::DatabaseFailure(_)) => "DATABASE_RECOVERY_FAILURE",
+            Some(RecoveryEvent::GlobalStart(_)) => "GLOBAL_RECOVERY_START",
+            Some(RecoveryEvent::GlobalSuccess(_)) => "GLOBAL_RECOVERY_SUCCESS",
+            Some(RecoveryEvent::GlobalFailure(_)) => "GLOBAL_RECOVERY_FAILURE",
+            None => "UNKNOWN_RECOVERY_EVENT",
+        }
+    }
+
+    pub fn database_recovery_start(database_id: u32) -> Self {
+        Self {
+            recovery_event: Some(RecoveryEvent::DatabaseStart(
+                event_recovery::DatabaseRecoveryStart { database_id },
+            )),
+        }
+    }
+
+    pub fn database_recovery_failure(database_id: u32) -> Self {
+        Self {
+            recovery_event: Some(RecoveryEvent::DatabaseFailure(
+                event_recovery::DatabaseRecoveryFailure { database_id },
+            )),
+        }
+    }
+
+    pub fn database_recovery_success(database_id: u32) -> Self {
+        Self {
+            recovery_event: Some(RecoveryEvent::DatabaseSuccess(
+                event_recovery::DatabaseRecoverySuccess { database_id },
+            )),
+        }
+    }
+
+    pub fn global_recovery_start(reason: String) -> Self {
+        Self {
+            recovery_event: Some(RecoveryEvent::GlobalStart(
+                event_recovery::GlobalRecoveryStart { reason },
+            )),
+        }
+    }
+
+    pub fn global_recovery_success(
+        reason: String,
+        duration_secs: f32,
+        running_database_ids: Vec<u32>,
+        recovering_database_ids: Vec<u32>,
+    ) -> Self {
+        Self {
+            recovery_event: Some(RecoveryEvent::GlobalSuccess(
+                event_recovery::GlobalRecoverySuccess {
+                    reason,
+                    duration_secs,
+                    running_database_ids,
+                    recovering_database_ids,
+                },
+            )),
+        }
+    }
+
+    pub fn global_recovery_failure(reason: String, error: String) -> Self {
+        Self {
+            recovery_event: Some(RecoveryEvent::GlobalFailure(
+                event_recovery::GlobalRecoveryFailure { reason, error },
+            )),
+        }
+    }
+}
+
 impl stream_plan::StreamNode {
     /// Find the external stream source info inside the stream node, if any.
     ///
@@ -295,10 +402,9 @@ impl stream_plan::StreamNode {
     pub fn find_stream_source(&self) -> Option<u32> {
         if let Some(crate::stream_plan::stream_node::NodeBody::Source(source)) =
             self.node_body.as_ref()
+            && let Some(inner) = &source.source_inner
         {
-            if let Some(inner) = &source.source_inner {
-                return Some(inner.source_id);
-            }
+            return Some(inner.source_id);
         }
 
         for child in &self.input {
@@ -344,44 +450,40 @@ impl stream_plan::StreamNode {
         None
     }
 }
-
-impl stream_plan::FragmentTypeFlag {
-    /// Fragments that may be affected by `BACKFILL_RATE_LIMIT`.
-    pub fn backfill_rate_limit_fragments() -> i32 {
-        stream_plan::FragmentTypeFlag::SourceScan as i32
-            | stream_plan::FragmentTypeFlag::StreamScan as i32
-    }
-
-    /// Fragments that may be affected by `SOURCE_RATE_LIMIT`.
-    /// Note: for `FsFetch`, old fragments don't have this flag set, so don't use this to check.
-    pub fn source_rate_limit_fragments() -> i32 {
-        stream_plan::FragmentTypeFlag::Source as i32 | stream_plan::FragmentTypeFlag::FsFetch as i32
-    }
-
-    /// Fragments that may be affected by `BACKFILL_RATE_LIMIT`.
-    pub fn sink_rate_limit_fragments() -> i32 {
-        stream_plan::FragmentTypeFlag::Sink as i32
-    }
-
-    /// Note: this doesn't include `FsFetch` created in old versions.
-    pub fn rate_limit_fragments() -> i32 {
-        Self::backfill_rate_limit_fragments()
-            | Self::source_rate_limit_fragments()
-            | Self::sink_rate_limit_fragments()
-    }
-
-    pub fn dml_rate_limit_fragments() -> i32 {
-        stream_plan::FragmentTypeFlag::Dml as i32
-    }
-}
-
 impl stream_plan::Dispatcher {
     pub fn as_strategy(&self) -> stream_plan::DispatchStrategy {
         stream_plan::DispatchStrategy {
             r#type: self.r#type,
             dist_key_indices: self.dist_key_indices.clone(),
-            output_indices: self.output_indices.clone(),
+            output_mapping: self.output_mapping.clone(),
         }
+    }
+}
+
+impl stream_plan::DispatchOutputMapping {
+    /// Create a mapping that forwards all columns.
+    pub fn identical(len: usize) -> Self {
+        Self {
+            indices: (0..len as u32).collect(),
+            types: Vec::new(),
+        }
+    }
+
+    /// Create a mapping that forwards columns with given indices, without type conversion.
+    pub fn simple(indices: Vec<u32>) -> Self {
+        Self {
+            indices,
+            types: Vec::new(),
+        }
+    }
+
+    /// Assert that this mapping does not involve type conversion and return the indices.
+    pub fn into_simple_indices(self) -> Vec<u32> {
+        assert!(
+            self.types.is_empty(),
+            "types must be empty for simple mapping"
+        );
+        self.indices
     }
 }
 
@@ -398,8 +500,8 @@ impl stream_plan::PbStreamScanType {
             // todo: should this be true?
             PbStreamScanType::UpstreamOnly => false,
             PbStreamScanType::ArrangementBackfill => true,
-            // todo: true when stable
-            PbStreamScanType::SnapshotBackfill => false,
+            PbStreamScanType::CrossDbSnapshotBackfill => true,
+            PbStreamScanType::SnapshotBackfill => true,
             _ => false,
         }
     }

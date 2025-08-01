@@ -1,0 +1,36 @@
+# description: Test COALESCE error short-circuiting
+# group: [projection]
+
+# constant coalesce short-circuiting
+query I
+SELECT COALESCE(1, 'hello'::INT)
+----
+1
+
+statement error
+SELECT COALESCE(NULL, 'hello'::INT)
+
+# non-constant
+statement ok
+DROP TABLE IF EXISTS vals
+
+statement ok
+CREATE TABLE vals AS SELECT * FROM (
+	VALUES (0, 1, 'hello'), (1, NULL, '2'), (2, 3, NULL)
+) tbl(id, a, b)
+
+statement ok
+FLUSH
+
+query I
+SELECT COALESCE(a, b::INT) FROM vals order by id;
+----
+1
+2
+3
+
+statement error
+SELECT COALESCE(NULL, b::INT) FROM vals
+
+statement ok
+DROP TABLE IF EXISTS vals

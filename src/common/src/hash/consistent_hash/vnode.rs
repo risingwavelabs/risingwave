@@ -112,7 +112,7 @@ impl VirtualNode {
         Self(scalar as _)
     }
 
-    pub fn from_datum(datum: DatumRef<'_>) -> Self {
+    pub fn from_datum_ref(datum: DatumRef<'_>) -> Self {
         Self::from_scalar(datum.expect("should not be none").into_int16())
     }
 
@@ -212,14 +212,14 @@ mod tests {
 
     #[test]
     fn test_serial_key_chunk() {
-        let mut gen =
+        let mut r#gen =
             RowIdGenerator::new([VirtualNode::from_index(100)], VirtualNode::COUNT_FOR_TEST);
         let chunk = format!(
             "SRL I
              {} 1
              {} 2",
-            gen.next(),
-            gen.next(),
+            r#gen.next(),
+            r#gen.next(),
         );
 
         let chunk = DataChunk::from_pretty(chunk.as_str());
@@ -233,10 +233,10 @@ mod tests {
 
     #[test]
     fn test_serial_key_row() {
-        let mut gen =
+        let mut r#gen =
             RowIdGenerator::new([VirtualNode::from_index(100)], VirtualNode::COUNT_FOR_TEST);
         let row = OwnedRow::new(vec![
-            Some(ScalarImpl::Serial(gen.next().into())),
+            Some(ScalarImpl::Serial(r#gen.next().into())),
             Some(ScalarImpl::Int64(12345)),
         ]);
 
@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn test_serial_key_chunk_multiple_vnodes() {
-        let mut gen = RowIdGenerator::new(
+        let mut r#gen = RowIdGenerator::new(
             [100, 200].map(VirtualNode::from_index),
             VirtualNode::COUNT_FOR_TEST,
         );
@@ -257,10 +257,10 @@ mod tests {
              {} 2
              {} 3
              {} 4",
-            gen.next(),
-            gen.next(),
-            gen.next(),
-            gen.next(),
+            r#gen.next(),
+            r#gen.next(),
+            r#gen.next(),
+            r#gen.next(),
         );
 
         let chunk = DataChunk::from_pretty(chunk.as_str());

@@ -55,7 +55,7 @@ impl Parse for DefineContextAttr {
 }
 
 impl DefineContextField {
-    pub(super) fn gen(self) -> Result<TokenStream> {
+    pub(super) fn r#gen(self) -> Result<TokenStream> {
         let Self { vis, name, ty } = self;
 
         // We create a sub mod, so we need to extend the vis of getter.
@@ -107,11 +107,11 @@ impl DefineContextField {
 }
 
 impl DefineContextAttr {
-    pub(super) fn gen(self) -> Result<TokenStream> {
+    pub(super) fn r#gen(self) -> Result<TokenStream> {
         let generated_fields: Vec<TokenStream> = self
             .fields
             .into_iter()
-            .map(DefineContextField::gen)
+            .map(DefineContextField::r#gen)
             .try_collect()?;
         Ok(quote! {
             #(#generated_fields)*
@@ -149,7 +149,7 @@ pub(super) fn generate_captured_function(
         orig_user_fn.sig.output = ReturnType::Type(
             syn::token::RArrow::default(),
             Box::new(
-                syn::parse_quote!(impl std::future::Future<Output = #output_type> + Send + 'static),
+                syn::parse_quote!(impl std::future::Future<Output = #output_type> + Send + 'static + use<>),
             ),
         );
         orig_user_fn.sig.asyncness = None;
@@ -160,13 +160,13 @@ pub(super) fn generate_captured_function(
             .inputs
             .iter()
             .map(|arg| {
-                if let FnArg::Typed(PatType { pat, .. }) = arg {
-                    if let Pat::Ident(ident) = pat.as_ref() {
-                        let ident_name = &ident.ident;
-                        return quote! {
-                            let #ident_name = #ident_name.clone();
-                        };
-                    }
+                if let FnArg::Typed(PatType { pat, .. }) = arg
+                    && let Pat::Ident(ident) = pat.as_ref()
+                {
+                    let ident_name = &ident.ident;
+                    return quote! {
+                        let #ident_name = #ident_name.clone();
+                    };
                 }
                 quote! {}
             })

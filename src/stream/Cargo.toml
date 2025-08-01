@@ -6,7 +6,9 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+dhat-heap = ["dhat"]
 
 [dependencies]
 anyhow = "1"
@@ -27,6 +29,7 @@ foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hytra = "0.1.2"
+iceberg = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
 local_stats_alloc = { path = "../utils/local_stats_alloc" }
@@ -37,7 +40,7 @@ multimap = "0.10"
 parking_lot = { workspace = true }
 pin-project = "1"
 prehash = "1"
-prometheus = { version = "0.13", features = ["process"] }
+prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true }
 rand = { workspace = true }
 risingwave_common = { workspace = true }
@@ -53,10 +56,10 @@ risingwave_storage = { workspace = true }
 rw_futures_util = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
-smallvec = "1"
+smallvec = { workspace = true }
 static_assertions = "1"
-strum_macros = "0.26"
-thiserror = "1"
+strum_macros = "0.27"
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
   "rt",
@@ -67,7 +70,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
   "signal",
   "fs",
 ] }
-tokio-metrics = "0.3.0"
+tokio-metrics = "0.4.0"
 tokio-retry = "0.3"
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
@@ -90,9 +93,6 @@ risingwave_hummock_test = { path = "../storage/hummock_test", features = [
 serde_yaml = "0.9"
 tracing-subscriber = "0.3.17"
 tracing-test = "0.2"
-
-[features]
-dhat-heap = ["dhat"]
 
 [[bench]]
 name = "stream_hash_agg"

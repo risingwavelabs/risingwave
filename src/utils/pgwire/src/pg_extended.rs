@@ -85,17 +85,18 @@ where
                         }
                     }
                 } else {
-                    self.row_cache = if let Some(rows) = self
+                    self.row_cache = match self
                         .result
                         .values_stream()
                         .try_next()
                         .await
                         .map_err(PsqlError::ExtendedExecuteError)?
                     {
-                        rows.into_iter()
-                    } else {
-                        query_end = true;
-                        break;
+                        Some(rows) => rows.into_iter(),
+                        _ => {
+                            query_end = true;
+                            break;
+                        }
                     };
                 }
             }
@@ -123,7 +124,7 @@ where
             let first_row_set = match first_row_set {
                 None => {
                     return Err(PsqlError::Uncategorized(
-                        anyhow::anyhow!("no affected rows in output").into(),
+                        "no affected rows in output".into(),
                     ));
                 }
                 Some(row) => row.map_err(PsqlError::SimpleQueryError)?,

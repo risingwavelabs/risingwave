@@ -64,6 +64,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::SecToTimestamptz
             | Type::AtTimeZone
             | Type::DateTrunc
+            | Type::DateBin
             | Type::MakeDate
             | Type::MakeTime
             | Type::MakeTimestamp
@@ -104,6 +105,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::CharLength
             | Type::Repeat
             | Type::ConcatOp
+            | Type::ByteaConcatOp
             | Type::Concat
             | Type::ConcatVariadic
             | Type::BoolOut
@@ -183,6 +185,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::ArrayPosition
             | Type::ArrayContains
             | Type::ArrayContained
+            | Type::ArrayFlatten
             | Type::HexToInt256
             | Type::JsonbConcat
             | Type::JsonbAccess
@@ -264,11 +267,18 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::MapCat
             | Type::MapContains
             | Type::MapDelete
+            | Type::MapFilter
             | Type::MapInsert
             | Type::MapLength
+            | Type::L2Distance
+            | Type::CosineDistance
+            | Type::L1Distance
+            | Type::InnerProduct
+            | Type::VecConcat
             | Type::VnodeUser
             | Type::RwEpochToTs
-            | Type::CheckNotNull =>
+            | Type::CheckNotNull
+            | Type::CompositeCast =>
             // expression output is deterministic(same result for the same input)
             {
                 func_call
@@ -278,7 +288,7 @@ impl ExprVisitor for ImpureAnalyzer {
             }
             // expression output is not deterministic
             Type::Vnode // obtain vnode count from the context
-            | Type::TestPaidTier
+            | Type::TestFeature
             | Type::License
             | Type::Proctime
             | Type::PgSleep
@@ -299,7 +309,10 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::MakeTimestamptz
             | Type::PgIsInRecovery
             | Type::RwRecoveryStatus
-            | Type::PgTableIsVisible => self.impure = true,
+            | Type::PgTableIsVisible
+            | Type::HasFunctionPrivilege
+            | Type::OpenaiEmbedding
+            | Type::HasDatabasePrivilege => self.impure = true,
         }
     }
 }

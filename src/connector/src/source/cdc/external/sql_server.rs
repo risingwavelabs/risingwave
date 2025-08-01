@@ -16,11 +16,11 @@ use std::cmp::Ordering;
 
 use anyhow::{Context, anyhow};
 use futures::stream::BoxStream;
-use futures::{StreamExt, TryStreamExt, pin_mut};
+use futures::{StreamExt, TryStreamExt, pin_mut, stream};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use serde_derive::{Deserialize, Serialize};
@@ -29,9 +29,10 @@ use tiberius::{Config, Query, QueryItem};
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::{ScalarImplTiberiusWrapper, sql_server_row_to_owned_row};
 use crate::sink::sqlserver::SqlServerClient;
+use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
-    CdcOffset, CdcOffsetParseFunc, DebeziumOffset, ExternalTableConfig, ExternalTableReader,
-    SchemaTableName,
+    CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, DebeziumOffset,
+    ExternalTableConfig, ExternalTableReader, SchemaTableName,
 };
 
 // The maximum commit_lsn value in Sql Server
@@ -124,7 +125,7 @@ impl SqlServerExternalTable {
                         column_descs.push(ColumnDesc::named(
                             col_name,
                             ColumnId::placeholder(),
-                            type_to_rw_type(col_type, col_name)?,
+                            mssql_type_to_rw_type(col_type, col_name)?,
                         ));
                     }
                 }
@@ -183,7 +184,7 @@ impl SqlServerExternalTable {
     }
 }
 
-fn type_to_rw_type(col_type: &str, col_name: &str) -> ConnectorResult<DataType> {
+fn mssql_type_to_rw_type(col_type: &str, col_name: &str) -> ConnectorResult<DataType> {
     let dtype = match col_type.to_lowercase().as_str() {
         "bit" => DataType::Boolean,
         "binary" | "varbinary" => DataType::Bytea,
@@ -199,6 +200,7 @@ fn type_to_rw_type(col_type: &str, col_name: &str) -> ConnectorResult<DataType> 
         "datetimeoffset" => DataType::Timestamptz,
         "char" | "nchar" | "varchar" | "nvarchar" | "text" | "ntext" | "xml"
         | "uniqueidentifier" => DataType::Varchar,
+        "money" => DataType::Decimal,
         mssql_type => {
             return Err(anyhow!(
                 "Unsupported Sql Server data type: {:?}, column name: {}",
@@ -273,6 +275,24 @@ impl ExternalTableReader for SqlServerExternalTableReader {
         limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
         self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
+    }
+
+    fn get_parallel_cdc_splits(
+        &self,
+        _options: CdcTableSnapshotSplitOption,
+    ) -> BoxStream<'_, ConnectorResult<CdcTableSnapshotSplit>> {
+        // TODO(zw): feat: impl
+        stream::empty::<ConnectorResult<CdcTableSnapshotSplit>>().boxed()
+    }
+
+    fn split_snapshot_read(
+        &self,
+        _table_name: SchemaTableName,
+        _left: OwnedRow,
+        _right: OwnedRow,
+        _split_columns: Vec<Field>,
+    ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
+        todo!("implement SqlServer CDC parallelized backfill")
     }
 }
 

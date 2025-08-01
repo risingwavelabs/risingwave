@@ -21,7 +21,8 @@
 #![feature(error_generic_member_access)]
 #![feature(assert_matches)]
 #![feature(try_blocks)]
-#![cfg_attr(coverage, feature(coverage_attribute))]
+#![feature(stmt_expr_attributes)]
+#![feature(proc_macro_hygiene)]
 #![feature(custom_test_frameworks)]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(impl_trait_in_assoc_type)]
@@ -40,7 +41,6 @@ pub mod manager;
 pub mod model;
 pub mod rpc;
 pub mod serving;
-pub mod storage;
 pub mod stream;
 pub mod telemetry;
 

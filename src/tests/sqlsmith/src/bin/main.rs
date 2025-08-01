@@ -20,6 +20,7 @@ use core::panic;
 use std::time::Duration;
 
 use clap::Parser as ClapParser;
+use risingwave_sqlsmith::config::Configuration;
 use risingwave_sqlsmith::print_function_table;
 use risingwave_sqlsmith::test_runners::{generate, run, run_differential_testing};
 use tokio_postgres::NoTls;
@@ -69,6 +70,14 @@ struct TestOptions {
     /// Whether to run differential testing mode.
     #[clap(long)]
     differential_testing: bool,
+
+    /// Path to weight configuration file.
+    #[clap(long, default_value = "src/tests/sqlsmith/config.yml")]
+    weight_config_path: String,
+
+    /// Features to enable (e.g. eowc).
+    #[clap(long = "enable", value_delimiter = ',', action = clap::ArgAction::Append)]
+    enabled_features: Vec<String>,
 }
 
 #[derive(clap::Subcommand, Clone, Debug)]
@@ -109,14 +118,16 @@ async fn main() {
             tracing::error!("Postgres connection error: {:?}", e);
         }
     });
+    let mut config = Configuration::new(&opt.weight_config_path);
+    config.enable_features_from_args(&opt.enabled_features);
     if opt.differential_testing {
-        return run_differential_testing(&client, &opt.testdata, opt.count, None)
+        return run_differential_testing(&client, &opt.testdata, opt.count, &config, None)
             .await
             .unwrap();
     }
     if let Some(outdir) = opt.generate {
-        generate(&client, &opt.testdata, opt.count, &outdir, None).await;
+        generate(&client, &opt.testdata, opt.count, &outdir, &config, None).await;
     } else {
-        run(&client, &opt.testdata, opt.count, None).await;
+        run(&client, &opt.testdata, opt.count, &config, None).await;
     }
 }

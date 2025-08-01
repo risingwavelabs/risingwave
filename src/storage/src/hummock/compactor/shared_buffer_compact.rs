@@ -20,9 +20,9 @@ use std::sync::{Arc, LazyLock};
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use foyer::CacheHint;
+use foyer::Hint;
 use futures::future::try_join;
-use futures::{FutureExt, StreamExt, TryFutureExt, stream};
+use futures::{FutureExt, StreamExt, stream};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{EPOCH_LEN, FullKey, FullKeyTracker, UserKey};
@@ -45,7 +45,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{
     BlockedXor16FilterBuilder, CachePolicy, GetObjectId, HummockError, HummockResult,
-    SstableBuilderOptions, SstableObjectIdManagerRef,
+    ObjectIdManagerRef, SstableBuilderOptions,
 };
 use crate::mem_table::ImmutableMemtable;
 use crate::opts::StorageOpts;
@@ -55,27 +55,58 @@ const GC_DELETE_KEYS_FOR_FLUSH: bool = false;
 /// Flush shared buffer to level0. Resulted SSTs are grouped by compaction group.
 pub async fn compact(
     context: CompactorContext,
-    sstable_object_id_manager: SstableObjectIdManagerRef,
+    object_id_manager: ObjectIdManagerRef,
     payload: Vec<ImmutableMemtable>,
     compaction_catalog_manager_ref: CompactionCatalogManagerRef,
 ) -> HummockResult<UploadTaskOutput> {
-    let new_value_payload = payload.clone();
-    let new_value_future = async {
-        compact_shared_buffer::<true>(
-            context.clone(),
-            sstable_object_id_manager.clone(),
-            compaction_catalog_manager_ref.clone(),
-            new_value_payload,
-        )
-        .map_ok(move |results| results.into_iter())
-        .instrument_await("shared_buffer_compact_new_value")
-        .await
+    let table_ids_with_old_value: HashSet<TableId> = payload
+        .iter()
+        .filter(|imm| imm.has_old_value())
+        .map(|imm| imm.table_id)
+        .collect();
+    let mut non_log_store_new_value_payload = Vec::with_capacity(payload.len());
+    let mut log_store_new_value_payload = Vec::with_capacity(payload.len());
+    let mut old_value_payload = Vec::with_capacity(payload.len());
+    for imm in payload {
+        if table_ids_with_old_value.contains(&imm.table_id) {
+            if imm.has_old_value() {
+                old_value_payload.push(imm.clone());
+            }
+            log_store_new_value_payload.push(imm);
+        } else {
+            assert!(!imm.has_old_value());
+            non_log_store_new_value_payload.push(imm);
+        }
+    }
+    let non_log_store_new_value_future = async {
+        if non_log_store_new_value_payload.is_empty() {
+            Ok(vec![])
+        } else {
+            compact_shared_buffer::<true>(
+                context.clone(),
+                object_id_manager.clone(),
+                compaction_catalog_manager_ref.clone(),
+                non_log_store_new_value_payload,
+            )
+            .instrument_await("shared_buffer_compact_non_log_store_new_value")
+            .await
+        }
     };
 
-    let old_value_payload = payload
-        .into_iter()
-        .filter(|imm| imm.has_old_value())
-        .collect_vec();
+    let log_store_new_value_future = async {
+        if log_store_new_value_payload.is_empty() {
+            Ok(vec![])
+        } else {
+            compact_shared_buffer::<true>(
+                context.clone(),
+                object_id_manager.clone(),
+                compaction_catalog_manager_ref.clone(),
+                log_store_new_value_payload,
+            )
+            .instrument_await("shared_buffer_compact_log_store_new_value")
+            .await
+        }
+    };
 
     let old_value_future = async {
         if old_value_payload.is_empty() {
@@ -83,18 +114,25 @@ pub async fn compact(
         } else {
             compact_shared_buffer::<false>(
                 context.clone(),
-                sstable_object_id_manager.clone(),
+                object_id_manager.clone(),
                 compaction_catalog_manager_ref.clone(),
                 old_value_payload,
             )
+            .instrument_await("shared_buffer_compact_log_store_old_value")
             .await
         }
     };
 
     // Note that the output is reordered compared with input `payload`.
-    let (new_value_ssts, old_value_ssts) = try_join(new_value_future, old_value_future).await?;
+    let ((non_log_store_new_value_ssts, log_store_new_value_ssts), old_value_ssts) = try_join(
+        try_join(non_log_store_new_value_future, log_store_new_value_future),
+        old_value_future,
+    )
+    .await?;
 
-    let new_value_ssts = new_value_ssts.into_iter().collect_vec();
+    let mut new_value_ssts = non_log_store_new_value_ssts;
+    new_value_ssts.extend(log_store_new_value_ssts);
+
     Ok(UploadTaskOutput {
         new_value_ssts,
         old_value_ssts,
@@ -108,7 +146,7 @@ pub async fn compact(
 /// When `IS_NEW_VALUE` is false, we are compacting with old value, and the payload imms should have `old_values` not `None`
 async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
     context: CompactorContext,
-    sstable_object_id_manager: SstableObjectIdManagerRef,
+    object_id_manager: ObjectIdManagerRef,
     compaction_catalog_manager_ref: CompactionCatalogManagerRef,
     mut payload: Vec<ImmutableMemtable>,
 ) -> HummockResult<Vec<LocalSstableInfo>> {
@@ -157,7 +195,7 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
             sub_compaction_sstable_size as usize,
             table_vnode_partition.clone(),
             use_block_based_filter,
-            Box::new(sstable_object_id_manager.clone()),
+            object_id_manager.clone(),
         );
         let mut forward_iters = Vec::with_capacity(payload.len());
         for imm in &payload {
@@ -517,7 +555,7 @@ impl SharedBufferCompactRunner {
         sub_compaction_sstable_size: usize,
         table_vnode_partition: BTreeMap<u32, u32>,
         use_block_based_filter: bool,
-        object_id_getter: Box<dyn GetObjectId>,
+        object_id_getter: Arc<dyn GetObjectId>,
     ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.capacity = sub_compaction_sstable_size;
@@ -526,7 +564,7 @@ impl SharedBufferCompactRunner {
             options,
             super::TaskConfig {
                 key_range,
-                cache_policy: CachePolicy::Fill(CacheHint::Normal),
+                cache_policy: CachePolicy::Fill(Hint::Normal),
                 gc_delete_keys: GC_DELETE_KEYS_FOR_FLUSH,
                 retain_multiple_version: true,
                 stats_target_table_ids: None,

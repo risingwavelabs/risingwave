@@ -246,3 +246,6 @@ drop table from_kafka;
 
 system ok
 rpk topic delete test-rw-sink-upsert-avro
+
+statement ok
+set sink_decouple to default;

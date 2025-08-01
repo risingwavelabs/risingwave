@@ -18,7 +18,7 @@ use std::process::Command;
 
 use anyhow::Result;
 
-use super::{ExecuteContext, Task, risingwave_cmd};
+use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
 use crate::{ComputeNodeConfig, add_meta_node, add_tempo_endpoint};
 
@@ -68,7 +68,7 @@ impl Task for ComputeNodeService {
         ctx.service(self);
         ctx.pb.set_message("starting...");
 
-        let mut cmd = risingwave_cmd("compute-node")?;
+        let mut cmd = ctx.risingwave_cmd("compute-node")?;
 
         cmd.env(
             "TOKIO_CONSOLE_BIND",

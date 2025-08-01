@@ -52,12 +52,11 @@ use crate::executor::{
 ///
 /// Distributed lookup join already scheduled to its inner side corresponding compute node, so that
 /// it can just lookup the compute node locally without sending RPCs to other compute nodes.
-pub struct DistributedLookupJoinExecutor<K> {
-    base: LookupJoinBase<K>,
-    _phantom: PhantomData<K>,
+pub struct DistributedLookupJoinExecutor<K, S: StateStore> {
+    base: LookupJoinBase<K, InnerSideExecutorBuilder<S>>,
 }
 
-impl<K: HashKey> Executor for DistributedLookupJoinExecutor<K> {
+impl<K: HashKey, S: StateStore> Executor for DistributedLookupJoinExecutor<K, S> {
     fn schema(&self) -> &Schema {
         &self.base.schema
     }
@@ -71,12 +70,9 @@ impl<K: HashKey> Executor for DistributedLookupJoinExecutor<K> {
     }
 }
 
-impl<K> DistributedLookupJoinExecutor<K> {
-    pub fn new(base: LookupJoinBase<K>) -> Self {
-        Self {
-            base,
-            _phantom: PhantomData,
-        }
+impl<K, S: StateStore> DistributedLookupJoinExecutor<K, S> {
+    fn new(base: LookupJoinBase<K, InnerSideExecutorBuilder<S>>) -> Self {
+        Self { base }
     }
 }
 
@@ -222,7 +218,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 outer_side_input,
                 outer_side_data_types,
                 outer_side_key_idxs,
-                inner_side_builder: Box::new(inner_side_builder),
+                inner_side_builder,
                 inner_side_key_types,
                 inner_side_key_idxs,
                 null_safe,
@@ -241,13 +237,13 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
     }
 }
 
-struct DistributedLookupJoinExecutorArgs {
+struct DistributedLookupJoinExecutorArgs<S: StateStore> {
     join_type: JoinType,
     condition: Option<BoxedExpression>,
     outer_side_input: BoxedExecutor,
     outer_side_data_types: Vec<DataType>,
     outer_side_key_idxs: Vec<usize>,
-    inner_side_builder: Box<dyn LookupExecutorBuilder>,
+    inner_side_builder: InnerSideExecutorBuilder<S>,
     inner_side_key_types: Vec<DataType>,
     inner_side_key_idxs: Vec<usize>,
     null_safe: Vec<bool>,
@@ -262,33 +258,31 @@ struct DistributedLookupJoinExecutorArgs {
     mem_ctx: MemoryContext,
 }
 
-impl HashKeyDispatcher for DistributedLookupJoinExecutorArgs {
+impl<S: StateStore> HashKeyDispatcher for DistributedLookupJoinExecutorArgs<S> {
     type Output = BoxedExecutor;
 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
-        Box::new(DistributedLookupJoinExecutor::<K>::new(
-            LookupJoinBase::<K> {
-                join_type: self.join_type,
-                condition: self.condition,
-                outer_side_input: self.outer_side_input,
-                outer_side_data_types: self.outer_side_data_types,
-                outer_side_key_idxs: self.outer_side_key_idxs,
-                inner_side_builder: self.inner_side_builder,
-                inner_side_key_types: self.inner_side_key_types,
-                inner_side_key_idxs: self.inner_side_key_idxs,
-                null_safe: self.null_safe,
-                lookup_prefix_len: self.lookup_prefix_len,
-                chunk_builder: self.chunk_builder,
-                schema: self.schema,
-                output_indices: self.output_indices,
-                chunk_size: self.chunk_size,
-                asof_desc: self.asof_desc,
-                identity: self.identity,
-                shutdown_rx: self.shutdown_rx,
-                mem_ctx: self.mem_ctx,
-                _phantom: PhantomData,
-            },
-        ))
+        Box::new(DistributedLookupJoinExecutor::<K, S>::new(LookupJoinBase {
+            join_type: self.join_type,
+            condition: self.condition,
+            outer_side_input: self.outer_side_input,
+            outer_side_data_types: self.outer_side_data_types,
+            outer_side_key_idxs: self.outer_side_key_idxs,
+            inner_side_builder: self.inner_side_builder,
+            inner_side_key_types: self.inner_side_key_types,
+            inner_side_key_idxs: self.inner_side_key_idxs,
+            null_safe: self.null_safe,
+            lookup_prefix_len: self.lookup_prefix_len,
+            chunk_builder: self.chunk_builder,
+            schema: self.schema,
+            output_indices: self.output_indices,
+            chunk_size: self.chunk_size,
+            asof_desc: self.asof_desc,
+            identity: self.identity,
+            shutdown_rx: self.shutdown_rx,
+            mem_ctx: self.mem_ctx,
+            _phantom: PhantomData,
+        }))
     }
 
     fn data_types(&self) -> &[DataType] {
@@ -329,7 +323,6 @@ impl<S: StateStore> InnerSideExecutorBuilder<S> {
     }
 }
 
-#[async_trait::async_trait]
 impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
     fn reset(&mut self) {
         // PASS

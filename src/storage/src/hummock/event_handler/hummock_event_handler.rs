@@ -20,7 +20,7 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use arc_swap::ArcSwap;
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use futures::FutureExt;
 use itertools::Itertools;
 use parking_lot::RwLock;
@@ -51,10 +51,8 @@ use crate::hummock::event_handler::{
 };
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::recent_versions::RecentVersions;
-use crate::hummock::store::version::{
-    HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate,
-};
-use crate::hummock::{HummockResult, MemoryLimiter, SstableObjectIdManager, SstableStoreRef};
+use crate::hummock::store::version::{HummockReadVersion, StagingSstableInfo, VersionUpdate};
+use crate::hummock::{HummockResult, MemoryLimiter, ObjectIdManager, SstableStoreRef};
 use crate::mem_table::ImmutableMemtable;
 use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
@@ -217,15 +215,15 @@ async fn flush_imms(
     payload: Vec<ImmutableMemtable>,
     compactor_context: CompactorContext,
     compaction_catalog_manager_ref: CompactionCatalogManagerRef,
-    sstable_object_id_manager: Arc<SstableObjectIdManager>,
+    object_id_manager: Arc<ObjectIdManager>,
 ) -> HummockResult<UploadTaskOutput> {
     compact(
         compactor_context,
-        sstable_object_id_manager,
+        object_id_manager,
         payload,
         compaction_catalog_manager_ref,
     )
-    .verbose_instrument_await("shared_buffer_compact")
+    .instrument_await("shared_buffer_compact".verbose())
     .await
 }
 
@@ -235,7 +233,7 @@ impl HummockEventHandler {
         pinned_version: PinnedVersion,
         compactor_context: CompactorContext,
         compaction_catalog_manager_ref: CompactionCatalogManagerRef,
-        sstable_object_id_manager: Arc<SstableObjectIdManager>,
+        object_id_manager: Arc<ObjectIdManager>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
     ) -> Self {
         let upload_compactor_context = compactor_context.clone();
@@ -273,7 +271,7 @@ impl HummockEventHandler {
                 let wait_poll_latency = wait_poll_latency.clone();
                 let upload_compactor_context = upload_compactor_context.clone();
                 let compaction_catalog_manager_ref = compaction_catalog_manager_ref.clone();
-                let sstable_object_id_manager = sstable_object_id_manager.clone();
+                let object_id_manager = object_id_manager.clone();
                 spawn({
                     let future = async move {
                         let _timer = upload_task_latency.start_timer();
@@ -284,7 +282,7 @@ impl HummockEventHandler {
                                 .collect(),
                             upload_compactor_context.clone(),
                             compaction_catalog_manager_ref.clone(),
-                            sstable_object_id_manager.clone(),
+                            object_id_manager.clone(),
                         )
                         .await?;
                         assert!(
@@ -411,10 +409,13 @@ impl HummockEventHandler {
                 continue;
             };
             total_count += 1;
-            if let Some(mut write_guard) = read_version.try_write() {
-                f(instance_id, &mut write_guard);
-            } else {
-                pending.push_back(instance_id);
+            match read_version.try_write() {
+                Some(mut write_guard) => {
+                    f(instance_id, &mut write_guard);
+                }
+                _ => {
+                    pending.push_back(instance_id);
+                }
             }
         }
         if !pending.is_empty() {
@@ -439,11 +440,14 @@ impl HummockEventHandler {
                 .local_read_version_mapping
                 .get(&instance_id)
                 .expect("have checked exist before");
-            if let Some(mut write_guard) = read_version.try_write_for(TRY_LOCK_TIMEOUT) {
-                f(instance_id, &mut write_guard);
-            } else {
-                warn!(instance_id, "failed to get lock again for instance");
-                pending.push_back(instance_id);
+            match read_version.try_write_for(TRY_LOCK_TIMEOUT) {
+                Some(mut write_guard) => {
+                    f(instance_id, &mut write_guard);
+                }
+                _ => {
+                    warn!(instance_id, "failed to get lock again for instance");
+                    pending.push_back(instance_id);
+                }
             }
         }
     }
@@ -452,11 +456,7 @@ impl HummockEventHandler {
         trace!("data_flushed. SST size {}", staging_sstable_info.imm_size());
         self.for_each_read_version(
             staging_sstable_info.imm_ids().keys().cloned(),
-            |_, read_version| {
-                read_version.update(VersionUpdate::Staging(StagingData::Sst(
-                    staging_sstable_info.clone(),
-                )))
-            },
+            |_, read_version| read_version.update(VersionUpdate::Sst(staging_sstable_info.clone())),
         )
     }
 
@@ -687,14 +687,14 @@ impl HummockEventHandler {
                 self.uploader
                     .init_instance(instance_id, table_id, init_epoch);
             }
-            HummockEvent::ImmToUploader { instance_id, imm } => {
+            HummockEvent::ImmToUploader { instance_id, imms } => {
                 assert!(
                     self.local_read_version_mapping.contains_key(&instance_id),
-                    "add imm from non-existing read version instance: instance_id: {}, table_id {}",
+                    "add imm from non-existing read version instance: instance_id: {}, table_id {:?}",
                     instance_id,
-                    imm.table_id,
+                    imms.first().map(|imm| imm.table_id),
                 );
-                self.uploader.add_imm(instance_id, imm);
+                self.uploader.add_imms(instance_id, imms);
                 self.uploader.may_flush();
             }
 
@@ -772,12 +772,27 @@ impl HummockEventHandler {
                 self.uploader.may_destroy_instance(instance_id);
                 self.destroy_read_version(instance_id);
             }
-            HummockEvent::GetMinUncommittedSstId { result_tx } => {
+            HummockEvent::GetMinUncommittedObjectId { result_tx } => {
                 let _ = result_tx
-                    .send(self.uploader.min_uncommitted_sst_id())
+                    .send(self.uploader.min_uncommitted_object_id())
                     .inspect_err(|e| {
                         error!("unable to send get_min_uncommitted_sst_id result: {:?}", e);
                     });
+            }
+            HummockEvent::RegisterVectorWriter {
+                table_id,
+                init_epoch,
+            } => self.uploader.register_vector_writer(table_id, init_epoch),
+            HummockEvent::VectorWriterSealEpoch {
+                table_id,
+                next_epoch,
+                add,
+            } => {
+                self.uploader
+                    .vector_writer_seal_epoch(table_id, next_epoch, add);
+            }
+            HummockEvent::DropVectorWriter { table_id } => {
+                self.uploader.drop_vector_writer(table_id);
             }
         }
     }
@@ -838,6 +853,7 @@ impl SyncedData {
             let SyncedData {
                 uploaded_ssts,
                 table_watermarks,
+                vector_index_adds,
             } = self;
             let mut sync_size = 0;
             let mut uncommitted_ssts = Vec::new();
@@ -854,6 +870,7 @@ impl SyncedData {
                 uncommitted_ssts,
                 table_watermarks: table_watermarks.clone(),
                 old_value_ssts,
+                vector_index_adds,
             }
         }
     }
@@ -892,7 +909,6 @@ mod tests {
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::local_version::pinned_version::PinnedVersion;
     use crate::hummock::local_version::recent_versions::RecentVersions;
-    use crate::hummock::store::version::{StagingData, VersionUpdate};
     use crate::hummock::test_utils::default_opts_for_test;
     use crate::mem_table::ImmutableMemtable;
     use crate::monitor::HummockStateStoreMetrics;
@@ -989,13 +1005,11 @@ mod tests {
         });
 
         let imm1 = gen_imm(epoch1).await;
-        read_version
-            .write()
-            .update(VersionUpdate::Staging(StagingData::ImmMem(imm1.clone())));
+        read_version.write().add_imm(imm1.clone());
 
         send_event(HummockEvent::ImmToUploader {
             instance_id: guard.instance_id,
-            imm: imm1,
+            imms: read_version.write().start_upload_pending_imms(),
         });
 
         send_event(HummockEvent::StartEpoch {
@@ -1009,15 +1023,16 @@ mod tests {
             opts: SealCurrentEpochOptions::for_test(),
         });
 
-        let imm2 = gen_imm(epoch2).await;
-        read_version
-            .write()
-            .update(VersionUpdate::Staging(StagingData::ImmMem(imm2.clone())));
+        {
+            let imm2 = gen_imm(epoch2).await;
+            let mut read_version = read_version.write();
+            read_version.add_imm(imm2);
 
-        send_event(HummockEvent::ImmToUploader {
-            instance_id: guard.instance_id,
-            imm: imm2,
-        });
+            send_event(HummockEvent::ImmToUploader {
+                instance_id: guard.instance_id,
+                imms: read_version.start_upload_pending_imms(),
+            });
+        }
 
         let epoch3 = epoch2.next_epoch();
         send_event(HummockEvent::StartEpoch {
@@ -1142,13 +1157,12 @@ mod tests {
         let write_imm = |read_version: &HummockReadVersionRef,
                          instance: &LocalInstanceGuard,
                          imm: &ImmutableMemtable| {
-            read_version
-                .write()
-                .update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
+            let mut read_version = read_version.write();
+            read_version.add_imm(imm.clone());
 
             send_event(HummockEvent::ImmToUploader {
                 instance_id: instance.instance_id,
-                imm: imm.clone(),
+                imms: read_version.start_upload_pending_imms(),
             });
         };
         let seal_epoch = |instance: &LocalInstanceGuard, next_epoch| {

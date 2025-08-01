@@ -172,10 +172,6 @@ pub enum Operation {
         opts: TracedSealCurrentEpochOptions,
     },
 
-    LocalStorageEpoch,
-
-    LocalStorageIsDirty,
-
     TryFlush,
 
     Flush,
@@ -290,8 +286,6 @@ pub enum OperationResult {
     Sync(TraceResult<usize>),
     NotifyHummock(TraceResult<()>),
     TryWaitEpoch(TraceResult<()>),
-    LocalStorageEpoch(TraceResult<u64>),
-    LocalStorageIsDirty(TraceResult<bool>),
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -353,16 +347,16 @@ mod tests {
     // test atomic id
     #[tokio::test(flavor = "multi_thread")]
     async fn test_atomic_id() {
-        let gen = Arc::new(UniqueIdGenerator::new(AtomicU64::new(0)));
+        let r#gen = Arc::new(UniqueIdGenerator::new(AtomicU64::new(0)));
         let mut handles = Vec::new();
         let ids_lock = Arc::new(Mutex::new(HashSet::new()));
         let count: u64 = 5000;
 
         for _ in 0..count {
             let ids = ids_lock.clone();
-            let gen = gen.clone();
+            let r#gen = r#gen.clone();
             handles.push(tokio::spawn(async move {
-                let id = gen.next();
+                let id = r#gen.next();
                 ids.lock().insert(id);
             }));
         }

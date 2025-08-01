@@ -1,7 +1,25 @@
 - sql: |
     select 1 as k, 2 as v;
   expected_outputs:
-  - batch_plan
+    - batch_plan
 - sql: select 'abc', 1, 1.4 as k from (select 1 as k, 2 from (select 1, 2 union all select 3, 4) union all select * from (select 3, 4) union all select 100, 200 from (select now(), now() - interval '1 hour'));
   expected_outputs:
-  - batch_plan
+    - batch_plan
+# Test openai_embedding function with MaterializedExprs for impure function
+- sql: |
+    select id, value, openai_embedding('sk-test-key', 'text-embedding-3-small', value) as embedding
+    from (values (1, 'hello'), (2, 'world')) as t(id, value);
+  expected_outputs:
+    - logical_plan
+    - batch_plan
+    - stream_plan
+# Test mixed pure and impure expressions with openai_embedding
+- sql: |
+    select id, value, id + 1 as id_plus_one,
+           openai_embedding('sk-test-key', 'text-embedding-3-small', value) as embedding,
+           upper(value) as upper_value
+    from (values (1, 'hello'), (2, 'world')) as t(id, value);
+  expected_outputs:
+    - logical_plan
+    - batch_plan
+    - stream_plan

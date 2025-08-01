@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow, bail};
-use foyer::{Engine, HybridCacheBuilder};
+use foyer::{CacheBuilder, Engine, HybridCacheBuilder, LargeEngineOptions};
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_rpc_client::MetaClient;
@@ -79,8 +79,8 @@ impl HummockServiceOpts {
                     - or directly use `./risedev d for-ctl` to start the cluster.
                     * use `./risedev ctl` to use risectl.
 
-                    For `./risedev apply-compose-deploy` users,
-                    * `RW_HUMMOCK_URL` will be printed out when deploying. Please copy the bash exports to your console.
+                    For production use cases,
+                    * please set `RW_HUMMOCK_URL` to the same address specified for the meta node.
                 ";
                 bail!(MESSAGE);
             }
@@ -179,13 +179,13 @@ impl HummockServiceOpts {
         let meta_cache = HybridCacheBuilder::new()
             .memory(opts.meta_cache_capacity_mb * (1 << 20))
             .with_shards(opts.meta_cache_shard_num)
-            .storage(Engine::Large)
+            .storage(Engine::Large(LargeEngineOptions::new()))
             .build()
             .await?;
         let block_cache = HybridCacheBuilder::new()
             .memory(opts.block_cache_capacity_mb * (1 << 20))
             .with_shards(opts.block_cache_shard_num)
-            .storage(Engine::Large)
+            .storage(Engine::Large(LargeEngineOptions::new()))
             .build()
             .await?;
 
@@ -201,6 +201,8 @@ impl HummockServiceOpts {
             use_new_object_prefix_strategy,
             meta_cache,
             block_cache,
+            vector_meta_cache: CacheBuilder::new(1 << 10).build(),
+            vector_block_cache: CacheBuilder::new(1 << 10).build(),
         })))
     }
 }

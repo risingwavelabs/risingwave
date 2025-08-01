@@ -15,7 +15,7 @@
 use std::cmp::Ordering::{Equal, Less};
 use std::sync::Arc;
 
-use foyer::CacheHint;
+use foyer::Hint;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
@@ -147,7 +147,7 @@ impl BackwardSstableIterator {
                 .get(
                     &self.sst,
                     idx as usize,
-                    crate::hummock::CachePolicy::Fill(CacheHint::Normal),
+                    crate::hummock::CachePolicy::Fill(Hint::Normal),
                     &mut self.stats,
                 )
                 .await?;
@@ -253,6 +253,7 @@ impl SstableIteratorType for BackwardSstableIterator {
 mod tests {
     use itertools::Itertools;
     use rand::prelude::*;
+    use rand::rng as thread_rng;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;

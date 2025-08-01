@@ -5,6 +5,7 @@
 set -euo pipefail
 
 source ci/scripts/common.sh
+unset RUSTC_WORKSPACE_WRAPPER
 
 while getopts 'p:' opt; do
     case ${opt} in
@@ -78,8 +79,7 @@ ENABLE_BUILD_RUST=$ENABLE_BUILD
 
 # Use target/debug for simplicity.
 ENABLE_RELEASE_PROFILE=false
-ENABLE_PYTHON_UDF=true
-ENABLE_JS_UDF=true
+ENABLE_UDF=true
 EOF
 
 # See https://github.com/risingwavelabs/risingwave/pull/15448

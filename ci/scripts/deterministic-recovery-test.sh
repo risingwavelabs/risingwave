@@ -16,7 +16,8 @@ risingwave_meta::barrier::mod=debug,\
 risingwave_simulation=debug,\
 risingwave_meta::stream::stream_manager=debug,\
 risingwave_meta::barrier::progress=debug,\
-sqlx=error"
+sqlx=error,\
+risingwave_storage::hummock::compactor=error"
 
 # Extra logs you can enable if the existing trace does not give enough info.
 #risingwave_stream::executor::backfill=trace,
