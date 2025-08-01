@@ -27,7 +27,9 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::table::{
     OptionalAssociatedSourceId, PbEngine, PbTableType, PbTableVersion,
 };
-use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable, PbWebhookSourceInfo};
+use risingwave_pb::catalog::{
+    PbCreateType, PbStreamJobStatus, PbTable, PbVectorIndexInfo, PbWebhookSourceInfo,
+};
 use risingwave_pb::plan_common::DefaultColumnDesc;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_sqlparser::ast;
@@ -200,6 +202,8 @@ pub struct TableCatalog {
 
     /// Whether the table supports manual refresh operations
     pub refreshable: bool,
+
+    pub vector_index_info: Option<PbVectorIndexInfo>,
 }
 
 pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
@@ -586,6 +590,7 @@ impl TableCatalog {
             engine: Some(self.engine.to_protobuf().into()),
             clean_watermark_index_in_pk: self.clean_watermark_index_in_pk.map(|x| x as i32),
             refreshable: self.refreshable,
+            vector_index_info: self.vector_index_info,
         }
     }
 
@@ -789,6 +794,7 @@ impl From<PbTable> for TableCatalog {
             engine,
             clean_watermark_index_in_pk: tb.clean_watermark_index_in_pk.map(|x| x as usize),
             refreshable: tb.refreshable,
+            vector_index_info: tb.vector_index_info,
         }
     }
 }
@@ -881,6 +887,7 @@ mod tests {
             engine: Some(PbEngine::Hummock as i32),
             clean_watermark_index_in_pk: None,
             refreshable: false,
+            vector_index_info: None,
         }
         .into();
 
@@ -950,6 +957,7 @@ mod tests {
                 engine: Engine::Hummock,
                 clean_watermark_index_in_pk: None,
                 refreshable: false,
+                vector_index_info: None,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost()));
