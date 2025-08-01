@@ -449,8 +449,9 @@ impl MetaSrvEnv {
             )
             .await?,
         );
-        let cdc_table_backfill_tracker =
-            CdcTableBackfillTracker::new(meta_store_impl.clone()).into();
+        let cdc_table_backfill_tracker = CdcTableBackfillTracker::new(meta_store_impl.clone())
+            .await?
+            .into();
         Ok(Self {
             id_gen_manager_impl: Arc::new(SqlIdGeneratorManager::new(&meta_store_impl.conn).await?),
             system_param_manager_impl: system_param_controller,

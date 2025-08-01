@@ -26,6 +26,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
 use risingwave_connector::source::cdc::{
     CdcTableSnapshotSplitAssignment, CdcTableSnapshotSplitAssignmentWithGeneration,
+    build_actor_cdc_table_snapshot_splits_with_generation,
     build_pb_actor_cdc_table_snapshot_splits,
     build_pb_actor_cdc_table_snapshot_splits_with_generation,
 };
@@ -903,6 +904,16 @@ impl Command {
                             upstream_fragment_downstreams.contains_key(fragment_id)
                         })
                         .collect();
+                    let cdc_table_snapshot_split_assignment =
+                        CdcTableSnapshotSplitAssignmentWithGeneration::new(
+                            cdc_table_snapshot_split_assignment.clone(),
+                            control_stream_manager
+                                .env
+                                .cdc_table_backfill_tracker
+                                .next_generation(
+                                    cdc_table_snapshot_split_assignment.keys().cloned(),
+                                ),
+                        );
                     let update = Self::generate_update_mutation_for_replace_table(
                         old_fragments.actor_ids(),
                         merge_updates,
@@ -957,6 +968,14 @@ impl Command {
                         upstream_fragment_downstreams.contains_key(fragment_id)
                     })
                     .collect();
+                let cdc_table_snapshot_split_assignment =
+                    CdcTableSnapshotSplitAssignmentWithGeneration::new(
+                        cdc_table_snapshot_split_assignment.clone(),
+                        control_stream_manager
+                            .env
+                            .cdc_table_backfill_tracker
+                            .next_generation(cdc_table_snapshot_split_assignment.keys().cloned()),
+                    );
                 Self::generate_update_mutation_for_replace_table(
                     old_fragments.actor_ids().into_iter().chain(
                         auto_refresh_schema_sinks
@@ -1130,12 +1149,13 @@ impl Command {
 
                 // we don't create dispatchers in reschedule scenario
                 let actor_new_dispatchers = HashMap::new();
+                let cdc_table_split_assignment_generation = control_stream_manager
+                    .env
+                    .cdc_table_backfill_tracker
+                    .next_generation(actor_cdc_table_snapshot_splits.keys().cloned());
                 let actor_cdc_table_snapshot_splits = PbCdcTableSnapshotSplitsWithGeneration {
                     splits: actor_cdc_table_snapshot_splits,
-                    generation: control_stream_manager
-                        .env
-                        .cdc_table_backfill_tracker
-                        .next_generation(),
+                    generation: cdc_table_split_assignment_generation,
                 }
                 .into();
                 let mutation = Mutation::Update(UpdateMutation {
@@ -1319,7 +1339,7 @@ impl Command {
         merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
         dispatchers: FragmentActorDispatchers,
         init_split_assignment: &SplitAssignment,
-        cdc_table_snapshot_split_assignment: &CdcTableSnapshotSplitAssignment,
+        cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignmentWithGeneration,
     ) -> Option<Mutation> {
         let dropped_actors = dropped_actors.into_iter().collect();
 
@@ -1333,15 +1353,16 @@ impl Command {
             .values()
             .flat_map(build_actor_connector_splits)
             .collect();
-
         Some(Mutation::Update(UpdateMutation {
             actor_new_dispatchers,
             merge_update: merge_updates.into_values().flatten().collect(),
             dropped_actors,
             actor_splits,
-            actor_cdc_table_snapshot_splits: build_pb_actor_cdc_table_snapshot_splits(
-                cdc_table_snapshot_split_assignment.clone(),
-            ),
+            actor_cdc_table_snapshot_splits:
+                build_pb_actor_cdc_table_snapshot_splits_with_generation(
+                    cdc_table_snapshot_split_assignment,
+                )
+                .into(),
             ..Default::default()
         }))
     }

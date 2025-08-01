@@ -21,6 +21,7 @@ use await_tree::{InstrumentAwait, span};
 use futures::FutureExt;
 use futures::future::join_all;
 use itertools::Itertools;
+use num_traits::ToPrimitive;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
@@ -516,10 +517,19 @@ impl GlobalStreamManager {
             self.env.meta_store_ref(),
         )
         .await?;
+        let cdc_split_generation = self
+            .env
+            .cdc_table_backfill_tracker
+            .next_generation(cdc_table_snapshot_split_assignment.keys().cloned());
+        for (table_id, splits) in cdc_table_snapshot_split_assignment.iter() {
+            self.env
+                .cdc_table_backfill_tracker
+                .add_split_count(*table_id, splits.len().to_u64().unwrap());
+        }
         let cdc_table_snapshot_split_assignment =
             CdcTableSnapshotSplitAssignmentWithGeneration::new(
                 cdc_table_snapshot_split_assignment,
-                self.env.cdc_table_backfill_tracker.next_generation(),
+                cdc_split_generation,
             );
 
         let source_change = SourceChange::CreateJobFinished {

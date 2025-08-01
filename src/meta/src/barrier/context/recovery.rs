@@ -456,10 +456,14 @@ impl GlobalBarrierWorkerContextImpl {
                             self.env.meta_store_ref(),
                         )
                         .await?;
+                    let cdc_table_split_assignment_generation = self
+                        .env
+                        .cdc_table_backfill_tracker
+                        .next_generation(cdc_table_snapshot_split_assignment.keys().cloned());
                     let cdc_table_snapshot_split_assignment =
                         CdcTableSnapshotSplitAssignmentWithGeneration::new(
                             cdc_table_snapshot_split_assignment,
-                            self.env.cdc_table_backfill_tracker.next_generation(),
+                            cdc_table_split_assignment_generation,
                         );
                     Ok(BarrierWorkerRuntimeInfoSnapshot {
                         active_streaming_nodes,
@@ -602,10 +606,14 @@ impl GlobalBarrierWorkerContextImpl {
             self.env.meta_store_ref(),
         )
         .await?;
+        let cdc_table_split_assignment_generation = self
+            .env
+            .cdc_table_backfill_tracker
+            .next_generation(cdc_table_snapshot_split_assignment.keys().cloned());
         let cdc_table_snapshot_split_assignment =
             CdcTableSnapshotSplitAssignmentWithGeneration::new(
                 cdc_table_snapshot_split_assignment,
-                self.env.cdc_table_backfill_tracker.next_generation(),
+                cdc_table_split_assignment_generation,
             );
         Ok(Some(DatabaseRuntimeInfoSnapshot {
             job_infos: info,
