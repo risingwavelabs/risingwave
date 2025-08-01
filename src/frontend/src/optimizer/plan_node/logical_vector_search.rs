@@ -21,7 +21,7 @@ use risingwave_pb::common::PbDistanceType;
 
 use crate::PlanRef;
 use crate::expr::{
-    ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, collect_input_refs,
+    ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, collect_input_refs,
 };
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, TopNLimit, VectorSearch};
@@ -126,7 +126,7 @@ impl ColPrunable for LogicalVectorSearch {
                 None
             );
         }
-        let required_cols_new_output_mapping = required_cols_new_output_mapping
+        let required_cols_new_output_idx = required_cols_new_output_mapping
             .into_iter()
             .map(Option::unwrap)
             .collect_vec();
@@ -148,21 +148,14 @@ impl ColPrunable for LogicalVectorSearch {
             .collect();
         let vector_search = Self::with_core(new_core);
         let plan: PlanRef = vector_search.into();
-        if required_cols_new_output_mapping.len() == plan.schema().len()
-            && required_cols_new_output_mapping.is_sorted()
+        if required_cols_new_output_idx.len() == plan.schema().len()
+            && required_cols_new_output_idx.is_sorted()
         {
             // the current plan output has match the required column order.
             plan
         } else {
-            let exprs = required_cols_new_output_mapping
-                .iter()
-                .map(|output_idx| {
-                    ExprImpl::InputRef(
-                        InputRef::new(*output_idx, plan.schema()[*output_idx].data_type()).into(),
-                    )
-                })
-                .collect();
-            LogicalProject::create(plan, exprs)
+            LogicalProject::with_out_col_idx(plan, required_cols_new_output_idx.iter().copied())
+                .into()
         }
     }
 }
@@ -211,20 +204,6 @@ impl ToStream for LogicalVectorSearch {
 impl ToBatch for LogicalVectorSearch {
     fn to_batch(&self) -> crate::error::Result<PlanRef> {
         let input = self.input().to_batch()?;
-        let mut exprs = self
-            .core
-            .output_input_idx
-            .iter()
-            .map(|input_idx| {
-                ExprImpl::InputRef(
-                    InputRef::new(
-                        *input_idx,
-                        self.core.input.schema().fields[*input_idx].data_type(),
-                    )
-                    .into(),
-                )
-            })
-            .collect_vec();
         let (neg, expr_type) = match self.core.distance_type {
             PbDistanceType::Unspecified => {
                 unreachable!()
@@ -241,7 +220,12 @@ impl ToBatch for LogicalVectorSearch {
         if neg {
             expr = ExprImpl::FunctionCall(Box::new(FunctionCall::new(ExprType::Neg, vec![expr])?));
         }
-        exprs.push(expr);
+        let exprs = generic::Project::out_col_idx_exprs(
+            &self.core.input,
+            self.core.output_input_idx.iter().copied(),
+        )
+        .chain([expr])
+        .collect();
 
         let project = generic::Project::new(exprs, input);
         let input = BatchProject::new(project).into();
