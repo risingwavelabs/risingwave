@@ -89,7 +89,6 @@ impl TableFunctionToInternalBackfillProgressRule {
         LogicalScan::create(
             table.name.clone(),
             table,
-            vec![],
             ctx.clone(),
             None,
             Default::default(),
