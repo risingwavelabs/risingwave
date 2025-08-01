@@ -18,10 +18,11 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::common::PbDistanceType;
 
-use crate::PlanRef;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::plan_node::generic::TopNLimit;
-use crate::optimizer::plan_node::{LogicalProject, LogicalVectorSearch, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{
+    LogicalPlanRef as PlanRef, LogicalProject, LogicalVectorSearch, PlanTreeNodeUnary,
+};
 use crate::optimizer::rule::prelude::*;
 use crate::optimizer::rule::{BoxedRule, Rule};
 
