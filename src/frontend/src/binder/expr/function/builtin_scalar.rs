@@ -439,6 +439,8 @@ impl Binder {
                 ("cosine_distance", raw_call(ExprType::CosineDistance)),
                 ("l1_distance", raw_call(ExprType::L1Distance)),
                 ("inner_product", raw_call(ExprType::InnerProduct)),
+                ("vector_norm", raw_call(ExprType::L2Norm)),
+                ("l2_normalize", raw_call(ExprType::L2Normalize)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least
