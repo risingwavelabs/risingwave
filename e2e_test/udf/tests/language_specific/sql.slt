@@ -622,3 +622,21 @@ drop table t2;
 
 statement ok
 drop table t3;
+
+# test add function with schema 's'
+statement ok
+create schema s;
+
+statement ok
+create function s.add(INT, INT) returns int language sql as $$select $1 + $2$$;
+
+query I
+select s.add(1, -1);
+----
+0
+
+statement ok
+drop function s.add;
+
+statement ok
+drop schema s;

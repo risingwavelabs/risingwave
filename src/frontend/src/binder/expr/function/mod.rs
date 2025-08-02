@@ -20,7 +20,7 @@ use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::acl::AclMode;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
+use risingwave_common::catalog::INFORMATION_SCHEMA_SCHEMA_NAME;
 use risingwave_common::types::{DataType, MapType};
 use risingwave_expr::aggregate::AggType;
 use risingwave_expr::window_function::WindowFuncKind;
@@ -99,11 +99,7 @@ impl Binder {
             [name] => (None, name.real_value()),
             [schema, name] => {
                 let schema_name = schema.real_value();
-                let func_name = if schema_name == PG_CATALOG_SCHEMA_NAME {
-                    // pg_catalog is always effectively part of the search path, so we can always bind the function.
-                    // Ref: https://www.postgresql.org/docs/current/ddl-schemas.html#DDL-SCHEMAS-CATALOG
-                    name.real_value()
-                } else if schema_name == INFORMATION_SCHEMA_SCHEMA_NAME {
+                let func_name = if schema_name == INFORMATION_SCHEMA_SCHEMA_NAME {
                     // definition of information_schema: https://github.com/postgres/postgres/blob/e0b2eed047df9045664da6f724cb42c10f8b12f0/src/backend/catalog/information_schema.sql
                     //
                     // FIXME: handle schema correctly, so that the functions are hidden if the schema is not in the search path.
@@ -117,11 +113,7 @@ impl Binder {
                     }
                     function_name
                 } else {
-                    bail_not_implemented!(
-                        issue = 12422,
-                        "Unsupported function name under schema: {}",
-                        schema_name
-                    );
+                    name.real_value()
                 };
                 (Some(schema_name), func_name)
             }
