@@ -26,12 +26,13 @@ use risingwave_expr::aggregate::AggType;
 use risingwave_expr::window_function::WindowFuncKind;
 use risingwave_pb::user::grant_privilege::PbObject;
 use risingwave_sqlparser::ast::{
-    self, Function, FunctionArg, FunctionArgExpr, FunctionArgList, Ident, OrderByExpr, Window,
+    self, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, FunctionArgList, Ident,
+    OrderByExpr, Statement, Window,
 };
 use risingwave_sqlparser::parser::ParserError;
 
+use crate::binder::Binder;
 use crate::binder::bind_context::Clause;
-use crate::binder::{Binder, UdfContext};
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
@@ -65,7 +66,7 @@ pub(super) fn is_sys_function_without_args(ident: &Ident) -> bool {
 /// To reduce the chance that the current running rw thread
 /// be killed by os, the current allowance depth of calling
 /// stack is set to `16`.
-const SQL_UDF_MAX_CALLING_DEPTH: u32 = 16;
+const SQL_UDF_MAX_CALLING_DEPTH: usize = 16;
 
 macro_rules! reject_syntax {
     ($pred:expr, $msg:expr) => {
@@ -649,6 +650,27 @@ impl Binder {
         Ok(())
     }
 
+    /// A common utility function to extract sql udf expression out from the input `ast` as
+    /// a subquery.
+    pub(crate) fn extract_udf_expr_as_subquery(ast: Vec<Statement>) -> Result<AstExpr> {
+        if ast.len() != 1 {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "the query for sql udf should contain only one statement".to_owned(),
+            )
+            .into());
+        }
+
+        // Extract the expression out
+        let Statement::Query(query) = ast.into_iter().next().unwrap() else {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "invalid function definition, please recheck the syntax".to_owned(),
+            )
+            .into());
+        };
+
+        Ok(AstExpr::Subquery(query))
+    }
+
     fn bind_sql_udf(
         &mut self,
         func: Arc<FunctionCatalog>,
@@ -661,63 +683,55 @@ impl Binder {
         }
 
         // This represents the current user defined function is `language sql`
-        let parse_result =
-            risingwave_sqlparser::parser::Parser::parse_sql(func.body.as_ref().unwrap().as_str());
-        if let Err(ParserError::ParserError(err)) | Err(ParserError::TokenizerError(err)) =
-            parse_result
-        {
-            // Here we just return the original parse error message
-            return Err(ErrorCode::InvalidInputSyntax(err).into());
-        }
+        let ast = match risingwave_sqlparser::parser::Parser::parse_sql(
+            func.body.as_ref().unwrap().as_str(),
+        ) {
+            Ok(ast) => ast,
+            Err(ParserError::ParserError(err) | ParserError::TokenizerError(err)) => {
+                // Here we just return the original parse error message
+                return Err(ErrorCode::InvalidInputSyntax(err).into());
+            }
+        };
 
-        debug_assert!(parse_result.is_ok());
-
-        // We can safely unwrap here
-        let ast = parse_result.unwrap();
-
-        // Stash the current `udf_context`
-        // Note that the `udf_context` may be empty,
-        // if the current binding is the root (top-most) sql udf.
-        // In this case the empty context will be stashed
-        // and restored later, no need to maintain other flags.
-        let stashed_udf_context = self.udf_context.get_context();
+        // Stash the current arguments.
+        // TODO: should this always be empty, as SQL UDF must be a `ExprImpl::Subquery` which always
+        // push a new context?
+        let stashed_udf_arguments = self.context.udf_arguments.take();
 
         // The actual inline logic for sql udf
         // Note that we will always create new udf context for each sql udf
-        let mut udf_context = HashMap::new();
+        let mut udf_arguments = HashMap::new();
         for (i, arg) in args.into_iter().enumerate() {
             if func.arg_names[i].is_empty() {
                 // unnamed argument, use `$1`, `$2` as the name
-                udf_context.insert(format!("${}", i + 1), arg);
+                udf_arguments.insert(format!("${}", i + 1), arg);
             } else {
                 // named argument
-                udf_context.insert(func.arg_names[i].clone(), arg);
+                udf_arguments.insert(func.arg_names[i].clone(), arg);
             }
         }
-        self.udf_context.update_context(udf_context);
+        self.context.udf_arguments = Some(udf_arguments);
 
         // Check for potential recursive calling
-        if self.udf_context.global_count() >= SQL_UDF_MAX_CALLING_DEPTH {
+        if self
+            .upper_subquery_contexts
+            .iter()
+            .filter(|(c, _)| c.udf_arguments.is_some())
+            .count()
+            >= SQL_UDF_MAX_CALLING_DEPTH
+        {
             return Err(ErrorCode::BindError(format!(
                 "function {} calling stack depth limit exceeded",
                 func.name
             ))
             .into());
-        } else {
-            // Update the status for the global counter
-            self.udf_context.incr_global_count();
         }
 
-        if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
+        if let Ok(expr) = Self::extract_udf_expr_as_subquery(ast) {
             let bind_result = self.bind_expr(&expr);
 
-            // We should properly decrement global count after a successful binding
-            // Since the subsequent probe operation in `bind_column` or
-            // `bind_parameter` relies on global counting
-            self.udf_context.decr_global_count();
-
-            // Restore context information for subsequent binding
-            self.udf_context.update_context(stashed_udf_context);
+            // Restore arguments information for subsequent binding.
+            self.context.udf_arguments = stashed_udf_arguments;
 
             return bind_result;
         }

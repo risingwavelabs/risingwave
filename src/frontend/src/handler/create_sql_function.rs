@@ -23,7 +23,6 @@ use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_sqlparser::parser::{Parser, ParserError};
 
 use super::*;
-use crate::binder::UdfContext;
 use crate::expr::{Expr, ExprImpl, Literal};
 use crate::{Binder, bind_data_type};
 
@@ -243,18 +242,12 @@ pub async fn handle_create_sql_function(
         let ast = parse_result.unwrap();
         let mut binder = Binder::new_for_system(session);
 
-        binder
-            .udf_context_mut()
-            .update_context(create_mock_udf_context(
-                arg_types.clone(),
-                arg_names.clone(),
-            ));
+        binder.set_mock_udf_arguments(create_mock_udf_context(
+            arg_types.clone(),
+            arg_names.clone(),
+        ));
 
-        // Need to set the initial global count to 1
-        // otherwise the context will not be probed during the semantic check
-        binder.udf_context_mut().incr_global_count();
-
-        if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
+        if let Ok(expr) = Binder::extract_udf_expr_as_subquery(ast) {
             match binder.bind_expr(&expr) {
                 Ok(expr) => {
                     // Check if the return type mismatches
@@ -268,8 +261,9 @@ pub async fn handle_create_sql_function(
                     }
                 }
                 Err(e) => {
+                    // TODO: simplify error message
                     if let ErrorCode::BindErrorRoot { expr: _, error } = e.inner() {
-                        let invalid_msg = error.to_string();
+                        let invalid_msg = error.to_report_string();
 
                         // First validate the message
                         let err_msg_type = validate_err_msg(invalid_msg.as_str());

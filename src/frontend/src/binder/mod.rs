@@ -21,9 +21,10 @@ use risingwave_common::catalog::FunctionId;
 use risingwave_common::session_config::{SearchPath, SessionConfig};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_sqlparser::ast::{Expr as AstExpr, SelectItem, SetExpr, Statement};
+use risingwave_sqlparser::ast::Statement;
 
 use crate::error::Result;
+use crate::expr::ExprImpl;
 
 mod bind_context;
 mod bind_param;
@@ -67,7 +68,6 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogResult, DatabaseId, TableId, ViewId};
 use crate::error::ErrorCode;
-use crate::expr::ExprImpl;
 use crate::session::{AuthContext, SessionImpl, TemporarySourceManager};
 use crate::user::user_service::UserInfoReadGuard;
 
@@ -131,9 +131,6 @@ pub struct Binder {
 
     param_types: ParameterTypes,
 
-    /// The sql udf context that will be used during binding phase
-    udf_context: UdfContext,
-
     /// The temporary sources that will be used during binding phase
     temporary_source_manager: TemporarySourceManager,
 
@@ -149,102 +146,6 @@ pub struct SecureCompareContext {
     pub column_name: String,
     /// The secret (usually a token provided by the webhook source user) to validate the calls
     pub secret_name: Option<String>,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct UdfContext {
-    /// The mapping from `sql udf parameters` to a bound `ExprImpl` generated from `ast expressions`
-    /// Note: The expressions are constructed during runtime, correspond to the actual users' input
-    udf_param_context: HashMap<String, ExprImpl>,
-
-    /// The global counter that records the calling stack depth
-    /// of the current binding sql udf chain
-    udf_global_counter: u32,
-}
-
-impl UdfContext {
-    pub fn new() -> Self {
-        Self {
-            udf_param_context: HashMap::new(),
-            udf_global_counter: 0,
-        }
-    }
-
-    pub fn global_count(&self) -> u32 {
-        self.udf_global_counter
-    }
-
-    pub fn incr_global_count(&mut self) {
-        self.udf_global_counter += 1;
-    }
-
-    pub fn decr_global_count(&mut self) {
-        self.udf_global_counter -= 1;
-    }
-
-    pub fn _is_empty(&self) -> bool {
-        self.udf_param_context.is_empty()
-    }
-
-    pub fn update_context(&mut self, context: HashMap<String, ExprImpl>) {
-        self.udf_param_context = context;
-    }
-
-    pub fn _clear(&mut self) {
-        self.udf_global_counter = 0;
-        self.udf_param_context.clear();
-    }
-
-    pub fn get_expr(&self, name: &str) -> Option<&ExprImpl> {
-        self.udf_param_context.get(name)
-    }
-
-    pub fn get_context(&self) -> HashMap<String, ExprImpl> {
-        self.udf_param_context.clone()
-    }
-
-    /// A common utility function to extract sql udf
-    /// expression out from the input `ast`
-    pub fn extract_udf_expression(ast: Vec<Statement>) -> Result<AstExpr> {
-        if ast.len() != 1 {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "the query for sql udf should contain only one statement".to_owned(),
-            )
-            .into());
-        }
-
-        // Extract the expression out
-        let Statement::Query(query) = ast[0].clone() else {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "invalid function definition, please recheck the syntax".to_owned(),
-            )
-            .into());
-        };
-
-        let SetExpr::Select(select) = query.body else {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "missing `select` body for sql udf expression, please recheck the syntax"
-                    .to_owned(),
-            )
-            .into());
-        };
-
-        if select.projection.len() != 1 {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "`projection` should contain only one `SelectItem`".to_owned(),
-            )
-            .into());
-        }
-
-        let SelectItem::UnnamedExpr(expr) = select.projection[0].clone() else {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "expect `UnnamedExpr` for `projection`".to_owned(),
-            )
-            .into());
-        };
-
-        Ok(expr)
-    }
 }
 
 /// `ParameterTypes` is used to record the types of the parameters during binding prepared stataments.
@@ -353,7 +254,6 @@ impl Binder {
             included_relations: HashSet::new(),
             included_udfs: HashSet::new(),
             param_types: ParameterTypes::new(param_types),
-            udf_context: UdfContext::new(),
             temporary_source_manager: session.temporary_source_manager(),
             secure_compare_context: None,
         }
@@ -485,6 +385,15 @@ impl Binder {
         }
     }
 
+    fn visible_upper_subquery_contexts_rev(
+        &self,
+    ) -> impl Iterator<Item = &(BindContext, Vec<LateralBindContext>)> + '_ {
+        self.upper_subquery_contexts
+            .iter()
+            .rev()
+            .take_while(|(context, _)| context.udf_arguments.is_none())
+    }
+
     fn next_subquery_id(&mut self) -> usize {
         let id = self.next_subquery_id;
         self.next_subquery_id += 1;
@@ -519,8 +428,8 @@ impl Binder {
         self.context.clause = clause;
     }
 
-    pub fn udf_context_mut(&mut self) -> &mut UdfContext {
-        &mut self.udf_context
+    pub fn set_mock_udf_arguments(&mut self, udf_arguments: HashMap<String, ExprImpl>) {
+        self.context.udf_arguments = Some(udf_arguments);
     }
 }
 
