@@ -277,7 +277,6 @@ impl GlobalBarrierWorkerContextImpl {
                                     .catalog_controller
                                     .finish_streaming_job(
                                         stream_job_fragments.stream_job_id().table_id as _,
-                                        None,
                                     )
                                     .await?;
                             } else {
@@ -526,10 +525,7 @@ impl GlobalBarrierWorkerContextImpl {
                     // If there's no tracking actor in the job, we can finish the job directly.
                     self.metadata_manager
                         .catalog_controller
-                        .finish_streaming_job(
-                            stream_job_fragments.stream_job_id().table_id as _,
-                            None,
-                        )
+                        .finish_streaming_job(stream_job_fragments.stream_job_id().table_id as _)
                         .await?;
                 } else {
                     background_jobs

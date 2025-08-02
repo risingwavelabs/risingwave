@@ -434,9 +434,6 @@ impl CatalogController {
             filter_condition
         };
 
-        // Find `Creating` background streaming job of sink into table, they need to be cleaned up.
-        // TODO(August): remove it when background sink into table is unified.
-
         let dirty_job_objs: Vec<PartialObject> = streaming_job::Entity::find()
             .select_only()
             .column(streaming_job::Column::JobId)
