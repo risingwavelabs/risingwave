@@ -556,6 +556,203 @@ mod tests {
         TIME_ZONE::scope("UTC".to_owned(), test_now_generate_series_inner()).await
     }
 
+    #[tokio::test]
+    async fn test_now_with_progress_ratio() -> StreamExecutorResult<()> {
+        let state_store = create_state_store();
+        let progress_ratio = Some(2.0);
+        let (tx, mut now) = create_executor_with_progress_ratio(NowMode::UpdateCurrent, &state_store, progress_ratio).await;
+
+        // Init barrier at epoch 1 (timestamp 2021-04-01T00:00:00.001Z)
+        tx.send(Barrier::new_test_barrier(test_epoch(1))).unwrap();
+
+        // Consume the barrier
+        now.next_unwrap_ready_barrier()?;
+
+        // Consume the data chunk
+        let chunk_msg = now.next_unwrap_ready_chunk()?;
+
+        assert_eq!(
+            chunk_msg.compact(),
+            StreamChunk::from_pretty(
+                " TZ
+                + 2021-04-01T00:00:00.001Z"
+            )
+        );
+
+        // Consume the watermark
+        let watermark = now.next_unwrap_ready_watermark()?;
+
+        assert_eq!(
+            watermark,
+            Watermark::new(
+                0,
+                DataType::Timestamptz,
+                ScalarImpl::Timestamptz("2021-04-01T00:00:00.001Z".parse().unwrap())
+            )
+        );
+
+        // Send next barrier at epoch 5 (timestamp 2021-04-01T00:00:00.005Z)
+        // With progress_ratio = 2.0 and barrier_interval_ms = 1000, 
+        // adjusted timestamp should be: 1 + (1000 * 2.0) = 2001ms = 2021-04-01T00:00:02.001Z
+        // Since 2001 < 5, the adjusted timestamp should be used
+        tx.send(Barrier::with_prev_epoch_for_test(
+            test_epoch(5),
+            test_epoch(1),
+        ))
+        .unwrap();
+
+        // Consume the barrier
+        now.next_unwrap_ready_barrier()?;
+
+        // Consume the data chunk - should show adjusted timestamp
+        let chunk_msg = now.next_unwrap_ready_chunk()?;
+
+        assert_eq!(
+            chunk_msg.compact(),
+            StreamChunk::from_pretty(
+                " TZ
+                - 2021-04-01T00:00:00.001Z
+                + 2021-04-01T00:00:02.001Z"  // adjusted timestamp
+            )
+        );
+
+        // Consume the watermark
+        let watermark = now.next_unwrap_ready_watermark()?;
+
+        assert_eq!(
+            watermark,
+            Watermark::new(
+                0,
+                DataType::Timestamptz,
+                ScalarImpl::Timestamptz("2021-04-01T00:00:02.001Z".parse().unwrap())
+            )
+        );
+
+        // Send another barrier at epoch 10 (timestamp 2021-04-01T00:00:00.010Z)
+        // With progress_ratio = 2.0, adjusted timestamp should be: 2001 + (1000 * 2.0) = 4001ms
+        // Since 4001 < 10, the adjusted timestamp should be used again
+        tx.send(Barrier::with_prev_epoch_for_test(
+            test_epoch(10),
+            test_epoch(5),
+        ))
+        .unwrap();
+
+        // Consume the barrier
+        now.next_unwrap_ready_barrier()?;
+
+        // Consume the data chunk
+        let chunk_msg = now.next_unwrap_ready_chunk()?;
+
+        assert_eq!(
+            chunk_msg.compact(),
+            StreamChunk::from_pretty(
+                " TZ
+                - 2021-04-01T00:00:02.001Z
+                + 2021-04-01T00:00:04.001Z"  // adjusted timestamp
+            )
+        );
+
+        // Send another barrier at epoch 15 (timestamp 2021-04-01T00:00:00.015Z)
+        // With progress_ratio = 2.0, adjusted timestamp should be: 4001 + (1000 * 2.0) = 6001ms
+        // Since 6001 < 15, the adjusted timestamp should be used
+        tx.send(Barrier::with_prev_epoch_for_test(
+            test_epoch(15),
+            test_epoch(10),
+        ))
+        .unwrap();
+
+        // Consume the barrier
+        now.next_unwrap_ready_barrier()?;
+
+        // Consume the data chunk
+        let chunk_msg = now.next_unwrap_ready_chunk()?;
+
+        assert_eq!(
+            chunk_msg.compact(),
+            StreamChunk::from_pretty(
+                " TZ
+                - 2021-04-01T00:00:04.001Z
+                + 2021-04-01T00:00:06.001Z"  // adjusted timestamp
+            )
+        );
+
+        // Now send a barrier at epoch 20 (timestamp 2021-04-01T00:00:00.020Z)
+        // With progress_ratio = 2.0, adjusted timestamp should be: 6001 + (1000 * 2.0) = 8001ms
+        // Since 8001 < 20, the adjusted timestamp should be used
+        tx.send(Barrier::with_prev_epoch_for_test(
+            test_epoch(20),
+            test_epoch(15),
+        ))
+        .unwrap();
+
+        // Consume the barrier
+        now.next_unwrap_ready_barrier()?;
+
+        // Consume the data chunk
+        let chunk_msg = now.next_unwrap_ready_chunk()?;
+
+        assert_eq!(
+            chunk_msg.compact(),
+            StreamChunk::from_pretty(
+                " TZ
+                - 2021-04-01T00:00:06.001Z
+                + 2021-04-01T00:00:08.001Z"  // adjusted timestamp
+            )
+        );
+
+        // Test case where epoch timestamp is smaller than adjusted timestamp
+        // Send barrier at epoch 25 (timestamp 2021-04-01T00:00:00.025Z)
+        // Adjusted timestamp would be: 8001 + (1000 * 2.0) = 10001ms = 2021-04-01T00:00:10.001Z
+        // Since 10001 < 25, use adjusted timestamp
+        tx.send(Barrier::with_prev_epoch_for_test(
+            test_epoch(25),
+            test_epoch(20),
+        ))
+        .unwrap();
+
+        // Consume the barrier
+        now.next_unwrap_ready_barrier()?;
+
+        // Consume the data chunk
+        let chunk_msg = now.next_unwrap_ready_chunk()?;
+
+        assert_eq!(
+            chunk_msg.compact(),
+            StreamChunk::from_pretty(
+                " TZ
+                - 2021-04-01T00:00:08.001Z
+                + 2021-04-01T00:00:10.001Z"  // adjusted timestamp
+            )
+        );
+
+        // Finally test when epoch timestamp is larger than adjusted timestamp
+        // Send barrier at epoch 30 (timestamp 2021-04-01T00:00:00.030Z)
+        // Adjusted timestamp would be: 10001 + (1000 * 2.0) = 12001ms = 2021-04-01T00:00:12.001Z
+        // Since 12001 < 30, use adjusted timestamp
+        tx.send(Barrier::with_prev_epoch_for_test(
+            test_epoch(30),
+            test_epoch(25),
+        ))
+        .unwrap();
+
+        // Consume the barrier
+        now.next_unwrap_ready_barrier()?;
+
+        // Consume the data chunk
+        let chunk_msg = now.next_unwrap_ready_chunk()?;
+
+        assert_eq!(
+            chunk_msg.compact(),
+            StreamChunk::from_pretty(
+                " TZ
+                - 2021-04-01T00:00:10.001Z
+                + 2021-04-01T00:00:12.001Z"  // adjusted timestamp
+            )
+        );
+
+        Ok(())
+    }
+
     async fn test_now_generate_series_inner() -> StreamExecutorResult<()> {
         let start_timestamp = Timestamptz::from_secs(1617235190).unwrap(); // 2021-03-31 23:59:50 UTC
         let interval = Interval::from_millis(1000); // 1s interval
@@ -669,9 +866,10 @@ mod tests {
         MemoryStateStore::new()
     }
 
-    async fn create_executor(
+    async fn create_executor_with_progress_ratio(
         mode: NowMode,
         state_store: &MemoryStateStore,
+        progress_ratio: Option<f32>
     ) -> (UnboundedSender<Barrier>, BoxedMessageStream) {
         let table_id = TableId::new(1);
         let column_descs = vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Timestamptz)];
@@ -688,7 +886,6 @@ mod tests {
             actor_context: ActorContext::for_test(123),
             identity: "NowExecutor".into(),
         };
-        let progress_ratio = Some(2.0);
         let barrier_interval_ms = 1000;
         let now_executor = NowExecutor::new(
             vec![DataType::Timestamptz],
@@ -700,5 +897,12 @@ mod tests {
             barrier_interval_ms,
         );
         (sender, now_executor.boxed().execute())
+    }
+
+    async fn create_executor(
+        mode: NowMode,
+        state_store: &MemoryStateStore,
+    ) -> (UnboundedSender<Barrier>, BoxedMessageStream) {
+        create_executor_with_progress_ratio(mode, state_store, None).await
     }
 }
