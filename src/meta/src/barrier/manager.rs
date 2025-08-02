@@ -142,6 +142,7 @@ impl GlobalBarrierManager {
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
         scale_controller: ScaleControllerRef,
+        barrier_scheduler: schedule::BarrierScheduler,
     ) -> (Arc<Self>, JoinHandle<()>, oneshot::Sender<()>) {
         let (request_tx, request_rx) = unbounded_channel();
         let hummock_manager_clone = hummock_manager.clone();
@@ -155,6 +156,7 @@ impl GlobalBarrierManager {
             sink_manager,
             scale_controller,
             request_rx,
+            barrier_scheduler,
         )
         .await;
         let manager = Self {

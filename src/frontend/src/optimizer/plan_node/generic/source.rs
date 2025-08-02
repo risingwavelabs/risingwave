@@ -190,6 +190,16 @@ impl Source {
             .is_some_and(|catalog| catalog.with_properties.is_kafka_connector())
     }
 
+    pub fn is_batch_connector(&self) -> bool {
+        self.catalog
+            .as_ref()
+            .is_some_and(|catalog| catalog.with_properties.is_batch_connector())
+    }
+
+    pub fn requires_singleton(&self) -> bool {
+        self.is_iceberg_connector() || self.is_batch_connector()
+    }
+
     /// Currently, only iceberg source supports time travel.
     pub fn support_time_travel(&self) -> bool {
         self.is_iceberg_connector()

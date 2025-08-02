@@ -43,6 +43,7 @@ pub mod prelude {
 }
 
 pub mod base;
+pub mod batch;
 pub mod cdc;
 pub mod data_gen_util;
 pub mod datagen;

@@ -160,6 +160,10 @@ impl StreamChunk {
         builder.take().expect("chunk should not be empty")
     }
 
+    pub fn empty(data_types: &[DataType]) -> Self {
+        StreamChunkBuilder::build_empty(data_types.to_vec())
+    }
+
     /// Get the reference of the underlying data chunk.
     pub fn data_chunk(&self) -> &DataChunk {
         &self.data

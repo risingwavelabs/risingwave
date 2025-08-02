@@ -231,6 +231,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         system_params,
                         source.rate_limit,
                         is_shared && !source.with_properties.is_cdc_connector(),
+                        params.local_barrier_manager.clone(),
                     )
                     .boxed()
                 }

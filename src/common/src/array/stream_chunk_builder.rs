@@ -104,6 +104,10 @@ impl StreamChunkBuilder {
         }
     }
 
+    pub fn build_empty(data_types: Vec<DataType>) -> StreamChunk {
+        Self::new(1, data_types).take_inner()
+    }
+
     /// Get the current number of rows in the builder.
     pub fn size(&self) -> usize {
         self.size
@@ -161,6 +165,10 @@ impl StreamChunkBuilder {
         if self.size == 0 {
             return None;
         }
+        Some(self.take_inner())
+    }
+
+    fn take_inner(&mut self) -> StreamChunk {
         self.size = 0;
 
         let ops = std::mem::replace(&mut self.ops, Vec::with_capacity(self.initial_capacity));
@@ -179,7 +187,7 @@ impl StreamChunkBuilder {
             .collect::<Vec<_>>();
         let vis = std::mem::take(&mut self.vis_builder).finish();
 
-        Some(StreamChunk::with_visibility(ops, columns, vis))
+        StreamChunk::with_visibility(ops, columns, vis)
     }
 
     #[must_use]
