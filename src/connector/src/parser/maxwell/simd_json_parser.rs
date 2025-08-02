@@ -62,6 +62,8 @@ mod tests {
         builder.finish_current_chunk();
         let chunk = builder.consume_ready_chunks().next().unwrap();
 
+        println!("{}", chunk.to_pretty());
+
         let mut rows = chunk.rows();
 
         {
