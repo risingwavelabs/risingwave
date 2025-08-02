@@ -14,7 +14,7 @@
 
 use std::fmt::Write;
 
-use risingwave_expr::{Result, function};
+use risingwave_expr::function;
 
 #[function("trim(varchar) -> varchar")]
 pub fn trim(s: &str, writer: &mut impl Write) {
