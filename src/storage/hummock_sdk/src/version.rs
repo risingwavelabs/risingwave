@@ -644,7 +644,8 @@ impl<T> HummockVersionDeltaCommon<T> {
                         }) => Some(inserted_table_infos.iter()),
                         GroupDeltaCommon::GroupConstruct(_)
                         | GroupDeltaCommon::GroupDestroy(_)
-                        | GroupDeltaCommon::GroupMerge(_) => None,
+                        | GroupDeltaCommon::GroupMerge(_)
+                        | GroupDeltaCommon::TruncateTables(_) => None,
                     };
                     sst_slice.into_iter().flatten()
                 })
@@ -1025,6 +1026,7 @@ pub enum GroupDeltaCommon<T> {
     GroupConstruct(Box<PbGroupConstruct>),
     GroupDestroy(PbGroupDestroy),
     GroupMerge(PbGroupMerge),
+    TruncateTables(Vec<u32>),
 }
 
 pub type GroupDelta = GroupDeltaCommon<SstableInfo>;
@@ -1054,6 +1056,10 @@ where
                     .map(T::from)
                     .collect(),
             ),
+            Some(PbDeltaType::TruncateTables(pb_truncate_tables)) => {
+                GroupDeltaCommon::TruncateTables(pb_truncate_tables.table_ids)
+            }
+
             None => panic!("delta_type is not set"),
         }
     }
@@ -1085,6 +1091,9 @@ where
                         .collect(),
                 })),
             },
+            GroupDeltaCommon::TruncateTables(table_ids) => PbGroupDelta {
+                delta_type: Some(PbDeltaType::TruncateTables(PbTruncateTables { table_ids })),
+            },
         }
     }
 }
@@ -1110,6 +1119,11 @@ where
             GroupDeltaCommon::NewL0SubLevel(new_sub_level) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::NewL0SubLevel(PbNewL0SubLevel {
                     inserted_table_infos: new_sub_level.iter().map(PbSstableInfo::from).collect(),
+                })),
+            },
+            GroupDeltaCommon::TruncateTables(table_ids) => PbGroupDelta {
+                delta_type: Some(PbDeltaType::TruncateTables(PbTruncateTables {
+                    table_ids: table_ids.clone(),
                 })),
             },
         }
@@ -1141,6 +1155,9 @@ where
                     .map(T::from)
                     .collect(),
             ),
+            Some(PbDeltaType::TruncateTables(pb_truncate_tables)) => {
+                GroupDeltaCommon::TruncateTables(pb_truncate_tables.table_ids.clone())
+            }
             None => panic!("delta_type is not set"),
         }
     }

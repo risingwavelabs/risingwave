@@ -280,6 +280,10 @@ impl SstableInfo {
     pub fn get_inner(&self) -> SstableInfoInner {
         (*self.0).clone()
     }
+
+    pub fn set_inner(&mut self, inner: SstableInfoInner) {
+        self.0 = Arc::new(inner);
+    }
 }
 
 impl SstableIdReader for SstableInfo {

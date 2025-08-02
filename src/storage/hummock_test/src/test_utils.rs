@@ -251,6 +251,7 @@ impl HummockTestEnv {
                     VectorIndexDelta::Init(init_config),
                 )]),
                 tables_to_commit: HashMap::from_iter([(table_id, init_epoch)]),
+                truncate_tables: HashSet::new(),
             })
             .await
             .unwrap();
