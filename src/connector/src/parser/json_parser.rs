@@ -21,6 +21,7 @@
 // rely on the internal implementation and allow that to be changed, the tests use
 // `ByteStreamSourceParserImpl` to create a parser instance.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 
 use anyhow::Context as _;
@@ -35,9 +36,40 @@ use crate::parser::unified::AccessImpl;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::schema::schema_registry::{Client, handle_sr_list};
 
+// Thread-local buffer pool for Vec<u8> to reduce allocations across parser instances
+thread_local! {
+    static BUFFER_POOL: RefCell<Vec<Vec<u8>>> = RefCell::new(Vec::new());
+}
+
+/// Get a reusable buffer from the thread-local pool
+fn get_pooled_buffer() -> Vec<u8> {
+    BUFFER_POOL.with(|pool| {
+        pool.borrow_mut()
+            .pop()
+            .unwrap_or_else(|| Vec::with_capacity(1024))
+    })
+}
+
+/// Return a buffer to the thread-local pool for reuse
+fn return_pooled_buffer(mut buf: Vec<u8>) {
+    // Clear the buffer but keep capacity for reuse
+    buf.clear();
+
+    // Only pool buffers with reasonable capacity to avoid memory bloat
+    if buf.capacity() >= 512 && buf.capacity() <= 64 * 1024 {
+        BUFFER_POOL.with(|pool| {
+            let mut pool = pool.borrow_mut();
+            if pool.len() < 8 {
+                // Limit pool size to prevent unbounded growth
+                pool.push(buf);
+            }
+        });
+    }
+}
+
 #[derive(Debug)]
 pub struct JsonAccessBuilder {
-    value: Option<Vec<u8>>,
+    value: Vec<u8>,
     payload_start_idx: usize,
     json_parse_options: JsonParseOptions,
 }
@@ -49,20 +81,36 @@ impl AccessBuilder for JsonAccessBuilder {
         payload: Vec<u8>,
         _: &crate::source::SourceMeta,
     ) -> ConnectorResult<AccessImpl<'_>> {
-        // XXX: When will we enter this branch?
+        // Clear but keep capacity to reuse the buffer
+        self.value.clear();
+
         if payload.is_empty() {
-            self.value = Some("{}".into());
+            self.value.extend_from_slice(b"{}");
         } else {
-            self.value = Some(payload);
+            // Smart capacity management to avoid frequent reallocations
+            let needed_len = payload.len();
+            if self.value.capacity() < needed_len {
+                // If we need to grow, grow by at least 50% and use payload's capacity if it's larger
+                let new_capacity = std::cmp::max(
+                    needed_len,
+                    std::cmp::max(self.value.capacity() * 3 / 2, 1024),
+                );
+                self.value.reserve(new_capacity - self.value.capacity());
+            }
+
+            // Copy payload data to our reusable buffer
+            self.value.extend_from_slice(&payload);
+
+            // Return the incoming payload buffer to the pool for reuse
+            return_pooled_buffer(payload);
         }
-        let value = simd_json::to_borrowed_value(
-            &mut self.value.as_mut().unwrap()[self.payload_start_idx..],
-        )
-        .context("failed to parse json payload")?;
+
+        // Parse JSON in-place, respecting schema registry offset
+        let value = simd_json::to_borrowed_value(&mut self.value[self.payload_start_idx..])
+            .context("failed to parse json payload")?;
+
         Ok(AccessImpl::Json(JsonAccess::new_with_options(
             value,
-            // Debezium and Canal have their special json access builder and will not
-            // use this
             &self.json_parse_options,
         )))
     }
@@ -75,10 +123,18 @@ impl JsonAccessBuilder {
             json_parse_options.timestamptz_handling = mode;
         }
         Ok(Self {
-            value: None,
+            value: get_pooled_buffer(), // Start with a pooled buffer
             payload_start_idx: if config.use_schema_registry { 5 } else { 0 },
             json_parse_options,
         })
+    }
+}
+
+impl Drop for JsonAccessBuilder {
+    fn drop(&mut self) {
+        // Return our buffer to the pool when the parser is dropped
+        let buffer = std::mem::take(&mut self.value);
+        return_pooled_buffer(buffer);
     }
 }
 
