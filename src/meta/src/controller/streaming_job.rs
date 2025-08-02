@@ -27,6 +27,7 @@ use risingwave_common::util::stream_graph_visitor::{
 };
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::allow_alter_on_fly_fields::check_sink_allow_alter_on_fly_fields;
+use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
@@ -40,7 +41,7 @@ use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::*;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::PbOptionalAssociatedSourceId;
-use risingwave_pb::catalog::{PbCreateType, PbSink, PbTable};
+use risingwave_pb::catalog::{PbConnection, PbCreateType, PbSink, PbTable};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{
@@ -2204,6 +2205,300 @@ impl CatalogController {
             .await;
 
         Ok(new_config.into_iter().collect())
+    }
+
+    pub async fn update_connection_props_by_connection_id(
+        &self,
+        connection_id: ConnectionId,
+        alter_props: BTreeMap<String, String>,
+        alter_secret_refs: BTreeMap<String, PbSecretRef>,
+    ) -> MetaResult<WithOptionsSecResolved> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let (connection_catalog, _obj) = Connection::find_by_id(connection_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found(ObjectType::Connection.as_str(), connection_id)
+            })?;
+
+        // Validate that props can be altered
+        let prop_keys: Vec<String> = alter_props
+            .keys()
+            .chain(alter_secret_refs.keys())
+            .cloned()
+            .collect();
+
+        // Map the connection type enum to the string name expected by the validation function
+        let connection_type_str = match connection_catalog.params.to_protobuf().connection_type() {
+            risingwave_pb::catalog::connection_params::PbConnectionType::Kafka => "kafka",
+            risingwave_pb::catalog::connection_params::PbConnectionType::Iceberg => "iceberg",
+            risingwave_pb::catalog::connection_params::PbConnectionType::SchemaRegistry => {
+                "schema_registry"
+            }
+            risingwave_pb::catalog::connection_params::PbConnectionType::Elasticsearch => {
+                "elasticsearch"
+            }
+            risingwave_pb::catalog::connection_params::PbConnectionType::Unspecified => {
+                return Err(MetaError::invalid_parameter("Unspecified connection type"));
+            }
+        };
+
+        risingwave_connector::allow_alter_on_fly_fields::check_connection_allow_alter_on_fly_fields(
+            connection_type_str, &prop_keys,
+        )?;
+
+        let connection_pb = connection_catalog.params.to_protobuf();
+        let mut options_with_secret = WithOptionsSecResolved::new(
+            connection_pb.properties.into_iter().collect(),
+            connection_pb.secret_refs.into_iter().collect(),
+        );
+
+        // Clone for validation before consuming in handle_update
+        let alter_props_clone = alter_props.clone();
+        let alter_secret_refs_clone = alter_secret_refs.clone();
+
+        let (to_add_secret_dep, to_remove_secret_dep) =
+            options_with_secret.handle_update(alter_props, alter_secret_refs)?;
+
+        tracing::info!(
+            "applying new properties to connection: connection_id={}, options_with_secret={:?}",
+            connection_id,
+            options_with_secret
+        );
+
+        // Validate that dependent sources/sinks don't have conflicting properties
+        self.validate_connection_property_conflicts(
+            connection_id,
+            &connection_catalog,
+            &alter_props_clone,
+            &alter_secret_refs_clone,
+            &txn,
+        )
+        .await?;
+
+        {
+            // emsamble connection and validate it
+            let conn_params_pb = risingwave_pb::catalog::ConnectionParams {
+                connection_type: connection_pb.connection_type,
+                properties: options_with_secret
+                    .as_plaintext()
+                    .clone()
+                    .into_iter()
+                    .collect(),
+                secret_refs: options_with_secret
+                    .as_secret()
+                    .clone()
+                    .into_iter()
+                    .collect(),
+            };
+            let connection = PbConnection {
+                id: connection_id as _,
+                info: Some(risingwave_pb::catalog::connection::Info::ConnectionParams(
+                    conn_params_pb,
+                )),
+                ..Default::default()
+            };
+            validate_connection(&connection).await?;
+        }
+
+        // Update secret dependencies
+        if !to_add_secret_dep.is_empty() {
+            ObjectDependency::insert_many(to_add_secret_dep.into_iter().map(|secret_id| {
+                object_dependency::ActiveModel {
+                    oid: Set(secret_id as _),
+                    used_by: Set(connection_id as _),
+                    ..Default::default()
+                }
+            }))
+            .exec(&txn)
+            .await?;
+        }
+        if !to_remove_secret_dep.is_empty() {
+            let _ = ObjectDependency::delete_many()
+                .filter(
+                    object_dependency::Column::Oid
+                        .is_in(to_remove_secret_dep)
+                        .and(object_dependency::Column::UsedBy.eq::<ObjectId>(connection_id as _)),
+                )
+                .exec(&txn)
+                .await?;
+        }
+
+        // Update the connection with new properties
+        let updated_connection_params = risingwave_pb::catalog::ConnectionParams {
+            connection_type: connection_pb.connection_type,
+            properties: options_with_secret
+                .as_plaintext()
+                .clone()
+                .into_iter()
+                .collect(),
+            secret_refs: options_with_secret
+                .as_secret()
+                .clone()
+                .into_iter()
+                .collect(),
+        };
+        let active_connection_model = connection::ActiveModel {
+            connection_id: Set(connection_id),
+            params: Set(ConnectionParams::from(&updated_connection_params)),
+            ..Default::default()
+        };
+        active_connection_model.update(&txn).await?;
+
+        // Get the updated connection to notify frontend
+        let (connection, obj) = Connection::find_by_id(connection_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found(ObjectType::Connection.as_str(), connection_id)
+            })?;
+
+        txn.commit().await?;
+
+        self.notify_frontend(
+            NotificationOperation::Update,
+            NotificationInfo::ObjectGroup(PbObjectGroup {
+                objects: vec![PbObject {
+                    object_info: Some(PbObjectInfo::Connection(
+                        ObjectModel(connection, obj.unwrap()).into(),
+                    )),
+                }],
+            }),
+        )
+        .await;
+
+        Ok(options_with_secret)
+    }
+
+    /// Find all sources that depend on a given connection
+    pub async fn find_sources_by_connection_id(
+        &self,
+        connection_id: ConnectionId,
+    ) -> MetaResult<Vec<SourceId>> {
+        let inner = self.inner.read().await;
+        let source_ids: Vec<SourceId> = Source::find()
+            .select_only()
+            .column(source::Column::SourceId)
+            .filter(source::Column::ConnectionId.eq(connection_id))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        Ok(source_ids)
+    }
+
+    /// Find all sinks that depend on a given connection
+    pub async fn find_sinks_by_connection_id(
+        &self,
+        connection_id: ConnectionId,
+    ) -> MetaResult<Vec<SinkId>> {
+        let inner = self.inner.read().await;
+        let sink_ids: Vec<SinkId> = Sink::find()
+            .select_only()
+            .column(sink::Column::SinkId)
+            .filter(sink::Column::ConnectionId.eq(connection_id))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        Ok(sink_ids)
+    }
+
+    /// Validate that dependent sources/sinks don't have conflicting property keys
+    async fn validate_connection_property_conflicts(
+        &self,
+        connection_id: ConnectionId,
+        connection_catalog: &connection::Model,
+        alter_props: &BTreeMap<String, String>,
+        alter_secret_refs: &BTreeMap<String, PbSecretRef>,
+        txn: &DatabaseTransaction,
+    ) -> MetaResult<Vec<()>> {
+        // we have checked create source/sink creation on no collision in connection properties
+        // so we assume:
+        // if a property is set in connection, it will not be set by dependent objects
+        let connection_defined_keys = connection_catalog
+            .params
+            .to_protobuf()
+            .properties
+            .keys()
+            .chain(connection_catalog.params.to_protobuf().secret_refs.keys())
+            .cloned()
+            .collect::<HashSet<_>>();
+
+        let property_keys: HashSet<String> = alter_props
+            .keys()
+            .chain(alter_secret_refs.keys())
+            .cloned()
+            .collect();
+
+        let mut merged_props = vec![];
+
+        // Check sources for conflicts
+        let conflicting_sources: Vec<(SourceId, String)> = Source::find()
+            .filter(source::Column::ConnectionId.eq(connection_id))
+            .all(txn)
+            .await?
+            .into_iter()
+            .filter_map(|source| {
+                for prop_key in &property_keys {
+                    if !connection_defined_keys.contains(prop_key)
+                        && source.with_properties.0.contains_key(prop_key)
+                        && let Some(secret_ref) = &source.secret_ref
+                        && secret_ref.to_protobuf().contains_key(prop_key)
+                    {
+                        return Some((source.source_id, prop_key.clone()));
+                    }
+                }
+
+                None
+            })
+            .collect();
+
+        if !conflicting_sources.is_empty() {
+            let conflicts: Vec<String> = conflicting_sources
+                .into_iter()
+                .map(|(source_id, prop)| format!("source {} has property '{}'", source_id, prop))
+                .collect();
+            return Err(MetaError::invalid_parameter(format!(
+                "Cannot alter connection properties that are also set in dependent objects: {}",
+                conflicts.join(", ")
+            )));
+        }
+
+        // Check sinks for conflicts
+        let conflicting_sinks: Vec<(SinkId, String)> = Sink::find()
+            .filter(sink::Column::ConnectionId.eq(connection_id))
+            .all(txn)
+            .await?
+            .into_iter()
+            .filter_map(|sink| {
+                for prop_key in &property_keys {
+                    if !connection_defined_keys.contains(prop_key)
+                        && sink.properties.0.contains_key(prop_key)
+                        && let Some(secret_ref) = &sink.secret_ref
+                        && secret_ref.to_protobuf().contains_key(prop_key)
+                    {
+                        return Some((sink.sink_id, prop_key.clone()));
+                    }
+                }
+                None
+            })
+            .collect();
+
+        if !conflicting_sinks.is_empty() {
+            let conflicts: Vec<String> = conflicting_sinks
+                .into_iter()
+                .map(|(sink_id, prop)| format!("sink {} has property '{}'", sink_id, prop))
+                .collect();
+            return Err(MetaError::invalid_parameter(format!(
+                "Cannot alter connection properties that are also set in dependent objects: {}",
+                conflicts.join(", ")
+            )));
+        }
+
+        Ok(merged_props)
     }
 
     pub async fn update_fragment_rate_limit_by_fragment_id(

@@ -1,0 +1,67 @@
+control substitution on
+
+system ok
+cat << EOF | kcat -b localhost:19092 -X security.protocol=SASL_PLAINTEXT -X sasl.mechanism=PLAIN -X sasl.username=dev -X sasl.password=rw -P -t test_alter_conn_1
+{"x": 1}
+{"x": 2}
+{"x": 3}
+EOF
+
+system ok
+cat << EOF | kcat -b localhost:19095 -X security.protocol=SASL_PLAINTEXT -X sasl.mechanism=PLAIN -X sasl.username=dev1 -X sasl.password=rw -P -t test_alter_conn_1
+{"x": 4}
+{"x": 5}
+{"x": 6}
+EOF
+
+statement ok
+create secret s_broker with ( backend = 'meta' ) as 'localhost:19092';
+
+statement ok
+create connection kafka_conn with (
+    type = 'kafka',
+    properties.bootstrap.server = secret s_broker,
+    properties.security.protocol = 'SASL_PLAINTEXT',
+    properties.sasl.mechanism = 'PLAIN',
+    properties.sasl.username = 'dev',
+    properties.sasl.password = 'rw'
+);
+
+statement ok
+create table t_conn(x int) with (
+    connector = 'kafka',
+    connection = kafka_conn,
+    topic = 'test_alter_conn_1'
+) format plain encode json;
+
+query I retry 3 backoff 1s
+select * from t_conn order by x;
+----
+1
+2
+3
+
+
+statement ok
+alter secret s_broker with ( backend = 'meta' ) as 'localhost:19095';
+
+statement ok
+alter connection kafka_conn connector with (properties.sasl.username = 'dev1');
+
+system ok
+cat << EOF | kcat -b localhost:19095 -X security.protocol=SASL_PLAINTEXT -X sasl.mechanism=PLAIN -X sasl.username=dev1 -X sasl.password=rw -P -t test_alter_conn_1
+{"x": 7}
+{"x": 8}
+{"x": 9}
+EOF
+
+query I retry 3 backoff 1s
+select * from t_conn order by x;
+----
+1
+2
+3
+7
+8
+9
+
