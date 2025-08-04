@@ -476,7 +476,12 @@ impl Binder {
         }
 
         Err(ErrorCode::BindError(format!(
-            "{SQL_UDF_PATTERN} failed to find parameter ${name}"
+            "{SQL_UDF_PATTERN} failed to find {} parameter {name}",
+            if name.starts_with('$') {
+                "unnamed"
+            } else {
+                "named"
+            }
         ))
         .into())
     }
