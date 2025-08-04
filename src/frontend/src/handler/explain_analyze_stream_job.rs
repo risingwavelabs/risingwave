@@ -28,12 +28,18 @@ use crate::handler::{HandlerArgs, RwPgResponse, RwPgResponseBuilder, RwPgRespons
 #[macro_export]
 macro_rules! debug_panic_or_warn {
     ($($arg:tt)*) => {
-        // if cfg!(debug_assertions) {
-        //     panic!($($arg)*);
-        // } else {
-            tracing::warn!($($arg)*);
-        // }
+        tracing::warn!($($arg)*);
     };
+
+    // FIXME(kwannoel): Once we resolve https://github.com/risingwavelabs/risingwave/issues/22775,
+    // we should re-enable the assertion path.
+    // ($($arg:tt)*) => {
+    //     if cfg!(debug_assertions) {
+    //         panic!($($arg)*);
+    //     } else {
+    //         tracing::warn!($($arg)*);
+    //     }
+    // };
 }
 
 #[derive(Fields)]
