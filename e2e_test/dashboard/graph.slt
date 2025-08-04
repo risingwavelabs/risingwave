@@ -1,0 +1,12 @@
+-- Market Data Graph Test Suite
+-- This file includes the creation and cleanup of a comprehensive market data graph
+-- with 5 datagen sources and 20 materialized views
+
+-- Include the creation script
+include create_graph.slt.part
+
+-- Wait for data to be processed
+sleep 5s
+
+-- Include the cleanup script
+include drop_graph.slt.part 
