@@ -344,7 +344,7 @@ mod metrics {
 
         pub(super) fn get_delta(
             initial: &Self,
-            other: &Self,
+            end: &Self,
             executor_ids: &HashSet<ExecutorId>,
             dispatch_fragment_ids: &[FragmentId],
         ) -> Self {
@@ -354,17 +354,40 @@ mod metrics {
                     tracing::warn!("missing initial stats for executor {}", executor_id);
                     continue;
                 };
-                let Some(other_stats) = other.executor_stats.get(executor_id) else {
+                let Some(end_stats) = end.executor_stats.get(executor_id) else {
                     tracing::warn!("missing final stats for executor {}", executor_id);
                     continue;
                 };
+
+                let initial_throughput = initial_stats.total_output_throughput;
+                let end_throughput = end_stats.total_output_throughput;
+                let Some(delta_throughput) = end_throughput.checked_sub(initial_throughput) else {
+                    tracing::warn!(
+                        initial_throughput,
+                        end_throughput,
+                        "delta throughput is negative for executor {}",
+                        executor_id
+                    );
+                    continue;
+                };
+
+                let initial_pending_ns = initial_stats.total_output_pending_ns;
+                let end_pending_ns = end_stats.total_output_pending_ns;
+                let Some(delta_pending_ns) = end_pending_ns.checked_sub(initial_pending_ns) else {
+                    tracing::warn!(
+                        initial_pending_ns,
+                        end_pending_ns,
+                        "delta pending ns is negative for executor {}",
+                        executor_id
+                    );
+                    continue;
+                };
+
                 let delta_stats = ExecutorMetrics {
                     executor_id: *executor_id,
                     epoch: 0,
-                    total_output_throughput: other_stats.total_output_throughput
-                        - initial_stats.total_output_throughput,
-                    total_output_pending_ns: other_stats.total_output_pending_ns
-                        - initial_stats.total_output_pending_ns,
+                    total_output_throughput: delta_throughput,
+                    total_output_pending_ns: delta_pending_ns,
                 };
                 delta_aggregated_stats
                     .executor_stats
@@ -376,16 +399,16 @@ mod metrics {
                     tracing::warn!("missing initial stats for fragment {}", fragment_id);
                     continue;
                 };
-                let Some(other_stats) = other.dispatch_stats.get(fragment_id) else {
+                let Some(end_stats) = end.dispatch_stats.get(fragment_id) else {
                     tracing::warn!("missing final stats for fragment {}", fragment_id);
                     continue;
                 };
                 let delta_stats = DispatchMetrics {
                     fragment_id: *fragment_id,
                     epoch: 0,
-                    total_output_throughput: other_stats.total_output_throughput
+                    total_output_throughput: end_stats.total_output_throughput
                         - initial_stats.total_output_throughput,
-                    total_output_pending_ns: other_stats.total_output_pending_ns
+                    total_output_pending_ns: end_stats.total_output_pending_ns
                         - initial_stats.total_output_pending_ns,
                 };
                 delta_aggregated_stats
