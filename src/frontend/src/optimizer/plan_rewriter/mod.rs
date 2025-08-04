@@ -15,68 +15,59 @@
 mod plan_cloner;
 mod share_source_rewriter;
 
+use std::collections::HashMap;
+
 use itertools::Itertools;
-use paste::paste;
 pub use plan_cloner::*;
 pub use share_source_rewriter::*;
 
-use crate::for_all_plan_nodes;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::*;
 
-macro_rules! def_rewrite {
-    ( $convention:ident, Share ) => {
-        paste! {
-            /// When we use the plan rewriter, we need to take care of the share operator,
-            /// because our plan is a DAG rather than a tree.
-            /// Make sure this method can keep the shape of DAG.
-            fn [<rewrite_ $convention:snake _ share>](&mut self, plan: &[<$convention Share>]) -> PlanRef;
-        }
-    };
-
-    ( $convention:ident, $name:ident ) => {
-        paste! {
-            #[doc = "Visit [`" [<$convention $name>] "`] , the function should rewrite the inputs."]
-            fn [<rewrite_ $convention:snake _ $name:snake>](&mut self, plan: &[<$convention $name>]) -> PlanRef {
-                let new_inputs = plan
-                    .inputs()
-                    .into_iter()
-                    .map(|input| self.rewrite(input.clone()))
-                    .collect_vec();
-                plan.clone_with_inputs(&new_inputs)
-            }
-        }
-    };
+pub trait PlanRewriter<C: ConventionMarker> {
+    fn rewrite_with_inputs(&mut self, plan: &PlanRef<C>, inputs: Vec<PlanRef<C>>) -> PlanRef<C>;
 }
 
-/// Define `PlanRewriter` trait.
-macro_rules! def_rewriter {
-    ($({ $convention:ident, $name:ident }),*) => {
+impl<C: ConventionMarker> PlanRef<C> {
+    pub fn rewrite_with(&self, rewriter: &mut impl PlanRewriter<C>) -> PlanRef<C> {
+        let mut share_map = HashMap::new();
+        self.rewrite_recursively(rewriter, &mut share_map)
+    }
 
-        /// it's kind of like a [`PlanVisitor<PlanRef>`](super::plan_visitor::PlanVisitor), but with default behaviour of each rewrite method
-        pub trait PlanRewriter {
-            paste! {
-                fn rewrite(&mut self, plan: PlanRef) -> PlanRef{
-                    use risingwave_common::util::recursive::{tracker, Recurse};
-                    use crate::session::current::notice_to_user;
+    fn rewrite_recursively(
+        &self,
+        rewriter: &mut impl PlanRewriter<C>,
+        share_map: &mut HashMap<PlanNodeId, PlanRef<C>>,
+    ) -> PlanRef<C> {
+        use risingwave_common::util::recursive::{Recurse, tracker};
 
-                    tracker!().recurse(|t| {
-                        if t.depth_reaches(PLAN_DEPTH_THRESHOLD) {
-                            notice_to_user(PLAN_TOO_DEEP_NOTICE);
-                        }
-
-                        match plan.node_type() {
-                            $(
-                                PlanNodeType::[<$convention $name>] => self.[<rewrite_ $convention:snake _ $name:snake>](plan.downcast_ref::<[<$convention $name>]>().unwrap()),
-                            )*
-                        }
-                    })
-                }
-
-                $(
-                    def_rewrite! {$convention, $name}
-                )*
+        use crate::session::current::notice_to_user;
+        tracker!().recurse(|t| {
+            if t.depth_reaches(PLAN_DEPTH_THRESHOLD) {
+                notice_to_user(PLAN_TOO_DEEP_NOTICE);
             }
-        }
-    };
+
+            if let Some(share) = self.as_share_node() {
+                let id = share.plan_base().id();
+                return if let Some(share) = share_map.get(&id) {
+                    share.clone()
+                } else {
+                    let input = share.input();
+                    let new_input = input.rewrite_recursively(rewriter, share_map);
+                    let new_plan = C::ShareNode::new_share(generic::Share::new(new_input));
+                    share_map
+                        .try_insert(id, new_plan.clone())
+                        .expect("non-duplicate");
+                    new_plan
+                };
+            }
+
+            let inputs = self
+                .inputs()
+                .iter()
+                .map(|plan| plan.rewrite_recursively(rewriter, share_map))
+                .collect_vec();
+            rewriter.rewrite_with_inputs(self, inputs)
+        })
+    }
 }
-for_all_plan_nodes! { def_rewriter }

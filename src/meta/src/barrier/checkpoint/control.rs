@@ -39,7 +39,7 @@ use crate::barrier::checkpoint::recovery::{
 use crate::barrier::checkpoint::state::BarrierWorkerState;
 use crate::barrier::command::CommandContext;
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompleteBarrierTask};
-use crate::barrier::info::InflightStreamingJobInfo;
+use crate::barrier::info::{InflightStreamingJobInfo, SharedActorInfos};
 use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand, TrackingJob};
 use crate::barrier::rpc::{ControlStreamManager, from_partial_graph_id};
@@ -69,12 +69,14 @@ impl CheckpointControl {
     }
 
     pub(crate) fn recover(
-        databases: impl IntoIterator<Item = (DatabaseId, DatabaseCheckpointControl)>,
+        databases: HashMap<DatabaseId, DatabaseCheckpointControl>,
         failed_databases: HashSet<DatabaseId>,
         control_stream_manager: &mut ControlStreamManager,
         hummock_version_stats: HummockVersionStats,
         env: MetaSrvEnv,
     ) -> Self {
+        env.shared_actor_infos()
+            .retain_databases(databases.keys().chain(&failed_databases).cloned());
         Self {
             env,
             databases: databases
@@ -225,7 +227,10 @@ impl CheckpointControl {
                         job_type: CreateStreamingJobType::Normal,
                         ..
                     } => {
-                        let new_database = DatabaseCheckpointControl::new(database_id);
+                        let new_database = DatabaseCheckpointControl::new(
+                            database_id,
+                            self.env.shared_actor_infos().clone(),
+                        );
                         control_stream_manager.add_partial_graph(database_id, None);
                         entry
                             .insert(DatabaseCheckpointControlStatus::Running(new_database))
@@ -540,10 +545,10 @@ pub(crate) struct DatabaseCheckpointControl {
 }
 
 impl DatabaseCheckpointControl {
-    fn new(database_id: DatabaseId) -> Self {
+    fn new(database_id: DatabaseId, shared_actor_infos: SharedActorInfos) -> Self {
         Self {
             database_id,
-            state: BarrierWorkerState::new(),
+            state: BarrierWorkerState::new(database_id, shared_actor_infos),
             command_ctx_queue: Default::default(),
             completing_barrier: None,
             committed_epoch: None,
@@ -982,11 +987,11 @@ impl DatabaseCheckpointControl {
             warn!("ignore reschedule when creating streaming job with snapshot backfill");
             for notifier in notifiers {
                 notifier.notify_start_failed(
-                        anyhow!(
+                    anyhow!(
                             "cannot reschedule when creating streaming job with snapshot backfill",
                         )
                         .into(),
-                    );
+                );
             }
             return Ok(());
         }
@@ -1067,17 +1072,21 @@ impl DatabaseCheckpointControl {
                         .cloned()
                         .collect();
 
-                    self.creating_streaming_job_controls.insert(
-                        job_id,
-                        CreatingStreamingJobControl::new(
-                            info,
-                            snapshot_backfill_upstream_tables,
-                            barrier_info.prev_epoch(),
-                            hummock_version_stats,
-                            control_stream_manager,
-                            edges.as_mut().expect("should exist"),
-                        )?,
-                    );
+                    let job = CreatingStreamingJobControl::new(
+                        info,
+                        snapshot_backfill_upstream_tables,
+                        barrier_info.prev_epoch(),
+                        hummock_version_stats,
+                        control_stream_manager,
+                        edges.as_mut().expect("should exist"),
+                    )?;
+
+                    self.state
+                        .inflight_graph_info
+                        .shared_actor_infos
+                        .upsert(self.database_id, job.graph_info().fragment_infos.values());
+
+                    self.creating_streaming_job_controls.insert(job_id, job);
                 }
             }
         }

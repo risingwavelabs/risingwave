@@ -15,14 +15,14 @@
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::optimizer::plan_node::{LogicalHopWindow, LogicalJoin};
 use crate::utils::IndexRewriter;
 
 pub struct PullUpHopRule {}
 
-impl Rule for PullUpHopRule {
-    fn apply(&self, plan: crate::PlanRef) -> Option<crate::PlanRef> {
+impl Rule<Logical> for PullUpHopRule {
+    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let join = plan.as_logical_join()?;
 
         let (left, right, on, join_type, mut output_index) = join.clone().decompose();

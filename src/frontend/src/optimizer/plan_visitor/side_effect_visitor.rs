@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{DefaultBehavior, Merge, PlanVisitor};
+use super::{DefaultBehavior, LogicalPlanVisitor, Merge};
 use crate::optimizer::plan_node;
 
 /// Recursively visit the **logical** plan and decide whether it has side effect and cannot be
 /// eliminated trivially.
 pub struct SideEffectVisitor;
 
-impl PlanVisitor for SideEffectVisitor {
+impl LogicalPlanVisitor for SideEffectVisitor {
     type Result = bool;
 
     type DefaultBehavior = impl DefaultBehavior<Self::Result>;

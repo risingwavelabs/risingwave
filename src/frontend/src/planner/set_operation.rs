@@ -14,10 +14,11 @@
 
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
-use crate::PlanRef;
 use crate::binder::{BoundSetExpr, BoundSetOperation};
 use crate::error::Result;
-use crate::optimizer::plan_node::{LogicalExcept, LogicalIntersect, LogicalProject, LogicalUnion};
+use crate::optimizer::plan_node::{
+    LogicalExcept, LogicalIntersect, LogicalPlanRef as PlanRef, LogicalProject, LogicalUnion,
+};
 use crate::planner::Planner;
 
 impl Planner {

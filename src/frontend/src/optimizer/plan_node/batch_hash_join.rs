@@ -20,8 +20,8 @@ use risingwave_pb::plan_common::{AsOfJoinDesc, JoinType};
 use super::batch::prelude::*;
 use super::utils::{Distill, childless_record};
 use super::{
-    EqJoinPredicate, ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchPb,
-    ToDistributedBatch, generic,
+    BatchPlanRef as PlanRef, EqJoinPredicate, ExprRewritable, LogicalJoin, PlanBase,
+    PlanTreeNodeBinary, ToBatchPb, ToDistributedBatch, generic,
 };
 use crate::error::Result;
 use crate::expr::{Expr, ExprRewriter, ExprVisitor};
@@ -125,7 +125,7 @@ impl Distill for BatchHashJoin {
     }
 }
 
-impl PlanTreeNodeBinary for BatchHashJoin {
+impl PlanTreeNodeBinary<Batch> for BatchHashJoin {
     fn left(&self) -> PlanRef {
         self.core.left.clone()
     }
@@ -142,7 +142,7 @@ impl PlanTreeNodeBinary for BatchHashJoin {
     }
 }
 
-impl_plan_tree_node_for_binary! { BatchHashJoin }
+impl_plan_tree_node_for_binary! { Batch, BatchHashJoin }
 
 impl ToDistributedBatch for BatchHashJoin {
     fn to_distributed(&self) -> Result<PlanRef> {
@@ -183,15 +183,15 @@ impl ToDistributedBatch for BatchHashJoin {
                         let right_dist = l2r.rewrite_required_distribution(
                             &RequiredDist::PhysicalDist(left_dist.clone()),
                         );
-                        right = right_dist.enforce_if_not_satisfies(right, &Order::any())?
+                        right = right_dist.batch_enforce_if_not_satisfies(right, &Order::any())?
                     }
                     Distribution::UpstreamHashShard(_, _) => {
                         left =
                             RequiredDist::hash_shard(&self.eq_join_predicate().left_eq_indexes())
-                                .enforce_if_not_satisfies(left, &Order::any())?;
+                                .batch_enforce_if_not_satisfies(left, &Order::any())?;
                         right =
                             RequiredDist::hash_shard(&self.eq_join_predicate().right_eq_indexes())
-                                .enforce_if_not_satisfies(right, &Order::any())?;
+                                .batch_enforce_if_not_satisfies(right, &Order::any())?;
                     }
                     _ => unreachable!(),
                 }
@@ -234,15 +234,15 @@ impl ToBatchPb for BatchHashJoin {
 impl ToLocalBatch for BatchHashJoin {
     fn to_local(&self) -> Result<PlanRef> {
         let right = RequiredDist::single()
-            .enforce_if_not_satisfies(self.right().to_local()?, &Order::any())?;
+            .batch_enforce_if_not_satisfies(self.right().to_local()?, &Order::any())?;
         let left = RequiredDist::single()
-            .enforce_if_not_satisfies(self.left().to_local()?, &Order::any())?;
+            .batch_enforce_if_not_satisfies(self.left().to_local()?, &Order::any())?;
 
         Ok(self.clone_with_left_right(left, right).into())
     }
 }
 
-impl ExprRewritable for BatchHashJoin {
+impl ExprRewritable<Batch> for BatchHashJoin {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

@@ -244,7 +244,6 @@ impl CommandContext {
                     stream_job_fragments,
                     upstream_fragment_downstreams,
                     init_split_assignment,
-                    streaming_job,
                     ..
                 } = info;
                 barrier_manager_context
@@ -255,7 +254,6 @@ impl CommandContext {
                         stream_job_fragments.actor_ids(),
                         upstream_fragment_downstreams,
                         init_split_assignment,
-                        streaming_job.should_notify_creating(),
                     )
                     .await?;
 
@@ -288,6 +286,7 @@ impl CommandContext {
                     upstream_fragment_downstreams,
                     init_split_assignment,
                     to_drop_state_table_ids,
+                    auto_refresh_schema_sinks,
                     ..
                 },
             ) => {
@@ -302,6 +301,21 @@ impl CommandContext {
                         init_split_assignment,
                     )
                     .await?;
+
+                if let Some(sinks) = auto_refresh_schema_sinks {
+                    for sink in sinks {
+                        barrier_manager_context
+                            .metadata_manager
+                            .catalog_controller
+                            .post_collect_job_fragments(
+                                sink.tmp_sink_id,
+                                sink.actor_status.keys().cloned().collect(),
+                                &Default::default(), // upstream_fragment_downstreams is already inserted in the job of upstream table
+                                &Default::default(), // no split assignment
+                            )
+                            .await?;
+                    }
+                }
 
                 // Apply the split changes in source manager.
                 barrier_manager_context
@@ -331,6 +345,8 @@ impl CommandContext {
             Command::DropSubscription { .. } => {}
             Command::MergeSnapshotBackfillStreamingJobs(_) => {}
             Command::StartFragmentBackfill { .. } => {}
+            Command::Refresh { .. } => {}
+            Command::LoadFinish { .. } => {}
         }
 
         Ok(())

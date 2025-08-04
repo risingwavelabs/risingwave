@@ -20,24 +20,25 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, is_source_backfill_table};
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use super::{ApplyResult, BoxedRule, FallibleRule};
+use super::prelude::{PlanRef, *};
 use crate::TableCatalog;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::expr::{ExprImpl, InputRef, Literal, TableFunctionType};
+use crate::optimizer::OptimizerContext;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
-    LogicalProject, LogicalScan, LogicalTableFunction, LogicalUnion, LogicalValues,
+    Logical, LogicalProject, LogicalScan, LogicalTableFunction, LogicalUnion, LogicalValues,
     StreamSourceScan,
 };
-use crate::optimizer::{OptimizerContext, PlanRef};
+use crate::optimizer::rule::{ApplyResult, FallibleRule};
 
 /// Transform the `internal_source_backfill_progress()` table function
 /// into a plan graph which will scan the state tables of source backfill nodes.
 /// It will return the progress of the source backfills,
 /// partitioned by the backfill node's fragment id and partition id.
 pub struct TableFunctionToInternalSourceBackfillProgressRule {}
-impl FallibleRule for TableFunctionToInternalSourceBackfillProgressRule {
-    fn apply(&self, plan: PlanRef) -> ApplyResult {
+impl FallibleRule<Logical> for TableFunctionToInternalSourceBackfillProgressRule {
+    fn apply(&self, plan: PlanRef) -> ApplyResult<PlanRef> {
         let logical_table_function: &LogicalTableFunction = plan.as_logical_table_function()?;
         if logical_table_function.table_function.function_type
             != TableFunctionType::InternalSourceBackfillProgress

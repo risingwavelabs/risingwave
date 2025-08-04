@@ -183,8 +183,7 @@ impl ClusterController {
         }
         self.env
             .notification_manager()
-            .notify_local_subscribers(LocalNotification::WorkerNodeActivated(worker))
-            .await;
+            .notify_local_subscribers(LocalNotification::WorkerNodeActivated(worker));
 
         Ok(())
     }
@@ -208,8 +207,7 @@ impl ClusterController {
         // local notification.
         self.env
             .notification_manager()
-            .notify_local_subscribers(LocalNotification::WorkerNodeDeleted(worker.clone()))
-            .await;
+            .notify_local_subscribers(LocalNotification::WorkerNodeDeleted(worker.clone()));
 
         Ok(worker)
     }
@@ -307,13 +305,10 @@ impl ClusterController {
                                 WorkerType::Frontend
                                 | WorkerType::ComputeNode
                                 | WorkerType::Compactor
-                                | WorkerType::RiseCtl => {
-                                    cluster_controller
-                                        .env
-                                        .notification_manager()
-                                        .delete_sender(worker_type.into(), WorkerKey(host_addr))
-                                        .await
-                                }
+                                | WorkerType::RiseCtl => cluster_controller
+                                    .env
+                                    .notification_manager()
+                                    .delete_sender(worker_type.into(), WorkerKey(host_addr)),
                                 _ => {}
                             };
                         }
@@ -363,10 +358,7 @@ impl ClusterController {
         let (tx, rx) = unbounded_channel();
 
         // insert before release the read lock to ensure that we don't lose any update in between
-        self.env
-            .notification_manager()
-            .insert_local_sender(tx)
-            .await;
+        self.env.notification_manager().insert_local_sender(tx);
         drop(inner);
         Ok((worker_nodes, rx))
     }

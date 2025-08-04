@@ -26,7 +26,7 @@ use risingwave_pb::stream_plan::{PbStreamNode, StreamScanType};
 
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record};
-use super::{ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode, generic};
+use super::{ExprRewritable, PlanBase, PlanNodeId, StreamNode, StreamPlanRef as PlanRef, generic};
 use crate::TableCatalog;
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, ExprVisitor, FunctionCall};
@@ -251,7 +251,7 @@ impl StreamTableScan {
     }
 }
 
-impl_plan_tree_node_for_leaf! { StreamTableScan }
+impl_plan_tree_node_for_leaf! { Stream, StreamTableScan }
 
 impl Distill for StreamTableScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -426,7 +426,7 @@ impl StreamTableScan {
     }
 }
 
-impl ExprRewritable for StreamTableScan {
+impl ExprRewritable<Stream> for StreamTableScan {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

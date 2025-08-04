@@ -30,7 +30,9 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use super::derive::derive_columns;
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record};
-use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode, reorganize_elements_id};
+use super::{
+    ExprRewritable, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, reorganize_elements_id,
+};
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::catalog::{DatabaseId, SchemaId};
 use crate::error::Result;
@@ -123,6 +125,7 @@ impl StreamMaterialize {
             create_type,
             None,
             Engine::Hummock,
+            false,
         )?;
 
         Ok(Self::new(input, table))
@@ -151,6 +154,7 @@ impl StreamMaterialize {
         retention_seconds: Option<NonZeroU32>,
         webhook_info: Option<PbWebhookSourceInfo>,
         engine: Engine,
+        refreshable: bool,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, TableType::Table)?;
 
@@ -173,6 +177,7 @@ impl StreamMaterialize {
             CreateType::Foreground,
             webhook_info,
             engine,
+            refreshable,
         )?;
 
         Ok(Self::new(input, table))
@@ -206,7 +211,7 @@ impl StreamMaterialize {
                         || matches!(input.as_stream_delta_join(), Some(_join));
 
                     if is_stream_join {
-                        return Ok(required_dist.enforce(input, &Order::any()));
+                        return Ok(required_dist.stream_enforce(input));
                     }
 
                     required_dist
@@ -222,7 +227,7 @@ impl StreamMaterialize {
             },
         };
 
-        required_dist.enforce_if_not_satisfies(input, &Order::any())
+        required_dist.streaming_enforce_if_not_satisfies(input)
     }
 
     /// Derive the table catalog with the given arguments.
@@ -249,6 +254,7 @@ impl StreamMaterialize {
         create_type: CreateType,
         webhook_info: Option<PbWebhookSourceInfo>,
         engine: Engine,
+        refreshable: bool,
     ) -> Result<TableCatalog> {
         let input = rewritten_input;
 
@@ -320,6 +326,7 @@ impl StreamMaterialize {
                 }
             },
             clean_watermark_index_in_pk: None, // TODO: fill this field
+            refreshable,
         })
     }
 
@@ -374,7 +381,7 @@ impl Distill for StreamMaterialize {
     }
 }
 
-impl PlanTreeNodeUnary for StreamMaterialize {
+impl PlanTreeNodeUnary<Stream> for StreamMaterialize {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -394,7 +401,7 @@ impl PlanTreeNodeUnary for StreamMaterialize {
     }
 }
 
-impl_plan_tree_node_for_unary! { StreamMaterialize }
+impl_plan_tree_node_for_unary! { Stream, StreamMaterialize }
 
 impl StreamNode for StreamMaterialize {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -416,6 +423,6 @@ impl StreamNode for StreamMaterialize {
     }
 }
 
-impl ExprRewritable for StreamMaterialize {}
+impl ExprRewritable<Stream> for StreamMaterialize {}
 
 impl ExprVisitable for StreamMaterialize {}

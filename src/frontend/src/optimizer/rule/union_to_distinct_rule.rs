@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Rule};
-use crate::optimizer::PlanRef;
+use super::prelude::{PlanRef, *};
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef};
 use crate::optimizer::plan_node::{LogicalUnion, PlanTreeNode};
 
 /// Convert union to distinct + union all
 pub struct UnionToDistinctRule {}
-impl Rule for UnionToDistinctRule {
+impl Rule<Logical> for UnionToDistinctRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let union: &LogicalUnion = plan.as_logical_union()?;
         if !union.all() {

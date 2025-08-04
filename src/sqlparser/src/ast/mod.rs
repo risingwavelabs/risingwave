@@ -1269,6 +1269,10 @@ pub enum Statement {
     Truncate {
         table_name: ObjectName,
     },
+    /// Refresh table
+    Refresh {
+        table_name: ObjectName,
+    },
     /// SELECT
     Query(Box<Query>),
     /// INSERT
@@ -1702,6 +1706,12 @@ pub enum Statement {
     Use {
         db_name: ObjectName,
     },
+    /// `VACUUM [database_name][schema_name][object_name]`
+    ///
+    /// Note: this is a RisingWave specific statement for iceberg table/sink compaction.
+    Vacuum {
+        object_name: ObjectName,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1792,6 +1802,10 @@ impl Statement {
             Statement::Query(s) => write!(f, "{}", s),
             Statement::Truncate { table_name } => {
                 write!(f, "TRUNCATE TABLE {}", table_name)?;
+                Ok(())
+            }
+            Statement::Refresh { table_name } => {
+                write!(f, "REFRESH TABLE {}", table_name)?;
                 Ok(())
             }
             Statement::Analyze { table_name } => {
@@ -2438,6 +2452,10 @@ impl Statement {
             }
             Statement::Use { db_name } => {
                 write!(f, "USE {}", db_name)?;
+                Ok(())
+            }
+            Statement::Vacuum { object_name } => {
+                write!(f, "VACUUM {}", object_name)?;
                 Ok(())
             }
             Statement::AlterFragment {

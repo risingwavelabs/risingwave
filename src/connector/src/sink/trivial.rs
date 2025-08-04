@@ -20,10 +20,7 @@ use risingwave_common::session_config::sink_decouple::SinkDecouple;
 
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
-use crate::sink::{
-    DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkError, SinkLogReader, SinkParam,
-    SinkWriterParam,
-};
+use crate::sink::{LogSinker, Result, Sink, SinkError, SinkLogReader, SinkParam, SinkWriterParam};
 
 pub const BLACKHOLE_SINK: &str = "blackhole";
 pub const TABLE_SINK: &str = "table";
@@ -66,7 +63,6 @@ impl<T: TrivialSinkName> TryFrom<SinkParam> for TrivialSink<T> {
 }
 
 impl<T: TrivialSinkName> Sink for TrivialSink<T> {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = Self;
 
     const SINK_NAME: &'static str = T::SINK_NAME;
@@ -74,8 +70,14 @@ impl<T: TrivialSinkName> Sink for TrivialSink<T> {
     /// Enable sink decoupling for sink-into-table.
     /// Disable sink decoupling for blackhole sink. It introduces overhead without any benefit
     fn is_sink_decouple(user_specified: &SinkDecouple) -> Result<bool> {
-        // TODO(kwannoel): also enable by default, once it's shown to be stable
-        Ok(T::SINK_NAME == TABLE_SINK && matches!(user_specified, SinkDecouple::Enable))
+        match user_specified {
+            SinkDecouple::Enable => Ok(true),
+            SinkDecouple::Default | SinkDecouple::Disable => Ok(false),
+        }
+    }
+
+    fn support_schema_change() -> bool {
+        true
     }
 
     async fn new_log_sinker(&self, _writer_env: SinkWriterParam) -> Result<Self::LogSinker> {

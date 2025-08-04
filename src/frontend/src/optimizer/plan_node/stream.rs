@@ -24,7 +24,7 @@ use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
 ///
 /// [`GenericPlanRef`]: super::generic::GenericPlanRef
 #[auto_impl::auto_impl(&)]
-pub trait StreamPlanRef: PhysicalPlanRef {
+pub trait StreamPlanNodeMetadata: PhysicalPlanRef {
     fn append_only(&self) -> bool;
     fn emit_on_window_close(&self) -> bool;
     fn watermark_columns(&self) -> &WatermarkColumns;
@@ -35,5 +35,5 @@ pub trait StreamPlanRef: PhysicalPlanRef {
 pub mod prelude {
     pub use super::super::Stream;
     pub use super::super::generic::{GenericPlanRef, PhysicalPlanRef};
-    pub use super::StreamPlanRef;
+    pub use super::StreamPlanNodeMetadata;
 }

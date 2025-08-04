@@ -22,9 +22,9 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::utils::{Distill, childless_record};
 use super::{
-    ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalJoin, LogicalProject, PlanBase,
-    PlanNodeType, PlanRef, PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
-    ToStream,
+    ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalJoin, LogicalPlanRef as PlanRef,
+    LogicalProject, PlanBase, PlanNodeType, PlanTreeNodeBinary, PlanTreeNodeUnary,
+    PredicatePushdown, ToBatch, ToStream,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall};
@@ -330,14 +330,14 @@ impl LogicalMultiJoin {
     }
 }
 
-impl PlanTreeNode for LogicalMultiJoin {
-    fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
+impl PlanTreeNode<Logical> for LogicalMultiJoin {
+    fn inputs(&self) -> smallvec::SmallVec<[PlanRef; 2]> {
         let mut vec = smallvec::SmallVec::new();
         vec.extend(self.inputs.clone());
         vec
     }
 
-    fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> PlanRef {
+    fn clone_with_inputs(&self, inputs: &[PlanRef]) -> PlanRef {
         Self::new(
             inputs.to_vec(),
             self.on().clone(),
@@ -818,7 +818,10 @@ impl ToStream for LogicalMultiJoin {
         )
     }
 
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(
+        &self,
+        _ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         panic!(
             "Method not available for `LogicalMultiJoin` which is a placeholder node with \
              a temporary lifetime. It only facilitates join reordering during logical planning."
@@ -827,7 +830,7 @@ impl ToStream for LogicalMultiJoin {
 }
 
 impl ToBatch for LogicalMultiJoin {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         panic!(
             "Method not available for `LogicalMultiJoin` which is a placeholder node with \
              a temporary lifetime. It only facilitates join reordering during logical planning."
@@ -844,7 +847,7 @@ impl ColPrunable for LogicalMultiJoin {
     }
 }
 
-impl ExprRewritable for LogicalMultiJoin {
+impl ExprRewritable<Logical> for LogicalMultiJoin {
     fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
         panic!(
             "Method not available for `LogicalMultiJoin` which is a placeholder node with \

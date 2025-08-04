@@ -266,6 +266,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             job_id: value.0.belongs_to_job_id.map(|id| id as _),
             engine: value.0.engine.map(|engine| PbEngine::from(engine) as i32),
             clean_watermark_index_in_pk: value.0.clean_watermark_index_in_pk,
+            refreshable: value.0.refreshable,
         }
     }
 }
@@ -350,6 +351,10 @@ impl From<ObjectModel<sink::Model>> for PbSink {
                 .original_target_columns
                 .map(|cols| cols.to_protobuf())
                 .unwrap_or_default(),
+            auto_refresh_schema_from_table: value
+                .0
+                .auto_refresh_schema_from_table
+                .map(|id| id as _),
         }
     }
 }

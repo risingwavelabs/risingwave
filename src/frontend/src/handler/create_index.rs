@@ -36,9 +36,11 @@ use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_expr_rewriter::ConstEvalRewriter;
-use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMaterialize};
+use crate::optimizer::plan_node::{
+    Explain, LogicalProject, LogicalScan, StreamMaterialize, StreamPlanRef as PlanRef,
+};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
-use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRoot};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::{GraphJobType, build_graph};
@@ -49,7 +51,7 @@ pub(crate) fn resolve_index_schema(
     table_name: ObjectName,
 ) -> Result<(String, Arc<TableCatalog>, String)> {
     let db_name = &session.database();
-    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
+    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, &table_name)?;
     let search_path = session.config().search_path();
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -97,7 +99,7 @@ pub(crate) fn gen_create_index_plan(
     let mut distributed_columns_expr = vec![];
     for column in columns {
         let order_type = OrderType::from_bools(column.asc, column.nulls_first);
-        let expr_impl = binder.bind_expr(column.expr)?;
+        let expr_impl = binder.bind_expr(&column.expr)?;
         // Do constant folding and timezone transportation on expressions so that batch queries can match it in the same form.
         let mut const_eval = ConstEvalRewriter { error: None };
         let expr_impl = const_eval.rewrite_expr(expr_impl);
@@ -138,13 +140,13 @@ pub(crate) fn gen_create_index_plan(
     } else {
         for column in include {
             let expr_impl =
-                binder.bind_expr(risingwave_sqlparser::ast::Expr::Identifier(column))?;
+                binder.bind_expr(&risingwave_sqlparser::ast::Expr::Identifier(column))?;
             include_columns_expr.push(expr_impl);
         }
     };
 
     for column in distributed_by {
-        let expr_impl = binder.bind_expr(column)?;
+        let expr_impl = binder.bind_expr(&column)?;
         distributed_columns_expr.push(expr_impl);
     }
 

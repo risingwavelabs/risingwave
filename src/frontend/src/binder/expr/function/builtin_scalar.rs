@@ -281,7 +281,7 @@ impl Binder {
                     if inputs[0].return_type() != DataType::Varchar {
                         // Support `quote_literal(any)` by converting it to `quote_literal(any::text)`
                         // Ref. https://github.com/postgres/postgres/blob/REL_16_1/src/include/catalog/pg_proc.dat#L4641
-                        FunctionCall::cast_mut(&mut inputs[0], DataType::Varchar, CastContext::Explicit)?;
+                        FunctionCall::cast_mut(&mut inputs[0], &DataType::Varchar, CastContext::Explicit)?;
                     }
                     Ok(FunctionCall::new_unchecked(ExprType::QuoteLiteral, inputs, DataType::Varchar).into())
                 }))),
@@ -289,7 +289,7 @@ impl Binder {
                     if inputs[0].return_type() != DataType::Varchar {
                         // Support `quote_nullable(any)` by converting it to `quote_nullable(any::text)`
                         // Ref. https://github.com/postgres/postgres/blob/REL_16_1/src/include/catalog/pg_proc.dat#L4650
-                        FunctionCall::cast_mut(&mut inputs[0], DataType::Varchar, CastContext::Explicit)?;
+                        FunctionCall::cast_mut(&mut inputs[0], &DataType::Varchar, CastContext::Explicit)?;
                     }
                     Ok(FunctionCall::new_unchecked(ExprType::QuoteNullable, inputs, DataType::Varchar).into())
                 }))),
@@ -319,7 +319,7 @@ impl Binder {
                     } else {
                         ""
                     };
-                    inputs[0].cast_implicit_mut(DataType::Bytea).map_err(|e| {
+                    inputs[0].cast_implicit_mut(&DataType::Bytea).map_err(|e| {
                         ErrorCode::BindError(format!("{} in `recv`.{hint}", e.as_report()))
                     })?;
                     Ok(FunctionCall::new_unchecked(ExprType::PgwireRecv, inputs, DataType::Int64).into())
@@ -371,7 +371,7 @@ impl Binder {
                         let (arg0, arg1) = inputs.into_iter().next_tuple().unwrap();
                         // rewrite into `CASE WHEN 0 < arg1 AND arg1 <= array_ndims(arg0) THEN 1 END`
                         let ndims_expr = binder.bind_builtin_scalar_function("array_ndims", vec![arg0], false)?;
-                        let arg1 = arg1.cast_implicit(DataType::Int32)?;
+                        let arg1 = arg1.cast_implicit(&DataType::Int32)?;
 
                         FunctionCall::new(
                             ExprType::Case,
@@ -436,6 +436,9 @@ impl Binder {
                 ("map_length", raw_call(ExprType::MapLength)),
                 // vector
                 ("l2_distance", raw_call(ExprType::L2Distance)),
+                ("cosine_distance", raw_call(ExprType::CosineDistance)),
+                ("l1_distance", raw_call(ExprType::L1Distance)),
+                ("inner_product", raw_call(ExprType::InnerProduct)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least
@@ -721,7 +724,8 @@ impl Binder {
                 // internal
                 ("rw_vnode", raw_call(ExprType::VnodeUser)),
                 ("rw_license", raw_call(ExprType::License)),
-                ("rw_test_paid_tier", raw_call(ExprType::TestPaidTier)), // for testing purposes
+                ("rw_test_paid_tier", raw_call(ExprType::TestFeature)), // deprecated, kept for compatibility
+                ("rw_test_feature", raw_call(ExprType::TestFeature)), // for testing purposes
                 // TODO: choose which pg version we should return.
                 ("version", raw_literal(ExprImpl::literal_varchar(current_cluster_version()))),
                 // non-deterministic
@@ -736,7 +740,7 @@ impl Binder {
                 // cast functions
                 // only functions required by the existing PostgreSQL tool are implemented
                 ("date", guard_by_len(1, raw(|_binder, inputs| {
-                    inputs[0].clone().cast_explicit(DataType::Date).map_err(Into::into)
+                    inputs[0].clone().cast_explicit(&DataType::Date).map_err(Into::into)
                 }))),
 
                 // AI model functions
@@ -885,7 +889,7 @@ fn rewrite_two_bool_inputs(mut inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
     let left = inputs.pop().unwrap();
     let right = inputs.pop().unwrap();
     Ok(vec![
-        left.cast_implicit(DataType::Boolean)?,
-        right.cast_implicit(DataType::Boolean)?,
+        left.cast_implicit(&DataType::Boolean)?,
+        right.cast_implicit(&DataType::Boolean)?,
     ])
 }

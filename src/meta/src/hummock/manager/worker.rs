@@ -30,7 +30,7 @@ pub enum HummockManagerEvent {
 }
 
 impl HummockManager {
-    pub async fn start_worker(
+    pub fn start_worker(
         self: &HummockManagerRef,
         mut receiver: HummockManagerEventReceiver,
     ) -> JoinHandle<()> {
@@ -38,8 +38,7 @@ impl HummockManager {
             tokio::sync::mpsc::unbounded_channel();
         self.env
             .notification_manager()
-            .insert_local_sender(local_notification_tx)
-            .await;
+            .insert_local_sender(local_notification_tx);
         let hummock_manager = self.clone();
         tokio::spawn(async move {
             loop {

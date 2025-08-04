@@ -17,9 +17,8 @@ use std::collections::HashMap;
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::{LogicalFilter, LogicalJoin, LogicalProject};
 use crate::optimizer::plan_visitor::PlanCorrelatedIdFinder;
 use crate::utils::Condition;
@@ -55,7 +54,7 @@ use crate::utils::Condition;
 ///  Domain       RHS
 /// ```
 pub struct ApplyEliminateRule {}
-impl Rule for ApplyEliminateRule {
+impl Rule<Logical> for ApplyEliminateRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =

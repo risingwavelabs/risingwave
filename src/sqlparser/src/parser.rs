@@ -317,6 +317,7 @@ impl Parser<'_> {
                 Keyword::FETCH => Ok(self.parse_fetch_cursor()?),
                 Keyword::CLOSE => Ok(self.parse_close_cursor()?),
                 Keyword::TRUNCATE => Ok(self.parse_truncate()?),
+                Keyword::REFRESH => Ok(self.parse_refresh()?),
                 Keyword::CREATE => Ok(self.parse_create()?),
                 Keyword::DISCARD => Ok(self.parse_discard()?),
                 Keyword::DROP => Ok(self.parse_drop()?),
@@ -356,6 +357,7 @@ impl Parser<'_> {
                 Keyword::WAIT => Ok(Statement::Wait),
                 Keyword::RECOVER => Ok(Statement::Recover),
                 Keyword::USE => Ok(self.parse_use()?),
+                Keyword::VACUUM => Ok(self.parse_vacuum()?),
                 _ => self.expected_at(checkpoint, "statement"),
             },
             Token::LParen => {
@@ -372,10 +374,22 @@ impl Parser<'_> {
         Ok(Statement::Truncate { table_name })
     }
 
+    pub fn parse_refresh(&mut self) -> ModalResult<Statement> {
+        self.expect_keyword(Keyword::TABLE)?;
+        let table_name = self.parse_object_name()?;
+        Ok(Statement::Refresh { table_name })
+    }
+
     pub fn parse_analyze(&mut self) -> ModalResult<Statement> {
         let table_name = self.parse_object_name()?;
 
         Ok(Statement::Analyze { table_name })
+    }
+
+    pub fn parse_vacuum(&mut self) -> ModalResult<Statement> {
+        let object_name = self.parse_object_name()?;
+
+        Ok(Statement::Vacuum { object_name })
     }
 
     /// Tries to parse a wildcard expression. If it is not a wildcard, parses an expression.
