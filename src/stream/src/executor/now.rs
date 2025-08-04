@@ -560,7 +560,12 @@ mod tests {
     async fn test_now_with_progress_ratio() -> StreamExecutorResult<()> {
         let state_store = create_state_store();
         let progress_ratio = Some(2.0);
-        let (tx, mut now) = create_executor_with_progress_ratio(NowMode::UpdateCurrent, &state_store, progress_ratio).await;
+        let (tx, mut now) = create_executor_with_progress_ratio(
+            NowMode::UpdateCurrent,
+            &state_store,
+            progress_ratio,
+        )
+        .await;
 
         // Init barrier at epoch 1 (timestamp 2021-04-01T00:00:00.001Z)
         tx.send(Barrier::new_test_barrier(test_epoch(1))).unwrap();
@@ -592,7 +597,7 @@ mod tests {
         );
 
         // Send next barrier at epoch 5 (timestamp 2021-04-01T00:00:00.005Z)
-        // With progress_ratio = 2.0 and barrier_interval_ms = 1000, 
+        // With progress_ratio = 2.0 and barrier_interval_ms = 1000,
         // adjusted timestamp should be: 1 + (1000 * 2.0) = 2001ms = 2021-04-01T00:00:02.001Z
         // Since 2001 < 5, the adjusted timestamp should be used
         tx.send(Barrier::with_prev_epoch_for_test(
@@ -612,7 +617,7 @@ mod tests {
             StreamChunk::from_pretty(
                 " TZ
                 - 2021-04-01T00:00:00.001Z
-                + 2021-04-01T00:00:02.001Z"  // adjusted timestamp
+                + 2021-04-01T00:00:02.001Z" // adjusted timestamp
             )
         );
 
@@ -648,7 +653,7 @@ mod tests {
             StreamChunk::from_pretty(
                 " TZ
                 - 2021-04-01T00:00:02.001Z
-                + 2021-04-01T00:00:04.001Z"  // adjusted timestamp
+                + 2021-04-01T00:00:04.001Z" // adjusted timestamp
             )
         );
 
@@ -672,7 +677,7 @@ mod tests {
             StreamChunk::from_pretty(
                 " TZ
                 - 2021-04-01T00:00:04.001Z
-                + 2021-04-01T00:00:06.001Z"  // adjusted timestamp
+                + 2021-04-01T00:00:06.001Z" // adjusted timestamp
             )
         );
 
@@ -696,7 +701,7 @@ mod tests {
             StreamChunk::from_pretty(
                 " TZ
                 - 2021-04-01T00:00:06.001Z
-                + 2021-04-01T00:00:08.001Z"  // adjusted timestamp
+                + 2021-04-01T00:00:08.001Z" // adjusted timestamp
             )
         );
 
@@ -721,7 +726,7 @@ mod tests {
             StreamChunk::from_pretty(
                 " TZ
                 - 2021-04-01T00:00:08.001Z
-                + 2021-04-01T00:00:10.001Z"  // adjusted timestamp
+                + 2021-04-01T00:00:10.001Z" // adjusted timestamp
             )
         );
 
@@ -746,7 +751,7 @@ mod tests {
             StreamChunk::from_pretty(
                 " TZ
                 - 2021-04-01T00:00:10.001Z
-                + 2021-04-01T00:00:12.001Z"  // adjusted timestamp
+                + 2021-04-01T00:00:12.001Z" // adjusted timestamp
             )
         );
 
@@ -869,7 +874,7 @@ mod tests {
     async fn create_executor_with_progress_ratio(
         mode: NowMode,
         state_store: &MemoryStateStore,
-        progress_ratio: Option<f32>
+        progress_ratio: Option<f32>,
     ) -> (UnboundedSender<Barrier>, BoxedMessageStream) {
         let table_id = TableId::new(1);
         let column_descs = vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Timestamptz)];
