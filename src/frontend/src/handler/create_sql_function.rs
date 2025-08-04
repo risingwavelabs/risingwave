@@ -226,7 +226,12 @@ pub async fn handle_create_sql_function(
                 }
             }
             Err(e) => {
-                // TODO: simplify error reporting
+                // If it's a parser error, just return the original error message.
+                if let ErrorCode::InvalidInputSyntax(_) = e.inner() {
+                    return Err(e);
+                }
+
+                // TODO: this seems to be "too user-friendly", we should probably simplify the error reporting
                 let invalid_msg = e.bind_root_removed().to_report_string();
 
                 // First validate the message

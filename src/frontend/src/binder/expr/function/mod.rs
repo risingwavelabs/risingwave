@@ -29,7 +29,7 @@ use risingwave_sqlparser::ast::{
     self, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, FunctionArgList, Ident,
     OrderByExpr, Statement, Window,
 };
-use risingwave_sqlparser::parser::ParserError;
+use risingwave_sqlparser::parser::Parser;
 
 use crate::binder::Binder;
 use crate::binder::bind_context::Clause;
@@ -679,13 +679,7 @@ impl Binder {
         args: Vec<ExprImpl>,
     ) -> Result<ExprImpl> {
         // This represents the current user defined function is `language sql`
-        let ast = match risingwave_sqlparser::parser::Parser::parse_sql(body) {
-            Ok(ast) => ast,
-            Err(ParserError::ParserError(err) | ParserError::TokenizerError(err)) => {
-                // Here we just return the original parse error message
-                return Err(ErrorCode::InvalidInputSyntax(err).into());
-            }
-        };
+        let ast = Parser::parse_sql(body)?;
 
         // Stash the current arguments.
         // TODO: should this always be empty, as SQL UDF must be a `ExprImpl::Subquery` which always
