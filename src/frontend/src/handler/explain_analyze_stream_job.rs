@@ -25,6 +25,17 @@ use crate::handler::explain_analyze_stream_job::graph::{
 };
 use crate::handler::{HandlerArgs, RwPgResponse, RwPgResponseBuilder, RwPgResponseBuilderExt};
 
+#[macro_export]
+macro_rules! debug_panic_or_warn {
+    ($($arg:tt)*) => {
+        if cfg!(debug_assertions) {
+            panic!($($arg)*);
+        } else {
+            tracing::warn!($($arg)*);
+        }
+    };
+}
+
 #[derive(Fields)]
 struct ExplainAnalyzeStreamJobOutput {
     identity: String,
@@ -351,22 +362,22 @@ mod metrics {
             let mut delta_aggregated_stats = Self::new();
             for executor_id in executor_ids {
                 let Some(initial_stats) = initial.executor_stats.get(executor_id) else {
-                    tracing::warn!("missing initial stats for executor {}", executor_id);
+                    debug_panic_or_warn!("missing initial stats for executor {}", executor_id);
                     continue;
                 };
                 let Some(end_stats) = end.executor_stats.get(executor_id) else {
-                    tracing::warn!("missing final stats for executor {}", executor_id);
+                    debug_panic_or_warn!("missing final stats for executor {}", executor_id);
                     continue;
                 };
 
                 let initial_throughput = initial_stats.total_output_throughput;
                 let end_throughput = end_stats.total_output_throughput;
                 let Some(delta_throughput) = end_throughput.checked_sub(initial_throughput) else {
-                    tracing::warn!(
+                    debug_panic_or_warn!(
+                        "delta throughput is negative for executor {} (initial: {}, end: {})",
+                        executor_id,
                         initial_throughput,
-                        end_throughput,
-                        "delta throughput is negative for executor {}",
-                        executor_id
+                        end_throughput
                     );
                     continue;
                 };
@@ -374,11 +385,11 @@ mod metrics {
                 let initial_pending_ns = initial_stats.total_output_pending_ns;
                 let end_pending_ns = end_stats.total_output_pending_ns;
                 let Some(delta_pending_ns) = end_pending_ns.checked_sub(initial_pending_ns) else {
-                    tracing::warn!(
+                    debug_panic_or_warn!(
+                        "delta pending ns is negative for executor {} (initial: {}, end: {})",
+                        executor_id,
                         initial_pending_ns,
-                        end_pending_ns,
-                        "delta pending ns is negative for executor {}",
-                        executor_id
+                        end_pending_ns
                     );
                     continue;
                 };
@@ -396,11 +407,11 @@ mod metrics {
 
             for fragment_id in dispatch_fragment_ids {
                 let Some(initial_stats) = initial.dispatch_stats.get(fragment_id) else {
-                    tracing::warn!("missing initial stats for fragment {}", fragment_id);
+                    debug_panic_or_warn!("missing initial stats for fragment {}", fragment_id);
                     continue;
                 };
                 let Some(end_stats) = end.dispatch_stats.get(fragment_id) else {
-                    tracing::warn!("missing final stats for fragment {}", fragment_id);
+                    debug_panic_or_warn!("missing final stats for fragment {}", fragment_id);
                     continue;
                 };
                 let delta_stats = DispatchMetrics {
