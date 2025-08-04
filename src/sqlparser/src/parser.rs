@@ -2513,6 +2513,8 @@ impl Parser<'_> {
             distributed_by = self.parse_comma_separated(Parser::parse_expr)?;
             self.expect_token(&Token::RParen)?;
         }
+        let with_properties = WithProperties(self.parse_with_properties()?);
+
         Ok(Statement::CreateIndex {
             name: index_name,
             table_name,
@@ -2522,6 +2524,7 @@ impl Parser<'_> {
             distributed_by,
             unique,
             if_not_exists,
+            with_properties,
         })
     }
 
