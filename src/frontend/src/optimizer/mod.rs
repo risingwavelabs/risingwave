@@ -919,8 +919,17 @@ impl LogicalPlanRoot {
         // Determine if the table should be refreshable based on the connector type
         let refreshable = source_catalog
             .as_ref()
-            .map(|catalog| catalog.with_properties.is_refreshable_connector())
+            .map(|catalog| catalog.with_properties.is_batch_connector())
             .unwrap_or(false);
+
+        // Validate that refreshable tables have a user-defined primary key (i.e., does not have rowid)
+        if refreshable && row_id_index.is_some() {
+            return Err(crate::error::ErrorCode::BindError(
+                "Refreshable tables must have a PRIMARY KEY. Please define a primary key for the table."
+                    .to_owned(),
+            )
+            .into());
+        }
 
         StreamMaterialize::create_for_table(
             stream_plan,
