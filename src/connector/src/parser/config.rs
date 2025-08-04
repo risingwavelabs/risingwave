@@ -262,49 +262,12 @@ impl SpecificParserConfig {
                 | SourceFormat::Canal
                 | SourceFormat::Upsert,
                 SourceEncode::Json,
-            ) => {
-                let mut timestamptz_handling =
-                    TimestamptzHandling::from_options(&format_encode_options_with_secret)?;
-
-                if timestamptz_handling.is_none() {
-                    if let Some(time_precision_mode) =
-                        format_encode_options_with_secret.get("debezium.time.precision.mode")
-                    {
-                        match time_precision_mode.as_str() {
-                            "connect" => {
-                                timestamptz_handling = Some(TimestamptzHandling::Milli);
-                                tracing::info!(
-                                    "Auto-setting timestamptz_handling to Milli for connect mode"
-                                );
-                            }
-                            "adaptive_time_microseconds" => {
-                                timestamptz_handling = Some(TimestamptzHandling::GuessNumberUnit);
-                                tracing::info!(
-                                    "Auto-setting timestamptz_handling to GuessNumberUnit for adaptive_time_microseconds mode"
-                                );
-                            }
-                            _ => {
-                                tracing::info!(
-                                    "No auto-setting for time.precision.mode: {}",
-                                    time_precision_mode
-                                );
-                            }
-                        }
-                    }
-                }
-
-                // 添加调试日志
-                tracing::info!(
-                    "JsonProperties timestamptz_handling: {:?}, format_encode_options: {:?}",
-                    timestamptz_handling,
-                    format_encode_options_with_secret
-                );
-
-                EncodingProperties::Json(JsonProperties {
-                    use_schema_registry: info.use_schema_registry,
-                    timestamptz_handling,
-                })
-            }
+            ) => EncodingProperties::Json(JsonProperties {
+                use_schema_registry: info.use_schema_registry,
+                timestamptz_handling: TimestamptzHandling::from_options(
+                    &format_encode_options_with_secret,
+                )?,
+            }),
             (SourceFormat::DebeziumMongo, SourceEncode::Json) => {
                 let props = MongoProperties::from(&format_encode_options_with_secret);
                 EncodingProperties::MongoJson(props)

@@ -72,7 +72,7 @@ async fn build_accessor_builder(
             DebeziumJsonAccessBuilder::new(
                 json_config
                     .timestamptz_handling
-                    .unwrap_or(TimestamptzHandling::Milli),
+                    .unwrap_or(TimestamptzHandling::GuessNumberUnit),
             )?,
         )),
         _ => bail!("unsupported encoding for Debezium"),
@@ -85,7 +85,6 @@ impl DebeziumParser {
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
     ) -> ConnectorResult<Self> {
-        println!("哈哈这里{:?}", source_ctx.connector_props);
         let key_builder =
             build_accessor_builder(props.encoding_config.clone(), EncodingType::Key).await?;
         let payload_builder =
