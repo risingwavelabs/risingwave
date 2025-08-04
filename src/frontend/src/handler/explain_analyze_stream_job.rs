@@ -60,7 +60,13 @@ pub async fn handle_explain_analyze_stream_job(
         .collect::<HashMap<_, _>>();
     let (root_node, dispatcher_fragment_ids, adjacency_list) = extract_stream_node_infos(fragments);
     let (executor_ids, operator_to_executor) = extract_executor_infos(&adjacency_list);
-    tracing::debug!(?fragment_parallelisms, ?root_node, ?dispatcher_fragment_ids, ?adjacency_list, "init info");
+    tracing::debug!(
+        ?fragment_parallelisms,
+        ?root_node,
+        ?dispatcher_fragment_ids,
+        ?adjacency_list,
+        "init info"
+    );
 
     let worker_nodes = net::list_stream_worker_nodes(handler_args.session.env()).await?;
 
@@ -520,7 +526,10 @@ mod metrics {
                 let operator_id = operator_id_for_dispatch(*fragment_id);
                 let total_output_throughput = dispatch_metrics.total_output_throughput;
                 let Some(fragment_parallelism) = fragment_parallelisms.get(fragment_id) else {
-                    debug_panic_or_warn!("missing fragment parallelism for fragment {}", fragment_id);
+                    debug_panic_or_warn!(
+                        "missing fragment parallelism for fragment {}",
+                        fragment_id
+                    );
                     continue;
                 };
                 let total_output_pending_ns =
@@ -594,7 +603,11 @@ mod graph {
     /// Extracts the root node of the plan, as well as the adjacency list
     pub(super) fn extract_stream_node_infos(
         fragments: Vec<FragmentInfo>,
-    ) -> (OperatorId, HashSet<FragmentId>, HashMap<OperatorId, StreamNode>) {
+    ) -> (
+        OperatorId,
+        HashSet<FragmentId>,
+        HashMap<OperatorId, StreamNode>,
+    ) {
         let job_fragment_ids = fragments.iter().map(|f| f.id).collect::<HashSet<_>>();
 
         // Finds root nodes of the graph
@@ -711,7 +724,11 @@ mod graph {
             }
         }
 
-        (root_node.unwrap(), dispatcher_fragment_ids, operator_id_to_stream_node)
+        (
+            root_node.unwrap(),
+            dispatcher_fragment_ids,
+            operator_id_to_stream_node,
+        )
     }
 
     pub(super) fn extract_executor_infos(
@@ -728,7 +745,8 @@ mod graph {
                 if node.identity != NodeBodyDiscriminants::BatchPlan
                 // FIXME(kwannoel): Add back after https://github.com/risingwavelabs/risingwave/issues/22775 is resolved.
                 && node.identity != NodeBodyDiscriminants::Merge
-                && node.identity != NodeBodyDiscriminants::Project {
+                && node.identity != NodeBodyDiscriminants::Project
+                {
                     assert!(executor_ids.insert(executor_id));
                 }
                 assert!(
