@@ -695,8 +695,6 @@ impl Binder {
         let ast = Parser::parse_sql(body)?;
 
         // Stash the current arguments.
-        // TODO: should this always be empty, as SQL UDF must be a `ExprImpl::Subquery` which always
-        // push a new context?
         let stashed_udf_arguments = self.context.udf_arguments.take();
 
         // The actual inline logic for sql udf
@@ -727,21 +725,20 @@ impl Binder {
             .into());
         }
 
-        if let Ok(expr) = Self::extract_udf_expr(ast) {
-            let bind_result = self.bind_expr(&expr);
-
-            // Restore arguments information for subsequent binding.
-            self.context.udf_arguments = stashed_udf_arguments;
-
-            return bind_result;
-        }
-
-        Err(ErrorCode::InvalidInputSyntax(
-            "failed to parse the input query and extract the udf expression,
+        let Ok(expr) = Self::extract_udf_expr(ast) else {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "failed to parse the input query and extract the udf expression, \
                 please recheck the syntax"
-                .to_owned(),
-        )
-        .into())
+                    .to_owned(),
+            )
+            .into());
+        };
+
+        let bind_result = self.bind_expr(&expr);
+        // Restore arguments information for subsequent binding.
+        self.context.udf_arguments = stashed_udf_arguments;
+
+        bind_result
     }
 
     fn bind_sql_udf(
