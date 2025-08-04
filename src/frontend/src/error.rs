@@ -275,19 +275,3 @@ impl From<RwError> for tonic::Status {
         err.to_status(tonic::Code::Internal, "RwError")
     }
 }
-
-impl RwError {
-    /// Returns the error with [`ErrorCode::BindErrorRoot`] layers removed from the source chain,
-    /// giving a more concise error message.
-    pub fn bind_root_removed(self) -> Self {
-        let inner = self.into_inner();
-        if let ErrorCode::BindErrorRoot { expr: _, error } = inner {
-            match error.downcast::<RwError>() {
-                Ok(error) => error.bind_root_removed(),
-                Err(error) => anyhow::anyhow!(error).into(),
-            }
-        } else {
-            inner.into()
-        }
-    }
-}

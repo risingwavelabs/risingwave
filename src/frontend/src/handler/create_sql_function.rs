@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use either::Either;
-use fancy_regex::Regex;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::StructType;
 use risingwave_pb::catalog::PbFunction;
@@ -22,76 +21,6 @@ use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use super::*;
 use crate::expr::{Expr, Literal};
 use crate::{Binder, bind_data_type};
-
-/// The error type for hint display
-/// Currently we will try invalid parameter first
-/// Then try to find non-existent functions
-enum ErrMsgType {
-    Parameter,
-    Function,
-    // Not yet support
-    None,
-}
-
-const DEFAULT_ERR_MSG: &str = "Failed to conduct semantic check";
-
-/// Used for hint display
-const PROMPT: &str = "In SQL UDF definition: ";
-
-/// Used for detecting non-existent function
-const FUNCTION_KEYWORD: &str = "function";
-
-/// Used for detecting invalid parameters
-pub const SQL_UDF_PATTERN: &str = "[sql udf]";
-
-/// Validate the error message to see if
-/// it's possible to improve the display to users
-fn validate_err_msg(invalid_msg: &str) -> ErrMsgType {
-    // First try invalid parameters
-    if invalid_msg.contains(SQL_UDF_PATTERN) {
-        ErrMsgType::Parameter
-    } else if invalid_msg.contains(FUNCTION_KEYWORD) {
-        ErrMsgType::Function
-    } else {
-        // Nothing could be better display
-        ErrMsgType::None
-    }
-}
-
-/// Extract the target name to hint display
-/// according to the type of the error message item
-fn extract_hint_display_target(err_msg_type: ErrMsgType, invalid_msg: &str) -> Option<&str> {
-    match err_msg_type {
-        // e.g., [sql udf] failed to find named parameter <target name>
-        ErrMsgType::Parameter => invalid_msg.split_whitespace().last(),
-        // e.g., function <target name> does not exist
-        ErrMsgType::Function => {
-            let func = invalid_msg.split_whitespace().nth(1).unwrap_or("null");
-            // Note: we do not want the parenthesis
-            func.find('(').map(|i| &func[0..i])
-        }
-        // Nothing to hint display, return default error message
-        ErrMsgType::None => None,
-    }
-}
-
-/// Find the pattern for better hint display
-/// return the exact index where the pattern first appears
-fn find_target(input: &str, target: &str) -> Option<usize> {
-    // Regex pattern to find `target` not preceded or followed by an ASCII letter
-    // The pattern uses negative lookbehind (?<!...) and lookahead (?!...) to ensure
-    // the target is not surrounded by ASCII alphabetic characters
-    let pattern = format!(r"(?<![A-Za-z]){0}(?![A-Za-z])", fancy_regex::escape(target));
-    let Ok(re) = Regex::new(&pattern) else {
-        return None;
-    };
-
-    let Ok(Some(ma)) = re.find(input) else {
-        return None;
-    };
-
-    Some(ma.start())
-}
 
 pub async fn handle_create_sql_function(
     handler_args: HandlerArgs,
@@ -213,56 +142,16 @@ pub async fn handle_create_sql_function(
             .map(|ty| Literal::new(None, ty.clone()).into() /* NULL */)
             .collect();
 
-        match binder.bind_sql_udf_inner(&body, &arg_names, args) {
-            Ok(expr) => {
-                // Check if the return type mismatches
-                if expr.return_type() != return_type {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "return type mismatch detected\nexpected: [{}]\nactual: [{}]\nplease adjust your function definition accordingly",
-                        return_type,
-                        expr.return_type()
-                    ))
-                    .into());
-                }
-            }
-            Err(e) => {
-                // If it's a parser error, just return the original error message.
-                if let ErrorCode::InvalidInputSyntax(_) = e.inner() {
-                    return Err(e);
-                }
+        let expr = binder.bind_sql_udf_inner(&body, &arg_names, args)?;
 
-                // TODO: this seems to be "too user-friendly", we should probably simplify the error reporting
-                let invalid_msg = e.bind_root_removed().to_report_string();
-
-                // First validate the message
-                let err_msg_type = validate_err_msg(invalid_msg.as_str());
-
-                // Get the name of the invalid item
-                // We will just display the first one found
-                let Some(invalid_item_name) =
-                    extract_hint_display_target(err_msg_type, invalid_msg.as_str())
-                else {
-                    return Err(ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into());
-                };
-
-                // Find the invalid parameter / column / function
-                let Some(idx) = find_target(body.as_str(), invalid_item_name) else {
-                    return Err(ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into());
-                };
-
-                // The exact error position for `^` to point to
-                let position = format!(
-                    "{}{}",
-                    " ".repeat(idx + PROMPT.len() + 1),
-                    "^".repeat(invalid_item_name.len())
-                );
-
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "{}\n{}\n{}`{}`\n{}",
-                    DEFAULT_ERR_MSG, invalid_msg, PROMPT, body, position
-                ))
-                .into());
-            }
+        // Check if the return type mismatches
+        if expr.return_type() != return_type {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "\nreturn type mismatch detected\nexpected: [{}]\nactual: [{}]\nplease adjust your function definition accordingly",
+                return_type,
+                expr.return_type()
+            ))
+            .into());
         }
     }
 
