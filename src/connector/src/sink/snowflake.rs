@@ -15,16 +15,21 @@
 use core::num::NonZeroU64;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
+use bytes::BytesMut;
+use opendal::Operator;
 use phf::{Set, phf_set};
 use risingwave_common::array::{ArrayImpl, DataChunk, Op, PrimitiveArray, StreamChunk, Utf8Array};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
+use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::{SinkMetadata, sink_metadata};
 use sea_orm::DatabaseConnection;
 use serde::Deserialize;
+use serde_json::{Map, Value};
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedSender;
@@ -35,6 +40,10 @@ use crate::connector_common::IcebergSinkCompactionUpdate;
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::decouple_checkpoint_log_sink::default_commit_checkpoint_interval;
+use crate::sink::encoder::{JsonEncoder, JsonbHandlingMode, TimeHandlingMode, TimestampHandlingMode, TimestamptzHandlingMode, RowEncoder};
+use crate::sink::file_sink::opendal_sink::FileSink;
+use crate::sink::file_sink::s3::{S3Config, S3Sink};
+use std::fmt::Write;
 use crate::sink::jdbc_jni_client::{self, JdbcJniClient};
 use crate::sink::remote::CoordinatedRemoteSinkWriter;
 use crate::sink::writer::SinkWriter;
@@ -99,6 +108,16 @@ pub struct SnowflakeConfig {
     #[serde(rename = "create_table_if_not_exists")]
     #[serde_as(as = "DisplayFromStr")]
     pub create_table_if_not_exists: bool,
+
+    #[serde(default)]
+    #[serde(rename = "with_s3")]
+    pub with_s3: bool,
+
+    #[serde(flatten)]
+    pub s3_inner: S3Config,
+
+    #[serde(rename = "snowflake.stage")]
+    pub stage: Option<String>,
 }
 
 fn default_schedule() -> u64 {
@@ -169,6 +188,14 @@ impl SnowflakeConfig {
         let jdbc_url = format!("{}?user={}&password={}", jdbc_url, username, password);
         let client = JdbcJniClient::new(jdbc_url)?;
 
+        if self.with_s3 {
+            let stage = self
+                .stage
+                .clone()
+                .ok_or(SinkError::Config(anyhow!("snowflake.stage is required")))?;
+            snowflake_task_ctx.stage = Some(stage);
+            snowflake_task_ctx.pipe_name = Some(format!("{}_pipe", target_table_name));
+        }
         if !is_append_only {
             let cdc_table_name = self
                 .snowflake_cdc_table_name
@@ -388,12 +415,222 @@ impl AugmentedChunk {
         Ok(chunk)
     }
 }
-pub struct SnowflakeSinkWriter {
+
+pub enum SnowflakeSinkWriter {
+    S3(SnowflakeSinkS3Writer),
+    Jdbc(SnowflakeSinkJdbcWriter),
+}
+
+impl SnowflakeSinkWriter {
+    pub async fn new(
+        config: SnowflakeConfig,
+        is_append_only: bool,
+        writer_param: SinkWriterParam,
+        param: SinkParam,
+    ) -> Result<Self> {
+        let schema = param.schema();
+        if config.with_s3 {
+            let executor_id = writer_param.executor_id;
+            let s3_writer = SnowflakeSinkS3Writer::new(
+                config,
+                schema,
+                is_append_only,
+                executor_id,
+            )?;
+            Ok(Self::S3(s3_writer))
+        } else {
+            let jdbc_writer = SnowflakeSinkJdbcWriter::new(
+                config,
+                is_append_only,
+                writer_param,
+                param,
+            )
+            .await?;
+            Ok(Self::Jdbc(jdbc_writer))
+        }
+    }
+}
+
+#[async_trait]
+impl SinkWriter for SnowflakeSinkWriter {
+    type CommitMetadata = Option<SinkMetadata>;
+
+    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+        match self {
+            Self::S3(writer) => writer.begin_epoch(epoch).await,
+            Self::Jdbc(writer) => writer.begin_epoch(epoch).await,
+        }
+    }
+
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+        match self {
+            Self::S3(writer) => writer.write_batch(chunk).await,
+            Self::Jdbc(writer) => writer.write_batch(chunk).await,
+        }
+    }
+
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<Option<SinkMetadata>> {
+        match self {
+            Self::S3(writer) => writer.barrier(is_checkpoint).await,
+            Self::Jdbc(writer) => writer.barrier(is_checkpoint).await,
+        }
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        if let Self::Jdbc(writer) = self {
+            writer.abort().await
+        } else {
+            Ok(())
+        }
+    }
+}
+
+struct AugmentedRow {
+    row_encoder: JsonEncoder,
+    current_epoch: u64,
+    current_row_count: usize,
+    is_append_only: bool,
+}
+
+impl AugmentedRow {
+    fn new(current_epoch: u64, is_append_only: bool, schema: Schema) -> Self {
+        let row_encoder = JsonEncoder::new(
+            schema,
+            None,
+            crate::sink::encoder::DateHandlingMode::String,
+            TimestampHandlingMode::String,
+            TimestamptzHandlingMode::UtcString,
+            TimeHandlingMode::String,
+            JsonbHandlingMode::String,
+        );
+        Self {
+            row_encoder,
+            current_epoch,
+            current_row_count: 0,
+            is_append_only,
+        }
+    }
+
+    fn reset_epoch(&mut self, current_epoch: u64) {
+        if self.is_append_only || current_epoch == self.current_epoch {
+            return;
+        }
+        self.current_epoch = current_epoch;
+        self.current_row_count = 0;
+    }
+
+    fn augmented_row(&mut self, row: impl Row, op: Op) -> Result<Map<String, Value>> {
+        let mut row = self.row_encoder.encode(row)?;
+        if self.is_append_only {
+            return Ok(row);
+        }
+        self.current_row_count += 1;
+        row.insert(
+            SNOWFLAKE_SINK_ROW_ID.to_owned(),
+            Value::String(format!("{}_{}", self.current_epoch, self.current_row_count)),
+        );
+        row.insert(
+            SNOWFLAKE_SINK_OP.to_owned(),
+            Value::Number(serde_json::Number::from(op.to_i16())),
+        );
+        Ok(row)
+    }
+}
+
+pub struct SnowflakeSinkS3Writer {
+    config: SnowflakeConfig,
+    s3_operator: Operator,
+    augmented_row: AugmentedRow,
+    opendal_writer: Option<opendal::Writer>,
+    executor_id: u64,
+}
+async fn build_opendal_writer(
+    config: &SnowflakeConfig,
+    executor_id: u64,
+    operator: &Operator,
+) -> Result<opendal::Writer> {
+    let mut base_path = config.s3_inner.common.path.clone().unwrap_or("".to_owned());
+    if !base_path.ends_with('/') {
+        base_path.push('/');
+    }
+    let create_time = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards");
+    let object_name = format!(
+        "{}{}_{}.{}",
+        base_path,
+        executor_id,
+        create_time.as_secs(),
+        "json",
+    );
+    Ok(operator.writer_with(&object_name).concurrent(8).await?)
+}
+
+impl SnowflakeSinkS3Writer {
+    pub fn new(
+        config: SnowflakeConfig,
+        schema: Schema,
+        is_append_only: bool,
+        executor_id: u64,
+    ) -> Result<Self> {
+        let s3_operator = FileSink::<S3Sink>::new_s3_sink(&config.s3_inner)?;
+        Ok(Self {
+            config,
+            s3_operator,
+            opendal_writer: None,
+            executor_id,
+            augmented_row: AugmentedRow::new(0, is_append_only, schema),
+        })
+    }
+}
+
+impl SnowflakeSinkS3Writer {
+
+    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+        self.augmented_row.reset_epoch(epoch);
+        Ok(())
+    }
+
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+        if self.opendal_writer.is_none() {
+            let opendal_writer =
+                build_opendal_writer(&self.config, self.executor_id, &self.s3_operator).await?;
+            self.opendal_writer = Some(opendal_writer);
+        }
+        let mut chunk_buf = BytesMut::new();
+        for (op, row) in chunk.rows() {
+            let encoded_row = self.augmented_row.augmented_row(row, op)?;
+            writeln!(chunk_buf, "{}", Value::Object(encoded_row)).unwrap(); // write to a `BytesMut` should never fail
+        }
+        self.opendal_writer
+            .as_mut()
+            .ok_or_else(|| SinkError::File("Sink writer is not created.".to_owned()))?
+            .write(chunk_buf.freeze())
+            .await?;
+        Ok(())
+    }
+
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<Option<SinkMetadata>> {
+        if is_checkpoint && let Some(mut writer) = self.opendal_writer.take() {
+            writer
+                .close()
+                .await
+                .map_err(|e| SinkError::File(e.to_report_string()))?;
+        }
+        Ok(Some(SinkMetadata {
+            metadata: Some(sink_metadata::Metadata::Serialized(SerializedMetadata {
+                metadata: vec![],
+            })),
+        }))
+    }
+}
+
+pub struct SnowflakeSinkJdbcWriter {
     augmented_row: AugmentedChunk,
     jdbc_sink_writer: CoordinatedRemoteSinkWriter,
 }
 
-impl SnowflakeSinkWriter {
+impl SnowflakeSinkJdbcWriter {
     pub async fn new(
         config: SnowflakeConfig,
         is_append_only: bool,
@@ -476,10 +713,7 @@ impl SnowflakeSinkWriter {
     }
 }
 
-#[async_trait]
-impl SinkWriter for SnowflakeSinkWriter {
-    type CommitMetadata = Option<SinkMetadata>;
-
+impl SnowflakeSinkJdbcWriter {
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         self.augmented_row.reset_epoch(epoch);
         self.jdbc_sink_writer.begin_epoch(epoch).await?;
@@ -523,6 +757,10 @@ pub struct SnowflakeTaskContext {
     pub warehouse: Option<String>,
     pub pk_column_names: Option<Vec<String>>,
     pub all_column_names: Option<Vec<String>>,
+
+    // only s3 writer
+    pub stage: Option<String>,
+    pub pipe_name: Option<String>,
 }
 pub struct SnowflakeSinkCommitter {
     client: Option<SnowflakeJniClient>,
@@ -681,6 +919,62 @@ impl SnowflakeJniClient {
         }
         Ok(())
     }
+
+    pub fn execute_create_pipe(&self) -> Result<()> {
+        let table_name =
+            if let Some(table_name) = self.snowflake_task_context.cdc_table_name.as_ref() {
+                table_name
+            } else {
+                &self.snowflake_task_context.target_table_name
+            };
+        let create_pipe_sql = build_create_pipe_sql(
+            table_name,
+            &self.snowflake_task_context.database,
+            &self.snowflake_task_context.schema_name,
+            &self.snowflake_task_context.stage.as_ref().ok_or_else(|| {
+                SinkError::Config(anyhow!("snowflake.stage is required for S3 writer"))
+            })?,
+            &self.snowflake_task_context.pipe_name.as_ref().ok_or_else(|| {
+                SinkError::Config(anyhow!("pipe_name is required for S3 writer"))
+            })?,
+        );
+        self.jdbc_client.execute_sql_sync(&vec![create_pipe_sql])?;
+        Ok(())
+    }
+
+    pub fn execute_drop_pipe(&self) -> Result<()> {
+        let drop_pipe_sql = build_drop_pipe_sql(
+            &self.snowflake_task_context.database,
+            &self.snowflake_task_context.schema_name,
+            &self.snowflake_task_context.pipe_name.as_ref().ok_or_else(|| {
+                SinkError::Config(anyhow!("pipe_name is required for S3 writer"))
+            })?,
+        );
+        if self.jdbc_client.execute_sql_sync(&vec![drop_pipe_sql]).is_err() {
+            tracing::warn!(
+                "Failed to drop Snowflake sink pipe {:?}",
+                self.snowflake_task_context.pipe_name
+            );
+        } else {
+            tracing::info!(
+                "Snowflake sink pipe {:?} dropped",
+                self.snowflake_task_context.pipe_name
+            );
+        }
+        Ok(())
+    }
+
+    pub fn execute_flush_pipe(&self) -> Result<()> {
+        let flush_pipe_sql = build_flush_pipe_sql(
+            &self.snowflake_task_context.database,
+            &self.snowflake_task_context.schema_name,
+            &self.snowflake_task_context.pipe_name.as_ref().ok_or_else(|| {
+                SinkError::Config(anyhow!("pipe_name is required for S3 writer"))
+            })?,
+        );
+        self.jdbc_client.execute_sql_sync(&vec![flush_pipe_sql])?;
+        Ok(())
+    }
 }
 
 fn build_create_table_sql(
@@ -734,6 +1028,32 @@ fn convert_snowflake_data_type(data_type: &DataType) -> Result<String> {
         }
     };
     Ok(data_type)
+}
+
+fn build_create_pipe_sql(
+    table_name: &str,
+    database: &str,
+    schema: &str,
+    stage: &str,
+    pipe_name: &str,
+) -> String {
+    let pipe_name = format!("{}.{}.{}", database, schema, pipe_name);
+    let table_name = format!("{}.{}.{}", database, schema, table_name);
+    let stage = format!("{}.{}.{}", database, schema, stage);
+    format!(
+        "CREATE OR REPLACE PIPE {} AUTO_INGEST = FALSE AS COPY INTO {} FROM @{} MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE FILE_FORMAT = (type = 'JSON');",
+        pipe_name, table_name, stage
+    )
+}
+
+fn build_flush_pipe_sql(database: &str, schema: &str, pipe_name: &str) -> String {
+    let pipe_name = format!("{}.{}.{}", database, schema, pipe_name);
+    format!("ALTER PIPE {} REFRESH;", pipe_name,)
+}
+
+fn build_drop_pipe_sql(database: &str, schema: &str, pipe_name: &str) -> String {
+    let pipe_name = format!("{}.{}.{}", database, schema, pipe_name);
+    format!("DROP PIPE IF EXISTS {};", pipe_name)
 }
 
 fn build_alter_add_column_sql(
@@ -906,6 +1226,8 @@ mod tests {
             database: "test_db".to_owned(),
             schema_name: "test_schema".to_owned(),
             schema: Schema { fields: vec![] },
+            stage: None,
+            pipe_name: None,
         };
         let task_sql = build_create_merge_into_task_sql(&snowflake_task_context);
         let expected = r#"CREATE OR REPLACE TASK "test_db"."test_schema"."test_task"
@@ -952,6 +1274,8 @@ END;"#;
             database: "test_db".to_owned(),
             schema_name: "test_schema".to_owned(),
             schema: Schema { fields: vec![] },
+            stage: None,
+            pipe_name: None,
         };
         let task_sql = build_create_merge_into_task_sql(&snowflake_task_context);
         let expected = r#"CREATE OR REPLACE TASK "test_db"."test_schema"."test_task_multi_pk"
