@@ -87,30 +87,44 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         let list_prefix = Self::extract_list_prefix(prefix);
         let object_lister = self.op.lister_with(&list_prefix).recursive(true).await?;
 
-        let stream = stream::unfold(object_lister, |mut object_lister| async move {
-            match object_lister.next().await {
-                Some(Ok(object)) => {
-                    let name = object.path().to_owned();
-                    let om = object.metadata();
+        let op = self.op.clone();
+        let full_capability = op.info().full_capability();
+        let stream = stream::unfold(object_lister, move |mut object_lister| {
+            let op = op.clone();
 
-                    let t = match om.last_modified() {
-                        Some(t) => t,
-                        None => DateTime::<Utc>::from_timestamp(0, 0).unwrap_or_default(),
-                    };
-                    let timestamp = Timestamptz::from(t);
-                    let size = om.content_length() as i64;
+            async move {
+                match object_lister.next().await {
+                    Some(Ok(object)) => {
+                        let name = object.path().to_owned();
+                        let mut meta = object.metadata().clone();
 
-                    let metadata = FsPageItem {
-                        name,
-                        size,
-                        timestamp,
-                    };
-                    Some((Ok(metadata), object_lister))
-                }
-                Some(Err(err)) => Some((Err(err.into()), object_lister)),
-                None => {
-                    tracing::info!("list object completed.");
-                    None
+                        // If the metadata returned by list operation doesn't provide content_length or last_modified, fetch them via stat
+                        if !full_capability.list_has_content_length
+                            || !full_capability.list_has_last_modified
+                        {
+                            let stat_meta = op.stat(&name).await.ok()?;
+                            meta = stat_meta;
+                        }
+
+                        let t = match meta.last_modified() {
+                            Some(t) => t,
+                            None => DateTime::<Utc>::from_timestamp(0, 0).unwrap_or_default(),
+                        };
+                        let timestamp = Timestamptz::from(t);
+                        let size = meta.content_length() as i64;
+
+                        let metadata = FsPageItem {
+                            name,
+                            size,
+                            timestamp,
+                        };
+                        Some((Ok(metadata), object_lister))
+                    }
+                    Some(Err(err)) => Some((Err(err.into()), object_lister)),
+                    None => {
+                        tracing::info!("list object completed.");
+                        None
+                    }
                 }
             }
         });
