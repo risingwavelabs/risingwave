@@ -128,6 +128,10 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         // Make sure to use mapping_message after transform_upstream.
+
+        // If user sets debezium.time.precision.mode to "connect", it means the user can guarantee
+        // that the upstream data precision is MilliSecond. In this case, we don't use GuessNumberUnit
+        // mode to guess precision, but use Milli mode directly, which can handle extreme timestamps.
         let timestamptz_handling: Option<TimestamptzHandling> = if self
             .properties
             .get("debezium.time.precision.mode")

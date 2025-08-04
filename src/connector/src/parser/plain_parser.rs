@@ -67,9 +67,25 @@ impl PlainParser {
             }
             _ => bail!("Unsupported encoding for Plain"),
         };
+        println!("这里 source_ctx {:?}", source_ctx.connector_props);
+        // let timestamptz_handling = {
+        //     // 从 props 中获取配置
+        //     if let EncodingProperties::Json(json_config) = &props.encoding_config {
+        //         if let Some(handling) = json_config.timestamptz_handling {
+        //             tracing::info!("PlainParser: timestamptz_handling from config: {:?}", handling);
+        //             handling
+        //         } else {
+        //             tracing::info!("PlainParser: using default GuessNumberUnit");
+        //             TimestamptzHandling::GuessNumberUnit
+        //         }
+        //     } else {
+        //         tracing::info!("PlainParser: using default GuessNumberUnit");
+        //         TimestamptzHandling::GuessNumberUnit
+        //     }
+        // };
 
         let transaction_meta_builder = Some(AccessBuilderImpl::DebeziumJson(
-            DebeziumJsonAccessBuilder::new(TimestamptzHandling::GuessNumberUnit)?,
+            DebeziumJsonAccessBuilder::new(TimestamptzHandling::Milli)?,
         ));
 
         let schema_change_builder = Some(AccessBuilderImpl::DebeziumJson(

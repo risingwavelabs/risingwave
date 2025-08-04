@@ -59,11 +59,8 @@ pub fn str_to_bool(input: &str) -> Result<bool> {
 #[inline]
 pub fn i64_to_timestamptz(t: i64) -> Result<Timestamptz> {
     const E11: u64 = 100_000_000_000;
-    // 253370764800000
-    // 253370764800000
     const E14: u64 = 100_000_000_000_000;
     const E17: u64 = 100_000_000_000_000_000;
-
     match t.abs_diff(0) {
         0..E11 => Ok(Timestamptz::from_secs(t).unwrap()), // s
         E11..E14 => Ok(Timestamptz::from_millis(t).unwrap()), // ms
