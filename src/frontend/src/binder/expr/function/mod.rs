@@ -189,7 +189,15 @@ impl Binder {
                 }
 
                 if func.language == "sql" {
-                    self.bind_sql_udf(func.clone(), array_args)?
+                    let expr = self.bind_sql_udf(func.clone(), array_args)?;
+                    // TODO: should visit the tree of expr node, instead of only inspecting the root node.
+                    if expr.is_subquery() {
+                        return Err(ErrorCode::InvalidInputSyntax(
+                            "complex SQL UDF cannot be used after `AGGREGATE:`".to_owned(),
+                        )
+                        .into());
+                    }
+                    expr
                 } else {
                     UserDefinedFunction::new(func.clone(), array_args).into()
                 }
@@ -650,9 +658,8 @@ impl Binder {
         Ok(())
     }
 
-    /// A common utility function to extract sql udf expression out from the input `ast` as
-    /// a subquery.
-    pub(crate) fn extract_udf_expr_as_subquery(ast: Vec<Statement>) -> Result<AstExpr> {
+    /// A common utility function to extract sql udf expression out from the input `ast`.
+    pub(crate) fn extract_udf_expr(ast: Vec<Statement>) -> Result<AstExpr> {
         if ast.len() != 1 {
             return Err(ErrorCode::InvalidInputSyntax(
                 "the query for sql udf should contain only one statement".to_owned(),
@@ -668,7 +675,13 @@ impl Binder {
             .into());
         };
 
-        Ok(AstExpr::Subquery(query))
+        if let Some(expr) = query.as_single_select_item() {
+            // Inline SQL UDF.
+            Ok(expr.clone())
+        } else {
+            // Subquery SQL UDF.
+            Ok(AstExpr::Subquery(query))
+        }
     }
 
     pub fn bind_sql_udf_inner(
@@ -714,7 +727,7 @@ impl Binder {
             .into());
         }
 
-        if let Ok(expr) = Self::extract_udf_expr_as_subquery(ast) {
+        if let Ok(expr) = Self::extract_udf_expr(ast) {
             let bind_result = self.bind_expr(&expr);
 
             // Restore arguments information for subsequent binding.

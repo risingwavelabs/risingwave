@@ -94,7 +94,6 @@ impl fmt::Debug for CorrelatedInputRef {
         f.debug_struct("CorrelatedInputRef")
             .field("index", &self.index)
             .field("correlated_id", &self.correlated_id())
-            .field("depth", &self.depth())
             .finish()
     }
 }

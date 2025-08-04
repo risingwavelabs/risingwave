@@ -440,9 +440,13 @@ impl Binder {
         FunctionCall::new(ExprType::Overlay, args).map(|f| f.into())
     }
 
+    fn is_binding_inline_sql_udf(&self) -> bool {
+        self.context.udf_arguments.is_some()
+    }
+
     /// Returns whether we're binding SQL UDF by checking if any of the upper subquery context has
     /// `udf_arguments` set.
-    fn is_binding_sql_udf(&self) -> bool {
+    fn is_binding_subquery_sql_udf(&self) -> bool {
         self.upper_subquery_contexts
             .iter()
             .any(|(context, _)| context.udf_arguments.is_some())
@@ -450,15 +454,10 @@ impl Binder {
 
     /// Bind a parameter for SQL UDF.
     fn bind_sql_udf_parameter(&mut self, name: &str) -> Result<ExprImpl> {
-        for (i, context) in self
-            .upper_subquery_contexts
-            .iter()
-            .map(|(context, _)| context)
-            .rev()
+        for (depth, context) in std::iter::once(&self.context)
+            .chain((self.upper_subquery_contexts.iter().rev()).map(|(context, _)| context))
             .enumerate()
         {
-            let depth = i + 1;
-
             // Only lookup the first non-empty udf context. If the parameter is not found in the
             // current context, we will continue to the upper context.
             if let Some(args) = &context.udf_arguments {
@@ -491,7 +490,7 @@ impl Binder {
         // Note: This is specific to sql udf with unnamed parameters, since the
         // parameters will be parsed and treated as `Parameter`.
         // For detailed explanation, consider checking `bind_column`.
-        if self.is_binding_sql_udf() {
+        if self.is_binding_inline_sql_udf() || self.is_binding_subquery_sql_udf() {
             let column_name = format!("${index}");
             return self.bind_sql_udf_parameter(&column_name);
         }
