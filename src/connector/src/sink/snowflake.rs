@@ -14,6 +14,7 @@
 
 use core::num::NonZeroU64;
 use std::collections::BTreeMap;
+use std::fmt::Write;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -40,10 +41,12 @@ use crate::connector_common::IcebergSinkCompactionUpdate;
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::decouple_checkpoint_log_sink::default_commit_checkpoint_interval;
-use crate::sink::encoder::{JsonEncoder, JsonbHandlingMode, TimeHandlingMode, TimestampHandlingMode, TimestamptzHandlingMode, RowEncoder};
+use crate::sink::encoder::{
+    JsonEncoder, JsonbHandlingMode, RowEncoder, TimeHandlingMode, TimestampHandlingMode,
+    TimestamptzHandlingMode,
+};
 use crate::sink::file_sink::opendal_sink::FileSink;
-use crate::sink::file_sink::s3::{S3Config, S3Sink};
-use std::fmt::Write;
+use crate::sink::file_sink::s3::{S3Common, S3Sink};
 use crate::sink::jdbc_jni_client::{self, JdbcJniClient};
 use crate::sink::remote::CoordinatedRemoteSinkWriter;
 use crate::sink::writer::SinkWriter;
@@ -111,12 +114,13 @@ pub struct SnowflakeConfig {
 
     #[serde(default)]
     #[serde(rename = "with_s3")]
+    #[serde_as(as = "DisplayFromStr")]
     pub with_s3: bool,
 
     #[serde(flatten)]
-    pub s3_inner: S3Config,
+    pub s3_inner: S3Common,
 
-    #[serde(rename = "snowflake.stage")]
+    #[serde(rename = "stage")]
     pub stage: Option<String>,
 }
 
@@ -192,7 +196,7 @@ impl SnowflakeConfig {
             let stage = self
                 .stage
                 .clone()
-                .ok_or(SinkError::Config(anyhow!("snowflake.stage is required")))?;
+                .ok_or(SinkError::Config(anyhow!("stage is required")))?;
             snowflake_task_ctx.stage = Some(stage);
             snowflake_task_ctx.pipe_name = Some(format!("{}_pipe", target_table_name));
         }
@@ -303,6 +307,7 @@ impl Sink for SnowflakeSink {
         {
             let client = SnowflakeJniClient::new(client, snowflake_task_ctx);
             client.execute_create_table()?;
+            client.execute_create_pipe()?;
         }
 
         Ok(())
@@ -431,21 +436,12 @@ impl SnowflakeSinkWriter {
         let schema = param.schema();
         if config.with_s3 {
             let executor_id = writer_param.executor_id;
-            let s3_writer = SnowflakeSinkS3Writer::new(
-                config,
-                schema,
-                is_append_only,
-                executor_id,
-            )?;
+            let s3_writer =
+                SnowflakeSinkS3Writer::new(config, schema, is_append_only, executor_id)?;
             Ok(Self::S3(s3_writer))
         } else {
-            let jdbc_writer = SnowflakeSinkJdbcWriter::new(
-                config,
-                is_append_only,
-                writer_param,
-                param,
-            )
-            .await?;
+            let jdbc_writer =
+                SnowflakeSinkJdbcWriter::new(config, is_append_only, writer_param, param).await?;
             Ok(Self::Jdbc(jdbc_writer))
         }
     }
@@ -457,7 +453,7 @@ impl SinkWriter for SnowflakeSinkWriter {
 
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         match self {
-            Self::S3(writer) => writer.begin_epoch(epoch).await,
+            Self::S3(writer) => writer.begin_epoch(epoch),
             Self::Jdbc(writer) => writer.begin_epoch(epoch).await,
         }
     }
@@ -549,9 +545,12 @@ async fn build_opendal_writer(
     executor_id: u64,
     operator: &Operator,
 ) -> Result<opendal::Writer> {
-    let mut base_path = config.s3_inner.common.path.clone().unwrap_or("".to_owned());
+    let mut base_path = config.s3_inner.path.clone().unwrap_or("".to_owned());
     if !base_path.ends_with('/') {
         base_path.push('/');
+    }
+    if let Some(table_name) = &config.snowflake_target_table_name {
+        base_path.push_str(&format!("{}/", table_name));
     }
     let create_time = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -585,8 +584,7 @@ impl SnowflakeSinkS3Writer {
 }
 
 impl SnowflakeSinkS3Writer {
-
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+    fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         self.augmented_row.reset_epoch(epoch);
         Ok(())
     }
@@ -799,18 +797,18 @@ impl SinkCommitCoordinator for SnowflakeSinkCommitter {
         _metadata: Vec<SinkMetadata>,
         add_columns: Option<Vec<Field>>,
     ) -> Result<()> {
+        let client = self.client.as_mut().ok_or_else(|| {
+            SinkError::Config(anyhow!("Snowflake sink committer is not initialized."))
+        })?;
+        client.execute_flush_pipe()?;
+
         if let Some(add_columns) = add_columns {
-            self.client
-                .as_mut()
-                .ok_or_else(|| {
-                    SinkError::Config(anyhow!("Snowflake sink committer is not initialized."))
-                })?
-                .execute_alter_add_columns(
-                    &add_columns
-                        .iter()
-                        .map(|f| (f.name.clone(), f.data_type.to_string()))
-                        .collect::<Vec<_>>(),
-                )?;
+            client.execute_alter_add_columns(
+                &add_columns
+                    .iter()
+                    .map(|f| (f.name.clone(), f.data_type.to_string()))
+                    .collect::<Vec<_>>(),
+            )?;
         }
         Ok(())
     }
@@ -820,6 +818,7 @@ impl Drop for SnowflakeSinkCommitter {
     fn drop(&mut self) {
         if let Some(client) = &self.client {
             client.execute_drop_task().ok();
+            client.execute_drop_pipe().ok();
         }
     }
 }
@@ -921,58 +920,57 @@ impl SnowflakeJniClient {
     }
 
     pub fn execute_create_pipe(&self) -> Result<()> {
-        let table_name =
-            if let Some(table_name) = self.snowflake_task_context.cdc_table_name.as_ref() {
-                table_name
-            } else {
-                &self.snowflake_task_context.target_table_name
-            };
-        let create_pipe_sql = build_create_pipe_sql(
-            table_name,
-            &self.snowflake_task_context.database,
-            &self.snowflake_task_context.schema_name,
-            &self.snowflake_task_context.stage.as_ref().ok_or_else(|| {
-                SinkError::Config(anyhow!("snowflake.stage is required for S3 writer"))
-            })?,
-            &self.snowflake_task_context.pipe_name.as_ref().ok_or_else(|| {
-                SinkError::Config(anyhow!("pipe_name is required for S3 writer"))
-            })?,
-        );
-        self.jdbc_client.execute_sql_sync(&vec![create_pipe_sql])?;
+        if let Some(pipe_name) = &self.snowflake_task_context.pipe_name {
+            let table_name =
+                if let Some(table_name) = self.snowflake_task_context.cdc_table_name.as_ref() {
+                    table_name
+                } else {
+                    &self.snowflake_task_context.target_table_name
+                };
+            let create_pipe_sql = build_create_pipe_sql(
+                table_name,
+                &self.snowflake_task_context.database,
+                &self.snowflake_task_context.schema_name,
+                self.snowflake_task_context.stage.as_ref().ok_or_else(|| {
+                    SinkError::Config(anyhow!("snowflake.stage is required for S3 writer"))
+                })?,
+                pipe_name,
+                &self.snowflake_task_context.target_table_name,
+            );
+            self.jdbc_client.execute_sql_sync(&vec![create_pipe_sql])?;
+        }
         Ok(())
     }
 
     pub fn execute_drop_pipe(&self) -> Result<()> {
-        let drop_pipe_sql = build_drop_pipe_sql(
-            &self.snowflake_task_context.database,
-            &self.snowflake_task_context.schema_name,
-            &self.snowflake_task_context.pipe_name.as_ref().ok_or_else(|| {
-                SinkError::Config(anyhow!("pipe_name is required for S3 writer"))
-            })?,
-        );
-        if self.jdbc_client.execute_sql_sync(&vec![drop_pipe_sql]).is_err() {
-            tracing::warn!(
-                "Failed to drop Snowflake sink pipe {:?}",
-                self.snowflake_task_context.pipe_name
+        if let Some(pipe_name) = &self.snowflake_task_context.pipe_name {
+            let drop_pipe_sql = build_drop_pipe_sql(
+                &self.snowflake_task_context.database,
+                &self.snowflake_task_context.schema_name,
+                pipe_name,
             );
-        } else {
-            tracing::info!(
-                "Snowflake sink pipe {:?} dropped",
-                self.snowflake_task_context.pipe_name
-            );
+            if self
+                .jdbc_client
+                .execute_sql_sync(&vec![drop_pipe_sql])
+                .is_err()
+            {
+                tracing::warn!("Failed to drop Snowflake sink pipe {:?}", pipe_name);
+            } else {
+                tracing::info!("Snowflake sink pipe {:?} dropped", pipe_name);
+            }
         }
         Ok(())
     }
 
     pub fn execute_flush_pipe(&self) -> Result<()> {
-        let flush_pipe_sql = build_flush_pipe_sql(
-            &self.snowflake_task_context.database,
-            &self.snowflake_task_context.schema_name,
-            &self.snowflake_task_context.pipe_name.as_ref().ok_or_else(|| {
-                SinkError::Config(anyhow!("pipe_name is required for S3 writer"))
-            })?,
-        );
-        self.jdbc_client.execute_sql_sync(&vec![flush_pipe_sql])?;
+        if let Some(pipe_name) = &self.snowflake_task_context.pipe_name {
+            let flush_pipe_sql = build_flush_pipe_sql(
+                &self.snowflake_task_context.database,
+                &self.snowflake_task_context.schema_name,
+                pipe_name,
+            );
+            self.jdbc_client.execute_sql_sync(&vec![flush_pipe_sql])?;
+        }
         Ok(())
     }
 }
@@ -1036,10 +1034,14 @@ fn build_create_pipe_sql(
     schema: &str,
     stage: &str,
     pipe_name: &str,
+    target_table_name: &str,
 ) -> String {
-    let pipe_name = format!("{}.{}.{}", database, schema, pipe_name);
-    let table_name = format!("{}.{}.{}", database, schema, table_name);
-    let stage = format!("{}.{}.{}", database, schema, stage);
+    let pipe_name = format!(r#""{}"."{}"."{}""#, database, schema, pipe_name);
+    let stage = format!(
+        r#""{}"."{}"."{}"/{}"#,
+        database, schema, stage, target_table_name
+    );
+    let table_name = format!(r#""{}"."{}"."{}""#, database, schema, table_name);
     format!(
         "CREATE OR REPLACE PIPE {} AUTO_INGEST = FALSE AS COPY INTO {} FROM @{} MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE FILE_FORMAT = (type = 'JSON');",
         pipe_name, table_name, stage
@@ -1047,12 +1049,12 @@ fn build_create_pipe_sql(
 }
 
 fn build_flush_pipe_sql(database: &str, schema: &str, pipe_name: &str) -> String {
-    let pipe_name = format!("{}.{}.{}", database, schema, pipe_name);
+    let pipe_name = format!(r#""{}"."{}"."{}""#, database, schema, pipe_name);
     format!("ALTER PIPE {} REFRESH;", pipe_name,)
 }
 
 fn build_drop_pipe_sql(database: &str, schema: &str, pipe_name: &str) -> String {
-    let pipe_name = format!("{}.{}.{}", database, schema, pipe_name);
+    let pipe_name = format!(r#""{}"."{}"."{}""#, database, schema, pipe_name);
     format!("DROP PIPE IF EXISTS {};", pipe_name)
 }
 
