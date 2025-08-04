@@ -15,6 +15,15 @@
 use risingwave_expr::{ExprError, Result, function};
 
 /// Extracts n'th bit from binary string.
+///
+/// # Example
+///
+/// ```slt
+/// query T
+/// SELECT get_bit('\x1234567890'::bytea, 30);
+/// ----
+/// 1
+/// ```
 #[function("get_bit(bytea, int8) -> int4")]
 pub fn get_bit(bytes: &[u8], n: i64) -> Result<i32> {
     let max_sz = (bytes.len() * 8) as i64;
@@ -30,6 +39,15 @@ pub fn get_bit(bytes: &[u8], n: i64) -> Result<i32> {
 }
 
 /// Sets n'th bit in binary string to newvalue.
+///
+/// # Example
+///
+/// ```slt
+/// query T
+/// SELECT set_bit('\x1234567890'::bytea, 30, 0);
+/// ----
+/// \x1234563890
+/// ```
 #[function("set_bit(bytea, int8, int4) -> bytea")]
 pub fn set_bit(bytes: &[u8], n: i64, value: i32) -> Result<Box<[u8]>> {
     let max_sz = (bytes.len() * 8) as i64;
@@ -52,6 +70,15 @@ pub fn set_bit(bytes: &[u8], n: i64, value: i32) -> Result<Box<[u8]>> {
 }
 
 /// Extracts n'th byte from binary string.
+///
+/// # Example
+///
+/// ```slt
+/// query T
+/// SELECT get_byte('\x1234567890'::bytea, 4);
+/// ----
+/// 144
+/// ```
 #[function("get_byte(bytea, int4) -> int4")]
 pub fn get_byte(bytes: &[u8], n: i32) -> Result<i32> {
     let max_sz = bytes.len() as i32;
@@ -65,6 +92,15 @@ pub fn get_byte(bytes: &[u8], n: i32) -> Result<i32> {
 }
 
 /// Sets n'th byte in binary string to newvalue.
+///
+/// # Example
+///
+/// ```slt
+/// query T
+/// SELECT set_byte('\x1234567890'::bytea, 4, 64);
+/// ----
+/// \x1234567840
+/// ```
 #[function("set_byte(bytea, int4, int4) -> bytea")]
 pub fn set_byte(bytes: &[u8], n: i32, value: i32) -> Result<Box<[u8]>> {
     let max_sz = bytes.len() as i32;
@@ -80,6 +116,15 @@ pub fn set_byte(bytes: &[u8], n: i32, value: i32) -> Result<Box<[u8]>> {
 }
 
 /// Returns the number of bits set in the binary string
+///
+/// # Example
+///
+/// ```slt
+/// query T
+/// SELECT bit_count('\x1234567890'::bytea);
+/// ----
+/// 15
+/// ```
 #[function("bit_count(bytea) -> int8")]
 pub fn bit_count(bytes: &[u8]) -> i64 {
     let mut ans = 0;
