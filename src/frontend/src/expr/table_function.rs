@@ -678,8 +678,8 @@ impl Expr for TableFunction {
         self.return_type.clone()
     }
 
-    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
-        unreachable!("Table function should not be converted to ExprNode")
+    fn try_to_expr_proto(&self) -> Result<risingwave_pb::expr::ExprNode, String> {
+        Err("Table function should not be converted to ExprNode".to_owned())
     }
 }
 
