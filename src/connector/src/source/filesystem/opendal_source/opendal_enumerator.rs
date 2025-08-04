@@ -36,6 +36,8 @@ pub struct OpendalEnumerator<Src: OpendalSource> {
     pub(crate) matcher: Option<glob::Pattern>,
     pub(crate) marker: PhantomData<Src>,
     pub(crate) compression_format: CompressionFormat,
+    /// Whether we need to call `stat()` to get complete metadata during list operations
+    pub(crate) need_stat_metadata: bool,
 }
 
 #[async_trait]
@@ -88,7 +90,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         let object_lister = self.op.lister_with(&list_prefix).recursive(true).await?;
 
         let op = self.op.clone();
-        let full_capability = op.info().full_capability();
+        let need_stat_metadata = self.need_stat_metadata;
         let stream = stream::unfold(object_lister, move |mut object_lister| {
             let op = op.clone();
 
@@ -98,10 +100,8 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
                         let name = object.path().to_owned();
                         let mut meta = object.metadata().clone();
 
-                        // If the metadata returned by list operation doesn't provide content_length or last_modified, fetch them via stat
-                        if !full_capability.list_has_content_length
-                            || !full_capability.list_has_last_modified
-                        {
+                        // If we need to call stat() to get complete metadata
+                        if need_stat_metadata {
                             let stat_meta = op.stat(&name).await.ok()?;
                             meta = stat_meta;
                         }

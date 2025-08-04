@@ -41,11 +41,18 @@ impl OpendalObjectStore {
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .finish();
+
+        // Check if we need to call stat() to get complete metadata
+        let full_capability = op.info().full_capability();
+        let need_stat_metadata =
+            !full_capability.list_has_content_length || !full_capability.list_has_last_modified;
+
         Ok(Self {
             op,
             media_type: MediaType::Fs,
             config,
             metrics,
+            need_stat_metadata,
         })
     }
 }
