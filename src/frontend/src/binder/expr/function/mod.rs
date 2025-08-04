@@ -189,15 +189,7 @@ impl Binder {
                 }
 
                 if func.language == "sql" {
-                    let expr = self.bind_sql_udf(func.clone(), array_args)?;
-                    // TODO: should visit the tree of expr node, instead of only inspecting the root node.
-                    if expr.is_subquery() {
-                        return Err(ErrorCode::InvalidInputSyntax(
-                            "complex SQL UDF cannot be used after `AGGREGATE:`".to_owned(),
-                        )
-                        .into());
-                    }
-                    expr
+                    self.bind_sql_udf(func.clone(), array_args)?
                 } else {
                     UserDefinedFunction::new(func.clone(), array_args).into()
                 }
@@ -205,8 +197,20 @@ impl Binder {
                 self.bind_builtin_scalar_function(&func_name, array_args, arg_list.variadic)?
             };
 
+            // `AggType::WrapScalar` requires the inner expression to be convertible to `ExprNode`
+            // and directly executable. If there's any subquery in the expression, this will fail.
+            let expr_node = match scalar_func_expr.try_to_expr_proto() {
+                Ok(expr_node) => expr_node,
+                Err(e) => {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "function {func_name} cannot be used after `AGGREGATE:`: {e}",
+                    ))
+                    .into());
+                }
+            };
+
             // now this is either an aggregate/window function call
-            Some(AggType::WrapScalar(scalar_func_expr.to_expr_proto()))
+            Some(AggType::WrapScalar(expr_node))
         } else {
             None
         };
