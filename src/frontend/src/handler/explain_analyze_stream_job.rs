@@ -28,18 +28,12 @@ use crate::handler::{HandlerArgs, RwPgResponse, RwPgResponseBuilder, RwPgRespons
 #[macro_export]
 macro_rules! debug_panic_or_warn {
     ($($arg:tt)*) => {
-        tracing::warn!($($arg)*);
+        if cfg!(debug_assertions) {
+            panic!($($arg)*);
+        } else {
+            tracing::warn!($($arg)*);
+        }
     };
-
-    // FIXME(kwannoel): Once we resolve https://github.com/risingwavelabs/risingwave/issues/22775,
-    // we should re-enable the assertion path.
-    // ($($arg:tt)*) => {
-    //     if cfg!(debug_assertions) {
-    //         panic!($($arg)*);
-    //     } else {
-    //         tracing::warn!($($arg)*);
-    //     }
-    // };
 }
 
 #[derive(Fields)]
@@ -60,12 +54,11 @@ pub async fn handle_explain_analyze_stream_job(
 
     let meta_client = handler_args.session.env().meta_client();
     let fragments = net::get_fragments(meta_client, job_id).await?;
-    let dispatcher_fragment_ids = fragments.iter().map(|f| f.id).collect::<Vec<_>>();
     let fragment_parallelisms = fragments
         .iter()
         .map(|f| (f.id, f.actors.len()))
         .collect::<HashMap<_, _>>();
-    let (root_node, adjacency_list) = extract_stream_node_infos(fragments);
+    let (root_node, dispatcher_fragment_ids, adjacency_list) = extract_stream_node_infos(fragments);
     let (executor_ids, operator_to_executor) = extract_executor_infos(&adjacency_list);
 
     let worker_nodes = net::list_stream_worker_nodes(handler_args.session.env()).await?;
@@ -204,9 +197,10 @@ mod net {
         handler_args: &HandlerArgs,
         worker_nodes: &[WorkerNode],
         executor_ids: &HashSet<ExecutorId>,
-        dispatcher_fragment_ids: &[u32],
+        dispatcher_fragment_ids: &HashSet<u32>,
         profiling_duration: Duration,
     ) -> Result<ExecutorStats> {
+        let dispatcher_fragment_ids = dispatcher_fragment_ids.iter().copied().collect::<Vec<_>>();
         let mut initial_aggregated_stats = ExecutorStats::new();
         for node in worker_nodes {
             let mut compute_client = handler_args.session.env().client_pool().get(node).await?;
@@ -214,13 +208,13 @@ mod net {
                 .monitor_client
                 .get_profile_stats(GetProfileStatsRequest {
                     executor_ids: executor_ids.iter().copied().collect(),
-                    dispatcher_fragment_ids: dispatcher_fragment_ids.into(),
+                    dispatcher_fragment_ids: dispatcher_fragment_ids.clone(),
                 })
                 .await
                 .expect("get profiling stats failed");
             initial_aggregated_stats.record(
                 executor_ids,
-                dispatcher_fragment_ids,
+                &dispatcher_fragment_ids,
                 &stats.into_inner(),
             );
         }
@@ -235,13 +229,13 @@ mod net {
                 .monitor_client
                 .get_profile_stats(GetProfileStatsRequest {
                     executor_ids: executor_ids.iter().copied().collect(),
-                    dispatcher_fragment_ids: dispatcher_fragment_ids.into(),
+                    dispatcher_fragment_ids: dispatcher_fragment_ids.clone(),
                 })
                 .await
                 .expect("get profiling stats failed");
             final_aggregated_stats.record(
                 executor_ids,
-                dispatcher_fragment_ids,
+                &dispatcher_fragment_ids,
                 &stats.into_inner(),
             );
         }
@@ -251,7 +245,7 @@ mod net {
             &initial_aggregated_stats,
             &final_aggregated_stats,
             executor_ids,
-            dispatcher_fragment_ids,
+            &dispatcher_fragment_ids,
         );
 
         Ok(delta_aggregated_stats)
@@ -432,13 +426,36 @@ mod metrics {
                     debug_panic_or_warn!("missing final stats for fragment {}", fragment_id);
                     continue;
                 };
+
+                let initial_throughput = initial_stats.total_output_throughput;
+                let end_throughput = end_stats.total_output_throughput;
+                let Some(delta_throughput) = end_throughput.checked_sub(initial_throughput) else {
+                    debug_panic_or_warn!(
+                        "delta throughput is negative for fragment {} (initial: {}, end: {})",
+                        fragment_id,
+                        initial_throughput,
+                        end_throughput
+                    );
+                    continue;
+                };
+
+                let initial_pending_ns = initial_stats.total_output_pending_ns;
+                let end_pending_ns = end_stats.total_output_pending_ns;
+                let Some(delta_pending_ns) = end_pending_ns.checked_sub(initial_pending_ns) else {
+                    debug_panic_or_warn!(
+                        "delta pending ns is negative for fragment {} (initial: {}, end: {})",
+                        fragment_id,
+                        initial_pending_ns,
+                        end_pending_ns
+                    );
+                    continue;
+                };
+
                 let delta_stats = DispatchMetrics {
                     fragment_id: *fragment_id,
                     epoch: 0,
-                    total_output_throughput: end_stats.total_output_throughput
-                        - initial_stats.total_output_throughput,
-                    total_output_pending_ns: end_stats.total_output_pending_ns
-                        - initial_stats.total_output_pending_ns,
+                    total_output_throughput: delta_throughput,
+                    total_output_pending_ns: delta_pending_ns,
                 };
                 delta_aggregated_stats
                     .dispatch_stats
@@ -575,7 +592,7 @@ mod graph {
     /// Extracts the root node of the plan, as well as the adjacency list
     pub(super) fn extract_stream_node_infos(
         fragments: Vec<FragmentInfo>,
-    ) -> (OperatorId, HashMap<OperatorId, StreamNode>) {
+    ) -> (OperatorId, HashSet<u32>, HashMap<OperatorId, StreamNode>) {
         // Finds root nodes of the graph
 
         fn find_root_nodes(stream_nodes: &HashMap<u64, StreamNode>) -> HashSet<u64> {
@@ -684,7 +701,9 @@ mod graph {
             }
         }
 
-        (root_node.unwrap(), operator_id_to_stream_node)
+        let dispatcher_fragment_ids = fragment_id_to_merge_operator_id.keys().copied().collect::<HashSet<_>>();
+
+        (root_node.unwrap(), dispatcher_fragment_ids, operator_id_to_stream_node)
     }
 
     pub(super) fn extract_executor_infos(
@@ -698,7 +717,10 @@ mod graph {
             for actor_id in &node.actor_ids {
                 let executor_id =
                     unique_executor_id_from_unique_operator_id(*actor_id, operator_id);
-                if node.identity != NodeBodyDiscriminants::BatchPlan {
+                if node.identity != NodeBodyDiscriminants::BatchPlan
+                // FIXME(kwannoel): Add back after https://github.com/risingwavelabs/risingwave/issues/22775 is resolved.
+                && node.identity != NodeBodyDiscriminants::Merge
+                && node.identity != NodeBodyDiscriminants::Project {
                     assert!(executor_ids.insert(executor_id));
                 }
                 assert!(
