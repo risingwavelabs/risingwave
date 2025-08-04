@@ -953,6 +953,7 @@ impl SubscriptionCursor {
                 output_col_idx,
                 table_catalog.clone(),
                 vec![],
+                vec![],
                 context,
                 Condition {
                     conjunctions: vec![],
