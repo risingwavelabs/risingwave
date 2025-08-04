@@ -60,6 +60,7 @@ pub async fn handle_explain_analyze_stream_job(
         .collect::<HashMap<_, _>>();
     let (root_node, dispatcher_fragment_ids, adjacency_list) = extract_stream_node_infos(fragments);
     let (executor_ids, operator_to_executor) = extract_executor_infos(&adjacency_list);
+    tracing::debug!(?fragment_parallelisms, ?root_node, ?dispatcher_fragment_ids, ?adjacency_list, "init info");
 
     let worker_nodes = net::list_stream_worker_nodes(handler_args.session.env()).await?;
 
@@ -518,12 +519,12 @@ mod metrics {
             for (fragment_id, dispatch_metrics) in &executor_stats.dispatch_stats {
                 let operator_id = operator_id_for_dispatch(*fragment_id);
                 let total_output_throughput = dispatch_metrics.total_output_throughput;
-                let fragment_parallelism = fragment_parallelisms
-                    .get(fragment_id)
-                    .copied()
-                    .expect("should have fragment parallelism");
+                let Some(fragment_parallelism) = fragment_parallelisms.get(fragment_id) else {
+                    debug_panic_or_warn!("missing fragment parallelism for fragment {}", fragment_id);
+                    continue;
+                };
                 let total_output_pending_ns =
-                    dispatch_metrics.total_output_pending_ns / fragment_parallelism as u64;
+                    dispatch_metrics.total_output_pending_ns / *fragment_parallelism as u64;
 
                 operator_stats.insert(
                     operator_id,
@@ -561,6 +562,7 @@ mod graph {
     use risingwave_pb::stream_plan::stream_node::{NodeBody, NodeBodyDiscriminants};
     use risingwave_pb::stream_plan::{MergeNode, StreamNode as PbStreamNode};
 
+    use crate::catalog::FragmentId;
     use crate::handler::explain_analyze_stream_job::ExplainAnalyzeStreamJobOutput;
     use crate::handler::explain_analyze_stream_job::metrics::OperatorStats;
     use crate::handler::explain_analyze_stream_job::utils::operator_id_for_dispatch;
@@ -592,9 +594,10 @@ mod graph {
     /// Extracts the root node of the plan, as well as the adjacency list
     pub(super) fn extract_stream_node_infos(
         fragments: Vec<FragmentInfo>,
-    ) -> (OperatorId, HashSet<u32>, HashMap<OperatorId, StreamNode>) {
-        // Finds root nodes of the graph
+    ) -> (OperatorId, HashSet<FragmentId>, HashMap<OperatorId, StreamNode>) {
+        let job_fragment_ids = fragments.iter().map(|f| f.id).collect::<HashSet<_>>();
 
+        // Finds root nodes of the graph
         fn find_root_nodes(stream_nodes: &HashMap<u64, StreamNode>) -> HashSet<u64> {
             let mut all_nodes = stream_nodes.keys().copied().collect::<HashSet<_>>();
             for node in stream_nodes.values() {
@@ -701,7 +704,12 @@ mod graph {
             }
         }
 
-        let dispatcher_fragment_ids = fragment_id_to_merge_operator_id.keys().copied().collect::<HashSet<_>>();
+        let mut dispatcher_fragment_ids = HashSet::new();
+        for dispatcher_fragment_id in fragment_id_to_merge_operator_id.keys() {
+            if job_fragment_ids.contains(dispatcher_fragment_id) {
+                dispatcher_fragment_ids.insert(*dispatcher_fragment_id);
+            }
+        }
 
         (root_node.unwrap(), dispatcher_fragment_ids, operator_id_to_stream_node)
     }
