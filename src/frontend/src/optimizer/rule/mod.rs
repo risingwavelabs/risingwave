@@ -113,6 +113,7 @@ pub trait Description {
 
 pub(super) type BoxedRule<C> = Box<dyn FallibleRule<C>>;
 
+mod correlated_expr_rewriter;
 mod logical_filter_expression_simplify_rule;
 pub use logical_filter_expression_simplify_rule::*;
 mod over_window_merge_rule;
@@ -125,6 +126,8 @@ mod project_merge_rule;
 pub use project_merge_rule::*;
 mod pull_up_correlated_predicate_rule;
 pub use pull_up_correlated_predicate_rule::*;
+mod pull_up_correlated_project_value_rule;
+pub use pull_up_correlated_project_value_rule::*;
 mod index_delta_join_rule;
 pub use index_delta_join_rule::*;
 mod left_deep_tree_join_ordering_rule;
@@ -291,6 +294,7 @@ macro_rules! for_all_rules {
             , { ProjectJoinMergeRule }
             , { ProjectMergeRule }
             , { PullUpCorrelatedPredicateRule }
+            , { PullUpCorrelatedProjectValueRule }
             , { LeftDeepTreeJoinOrderingRule }
             , { TranslateApplyRule }
             , { PushCalculationOfJoinRule }
