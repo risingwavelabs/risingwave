@@ -12,18 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use either::Either;
 use fancy_regex::Regex;
 use risingwave_common::catalog::FunctionId;
-use risingwave_common::types::{DataType, StructType};
+use risingwave_common::types::StructType;
 use risingwave_pb::catalog::PbFunction;
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
-use risingwave_sqlparser::parser::{Parser, ParserError};
 
 use super::*;
-use crate::expr::{Expr, ExprImpl, Literal};
+use crate::expr::{Expr, Literal};
 use crate::{Binder, bind_data_type};
 
 /// The error type for hint display
@@ -94,27 +91,6 @@ fn find_target(input: &str, target: &str) -> Option<usize> {
     };
 
     Some(ma.start())
-}
-
-/// Create a mock `udf_context`, which is used for semantic check
-fn create_mock_udf_context(
-    arg_types: Vec<DataType>,
-    arg_names: Vec<String>,
-) -> HashMap<String, ExprImpl> {
-    let mut ret: HashMap<String, ExprImpl> = (1..=arg_types.len())
-        .map(|i| {
-            let mock_expr =
-                ExprImpl::Literal(Box::new(Literal::new(None, arg_types[i - 1].clone())));
-            (format!("${i}"), mock_expr)
-        })
-        .collect();
-
-    for (i, arg_name) in arg_names.into_iter().enumerate() {
-        let mock_expr = ExprImpl::Literal(Box::new(Literal::new(None, arg_types[i].clone())));
-        ret.insert(arg_name, mock_expr);
-    }
-
-    ret
 }
 
 pub async fn handle_create_sql_function(
@@ -227,89 +203,66 @@ pub async fn handle_create_sql_function(
         return Ok(resp);
     }
 
-    // Parse function body here
+    // Try bind the function call with mock arguments.
     // Note that the parsing here is just basic syntax / semantic check, the result will NOT be stored
     // e.g., The provided function body contains invalid syntax, return type mismatch, ..., etc.
-    let parse_result = Parser::parse_sql(body.as_str());
-    if let Err(ParserError::ParserError(err)) | Err(ParserError::TokenizerError(err)) = parse_result
     {
-        // Here we just return the original parse error message
-        return Err(ErrorCode::InvalidInputSyntax(err).into());
-    } else {
-        debug_assert!(parse_result.is_ok());
-
-        // Conduct semantic check (e.g., see if the inner calling functions exist, etc.)
-        let ast = parse_result.unwrap();
         let mut binder = Binder::new_for_system(session);
+        let args = arg_types
+            .iter()
+            .map(|ty| Literal::new(None, ty.clone()).into() /* NULL */)
+            .collect();
 
-        binder.set_mock_udf_arguments(create_mock_udf_context(
-            arg_types.clone(),
-            arg_names.clone(),
-        ));
-
-        if let Ok(expr) = Binder::extract_udf_expr_as_subquery(ast) {
-            match binder.bind_expr(&expr) {
-                Ok(expr) => {
-                    // Check if the return type mismatches
-                    if expr.return_type() != return_type {
-                        return Err(ErrorCode::InvalidInputSyntax(format!(
-                            "\nreturn type mismatch detected\nexpected: [{}]\nactual: [{}]\nplease adjust your function definition accordingly",
-                            return_type,
-                            expr.return_type()
-                        ))
-                        .into());
-                    }
-                }
-                Err(e) => {
-                    // TODO: simplify error message
-                    if let ErrorCode::BindErrorRoot { expr: _, error } = e.inner() {
-                        let invalid_msg = error.to_report_string();
-
-                        // First validate the message
-                        let err_msg_type = validate_err_msg(invalid_msg.as_str());
-
-                        // Get the name of the invalid item
-                        // We will just display the first one found
-                        let Some(invalid_item_name) =
-                            extract_hint_display_target(err_msg_type, invalid_msg.as_str())
-                        else {
-                            return Err(
-                                ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into()
-                            );
-                        };
-
-                        // Find the invalid parameter / column / function
-                        let Some(idx) = find_target(body.as_str(), invalid_item_name) else {
-                            return Err(
-                                ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into()
-                            );
-                        };
-
-                        // The exact error position for `^` to point to
-                        let position = format!(
-                            "{}{}",
-                            " ".repeat(idx + PROMPT.len() + 1),
-                            "^".repeat(invalid_item_name.len())
-                        );
-
-                        return Err(ErrorCode::InvalidInputSyntax(format!(
-                            "{}\n{}\n{}`{}`\n{}",
-                            DEFAULT_ERR_MSG, invalid_msg, PROMPT, body, position
-                        ))
-                        .into());
-                    }
-
-                    // Otherwise return the default error message
-                    return Err(ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into());
+        match binder.bind_sql_udf_inner(&function_name, &body, &arg_names, args) {
+            Ok(expr) => {
+                // Check if the return type mismatches
+                if expr.return_type() != return_type {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "\nreturn type mismatch detected\nexpected: [{}]\nactual: [{}]\nplease adjust your function definition accordingly",
+                        return_type,
+                        expr.return_type()
+                    ))
+                    .into());
                 }
             }
-        } else {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "failed to parse the input query and extract the udf expression,
-                please recheck the syntax"
-                    .to_owned(),
-            )
-            .into());
+            Err(e) => {
+                // TODO: simplify error message
+                if let ErrorCode::BindErrorRoot { expr: _, error } = e.inner() {
+                    let invalid_msg = error.to_report_string();
+
+                    // First validate the message
+                    let err_msg_type = validate_err_msg(invalid_msg.as_str());
+
+                    // Get the name of the invalid item
+                    // We will just display the first one found
+                    let Some(invalid_item_name) =
+                        extract_hint_display_target(err_msg_type, invalid_msg.as_str())
+                    else {
+                        return Err(ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into());
+                    };
+
+                    // Find the invalid parameter / column / function
+                    let Some(idx) = find_target(body.as_str(), invalid_item_name) else {
+                        return Err(ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into());
+                    };
+
+                    // The exact error position for `^` to point to
+                    let position = format!(
+                        "{}{}",
+                        " ".repeat(idx + PROMPT.len() + 1),
+                        "^".repeat(invalid_item_name.len())
+                    );
+
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "{}\n{}\n{}`{}`\n{}",
+                        DEFAULT_ERR_MSG, invalid_msg, PROMPT, body, position
+                    ))
+                    .into());
+                }
+
+                // Otherwise return the default error message
+                return Err(ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into());
+            }
         }
     }
 

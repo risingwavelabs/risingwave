@@ -163,7 +163,7 @@ pub struct BindContext {
     pub disable_security_invoker: bool,
     /// Named window definitions from the `WINDOW` clause
     pub named_windows: HashMap<String, WindowSpec>,
-    /// Bound arguments for the current SQL UDF.
+    /// Bound arguments for the current SQL UDF, if any.
     // TODO: use enum for named or positional arguments
     pub udf_arguments: Option<HashMap<String, ExprImpl>>,
 }

@@ -99,7 +99,8 @@ impl fmt::Debug for CorrelatedInputRef {
     }
 }
 
-/// Rewrite `InputRef` to `CorrelatedInputRef` with offset.
+/// Rewrite `InputRef` or `CorrelatedInputRef` to `CorrelatedInputRef` with an offset
+/// on the relative `depth`.
 pub struct InputRefDepthRewriter {
     offset: usize,
 }

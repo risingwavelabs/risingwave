@@ -440,12 +440,15 @@ impl Binder {
         FunctionCall::new(ExprType::Overlay, args).map(|f| f.into())
     }
 
+    /// Returns whether we're binding SQL UDF by checking if any of the upper subquery context has
+    /// `udf_arguments` set.
     fn is_binding_sql_udf(&self) -> bool {
         self.upper_subquery_contexts
             .iter()
             .any(|(context, _)| context.udf_arguments.is_some())
     }
 
+    /// Bind a parameter for SQL UDF.
     fn bind_sql_udf_parameter(&mut self, name: &str) -> Result<ExprImpl> {
         for (i, context) in self
             .upper_subquery_contexts
@@ -456,13 +459,17 @@ impl Binder {
         {
             let depth = i + 1;
 
-            // Find the first non-empty udf context.
+            // Only lookup the first non-empty udf context. If the parameter is not found in the
+            // current context, we will continue to the upper context.
             if let Some(args) = &context.udf_arguments {
                 if let Some(expr) = args.get(name) {
+                    // The arguments recorded in the context is relative to the that context.
+                    // We need to shift the depth to the current context.
                     let mut rewriter = InputRefDepthRewriter::new(depth);
                     return Ok(rewriter.rewrite_expr(expr.clone()));
                 } else {
-                    // Will not continue to the upper context.
+                    // A UDF cannot access parameters from outer UDFs. Do not continue but directly
+                    // return an error.
                     break;
                 }
             }

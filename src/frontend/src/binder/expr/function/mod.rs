@@ -671,21 +671,15 @@ impl Binder {
         Ok(AstExpr::Subquery(query))
     }
 
-    fn bind_sql_udf(
+    pub fn bind_sql_udf_inner(
         &mut self,
-        func: Arc<FunctionCatalog>,
+        name: &str,
+        body: &str,
+        arg_names: &[String],
         args: Vec<ExprImpl>,
     ) -> Result<ExprImpl> {
-        if func.body.is_none() {
-            return Err(
-                ErrorCode::InvalidInputSyntax("`body` must exist for sql udf".to_owned()).into(),
-            );
-        }
-
         // This represents the current user defined function is `language sql`
-        let ast = match risingwave_sqlparser::parser::Parser::parse_sql(
-            func.body.as_ref().unwrap().as_str(),
-        ) {
+        let ast = match risingwave_sqlparser::parser::Parser::parse_sql(body) {
             Ok(ast) => ast,
             Err(ParserError::ParserError(err) | ParserError::TokenizerError(err)) => {
                 // Here we just return the original parse error message
@@ -702,12 +696,12 @@ impl Binder {
         // Note that we will always create new udf context for each sql udf
         let mut udf_arguments = HashMap::new();
         for (i, arg) in args.into_iter().enumerate() {
-            if func.arg_names[i].is_empty() {
+            if arg_names[i].is_empty() {
                 // unnamed argument, use `$1`, `$2` as the name
                 udf_arguments.insert(format!("${}", i + 1), arg);
             } else {
                 // named argument
-                udf_arguments.insert(func.arg_names[i].clone(), arg);
+                udf_arguments.insert(arg_names[i].clone(), arg);
             }
         }
         self.context.udf_arguments = Some(udf_arguments);
@@ -721,8 +715,7 @@ impl Binder {
             >= SQL_UDF_MAX_CALLING_DEPTH
         {
             return Err(ErrorCode::BindError(format!(
-                "function {} calling stack depth limit exceeded",
-                func.name
+                "function {name} calling stack depth limit exceeded"
             ))
             .into());
         }
@@ -742,6 +735,20 @@ impl Binder {
                 .to_owned(),
         )
         .into())
+    }
+
+    fn bind_sql_udf(
+        &mut self,
+        func: Arc<FunctionCatalog>,
+        args: Vec<ExprImpl>,
+    ) -> Result<ExprImpl> {
+        let Some(body) = &func.body else {
+            return Err(
+                ErrorCode::InvalidInputSyntax("`body` must exist for sql udf".to_owned()).into(),
+            );
+        };
+
+        self.bind_sql_udf_inner(&func.name, body, &func.arg_names, args)
     }
 
     pub(in crate::binder) fn bind_function_expr_arg(

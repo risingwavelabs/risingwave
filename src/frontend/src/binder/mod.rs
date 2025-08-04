@@ -385,6 +385,11 @@ impl Binder {
         }
     }
 
+    /// Returns a reverse iterator over the upper subquery contexts that are visible to the current
+    /// context.
+    ///
+    /// In most cases, this should include all the upper subquery contexts. However, when binding
+    /// SQL UDFs, we should avoid resolving the context outside the UDF for hygiene.
     fn visible_upper_subquery_contexts_rev(
         &self,
     ) -> impl Iterator<Item = &(BindContext, Vec<LateralBindContext>)> + '_ {
