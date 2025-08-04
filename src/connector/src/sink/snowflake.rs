@@ -367,14 +367,14 @@ impl Sink for SnowflakeSink {
     }
 }
 
-struct AugmentedChunk {
+pub struct AugmentedChunk {
     current_epoch: u64,
     current_row_count: usize,
     is_append_only: bool,
 }
 
 impl AugmentedChunk {
-    fn new(current_epoch: u64, is_append_only: bool) -> Self {
+    pub fn new(current_epoch: u64, is_append_only: bool) -> Self {
         Self {
             current_epoch,
             current_row_count: 0,
@@ -382,7 +382,7 @@ impl AugmentedChunk {
         }
     }
 
-    fn reset_epoch(&mut self, current_epoch: u64) {
+    pub fn reset_epoch(&mut self, current_epoch: u64) {
         if self.is_append_only || current_epoch == self.current_epoch {
             return;
         }
@@ -390,7 +390,7 @@ impl AugmentedChunk {
         self.current_row_count = 0;
     }
 
-    fn augmented_chunk(&mut self, chunk: StreamChunk) -> Result<StreamChunk> {
+    pub fn augmented_chunk(&mut self, chunk: StreamChunk) -> Result<StreamChunk> {
         if self.is_append_only {
             return Ok(chunk);
         }
