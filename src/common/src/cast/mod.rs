@@ -113,7 +113,7 @@ pub fn i64_to_timestamp(t: i64) -> Result<Timestamp> {
 }
 
 pub fn i64_to_timestamp_milli(t: i64) -> Result<Timestamp> {
-    let tz = Timestamptz::from_millis(t).unwrap();
+    let tz = Timestamptz::from_millis(t).unwrap_or_default();
     Ok(Timestamp::from_timestamp_uncheck(
         tz.timestamp(),
         tz.timestamp_subsec_nanos(),
