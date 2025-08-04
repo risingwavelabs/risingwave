@@ -658,6 +658,7 @@ pub async fn handle(
             distributed_by,
             unique,
             if_not_exists,
+            with_properties: _,
         } => {
             if unique {
                 bail_not_implemented!("create unique index");
