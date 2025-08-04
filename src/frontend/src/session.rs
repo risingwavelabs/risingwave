@@ -1203,7 +1203,7 @@ impl SessionImpl {
 
         self.check_privileges(&[ObjectCheckItem::new(
             secret.owner(),
-            AclMode::Create,
+            AclMode::Usage,
             secret.name.clone(),
             Object::SecretId(secret.id.secret_id()),
         )])?;
