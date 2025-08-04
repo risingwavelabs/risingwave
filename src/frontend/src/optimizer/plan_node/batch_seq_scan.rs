@@ -58,7 +58,7 @@ impl BatchSeqScan {
             scan_ranges.iter().for_each(|scan_range| {
                 assert!(!scan_range.is_full_table_scan());
                 let scan_pk_prefix_len = scan_range.eq_conds.len();
-                let order_len = core.table_desc.order_column_indices().len();
+                let order_len = core.table_catalog.pk.len();
                 assert!(
                     scan_pk_prefix_len < order_len
                         || (scan_pk_prefix_len == order_len && is_full_range(&scan_range.range)),
@@ -111,7 +111,7 @@ impl BatchSeqScan {
                         // inserted.
                         Distribution::UpstreamHashShard(
                             distribution_key,
-                            self.core.table_desc.table_id,
+                            self.core.table_catalog.id,
                         )
                     }
                 }
@@ -182,7 +182,7 @@ impl ToDistributedBatch for BatchSeqScan {
 impl TryToBatchPb for BatchSeqScan {
     fn try_to_batch_prost_body(&self) -> SchedulerResult<NodeBody> {
         Ok(NodeBody::RowSeqScan(RowSeqScanNode {
-            table_desc: Some(self.core.table_desc.try_to_protobuf()?),
+            table_desc: Some(self.core.table_catalog.table_desc().try_to_protobuf()?),
             column_ids: self
                 .core
                 .output_column_ids()
@@ -204,7 +204,7 @@ impl ToLocalBatch for BatchSeqScan {
         let dist = if let Some(distribution_key) = self.core.distribution_key()
             && !distribution_key.is_empty()
         {
-            Distribution::UpstreamHashShard(distribution_key, self.core.table_desc.table_id)
+            Distribution::UpstreamHashShard(distribution_key, self.core.table_catalog.id)
         } else {
             // NOTE(kwannoel): This is a hack to force an exchange to always be inserted before
             // scan.

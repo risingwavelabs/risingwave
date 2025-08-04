@@ -148,7 +148,7 @@ impl LogicalPlanVisitor for InputRefValidator {
         plan: &crate::optimizer::plan_node::LogicalScan,
     ) -> Option<String> {
         let fields = plan
-            .table_desc()
+            .table()
             .columns
             .iter()
             .map(|col| Field::from_with_table_name_prefix(col, plan.table_name()))

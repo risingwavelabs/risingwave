@@ -833,7 +833,12 @@ impl PlanAggCall {
             return_type: Some(self.return_type.to_protobuf()),
             args: self.inputs.iter().map(InputRef::to_proto).collect(),
             distinct: self.distinct,
-            order_by: self.order_by.iter().map(ColumnOrder::to_protobuf).collect(),
+            order_by: self
+                .order_by
+                .iter()
+                .copied()
+                .map(ColumnOrder::to_protobuf)
+                .collect(),
             filter: self.filter.as_expr_unless_true().map(|x| x.to_expr_proto()),
             direct_args: self
                 .direct_args

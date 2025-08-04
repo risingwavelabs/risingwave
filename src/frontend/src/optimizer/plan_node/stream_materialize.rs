@@ -417,6 +417,7 @@ impl StreamNode for StreamMaterialize {
                 .table()
                 .pk()
                 .iter()
+                .copied()
                 .map(ColumnOrder::to_protobuf)
                 .collect(),
         }))
