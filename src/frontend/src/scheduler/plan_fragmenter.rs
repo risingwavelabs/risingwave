@@ -35,7 +35,7 @@ use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use risingwave_connector::source::filesystem::opendal_source::{
-    OpendalAzblob, OpendalGcs, OpendalS3,
+    BatchPosixFsEnumerator, OpendalAzblob, OpendalGcs, OpendalS3,
 };
 use risingwave_connector::source::iceberg::IcebergSplitEnumerator;
 use risingwave_connector::source::kafka::KafkaSplitEnumerator;
@@ -57,11 +57,11 @@ use super::SchedulerError;
 use crate::catalog::TableId;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::error::RwError;
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
 use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
 use crate::optimizer::plan_node::{
-    BatchIcebergScan, BatchKafkaScan, BatchSource, PlanNodeId, PlanNodeType,
+    BatchIcebergScan, BatchKafkaScan, BatchPlanRef as PlanRef, BatchSource, PlanNodeId,
+    PlanNodeType,
 };
 use crate::optimizer::property::Distribution;
 use crate::scheduler::SchedulerResult;
@@ -383,6 +383,21 @@ impl SourceScanInfo {
                 let stream = build_opendal_fs_list_for_batch(lister);
                 let batch_res: Vec<_> = stream.try_collect().await?;
                 let res = batch_res.into_iter().map(SplitImpl::Azblob).collect_vec();
+
+                Ok(SourceScanInfo::Complete(res))
+            }
+            (ConnectorProperties::BatchPosixFs(prop), SourceFetchParameters::Empty) => {
+                use risingwave_connector::source::SplitEnumerator;
+                let mut enumerator = BatchPosixFsEnumerator::new(
+                    *prop,
+                    risingwave_connector::source::SourceEnumeratorContext::dummy().into(),
+                )
+                .await?;
+                let splits = enumerator.list_splits().await?;
+                let res = splits
+                    .into_iter()
+                    .map(SplitImpl::BatchPosixFs)
+                    .collect_vec();
 
                 Ok(SourceScanInfo::Complete(res))
             }
@@ -1241,7 +1256,7 @@ impl BatchPlanFragmenter {
             )
         } else if let Some(scan_node) = node.as_batch_seq_scan() {
             build_table_scan_info(
-                scan_node.core().table_name.to_owned(),
+                scan_node.core().table_name().to_owned(),
                 &scan_node.core().table_desc,
                 scan_node.scan_ranges(),
             )

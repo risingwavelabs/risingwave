@@ -21,7 +21,7 @@ pub(crate) mod split_now_or_rule;
 pub(crate) mod stream_project_merge_rule;
 
 mod prelude {
-    pub(super) use crate::optimizer::plan_node::{PlanRef, Stream};
+    pub(super) use crate::optimizer::plan_node::{Stream, StreamPlanRef as PlanRef};
     pub(super) use crate::optimizer::rule::Rule;
 
     pub(super) type BoxedRule = crate::optimizer::rule::BoxedRule<Stream>;

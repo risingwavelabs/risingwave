@@ -19,9 +19,8 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::batch::prelude::*;
 use super::utils::impl_distill_by_unit;
-use super::{ExprRewritable, generic};
+use super::{BatchPlanRef as PlanRef, ExprRewritable, generic};
 use crate::error::Result;
-use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     PlanBase, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, ToLocalBatch,
@@ -54,7 +53,7 @@ impl BatchExpand {
 
 impl_distill_by_unit!(BatchExpand, core, "BatchExpand");
 
-impl PlanTreeNodeUnary for BatchExpand {
+impl PlanTreeNodeUnary<Batch> for BatchExpand {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -66,7 +65,7 @@ impl PlanTreeNodeUnary for BatchExpand {
     }
 }
 
-impl_plan_tree_node_for_unary! { BatchExpand }
+impl_plan_tree_node_for_unary! { Batch, BatchExpand }
 
 impl ToDistributedBatch for BatchExpand {
     fn to_distributed(&self) -> Result<PlanRef> {
@@ -99,6 +98,6 @@ impl ToLocalBatch for BatchExpand {
     }
 }
 
-impl ExprRewritable for BatchExpand {}
+impl ExprRewritable<Batch> for BatchExpand {}
 
 impl ExprVisitable for BatchExpand {}

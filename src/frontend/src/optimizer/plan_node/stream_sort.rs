@@ -21,7 +21,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
 use super::utils::{Distill, TableCatalogBuilder, childless_record};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef};
 use crate::TableCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Monotonicity, MonotonicityMap, WatermarkColumns};
@@ -120,7 +120,7 @@ impl StreamEowcSort {
     }
 }
 
-impl PlanTreeNodeUnary for StreamEowcSort {
+impl PlanTreeNodeUnary<Stream> for StreamEowcSort {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -130,7 +130,7 @@ impl PlanTreeNodeUnary for StreamEowcSort {
     }
 }
 
-impl_plan_tree_node_for_unary! { StreamEowcSort }
+impl_plan_tree_node_for_unary! { Stream, StreamEowcSort }
 
 impl StreamNode for StreamEowcSort {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -146,6 +146,6 @@ impl StreamNode for StreamEowcSort {
     }
 }
 
-impl ExprRewritable for StreamEowcSort {}
+impl ExprRewritable<Stream> for StreamEowcSort {}
 
 impl ExprVisitable for StreamEowcSort {}

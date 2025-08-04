@@ -29,14 +29,13 @@ use risingwave_sqlparser::ast::{SetExpr, Statement};
 
 use super::extended_handle::{PortalResult, PrepareStatement, PreparedResult};
 use super::{PgResponseStream, RwPgResponse, create_mv, declare_cursor};
-use crate::PlanRef;
 use crate::binder::{Binder, BoundCreateView, BoundStatement};
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
 use crate::handler::flush::do_flush;
 use crate::handler::util::{DataChunkToRowSetAdapter, to_pg_field};
-use crate::optimizer::plan_node::{Batch, Explain};
+use crate::optimizer::plan_node::{BatchPlanRef, Explain};
 use crate::optimizer::{
     BatchPlanRoot, ExecutionModeDecider, OptimizerContext, OptimizerContextRef,
     ReadStorageTableVisitor, RelationCollectorVisitor, SysTableVisitor,
@@ -230,7 +229,7 @@ fn gen_bound(
 }
 
 pub struct BatchQueryPlanResult {
-    pub(crate) plan: PlanRef,
+    pub(crate) plan: BatchPlanRef,
     pub(crate) query_mode: QueryMode,
     pub(crate) schema: Schema,
     pub(crate) stmt_type: StatementType,
@@ -264,10 +263,8 @@ fn gen_batch_query_plan(
     let schema = logical.schema();
     let batch_plan = logical.gen_batch_plan()?;
 
-    let dependent_relations = RelationCollectorVisitor::collect_with::<Batch>(
-        dependent_relations,
-        batch_plan.plan.clone(),
-    );
+    let dependent_relations =
+        RelationCollectorVisitor::collect_with(dependent_relations, batch_plan.plan.clone());
 
     let read_storage_tables = ReadStorageTableVisitor::collect(&batch_plan);
 

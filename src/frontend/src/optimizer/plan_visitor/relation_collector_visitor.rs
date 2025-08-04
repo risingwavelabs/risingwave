@@ -42,12 +42,11 @@ impl RelationCollectorVisitor {
     /// on indices can only be discovered after plan is built.
     pub fn collect_with<C: ConventionMarker>(
         relations: HashSet<TableId>,
-        plan: PlanRef,
+        plan: PlanRef<C>,
     ) -> HashSet<TableId>
     where
         Self: PlanVisitor<C>,
     {
-        plan.expect_convention::<C>();
         let mut visitor = Self::new_with(relations);
         visitor.visit(plan);
         visitor.relations

@@ -26,7 +26,7 @@ use super::{GenericPlanNode, GenericPlanRef, impl_distill_unit_from_fields};
 use crate::error::Result;
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::plan_node::batch::BatchPlanRef;
+use crate::optimizer::plan_node::batch::BatchPlanNodeMetadata;
 use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -116,7 +116,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for HopWindow<PlanRef> {
     }
 }
 
-impl<PlanRef: BatchPlanRef> HopWindow<PlanRef> {
+impl<PlanRef: BatchPlanNodeMetadata> HopWindow<PlanRef> {
     pub fn get_out_column_index_order(&self) -> Order {
         self.i2o_col_mapping()
             .rewrite_provided_order(self.input.order())
@@ -124,6 +124,17 @@ impl<PlanRef: BatchPlanRef> HopWindow<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
+    pub fn clone_with_input<OtherPlanRef>(&self, input: OtherPlanRef) -> HopWindow<OtherPlanRef> {
+        HopWindow {
+            input,
+            time_col: self.time_col.clone(),
+            window_slide: self.window_slide,
+            window_size: self.window_size,
+            window_offset: self.window_offset,
+            output_indices: self.output_indices.clone(),
+        }
+    }
+
     pub fn output_window_start_col_idx(&self) -> Option<usize> {
         self.internal2output_col_mapping()
             .try_map(self.internal_window_start_col_idx())

@@ -20,7 +20,7 @@ use risingwave_pb::stream_plan::{
 
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record, plan_node_name};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{
     Distribution, DistributionDisplay, MonotonicityMap, RequiredDist,
@@ -105,7 +105,7 @@ impl Distill for StreamExchange {
     }
 }
 
-impl PlanTreeNodeUnary for StreamExchange {
+impl PlanTreeNodeUnary<Stream> for StreamExchange {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -118,7 +118,7 @@ impl PlanTreeNodeUnary for StreamExchange {
         }
     }
 }
-impl_plan_tree_node_for_unary! {StreamExchange}
+impl_plan_tree_node_for_unary! { Stream, StreamExchange}
 
 impl StreamNode for StreamExchange {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> NodeBody {
@@ -152,6 +152,6 @@ impl StreamNode for StreamExchange {
     }
 }
 
-impl ExprRewritable for StreamExchange {}
+impl ExprRewritable<Stream> for StreamExchange {}
 
 impl ExprVisitable for StreamExchange {}

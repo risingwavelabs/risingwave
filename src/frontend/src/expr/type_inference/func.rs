@@ -700,6 +700,42 @@ fn infer_type_for_special(
                 _ => Ok(None), // would be rejected by general rules later
             }
         }
+        ExprType::VecConcat => {
+            use risingwave_common::types::ScalarImpl;
+            ensure_arity!("vec_concat", | inputs | == 2);
+            for input in inputs.iter_mut() {
+                if !input.is_untyped() {
+                    continue;
+                }
+                let ExprImpl::Literal(lit) = input else {
+                    // use general rules, which would reject with proper error message
+                    return Ok(None);
+                };
+                let Some(ScalarImpl::Utf8(lit)) = lit.get_data() else {
+                    // use general rules, which would reject with proper error message
+                    return Ok(None);
+                };
+                let guessed = lit.matches(',').count() + 1;
+                input.cast_explicit_mut(&DataType::Vector(guessed))?;
+            }
+            if let (DataType::Vector(l), DataType::Vector(r)) =
+                (inputs[0].return_type(), inputs[1].return_type())
+            {
+                let s = l
+                    .checked_add(r)
+                    .and_then(|s| (s <= DataType::VEC_MAX_SIZE).then_some(s))
+                    .ok_or_else(|| {
+                        ErrorCode::BindError(format!(
+                            "vector cannot have more than {} dimensions: {l} + {r}",
+                            DataType::VEC_MAX_SIZE
+                        ))
+                    })?;
+                Ok(Some(DataType::Vector(s)))
+            } else {
+                // use general rules, which would reject with proper error message
+                Ok(None)
+            }
+        }
         // internal use only
         ExprType::Vnode => Ok(Some(VirtualNode::RW_TYPE)),
         // user-facing `rw_vnode`

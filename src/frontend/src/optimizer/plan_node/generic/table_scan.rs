@@ -26,18 +26,18 @@ use risingwave_sqlparser::ast::AsOf;
 
 use super::GenericPlanNode;
 use crate::TableCatalog;
+use crate::catalog::ColumnId;
+use crate::catalog::index_catalog::TableIndex;
 use crate::catalog::table_catalog::TableType;
-use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::{Cardinality, FunctionalDependencySet, Order, WatermarkColumns};
+use crate::optimizer::property::{FunctionalDependencySet, Order, WatermarkColumns};
 use crate::utils::{ColIndexMappingRewriteExt, Condition};
 
 /// [`TableScan`] returns contents of a RisingWave Table.
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]
 pub struct TableScan {
-    pub table_name: String,
     /// Include `output_col_idx` and columns required in `predicate`
     pub required_col_idx: Vec<usize>,
     pub output_col_idx: Vec<usize>,
@@ -51,7 +51,7 @@ pub struct TableScan {
     /// Table Desc (subset of table catalog).
     pub table_desc: Rc<TableDesc>,
     /// Descriptors of all indexes on this table
-    pub indexes: Vec<Rc<IndexCatalog>>,
+    pub table_indexes: Vec<Arc<TableIndex>>,
     /// The pushed down predicates. It refers to column indexes of the table.
     pub predicate: Condition,
     /// syntax `FOR SYSTEM_TIME AS OF PROCTIME()` is used for temporal join.
@@ -59,8 +59,6 @@ pub struct TableScan {
     /// syntax `FOR SYSTEM_TIME AS OF 499162860` is used for iceberg.
     /// syntax `FOR SYSTEM_VERSION AS OF 10963874102873;` is used for iceberg.
     pub as_of: Option<AsOf>,
-    /// The cardinality of the table **without** applying the predicate.
-    pub table_cardinality: Cardinality,
     #[educe(PartialEq(ignore))]
     #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
@@ -73,6 +71,10 @@ impl TableScan {
 
     pub(crate) fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
         self.predicate.visit_expr(v);
+    }
+
+    pub fn table_name(&self) -> &str {
+        self.table_catalog.name()
     }
 
     /// The mapped distribution key of the scan operator.
@@ -122,7 +124,7 @@ impl TableScan {
     pub(crate) fn column_names_with_table_prefix(&self) -> Vec<String> {
         self.output_col_idx
             .iter()
-            .map(|&i| format!("{}.{}", self.table_name, self.get_table_columns()[i].name))
+            .map(|&i| format!("{}.{}", self.table_name(), self.get_table_columns()[i].name))
             .collect()
     }
 
@@ -150,7 +152,7 @@ impl TableScan {
         self.table_desc
             .order_column_indices()
             .iter()
-            .map(|&i| format!("{}.{}", self.table_name, self.get_table_columns()[i].name))
+            .map(|&i| format!("{}.{}", self.table_name(), self.get_table_columns()[i].name))
             .collect()
     }
 
@@ -197,7 +199,6 @@ impl TableScan {
     /// scan.
     pub fn to_index_scan(
         &self,
-        index_name: &str,
         index_table_catalog: Arc<TableCatalog>,
         primary_to_secondary_mapping: &BTreeMap<usize, usize>,
         function_mapping: &HashMap<FunctionCall, usize>,
@@ -245,51 +246,42 @@ impl TableScan {
         let new_predicate = self.predicate.clone().rewrite_expr(&mut rewriter);
 
         Self::new(
-            index_name.to_owned(),
             new_output_col_idx,
             index_table_catalog,
             vec![],
             self.ctx.clone(),
             new_predicate,
             self.as_of.clone(),
-            self.table_cardinality,
         )
     }
 
     /// Create a `LogicalScan` node. Used internally by optimizer.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        table_name: String,
         output_col_idx: Vec<usize>, // the column index in the table
         table_catalog: Arc<TableCatalog>,
-        indexes: Vec<Rc<IndexCatalog>>,
+        table_indexes: Vec<Arc<TableIndex>>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
         as_of: Option<AsOf>,
-        table_cardinality: Cardinality,
     ) -> Self {
         Self::new_inner(
-            table_name,
             output_col_idx,
             table_catalog,
-            indexes,
+            table_indexes,
             ctx,
             predicate,
             as_of,
-            table_cardinality,
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_inner(
-        table_name: String,
         output_col_idx: Vec<usize>, // the column index in the table
         table_catalog: Arc<TableCatalog>,
-        indexes: Vec<Rc<IndexCatalog>>,
+        table_indexes: Vec<Arc<TableIndex>>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
         as_of: Option<AsOf>,
-        table_cardinality: Cardinality,
     ) -> Self {
         // here we have 3 concepts
         // 1. column_id: ColumnId, stored in catalog and a ID to access data from storage.
@@ -310,15 +302,13 @@ impl TableScan {
         let table_desc = Rc::new(table_catalog.table_desc());
 
         Self {
-            table_name,
             required_col_idx,
             output_col_idx,
             table_catalog,
             table_desc,
-            indexes,
+            table_indexes,
             predicate,
             as_of,
-            table_cardinality,
             ctx,
         }
     }
@@ -340,7 +330,7 @@ impl TableScan {
             .table_desc
             .columns
             .iter()
-            .map(|col| Field::from_with_table_name_prefix(col, &self.table_name))
+            .map(|col| Field::from_with_table_name_prefix(col, self.table_name()))
             .collect();
         Schema { fields }
     }
@@ -353,7 +343,7 @@ impl GenericPlanNode for TableScan {
             .iter()
             .map(|tb_idx| {
                 let col = &self.get_table_columns()[*tb_idx];
-                Field::from_with_table_name_prefix(col, &self.table_name)
+                Field::from_with_table_name_prefix(col, self.table_name())
             })
             .collect();
         Schema { fields }

@@ -20,7 +20,8 @@ use super::batch::prelude::*;
 use super::generic::DistillUnit;
 use super::utils::Distill;
 use super::{
-    ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, generic,
+    BatchPlanRef as PlanRef, ExprRewritable, PlanBase, PlanTreeNodeUnary, ToBatchPb,
+    ToDistributedBatch, generic,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::ToLocalBatch;
@@ -46,7 +47,7 @@ impl BatchMaxOneRow {
     }
 }
 
-impl PlanTreeNodeUnary for BatchMaxOneRow {
+impl PlanTreeNodeUnary<Batch> for BatchMaxOneRow {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -57,7 +58,7 @@ impl PlanTreeNodeUnary for BatchMaxOneRow {
         Self::new(core)
     }
 }
-impl_plan_tree_node_for_unary! {BatchMaxOneRow}
+impl_plan_tree_node_for_unary! { Batch, BatchMaxOneRow}
 
 impl Distill for BatchMaxOneRow {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -68,7 +69,7 @@ impl Distill for BatchMaxOneRow {
 impl ToDistributedBatch for BatchMaxOneRow {
     fn to_distributed(&self) -> Result<PlanRef> {
         let new_input = RequiredDist::single()
-            .enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
+            .batch_enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
         Ok(self.clone_with_input(new_input).into())
     }
 }
@@ -82,11 +83,11 @@ impl ToBatchPb for BatchMaxOneRow {
 impl ToLocalBatch for BatchMaxOneRow {
     fn to_local(&self) -> Result<PlanRef> {
         let new_input = RequiredDist::single()
-            .enforce_if_not_satisfies(self.input().to_local()?, &Order::any())?;
+            .batch_enforce_if_not_satisfies(self.input().to_local()?, &Order::any())?;
         Ok(self.clone_with_input(new_input).into())
     }
 }
 
-impl ExprRewritable for BatchMaxOneRow {}
+impl ExprRewritable<Batch> for BatchMaxOneRow {}
 
 impl ExprVisitable for BatchMaxOneRow {}
