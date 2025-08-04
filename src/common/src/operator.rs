@@ -27,7 +27,7 @@ pub fn unique_executor_id(actor_id: u32, operator_id: u64) -> u64 {
 /// Decompose a unique executor id into actor id and operator id.
 pub fn unique_executor_id_into_parts(unique_executor_id: u64) -> (u32, u32) {
     let actor_id = (unique_executor_id >> 32) as u32;
-    let operator_id = unique_executor_id as u32 & 0xFFFFFFFF;
+    let operator_id = (unique_executor_id & 0xFFFFFFFF) as u32;
     (actor_id, operator_id)
 }
 

@@ -259,9 +259,9 @@ mod net {
 mod metrics {
     use std::collections::{HashMap, HashSet};
 
+    use risingwave_common::operator::unique_executor_id_into_parts;
     use risingwave_pb::monitor_service::GetProfileStatsResponse;
 
-    use risingwave_common::operator::unique_executor_id_into_parts;
     use crate::catalog::FragmentId;
     use crate::handler::explain_analyze_stream_job::graph::{ExecutorId, OperatorId};
     use crate::handler::explain_analyze_stream_job::utils::operator_id_for_dispatch;
@@ -364,11 +364,19 @@ mod metrics {
             for executor_id in executor_ids {
                 let (actor_id, operator_id) = unique_executor_id_into_parts(*executor_id);
                 let Some(initial_stats) = initial.executor_stats.get(executor_id) else {
-                    debug_panic_or_warn!("missing initial stats for actor {} operator {}", actor_id, operator_id);
+                    debug_panic_or_warn!(
+                        "missing initial stats for actor {} operator {}",
+                        actor_id,
+                        operator_id
+                    );
                     continue;
                 };
                 let Some(end_stats) = end.executor_stats.get(executor_id) else {
-                    debug_panic_or_warn!("missing final stats for actor {} operator {}", actor_id, operator_id);
+                    debug_panic_or_warn!(
+                        "missing final stats for actor {} operator {}",
+                        actor_id,
+                        operator_id
+                    );
                     continue;
                 };
 
