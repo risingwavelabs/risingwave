@@ -32,7 +32,7 @@ use crate::array::data_chunk_iter::RowRef;
 use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use crate::hash::HashCode;
-use crate::row::Row;
+use crate::row::{OwnedRow, Row};
 use crate::types::{DataType, DatumRef, MapType, StructType, ToOwnedDatum, ToText};
 use crate::util::chunk_coalesce::DataChunkBuilder;
 use crate::util::hash_util::finalize_hashers;
@@ -63,12 +63,391 @@ use crate::util::value_encoding::{
 /// | 3  | c  | t  |
 #[derive(Clone, PartialEq)]
 #[must_use]
-pub struct DataChunk {
+pub struct ColumnChunk {
     columns: Arc<[ArrayRef]>,
     visibility: Bitmap,
 }
 
+#[derive(Clone, PartialEq)]
+pub struct RowChunk {
+    rows: Arc<[OwnedRow]>,
+    visibility: Bitmap,
+}
+
+#[derive(Clone, PartialEq)]
+pub enum DataChunk {
+    Columns(ColumnChunk),
+    Rows(RowChunk),
+}
+
 impl DataChunk {
+    pub fn as_row_chunk(&self) -> &RowChunk {
+        match self {
+            DataChunk::Rows(c) => c,
+            _ => panic!("DataChunk is not a RowChunk"),
+        }
+    }
+
+    pub fn as_row_chunk_mut(&mut self) -> &mut RowChunk {
+        match self {
+            DataChunk::Rows(c) => c,
+            _ => panic!("DataChunk is not a RowChunk"),
+        }
+    }
+
+    pub fn as_column_chunk(&self) -> &ColumnChunk {
+        match self {
+            DataChunk::Columns(c) => c,
+            _ => panic!("DataChunk is not a ColumnChunk"),
+        }
+    }
+
+    pub fn into_column_chunk(self) -> ColumnChunk {
+        match self {
+            DataChunk::Columns(c) => c,
+            _ => panic!("DataChunk is not a ColumnChunk"),
+        }
+    }
+
+    pub fn new(columns: Vec<ArrayRef>, visibility: impl Into<Bitmap>) -> Self {
+        DataChunk::Columns(ColumnChunk::new(columns, visibility))
+    }
+
+    pub fn new_dummy(cardinality: usize) -> Self {
+        DataChunk::Columns(ColumnChunk::new_dummy(cardinality))
+    }
+
+    pub fn from_rows(rows: &[impl Row], data_types: &[DataType]) -> Self {
+        DataChunk::Columns(ColumnChunk::from_rows(rows, data_types))
+    }
+
+    pub fn next_visible_row_idx(&self, row_idx: usize) -> Option<usize> {
+        match self {
+            DataChunk::Columns(c) => c.next_visible_row_idx(row_idx),
+            DataChunk::Rows(r) => r.next_visible_row_idx(row_idx),
+        }
+    }
+
+    pub fn into_parts(self) -> (Vec<ArrayRef>, Bitmap) {
+        match self {
+            DataChunk::Columns(c) => c.into_parts(),
+            DataChunk::Rows(_) => unimplemented!(),
+        }
+    }
+
+    pub fn into_parts_v2(self) -> (Arc<[ArrayRef]>, Bitmap) {
+        match self {
+            DataChunk::Columns(c) => c.into_parts_v2(),
+            DataChunk::Rows(_) => unimplemented!(),
+        }
+    }
+
+    pub fn from_parts(columns: Arc<[ArrayRef]>, visibility: Bitmap) -> Self {
+        DataChunk::Columns(ColumnChunk::from_parts(columns, visibility))
+    }
+
+    pub fn dimension(&self) -> usize {
+        match self {
+            DataChunk::Columns(c) => c.dimension(),
+            DataChunk::Rows(_) => unimplemented!(),
+        }
+    }
+
+    pub fn cardinality(&self) -> usize {
+        match self {
+            DataChunk::Columns(c) => c.cardinality(),
+            DataChunk::Rows(r) => r.cardinality(),
+        }
+    }
+
+    pub fn capacity(&self) -> usize {
+        match self {
+            DataChunk::Columns(c) => c.capacity(),
+            DataChunk::Rows(r) => r.capacity(),
+        }
+    }
+
+    pub fn selectivity(&self) -> f64 {
+        match self {
+            DataChunk::Columns(c) => c.selectivity(),
+            DataChunk::Rows(_) => unimplemented!(),
+        }
+    }
+
+    pub fn with_visibility(&self, visibility: impl Into<Bitmap>) -> Self {
+        match self {
+            DataChunk::Columns(c) => DataChunk::Columns(c.with_visibility(visibility)),
+            DataChunk::Rows(_) => unimplemented!(),
+        }
+    }
+
+    pub fn visibility(&self) -> &Bitmap {
+        match self {
+            DataChunk::Columns(c) => c.visibility(),
+            DataChunk::Rows(_) => unimplemented!(),
+        }
+    }
+
+    pub fn set_visibility(&mut self, visibility: Bitmap) {
+        match self {
+            DataChunk::Columns(c) => c.set_visibility(visibility),
+            DataChunk::Rows(_) => unimplemented!(),
+        }
+    }
+
+    pub fn is_compacted(&self) -> bool {
+        match self {
+            DataChunk::Columns(c) => c.is_compacted(),
+            DataChunk::Rows(_) => unimplemented!(),
+        }
+    }
+
+    pub fn column_at(&self, idx: usize) -> &ArrayRef {
+        match self {
+            DataChunk::Columns(c) => c.column_at(idx),
+            DataChunk::Rows(_) => unimplemented!(),
+        }
+    }
+
+    pub fn columns(&self) -> &[ArrayRef] {
+        match self {
+            DataChunk::Columns(c) => c.columns(),
+            DataChunk::Rows(_) => unimplemented!(),
+        }
+    }
+
+    pub fn raw_rows(&self) -> &[OwnedRow] {
+        match self {
+            DataChunk::Columns(_) => unimplemented!(),
+            DataChunk::Rows(r) => r.raw_rows(),
+        }
+    }
+
+    pub fn data_types(&self) -> Vec<DataType> {
+        match self {
+            DataChunk::Columns(c) => c.data_types(),
+            DataChunk::Rows(_) => unimplemented!(),
+        }
+    }
+
+    pub fn split_column_at(&self, idx: usize) -> (Self, Self) {
+        match self {
+            DataChunk::Columns(c) => {
+                let (l, r) = c.split_column_at(idx);
+                (DataChunk::Columns(l), DataChunk::Columns(r))
+            }
+            DataChunk::Rows(_) => unimplemented!(),
+        }
+    }
+
+    pub fn to_protobuf(&self) -> PbDataChunk {
+        match self {
+            DataChunk::Columns(c) => c.to_protobuf(),
+            DataChunk::Rows(_) => unimplemented!(),
+        }
+    }
+
+    pub fn compact(self) -> Self {
+        match self {
+            DataChunk::Columns(c) => DataChunk::Columns(c.compact()),
+            DataChunk::Rows(_) => unimplemented!(),
+        }
+    }
+
+    pub fn uncompact(self, vis: Bitmap) -> Self {
+        match self {
+            DataChunk::Columns(c) => DataChunk::Columns(c.uncompact(vis)),
+            DataChunk::Rows(_) => unimplemented!(),
+        }
+    }
+
+    pub fn compact_cow(&self) -> Cow<'_, Self> {
+        match self {
+            DataChunk::Columns(c) => match c.compact_cow() {
+                Cow::Owned(owned) => Cow::Owned(DataChunk::Columns(owned)),
+                Cow::Borrowed(_) => Cow::Borrowed(self),
+            },
+            DataChunk::Rows(_) => unimplemented!(),
+        }
+    }
+
+    pub fn from_protobuf(proto: &PbDataChunk) -> ArrayResult<Self> {
+        ColumnChunk::from_protobuf(proto).map(DataChunk::Columns)
+    }
+
+    pub fn rechunk(chunks: &[Self], each_size_limit: usize) -> ArrayResult<Vec<Self>> {
+        Ok(ColumnChunk::rechunk(chunks, each_size_limit)?
+            .into_iter()
+            .map(|d| DataChunk::Columns(d.into_column_chunk()))
+            .collect())
+    }
+
+    pub fn get_hash_values<H: BuildHasher>(
+        &self,
+        column_idxes: &[usize],
+        hasher_builder: H,
+    ) -> Vec<HashCode<H>> {
+        match self {
+            DataChunk::Columns(c) => c.get_hash_values(column_idxes, hasher_builder),
+            DataChunk::Rows(r) => r.get_hash_values(column_idxes, hasher_builder),
+        }
+    }
+
+    pub fn row_at(&self, pos: usize) -> (RowRef<'_>, bool) {
+        match self {
+            DataChunk::Columns(c) => c.row_at(pos),
+            DataChunk::Rows(c) => c.row_at(pos),
+        }
+    }
+
+    pub fn row_at_unchecked_vis(&self, pos: usize) -> RowRef<'_> {
+        match self {
+            DataChunk::Columns(c) => c.row_at_unchecked_vis(pos),
+            DataChunk::Rows(r) => r.row_at_unchecked_vis(pos),
+        }
+    }
+
+    pub fn to_pretty(&self) -> impl Display {
+        match self {
+            DataChunk::Columns(c) => c.to_pretty(),
+            DataChunk::Rows(_) => unimplemented!(),
+        }
+    }
+
+    pub fn keep_columns(&self, column_indices: &[usize]) -> Self {
+        match self {
+            DataChunk::Columns(c) => DataChunk::Columns(c.keep_columns(column_indices)),
+            DataChunk::Rows(_) => unimplemented!(),
+        }
+    }
+
+    pub fn project(&self, indices: &[usize]) -> Self {
+        match self {
+            DataChunk::Columns(c) => DataChunk::Columns(c.project(indices)),
+            DataChunk::Rows(_) => unimplemented!(),
+        }
+    }
+
+    pub fn project_with_vis(&self, indices: &[usize], visibility: Bitmap) -> Self {
+        match self {
+            DataChunk::Columns(c) => DataChunk::Columns(c.project_with_vis(indices, visibility)),
+            DataChunk::Rows(_) => unimplemented!(),
+        }
+    }
+
+    pub fn reorder_rows(&self, indexes: &[usize]) -> Self {
+        match self {
+            DataChunk::Columns(c) => DataChunk::Columns(c.reorder_rows(indexes)),
+            DataChunk::Rows(_) => unimplemented!(),
+        }
+    }
+
+    pub fn serialize(&self) -> Vec<Bytes> {
+        match self {
+            DataChunk::Columns(c) => c.serialize(),
+            DataChunk::Rows(_) => unimplemented!(),
+        }
+    }
+
+    pub fn serialize_with(&self, serializer: &impl ValueRowSerializer) -> Vec<Bytes> {
+        match self {
+            DataChunk::Columns(c) => c.serialize_with(serializer),
+            DataChunk::Rows(_) => unimplemented!(),
+        }
+    }
+
+    pub fn estimate_value_encoding_size(&self, column_indices: &[usize]) -> usize {
+        match self {
+            DataChunk::Columns(c) => c.estimate_value_encoding_size(column_indices),
+            DataChunk::Rows(_) => unimplemented!(),
+        }
+    }
+}
+
+impl RowChunk {
+    pub fn raw_rows(&self) -> &[OwnedRow] {
+        &self.rows
+    }
+
+    /// `capacity` returns physical length of any chunk column
+    pub fn capacity(&self) -> usize {
+        self.visibility.len()
+    }
+
+    pub fn visibility(&self) -> &Bitmap {
+        &self.visibility
+    }
+
+    pub fn dimension(&self) -> usize {
+        self.rows[0].len()
+    }
+
+    /// `cardinality` returns the number of visible tuples
+    pub fn cardinality(&self) -> usize {
+        self.visibility.count_ones()
+    }
+
+    /// Random access a tuple in a data chunk. Return in a row format.
+    /// # Arguments
+    /// * `pos` - Index of look up tuple
+    /// * `RowRef` - Reference of data tuple
+    /// * bool - whether this tuple is visible
+    pub fn row_at(&self, pos: usize) -> (RowRef<'_>, bool) {
+        let row = self.row_at_unchecked_vis(pos);
+        let vis = self.visibility.is_set(pos);
+        (row, vis)
+    }
+
+    /// Random access a tuple in a data chunk. Return in a row format.
+    /// Note that this function do not return whether the row is visible.
+    /// # Arguments
+    /// * `pos` - Index of look up tuple
+    pub fn row_at_unchecked_vis(&self, pos: usize) -> RowRef<'_> {
+        RowRef::from_row_chunk(self, pos)
+    }
+
+    pub fn next_visible_row_idx(&self, row_idx: usize) -> Option<usize> {
+        self.visibility.next_set_bit(row_idx)
+    }
+
+    pub fn get_hash_values<H: BuildHasher>(
+        &self,
+        column_idxes: &[usize],
+        hasher_builder: H,
+    ) -> Vec<HashCode<H>> {
+        let len = self.capacity();
+        let mut states = Vec::with_capacity(len);
+        states.resize_with(len, || hasher_builder.build_hasher());
+        // Compute hash for the specified columns.
+        let mut state_idx = 0;
+        for idx in self.visibility.iter_ones() {
+            let row = &self.rows[idx];
+            for column_idx in column_idxes {
+                row.hash_at(*column_idx, &mut states[state_idx]);
+            }
+            state_idx += 1;
+        }
+        finalize_hashers(&states[..])
+            .into_iter()
+            .map(|hash_code| hash_code.into())
+            .collect_vec()
+    }
+
+    // pub fn to_protobuf(&self) -> PbDataChunk {
+    //     assert!(self.visibility.all(), "must be compacted before transfer");
+    //     let mut proto = PbDataChunk {
+    //         cardinality: self.cardinality() as u32,
+    //         columns: Default::default(),
+    //     };
+    //     let column_ref = &mut proto.columns;
+    //     for array in &*self.columns {
+    //         column_ref.push(array.to_protobuf());
+    //     }
+    //     proto
+    // }
+}
+
+impl ColumnChunk {
     pub(crate) const PRETTY_TABLE_PRESET: &'static str = "||--+-++|    ++++++";
 
     /// Create a `DataChunk` with `columns` and visibility.
@@ -81,7 +460,7 @@ impl DataChunk {
             assert_eq!(capacity, column.len());
         }
 
-        DataChunk {
+        ColumnChunk {
             columns: columns.into(),
             visibility,
         }
@@ -89,7 +468,7 @@ impl DataChunk {
 
     /// `new_dummy` creates a data chunk without columns but only a cardinality.
     pub fn new_dummy(cardinality: usize) -> Self {
-        DataChunk {
+        ColumnChunk {
             columns: Arc::new([]),
             visibility: Bitmap::ones(cardinality),
         }
@@ -113,7 +492,10 @@ impl DataChunk {
             debug_assert!(none.is_none());
         }
 
-        builder.consume_all().expect("chunk should not be empty")
+        builder
+            .consume_all()
+            .expect("chunk should not be empty")
+            .into_column_chunk()
     }
 
     /// Return the next visible row index on or after `row_idx`.
@@ -163,7 +545,7 @@ impl DataChunk {
     }
 
     pub fn with_visibility(&self, visibility: impl Into<Bitmap>) -> Self {
-        DataChunk {
+        ColumnChunk {
             columns: self.columns.clone(),
             visibility: visibility.into(),
         }
@@ -202,8 +584,8 @@ impl DataChunk {
     /// Panics if `idx > columns.len()`.
     pub fn split_column_at(&self, idx: usize) -> (Self, Self) {
         let (left, right) = self.columns.split_at(idx);
-        let left = DataChunk::new(left.to_vec(), self.visibility.clone());
-        let right = DataChunk::new(right.to_vec(), self.visibility.clone());
+        let left = ColumnChunk::new(left.to_vec(), self.visibility.clone());
+        let right = ColumnChunk::new(right.to_vec(), self.visibility.clone());
         (left, right)
     }
 
@@ -320,7 +702,7 @@ impl DataChunk {
             columns.push(ArrayImpl::from_protobuf(any_col, cardinality)?.into());
         }
 
-        let chunk = DataChunk::new(columns, proto.cardinality as usize);
+        let chunk = ColumnChunk::new(columns, proto.cardinality as usize);
         Ok(chunk)
     }
 
@@ -384,7 +766,7 @@ impl DataChunk {
     /// # Arguments
     /// * `pos` - Index of look up tuple
     pub fn row_at_unchecked_vis(&self, pos: usize) -> RowRef<'_> {
-        RowRef::new(self, pos)
+        RowRef::from_column_chunk(self, pos)
     }
 
     /// Returns a table-like text representation of the `DataChunk`.
@@ -436,7 +818,7 @@ impl DataChunk {
                 }
             })
             .collect();
-        DataChunk {
+        ColumnChunk {
             columns,
             visibility: self.visibility.clone(),
         }
@@ -479,7 +861,7 @@ impl DataChunk {
             .into_iter()
             .map(|builder| builder.finish().into())
             .collect();
-        DataChunk::new(columns, indexes.len())
+        ColumnChunk::new(columns, indexes.len())
     }
 
     /// Partition fixed size datums and variable length ones.
@@ -634,20 +1016,32 @@ impl fmt::Debug for DataChunk {
 
 impl<'a> From<&'a StructArray> for DataChunk {
     fn from(array: &'a StructArray) -> Self {
-        Self {
+        let c = ColumnChunk {
             columns: array.fields().cloned().collect(),
             visibility: Bitmap::ones(array.len()),
-        }
+        };
+        DataChunk::Columns(c)
     }
 }
 
 impl EstimateSize for DataChunk {
     fn estimated_heap_size(&self) -> usize {
-        self.columns
-            .iter()
-            .map(|a| a.estimated_heap_size())
-            .sum::<usize>()
-            + self.visibility.estimated_heap_size()
+        match self {
+            DataChunk::Columns(c) => {
+                c.columns
+                    .iter()
+                    .map(|a| a.estimated_heap_size())
+                    .sum::<usize>()
+                    + c.visibility.estimated_heap_size()
+            }
+            DataChunk::Rows(r) => {
+                r.rows
+                    .iter()
+                    .map(|r| r.estimated_heap_size())
+                    .sum::<usize>()
+                    + r.visibility().estimated_heap_size()
+            }
+        }
     }
 }
 
@@ -836,11 +1230,29 @@ impl DataChunkTestExt for DataChunk {
     }
 
     fn assert_valid(&self) {
-        let cols = self.columns();
-        let vis = &self.visibility;
-        let n = vis.len();
-        for col in cols {
-            assert_eq!(col.len(), n);
+        match self {
+            DataChunk::Columns(c) => {
+                let cols = c.columns();
+                let vis = &c.visibility;
+                let n = vis.len();
+                for col in cols {
+                    assert_eq!(col.len(), n);
+                }
+            }
+            DataChunk::Rows(r) => {
+                let rows = r.raw_rows();
+                let vis = &r.visibility;
+                let n = vis.len();
+                assert_eq!(rows.len(), n);
+                let mut row_length = None;
+                for row in rows {
+                    if let Some(row_length) = row_length {
+                        assert_eq!(row.len(), row_length);
+                    } else {
+                        row_length = Some(row.len());
+                    }
+                }
+            }
         }
     }
 

@@ -27,7 +27,7 @@ use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::{PbOp, PbStreamChunk};
 
 use super::stream_chunk_builder::StreamChunkBuilder;
-use super::{ArrayImpl, ArrayRef, ArrayResult, DataChunkTestExt, RowRef};
+use super::{ArrayImpl, ArrayRef, ArrayResult, ColumnChunk, DataChunkTestExt, RowRef};
 use crate::array::DataChunk;
 use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::catalog::Schema;
@@ -276,7 +276,7 @@ impl StreamChunk {
         }
 
         let mut table = Table::new();
-        table.load_preset(DataChunk::PRETTY_TABLE_PRESET);
+        table.load_preset(ColumnChunk::PRETTY_TABLE_PRESET);
 
         if let Some(schema) = schema {
             assert_eq!(self.dimension(), schema.len());

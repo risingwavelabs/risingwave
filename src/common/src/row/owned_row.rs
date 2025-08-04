@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::hash::Hasher;
 use std::mem;
 
 use risingwave_common_estimate_size::EstimateSize;
 
 use super::Row;
+use crate::array::NULL_VAL_FOR_HASH;
 use crate::types::{
     DataType, Date, Datum, DatumRef, Decimal, Interval, ScalarImpl, Time, Timestamp, ToDatumRef,
 };
@@ -49,6 +51,18 @@ impl OwnedRow {
     /// Note: use [`empty`](super::empty()) if possible.
     pub fn empty() -> Self {
         Self(Box::new([]))
+    }
+
+    #[inline(always)]
+    pub fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
+        use std::hash::Hash;
+        // We use a default implementation for all arrays for now, as retrieving the reference
+        // should be lightweight.
+        if let Some(value) = self.datum_at(idx) {
+            value.hash(state);
+        } else {
+            NULL_VAL_FOR_HASH.hash(state);
+        }
     }
 
     pub fn new(values: Vec<Datum>) -> Self {
