@@ -21,25 +21,17 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, IndexId, Schema};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::{PbIndex, PbIndexColumnProperties, PbStreamJobStatus};
+use risingwave_pb::catalog::{PbIndex, PbIndexColumnProperties};
 
-use crate::catalog::{DatabaseId, OwnedByUserCatalog, SchemaId, TableCatalog};
-use crate::expr::{Expr, ExprDisplay, ExprImpl, ExprRewriter as _, FunctionCall};
+use crate::catalog::table_catalog::TableType;
+use crate::catalog::{OwnedByUserCatalog, TableCatalog};
+use crate::expr::{ExprDisplay, ExprImpl, ExprRewriter as _, FunctionCall};
 use crate::user::UserId;
 
 #[derive(Clone, Debug, Educe)]
 #[educe(PartialEq, Eq, Hash)]
-pub struct IndexCatalog {
-    pub id: IndexId,
-
+pub struct TableIndex {
     pub name: String,
-
-    /// Only `InputRef` and `FuncCall` type index is supported Now.
-    /// The index of `InputRef` is the column index of the primary table.
-    /// The `index_item` size is equal to the index table columns size
-    /// The input args of `FuncCall` is also the column index of the primary table.
-    pub index_item: Vec<ExprImpl>,
-
     /// The properties of the index columns.
     /// <https://www.postgresql.org/docs/current/functions-info.html#FUNCTIONS-INFO-INDEX-COLUMN-PROPS>
     pub index_column_properties: Vec<PbIndexColumnProperties>,
@@ -62,6 +54,28 @@ pub struct IndexCatalog {
     pub function_mapping: HashMap<FunctionCall, usize>,
 
     pub index_columns_len: u32,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub enum IndexType {
+    Table(Arc<TableIndex>),
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct IndexCatalog {
+    pub id: IndexId,
+
+    pub name: String,
+
+    /// Only `InputRef` and `FuncCall` type index is supported Now.
+    /// The index of `InputRef` is the column index of the primary table.
+    /// The `index_item` size is equal to the index table columns size
+    /// The input args of `FuncCall` is also the column index of the primary table.
+    pub index_item: Vec<ExprImpl>,
+
+    pub index_type: IndexType,
+
+    pub primary_table: Arc<TableCatalog>,
 
     pub created_at_epoch: Option<Epoch>,
 
@@ -75,8 +89,8 @@ pub struct IndexCatalog {
 impl IndexCatalog {
     pub fn build_from(
         index_prost: &PbIndex,
-        index_table: &TableCatalog,
-        primary_table: &TableCatalog,
+        index_table: &Arc<TableCatalog>,
+        primary_table: &Arc<TableCatalog>,
     ) -> Self {
         let index_item: Vec<ExprImpl> = index_prost
             .index_item
@@ -85,51 +99,65 @@ impl IndexCatalog {
             .map(|expr| item_rewriter::CompositeCastEliminator.rewrite_expr(expr))
             .collect();
 
-        let primary_to_secondary_mapping: BTreeMap<usize, usize> = index_item
-            .iter()
-            .enumerate()
-            .filter_map(|(i, expr)| match expr {
-                ExprImpl::InputRef(input_ref) => Some((input_ref.index, i)),
-                ExprImpl::FunctionCall(_) => None,
-                _ => unreachable!(),
-            })
-            .collect();
+        let index_type = match index_table.table_type {
+            TableType::Index => {
+                let primary_to_secondary_mapping: BTreeMap<usize, usize> = index_item
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, expr)| match expr {
+                        ExprImpl::InputRef(input_ref) => Some((input_ref.index, i)),
+                        ExprImpl::FunctionCall(_) => None,
+                        _ => unreachable!(),
+                    })
+                    .collect();
 
-        let secondary_to_primary_mapping = BTreeMap::from_iter(
-            primary_to_secondary_mapping
-                .clone()
-                .into_iter()
-                .map(|(x, y)| (y, x)),
-        );
+                let secondary_to_primary_mapping = BTreeMap::from_iter(
+                    primary_to_secondary_mapping
+                        .clone()
+                        .into_iter()
+                        .map(|(x, y)| (y, x)),
+                );
 
-        let function_mapping: HashMap<FunctionCall, usize> = index_item
-            .iter()
-            .enumerate()
-            .filter_map(|(i, expr)| match expr {
-                ExprImpl::InputRef(_) => None,
-                ExprImpl::FunctionCall(func) => Some((func.deref().clone(), i)),
-                _ => unreachable!(),
-            })
-            .collect();
+                let function_mapping: HashMap<FunctionCall, usize> = index_item
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, expr)| match expr {
+                        ExprImpl::InputRef(_) => None,
+                        ExprImpl::FunctionCall(func) => Some((func.deref().clone(), i)),
+                        _ => unreachable!(),
+                    })
+                    .collect();
+                IndexType::Table(Arc::new(TableIndex {
+                    name: index_prost.name.clone(),
+                    index_column_properties: index_prost.index_column_properties.clone(),
+                    index_columns_len: index_prost.index_columns_len,
+                    index_table: index_table.clone(),
+                    primary_table: primary_table.clone(),
+                    primary_to_secondary_mapping,
+                    secondary_to_primary_mapping,
+                    function_mapping,
+                }))
+            }
+            TableType::Table | TableType::MaterializedView | TableType::Internal => {
+                unreachable!()
+            }
+        };
 
         IndexCatalog {
             id: index_prost.id.into(),
             name: index_prost.name.clone(),
             index_item,
-            index_column_properties: index_prost.index_column_properties.clone(),
-            index_table: Arc::new(index_table.clone()),
-            primary_table: Arc::new(primary_table.clone()),
-            primary_to_secondary_mapping,
-            secondary_to_primary_mapping,
-            function_mapping,
-            index_columns_len: index_prost.index_columns_len,
+            index_type,
+            primary_table: primary_table.clone(),
             created_at_epoch: index_prost.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: index_prost.initialized_at_epoch.map(Epoch::from),
             created_at_cluster_version: index_prost.created_at_cluster_version.clone(),
             initialized_at_cluster_version: index_prost.initialized_at_cluster_version.clone(),
         }
     }
+}
 
+impl TableIndex {
     pub fn primary_table_pk_ref_to_index_table(&self) -> Vec<ColumnOrder> {
         let mapping = self.primary_to_secondary_mapping();
 
@@ -169,38 +197,24 @@ impl IndexCatalog {
     pub fn function_mapping(&self) -> &HashMap<FunctionCall, usize> {
         &self.function_mapping
     }
+}
 
-    pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> PbIndex {
-        PbIndex {
-            id: self.id.index_id,
-            schema_id,
-            database_id,
-            name: self.name.clone(),
-            owner: self.index_table.owner,
-            index_table_id: self.index_table.id.table_id,
-            primary_table_id: self.primary_table.id.table_id,
-            index_item: self
-                .index_item
-                .iter()
-                .map(|expr| expr.to_expr_proto())
-                .collect_vec(),
-            index_column_properties: self.index_column_properties.clone(),
-            index_columns_len: self.index_columns_len,
-            initialized_at_epoch: self.initialized_at_epoch.map(|e| e.0),
-            created_at_epoch: self.created_at_epoch.map(|e| e.0),
-            stream_job_status: PbStreamJobStatus::Creating.into(),
-            initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
-            created_at_cluster_version: self.created_at_cluster_version.clone(),
+impl IndexCatalog {
+    pub fn index_table(&self) -> &Arc<TableCatalog> {
+        match &self.index_type {
+            IndexType::Table(index) => &index.index_table,
         }
     }
 
     /// Get the column properties of the index column.
     pub fn get_column_properties(&self, column_idx: usize) -> Option<PbIndexColumnProperties> {
-        self.index_column_properties.get(column_idx).cloned()
+        match &self.index_type {
+            IndexType::Table(index) => index.index_column_properties.get(column_idx).cloned(),
+        }
     }
 
     pub fn get_column_def(&self, column_idx: usize) -> Option<String> {
-        if let Some(col) = self.index_table.columns.get(column_idx) {
+        if let Some(col) = self.index_table().columns.get(column_idx) {
             if col.is_hidden {
                 return None;
             }
@@ -224,7 +238,7 @@ impl IndexCatalog {
     }
 
     pub fn display(&self) -> IndexDisplay {
-        let index_table = self.index_table.clone();
+        let index_table = self.index_table().clone();
         let index_columns_with_ordering = index_table
             .pk
             .iter()
@@ -272,7 +286,7 @@ pub struct IndexDisplay {
 
 impl OwnedByUserCatalog for IndexCatalog {
     fn owner(&self) -> UserId {
-        self.index_table.owner
+        self.index_table().owner
     }
 }
 

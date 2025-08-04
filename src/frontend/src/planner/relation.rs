@@ -78,19 +78,7 @@ impl Planner {
 
     pub(super) fn plan_base_table(&mut self, base_table: &BoundBaseTable) -> Result<PlanRef> {
         let as_of = base_table.as_of.clone();
-        let table_cardinality = base_table.table_catalog.cardinality;
-        let scan = LogicalScan::create(
-            base_table.table_catalog.name().to_owned(),
-            base_table.table_catalog.clone(),
-            base_table
-                .table_indexes
-                .iter()
-                .map(|x| x.as_ref().clone().into())
-                .collect(),
-            self.ctx(),
-            as_of.clone(),
-            table_cardinality,
-        );
+        let scan = LogicalScan::from_base_table(base_table, self.ctx(), as_of.clone());
 
         match base_table.table_catalog.engine {
             Engine::Hummock => {

@@ -1241,7 +1241,7 @@ impl BatchPlanFragmenter {
             )
         } else if let Some(scan_node) = node.as_batch_seq_scan() {
             build_table_scan_info(
-                scan_node.core().table_name.to_owned(),
+                scan_node.core().table_name().to_owned(),
                 &scan_node.core().table_desc,
                 scan_node.scan_ranges(),
             )
