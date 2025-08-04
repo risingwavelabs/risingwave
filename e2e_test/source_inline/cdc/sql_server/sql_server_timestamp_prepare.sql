@@ -4,6 +4,10 @@
 USE mydb;
 GO
 
+-- Enable CDC on database first
+EXEC sys.sp_cdc_enable_db;
+GO
+
 -- Create table for timestamp testing
 CREATE TABLE timestamp_test (
     id INT PRIMARY KEY,
