@@ -17,9 +17,8 @@ use std::rc::Rc;
 use risingwave_connector::source::ConnectorProperties;
 
 use super::{BatchPlanVisitor, DefaultBehavior, Merge};
-use crate::PlanRef;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::optimizer::plan_node::BatchSource;
+use crate::optimizer::plan_node::{BatchPlanRef as PlanRef, BatchSource};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
 #[derive(Debug, Clone, Default)]

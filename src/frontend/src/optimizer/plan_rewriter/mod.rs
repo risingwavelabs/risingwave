@@ -25,24 +25,20 @@ use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::*;
 
 pub trait PlanRewriter<C: ConventionMarker> {
-    fn rewrite_with_inputs(&mut self, plan: &PlanRef, inputs: Vec<PlanRef>) -> PlanRef;
+    fn rewrite_with_inputs(&mut self, plan: &PlanRef<C>, inputs: Vec<PlanRef<C>>) -> PlanRef<C>;
 }
 
-impl PlanRef {
-    pub fn rewrite_with<C: ConventionMarker>(
-        &self,
-        rewriter: &mut impl PlanRewriter<C>,
-    ) -> PlanRef {
-        self.expect_convention::<C>();
+impl<C: ConventionMarker> PlanRef<C> {
+    pub fn rewrite_with(&self, rewriter: &mut impl PlanRewriter<C>) -> PlanRef<C> {
         let mut share_map = HashMap::new();
         self.rewrite_recursively(rewriter, &mut share_map)
     }
 
-    fn rewrite_recursively<C: ConventionMarker>(
+    fn rewrite_recursively(
         &self,
         rewriter: &mut impl PlanRewriter<C>,
-        share_map: &mut HashMap<PlanNodeId, PlanRef>,
-    ) -> PlanRef {
+        share_map: &mut HashMap<PlanNodeId, PlanRef<C>>,
+    ) -> PlanRef<C> {
         use risingwave_common::util::recursive::{Recurse, tracker};
 
         use crate::session::current::notice_to_user;
@@ -51,8 +47,8 @@ impl PlanRef {
                 notice_to_user(PLAN_TOO_DEEP_NOTICE);
             }
 
-            if let Some(share) = self.as_share_node::<C>() {
-                let id = self.id();
+            if let Some(share) = self.as_share_node() {
+                let id = share.plan_base().id();
                 return if let Some(share) = share_map.get(&id) {
                     share.clone()
                 } else {

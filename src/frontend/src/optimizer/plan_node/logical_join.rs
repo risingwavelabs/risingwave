@@ -28,8 +28,9 @@ use super::generic::{
 };
 use super::utils::{Distill, childless_record};
 use super::{
-    ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown,
-    StreamHashJoin, StreamProject, ToBatch, ToStream, generic,
+    BatchPlanRef, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, PlanBase,
+    PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamPlanRef, StreamProject, ToBatch,
+    ToStream, generic,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
@@ -43,7 +44,7 @@ use crate::optimizer::plan_node::{
     StreamDynamicFilter, StreamFilter, StreamTableScan, StreamTemporalJoin, ToStreamContext,
 };
 use crate::optimizer::plan_visitor::LogicalCardinalityExt;
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Distribution, RequiredDist};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay};
 
 /// `LogicalJoin` combines two relations according to some condition.
@@ -256,9 +257,9 @@ impl LogicalJoin {
     fn to_batch_lookup_join_with_index_selection(
         &self,
         predicate: EqJoinPredicate,
-        logical_join: generic::Join<PlanRef>,
+        batch_join: generic::Join<BatchPlanRef>,
     ) -> Result<Option<BatchLookupJoin>> {
-        match logical_join.join_type {
+        match batch_join.join_type {
             JoinType::Inner
             | JoinType::LeftOuter
             | JoinType::LeftSemi
@@ -280,7 +281,7 @@ impl LogicalJoin {
         let mut result_plan = None;
         // Lookup primary table.
         if let Some(lookup_join) =
-            self.to_batch_lookup_join(predicate.clone(), logical_join.clone())?
+            self.to_batch_lookup_join(predicate.clone(), batch_join.clone())?
         {
             result_plan = Some(lookup_join);
         }
@@ -290,12 +291,12 @@ impl LogicalJoin {
             if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
                 let index_scan: PlanRef = index_scan.into();
                 let that = self.clone_with_left_right(self.left(), index_scan.clone());
-                let mut new_logical_join = logical_join.clone();
-                new_logical_join.right = index_scan.to_batch().expect("index scan failed to batch");
+                let mut new_batch_join = batch_join.clone();
+                new_batch_join.right = index_scan.to_batch().expect("index scan failed to batch");
 
                 // Lookup covered index.
                 if let Some(lookup_join) =
-                    that.to_batch_lookup_join(predicate.clone(), new_logical_join)?
+                    that.to_batch_lookup_join(predicate.clone(), new_batch_join)?
                 {
                     match &result_plan {
                         None => result_plan = Some(lookup_join),
@@ -319,7 +320,7 @@ impl LogicalJoin {
     fn to_batch_lookup_join(
         &self,
         predicate: EqJoinPredicate,
-        logical_join: generic::Join<PlanRef>,
+        logical_join: generic::Join<BatchPlanRef>,
     ) -> Result<Option<BatchLookupJoin>> {
         match logical_join.join_type {
             JoinType::Inner
@@ -448,11 +449,12 @@ impl LogicalJoin {
 
         let new_scan_output_column_ids = new_scan.output_column_ids();
         let as_of = new_scan.as_of.clone();
+        let new_logical_scan: LogicalScan = new_scan.into();
 
         // Construct a new logical join, because we have change its RHS.
         let new_logical_join = generic::Join::new(
             logical_join.left,
-            new_scan.into(),
+            new_logical_scan.to_batch()?,
             new_join_on,
             logical_join.join_type,
             new_join_output_indices,
@@ -485,7 +487,7 @@ impl LogicalJoin {
     }
 }
 
-impl PlanTreeNodeBinary for LogicalJoin {
+impl PlanTreeNodeBinary<Logical> for LogicalJoin {
     fn left(&self) -> PlanRef {
         self.core.left.clone()
     }
@@ -558,7 +560,7 @@ impl PlanTreeNodeBinary for LogicalJoin {
     }
 }
 
-impl_plan_tree_node_for_binary! { LogicalJoin }
+impl_plan_tree_node_for_binary! { Logical, LogicalJoin }
 
 impl ColPrunable for LogicalJoin {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
@@ -626,7 +628,7 @@ impl ColPrunable for LogicalJoin {
     }
 }
 
-impl ExprRewritable for LogicalJoin {
+impl ExprRewritable<Logical> for LogicalJoin {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
@@ -880,27 +882,33 @@ impl LogicalJoin {
         &self,
         predicate: &EqJoinPredicate,
         ctx: &mut ToStreamContext,
-    ) -> Result<(PlanRef, PlanRef)> {
+    ) -> Result<(StreamPlanRef, StreamPlanRef)> {
         use super::stream::prelude::*;
 
         let mut right = self.right().to_stream_with_dist_required(
             &RequiredDist::shard_by_key(self.right().schema().len(), &predicate.right_eq_indexes()),
             ctx,
         )?;
-        let mut left = self.left();
+        let logical_left = self.left();
 
-        let r2l = predicate.r2l_eq_columns_mapping(left.schema().len(), right.schema().len());
-        let l2r = predicate.l2r_eq_columns_mapping(left.schema().len(), right.schema().len());
+        let r2l =
+            predicate.r2l_eq_columns_mapping(logical_left.schema().len(), right.schema().len());
+        let l2r =
+            predicate.l2r_eq_columns_mapping(logical_left.schema().len(), right.schema().len());
 
+        let mut left;
         let right_dist = right.distribution();
         match right_dist {
             Distribution::HashShard(_) => {
                 let left_dist = r2l
                     .rewrite_required_distribution(&RequiredDist::PhysicalDist(right_dist.clone()));
-                left = left.to_stream_with_dist_required(&left_dist, ctx)?;
+                left = self
+                    .core
+                    .left
+                    .to_stream_with_dist_required(&left_dist, ctx)?;
             }
             Distribution::UpstreamHashShard(_, _) => {
-                left = left.to_stream_with_dist_required(
+                left = self.core.left.to_stream_with_dist_required(
                     &RequiredDist::shard_by_key(
                         self.left().schema().len(),
                         &predicate.left_eq_indexes(),
@@ -913,13 +921,13 @@ impl LogicalJoin {
                         let right_dist = l2r.rewrite_required_distribution(
                             &RequiredDist::PhysicalDist(left_dist.clone()),
                         );
-                        right = right_dist.enforce_if_not_satisfies(right, &Order::any())?
+                        right = right_dist.streaming_enforce_if_not_satisfies(right)?
                     }
                     Distribution::UpstreamHashShard(_, _) => {
                         left = RequiredDist::hash_shard(&predicate.left_eq_indexes())
-                            .enforce_if_not_satisfies(left, &Order::any())?;
+                            .streaming_enforce_if_not_satisfies(left)?;
                         right = RequiredDist::hash_shard(&predicate.right_eq_indexes())
-                            .enforce_if_not_satisfies(right, &Order::any())?;
+                            .streaming_enforce_if_not_satisfies(right)?;
                     }
                     _ => unreachable!(),
                 }
@@ -933,13 +941,13 @@ impl LogicalJoin {
         &self,
         predicate: EqJoinPredicate,
         ctx: &mut ToStreamContext,
-    ) -> Result<PlanRef> {
+    ) -> Result<StreamPlanRef> {
         use super::stream::prelude::*;
 
         assert!(predicate.has_eq());
         let (left, right) = self.get_stream_input_for_hash_join(&predicate, ctx)?;
 
-        let logical_join = self.clone_with_left_right(left, right);
+        let core = self.core.clone_with_inputs(left, right);
 
         // Convert to Hash Join for equal joins
         // For inner joins, pull non-equal conditions to a filter operator on top of it by default.
@@ -949,7 +957,7 @@ impl LogicalJoin {
         // session variable `streaming_force_filter_inside_join` as it can save unnecessary
         // materialization of rows only to be filtered later.
 
-        let stream_hash_join = StreamHashJoin::new(logical_join.core.clone(), predicate.clone());
+        let stream_hash_join = StreamHashJoin::new(core.clone(), predicate.clone());
 
         let force_filter_inside_join = self
             .base
@@ -965,16 +973,17 @@ impl LogicalJoin {
         if pull_filter {
             let default_indices = (0..self.internal_column_num()).collect::<Vec<_>>();
 
+            let mut core = core.clone();
+            core.output_indices = default_indices.clone();
             // Temporarily remove output indices.
-            let logical_join = logical_join.clone_with_output_indices(default_indices.clone());
             let eq_cond = EqJoinPredicate::new(
                 Condition::true_cond(),
                 predicate.eq_keys().to_vec(),
                 self.left().schema().len(),
                 self.right().schema().len(),
             );
-            let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
-            let hash_join = StreamHashJoin::new(logical_join.core, eq_cond).into();
+            core.on = eq_cond.eq_cond();
+            let hash_join = StreamHashJoin::new(core, eq_cond).into();
             let logical_filter = generic::Filter::new(predicate.non_eq_cond(), hash_join);
             let plan = StreamFilter::new(logical_filter).into();
             if self.output_indices() != &default_indices {
@@ -1007,7 +1016,7 @@ impl LogicalJoin {
         &self,
         predicate: EqJoinPredicate,
         ctx: &mut ToStreamContext,
-    ) -> Result<PlanRef> {
+    ) -> Result<StreamPlanRef> {
         // Index selection for temporal join.
         let right = self.right();
         // `should_be_temporal_join()` has already check right input for us.
@@ -1207,7 +1216,7 @@ impl LogicalJoin {
 
         let left = self.left().to_stream(ctx)?;
         // Enforce a shuffle for the temporal join LHS to let the scheduler be able to schedule the join fragment together with the RHS with a `no_shuffle` exchange.
-        let left = required_dist.enforce(left, &Order::any());
+        let left = required_dist.stream_enforce(left);
 
         let (new_stream_table_scan, new_predicate, new_join_on, new_join_output_indices) =
             Self::temporal_join_scan_predicate_pull_up(
@@ -1247,7 +1256,7 @@ impl LogicalJoin {
         &self,
         predicate: EqJoinPredicate,
         ctx: &mut ToStreamContext,
-    ) -> Result<PlanRef> {
+    ) -> Result<StreamPlanRef> {
         use super::stream::prelude::*;
         assert!(!predicate.has_eq());
 
@@ -1300,7 +1309,7 @@ impl LogicalJoin {
         &self,
         predicate: Condition,
         ctx: &mut ToStreamContext,
-    ) -> Result<Option<PlanRef>> {
+    ) -> Result<Option<StreamPlanRef>> {
         use super::stream::prelude::*;
 
         // If there is exactly one predicate, it is a comparison (<, <=, >, >=), and the
@@ -1389,7 +1398,7 @@ impl LogicalJoin {
         }
     }
 
-    pub fn index_lookup_join_to_batch_lookup_join(&self) -> Result<PlanRef> {
+    pub fn index_lookup_join_to_batch_lookup_join(&self) -> Result<BatchPlanRef> {
         let predicate = EqJoinPredicate::create(
             self.left().schema().len(),
             self.right().schema().len(),
@@ -1397,12 +1406,12 @@ impl LogicalJoin {
         );
         assert!(predicate.has_eq());
 
-        let mut logical_join = self.core.clone();
-        logical_join.left = logical_join.left.to_batch()?;
-        logical_join.right = logical_join.right.to_batch()?;
+        let join = self
+            .core
+            .clone_with_inputs(self.core.left.to_batch()?, self.core.right.to_batch()?);
 
         Ok(self
-            .to_batch_lookup_join(predicate, logical_join)?
+            .to_batch_lookup_join(predicate, join)?
             .expect("Fail to convert to lookup join")
             .into())
     }
@@ -1411,7 +1420,7 @@ impl LogicalJoin {
         &self,
         predicate: EqJoinPredicate,
         ctx: &mut ToStreamContext,
-    ) -> Result<PlanRef> {
+    ) -> Result<StreamPlanRef> {
         use super::stream::prelude::*;
 
         if predicate.eq_keys().is_empty() {
@@ -1423,20 +1432,20 @@ impl LogicalJoin {
 
         let (left, right) = self.get_stream_input_for_hash_join(&predicate, ctx)?;
         let left_len = left.schema().len();
-        let logical_join = self.clone_with_left_right(left, right);
+        let core = self.core.clone_with_inputs(left, right);
 
         let inequality_desc =
             Self::get_inequality_desc_from_predicate(predicate.other_cond().clone(), left_len)?;
 
-        Ok(StreamAsOfJoin::new(logical_join.core.clone(), predicate, inequality_desc).into())
+        Ok(StreamAsOfJoin::new(core, predicate, inequality_desc).into())
     }
 
     /// Convert the logical join to a Hash join.
     fn to_batch_hash_join(
         &self,
-        logical_join: generic::Join<PlanRef>,
+        logical_join: generic::Join<BatchPlanRef>,
         predicate: EqJoinPredicate,
-    ) -> Result<PlanRef> {
+    ) -> Result<BatchPlanRef> {
         use super::batch::prelude::*;
 
         let left_schema_len = logical_join.left.schema().len();
@@ -1494,16 +1503,16 @@ impl LogicalJoin {
 }
 
 impl ToBatch for LogicalJoin {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         let predicate = EqJoinPredicate::create(
             self.left().schema().len(),
             self.right().schema().len(),
             self.on().clone(),
         );
 
-        let mut logical_join = self.core.clone();
-        logical_join.left = logical_join.left.to_batch()?;
-        logical_join.right = logical_join.right.to_batch()?;
+        let batch_join = self
+            .core
+            .clone_with_inputs(self.core.left.to_batch()?, self.core.right.to_batch()?);
 
         let ctx = self.base.ctx();
         let config = ctx.session_ctx().config();
@@ -1518,12 +1527,12 @@ impl ToBatch for LogicalJoin {
             if config.batch_enable_lookup_join()
                 && let Some(lookup_join) = self.to_batch_lookup_join_with_index_selection(
                     predicate.clone(),
-                    logical_join.clone(),
+                    batch_join.clone(),
                 )?
             {
                 return Ok(lookup_join.into());
             }
-            self.to_batch_hash_join(logical_join, predicate)
+            self.to_batch_hash_join(batch_join, predicate)
         } else if self.is_asof_join() {
             Err(ErrorCode::InvalidInputSyntax(
                 "AsOf join requires at least 1 equal condition".to_owned(),
@@ -1531,13 +1540,16 @@ impl ToBatch for LogicalJoin {
             .into())
         } else {
             // Convert to Nested-loop Join for non-equal joins
-            Ok(BatchNestedLoopJoin::new(logical_join).into())
+            Ok(BatchNestedLoopJoin::new(batch_join).into())
         }
     }
 }
 
 impl ToStream for LogicalJoin {
-    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(
+        &self,
+        ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         if self
             .on()
             .conjunctions
@@ -1867,7 +1879,7 @@ mod tests {
     ///   TableScan(v1, v2, v3)
     ///   TableScan(v4, v5, v6)
     /// ```
-    /// with required columns [1,3] will result in
+    /// with required columns [1, 3] will result in
     /// ```text
     /// Join(on: input_ref(0)=input_ref(1))
     ///   TableScan(v2)
@@ -2059,7 +2071,7 @@ mod tests {
         //     TableId::new(0),
         //     vec![4.into(), 5.into(), 6.into()],
         //     Schema {
-        //         fields: fields[3..6].to_vec(),
+        //                 fields: fields[3..6].to_vec(),
         //     },
         //     ctx,
         // );
@@ -2093,8 +2105,8 @@ mod tests {
 
         // let join_type = JoinType::LeftOuter;
         // let logical_join = LogicalJoin::new(
-        //     left.into(),
-        //     right.into(),
+        //     left.clone().into(),
+        //     right.clone().into(),
         //     join_type,
         //     Condition::with_expr(on_cond.clone()),
         // );

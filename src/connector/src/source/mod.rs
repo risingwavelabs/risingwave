@@ -43,6 +43,7 @@ pub mod prelude {
 }
 
 pub mod base;
+pub mod batch;
 pub mod cdc;
 pub mod data_gen_util;
 pub mod datagen;
@@ -77,6 +78,7 @@ use async_nats::jetstream::consumer::AckPolicy as JetStreamAckPolicy;
 use async_nats::jetstream::context::Context as JetStreamContext;
 pub use manager::{SourceColumnDesc, SourceColumnType};
 use risingwave_common::array::{Array, ArrayRef};
+use risingwave_common::row::OwnedRow;
 use thiserror_ext::AsReport;
 pub use util::fill_adaptive_split;
 
@@ -207,3 +209,13 @@ impl WaitCheckpointTask {
         }
     }
 }
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CdcTableSnapshotSplitCommon<T: Clone> {
+    pub split_id: i64,
+    pub left_bound_inclusive: T,
+    pub right_bound_exclusive: T,
+}
+
+pub type CdcTableSnapshotSplit = CdcTableSnapshotSplitCommon<OwnedRow>;
+pub type CdcTableSnapshotSplitRaw = CdcTableSnapshotSplitCommon<Vec<u8>>;

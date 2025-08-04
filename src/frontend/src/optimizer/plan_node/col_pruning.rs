@@ -14,12 +14,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use paste::paste;
-
 use super::*;
-use crate::optimizer::PlanVisitor;
 use crate::optimizer::plan_visitor::ShareParentCounter;
-use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
+use crate::optimizer::{LogicalPlanRef as PlanRef, PlanVisitor};
 
 /// The trait for column pruning, only logical plan node will use it, though all plan node impl it.
 pub trait ColPrunable {
@@ -36,21 +33,6 @@ pub trait ColPrunable {
     /// [`LogicalProject`](super::LogicalProject) above to have a correct schema.
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef;
 }
-
-/// Implements [`ColPrunable`] for batch and streaming node.
-macro_rules! impl_prune_col {
-    ($( { $convention:ident, $name:ident }),*) => {
-        paste!{
-            $(impl ColPrunable for [<$convention $name>] {
-                fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
-                    panic!("column pruning is only allowed on logical plan")
-                }
-            })*
-        }
-    }
-}
-for_batch_plan_nodes! { impl_prune_col }
-for_stream_plan_nodes! { impl_prune_col }
 
 #[derive(Debug, Clone)]
 pub struct ColumnPruningContext {

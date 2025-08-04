@@ -41,7 +41,8 @@ use super::utils::{
     Distill, IndicesDisplay, childless_record, infer_kv_log_store_table_catalog_inner,
 };
 use super::{
-    ExprRewritable, PlanBase, PlanRef, StreamNode, StreamProject, StreamSyncLogStore, generic,
+    ExprRewritable, PlanBase, StreamNode, StreamPlanRef as PlanRef, StreamProject,
+    StreamSyncLogStore, generic,
 };
 use crate::TableCatalog;
 use crate::error::{ErrorCode, Result, RwError};
@@ -50,7 +51,7 @@ use crate::optimizer::StreamOptimizedLogicalPlanRoot;
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::plan_can_use_background_ddl;
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Distribution, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::WithOptionsSecResolved;
 
@@ -172,11 +173,7 @@ pub struct StreamSink {
 impl StreamSink {
     #[must_use]
     pub fn new(input: PlanRef, sink_desc: SinkDesc, log_store_type: SinkLogStoreType) -> Self {
-        let base = input
-            .plan_base()
-            .into_stream()
-            .expect("input should be stream plan")
-            .clone_with_new_plan_id();
+        let base = input.plan_base().clone_with_new_plan_id();
 
         Self {
             base,
@@ -357,7 +354,7 @@ impl StreamSink {
                 }
             }
         };
-        let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
+        let input = required_dist.streaming_enforce_if_not_satisfies(input)?;
         let distribution_key = input.distribution().dist_column_indices().to_vec();
         let create_type = if input.ctx().session_ctx().config().background_ddl()
             && plan_can_use_background_ddl(&input)
@@ -627,7 +624,7 @@ impl StreamSink {
     }
 }
 
-impl PlanTreeNodeUnary for StreamSink {
+impl PlanTreeNodeUnary<Stream> for StreamSink {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -638,7 +635,7 @@ impl PlanTreeNodeUnary for StreamSink {
     }
 }
 
-impl_plan_tree_node_for_unary! { StreamSink }
+impl_plan_tree_node_for_unary! { Stream, StreamSink }
 
 impl Distill for StreamSink {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -687,7 +684,7 @@ impl StreamNode for StreamSink {
     }
 }
 
-impl ExprRewritable for StreamSink {}
+impl ExprRewritable<Stream> for StreamSink {}
 
 impl ExprVisitable for StreamSink {}
 
