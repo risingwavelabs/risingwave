@@ -28,11 +28,11 @@ use crate::handler::{HandlerArgs, RwPgResponse, RwPgResponseBuilder, RwPgRespons
 #[macro_export]
 macro_rules! debug_panic_or_warn {
     ($($arg:tt)*) => {
-        if cfg!(debug_assertions) {
-            panic!($($arg)*);
-        } else {
+        // if cfg!(debug_assertions) {
+        //     panic!($($arg)*);
+        // } else {
             tracing::warn!($($arg)*);
-        }
+        // }
     };
 }
 
@@ -261,6 +261,7 @@ mod metrics {
 
     use risingwave_pb::monitor_service::GetProfileStatsResponse;
 
+    use risingwave_common::operator::unique_executor_id_into_parts;
     use crate::catalog::FragmentId;
     use crate::handler::explain_analyze_stream_job::graph::{ExecutorId, OperatorId};
     use crate::handler::explain_analyze_stream_job::utils::operator_id_for_dispatch;
@@ -361,12 +362,13 @@ mod metrics {
         ) -> Self {
             let mut delta_aggregated_stats = Self::new();
             for executor_id in executor_ids {
+                let (actor_id, operator_id) = unique_executor_id_into_parts(*executor_id);
                 let Some(initial_stats) = initial.executor_stats.get(executor_id) else {
-                    debug_panic_or_warn!("missing initial stats for executor {}", executor_id);
+                    debug_panic_or_warn!("missing initial stats for actor {} operator {}", actor_id, operator_id);
                     continue;
                 };
                 let Some(end_stats) = end.executor_stats.get(executor_id) else {
-                    debug_panic_or_warn!("missing final stats for executor {}", executor_id);
+                    debug_panic_or_warn!("missing final stats for actor {} operator {}", actor_id, operator_id);
                     continue;
                 };
 
@@ -374,8 +376,9 @@ mod metrics {
                 let end_throughput = end_stats.total_output_throughput;
                 let Some(delta_throughput) = end_throughput.checked_sub(initial_throughput) else {
                     debug_panic_or_warn!(
-                        "delta throughput is negative for executor {} (initial: {}, end: {})",
-                        executor_id,
+                        "delta throughput is negative for actor {} operator {} (initial: {}, end: {})",
+                        actor_id,
+                        operator_id,
                         initial_throughput,
                         end_throughput
                     );
@@ -386,8 +389,9 @@ mod metrics {
                 let end_pending_ns = end_stats.total_output_pending_ns;
                 let Some(delta_pending_ns) = end_pending_ns.checked_sub(initial_pending_ns) else {
                     debug_panic_or_warn!(
-                        "delta pending ns is negative for executor {} (initial: {}, end: {})",
-                        executor_id,
+                        "delta pending ns is negative for actor {} operator {} (initial: {}, end: {})",
+                        actor_id,
+                        operator_id,
                         initial_pending_ns,
                         end_pending_ns
                     );
@@ -680,7 +684,9 @@ mod graph {
             for actor_id in &node.actor_ids {
                 let executor_id =
                     unique_executor_id_from_unique_operator_id(*actor_id, operator_id);
-                assert!(executor_ids.insert(executor_id));
+                if node.identity != NodeBodyDiscriminants::BatchPlan {
+                    assert!(executor_ids.insert(executor_id));
+                }
                 assert!(
                     operator_to_executor
                         .entry(operator_id)
