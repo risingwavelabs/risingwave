@@ -121,7 +121,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
                 state_table,
                 node.rate_limit,
                 scan_options,
-                properties.clone(),
+                properties,
             );
             Ok((params.info, exec).into())
         } else {
@@ -141,7 +141,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
                 state_table,
                 node.rate_limit,
                 scan_options,
-                properties.clone(),
+                properties,
             );
             Ok((params.info, exec).into())
         }

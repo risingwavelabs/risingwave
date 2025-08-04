@@ -321,7 +321,17 @@ public class DbzConnectorConfig {
         }
         var otherProps = extractDebeziumProperties(userProps);
         for (var entry : otherProps.entrySet()) {
-            // For time.precision.mode, user configuration should override default configuration
+            // In general, we do not allow user-defined configuration items to override existing
+            // configurations in the properties file.
+            // However, `time.precision.mode` is an exception. If a user configures
+            // `debezium.time.precision.mode`, it typically indicates that they can determine the
+            // precision of the timestamps in the upstream table.
+            //  In this case, we can use this configuration item in the backend with a more precise
+            // TimestamptzHandling mode instead of `TimestamptzHandling::GuessNumberUnit`. Before
+            // upgrading Debezium to version 3.x, this is a
+            // workaround for handling extreme timestamps.
+            //  For more information, refer to
+            // https://github.com/risingwavelabs/risingwave/issues/21551.
             if ("time.precision.mode".equals(entry.getKey())) {
                 dbzProps.put(entry.getKey(), entry.getValue());
                 LOG.info("Overriding time.precision.mode with user value: {}", entry.getValue());

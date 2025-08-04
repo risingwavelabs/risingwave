@@ -217,12 +217,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             None
         };
         // Make sure to use mapping_message after transform_upstream.
-        let mut upstream = transform_upstream(
-            upstream,
-            self.output_columns.clone(),
-            timestamptz_handling.clone(),
-        )
-        .boxed();
+        let mut upstream =
+            transform_upstream(upstream, self.output_columns.clone(), timestamptz_handling).boxed();
         loop {
             if let Some(msg) =
                 build_reader_and_poll_upstream(&mut upstream, &mut table_reader, &mut future)

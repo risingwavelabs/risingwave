@@ -142,12 +142,8 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         } else {
             None
         };
-        let mut upstream = transform_upstream(
-            upstream,
-            self.output_columns.clone(),
-            timestamptz_handling.clone(),
-        )
-        .boxed();
+        let mut upstream =
+            transform_upstream(upstream, self.output_columns.clone(), timestamptz_handling).boxed();
         let mut next_reset_barrier = Some(first_barrier);
         let mut is_reset = false;
         let mut state_impl =
