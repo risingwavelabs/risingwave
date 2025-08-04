@@ -93,20 +93,25 @@ pub(crate) fn gen_create_index_plan(
         .into());
     }
 
-    let is_vector_index = match method {
-        Some(ident) => {
-            if &ident.real_value().to_ascii_lowercase() == "hnsw" {
-                true
-            } else {
+    let vector_index_config = if let Some(method) = method {
+        match method.real_value().to_ascii_lowercase().as_str() {
+            "default" => None,
+            "flat" => Some(risingwave_pb::catalog::vector_index_info::PbConfig::Flat(
+                PbFlatIndexConfig {},
+            )),
+            _ => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "unsupported index method: {}",
-                    ident
+                    "invalid index method {}",
+                    method
                 ))
                 .into());
             }
         }
-        _ => false,
+    } else {
+        None
     };
+
+    let is_vector_index = vector_index_config.is_some();
 
     if is_vector_index && !table.append_only {
         return Err(ErrorCode::InvalidInputSyntax(format!(
@@ -263,7 +268,7 @@ pub(crate) fn gen_create_index_plan(
     let (index_database_id, index_schema_id) =
         session.get_database_and_schema_id_for_create(Some(schema_name))?;
 
-    let (plan, mut index_table) = if is_vector_index {
+    let (plan, mut index_table) = if let Some(vector_index_config) = vector_index_config {
         assert!(distributed_columns_expr.is_empty());
         assert_eq!(1, index_columns_ordered_expr.len());
         let input = assemble_input(
@@ -276,6 +281,30 @@ pub(crate) fn gen_create_index_plan(
         let definition = context.normalized_sql().to_owned();
         let retention_seconds = table.retention_seconds.and_then(NonZeroU32::new);
 
+        let distance_type = match context
+            .with_options()
+            .get("distance_type")
+            .ok_or_else(|| {
+                ErrorCode::InvalidInputSyntax(
+                    "vector index missing `distance_type` in with options".to_owned(),
+                )
+            })?
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "l1" => PbDistanceType::L1,
+            "l2" => PbDistanceType::L2,
+            "inner_product" => PbDistanceType::InnerProduct,
+            "cosine" => PbDistanceType::Cosine,
+            other => {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "unsupported vector index distance type: {}",
+                    other
+                ))
+                .into());
+            }
+        };
+
         let vector_index_write = input.gen_vector_index_plan(
             index_table_name.clone(),
             index_database_id,
@@ -284,10 +313,8 @@ pub(crate) fn gen_create_index_plan(
             retention_seconds,
             PbVectorIndexInfo {
                 dimension: dimension.expect("should be set for vector index") as _,
-                config: Some(risingwave_pb::catalog::vector_index_info::PbConfig::Flat(
-                    PbFlatIndexConfig {},
-                )),
-                distance_type: PbDistanceType::InnerProduct as _,
+                config: Some(vector_index_config),
+                distance_type: distance_type as _,
             },
         )?;
         let index_table = vector_index_write.table().clone();

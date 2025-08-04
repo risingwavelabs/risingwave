@@ -1373,6 +1373,7 @@ pub enum Statement {
         distributed_by: Vec<Expr>,
         unique: bool,
         if_not_exists: bool,
+        with_properties: WithProperties,
     },
     /// CREATE SOURCE
     CreateSource {
@@ -2126,15 +2127,16 @@ impl Statement {
                 distributed_by,
                 unique,
                 if_not_exists,
+                with_properties,
             } => write!(
                 f,
-                "CREATE {unique}INDEX {if_not_exists}{name} ON {table_name}{method}({columns}){include}{distributed_by}",
+                "CREATE {unique}INDEX {if_not_exists}{name} ON {table_name}{method}({columns}){include}{distributed_by}{with_properties}",
                 unique = if *unique { "UNIQUE " } else { "" },
                 if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
                 name = name,
                 table_name = table_name,
                 method = if let Some(method) = method {
-                    format!(" USING {}", method)
+                    format!(" USING {} ", method)
                 } else {
                     "".to_owned()
                 },
@@ -2151,7 +2153,12 @@ impl Statement {
                         " DISTRIBUTED BY({})",
                         display_separated(distributed_by, ",")
                     )
-                }
+                },
+                with_properties = if !with_properties.0.is_empty() {
+                    format!(" {}", with_properties)
+                } else {
+                    "".to_owned()
+                },
             ),
             Statement::CreateSource { stmt } => write!(f, "CREATE SOURCE {}", stmt,),
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
