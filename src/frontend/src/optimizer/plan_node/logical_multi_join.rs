@@ -22,8 +22,8 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::utils::{Distill, childless_record};
 use super::{
-    ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalJoin, LogicalPlanRef as PlanRef,
-    LogicalProject, PlanBase, PlanNodeType, PlanTreeNodeBinary, PlanTreeNodeUnary,
+    ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalJoin, LogicalPlanNodeType,
+    LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PlanTreeNodeBinary, PlanTreeNodeUnary,
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::error::{ErrorCode, Result, RwError};
@@ -118,9 +118,9 @@ impl LogicalMultiJoinBuilder {
 
     pub fn new(plan: PlanRef) -> LogicalMultiJoinBuilder {
         match plan.node_type() {
-            PlanNodeType::LogicalJoin => Self::with_join(plan),
-            PlanNodeType::LogicalFilter => Self::with_filter(plan),
-            PlanNodeType::LogicalProject => Self::with_project(plan),
+            LogicalPlanNodeType::LogicalJoin => Self::with_join(plan),
+            LogicalPlanNodeType::LogicalFilter => Self::with_filter(plan),
+            LogicalPlanNodeType::LogicalProject => Self::with_project(plan),
             _ => Self::with_input(plan),
         }
     }

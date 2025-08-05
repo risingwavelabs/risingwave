@@ -20,8 +20,8 @@ use super::batch::prelude::*;
 use super::generic::{self, PlanAggCall};
 use super::utils::impl_distill_by_unit;
 use super::{
-    BatchPlanRef as PlanRef, ExprRewritable, PlanBase, PlanNodeType, PlanTreeNodeUnary, ToBatchPb,
-    ToDistributedBatch,
+    BatchPlanNodeType, BatchPlanRef as PlanRef, ExprRewritable, PlanBase, PlanTreeNodeUnary,
+    ToBatchPb, ToDistributedBatch,
 };
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
@@ -59,7 +59,7 @@ impl BatchHashAgg {
     fn to_two_phase_agg(&self, dist_input: PlanRef) -> Result<PlanRef> {
         // partial agg - follows input distribution
         let partial_agg: PlanRef = self.clone_with_input(dist_input).into();
-        debug_assert!(partial_agg.node_type() == PlanNodeType::BatchHashAgg);
+        debug_assert!(partial_agg.node_type() == BatchPlanNodeType::BatchHashAgg);
 
         // insert exchange
         let exchange = RequiredDist::shard_by_key(

@@ -30,7 +30,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
-use std::marker::PhantomData;
 use std::ops::Deref;
 use std::rc::Rc;
 
@@ -67,6 +66,7 @@ pub trait ConventionMarker: 'static + Sized + Clone + Debug + Eq + PartialEq + H
     type Extra: 'static + Eq + Hash + Clone + Debug;
     type ShareNode: ShareNode<Self>;
     type PlanRefDyn: PlanNodeCommon<Self> + Eq + Hash + ?Sized;
+    type PlanNodeType;
 
     fn as_share(plan: &Self::PlanRefDyn) -> Option<&Self::ShareNode>;
 }
@@ -78,34 +78,34 @@ pub trait ShareNode<C: ConventionMarker>:
     fn replace_input(&self, plan: PlanRef<C>);
 }
 
-pub struct NoShareNode<C: ConventionMarker>(!, PhantomData<C>);
+pub struct NoShareNode(!);
 
-impl<C: ConventionMarker> ShareNode<C> for NoShareNode<C> {
-    fn new_share(_plan: generic::Share<PlanRef<C>>) -> PlanRef<C> {
+impl ShareNode<Batch> for NoShareNode {
+    fn new_share(_plan: generic::Share<BatchPlanRef>) -> BatchPlanRef {
         unreachable!()
     }
 
-    fn replace_input(&self, _plan: PlanRef<C>) {
-        unreachable!()
-    }
-}
-
-impl<C: ConventionMarker> PlanTreeNodeUnary<C> for NoShareNode<C> {
-    fn input(&self) -> PlanRef<C> {
-        unreachable!()
-    }
-
-    fn clone_with_input(&self, _input: PlanRef<C>) -> Self {
+    fn replace_input(&self, _plan: BatchPlanRef) {
         unreachable!()
     }
 }
 
-impl<C: ConventionMarker> AnyPlanNodeMeta<C> for NoShareNode<C> {
-    fn node_type(&self) -> PlanNodeType {
+impl PlanTreeNodeUnary<Batch> for NoShareNode {
+    fn input(&self) -> BatchPlanRef {
         unreachable!()
     }
 
-    fn plan_base(&self) -> &PlanBase<C> {
+    fn clone_with_input(&self, _input: BatchPlanRef) -> Self {
+        unreachable!()
+    }
+}
+
+impl AnyPlanNodeMeta<Batch> for NoShareNode {
+    fn node_type(&self) -> BatchPlanNodeType {
+        unreachable!()
+    }
+
+    fn plan_base(&self) -> &PlanBase<Batch> {
         unreachable!()
     }
 }
@@ -115,6 +115,7 @@ impl<C: ConventionMarker> AnyPlanNodeMeta<C> for NoShareNode<C> {
 pub struct Logical;
 impl ConventionMarker for Logical {
     type Extra = plan_base::NoExtra;
+    type PlanNodeType = LogicalPlanNodeType;
     type PlanRefDyn = dyn LogicalPlanNode;
     type ShareNode = LogicalShare;
 
@@ -128,8 +129,9 @@ impl ConventionMarker for Logical {
 pub struct Batch;
 impl ConventionMarker for Batch {
     type Extra = plan_base::BatchExtra;
+    type PlanNodeType = BatchPlanNodeType;
     type PlanRefDyn = dyn BatchPlanNode;
-    type ShareNode = NoShareNode<Batch>;
+    type ShareNode = NoShareNode;
 
     fn as_share(_plan: &Self::PlanRefDyn) -> Option<&Self::ShareNode> {
         None
@@ -141,6 +143,7 @@ impl ConventionMarker for Batch {
 pub struct Stream;
 impl ConventionMarker for Stream {
     type Extra = plan_base::StreamExtra;
+    type PlanNodeType = StreamPlanNodeType;
     type PlanRefDyn = dyn StreamPlanNode;
     type ShareNode = StreamShare;
 
@@ -150,13 +153,10 @@ impl ConventionMarker for Stream {
 }
 
 /// The trait for accessing the meta data and [`PlanBase`] for plan nodes.
-pub trait PlanNodeMeta {
-    type Convention: ConventionMarker;
-
-    const NODE_TYPE: PlanNodeType;
-
+pub trait PlanNodeMeta<C: ConventionMarker> {
+    const NODE_TYPE: C::PlanNodeType;
     /// Get the reference to the [`PlanBase`] with corresponding convention.
-    fn plan_base(&self) -> &PlanBase<Self::Convention>;
+    fn plan_base(&self) -> &PlanBase<C>;
 }
 
 // Intentionally made private.
@@ -167,21 +167,21 @@ mod plan_node_meta {
     ///
     /// Check [`PlanNodeMeta`] for more details.
     pub trait AnyPlanNodeMeta<C: ConventionMarker> {
-        fn node_type(&self) -> PlanNodeType;
+        fn node_type(&self) -> C::PlanNodeType;
         fn plan_base(&self) -> &PlanBase<C>;
     }
 
     /// Implement [`AnyPlanNodeMeta`] for all [`PlanNodeMeta`].
-    impl<P> AnyPlanNodeMeta<P::Convention> for P
+    impl<P, C: ConventionMarker> AnyPlanNodeMeta<C> for P
     where
-        P: PlanNodeMeta,
+        P: PlanNodeMeta<C>,
     {
-        fn node_type(&self) -> PlanNodeType {
+        fn node_type(&self) -> C::PlanNodeType {
             P::NODE_TYPE
         }
 
-        fn plan_base(&self) -> &PlanBase<P::Convention> {
-            <Self as PlanNodeMeta>::plan_base(self)
+        fn plan_base(&self) -> &PlanBase<C> {
+            <Self as PlanNodeMeta<C>>::plan_base(self)
         }
     }
 }
@@ -196,15 +196,17 @@ pub trait PlanNodeCommon<C: ConventionMarker> = PlanTreeNode<C>
     + Downcast
     + ExprRewritable<C>
     + ExprVisitable
-    + AnyPlanNodeMeta<C>
-    + ToPb;
+    + AnyPlanNodeMeta<C>;
 
 /// The common trait over all plan nodes. Used by optimizer framework which will treat all node as
 /// `dyn PlanNode`
 ///
 /// We split the trait into lots of sub-trait so that we can easily use macro to impl them.
-pub trait StreamPlanNode: PlanNodeCommon<Stream> {}
-pub trait BatchPlanNode: PlanNodeCommon<Batch> + ToDistributedBatch + ToLocalBatch {}
+pub trait StreamPlanNode: PlanNodeCommon<Stream> + TryToStreamPb {}
+pub trait BatchPlanNode:
+    PlanNodeCommon<Batch> + ToDistributedBatch + ToLocalBatch + TryToBatchPb
+{
+}
 pub trait LogicalPlanNode:
     PlanNodeCommon<Logical> + ColPrunable + PredicatePushdown + ToBatch + ToStream
 {
@@ -607,12 +609,12 @@ impl<C: ConventionMarker> PlanRef<C> {
 }
 
 /// Implement again for the `dyn` newtype wrapper.
-impl<C: ConventionMarker> AnyPlanNodeMeta<C> for PlanRef<C> {
-    fn node_type(&self) -> PlanNodeType {
+impl<C: ConventionMarker> PlanRef<C> {
+    pub fn node_type(&self) -> C::PlanNodeType {
         self.0.node_type()
     }
 
-    fn plan_base(&self) -> &PlanBase<C> {
+    pub fn plan_base(&self) -> &PlanBase<C> {
         self.0.plan_base()
     }
 }
@@ -1420,37 +1422,41 @@ macro_rules! for_stream_plan_nodes {
     }
 }
 
-/// impl [`PlanNodeType`] fn for each node.
+/// impl `PlanNodeType` fn for each node.
 macro_rules! impl_plan_node_meta {
-    ($( { $convention:ident, $name:ident }),*) => {
+    ({
+        $( $convention:ident, { $( $name:ident ),* }),*
+    }) => {
         paste!{
-            /// each enum value represent a `PlanNode` struct type, help us to dispatch and downcast
-            #[derive(Copy, Clone, PartialEq, Debug, Hash, Eq, Serialize)]
-            pub enum PlanNodeType {
-                $( [<$convention $name>] ),*
-            }
-
-            $(impl PlanNodeMeta for [<$convention $name>] {
-                type Convention = $convention;
-                const NODE_TYPE: PlanNodeType = PlanNodeType::[<$convention $name>];
-
-                fn plan_base(&self) -> &PlanBase<$convention> {
-                    &self.base
+            $(
+                /// each enum value represent a `PlanNode` struct type, help us to dispatch and downcast
+                #[derive(Copy, Clone, PartialEq, Debug, Hash, Eq, Serialize)]
+                pub enum [<$convention PlanNodeType>] {
+                    $( [<$convention $name>] ),*
                 }
-            }
+            )*
+            $(
+                $(impl PlanNodeMeta<$convention> for [<$convention $name>] {
+                    const NODE_TYPE: [<$convention PlanNodeType>] = [<$convention PlanNodeType>]::[<$convention $name>];
 
-            impl Deref for [<$convention $name>] {
-                type Target = PlanBase<$convention>;
-
-                fn deref(&self) -> &Self::Target {
-                    &self.base
+                    fn plan_base(&self) -> &PlanBase<$convention> {
+                        &self.base
+                    }
                 }
-            })*
+
+                impl Deref for [<$convention $name>] {
+                    type Target = PlanBase<$convention>;
+
+                    fn deref(&self) -> &Self::Target {
+                        &self.base
+                    }
+                })*
+            )*
         }
     }
 }
 
-for_all_plan_nodes! { impl_plan_node_meta }
+for_each_convention_all_plan_nodes! { impl_plan_node_meta }
 
 macro_rules! impl_plan_node {
     ($({ $convention:ident, $name:ident }),*) => {

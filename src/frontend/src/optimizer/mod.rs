@@ -79,7 +79,7 @@ use crate::expr::TimestamptzExprFinder;
 use crate::handler::create_table::{CreateTableInfo, CreateTableProps};
 use crate::optimizer::plan_node::generic::{GenericPlanRef, SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
-    Batch, BatchExchange, BatchPlanRef, ConventionMarker, PlanNodeType, PlanTreeNode, Stream,
+    Batch, BatchExchange, BatchPlanNodeType, BatchPlanRef, ConventionMarker, PlanTreeNode, Stream,
     StreamExchange, StreamPlanRef, StreamUnion, ToStream, VisitExprsRecursive,
 };
 use crate::optimizer::plan_visitor::{RwTimestampValidator, TemporalJoinValidator};
@@ -1162,7 +1162,7 @@ fn exist_and_no_exchange_before(
     plan: &BatchPlanRef,
     is_candidate: fn(&BatchPlanRef) -> bool,
 ) -> bool {
-    if plan.node_type() == PlanNodeType::BatchExchange {
+    if plan.node_type() == BatchPlanNodeType::BatchExchange {
         return false;
     }
     is_candidate(plan)
@@ -1179,29 +1179,29 @@ fn exist_and_no_exchange_before(
 /// Returns `true` if we must insert an additional exchange to ensure this.
 fn require_additional_exchange_on_root_in_distributed_mode(plan: BatchPlanRef) -> bool {
     fn is_user_table(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == PlanNodeType::BatchSeqScan
+        plan.node_type() == BatchPlanNodeType::BatchSeqScan
     }
 
     fn is_log_table(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == PlanNodeType::BatchLogSeqScan
+        plan.node_type() == BatchPlanNodeType::BatchLogSeqScan
     }
 
     fn is_source(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == PlanNodeType::BatchSource
-            || plan.node_type() == PlanNodeType::BatchKafkaScan
-            || plan.node_type() == PlanNodeType::BatchIcebergScan
+        plan.node_type() == BatchPlanNodeType::BatchSource
+            || plan.node_type() == BatchPlanNodeType::BatchKafkaScan
+            || plan.node_type() == BatchPlanNodeType::BatchIcebergScan
     }
 
     fn is_insert(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == PlanNodeType::BatchInsert
+        plan.node_type() == BatchPlanNodeType::BatchInsert
     }
 
     fn is_update(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == PlanNodeType::BatchUpdate
+        plan.node_type() == BatchPlanNodeType::BatchUpdate
     }
 
     fn is_delete(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == PlanNodeType::BatchDelete
+        plan.node_type() == BatchPlanNodeType::BatchDelete
     }
 
     assert_eq!(plan.distribution(), &Distribution::Single);
@@ -1217,17 +1217,17 @@ fn require_additional_exchange_on_root_in_distributed_mode(plan: BatchPlanRef) -
 /// them for the different requirement of plan node in different execute mode.
 fn require_additional_exchange_on_root_in_local_mode(plan: BatchPlanRef) -> bool {
     fn is_user_table(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == PlanNodeType::BatchSeqScan
+        plan.node_type() == BatchPlanNodeType::BatchSeqScan
     }
 
     fn is_source(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == PlanNodeType::BatchSource
-            || plan.node_type() == PlanNodeType::BatchKafkaScan
-            || plan.node_type() == PlanNodeType::BatchIcebergScan
+        plan.node_type() == BatchPlanNodeType::BatchSource
+            || plan.node_type() == BatchPlanNodeType::BatchKafkaScan
+            || plan.node_type() == BatchPlanNodeType::BatchIcebergScan
     }
 
     fn is_insert(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == PlanNodeType::BatchInsert
+        plan.node_type() == BatchPlanNodeType::BatchInsert
     }
 
     assert_eq!(plan.distribution(), &Distribution::Single);
