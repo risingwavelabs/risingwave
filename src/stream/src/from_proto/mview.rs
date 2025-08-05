@@ -74,6 +74,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
                 version_column_index,
                 params.executor_stats.clone(),
                 Some(refresh_args),
+                params.local_barrier_manager.clone(),
             )
             .await
             .boxed()
@@ -93,6 +94,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
                     version_column_index,
                     params.executor_stats.clone(),
                     None, // No refresh args for regular tables
+                    params.local_barrier_manager.clone(),
                 )
                 .await
                 .boxed()
@@ -110,6 +112,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
                     version_column_index,
                     params.executor_stats.clone(),
                     None, // No refresh args for regular tables
+                    params.local_barrier_manager.clone(),
                 )
                 .await
                 .boxed()
@@ -160,6 +163,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             version_column_index,
             params.executor_stats.clone(),
             None, // ArrangeExecutor doesn't support refresh functionality
+            params.local_barrier_manager.clone(),
         )
         .await;
 

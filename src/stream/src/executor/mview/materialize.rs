@@ -23,8 +23,10 @@ use futures::stream;
 use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::Bitmap;
+#[cfg(test)]
+use risingwave_common::catalog::ColumnId;
 use risingwave_common::catalog::{
-    ColumnDesc, ColumnId, ConflictBehavior, TableId, checked_conflict_behaviors,
+    ColumnDesc, ConflictBehavior, TableId, checked_conflict_behaviors,
 };
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{CompactedRow, RowDeserializer};
@@ -32,19 +34,23 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType, cmp_datum};
 use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerializer};
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::catalog::table::{Engine, OptionalAssociatedSourceId};
 use risingwave_storage::mem_table::KeyOp;
 use risingwave_storage::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
-use risingwave_storage::store::PrefetchOptions;
+use risingwave_storage::store::{PrefetchOptions, TryWaitEpochOptions};
 use risingwave_storage::table::KeyedRow;
 
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{StateTableInner, StateTableOpConsistencyLevel};
+#[cfg(test)]
 use crate::common::table::test_utils::gen_pbtable;
+use crate::executor::EpochPair;
 use crate::executor::monitor::MaterializeMetrics;
 use crate::executor::prelude::*;
+use crate::task::{ActorId, LocalBarrierManager};
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
 pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
@@ -77,6 +83,9 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
 
     /// Optional refresh arguments and state for refreshable materialized views
     refresh_args: Option<RefreshableMaterializeArgs<S, SD>>,
+
+    /// Local barrier manager for reporting barrier events
+    local_barrier_manager: LocalBarrierManager,
 }
 
 /// Arguments and state for refreshable materialized views
@@ -133,6 +142,9 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshableMaterializeArgs<S, SD> {
     pub async fn on_load_finish(
         &mut self,
         state_table: &mut StateTableInner<S, SD>,
+        local_barrier_manager: &LocalBarrierManager,
+        current_epoch: EpochPair,
+        actor_id: ActorId,
     ) -> StreamExecutorResult<()> {
         tracing::info!(table_id = %self.table_id, "on_load_finish: Starting table replacement operation");
 
@@ -207,9 +219,14 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshableMaterializeArgs<S, SD> {
             }
         }
 
-        // Clear the staging table for the next refresh
-        self.staging_table.clear_all_rows().await?;
-        tracing::info!(table_id = %self.table_id, "on_load_finish: Staging table cleared and diff applied");
+        // Report staging table truncation through barrier system
+        // This will be more efficient than clear_all_rows which iterates through all keys
+        local_barrier_manager.report_truncate_table(
+            current_epoch,
+            actor_id,
+            self.staging_table.table_id(),
+        );
+        tracing::info!(table_id = %self.table_id, "on_load_finish: Reported staging table truncation and diff applied");
 
         Ok(())
     }
@@ -249,6 +266,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         version_column_index: Option<u32>,
         metrics: Arc<StreamingMetrics>,
         refresh_args: Option<RefreshableMaterializeArgs<S, SD>>,
+        local_barrier_manager: LocalBarrierManager,
     ) -> Self {
         let table_columns: Vec<ColumnDesc> = table_catalog
             .columns
@@ -313,18 +331,21 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             depended_subscription_ids,
             metrics: mv_metrics,
             refresh_args,
+            local_barrier_manager,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         let mv_table_id = TableId::new(self.state_table.table_id());
+        let staging_table_id = TableId::new(self.state_table.table_id());
 
         let data_types = self.schema.data_types();
         let mut input = self.input.execute();
 
         let barrier = expect_first_barrier(&mut input).await?;
         let first_epoch = barrier.epoch;
+        let _barrier_epoch = barrier.epoch; // Save epoch for later use (unused in normal execution)
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
         self.state_table.init_epoch(first_epoch).await?;
@@ -341,6 +362,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
             let msg = match msg {
                 Message::Watermark(w) => Message::Watermark(w),
+                // if is_finishing
                 Message::Chunk(chunk) if self.is_dummy_table => {
                     self.metrics
                         .materialize_input_row_count
@@ -468,6 +490,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     }
                 }
                 Message::Barrier(b) => {
+                    let mut should_wait_epoch = false;
+
                     // Handle refresh mutations for refreshable materialized views
                     if let Some(ref mut refresh_args) = self.refresh_args {
                         if let Some(m) = b.mutation.as_deref() {
@@ -505,9 +529,15 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                                     // Execute the atomic swap from staging to main table
                                     refresh_args
-                                        .on_load_finish(&mut self.state_table)
+                                        .on_load_finish(
+                                            &mut self.state_table,
+                                            &self.local_barrier_manager,
+                                            b.epoch,
+                                            self.actor_context.id,
+                                        )
                                         .instrument_await("on_load_finish")
                                         .await?;
+                                    should_wait_epoch = true;
 
                                     tracing::info!(
                                         %load_finish_source_id,
@@ -576,6 +606,24 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         .materialize_current_epoch
                         .set(b_epoch.curr as i64);
 
+                    if should_wait_epoch {
+                        // Wait for staing table truncation to complete
+                        let store = self
+                            .refresh_args
+                            .as_ref()
+                            .unwrap()
+                            .staging_table
+                            .state_store();
+                        store
+                            .try_wait_epoch(
+                                HummockReadEpoch::Committed(b_epoch.prev),
+                                TryWaitEpochOptions {
+                                    table_id: staging_table_id,
+                                },
+                            )
+                            .await?;
+                    }
+
                     continue;
                 }
             };
@@ -623,6 +671,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
     /// Create a new `MaterializeExecutor` without distribution info for test purpose.
     #[allow(clippy::too_many_arguments)]
+    #[cfg(test)]
     pub async fn for_test(
         input: Executor,
         store: S,
@@ -679,6 +728,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             depended_subscription_ids: HashSet::new(),
             metrics,
             refresh_args: None, // Test constructor doesn't support refresh functionality
+            local_barrier_manager: LocalBarrierManager::for_test(),
         }
     }
 }
