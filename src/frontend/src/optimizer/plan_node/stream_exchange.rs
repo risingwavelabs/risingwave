@@ -60,7 +60,7 @@ impl StreamExchange {
             input.stream_key().map(|v| v.to_vec()),
             input.functional_dependency().clone(),
             dist,
-            input.append_only(), // append-only property won't change
+            input.stream_kind(), // stream kind property won't change
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             columns_monotonicity,
@@ -80,7 +80,7 @@ impl StreamExchange {
             input.stream_key().map(|v| v.to_vec()),
             input.functional_dependency().clone(),
             input.distribution().clone(),
-            input.append_only(), // append-only property won't change
+            input.stream_kind(), // stream kind property won't change
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),

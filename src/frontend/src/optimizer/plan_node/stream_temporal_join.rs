@@ -52,7 +52,10 @@ impl StreamTemporalJoin {
         is_nested_loop: bool,
     ) -> Self {
         assert!(core.join_type == JoinType::Inner || core.join_type == JoinType::LeftOuter);
-        let append_only = core.left.append_only();
+        // TODO(kind): reject upsert input
+        // TODO(kind): theoretically, even if input is upsert, the output can be retract
+        let stream_kind = core.left.stream_kind();
+        let append_only = stream_kind.is_append_only();
         assert!(!is_nested_loop || append_only);
 
         let right = core.right.clone();
@@ -93,7 +96,7 @@ impl StreamTemporalJoin {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            append_only,
+            stream_kind,
             false, // TODO(rc): derive EOWC property from input
             watermark_columns,
             columns_monotonicity,

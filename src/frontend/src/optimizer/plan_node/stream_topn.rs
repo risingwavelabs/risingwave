@@ -45,7 +45,7 @@ impl StreamTopN {
         let base = PlanBase::new_stream_with_core(
             &core,
             Distribution::Single,
-            false,
+            StreamKind::Retract,
             false,
             watermark_columns,
             MonotonicityMap::new(),

@@ -15,7 +15,6 @@
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::util::functional::SameOrElseExt;
-use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
@@ -47,11 +46,6 @@ impl StreamDeltaJoin {
     pub fn new(core: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Self {
         let ctx = core.ctx();
 
-        // Inner join won't change the append-only behavior of the stream. The rest might.
-        let append_only = match core.join_type {
-            JoinType::Inner => core.left.append_only() && core.right.append_only(),
-            _ => todo!("delta join only supports inner join for now"),
-        };
         if eq_join_predicate.has_non_eq() {
             todo!("non-eq condition not supported for delta join");
         }
@@ -84,7 +78,7 @@ impl StreamDeltaJoin {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            append_only,
+            core.stream_kind(),
             false, // TODO(rc): derive EOWC property from input
             watermark_columns,
             MonotonicityMap::new(), // TODO: derive monotonicity
