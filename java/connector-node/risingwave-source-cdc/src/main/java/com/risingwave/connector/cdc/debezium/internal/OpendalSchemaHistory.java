@@ -39,13 +39,10 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
-import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -135,17 +132,17 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
             Collections.sort(
                     historyFiles, Comparator.comparingLong(this::extractTimestampFromFileName));
 
-            // 2. Assign the lazy list to this.records.
-            // This is the key change to avoid OOM. We are overriding the parent's list
-            // with our own implementation that loads data on demand.
-            this.records = new LazyHistoryRecordList(historyFiles);
+            // 2. Simple sequential loading approach - much more efficient than lazy loading
+            // For most cases, loading all records sequentially is faster and simpler
+            this.records = loadAllHistoryRecords(historyFiles);
+
             LOGGER.info(
-                    "Initialized lazy schema history with {} total records across {} files.",
+                    "Loaded schema history with {} total records from {} files.",
                     this.records.size(),
                     historyFiles.size());
 
         } catch (Exception e) {
-            throw new SchemaHistoryException("Failed to initialize lazy schema history", e);
+            throw new SchemaHistoryException("Failed to initialize schema history", e);
         }
     }
 
@@ -272,86 +269,30 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     }
 
     /**
-     * A custom List implementation that loads schema history records from Opendal on demand. This
-     * avoids loading all history records into memory at once.
+     * Load all history records from files sequentially. This is much simpler and more efficient
+     * than the lazy loading approach. Schema history recovery typically needs all records anyway,
+     * so there's no benefit to complex on-demand loading.
      */
-    private class LazyHistoryRecordList extends AbstractList<HistoryRecord> {
-        private final List<String> filePaths;
-        // Stores the cumulative number of records up to file i
-        private final int[] recordsPerFileIndex;
-        private final int totalRecords;
+    private List<HistoryRecord> loadAllHistoryRecords(List<String> historyFiles) {
+        List<HistoryRecord> allRecords = new ArrayList<>();
 
-        // An LRU cache to hold the contents of the most recently accessed files.
-        // Key: file index, Value: list of records in that file.
-        private final Map<Integer, List<HistoryRecord>> cache =
-                new LinkedHashMap<Integer, List<HistoryRecord>>(6, 0.75f, true) {
-                    @Override
-                    protected boolean removeEldestEntry(
-                            Map.Entry<Integer, List<HistoryRecord>> eldest) {
-                        // Cache up to 100 files' content
-                        return size() > 100;
-                    }
-                };
+        LOGGER.info("Loading schema history from {} files...", historyFiles.size());
 
-        public LazyHistoryRecordList(List<String> filePaths) {
-            this.filePaths = filePaths;
-            this.recordsPerFileIndex = new int[filePaths.size()];
+        for (String filePath : historyFiles) {
+            try {
+                byte[] data = getObject(filePath);
+                List<HistoryRecord> records = toHistoryRecords(data);
+                allRecords.addAll(records);
 
-            int cumulativeRecords = 0;
-            if (!filePaths.isEmpty()) {
-                LOGGER.info("Calculating total records for lazy list...");
-                for (int i = 0; i < filePaths.size(); i++) {
-                    // This reads the file content, but only holds it temporarily to count records.
-                    byte[] data = getObject(filePaths.get(i));
-                    // We must deserialize to count accurately.
-                    List<HistoryRecord> recs = toHistoryRecords(data);
-                    cumulativeRecords += recs.size();
-                    this.recordsPerFileIndex[i] = cumulativeRecords;
-                }
+                LOGGER.debug("Loaded {} records from file: {}", records.size(), filePath);
+            } catch (Exception e) {
+                LOGGER.error("Failed to load history records from file: {}", filePath, e);
+                throw new SchemaHistoryException(
+                        "Failed to load history records from file: " + filePath, e);
             }
-            this.totalRecords = cumulativeRecords;
-            LOGGER.info("Lazy list calculation complete. Total records: {}", this.totalRecords);
         }
 
-        @Override
-        public HistoryRecord get(int index) {
-            if (index < 0 || index >= totalRecords) {
-                throw new IndexOutOfBoundsException("Index: " + index + ", Size: " + totalRecords);
-            }
-
-            // Find which file contains the record for the given index
-            int fileIndex = 0;
-            for (int i = 0; i < recordsPerFileIndex.length; i++) {
-                if (index < recordsPerFileIndex[i]) {
-                    fileIndex = i;
-                    break;
-                }
-            }
-
-            // Check cache first
-            List<HistoryRecord> recordsInFile = cache.get(fileIndex);
-            if (recordsInFile == null) {
-                // Not in cache, load from remote object store and add to cache
-                LOGGER.info(
-                        "Cache miss for file index {}. Loading from remote object store.",
-                        fileIndex);
-                byte[] data = getObject(filePaths.get(fileIndex));
-                recordsInFile = toHistoryRecords(data);
-                cache.put(fileIndex, recordsInFile);
-            } else {
-                LOGGER.info("Cache hit for file index {}.", fileIndex);
-            }
-
-            // Calculate the index within the file
-            int baseIndex = (fileIndex == 0) ? 0 : recordsPerFileIndex[fileIndex - 1];
-            int indexInFile = index - baseIndex;
-
-            return recordsInFile.get(indexInFile);
-        }
-
-        @Override
-        public int size() {
-            return this.totalRecords;
-        }
+        LOGGER.info("Successfully loaded {} total history records", allRecords.size());
+        return allRecords;
     }
 }
