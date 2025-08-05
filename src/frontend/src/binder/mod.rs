@@ -386,7 +386,7 @@ impl Binder {
     }
 
     /// Returns a reverse iterator over the upper subquery contexts that are visible to the current
-    /// context.
+    /// context. Not to be confused with `is_visible` in [`LateralBindContext`].
     ///
     /// In most cases, this should include all the upper subquery contexts. However, when binding
     /// SQL UDFs, we should avoid resolving the context outside the UDF for hygiene.
@@ -431,10 +431,6 @@ impl Binder {
 
     pub fn set_clause(&mut self, clause: Option<Clause>) {
         self.context.clause = clause;
-    }
-
-    pub fn set_mock_udf_arguments(&mut self, udf_arguments: HashMap<String, ExprImpl>) {
-        self.context.udf_arguments = Some(udf_arguments);
     }
 }
 
