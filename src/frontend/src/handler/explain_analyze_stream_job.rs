@@ -28,7 +28,7 @@ use crate::handler::{HandlerArgs, RwPgResponse, RwPgResponseBuilder, RwPgRespons
 #[macro_export]
 macro_rules! debug_panic_or_warn {
     ($($arg:tt)*) => {
-        if cfg!(debug_assertions) {
+        if cfg!(debug_assertions) || cfg!(madsim) {
             panic!($($arg)*);
         } else {
             tracing::warn!($($arg)*);
@@ -335,7 +335,15 @@ mod metrics {
                 };
                 // An executor should be scheduled on a single worker node,
                 // it should not be inserted multiple times.
-                assert!(self.executor_stats.insert(*executor_id, stats).is_none());
+                if cfg!(madsim) {
+                    // If madsim is enabled, worker nodes will share the same process.
+                    // The metrics is stored as a global object, so querying each worker node
+                    // will return the same set of executor metrics.
+                    // So we should not assert here.
+                    self.executor_stats.insert(*executor_id, stats);
+                } else {
+                    assert!(self.executor_stats.insert(*executor_id, stats).is_none());
+                }
             }
 
             for fragment_id in dispatch_fragment_ids {
