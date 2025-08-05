@@ -43,6 +43,7 @@ use self::managed_state::ManagedBarrierState;
 use crate::error::{ScoredStreamError, StreamError, StreamResult};
 #[cfg(test)]
 use crate::task::LocalBarrierManager;
+use crate::task::managed_state::BarrierToComplete;
 use crate::task::{
     ActorId, AtomicU64Ref, PartialGraphId, StreamActorManager, StreamEnvironment, UpDownActorIds,
 };
@@ -87,6 +88,9 @@ pub struct BarrierCompleteResult {
 
     /// The source IDs that have finished loading data for refreshable batch sources.
     pub load_finished_source_ids: Vec<u32>,
+
+    /// The table IDs that should be truncated.
+    pub truncate_tables: Vec<u32>,
 }
 
 /// Lives in [`crate::task::barrier_worker::LocalBarrierWorker`],
@@ -635,6 +639,7 @@ mod await_epoch_completed_future {
         barrier_await_tree_reg: Option<&await_tree::Registry>,
         create_mview_progress: Vec<PbCreateMviewProgress>,
         load_finished_source_ids: Vec<u32>,
+        truncate_tables: Vec<u32>,
     ) -> AwaitEpochCompletedFuture {
         let prev_epoch = barrier.epoch.prev;
         let future = async move {
@@ -653,6 +658,7 @@ mod await_epoch_completed_future {
                     sync_result,
                     create_mview_progress,
                     load_finished_source_ids,
+                    truncate_tables,
                 }),
             )
         });
@@ -723,8 +729,13 @@ impl LocalBarrierWorker {
             else {
                 return;
             };
-            let (barrier, table_ids, create_mview_progress, load_finished_source_ids) =
-                database_state.pop_barrier_to_complete(partial_graph_id, prev_epoch);
+            let BarrierToComplete {
+                barrier,
+                table_ids,
+                create_mview_progress,
+                load_finished_source_ids,
+                truncate_tables,
+            } = database_state.pop_barrier_to_complete(partial_graph_id, prev_epoch);
 
             let complete_barrier_future = match &barrier.kind {
                 BarrierKind::Unspecified => unreachable!(),
@@ -756,6 +767,7 @@ impl LocalBarrierWorker {
                         self.actor_manager.await_tree_reg.as_ref(),
                         create_mview_progress,
                         load_finished_source_ids,
+                        truncate_tables,
                     )
                 });
         }
@@ -772,6 +784,7 @@ impl LocalBarrierWorker {
             create_mview_progress,
             sync_result,
             load_finished_source_ids,
+            truncate_tables,
         } = result;
 
         let (synced_sstables, table_watermarks, old_value_ssts) = sync_result
@@ -818,6 +831,7 @@ impl LocalBarrierWorker {
                             .collect(),
                         database_id: database_id.database_id,
                         load_finished_source_ids,
+                        truncate_tables,
                     },
                 )
             }

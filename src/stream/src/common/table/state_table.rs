@@ -653,42 +653,6 @@ where
             .await
     }
 
-    /// Clear all rows from the state table for refresh operations
-    ///
-    /// FIXME: implement correct truncating.
-    pub async fn clear_all_rows(&mut self) -> StreamExecutorResult<()> {
-        let all_vnodes = self.vnodes().iter_vnodes().collect::<Vec<_>>();
-
-        // First collect all keys to delete from all vnodes
-        let mut all_keys_to_delete = Vec::new();
-
-        for vnode in all_vnodes {
-            // Create range for all keys with this vnode prefix
-            let table_key_range = prefixed_range_with_vnode::<Bytes>(.., vnode);
-
-            // Iterate through all keys in this vnode and collect them for deletion
-            let mut iter = self
-                .local_store
-                .iter(table_key_range, Default::default())
-                .await?;
-
-            // Collect all keys to delete
-            while let Some((key, value)) = iter.try_next().await? {
-                all_keys_to_delete.push((
-                    key.user_key.table_key.copy_into(),
-                    Bytes::copy_from_slice(value),
-                ));
-            }
-        }
-
-        // Now delete all collected keys
-        for (key, old_value) in all_keys_to_delete {
-            self.local_store.delete(key, old_value)?;
-        }
-
-        Ok(())
-    }
-
     async fn get_inner<O: Send + 'static>(
         &self,
         pk: impl Row,
