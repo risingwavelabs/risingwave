@@ -77,7 +77,6 @@ pub struct BatchVectorSearch {
 }
 
 impl BatchVectorSearch {
-    #[expect(dead_code)]
     pub(super) fn with_core(core: BatchVectorSearchCore) -> Self {
         Self::with_core_inner(core, Distribution::Single)
     }
