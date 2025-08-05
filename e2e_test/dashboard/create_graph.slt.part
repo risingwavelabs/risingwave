@@ -1,17 +1,62 @@
 statement ok
-create table t(v1 int, v2 int);
+create table t(v1 int, v2 int) with (
+    connector = 'datagen',
+    fields.v1.kind = 'sequence',
+    fields.v1.start = 1,
+    fields.v1.end = 1000000,
+    fields.v2.kind = 'random',
+    fields.v2.min = 1,
+    fields.v2.max = 100,
+    datagen.rows.per.second = 100
+);
 
 statement ok
-create table t2(v1 int, v2 int);
+create table t2(v1 int, v2 int) with (
+    connector = 'datagen',
+    fields.v1.kind = 'sequence',
+    fields.v1.start = 1,
+    fields.v1.end = 1000000,
+    fields.v2.kind = 'random',
+    fields.v2.min = 1,
+    fields.v2.max = 100,
+    datagen.rows.per.second = 100
+);
 
 statement ok
-create table t3(v1 int, v2 int);
+create table t3(v1 int, v2 int) with (
+    connector = 'datagen',
+    fields.v1.kind = 'sequence',
+    fields.v1.start = 1,
+    fields.v1.end = 1000000,
+    fields.v2.kind = 'random',
+    fields.v2.min = 1,
+    fields.v2.max = 100,
+    datagen.rows.per.second = 100
+);
 
 statement ok
-create table t4(v1 int, v2 int);
+create table t4(v1 int, v2 int) with (
+    connector = 'datagen',
+    fields.v1.kind = 'sequence',
+    fields.v1.start = 1,
+    fields.v1.end = 1000000,
+    fields.v2.kind = 'random',
+    fields.v2.min = 1,
+    fields.v2.max = 100,
+    datagen.rows.per.second = 100
+);
 
 statement ok
-create table t5(v1 int, v2 int);
+create table t5(v1 int, v2 int) with (
+    connector = 'datagen',
+    fields.v1.kind = 'sequence',
+    fields.v1.start = 1,
+    fields.v1.end = 1000000,
+    fields.v2.kind = 'random',
+    fields.v2.min = 1,
+    fields.v2.max = 100,
+    datagen.rows.per.second = 100
+);
 
 statement ok
 create materialized view mv1 as 
