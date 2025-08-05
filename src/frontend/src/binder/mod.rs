@@ -24,7 +24,6 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_sqlparser::ast::Statement;
 
 use crate::error::Result;
-use crate::expr::ExprImpl;
 
 mod bind_context;
 mod bind_param;
@@ -396,7 +395,7 @@ impl Binder {
         self.upper_subquery_contexts
             .iter()
             .rev()
-            .take_while(|(context, _)| context.udf_arguments.is_none())
+            .take_while(|(context, _)| context.sql_udf_arguments.is_none())
     }
 
     fn next_subquery_id(&mut self) -> usize {

@@ -441,15 +441,15 @@ impl Binder {
     }
 
     fn is_binding_inline_sql_udf(&self) -> bool {
-        self.context.udf_arguments.is_some()
+        self.context.sql_udf_arguments.is_some()
     }
 
     /// Returns whether we're binding SQL UDF by checking if any of the upper subquery context has
-    /// `udf_arguments` set.
+    /// `sql_udf_arguments` set.
     fn is_binding_subquery_sql_udf(&self) -> bool {
         self.upper_subquery_contexts
             .iter()
-            .any(|(context, _)| context.udf_arguments.is_some())
+            .any(|(context, _)| context.sql_udf_arguments.is_some())
     }
 
     /// Bind a parameter for SQL UDF.
@@ -460,7 +460,7 @@ impl Binder {
         {
             // Only lookup the first non-empty udf context. If the parameter is not found in the
             // current context, we will continue to the upper context.
-            if let Some(args) = &context.udf_arguments {
+            if let Some(args) = &context.sql_udf_arguments {
                 if let Some(expr) = args.get(name) {
                     // The arguments recorded in the context is relative to the that context.
                     // We need to shift the depth to the current context.

@@ -37,7 +37,7 @@ impl Binder {
             }
         };
 
-        // If we find `udf_arguments` in the current context, it means we're binding an inline SQL UDF
+        // If we find `sql_udf_arguments` in the current context, it means we're binding an inline SQL UDF
         // (without a layer of subquery). This only happens when the function body is a trivial `SELECT`
         // statement without any `FROM` clause etc. In this case, the column must be a UDF parameter.
         if self.is_binding_inline_sql_udf() {

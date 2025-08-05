@@ -694,20 +694,20 @@ impl Binder {
         // Stash the current arguments.
         // For subquery SQL UDF, as we always push a new context, there should be no arguments to stash.
         // For inline SQL UDF, we need to stash the arguments in case of nesting.
-        let stashed_udf_arguments = self.context.udf_arguments.take();
+        let stashed_arguments = self.context.sql_udf_arguments.take();
 
         // The actual inline logic for sql udf.
-        let mut udf_arguments = HashMap::new();
+        let mut arguments = HashMap::new();
         for (i, arg) in args.into_iter().enumerate() {
             if arg_names[i].is_empty() {
                 // unnamed argument, use `$1`, `$2` as the name
-                udf_arguments.insert(format!("${}", i + 1), arg);
+                arguments.insert(format!("${}", i + 1), arg);
             } else {
                 // named argument
-                udf_arguments.insert(arg_names[i].clone(), arg);
+                arguments.insert(arg_names[i].clone(), arg);
             }
         }
-        self.context.udf_arguments = Some(udf_arguments);
+        self.context.sql_udf_arguments = Some(arguments);
 
         let Ok(expr) = Self::extract_udf_expr(ast) else {
             return Err(ErrorCode::InvalidInputSyntax(
@@ -720,7 +720,7 @@ impl Binder {
 
         let bind_result = self.bind_expr(&expr);
         // Restore arguments information for subsequent binding.
-        self.context.udf_arguments = stashed_udf_arguments;
+        self.context.sql_udf_arguments = stashed_arguments;
 
         bind_result
     }
