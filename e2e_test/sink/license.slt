@@ -26,8 +26,7 @@ db error: ERROR: Failed to run the query
 Caused by these errors (recent errors listed first):
   1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSink`) failed: Internal error
   2: failed to validate sink
-  3: Internal error
-  4: feature DynamoDbSink is not available based on your license
+  3: feature DynamoDbSink is not available based on your license
 
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
 
@@ -51,8 +50,7 @@ db error: ERROR: Failed to run the query
 Caused by these errors (recent errors listed first):
   1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSink`) failed: Internal error
   2: failed to validate sink
-  3: Internal error
-  4: feature SnowflakeSink is not available based on your license
+  3: feature SnowflakeSink is not available based on your license
 
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
 
@@ -97,8 +95,7 @@ db error: ERROR: Failed to run the query
 Caused by these errors (recent errors listed first):
   1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSink`) failed: Internal error
   2: failed to validate sink
-  3: Internal error
-  4: feature BigQuerySink is not available based on your license
+  3: feature BigQuerySink is not available based on your license
 
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
 
