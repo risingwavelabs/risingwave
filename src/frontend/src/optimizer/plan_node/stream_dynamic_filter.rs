@@ -50,6 +50,7 @@ impl StreamDynamicFilter {
         let out_kind = if condition_always_relax && core.left().append_only() {
             StreamKind::AppendOnly
         } else {
+            // TODO(kind): check if the impl can handle upsert stream.
             StreamKind::Retract
         };
 

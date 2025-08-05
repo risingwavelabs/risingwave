@@ -51,10 +51,7 @@ pub struct StreamExtra {
     /// Common fields for physical plan nodes.
     physical: PhysicalCommonExtra,
 
-    // /// The append-only property of the `PlanNode`'s output is a stream-only property. Append-only
-    // /// means the stream contains only insert operation.
-    // append_only: bool,
-    /// The kind of the `PlanNode`'s output.
+    /// Whether the `PlanNode`'s output is append-only, retract, or upsert.
     stream_kind: StreamKind,
 
     /// Whether the output is emitted on window close.

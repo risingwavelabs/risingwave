@@ -34,19 +34,5 @@ mod monotonicity;
 pub use monotonicity::*;
 mod watermark_columns;
 pub use watermark_columns::*;
-
-mod stream_kind {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-    pub enum StreamKind {
-        AppendOnly,
-        Retract,
-        // Upsert,
-    }
-
-    impl StreamKind {
-        pub fn is_append_only(self) -> bool {
-            matches!(self, Self::AppendOnly)
-        }
-    }
-}
+mod stream_kind;
 pub use stream_kind::*;
