@@ -156,7 +156,7 @@ impl ConventionMarker for Stream {
 /// The trait for accessing the meta data and [`PlanBase`] for plan nodes.
 pub trait PlanNodeMeta {
     type Convention: ConventionMarker;
-    fn node_type() -> <Self::Convention as ConventionMarker>::PlanNodeType;
+    const NODE_TYPE: <Self::Convention as ConventionMarker>::PlanNodeType;
     /// Get the reference to the [`PlanBase`] with corresponding convention.
     fn plan_base(&self) -> &PlanBase<Self::Convention>;
 }
@@ -179,7 +179,7 @@ mod plan_node_meta {
         P: PlanNodeMeta,
     {
         fn node_type(&self) -> <P::Convention as ConventionMarker>::PlanNodeType {
-            <Self as PlanNodeMeta>::node_type()
+            P::NODE_TYPE
         }
 
         fn plan_base(&self) -> &PlanBase<P::Convention> {
@@ -1440,10 +1440,7 @@ macro_rules! impl_plan_node_meta {
             $(
                 $(impl PlanNodeMeta for [<$convention $name>] {
                     type Convention = $convention;
-
-                    fn node_type() -> [<$convention PlanNodeType>] {
-                         [<$convention PlanNodeType>]::[<$convention $name>]
-                    }
+                    const NODE_TYPE: [<$convention PlanNodeType>] = [<$convention PlanNodeType>]::[<$convention $name>];
 
                     fn plan_base(&self) -> &PlanBase<$convention> {
                         &self.base
