@@ -372,7 +372,8 @@ mod metrics {
                 let (actor_id, operator_id) = unique_executor_id_into_parts(*executor_id);
                 let Some(initial_stats) = initial.executor_stats.get(executor_id) else {
                     debug_panic_or_warn!(
-                        "missing initial stats for actor {} operator {}",
+                        "missing initial stats for executor {} (actor {} operator {})",
+                        executor_id,
                         actor_id,
                         operator_id
                     );
@@ -380,7 +381,8 @@ mod metrics {
                 };
                 let Some(end_stats) = end.executor_stats.get(executor_id) else {
                     debug_panic_or_warn!(
-                        "missing final stats for actor {} operator {}",
+                        "missing final stats for executor {} (actor {} operator {})",
+                        executor_id,
                         actor_id,
                         operator_id
                     );

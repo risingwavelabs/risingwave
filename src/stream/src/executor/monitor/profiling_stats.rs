@@ -30,8 +30,6 @@ impl ProfileMetricsImpl {
         stats: &StreamingMetrics,
         enable_profiling: bool,
     ) -> ProfileMetricsImpl {
-        let (actor_id, operator_id) = unique_executor_id_into_parts(executor_id);
-        tracing::debug!(actor_id, operator_id, "in mem profiling stats");
         if enable_profiling {
             ProfileMetricsImpl::ProfileMetrics(ProfileMetrics {
                 stream_node_output_row_count: stats
